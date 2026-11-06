@@ -1,12 +1,12 @@
 {
   "id": "sample-plugin",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "api_version": 1,
-  "name": "Sample Plugin",
-  "description": "Minimal contract example; not yet installable",
+  "name": "Sample Transformer Plugin",
+  "description": "Biến đổi chuỗi văn bản, đếm số lần chạy qua SQLite KV và gọi HTTP echo",
   "entrypoint": "plugin.wasm",
   "permissions": {
-    "sqlite": [],
-    "http": []
+    "sqlite": ["kv_read", "kv_write"],
+    "http": ["http://127.0.0.1:18766/page", "http://localhost:18766/page"]
   }
 }

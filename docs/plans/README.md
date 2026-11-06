@@ -2,7 +2,11 @@
 
 Thư mục này dùng cho kế hoạch cụ thể theo giai đoạn, đặt tên `YYYY-MM-DD-<chu-de>.md`. Một kế hoạch cần có contract liên quan, phạm vi, các bước, tiêu chí nghiệm thu và ghi rõ phần ngoài phạm vi.
 
-## Việc tiếp theo khi nhập source CMS M1/M2 vào scaffold `/opendash-cms`
+## Nhập mã nguồn M1/M2
+
+Đã triển khai trên workspace đích ngày 07/11/2026. Xem [kết quả và giới hạn nghiệm thu](../verification/2026-11-07-m1-m2-import.md). Các bước dưới đây ghi lại trình tự nhập mã.
+
+[Bản đối chiếu từng module với scaffold `0ec91ec`](2026-11-07-m1-m2-module-map.md) ghi các quyết định đề xuất và tiêu chí kiểm tra khi nhập. Phiên bản nguồn được định danh trong [báo cáo kiểm chứng M1/M2](../verification/2026-11-07-m1-m2-source-baseline.md).
 
 1. Xác định repository M1/M2 nguồn và trạng thái Git thực tế; giữ lịch sử nguồn và mọi thay đổi chưa commit. Scaffold đang có là mã mẫu, không thay thế logic đã được kiểm chứng từ repository trước.
 2. Chạy baseline ở **repository M1/M2 nguồn** và ghi lại kết quả; dùng [README hiện tại](../../README.md) để kiểm chứng scaffold mới riêng.

@@ -1,6 +1,6 @@
 # OpenDash — Bản đồ Kiến trúc CMS và Cấu trúc Thư mục
 
-> **Tình trạng workspace ngày 06/11/2026.** Đã tạo scaffold gồm 2 crate Rust, server Axum + SQLite + MiniJinja và React Admin mẫu. Mục 2.1–2.2 vẫn ghi lịch sử chuyển đổi và **kiến trúc đích**, chưa biểu thị đã có đầy đủ các module của CMS V1. Source M1/M2, migration và fixture gốc chưa nhập. Xem [kiểm kê trước scaffold](../verification/2026-11-06-repository-inventory.md) và [ADR-0001](../decisions/ADR-0001-workspace-layout.md). Các module có nhãn M3/M4 là phần dự kiến.
+> **Hiện trạng 07/11/2026.** M1/M2 đã được nhập vào hai crate và React Admin. Các mục M3/M4 và bố cục V1 dưới đây mô tả kiến trúc đích. Xem [ranh giới đã kiểm chứng](../verification/2026-11-07-m1-m2-import.md).
 
 **Nguồn định hướng:**
 - [Yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md): Quyết định phạm vi tính năng sản phẩm V1.
@@ -75,7 +75,7 @@ flowchart LR
 - **Dữ liệu thuộc về Website (tách khỏi Theme/Plugin và tách khỏi Repo):**
   - Định nghĩa CPT, custom fields, danh mục, nội dung đã nhập và bố cục đã chỉnh thuộc về từng website. Khi đổi/cập nhật theme hoặc tắt plugin, các dữ liệu và bố cục này vẫn được giữ nguyên.
   - Thư mục dữ liệu vận hành của từng website tách biệt với mã nguồn phát triển. Đường dẫn cơ sở dữ liệu được cấu hình qua `OPENDASH_DB_PATH` (mặc định `database/opendash.sqlite` theo [README.md](../../README.md), đặt ở root website).
-  - Các gói và media của website nằm trong [`themes/`](../../themes/README.md), [`plugins/`](../../plugins/README.md) và [`uploads/`](../../uploads/README.md). SQLite mặc định nằm trong [`database/`](../../database/README.md).
+  - Bố cục V1 dành các thư mục sau cho gói và media. M1/M2 hiện lưu theme block và plugin đã cài trong SQLite. Các thư mục gồm [`themes/`](../../themes/README.md), [`plugins/`](../../plugins/README.md) và [`uploads/`](../../uploads/README.md). SQLite mặc định nằm trong [`database/`](../../database/README.md).
   - **Trạng thái của `SitePaths` và các luồng sử dụng đường dẫn**
     - **Đã triển khai và kiểm chứng trên Windows.** Server dùng `SitePaths` để mở SQLite. Binary phân phối lấy thư mục chứa file thực thi làm gốc ngay từ lần chạy đầu. Bản build dưới `cms/target/` dùng gốc dự án. `OPENDASH_SITE_ROOT` chọn gốc website và `OPENDASH_DB_PATH` có ưu tiên cao nhất cho riêng tệp SQLite. [Báo cáo unit test và HTTP smoke](../verification/2026-11-07-site-paths.md).
     - **Đã kiểm tra bằng unit test.** `SitePaths` trả đường dẫn theme, plugin, upload, backup và staging. Việc dùng các đường dẫn này để cài ZIP, lưu media, sao lưu và phục hồi thuộc thiết kế `AGREED` của V1.

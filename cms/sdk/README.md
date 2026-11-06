@@ -1,5 +1,3 @@
-# SDK cho plugin OpenDash
+# SDK AssemblyScript
 
-`as/opendash.ts` mô tả bốn host import của [Plugin ABI v1](../../docs/contracts/PLUGIN_ABI.md) bằng AssemblyScript. Đây mới là phần khai báo API; chưa có bộ build/package/versioning hoàn chỉnh.
-
-Plugin chạy server sẽ được biên dịch thành `plugin.wasm` và đóng ZIP cùng `manifest.json`. Host plugin Wasmi chưa được triển khai trong scaffold nên chưa thể cài hoặc chạy ZIP.
+`as/opendash.ts` cung cấp wrapper đọc input, ghi output và gọi host theo [Plugin ABI v1](../../docs/contracts/PLUGIN_ABI.md). Xem [plugin mẫu](../examples/plugins/sample-plugin/README.md) để build và chạy trên host Wasmi.

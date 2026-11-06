@@ -1,5 +1,3 @@
-# Plugin host — module dự kiến
+# Host plugin Wasmi
 
-Plugin server chạy bằng Wasmi 2.0.0, với sandbox, quyền và giới hạn theo [Plugin ABI v1](../../../../../docs/contracts/PLUGIN_ABI.md). Module ở repository M1/M2 nguồn sẽ được đối chiếu và nhập tại đây.
-
-Scaffold hiện tại **không** cài, gọi hay thực thi WebAssembly plugin; không expose route plugin API cho đến khi có xác thực và kiểm chứng quyền.
+M2 kiểm tra ZIP/manifest, nạp guest Wasm, chạy trong tiến trình worker và cấp host operation theo quyền. Plugin đã cài, KV và log nằm trong SQLite. Xem [Plugin ABI v1](../../../../../docs/contracts/PLUGIN_ABI.md) và [kiểm chứng tại đích](../../../../../docs/verification/2026-11-07-m1-m2-import.md).

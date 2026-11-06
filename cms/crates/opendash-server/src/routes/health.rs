@@ -20,6 +20,6 @@ pub async fn status(
     Ok(Json(Health {
         status: "ok",
         database: "ready",
-        scaffold: true,
+        scaffold: false,
     }))
 }

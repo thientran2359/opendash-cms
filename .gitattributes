@@ -1,0 +1,4 @@
+cms/migrations/*.sql text eol=lf
+cms/examples/plugins/sample-plugin/manifest.json text eol=lf
+*.sqlite binary
+*.zip binary

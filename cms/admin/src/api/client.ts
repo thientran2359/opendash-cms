@@ -1,3 +1,21 @@
+export class ApiClientError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiClientError';
+    this.status = status;
+  }
+}
+
+export async function handleResponseText(res: Response, defaultMessage: string): Promise<string> {
+  const text = await res.text();
+  if (!res.ok) {
+    throw new ApiClientError(res.status, text || defaultMessage);
+  }
+  return text;
+}
+
 export interface HealthResponse {
   status: string;
   database: string;

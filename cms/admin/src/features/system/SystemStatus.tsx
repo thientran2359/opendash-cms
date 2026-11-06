@@ -23,20 +23,16 @@ export function SystemStatus() {
   return (
     <section className="panel">
       <span className="eyebrow">Kết nối backend</span>
-      <h2>Trạng thái khung ứng dụng</h2>
+      <h2>Trạng thái hệ thống</h2>
       {health ? (
         <p className="status success">
-          HTTP: {health.status} · SQLite: {health.database} · Demo scaffold
+          HTTP: {health.status} · SQLite: {health.database}
         </p>
       ) : error ? (
         <p className="status error">Không kết nối được: {error}</p>
       ) : (
         <p className="status">Đang kiểm tra /api/health…</p>
       )}
-      <p>
-        Rust workspace và React Admin đã được liên kết qua HTTP. Đây là cấu trúc khởi đầu;
-        hệ thống quản lý CPT, media, theme, plugin, phân quyền và backup chưa triển khai.
-      </p>
     </section>
   );
 }

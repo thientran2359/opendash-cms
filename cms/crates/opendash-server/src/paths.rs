@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
@@ -17,7 +16,7 @@ pub struct SitePaths {
 
 impl SitePaths {
     /// Resolves website paths from the executable location and environment overrides.
-    pub fn from_env() -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub fn from_env() -> io::Result<Self> {
         let current_exe = std::env::current_exe()?;
         let executable_dir = current_exe.parent().ok_or_else(|| {
             io::Error::new(

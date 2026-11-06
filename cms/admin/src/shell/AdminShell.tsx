@@ -1,46 +1,60 @@
-import type { ReactNode } from "react";
+import React from 'react';
+import { AuthUser } from '../types.ts';
+import { AuthPanel } from './AuthPanel.tsx';
 
-export type AdminView = "overview" | "builder";
-
-interface Props {
-  view: AdminView;
-  onNavigate: (next: AdminView) => void;
-  children: ReactNode;
+interface AdminShellProps {
+  user: AuthUser | null;
+  authUsername: string;
+  authPassword: string;
+  statusMessage: string;
+  isError: boolean;
+  isProcessing: boolean;
+  onUsernameChange: (username: string) => void;
+  onPasswordChange: (password: string) => void;
+  onSetup: () => void;
+  onLogin: () => void;
+  onLogout: () => void;
+  sidebarContent: React.ReactNode;
+  previewContent: React.ReactNode;
 }
 
-export function AdminShell({ view, onNavigate, children }: Props) {
+export const AdminShell: React.FC<AdminShellProps> = ({
+  user,
+  authUsername,
+  authPassword,
+  statusMessage,
+  isError,
+  isProcessing,
+  onUsernameChange,
+  onPasswordChange,
+  onSetup,
+  onLogin,
+  onLogout,
+  sidebarContent,
+  previewContent,
+}) => {
   return (
-    <div className="app-layout">
-      <aside className="sidebar">
-        <div className="brand">OpenDash <span>CMS</span></div>
-        <p className="sidebar-caption">Giao diện phát triển mẫu</p>
-        <nav aria-label="Điều hướng Admin">
-          <button
-            type="button"
-            className={view === "overview" ? "nav-item active" : "nav-item"}
-            onClick={() => onNavigate("overview")}
-          >
-            Tổng quan
-          </button>
-          <button
-            type="button"
-            className={view === "builder" ? "nav-item active" : "nav-item"}
-            onClick={() => onNavigate("builder")}
-          >
-            Builder (mẫu)
-          </button>
-        </nav>
-        <p className="sidebar-note">
-          Chưa có xác thực, chỉnh sửa nội dung hay plugin runtime. Chỉ sử dụng trên máy phát triển.
-        </p>
-      </aside>
-      <main className="main-content">
-        <div className="page-header">
-          <span className="eyebrow">OpenDash / Development</span>
-          <h1>{view === "builder" ? "Visual Builder" : "Tổng quan hệ thống"}</h1>
-        </div>
-        {children}
+    <div>
+      <h1>OpenDash — Quản trị &amp; Builder</h1>
+
+      <AuthPanel
+        user={user}
+        authUsername={authUsername}
+        authPassword={authPassword}
+        statusMessage={statusMessage}
+        isError={isError}
+        isProcessing={isProcessing}
+        onUsernameChange={onUsernameChange}
+        onPasswordChange={onPasswordChange}
+        onSetup={onSetup}
+        onLogin={onLogin}
+        onLogout={onLogout}
+      />
+
+      <main id="builder-main" className={user ? '' : 'hidden'}>
+        <section className="editor-sidebar">{sidebarContent}</section>
+        {previewContent}
       </main>
     </div>
   );
-}
+};

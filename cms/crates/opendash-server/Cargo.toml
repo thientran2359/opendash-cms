@@ -1,9 +1,7 @@
 [package]
 name = "opendash-server"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-build = "build.rs"
+version = "0.1.0"
+edition = "2024"
 
 [[bin]]
 name = "opendash"
@@ -11,9 +9,21 @@ path = "src/main.rs"
 
 [dependencies]
 opendash-core = { path = "../opendash-core" }
-axum = "=0.8.9"
-tokio = { version = "=1.48.0", features = ["macros", "rt-multi-thread", "net"] }
-serde = { version = "=1.0.228", features = ["derive"] }
-sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"] }
-minijinja = "=3.0.5"
-rust-embed = "=8.13.0"
+argon2 = { workspace = true }
+axum = { workspace = true }
+minijinja = { workspace = true }
+mime_guess = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true }
+subtle = { workspace = true }
+tokio = { workspace = true }
+url = { workspace = true }
+reqwest = { workspace = true }
+rust-embed = { workspace = true }
+wasmi = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+wat = { workspace = true }

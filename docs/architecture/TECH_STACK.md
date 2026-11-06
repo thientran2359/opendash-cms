@@ -2,7 +2,7 @@
 
 **Chủ dự án đã duyệt hướng stack V1 và chốt dùng Wasmi cho runtime plugin.** Phạm vi theo [yêu cầu V1 đã xác nhận](../product/PRODUCT_REQUIREMENTS.md). Phần tích hợp `wasmi` và SDK plugin trên host Rust vẫn cần kiểm chứng theo tiêu chí trong tài liệu này.
 
-> Các kết quả M1/M2 được ghi dưới đây là lịch sử kiểm chứng từ repository nguồn. Workspace `/opendash-cms` đã có scaffold Rust/React mẫu, nhưng chưa nhập những module CMS đã kiểm chứng trước đó. Xem [verification](../verification/README.md) để phân biệt kiểm chứng scaffold mới với hệ thống CMS đầy đủ.
+> Các kết quả lịch sử ở dưới thuộc repository nguồn. Bản nhập M1/M2 tại workspace đích có [báo cáo riêng](../verification/2026-11-07-m1-m2-import.md).
 
 Stack V1 gồm Axum, SQLx, React/TypeScript/Vite, MiniJinja và Wasmi. Chủ dự án quyết định chọn thẳng Wasmi thay vì chạy thử nghiệm so sánh ba bên với Wasmtime và QuickJS.
 
@@ -32,7 +32,7 @@ Bản thử ở `spikes/stack-v1` dùng dữ liệu tổng hợp. Contract thử
 
 Chạy **7 kiểm tra tự động thành công** với MiniJinja 3.0.5 và Wasmtime 50.0.1 qua binding Python trên Windows. Luồng builder chạy trong trình duyệt qua localhost. Logic plugin thử nghiệm được gọi qua bộ kiểm tra, chưa chạy qua router CMS. Hàm host thử đọc dữ liệu mẫu, chưa thực hiện ghi DB hoặc gọi mạng.
 
-Chủ dự án chọn phát triển trước trên Windows. Lát cắt Rust đã build bằng MSVC và chạy luồng theme ZIP, preview và Lưu vào SQLite. Smoke test khởi động lại cùng database đã qua. Kiểm chứng React drag/drop, host Rust cho plugin và bản phát hành Linux còn ở các bước tiếp theo. [Hướng dẫn chạy scaffold trên Windows](../../README.md#chạy-scaffold-trên-windows)
+Chủ dự án chọn phát triển trước trên Windows. Lát cắt Rust đã build bằng MSVC và chạy luồng theme ZIP, preview và Lưu vào SQLite. Smoke test khởi động lại cùng database đã qua. Kiểm chứng React drag/drop, host Rust cho plugin và bản phát hành Linux còn ở các bước tiếp theo. [Hướng dẫn chạy OpenDash trên Windows](../../README.md#chạy-opendash-trên-windows)
 
 ## Phản biện từ Antigravity
 

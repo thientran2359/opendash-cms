@@ -1,26 +1,80 @@
-use minijinja::{Environment, context};
+use std::io::{Cursor, Read};
 
-/// A public HTML demo using MiniJinja autoescaping.
-/// No theme ZIP, block registry or preview/save API exists in this scaffold.
-pub fn render_home() -> Result<String, minijinja::Error> {
-    let mut environment = Environment::new();
-    environment.add_template(
-        "home.html",
-        r#"<!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ name }} — Scaffold</title>
-</head>
-<body style="font-family:system-ui,sans-serif;max-width:700px;margin:72px auto;padding:0 20px">
-  <h1>{{ name }}</h1>
-  <p>Khung dự án CMS đang hoạt động. Chức năng quản lý nội dung, theme và plugin chưa được triển khai.</p>
-  <p><a href="/admin/">Mở giao diện Admin mẫu</a></p>
-</body>
-</html>"#,
-    )?;
-    environment
-        .get_template("home.html")?
-        .render(context!(name => opendash_core::CMS_NAME))
+use minijinja::{AutoEscape, Environment, UndefinedBehavior};
+pub use opendash_core::theme::{Block, BlockDescriptor, Fields};
+use zip::ZipArchive;
+
+pub const MAX_ZIP_BYTES: usize = 64 * 1024;
+
+pub struct Theme {
+    pub descriptor: BlockDescriptor,
+    pub template: String,
+}
+
+impl Theme {
+    pub fn from_zip(bytes: &[u8]) -> Result<Self, &'static str> {
+        if bytes.len() > MAX_ZIP_BYTES {
+            return Err("ZIP vượt quá giới hạn kích thước.");
+        }
+
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|_| "ZIP không hợp lệ.")?;
+        if archive.len() != 2 {
+            return Err("ZIP phải chứa block.json và block.html.");
+        }
+
+        let mut descriptor = None;
+        let mut template = None;
+        let mut remaining = MAX_ZIP_BYTES;
+        for index in 0..archive.len() {
+            let entry = archive.by_index(index).map_err(|_| "Không đọc được ZIP.")?;
+            let name = entry.name().map_err(|_| "Tên mục ZIP không hợp lệ.")?;
+            let slot = match name.as_ref() {
+                "block.json" if descriptor.is_none() => &mut descriptor,
+                "block.html" if template.is_none() => &mut template,
+                _ => return Err("ZIP chứa đường dẫn lạ hoặc mục bị trùng."),
+            };
+            if entry.size() > remaining as u64 {
+                return Err("Nội dung ZIP vượt quá giới hạn kích thước.");
+            }
+            let mut content = String::new();
+            entry
+                .take(remaining as u64 + 1)
+                .read_to_string(&mut content)
+                .map_err(|_| "Không đọc được nội dung ZIP dạng UTF-8.")?;
+            remaining = remaining
+                .checked_sub(content.len())
+                .ok_or("Nội dung ZIP vượt quá giới hạn kích thước.")?;
+            *slot = Some(content);
+        }
+
+        let descriptor: BlockDescriptor =
+            serde_json::from_str(&descriptor.ok_or("Thiếu block.json.")?)
+                .map_err(|_| "block.json không hợp lệ.")?;
+        descriptor.validate()?;
+
+        let template = template.ok_or("Thiếu block.html.")?;
+        if template.trim().is_empty() || environment().template_from_str(&template).is_err() {
+            return Err("Template block không hợp lệ.");
+        }
+        Ok(Self {
+            descriptor,
+            template,
+        })
+    }
+}
+
+pub fn render(template: &str, fields: &Fields, block: &Block) -> Result<String, &'static str> {
+    block.validate_against_fields(fields)?;
+    let env = environment();
+    env.template_from_str(template)
+        .and_then(|template| template.render(minijinja::context!(values => &block.values)))
+        .map_err(|_| "Không render được template block.")
+}
+
+fn environment() -> Environment<'static> {
+    let mut env = Environment::new();
+    env.set_auto_escape_callback(|_| AutoEscape::Html);
+    env.set_undefined_behavior(UndefinedBehavior::Strict);
+    env.set_fuel(Some(10_000));
+    env
 }

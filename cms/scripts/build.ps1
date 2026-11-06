@@ -6,17 +6,21 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $cmsRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$adminRoot = Join-Path $cmsRoot 'admin'
-
-Push-Location $adminRoot
-try {
-    npm ci
-    if ($LASTEXITCODE -ne 0) { throw "npm ci failed ($LASTEXITCODE)" }
-    npm run build
-    if ($LASTEXITCODE -ne 0) { throw "npm run build failed ($LASTEXITCODE)" }
-}
-finally {
-    Pop-Location
+foreach ($package in 'admin', 'examples/plugins/sample-plugin') {
+    $packageRoot = Join-Path $cmsRoot $package
+    if (-not (Test-Path -LiteralPath (Join-Path $packageRoot 'package-lock.json'))) {
+        throw "$package/package-lock.json missing"
+    }
+    Push-Location $packageRoot
+    try {
+        npm ci
+        if ($LASTEXITCODE -ne 0) { throw "$package npm ci failed ($LASTEXITCODE)" }
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw "$package build failed ($LASTEXITCODE)" }
+    }
+    finally {
+        Pop-Location
+    }
 }
 
 Push-Location $cmsRoot
@@ -30,4 +34,4 @@ finally {
     Pop-Location
 }
 
-Write-Host 'OpenDash scaffold build complete.' -ForegroundColor Green
+Write-Host 'OpenDash build complete.' -ForegroundColor Green

@@ -2,7 +2,7 @@
 
 ## Ngữ cảnh và nguồn quyết định
 
-- `/opendash-cms` đặt mã nguồn, build scripts và SDK trong `cms/`, tài liệu tại `docs/`; `database/`, `themes/`, `plugins/`, `uploads/` thuộc website và nằm ở root. M1/M2 thực và migration/fixtures lịch sử **chưa được nhập**. Kiểm tra file thực tế trước khi tuyên bố chức năng đã có. Xem [README](README.md) và [verification](docs/verification/README.md).
+- `/opendash-cms` đặt mã nguồn, build scripts và SDK trong `cms/`, tài liệu tại `docs/`; `database/`, `themes/`, `plugins/`, `uploads/` thuộc website và nằm ở root. M1/M2 và migration/fixture lịch sử đã được nhập. Đối chiếu [báo cáo tại đích](docs/verification/2026-11-07-m1-m2-import.md) trước khi mở rộng phạm vi. Kiểm tra file thực tế trước khi tuyên bố chức năng đã có. Xem [README](README.md) và [verification](docs/verification/README.md).
 - Đọc [README.md](README.md) và [docs/product/PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) trước khi đề xuất tech stack hoặc thay đổi kiến trúc/code.
 - Dự án phát triển trước trên Windows. Lát cắt Rust và cách kiểm chứng được ghi trong [README.md](README.md). Không báo đã build/test/benchmark nếu chưa thực hiện được trên mã thật.
 - Giữ các ràng buộc đã xác nhận trong [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md), bao gồm Rust + SQLite, một file thực thi, builder và plugin chạy logic server từ bản đầu. Hướng stack và Wasmi đã được chủ dự án chốt trong [docs/architecture/TECH_STACK.md](docs/architecture/TECH_STACK.md); cấu trúc dự án theo [docs/architecture/CMS_ARCHITECTURE.md](docs/architecture/CMS_ARCHITECTURE.md) và hợp đồng ABI theo [docs/contracts/PLUGIN_ABI.md](docs/contracts/PLUGIN_ABI.md).
@@ -20,7 +20,7 @@
 - Trước khi làm một slice: nêu contract liên quan, tiêu chí nghiệm thu và phần ngoài phạm vi. Sau khi làm: ghi thay đổi, lệnh/check thực chạy, kết quả và giới hạn.
 - Với thay đổi hành vi, chọn kiểm chứng theo phạm vi: preview chưa lưu, cập nhật khi Lưu, dữ liệu và bố cục khi đổi theme, quyền và lỗi plugin, hoặc backup/restore. Không tạo test chỉ lặp lại implementation.
 - Trạng thái thiết kế `AGREED` khác `implemented` và `verified`. Giữ các trạng thái này riêng; không đánh dấu hoàn thành khi thiếu fixtures/bằng chứng thực tế.
-- Tài liệu mới đặt đúng nhóm theo [docs/README.md](docs/README.md); quyết định kiến trúc có ADR, kế hoạch để ở `docs/plans/`, bằng chứng thực chạy ở `docs/verification/`. Các phần mẫu trong `cms/crates/`, `cms/admin/`, `cms/sdk/` và `cms/examples/` chỉ là scaffold; không suy ra Auth/Save/Preview/Plugin runtime đã hoạt động.
+- Tài liệu mới đặt đúng nhóm theo [docs/README.md](docs/README.md); quyết định kiến trúc có ADR, kế hoạch để ở `docs/plans/`, bằng chứng thực chạy ở `docs/verification/`. Phân biệt các luồng M1/M2 đã kiểm chứng với module V1 còn trong thiết kế.
 - Dùng đường dẫn Markdown tương đối trong repo. Sau khi đổi docs, kiểm tra link nội bộ và `git diff --check`.
 - Ghi lệnh chạy chính xác trong [README.md](README.md) và giữ `cms/Cargo.lock` đồng bộ với `cms/Cargo.toml`. Từ root, dùng `cargo build --manifest-path cms/Cargo.toml --locked` để kiểm tra build lặp lại được; từ `cms/` có thể dùng `cargo build --locked`.
 

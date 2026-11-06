@@ -44,3 +44,6 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+/cms/examples/plugins/sample-plugin/node_modules/
+/cms/examples/plugins/sample-plugin/build/

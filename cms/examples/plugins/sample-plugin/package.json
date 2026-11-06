@@ -1,0 +1,16 @@
+{
+  "name": "sample-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenDash sample AssemblyScript plugin",
+  "scripts": {
+    "asbuild": "asc assembly/index.ts --target release",
+    "build": "asc assembly/index.ts --target release && node scripts/bundle.js"
+  },
+  "devDependencies": {
+    "assemblyscript": "=0.27.34"
+  },
+  "dependencies": {
+    "assemblyscript-json": "1.1.0"
+  }
+}
