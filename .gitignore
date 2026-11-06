@@ -1,0 +1,46 @@
+# Codex <-> Antigravity handoff state (keep scripts and skills tracked)
+/.agents/sync/
+
+# Rust and frontend build outputs
+/target/
+/cms/target/
+/cms/admin/node_modules/
+/cms/admin/dist/
+/cms/admin/coverage/
+/cms/admin/.vite/
+/node_modules/
+/coverage/
+
+# Local website data and runtime artifacts
+/database/*
+!/database/README.md
+/runtime/
+/backups/
+
+# Installed website theme/plugin packages and uploaded media. Keep their
+# documentation visible in Git; avoid silently committing site-specific data.
+/themes/*
+!/themes/README.md
+/plugins/*
+!/plugins/README.md
+/uploads/*
+!/uploads/README.md
+
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+*.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Python smoke test cache
+__pycache__/
+*.py[cod]
+.pytest_cache/

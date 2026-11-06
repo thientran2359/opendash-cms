@@ -1,0 +1,12 @@
+{
+  "id": "sample-plugin",
+  "version": "0.1.0",
+  "api_version": 1,
+  "name": "Sample Plugin",
+  "description": "Minimal contract example; not yet installable",
+  "entrypoint": "plugin.wasm",
+  "permissions": {
+    "sqlite": [],
+    "http": []
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "codex-sync": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File notify-codex.ps1",
+        "timeout": 10
+      }
+    ]
+  }
+}

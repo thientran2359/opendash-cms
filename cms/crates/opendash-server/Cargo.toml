@@ -1,0 +1,19 @@
+[package]
+name = "opendash-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "opendash"
+path = "src/main.rs"
+
+[dependencies]
+opendash-core = { path = "../opendash-core" }
+axum = "=0.8.9"
+tokio = { version = "=1.48.0", features = ["macros", "rt-multi-thread", "net"] }
+serde = { version = "=1.0.228", features = ["derive"] }
+sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "sqlite"] }
+minijinja = "=3.0.5"
+rust-embed = "=8.13.0"
