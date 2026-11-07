@@ -3,6 +3,7 @@ mod auth;
 mod error;
 mod hooks;
 mod package;
+mod page;
 mod paths;
 mod plugin;
 mod routes;

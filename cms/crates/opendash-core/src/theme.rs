@@ -3,8 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::id::{
-    valid_kebab_segment_with_limit, valid_namespaced_block_id, valid_namespaced_snake_key,
-    valid_snake_key_with_limit,
+    valid_namespaced_block_id, valid_namespaced_snake_key, valid_snake_key_with_limit,
 };
 
 pub type Fields = BTreeMap<String, String>;
@@ -54,20 +53,6 @@ impl Block {
             return Err("Giá trị nhập không khớp khai báo block.");
         }
         Ok(())
-    }
-}
-
-pub fn valid_name(value: &str, separator: u8) -> bool {
-    match separator {
-        b'_' => valid_snake_key_with_limit(value, 32),
-        b'-' => valid_kebab_segment_with_limit(value, 32),
-        _ => {
-            (1..=32).contains(&value.len())
-                && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-                && value.bytes().all(|byte| {
-                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == separator
-                })
-        }
     }
 }
 

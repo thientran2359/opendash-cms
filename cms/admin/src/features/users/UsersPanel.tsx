@@ -1,4 +1,5 @@
 import React from 'react';
+import { TextInput } from '../../components/FormPrimitives.tsx';
 
 interface UsersPanelProps {
   editorUsername: string;
@@ -21,17 +22,17 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
     <div className="admin-section">
       <h2>Tạo tài khoản Biên tập viên</h2>
       <form onSubmit={onCreateEditor} className="form-group">
-        <input
+        <TextInput
           placeholder="Tên đăng nhập editor"
           value={editorUsername}
-          onChange={e => onEditorUsernameChange(e.target.value)}
+          onValueChange={onEditorUsernameChange}
           disabled={isProcessing}
         />
-        <input
+        <TextInput
           type="password"
           placeholder="Mật khẩu"
           value={editorPassword}
-          onChange={e => onEditorPasswordChange(e.target.value)}
+          onValueChange={onEditorPasswordChange}
           disabled={isProcessing}
         />
         <button type="submit" disabled={isProcessing}>

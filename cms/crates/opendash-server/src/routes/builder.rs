@@ -7,8 +7,6 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use opendash_core::hooks::HookEvent;
-use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::{
@@ -17,11 +15,10 @@ use crate::{
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
     package::is_valid_zip_content_type,
+    page::{render_block, save_page},
     routes::public::rendered,
-    storage::page::{
-        insert_theme_block, list_theme_blocks, load_home_page, load_theme_block, save_home_page,
-    },
-    theme::{self, Block, Fields, Theme},
+    storage::page::{insert_theme_block, list_theme_blocks, load_home_page},
+    theme::{Block, Fields, Theme},
 };
 
 pub async fn builder() -> Response {
@@ -117,16 +114,5 @@ pub async fn save(
     Json(block): Json<Block>,
 ) -> ApiResult<Response> {
     require_session_with_csrf(&headers, &db).await?;
-    let html = render_block(&db, &block).await?;
-    save_home_page(&db, &block).await?;
-    hooks.emit(
-        HookEvent::PageAfterSave,
-        json!({ "block_type": &block.kind }),
-    );
-    Ok(rendered(html))
-}
-
-pub async fn render_block(db: &SqlitePool, block: &Block) -> ApiResult<String> {
-    let (template, fields) = load_theme_block(db, &block.kind).await?;
-    theme::render(&template, &fields, block).map_err(ApiError::bad_request)
+    Ok(rendered(save_page(&db, &hooks, &block).await?))
 }

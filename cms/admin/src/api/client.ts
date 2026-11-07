@@ -91,14 +91,8 @@ export interface HealthResponse {
 }
 
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
-  const response = await fetch('/api/health', {
-    credentials: 'same-origin',
+  return requestJson<HealthResponse>('/api/health', {
     signal,
+    defaultErrorMessage: 'Không kiểm tra được trạng thái máy chủ.',
   });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  return (await response.json()) as HealthResponse;
 }

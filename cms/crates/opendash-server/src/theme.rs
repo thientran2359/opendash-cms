@@ -1,7 +1,7 @@
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 pub use opendash_core::theme::{Block, BlockDescriptor, Fields};
 
-use crate::package::{open_bounded_zip, read_bounded_entry};
+use crate::package::{ensure_safe_flat_entry, open_bounded_zip, read_bounded_entry};
 
 pub const MAX_ZIP_BYTES: usize = 64 * 1024;
 
@@ -27,10 +27,12 @@ impl Theme {
         let mut remaining = MAX_ZIP_BYTES;
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).map_err(|_| "Không đọc được ZIP.")?;
-            let name = entry
-                .name()
-                .map_err(|_| "Tên mục ZIP không hợp lệ.")?
-                .to_string();
+            let name = ensure_safe_flat_entry(
+                &entry,
+                "Đường dẫn ZIP không an toàn.",
+                "ZIP không được chứa symlink.",
+                "ZIP không được chứa thư mục con.",
+            )?;
             let slot = match name.as_str() {
                 "block.json" if descriptor.is_none() => &mut descriptor,
                 "block.html" if template.is_none() => &mut template,

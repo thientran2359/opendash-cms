@@ -1,14 +1,15 @@
 # Kế hoạch M2.5 — Bộ khung Lõi (Core Kernel) & Quy chuẩn Code
 
 - **Ngày lập:** `2026-11-07`
-- **Trạng thái:** `verified` — xem [báo cáo kiểm chứng M2.5](../verification/2026-11-07-m2-5-core-kernel.md).
-- **Hợp đồng liên quan:** [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md) · [PLUGIN_ABI.md](../contracts/PLUGIN_ABI.md) · [CMS_ARCHITECTURE.md](../architecture/CMS_ARCHITECTURE.md) · [PRODUCT_REQUIREMENTS.md](../product/PRODUCT_REQUIREMENTS.md)
+- **Trạng thái:** `verified` cho toàn bộ phạm vi M2.5 (gồm cả 8 mục hoàn thiện); xem [báo cáo kiểm chứng M2.5](../verification/2026-11-07-m2-5-core-kernel.md) và [ADR-0002](../decisions/ADR-0002-core-extension-contract.md).
+- **Cập nhật phạm vi:** `2026-11-07`, theo mục tiêu chủ dự án: có API lõi dùng chung, cơ chế mở rộng thực tế và quy chuẩn ngăn mỗi phase tổ chức code một kiểu.
+- **Hợp đồng liên quan:** [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md) · [PLUGIN_ABI.md](../contracts/PLUGIN_ABI.md) · [CMS_ARCHITECTURE.md](../architecture/CMS_ARCHITECTURE.md) · [PRODUCT_REQUIREMENTS.md](../product/PRODUCT_REQUIREMENTS.md) · [ADR-0002](../decisions/ADR-0002-core-extension-contract.md)
 
 ---
 
 ## 1. Bối cảnh và mục tiêu
 
-Sau khi nhập M1 (Auth/Builder 1 block) và M2 (Plugin Wasmi) vào workspace 2 crate ([báo cáo kiểm chứng](../verification/2026-11-07-m1-m2-import.md)), mã nguồn đã chạy ổn định nhưng tồn tại các điểm lệch chuẩn giữa hai giai đoạn:
+Trước đợt triển khai M2.5 đầu, sau khi nhập M1 (Auth/Builder 1 block) và M2 (Plugin Wasmi) vào workspace 2 crate ([báo cáo kiểm chứng](../verification/2026-11-07-m1-m2-import.md)), có các điểm cần chuẩn hóa:
 - Kiểm tra định danh (`id`, `key`, `semver`) viết riêng ở từng file (`content.rs`, `theme.rs`, `plugin.rs`).
 - Truy vấn SQLite nằm rải rác trong `routes/auth.rs`, `auth.rs`, `plugin/manager.rs` và `storage/page.rs`.
 - Giải nén và kiểm tra gói ZIP tách rời giữa `theme.rs` và `plugin/package.rs`.
@@ -17,34 +18,40 @@ Sau khi nhập M1 (Auth/Builder 1 block) và M2 (Plugin Wasmi) vào workspace 2 
 
 Mốc **M2.5** xây dựng bộ khung CMS cơ bản và áp dụng quy chuẩn trong [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md) lên toàn bộ mã M1/M2 trước khi mở M3.
 
+Mục tiêu nghiệm thu là: một tính năng mới có mẫu rõ để làm theo, có API lõi thực sự dùng được và có kiểm tra phát hiện khi đi sai quy chuẩn. Việc tạo module hoặc kiểu dữ liệu chưa đủ chứng minh đã có cơ chế mở rộng. Không cần sao chép cấu trúc class của WordPress; cần thực hiện được vai trò đăng ký tài nguyên, xử lý sự kiện và dùng chung nghiệp vụ nền trong kiến trúc Rust hiện tại.
+
 ---
 
 ## 2. Phạm vi và phần ngoài phạm vi
 
-### Trong phạm vi
+### Nền của đợt triển khai đầu
+
+Danh sách dưới đây ghi phạm vi dự kiến ban đầu; tên API và mức tích hợp đã được đối chiếu và hoàn thiện ở mục 4.
 1. Ban hành [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md) và cập nhật [AGENTS.md](../../AGENTS.md), [docs/README.md](../README.md).
 2. Xây dựng 3 module nền trong `opendash-core`:
-   - `id.rs`: chuẩn hóa `validate_snake_key`, `validate_kebab_id`, `validate_namespaced_id`, `validate_semver`.
-   - `registry.rs`: định nghĩa `ResourceOwner`, `ProviderStatus`, `OwnedDescriptor<T>` và `RegistryCatalog<T>`.
+   - `id.rs`: chuẩn hóa `valid_snake_key`, `valid_snake_key_with_limit`, `valid_kebab_segment_with_limit`, `valid_namespaced_block_id`, `valid_namespaced_snake_key`, `validate_package_id`, `valid_package_id`, `validate_semver`.
+   - `registry.rs`: định nghĩa `ResourceOwner`, `ProviderStatus`, `OwnedDescriptor<T>`, `RegistryCatalog<T>` và `RegistryError`.
    - `hooks.rs`: định nghĩa `HookEvent`, `HookEnvelope` và tên sự kiện chuẩn.
 3. Chuẩn hóa `opendash-server` theo đúng phân tầng:
    - Nâng cấp `error::ApiError` dùng `Cow<'static, str>`.
-   - Tạo `package::SafeZipArchive` dùng chung cho đọc/kiểm tra ZIP của Theme và Plugin.
-   - Đưa toàn bộ câu lệnh `sqlx::query*` của Auth và Plugin về `storage/auth.rs` và `storage/plugin.rs`.
+   - Tạo `package.rs` (`open_bounded_zip`, `ensure_safe_flat_entry`, `read_bounded_entry`, `is_valid_zip_content_type`) dùng chung cho đọc/kiểm tra ZIP của Theme và Plugin.
+   - Đưa toàn bộ câu lệnh `sqlx::query*` và `sqlx::raw_sql` của ứng dụng về `storage/{mod,auth,page,plugin,plugin_kv}.rs`.
    - Bổ sung guard kết hợp `require_session_with_csrf` và `require_admin_with_csrf` trong `auth.rs`.
-   - Tạo `hooks::HookDispatcher` trong `AppState` để điều phối sự kiện hệ thống và thực thi plugin.
+   - Tạo `page.rs` cho nghiệp vụ render/save trang và `hooks::HookDispatcher` trong `AppState` để điều phối sự kiện hệ thống và thực thi plugin.
 4. Chuẩn hóa `cms/admin/src/`:
-   - Bổ sung helper `requestJson` / `requestText` kèm CSRF trong `api/client.ts`.
-   - Tạo `components/FormPrimitives.tsx` và áp dụng cho Builder/Plugin UI mà không đổi DOM selector.
+   - Bổ sung helper `requestJson` / `requestText` kèm CSRF và `getHealth` trong `api/client.ts`.
+   - Tạo `components/FormPrimitives.tsx` (`TextInput`, `FormGroup`, `TextField`, `SelectField`, `ZipUploadField`) và áp dụng cho Builder/Plugin/Auth/Users UI mà không đổi DOM selector.
 
 ### Ngoài phạm vi
-- Không thay đổi schema SQLite hiện có (`0001`–`0003`) và không đổi byte của `fixtures/baseline_0001.sqlite`.
+- Không sửa migrations lịch sử (`0001`–`0003`) và không đổi byte của `fixtures/baseline_0001.sqlite`. Nếu tích hợp registry cần schema bổ sung, phải nêu lý do, chốt thiết kế lưu bền và migration mới trong slice tương ứng trước khi code; không mặc định cần bảng mới.
 - Chưa thêm bảng hay màn hình quản trị CPT/Media (thuộc M3).
 - Không thay đổi giao thức nhị phân Wasm trong [PLUGIN_ABI.md](../contracts/PLUGIN_ABI.md).
+- Không triển khai builder nhiều tầng, hệ settings hoàn chỉnh, backup/restore hoặc framework tổng quát cho mọi nhu cầu tương lai.
+- Không đổi stack, tự nâng dependency hoặc tạo module rỗng cho các phase sau.
 
 ---
 
-## 3. Các bước thực hiện (Slices)
+## 3. Các slice của đợt triển khai đầu
 
 1. **Slice 1 — Tài liệu & Quy chuẩn:** Tạo `docs/contracts/CORE_FOUNDATION.md`, `docs/plans/2026-11-07-m2-5-core-kernel-and-standards.md`, cập nhật `AGENTS.md` và `docs/README.md`.
 2. **Slice 2 — Core Kernel (`opendash-core`):** Triển khai `id.rs`, `registry.rs`, `hooks.rs`; hợp nhất logic kiểm tra trong `content.rs`, `theme.rs`, `plugin.rs` và viết unit test đầy đủ.
@@ -53,12 +60,91 @@ Mốc **M2.5** xây dựng bộ khung CMS cơ bản và áp dụng quy chuẩn t
 
 ---
 
-## 4. Tiêu chí nghiệm thu
+## 4. Tám mục hoàn thiện M2.5
 
-- Không còn `sqlx::query` hay `sqlx::query_as` trong `routes/`, `auth.rs` hay `plugin/manager.rs`.
+Các mục sau đã được chốt thiết kế tại [ADR-0002](../decisions/ADR-0002-core-extension-contract.md), đồng bộ vào [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md), triển khai trong source và kiểm chứng thực tế tại [2026-11-07-m2-5-core-kernel.md](../verification/2026-11-07-m2-5-core-kernel.md).
+
+### 4.1. Đồng bộ contract và Base APIs thật
+
+- [x] Lập danh mục API công khai đang có, nơi sở hữu và caller thực tế; đồng bộ tên, chữ ký và hành vi với `CORE_FOUNDATION.md`.
+- [x] Xử lý chênh lệch `validate_snake_key` / `validate_kebab_id` / `validate_namespaced_id` với các hàm `valid_*` hiện tại; làm rõ kiểm tra package, block, hook và slug thay vì gộp các quy tắc khác nhau.
+- [x] Chốt API ZIP dùng chung: các helper hiện có (`open_bounded_zip`, `ensure_safe_flat_entry`, `read_bounded_entry`, `is_valid_zip_content_type`); không bắt caller dùng một kiểu chưa tồn tại.
+- [x] Ghi riêng trạng thái thiết kế, triển khai và kiểm chứng của từng nhóm API.
+
+**Nghiệm thu:** mọi API bắt buộc trong contract tìm được trong source, hành vi có bằng chứng phù hợp; không đổi định dạng được chấp nhận trước đây mà thiếu đánh giá tương thích.
+
+### 4.2. Chốt quy chuẩn tổ chức code
+
+- [x] Quy định trách nhiệm route, xử lý nghiệp vụ (`page.rs`), core và storage; nơi quản lý transaction, thứ tự commit/phát hook và cách truyền dependency.
+- [x] Quy định đặt tên, kiểu lỗi, async/cancellation và điều kiện tách nghiệp vụ nhiều bước khỏi route; không ép mọi hàm nhỏ đi qua tầng trung gian.
+- [x] Trước khi tạo helper/module mới, tìm API tương đương bằng CodeGraph và source. Nếu API cũ thiếu, ưu tiên mở rộng tại module sở hữu; API mới phải giải thích trách nhiệm khác biệt và caller dự kiến.
+- [x] Ngoại lệ quy chuẩn phải ghi rõ phạm vi, lý do và cách kiểm chứng; không tự phát sinh ngoại lệ ở từng phase.
+
+**Nghiệm thu:** contract chỉ rõ nơi đặt một tính năng mới, cách tái sử dụng và xử lý ngoại lệ; các quyết định kiến trúc được liên kết tới [ADR-0002](../decisions/ADR-0002-core-extension-contract.md).
+
+### 4.3. Hoàn thiện Registry có quyền sở hữu
+
+- [x] Từ chối trùng khóa khác owner (`RegistryError::OwnerConflict`); quy định cập nhật cùng owner (`RegistryCatalog::update`) và giữ nguyên trạng thái `ProviderStatus`.
+- [x] Quy định bật/tắt provider (`activate_owner` / `deactivate_owner`); giữ định nghĩa và dữ liệu, phân biệt khả năng quản lý schema với khả năng thực thi block/template từ provider đang tắt.
+- [x] Tách định nghĩa do provider cung cấp (`theme_blocks`) với nội dung và tùy chỉnh người dùng (`home_page`) để cập nhật provider không ghi đè tùy chỉnh.
+- [x] Chốt phần lưu SQLite, phần catalog trong bộ nhớ (`storage::page::load_block_catalog`) và cách khôi phục sau restart; tận dụng storage hiện có mà không mở bảng mới.
+
+**Nghiệm thu:** có test xung đột owner, cập nhật cùng owner, deactivate/reactivate và bảo toàn tài nguyên; có bằng chứng restart cho tài nguyên được tích hợp ở mục 4.5 (`windows_kernel_smoke.py`). Chưa tuyên bố bảo toàn CPT/Media khi các module đó chưa triển khai.
+
+### 4.4. Hoàn thiện Hook/Action chạy thực tế
+
+- [x] Có API đăng ký handler (`register_handler` cho core, manifest `hooks` cho plugin) và `dispatch`; chốt thứ tự chạy `(priority, id)`, xử lý đăng ký trùng và vòng đời handler khi provider tắt.
+- [x] Thống nhất tên event khi serialize (`page/after_save`, ...), payload, thời điểm (`occurred_at_ms`) và `correlation_id` xuyên suốt xử lý/log.
+- [x] Phân biệt thông báo sau lưu với xử lý trước lưu: M2.5 chỉ thực thi thông báo sau commit (`PageAfterSave`), từ chối `ContentBeforeSave` và chặn gọi lồng (`IN_DISPATCH`). Việc triển khai Content hooks thuộc M3.
+- [x] Quy định lỗi, timeout (`250ms` cho core handler, ngân sách admission `5s`, tối đa `32` handler), bắt panic và tiếp tục handler độc lập; plugin tiếp tục dùng worker/quyền/giới hạn của M2, không thêm đường thực thi bỏ qua sandbox.
+- [x] Chốt cách nối lifecycle event với plugin (`HookEnvelope` qua JSON input của `run_plugin_correlated`) mà giữ ABI nhị phân v1 và tương thích input của thao tác chạy thủ công (`dispatch_plugin_run`).
+
+**Nghiệm thu:** handler thật nhận đúng event/payload, thứ tự và vòng đời đúng contract; plugin lỗi/timeout không làm mất giao dịch đã lưu hoặc chặn đường phục hồi Admin.
+
+### 4.5. Đưa luồng hiện có qua bộ lõi
+
+- [x] Dùng registry (`load_block_catalog`) cho tài nguyên hiện có như block; adapter/storage vẫn tương thích dữ liệu M1.
+- [x] Luồng Lưu (`routes/builder.rs::save` → `page.rs::save_page`) phát sự kiện sau commit tới handler thật; chạy plugin thủ công qua `HookDispatcher::dispatch_plugin_run`.
+- [x] Kiểm tra caller để không giữ hai đường nghiệp vụ tương đương hoặc triển khai bản sao API lõi ở module khác.
+
+**Nghiệm thu:** một luồng xuyên suốt từ HTTP tới registry/storage/hook được kiểm chứng (`page.rs` unit test + `windows_kernel_smoke.py`); preview chưa lưu không thay đổi public, Lưu cập nhật public, lỗi handler sau lưu không biến kết quả lưu thành thất bại. Không mở rộng sang CPT/Media hay builder nhiều tầng.
+
+### 4.6. Khép các điểm chưa thống nhất của Base APIs
+
+- [x] Đưa SQL ứng dụng còn ở runtime/host operations về `storage/plugin_kv.rs` theo contract hiện hành, giữ nguyên deadline, cancellation, transaction guard và commit handover.
+- [x] Theme và plugin dùng chung kiểm tra ZIP phù hợp (`ensure_safe_flat_entry` trong `theme.rs` và `plugin/package.rs`): đường dẫn, symlink, mục trùng, kích thước và giới hạn giải nén; giới hạn riêng của từng loại gói vẫn được giữ.
+- [x] Thống nhất cách dùng `ApiError`/`ApiResult`, response lỗi và ánh xạ lỗi; ghi rõ ngoại lệ tương thích của `PluginRunResponse` thay vì âm thầm đổi API.
+- [x] Ghi rõ auth/Origin/CSRF cho login/setup và các route đã có session; không áp dụng guard yêu cầu session vào bootstrap.
+- [x] Rà API client (`getHealth` dùng `requestJson`) và form primitives (`TextInput` cho `AuthPanel`/`UsersPanel`) để tái sử dụng nhất quán, bảo toàn dữ liệu nhập khi gặp 401 và selector hiện có.
+
+**Nghiệm thu:** kiểm tra ranh giới SQL đạt đúng contract (`check-standards.py`), hồi quy cancellation/zero late writes còn PASS; ZIP theme có ca symlink (`windows_kernel_smoke.py`); auth và response hiện có không bị thay đổi ngoài thiết kế đã chốt.
+
+### 4.7. Mẫu mở rộng và kiểm tra quy chuẩn
+
+- [x] Tài liệu hóa một luồng code thật: `routes/builder.rs::save` → `page.rs::save_page` → `opendash_core` validation/registry → `storage/page.rs` → `hooks.rs::HookDispatcher` sau commit; liên kết tới API và test thực tế trong `CORE_FOUNDATION.md`.
+- [x] Có lệnh kiểm tra ranh giới dependency của core, SQL ngoài storage, route guard và fetch tập trung (`python cms/scripts/check-standards.py`). Phân biệt code ứng dụng, code test (`#[cfg(test)]`) và ngoại lệ đã ghi nhận (`auth_login`, `auth_setup`).
+- [x] Kiểm tra có exit code thất bại khi vi phạm; có ca cố ý vi phạm (`python cms/scripts/check-standards.py --self-test`) để chứng minh check hoạt động, không chỉ chạy PASS trên source hiện tại.
+- [x] Đưa lệnh vào hướng dẫn kiểm chứng và checklist mỗi slice. Review vẫn kiểm tra hàm khác tên nhưng trùng trách nhiệm; CodeGraph và kiểm tra tĩnh không tự chứng minh hết việc tái sử dụng.
+
+**Nghiệm thu:** người triển khai phase sau có mẫu và lệnh chạy cụ thể; thêm code sai ranh giới bị phát hiện; không viết test chỉ phản chiếu cấu trúc implementation.
+
+### 4.8. Kiểm chứng và chốt M2.5
+
+- [x] Hoàn thành bằng chứng các mục 4.1–4.7 và các lệnh ở mục 5.
+- [x] Báo cáo cập nhật ghi chính xác lệnh, môi trường, kết quả, giới hạn và trạng thái từng mục; giữ bằng chứng lịch sử của đợt đầu.
+- [x] Đóng M2.5 khi registry/hook đã dùng trong luồng thật và quy chuẩn có kiểm tra tự động.
+
+**Nghiệm thu:** đủ căn cứ mở M3 trên nền chung, không yêu cầu M3 tự xây lại registry, dispatcher hay các helper nền tương đương.
+
+## 5. Kiểm chứng hồi quy bắt buộc khi hoàn thiện code
+
+- Kiểm tra toàn bộ `sqlx::query*` và `sqlx::raw_sql` trong code ứng dụng bằng `python cms/scripts/check-standards.py` và `--self-test` đạt `PASS`.
 - `cargo fmt --manifest-path cms/Cargo.toml --all --check` đạt `PASS`.
+- `cargo build --manifest-path cms/Cargo.toml --locked` đạt `PASS`.
 - `powershell -NoProfile -ExecutionPolicy Bypass -File cms/scripts/build.ps1 -Release` đạt `PASS`.
-- `cargo test --manifest-path cms/Cargo.toml --workspace --release --locked` đạt `PASS` (kèm các unit test mới của Core Kernel và Package).
-- Cả 5 bộ kiểm thử tự động trên Windows (`windows_smoke.py`, `windows_auth_smoke.py`, `windows_distribution_smoke.py`, `windows_plugin_smoke.py`, `windows_admin_browser.py`) đạt `PASS`.
+- `cargo test --manifest-path cms/Cargo.toml --workspace --release --locked` đạt `PASS` (`12 passed` trong `opendash-core`, `34 passed` trong `opendash-server`).
+- Cả 6 bộ kiểm thử tự động trên Windows (`windows_smoke.py`, `windows_auth_smoke.py`, `windows_distribution_smoke.py`, `windows_plugin_smoke.py`, `windows_kernel_smoke.py`, `windows_admin_browser.py`) đạt `PASS`.
 - `git diff --check` sạch lỗi định dạng.
+- Kiểm tra link nội bộ của tài liệu thay đổi; cập nhật chỉ mục docs bằng `node cms/scripts/codegraph-index-docs.mjs` khi sửa nguồn docs được nạp.
 
+Mỗi slice chọn test theo hành vi bị ảnh hưởng. Trước khi đóng mốc phải chạy đủ bộ hồi quy trên; kiểm thử dùng site tạm riêng, không ghi vào dữ liệu website đang làm việc. Kết quả lịch sử không thay thế kiểm chứng trên code sau khi hoàn thiện.

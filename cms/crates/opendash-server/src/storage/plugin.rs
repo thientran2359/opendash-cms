@@ -142,8 +142,10 @@ pub async fn load_plugin_executable(
 ) -> Result<Option<(Vec<u8>, String, bool)>, sqlx::Error> {
     let row_opt = sqlx::query("SELECT wasm_blob, manifest_json, enabled FROM plugins WHERE id = ?")
         .bind(id)
-        .fetch_optional(db_pool)
-        .await?;
+        .fetch_optional(db_pool);
+    let row_opt = tokio::time::timeout(std::time::Duration::from_secs(1), row_opt)
+        .await
+        .map_err(|_| sqlx::Error::PoolTimedOut)??;
 
     Ok(row_opt.map(|row| {
         let wasm_blob: Vec<u8> = row.get("wasm_blob");
@@ -161,20 +163,40 @@ pub async fn record_plugin_execution_result(
     message: &str,
     last_error: Option<&str>,
 ) {
-    let _ = sqlx::query(
-        "INSERT INTO plugin_logs (plugin_id, correlation_id, level, message) VALUES (?, ?, ?, ?)",
-    )
-    .bind(id)
-    .bind(correlation_id)
-    .bind(level)
-    .bind(message)
-    .execute(db_pool)
-    .await;
-
-    let _ =
+    let write = async {
+        sqlx::query("INSERT INTO plugin_logs (plugin_id, correlation_id, level, message) VALUES (?, ?, ?, ?)")
+            .bind(id).bind(correlation_id).bind(level).bind(message).execute(db_pool).await?;
         sqlx::query("UPDATE plugins SET last_error = ?, updated_at = datetime('now') WHERE id = ?")
             .bind(last_error)
             .bind(id)
             .execute(db_pool)
-            .await;
+            .await?;
+        Ok::<_, sqlx::Error>(())
+    };
+    if !matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), write).await,
+        Ok(Ok(()))
+    ) {
+        eprintln!("Plugin log unavailable: {id} {correlation_id} {level}: {message}");
+    }
+}
+
+pub async fn hook_subscriptions(
+    db: &SqlitePool,
+    event: opendash_core::hooks::HookEvent,
+) -> Result<Vec<String>, String> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, manifest_json FROM plugins WHERE enabled = 1 ORDER BY id")
+            .fetch_all(db)
+            .await
+            .map_err(|e| e.to_string())?;
+    let mut ids = Vec::new();
+    for (id, json) in rows {
+        match PluginManifest::from_json_str(&json) {
+            Ok(manifest) if manifest.id == id && manifest.hooks.contains(&event) => ids.push(id),
+            Ok(_) => {}
+            Err(error) => eprintln!("Invalid subscription manifest {id}: {error}"),
+        }
+    }
+    Ok(ids)
 }

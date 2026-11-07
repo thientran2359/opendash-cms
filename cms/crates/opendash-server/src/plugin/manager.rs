@@ -100,6 +100,34 @@ impl PluginManager {
         let token = crate::auth::generate_random_token();
         let correlation_id = format!("run_{}", &token[..16.min(token.len())]);
 
+        self.run_plugin_correlated(id, input, correlation_id).await
+    }
+
+    pub async fn hook_subscriptions(
+        &self,
+        event: opendash_core::hooks::HookEvent,
+    ) -> Result<Vec<String>, String> {
+        plugin_storage::hook_subscriptions(&self.db_pool, event).await
+    }
+
+    pub async fn record_hook_failure(&self, id: &str, correlation_id: &str, message: &str) {
+        plugin_storage::record_plugin_execution_result(
+            &self.db_pool,
+            id,
+            correlation_id,
+            "error",
+            message,
+            Some(message),
+        )
+        .await;
+    }
+
+    pub async fn run_plugin_correlated(
+        &self,
+        id: &str,
+        input: Value,
+        correlation_id: String,
+    ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
         let row_opt = plugin_storage::load_plugin_executable(&self.db_pool, id)
             .await
             .map_err(|e| {

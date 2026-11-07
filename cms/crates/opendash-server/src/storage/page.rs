@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use opendash_core::registry::{RegistryCatalog, ResourceOwner};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -7,18 +8,68 @@ use crate::{
     theme::{Block, Fields, Theme},
 };
 
+#[derive(Debug, Clone)]
+pub struct BlockDefinition {
+    pub fields: Fields,
+    pub template: String,
+}
+
+/// SQLite is authoritative. A fresh snapshot avoids stale state across restart/install.
+pub async fn load_block_catalog(db: &SqlitePool) -> ApiResult<RegistryCatalog<BlockDefinition>> {
+    let rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT id, fields_json, template FROM theme_blocks ORDER BY id")
+            .fetch_all(db)
+            .await?;
+    let mut catalog = RegistryCatalog::new();
+    for (id, fields, template) in rows {
+        if !opendash_core::id::valid_namespaced_block_id(&id) {
+            return Err(ApiError::internal("Invalid stored block ID"));
+        }
+        let owner = ResourceOwner::Theme(id.split_once('/').unwrap().0.to_owned());
+        catalog
+            .register(
+                id,
+                owner,
+                BlockDefinition {
+                    fields: serde_json::from_str(&fields)?,
+                    template,
+                },
+            )
+            .map_err(|e| ApiError::conflict(e.to_string()))?;
+    }
+    Ok(catalog)
+}
+
 pub async fn list_theme_blocks(db: &SqlitePool) -> ApiResult<BTreeMap<String, Fields>> {
-    let rows: Vec<(String, String)> = sqlx::query_as("SELECT id, fields_json FROM theme_blocks")
-        .fetch_all(db)
-        .await?;
-    let blocks = rows
-        .into_iter()
-        .map(|(id, fields)| Ok((id, serde_json::from_str(&fields)?)))
-        .collect::<Result<_, serde_json::Error>>()?;
-    Ok(blocks)
+    Ok(load_block_catalog(db)
+        .await?
+        .iter()
+        .map(|(id, entry)| (id.clone(), entry.descriptor.fields.clone()))
+        .collect())
 }
 
 pub async fn insert_theme_block(db: &SqlitePool, theme: &Theme) -> ApiResult<()> {
+    let mut catalog = load_block_catalog(db).await?;
+    let owner = ResourceOwner::Theme(
+        theme
+            .descriptor
+            .id
+            .split_once('/')
+            .ok_or_else(|| ApiError::bad_request("Invalid block namespace"))?
+            .0
+            .into(),
+    );
+    catalog
+        .register(
+            theme.descriptor.id.clone(),
+            owner,
+            BlockDefinition {
+                fields: theme.descriptor.fields.clone(),
+                template: theme.template.clone(),
+            },
+        )
+        .map_err(|e| ApiError::conflict(e.to_string()))?;
+    // The UNIQUE constraint still arbitrates concurrent installs after this snapshot check.
     let result =
         sqlx::query("INSERT INTO theme_blocks (id, fields_json, template) VALUES (?, ?, ?)")
             .bind(&theme.descriptor.id)
@@ -38,13 +89,17 @@ pub async fn insert_theme_block(db: &SqlitePool, theme: &Theme) -> ApiResult<()>
 }
 
 pub async fn load_theme_block(db: &SqlitePool, block_id: &str) -> ApiResult<(String, Fields)> {
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT template, fields_json FROM theme_blocks WHERE id = ?")
-            .bind(block_id)
-            .fetch_optional(db)
-            .await?;
-    let (template, fields) = row.ok_or(ApiError::bad_request("Không tìm thấy block."))?;
-    Ok((template, serde_json::from_str(&fields)?))
+    let catalog = load_block_catalog(db).await?;
+    let entry = catalog
+        .get(block_id)
+        .ok_or_else(|| ApiError::bad_request("Block not found"))?;
+    if entry.status != opendash_core::registry::ProviderStatus::Active {
+        return Err(ApiError::bad_request("Block provider is inactive"));
+    }
+    Ok((
+        entry.descriptor.template.clone(),
+        entry.descriptor.fields.clone(),
+    ))
 }
 
 pub async fn load_home_page(db: &SqlitePool) -> ApiResult<Option<Block>> {

@@ -5,7 +5,7 @@ use axum::{
 };
 use sqlx::SqlitePool;
 
-use crate::{error::ApiResult, routes::builder::render_block, storage::page::load_home_page};
+use crate::{error::ApiResult, page::render_block, storage::page::load_home_page};
 
 pub async fn public_page(State(db): State<SqlitePool>) -> ApiResult<Response> {
     let html = match load_home_page(&db).await? {

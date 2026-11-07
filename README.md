@@ -2,7 +2,7 @@
 
 CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress. Rust, SQLite, một file thực thi cho mỗi bản cài và hệ theme/plugin riêng.
 
-**Hiện trạng (07/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng tại đích](docs/verification/2026-11-07-m1-m2-import.md). CPT/Media, builder nhiều tầng và backup/restore thuộc các mốc sau.
+**Hiện trạng (07/11/2026).** M1/M2 và bộ khung lõi M2.5 đã được kiểm chứng trong workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block qua Registry gắn quyền sở hữu, Preview/Lưu phát sự kiện vòng đời sau commit và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng tại đích](docs/verification/2026-11-07-m1-m2-import.md) và [kiểm chứng M2.5](docs/verification/2026-11-07-m2-5-core-kernel.md). CPT/Media, builder nhiều tầng và backup/restore thuộc các mốc sau.
 
 ## Cấu trúc thư mục
 
@@ -37,9 +37,9 @@ M1 lưu template và dữ liệu trang trong SQLite. M2 lưu manifest, Wasm, KV 
 | **Yêu cầu & Stack đã chốt** | [Đánh giá tech stack (TECH_STACK)](docs/architecture/TECH_STACK.md) | Stack đã duyệt (Axum, SQLx/SQLite, React/Vite, MiniJinja, Wasmi) và kết quả bản thử |
 | **Kiến trúc & Đề xuất đang dùng** | [Kiến trúc CMS và cấu trúc thư mục (CMS_ARCHITECTURE)](docs/architecture/CMS_ARCHITECTURE.md) | Cấu trúc Workspace 2 crate (`opendash-core` / `opendash-server` / `admin`), luồng Preview/Lưu và trình tự chuyển đổi |
 | **Kiến trúc & Đề xuất đang dùng** | [Đề xuất CMS-first (CMS_PROPOSAL)](docs/architecture/CMS_PROPOSAL.md) | **Đề xuất nền đang dùng có chọn lọc:** Dùng lại ranh giới module (Mục 2) và nguyên tắc tách dữ liệu khỏi theme; các phần khác đối chiếu theo `PRODUCT_REQUIREMENTS`, `TECH_STACK` và `CMS_ARCHITECTURE` |
-| **Hợp đồng kỹ thuật (Contract)** | [Hợp đồng ABI Plugin (PLUGIN_ABI)](docs/contracts/PLUGIN_ABI.md) | Quy ước bộ nhớ, hàm host, quyền, giới hạn tài nguyên và mã lỗi giữa host Wasmi và SDK plugin |
+| **Hợp đồng kỹ thuật (Contract)** | [Bộ khung lõi & Quy chuẩn code (CORE_FOUNDATION)](docs/contracts/CORE_FOUNDATION.md) · [Hợp đồng ABI Plugin (PLUGIN_ABI)](docs/contracts/PLUGIN_ABI.md) | Danh mục Base APIs bắt buộc tái sử dụng, quy chuẩn phân tầng/SQL và giao thức giữa host Wasmi với SDK plugin |
 | **Quy trình đang áp dụng** | [AGENTS.md](AGENTS.md) · [Giao thức thảo luận (PROTOCOL)](docs/discussions/PROTOCOL.md) | Quy tắc làm việc bắt buộc trong repo và giao thức phối hợp Antigravity ↔ Codex |
-| **Quyết định tổ chức repository** | [ADR-0001](docs/decisions/ADR-0001-workspace-layout.md) | Ranh giới 2 crate + React Admin; trạng thái thiết kế `AGREED` |
+| **Quyết định kiến trúc** | [ADR-0001](docs/decisions/ADR-0001-workspace-layout.md) · [ADR-0002](docs/decisions/ADR-0002-core-extension-contract.md) | Ranh giới 2 crate + React Admin và cơ chế mở rộng lõi M2.5 (`RegistryCatalog`, `HookDispatcher`, `storage/plugin_kv`) |
 | **Trạng thái và kế hoạch** | [Kiểm kê](docs/verification/2026-11-06-repository-inventory.md) · [Kế hoạch](docs/plans/README.md) | Những gì có trong workspace mới, điều kiện để import source và kiểm chứng |
 
 Khi có khác biệt, ưu tiên chỉ đạo mới nhất của chủ dự án và yêu cầu đã xác nhận trong [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md).
@@ -62,6 +62,8 @@ Binary bind loopback, mặc định cổng 18766. Binary phân phối lưu SQLit
 Sau khi build Admin và plugin mẫu bằng script trên, chạy từ gốc:
 
 ```powershell
+python cms/scripts/check-standards.py
+python cms/scripts/check-standards.py --self-test
 cargo fmt --manifest-path cms/Cargo.toml --all --check
 cargo build --manifest-path cms/Cargo.toml --locked
 cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
@@ -70,6 +72,7 @@ python scripts/windows_smoke.py --binary target/release/opendash.exe
 python scripts/windows_auth_smoke.py --binary target/release/opendash.exe
 python scripts/windows_distribution_smoke.py --binary target/release/opendash.exe
 python scripts/windows_plugin_smoke.py --binary target/release/opendash.exe
+python scripts/windows_kernel_smoke.py --binary target/release/opendash.exe
 # Bổ sung khi đã có Python Playwright và Chromium
 python scripts/windows_admin_browser.py
 cd ..

@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod page;
 pub mod plugin;
+pub mod plugin_kv;
 
 use std::{path::Path, time::Duration};
 

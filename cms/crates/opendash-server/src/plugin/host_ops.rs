@@ -168,12 +168,7 @@ fn handle_kv_get(ctx: &mut HostContext, key: &str) -> HostOperationResponse {
     let query_res = tokio::runtime::Handle::current().block_on(async move {
         tokio::time::timeout(
             db_timeout,
-            sqlx::query_scalar::<_, String>(
-                "SELECT value_json FROM plugin_kv WHERE plugin_id = ? AND key = ?",
-            )
-            .bind(&plugin_id)
-            .bind(&key_clone)
-            .fetch_optional(&db),
+            crate::storage::plugin_kv::get(&db, &plugin_id, &key_clone),
         )
         .await
     });
