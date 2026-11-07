@@ -16,6 +16,7 @@ Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc
 | --- | --- | --- |
 | Phạm vi và hành vi sản phẩm | [`product/`](product/PRODUCT_REQUIREMENTS.md) | Đã xác nhận, thay đổi cần chỉ đạo của chủ dự án |
 | Kiến trúc và lựa chọn stack | [`architecture/`](architecture/CMS_ARCHITECTURE.md) | Ghi rõ đề xuất và quyết định; [CMS_PROPOSAL](architecture/CMS_PROPOSAL.md) chỉ tham khảo có chọn lọc |
+| Nghiên cứu chưa chốt | [`research/`](research/DAYPRESS_EMDASH_RESEARCH.md) — Daypress & EmDash | Bóc tách source, khả năng tái sử dụng, rủi ro, nguồn pin commit; trạng thái `RESEARCH / PROPOSED`, chưa thành quyết định |
 | Giao diện kỹ thuật giữa các phần | [`contracts/`](contracts/PLUGIN_ABI.md) | Contract có version, trạng thái `AGREED` khác `verified` |
 | Quyết định kiến trúc | [`decisions/`](decisions/ADR-0001-workspace-layout.md) | ADR có bối cảnh, quyết định, hệ quả và trạng thái |
 | Kế hoạch triển khai | [`plans/`](plans/README.md) | Mỗi kế hoạch nêu phạm vi, mốc và tiêu chí nghiệm thu |
