@@ -19,7 +19,9 @@ Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc
 | Nghiên cứu chưa chốt | [`research/`](research/DAYPRESS_EMDASH_RESEARCH.md) — Daypress & EmDash | Bóc tách source, khả năng tái sử dụng, rủi ro, nguồn pin commit; trạng thái `RESEARCH / PROPOSED`, chưa thành quyết định |
 | Giao diện kỹ thuật giữa các phần | [`contracts/`](contracts/CORE_FOUNDATION.md) — [Core Foundation](contracts/CORE_FOUNDATION.md) · [Plugin ABI](contracts/PLUGIN_ABI.md) | Contract có version, trạng thái `AGREED` khác `verified` |
 | Quyết định kiến trúc | [`decisions/`](decisions/ADR-0001-workspace-layout.md) — [ADR-0001](decisions/ADR-0001-workspace-layout.md) · [ADR-0002](decisions/ADR-0002-core-extension-contract.md) | ADR có bối cảnh, quyết định, hệ quả và trạng thái |
-| Kế hoạch triển khai | [`plans/`](plans/README.md) | Mỗi kế hoạch nêu phạm vi, mốc và tiêu chí nghiệm thu |
+| Roadmap và danh mục module | [Roadmap V1](plans/ROADMAP_V1.md) · [Module Catalog](plans/MODULE_CATALOG_V1.md) · [Quy trình](plans/PLANNING_WORKFLOW.md) | Hai trục chức năng và tiến độ, ID module, research/design gates, mẫu task |
+| Kế hoạch triển khai | [`plans/`](plans/README.md) · [Milestones](plans/milestones/README.md) | Mỗi kế hoạch nêu phạm vi, mốc và tiêu chí nghiệm thu; có mẫu module và task |
+| Hồ sơ lịch sử đã đóng | [`archive/`](archive/README.md) | Lưu hồ sơ chuyển đổi/migration đã hoàn tất, giữ liên kết đến verification |
 | Bằng chứng thực thi | [`verification/`](verification/README.md) | Chỉ ghi `verified` khi có lệnh, môi trường và kết quả thực tế |
 | Thảo luận giữa AI | [`discussions/`](discussions/PROTOCOL.md) | Giữ lịch sử theo lượt, không tự coi đồng thuận AI là chỉ đạo chủ dự án |
 

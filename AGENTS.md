@@ -21,8 +21,8 @@
 - Trước khi làm một slice: nêu contract liên quan, tiêu chí nghiệm thu và phần ngoài phạm vi. Sau khi làm: ghi thay đổi, lệnh/check thực chạy, kết quả và giới hạn.
 - Với thay đổi hành vi, chọn kiểm chứng theo phạm vi: preview chưa lưu, cập nhật khi Lưu, dữ liệu và bố cục khi đổi theme, quyền và lỗi plugin, hoặc backup/restore. Không tạo test chỉ lặp lại implementation.
 - Trạng thái thiết kế `AGREED` khác `implemented` và `verified`. Giữ các trạng thái này riêng; không đánh dấu hoàn thành khi thiếu fixtures/bằng chứng thực tế.
-- Tài liệu mới đặt đúng nhóm theo [docs/README.md](docs/README.md); quyết định kiến trúc có ADR, kế hoạch để ở `docs/plans/`, bằng chứng thực chạy ở `docs/verification/`. Phân biệt các luồng M1/M2 đã kiểm chứng với module V1 còn trong thiết kế.
-- Dùng đường dẫn Markdown tương đối trong repo. Sau khi đổi docs, kiểm tra link nội bộ và `git diff --check`.
+- Tài liệu mới đặt đúng nhóm theo [docs/README.md](docs/README.md); dùng [Planning Workflow V1](docs/plans/PLANNING_WORKFLOW.md) và [Module Catalog](docs/plans/MODULE_CATALOG_V1.md) khi chia milestone/slice/task. Quy trình Living Module Brief G0–G3, Full-Track/Fast-Track, Primary Acceptance Slice, Stop-and-Propose đã được thống nhất; **đồng thuận về planning không chốt schema M3**. Kiến trúc có ADR, bằng chứng thực chạy ở `docs/verification/`.
+- Dùng đường dẫn Markdown tương đối trong repo. Sau khi đổi docs/plans, chạy `python cms/scripts/check-plans.py` và `python cms/scripts/check-plans.py --self-test` cùng `git diff --check`. Checker kiểm nhất quán link/ID/evidence, không thay thế review thiết kế hoặc test thực thi.
 - Ghi lệnh chạy chính xác trong [README.md](README.md) và giữ `cms/Cargo.lock` đồng bộ với `cms/Cargo.toml`. Từ root, dùng `cargo build --manifest-path cms/Cargo.toml --locked` để kiểm tra build lặp lại được; từ `cms/` có thể dùng `cargo build --locked`.
 
 ## Trao đổi với Antigravity/Codex

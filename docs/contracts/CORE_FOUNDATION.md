@@ -3,7 +3,7 @@
 - **Phiên bản:** `1.1`
 - **Ngày hiệu lực:** `2026-11-07`
 - **Trạng thái:** `AGREED` (Quy chuẩn bắt buộc cho M2.5 và toàn bộ các mốc M3–M6); các phần thuộc phạm vi M2.5 đã `implemented` và `verified` theo [báo cáo kiểm chứng M2.5](../verification/2026-11-07-m2-5-core-kernel.md).
-- **Tài liệu liên quan:** [Yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md) · [Kiến trúc CMS](../architecture/CMS_ARCHITECTURE.md) · [Plugin ABI v1](PLUGIN_ABI.md) · [ADR-0001](../decisions/ADR-0001-workspace-layout.md) · [ADR-0002](../decisions/ADR-0002-core-extension-contract.md) · [Kế hoạch M2.5](../plans/2026-11-07-m2-5-core-kernel-and-standards.md)
+- **Tài liệu liên quan:** [Yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md) · [Kiến trúc CMS](../architecture/CMS_ARCHITECTURE.md) · [Plugin ABI v1](PLUGIN_ABI.md) · [ADR-0001](../decisions/ADR-0001-workspace-layout.md) · [ADR-0002](../decisions/ADR-0002-core-extension-contract.md) · [Kế hoạch M2.5](../plans/milestones/M2.5-core-foundation.md)
 
 ---
 

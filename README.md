@@ -28,6 +28,7 @@ M1 lưu template và dữ liệu trang trong SQLite. M2 lưu manifest, Wasm, KV 
 2. Đọc [kiến trúc CMS và cấu trúc thư mục](docs/architecture/CMS_ARCHITECTURE.md) cùng [đề xuất CMS-first](docs/architecture/CMS_PROPOSAL.md) để nắm ranh giới module trước khi triển khai.
 3. Dùng [mục lục docs](docs/README.md) để phân biệt thiết kế đã duyệt, kế hoạch và bằng chứng kiểm chứng. Khi làm việc bằng AI, đọc [AGENTS.md](AGENTS.md) và [giao thức thảo luận](docs/discussions/PROTOCOL.md).
 4. Tra lại phạm vi và nguồn M1/M2 theo [kế hoạch nhập mã](docs/plans/README.md) và ghi bằng chứng mới vào [verification](docs/verification/README.md). Không thay thế migrations hay plugin runtime đã kiểm chứng bằng mã mẫu.
+5. Khi lập kế hoạch tính năng V1, đọc [Roadmap](docs/plans/ROADMAP_V1.md), [Module Catalog](docs/plans/MODULE_CATALOG_V1.md) và [quy trình chia task](docs/plans/PLANNING_WORKFLOW.md). M3 là mốc nghiên cứu tiếp theo sau M2.5 đã kiểm chứng.
 
 ## Bộ tài liệu
 

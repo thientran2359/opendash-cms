@@ -3,7 +3,7 @@
 - **Ngày kiểm chứng:** `2026-11-07`
 - **Môi trường:** Windows, Rust `1.99.1`, Node `22.16.0`, Python `3.13.4`, Chromium headless (`ms-playwright`).
 - **Đường dẫn mã:** `C:\Users\Thientran\Local Sites\opendash-cms\cms`
-- **Trạng thái:** `verified` cho toàn bộ phạm vi M2.5 (gồm cả 8 mục hoàn thiện trong [kế hoạch M2.5](../plans/2026-11-07-m2-5-core-kernel-and-standards.md), quyết định [ADR-0002](../decisions/ADR-0002-core-extension-contract.md) và hợp đồng [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md)).
+- **Trạng thái:** `verified` cho toàn bộ phạm vi M2.5 (gồm cả 8 mục hoàn thiện trong [kế hoạch M2.5](../plans/milestones/M2.5-core-foundation.md), quyết định [ADR-0002](../decisions/ADR-0002-core-extension-contract.md) và hợp đồng [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md)).
 
 ---
 
