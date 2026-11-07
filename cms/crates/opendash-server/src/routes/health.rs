@@ -2,6 +2,8 @@ use axum::{Json, extract::State, http::StatusCode};
 use serde::Serialize;
 use sqlx::SqlitePool;
 
+use crate::storage::check_db_ready;
+
 #[derive(Serialize)]
 pub struct Health {
     status: &'static str,
@@ -12,8 +14,7 @@ pub struct Health {
 pub async fn status(
     State(database): State<SqlitePool>,
 ) -> Result<Json<Health>, (StatusCode, &'static str)> {
-    sqlx::query_scalar::<_, i64>("SELECT 1")
-        .fetch_one(&database)
+    check_db_ready(&database)
         .await
         .map_err(|_| (StatusCode::SERVICE_UNAVAILABLE, "Database unavailable"))?;
 

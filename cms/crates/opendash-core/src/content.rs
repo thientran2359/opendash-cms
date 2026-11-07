@@ -1,14 +1,12 @@
-//! Small example of validating identifiers for future custom post types.
-//! Actual CPT definitions and field schemas belong to a later implementation.
+//! Content domain identifiers and validation primitives.
+//! Delegates identifier rules to `crate::id` as the single source of truth.
+
+use crate::id::valid_snake_key;
 
 /// Valid identifiers start with a lowercase ASCII letter and contain only
-/// lowercase letters, digits, or underscores.
+/// lowercase letters, digits, or underscores (`1..=64` chars).
 pub fn valid_content_type_key(value: &str) -> bool {
-    (1..=64).contains(&value.len())
-        && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+    valid_snake_key(value)
 }
 
 #[cfg(test)]

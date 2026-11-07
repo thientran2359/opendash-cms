@@ -1,9 +1,10 @@
 pub mod host_ops;
 pub mod manager;
-pub mod manifest;
 pub mod package;
 pub mod runtime;
 pub mod worker;
+
+pub use opendash_core::plugin as manifest;
 
 #[cfg(test)]
 mod tests;

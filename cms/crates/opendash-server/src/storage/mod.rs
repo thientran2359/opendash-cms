@@ -1,4 +1,6 @@
+pub mod auth;
 pub mod page;
+pub mod plugin;
 
 use std::{path::Path, time::Duration};
 
@@ -29,4 +31,11 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, Box<dyn std::error::E
 
     sqlx::migrate!("../../migrations").run(&db).await?;
     Ok(db)
+}
+
+pub async fn check_db_ready(db: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::query_scalar::<_, i64>("SELECT 1")
+        .fetch_one(db)
+        .await?;
+    Ok(())
 }

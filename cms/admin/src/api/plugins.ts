@@ -1,53 +1,25 @@
 import { PluginRunResult, PluginSummary } from '../types.ts';
-import { ApiClientError, handleResponseText } from './client.ts';
+import { requestJson, requestText } from './client.ts';
 
 export async function getPlugins(): Promise<PluginSummary[]> {
-  const res = await fetch('/api/admin/plugins', {
+  return requestJson<PluginSummary[]>('/api/admin/plugins', {
     method: 'GET',
-    credentials: 'same-origin',
+    defaultErrorMessage: 'Không thể tải danh sách plugin.',
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new ApiClientError(res.status, text || 'Không thể tải danh sách plugin.');
-  }
-  return res.json();
 }
 
 export async function installPlugin(
   file: File,
   csrfToken: string,
 ): Promise<PluginSummary> {
-  const res = await fetch('/api/admin/plugins', {
+  return requestJson<PluginSummary>('/api/admin/plugins', {
     method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/zip',
-      'X-CSRF-Token': csrfToken,
-    },
+    csrfToken,
+    contentType: 'application/zip',
     body: file,
+    defaultErrorMessage: 'Lỗi khi cài đặt plugin.',
+    oversizeErrorMessage: 'Tập tin ZIP quá lớn (vượt quá giới hạn 5 MiB của plugin).',
   });
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = text;
-    try {
-      const errObj = JSON.parse(text);
-      if (errObj && errObj.error) {
-        msg = errObj.error;
-      }
-    } catch {
-      // not JSON
-    }
-    if (res.status === 413) {
-      msg = 'Tập tin ZIP quá lớn (vượt quá giới hạn 5 MiB của plugin).';
-    }
-    throw new ApiClientError(res.status, msg || `Lỗi HTTP ${res.status} khi cài đặt plugin.`);
-  }
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new ApiClientError(res.status, 'Phản hồi từ máy chủ không phải là JSON hợp lệ.');
-  }
 }
 
 export async function runPlugin(
@@ -55,57 +27,28 @@ export async function runPlugin(
   inputJson: string,
   csrfToken: string,
 ): Promise<PluginRunResult> {
-  const res = await fetch(`/api/admin/plugins/${encodeURIComponent(id)}/run`, {
+  return requestJson<PluginRunResult>(`/api/admin/plugins/${encodeURIComponent(id)}/run`, {
     method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRF-Token': csrfToken,
-    },
+    csrfToken,
+    contentType: 'application/json',
     body: inputJson || '{}',
+    defaultErrorMessage: 'Lỗi khi chạy plugin.',
+    oversizeErrorMessage: 'Payload quá lớn (vượt quá giới hạn 1 MiB cho JSON input).',
   });
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = text;
-    try {
-      const errObj = JSON.parse(text);
-      if (errObj && errObj.error) {
-        msg = errObj.error;
-      }
-    } catch {
-      // not JSON
-    }
-    if (res.status === 413) {
-      msg = 'Payload quá lớn (vượt quá giới hạn 1 MiB cho JSON input).';
-    }
-    throw new ApiClientError(res.status, msg || `Lỗi HTTP ${res.status} khi chạy plugin.`);
-  }
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new ApiClientError(res.status, 'Phản hồi từ máy chủ không phải là JSON hợp lệ.');
-  }
 }
 
 export async function disablePlugin(id: string, csrfToken: string): Promise<void> {
-  const res = await fetch(`/api/admin/plugins/${encodeURIComponent(id)}/disable`, {
+  await requestText(`/api/admin/plugins/${encodeURIComponent(id)}/disable`, {
     method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'X-CSRF-Token': csrfToken,
-    },
+    csrfToken,
+    defaultErrorMessage: 'Không thể vô hiệu hóa plugin.',
   });
-  await handleResponseText(res, 'Không thể vô hiệu hóa plugin.');
 }
 
 export async function enablePlugin(id: string, csrfToken: string): Promise<void> {
-  const res = await fetch(`/api/admin/plugins/${encodeURIComponent(id)}/enable`, {
+  await requestText(`/api/admin/plugins/${encodeURIComponent(id)}/enable`, {
     method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'X-CSRF-Token': csrfToken,
-    },
+    csrfToken,
+    defaultErrorMessage: 'Không thể kích hoạt plugin.',
   });
-  await handleResponseText(res, 'Không thể kích hoạt plugin.');
 }

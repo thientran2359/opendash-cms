@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+pub use crate::id::{
+    valid_package_id as valid_plugin_id, validate_package_id as validate_plugin_id, validate_semver,
+};
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginPermissions {
@@ -90,71 +94,7 @@ impl PluginManifest {
     }
 }
 
-pub fn validate_semver(version: &str) -> bool {
-    if version.is_empty() || version.len() > 64 {
-        return false;
-    }
-    let mut parts = version.splitn(2, '+');
-    let main_and_pre = parts.next().unwrap_or("");
-    if let Some(build) = parts.next() {
-        if build.is_empty()
-            || !build
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
-        {
-            return false;
-        }
-    }
-    let mut pre_parts = main_and_pre.splitn(2, '-');
-    let numbers_part = pre_parts.next().unwrap_or("");
-    if let Some(pre) = pre_parts.next() {
-        if pre.is_empty()
-            || !pre
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
-        {
-            return false;
-        }
-    }
-    let nums: Vec<&str> = numbers_part.split('.').collect();
-    if nums.len() != 3 {
-        return false;
-    }
-    for num in nums {
-        if num.is_empty() || (num.len() > 1 && num.starts_with('0')) {
-            return false;
-        }
-        if !num.chars().all(|c| c.is_ascii_digit()) {
-            return false;
-        }
-        if num.parse::<u64>().is_err() {
-            return false;
-        }
-    }
-    true
-}
-
 pub const PLUGIN_ABI_VERSION: u32 = 1;
-
-fn validate_plugin_id(id: &str) -> Result<(), &'static str> {
-    if id.len() < 3 || id.len() > 64 {
-        return Err("ID plugin phải từ 3 đến 64 ký tự.");
-    }
-    if !id
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    {
-        return Err("ID plugin chỉ được chứa chữ thường, số và dấu gạch ngang.");
-    }
-    if id.starts_with('-') || id.ends_with('-') {
-        return Err("ID plugin không được bắt đầu hoặc kết thúc bằng dấu gạch ngang.");
-    }
-    Ok(())
-}
-
-pub fn valid_plugin_id(value: &str) -> bool {
-    validate_plugin_id(value).is_ok()
-}
 
 #[cfg(test)]
 mod tests {

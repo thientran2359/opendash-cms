@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use axum::http::StatusCode;
 use sqlx::SqlitePool;
 
 use crate::{
@@ -28,10 +27,9 @@ pub async fn insert_theme_block(db: &SqlitePool, theme: &Theme) -> ApiResult<()>
             .execute(db)
             .await;
     match result {
-        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => Err(ApiError(
-            StatusCode::CONFLICT,
-            "ID block đã có trong dữ liệu.",
-        )),
+        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+            Err(ApiError::conflict("ID block đã có trong dữ liệu."))
+        }
         result => {
             result?;
             Ok(())

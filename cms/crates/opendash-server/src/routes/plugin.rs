@@ -11,8 +11,10 @@ use serde_json::Value;
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::{require_admin, require_csrf},
+    auth::{require_admin, require_admin_with_csrf},
     error::{ApiError, ApiResult},
+    hooks::HookDispatcher,
+    package::is_valid_zip_content_type,
     plugin::PluginManager,
 };
 
@@ -25,31 +27,20 @@ pub async fn plugin_install(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    let session = require_admin(&headers, &db).await?;
-    require_csrf(&headers, &session)?;
+    require_admin_with_csrf(&headers, &db).await?;
 
-    if headers
+    let content_type = headers
         .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(|ct| {
-            !ct.starts_with("application/zip")
-                && !ct.starts_with("application/x-zip-compressed")
-                && !ct.starts_with("application/octet-stream")
-        })
-        .unwrap_or(false)
-    {
+        .and_then(|v| v.to_str().ok());
+    if !is_valid_zip_content_type(content_type, false) {
         return Err(ApiError::bad_request("Content-Type phải là file ZIP."));
     }
 
-    match plugins.install_plugin(&bytes).await {
-        Ok(summary) => Ok((StatusCode::CREATED, Json(summary)).into_response()),
-        Err(err) => Ok((
-            StatusCode::BAD_REQUEST,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            err,
-        )
-            .into_response()),
-    }
+    let summary = plugins
+        .install_plugin(&bytes)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok((StatusCode::CREATED, Json(summary)).into_response())
 }
 
 pub async fn plugin_list(
@@ -58,26 +49,18 @@ pub async fn plugin_list(
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let _session = require_admin(&headers, &db).await?;
-    match plugins.list_plugins().await {
-        Ok(list) => Ok(Json(list).into_response()),
-        Err(err) => Ok((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            err,
-        )
-            .into_response()),
-    }
+    let list = plugins.list_plugins().await.map_err(ApiError::internal)?;
+    Ok(Json(list).into_response())
 }
 
 pub async fn plugin_run(
     State(db): State<SqlitePool>,
-    State(plugins): State<Arc<PluginManager>>,
+    State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    let session = require_admin(&headers, &db).await?;
-    require_csrf(&headers, &session)?;
+    require_admin_with_csrf(&headers, &db).await?;
 
     let input_val: Value = if bytes.is_empty() {
         serde_json::json!({})
@@ -100,7 +83,7 @@ pub async fn plugin_run(
         }
     };
 
-    match plugins.run_plugin(&id, input_val).await {
+    match hooks.dispatch_plugin_run(&id, input_val).await {
         Ok(resp) => Ok((StatusCode::OK, Json(resp)).into_response()),
         Err((status, resp)) => Ok((status, Json(resp)).into_response()),
     }
@@ -112,20 +95,13 @@ pub async fn plugin_disable(
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
-    let session = require_admin(&headers, &db).await?;
-    require_csrf(&headers, &session)?;
+    require_admin_with_csrf(&headers, &db).await?;
 
-    match plugins.disable_plugin(&id).await {
-        Ok(()) => {
-            Ok(Json(serde_json::json!({ "message": "Đã vô hiệu hóa plugin." })).into_response())
-        }
-        Err(err) => Ok((
-            StatusCode::BAD_REQUEST,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            err,
-        )
-            .into_response()),
-    }
+    plugins
+        .disable_plugin(&id)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!({ "message": "Đã vô hiệu hóa plugin." })).into_response())
 }
 
 pub async fn plugin_enable(
@@ -134,18 +110,11 @@ pub async fn plugin_enable(
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
-    let session = require_admin(&headers, &db).await?;
-    require_csrf(&headers, &session)?;
+    require_admin_with_csrf(&headers, &db).await?;
 
-    match plugins.enable_plugin(&id).await {
-        Ok(()) => {
-            Ok(Json(serde_json::json!({ "message": "Đã kích hoạt plugin." })).into_response())
-        }
-        Err(err) => Ok((
-            StatusCode::BAD_REQUEST,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            err,
-        )
-            .into_response()),
-    }
+    plugins
+        .enable_plugin(&id)
+        .await
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(serde_json::json!({ "message": "Đã kích hoạt plugin." })).into_response())
 }

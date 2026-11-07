@@ -1,56 +1,61 @@
+use std::borrow::Cow;
+
 use axum::{
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 
-#[derive(Clone, Copy)]
-pub struct ApiError(pub StatusCode, pub &'static str);
+#[derive(Debug, Clone)]
+pub struct ApiError(pub StatusCode, pub Cow<'static, str>);
 pub type ApiResult<T> = Result<T, ApiError>;
 
 impl ApiError {
-    pub fn bad_request(message: &'static str) -> Self {
-        Self(StatusCode::BAD_REQUEST, message)
+    pub fn bad_request(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::BAD_REQUEST, message.into())
     }
 
-    pub fn unauthorized(message: &'static str) -> Self {
-        Self(StatusCode::UNAUTHORIZED, message)
+    pub fn unauthorized(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::UNAUTHORIZED, message.into())
     }
 
-    pub fn forbidden(message: &'static str) -> Self {
-        Self(StatusCode::FORBIDDEN, message)
+    pub fn forbidden(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::FORBIDDEN, message.into())
     }
 
-    pub fn conflict(message: &'static str) -> Self {
-        Self(StatusCode::CONFLICT, message)
+    pub fn conflict(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::CONFLICT, message.into())
     }
 
-    pub fn internal(message: &'static str) -> Self {
-        Self(StatusCode::INTERNAL_SERVER_ERROR, message)
+    pub fn unsupported_media_type(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::UNSUPPORTED_MEDIA_TYPE, message.into())
+    }
+
+    pub fn internal(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::INTERNAL_SERVER_ERROR, message.into())
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        (self.0, self.1).into_response()
+        (
+            self.0,
+            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            self.1,
+        )
+            .into_response()
     }
 }
 
 impl From<sqlx::Error> for ApiError {
     fn from(error: sqlx::Error) -> Self {
         eprintln!("SQLite: {error}");
-        Self(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Không truy cập được dữ liệu.",
-        )
+        Self::internal("Không truy cập được dữ liệu.")
     }
 }
 
 impl From<serde_json::Error> for ApiError {
     fn from(error: serde_json::Error) -> Self {
         eprintln!("JSON: {error}");
-        Self(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Dữ liệu block không hợp lệ.",
-        )
+        Self::internal("Dữ liệu block không hợp lệ.")
     }
 }

@@ -12,6 +12,7 @@ use rust_embed::RustEmbed;
 use sqlx::SqlitePool;
 
 use crate::{
+    hooks::HookDispatcher,
     plugin::PluginManager,
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup, create_editor},
@@ -29,6 +30,7 @@ use crate::{
 pub struct AppState {
     pub db: SqlitePool,
     pub plugin_manager: Arc<PluginManager>,
+    pub hooks: Arc<HookDispatcher>,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -40,6 +42,12 @@ impl axum::extract::FromRef<AppState> for SqlitePool {
 impl axum::extract::FromRef<AppState> for Arc<PluginManager> {
     fn from_ref(state: &AppState) -> Self {
         state.plugin_manager.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<HookDispatcher> {
+    fn from_ref(state: &AppState) -> Self {
+        state.hooks.clone()
     }
 }
 

@@ -1,53 +1,37 @@
 import { AuthResponse, AuthUser } from '../types.ts';
-import { ApiClientError, handleResponseText } from './client.ts';
+import { requestJson, requestText } from './client.ts';
 
 export async function getAuthMe(): Promise<AuthResponse> {
-  const res = await fetch('/auth/me', {
+  return requestJson<AuthResponse>('/auth/me', {
     method: 'GET',
-    credentials: 'same-origin',
+    defaultErrorMessage: 'Chưa đăng nhập.',
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new ApiClientError(res.status, text || 'Chưa đăng nhập.');
-  }
-  return res.json();
 }
 
 export async function setupAdmin(username: string, password: string): Promise<void> {
-  const res = await fetch('/auth/setup', {
+  await requestText('/auth/setup', {
     method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    contentType: 'application/json',
     body: JSON.stringify({ username, password }),
+    defaultErrorMessage: 'Không thể thiết lập quản trị viên.',
   });
-  await handleResponseText(res, 'Không thể thiết lập quản trị viên.');
 }
 
 export async function login(username: string, password: string): Promise<AuthResponse> {
-  const res = await fetch('/auth/login', {
+  return requestJson<AuthResponse>('/auth/login', {
     method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    contentType: 'application/json',
     body: JSON.stringify({ username, password }),
+    defaultErrorMessage: 'Không thể đăng nhập.',
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new ApiClientError(res.status, text || 'Không thể đăng nhập.');
-  }
-  return res.json();
 }
 
 export async function logout(csrfToken: string | null): Promise<void> {
-  const headers: Record<string, string> = {};
-  if (csrfToken) {
-    headers['X-CSRF-Token'] = csrfToken;
-  }
-  const res = await fetch('/auth/logout', {
+  await requestText('/auth/logout', {
     method: 'POST',
-    credentials: 'same-origin',
-    headers,
+    csrfToken,
+    defaultErrorMessage: 'Không thể đăng xuất.',
   });
-  await handleResponseText(res, 'Không thể đăng xuất.');
 }
 
 export async function createEditor(
@@ -55,18 +39,11 @@ export async function createEditor(
   password: string,
   csrfToken: string,
 ): Promise<AuthUser> {
-  const res = await fetch('/api/admin/users', {
+  return requestJson<AuthUser>('/api/admin/users', {
     method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRF-Token': csrfToken,
-    },
+    csrfToken,
+    contentType: 'application/json',
     body: JSON.stringify({ username, password }),
+    defaultErrorMessage: 'Không thể tạo tài khoản biên tập viên.',
   });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new ApiClientError(res.status, text || 'Không thể tạo tài khoản biên tập viên.');
-  }
-  return res.json();
 }

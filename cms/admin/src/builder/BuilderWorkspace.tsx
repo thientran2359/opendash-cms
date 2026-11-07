@@ -1,5 +1,6 @@
 import React from 'react';
 import { BlockData, BlockRegistry, Role } from '../types.ts';
+import { SelectField, TextField, ZipUploadField } from '../components/FormPrimitives.tsx';
 
 export function normalizeValues(
   targetType: string,
@@ -38,53 +39,41 @@ export const BuilderControls: React.FC<BuilderControlsProps> = ({
   onSave,
 }) => {
   const currentDescriptor = registry[blockData.type] || {};
+  const blockOptions = Object.keys(registry).map(id => ({ value: id, label: id }));
 
   return (
     <>
       {role === 'admin' && (
-        <div className="form-group">
-          <label id="theme-label" htmlFor="theme">
-            Gói theme ZIP:
-          </label>
-          <input
-            id="theme"
-            type="file"
-            accept=".zip"
-            onChange={onThemeUpload}
-            disabled={isProcessing}
-          />
-        </div>
+        <ZipUploadField
+          id="theme"
+          labelId="theme-label"
+          label="Gói theme ZIP:"
+          onChange={onThemeUpload}
+          disabled={isProcessing}
+        />
       )}
 
-      <div className="form-group">
-        <label htmlFor="type">Loại Block:</label>
-        <select
-          id="type"
-          aria-label="Block"
-          value={blockData.type}
-          onChange={onTypeChange}
-          disabled={isProcessing}
-        >
-          {Object.keys(registry).map(id => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
-        </select>
-      </div>
+      <SelectField
+        id="type"
+        label="Loại Block:"
+        ariaLabel="Block"
+        value={blockData.type}
+        options={blockOptions}
+        onChange={onTypeChange}
+        disabled={isProcessing}
+      />
 
       <form id="fields" onSubmit={e => e.preventDefault()}>
         {Object.entries(currentDescriptor).map(([fieldName, fieldLabel]) => (
-          <div key={fieldName} className="form-group">
-            <label htmlFor={`field-${fieldName}`}>{fieldLabel}</label>
-            <input
-              id={`field-${fieldName}`}
-              name={fieldName}
-              value={blockData.values[fieldName] ?? ''}
-              onChange={e => onFieldChange(fieldName, e.target.value)}
-              disabled={isProcessing}
-            />
-          </div>
+          <TextField
+            key={fieldName}
+            id={`field-${fieldName}`}
+            name={fieldName}
+            label={fieldLabel}
+            value={blockData.values[fieldName] ?? ''}
+            onChange={val => onFieldChange(fieldName, val)}
+            disabled={isProcessing}
+          />
         ))}
       </form>
 

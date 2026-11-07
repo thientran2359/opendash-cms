@@ -2,6 +2,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::id::{
+    valid_kebab_segment_with_limit, valid_namespaced_block_id, valid_namespaced_snake_key,
+    valid_snake_key_with_limit,
+};
+
 pub type Fields = BTreeMap<String, String>;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -13,14 +18,15 @@ pub struct BlockDescriptor {
 
 impl BlockDescriptor {
     pub fn validate(&self) -> Result<(), &'static str> {
-        let (namespace, name) = self.id.split_once('/').ok_or("ID block không hợp lệ.")?;
-        if !valid_name(namespace, b'-') || !valid_name(name, b'-') {
+        if !valid_namespaced_block_id(&self.id) {
             return Err("ID block không hợp lệ.");
         }
         if self.fields.is_empty()
             || self.fields.len() > 12
             || self.fields.iter().any(|(key, label)| {
-                !valid_name(key, b'_') || label.trim().is_empty() || label.chars().count() > 80
+                !valid_snake_key_with_limit(key, 32)
+                    || label.trim().is_empty()
+                    || label.chars().count() > 80
             })
         {
             return Err("Khai báo field không hợp lệ.");
@@ -52,21 +58,22 @@ impl Block {
 }
 
 pub fn valid_name(value: &str, separator: u8) -> bool {
-    value.len() <= 32
-        && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == separator)
+    match separator {
+        b'_' => valid_snake_key_with_limit(value, 32),
+        b'-' => valid_kebab_segment_with_limit(value, 32),
+        _ => {
+            (1..=32).contains(&value.len())
+                && value.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
+                && value.bytes().all(|byte| {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == separator
+                })
+        }
+    }
 }
-
-use crate::content::valid_content_type_key;
 
 /// A block key is namespaced, e.g. `core/heading`.
 pub fn valid_block_key(value: &str) -> bool {
-    let Some((namespace, name)) = value.split_once('/') else {
-        return false;
-    };
-    valid_content_type_key(namespace) && valid_content_type_key(name)
+    valid_namespaced_snake_key(value)
 }
 
 #[cfg(test)]

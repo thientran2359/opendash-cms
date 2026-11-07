@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     Json,
@@ -7,12 +7,16 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use opendash_core::hooks::HookEvent;
+use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::{
     app::AdminAssets,
-    auth::{require_admin, require_csrf, require_session},
+    auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
+    hooks::HookDispatcher,
+    package::is_valid_zip_content_type,
     routes::public::rendered,
     storage::page::{
         insert_theme_block, list_theme_blocks, load_home_page, load_theme_block, save_home_page,
@@ -76,18 +80,13 @@ pub async fn install(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<StatusCode> {
-    let session = require_admin(&headers, &db).await?;
-    require_csrf(&headers, &session)?;
+    require_admin_with_csrf(&headers, &db).await?;
 
-    if headers
+    let content_type = headers
         .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        != Some("application/zip")
-    {
-        return Err(ApiError(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "Cần gói application/zip.",
-        ));
+        .and_then(|value| value.to_str().ok());
+    if !is_valid_zip_content_type(content_type, true) {
+        return Err(ApiError::unsupported_media_type("Cần gói application/zip."));
     }
     let theme = Theme::from_zip(&bytes).map_err(ApiError::bad_request)?;
     insert_theme_block(&db, &theme).await?;
@@ -107,20 +106,23 @@ pub async fn preview(
     headers: HeaderMap,
     Json(block): Json<Block>,
 ) -> ApiResult<Response> {
-    let session = require_session(&headers, &db).await?;
-    require_csrf(&headers, &session)?;
+    require_session_with_csrf(&headers, &db).await?;
     Ok(rendered(render_block(&db, &block).await?))
 }
 
 pub async fn save(
     State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Json(block): Json<Block>,
 ) -> ApiResult<Response> {
-    let session = require_session(&headers, &db).await?;
-    require_csrf(&headers, &session)?;
+    require_session_with_csrf(&headers, &db).await?;
     let html = render_block(&db, &block).await?;
     save_home_page(&db, &block).await?;
+    hooks.emit(
+        HookEvent::PageAfterSave,
+        json!({ "block_type": &block.kind }),
+    );
     Ok(rendered(html))
 }
 

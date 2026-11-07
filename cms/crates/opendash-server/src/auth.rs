@@ -14,7 +14,10 @@ use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
 use tokio::sync::Semaphore;
 
-use crate::error::{ApiError, ApiResult};
+use crate::{
+    error::{ApiError, ApiResult},
+    storage::auth::{delete_session_by_token_hash, load_session_by_token_hash},
+};
 
 pub const SESSION_COOKIE_NAME: &str = "opendash_session";
 pub const SESSION_DURATION_SECS: i64 = 8 * 3600; // 8 hours
@@ -200,39 +203,11 @@ pub async fn load_session(
 ) -> Result<Option<SessionContext>, sqlx::Error> {
     let token_hash = hash_token(token);
     let now = current_time_secs();
-    let row: Option<(i64, String, String, String, i64)> = sqlx::query_as(
-        "SELECT u.id, u.username, u.role, s.csrf_token, s.expires_at
-         FROM sessions s
-         JOIN users u ON u.id = s.user_id
-         WHERE s.token_hash = ? AND s.expires_at > ?",
-    )
-    .bind(&token_hash)
-    .bind(now)
-    .fetch_optional(db)
-    .await?;
-
-    Ok(
-        row.and_then(|(user_id, username, role_str, csrf_token, _expires_at)| {
-            let role = Role::from_str(&role_str)?;
-            Some(SessionContext {
-                user: AuthUser {
-                    id: user_id,
-                    username,
-                    role,
-                },
-                csrf_token,
-                token_hash,
-            })
-        }),
-    )
+    load_session_by_token_hash(db, &token_hash, now).await
 }
 
 pub async fn delete_session(db: &SqlitePool, token_hash: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM sessions WHERE token_hash = ?")
-        .bind(token_hash)
-        .execute(db)
-        .await?;
-    Ok(())
+    delete_session_by_token_hash(db, token_hash).await
 }
 
 pub async fn require_session(headers: &HeaderMap, db: &SqlitePool) -> ApiResult<SessionContext> {
@@ -264,5 +239,25 @@ pub async fn require_admin(headers: &HeaderMap, db: &SqlitePool) -> ApiResult<Se
             "Chỉ quản trị viên mới có quyền thực hiện thao tác này.",
         ));
     }
+    Ok(session)
+}
+
+/// Combined session + CSRF guard for authenticated mutations (`Admin` or `Editor`).
+pub async fn require_session_with_csrf(
+    headers: &HeaderMap,
+    db: &SqlitePool,
+) -> ApiResult<SessionContext> {
+    let session = require_session(headers, db).await?;
+    require_csrf(headers, &session)?;
+    Ok(session)
+}
+
+/// Combined Admin role + CSRF guard for administrative mutations (`Admin` only).
+pub async fn require_admin_with_csrf(
+    headers: &HeaderMap,
+    db: &SqlitePool,
+) -> ApiResult<SessionContext> {
+    let session = require_admin(headers, db).await?;
+    require_csrf(headers, &session)?;
     Ok(session)
 }

@@ -1,6 +1,6 @@
-use std::io::{Cursor, Read};
 use wasmi::{Engine, ExternType, Module, ValType};
-use zip::ZipArchive;
+
+use crate::package::{ensure_safe_flat_entry, open_bounded_zip, read_bounded_entry};
 
 use super::manifest::PluginManifest;
 
@@ -18,11 +18,12 @@ pub struct PluginPackage {
 
 impl PluginPackage {
     pub fn from_zip(bytes: &[u8], engine: &Engine) -> Result<Self, &'static str> {
-        if bytes.len() > MAX_PLUGIN_ZIP_BYTES {
-            return Err("Kích thước file ZIP vượt quá giới hạn 5 MB.");
-        }
-
-        let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|_| "ZIP không hợp lệ.")?;
+        let mut archive = open_bounded_zip(
+            bytes,
+            MAX_PLUGIN_ZIP_BYTES,
+            "Kích thước file ZIP vượt quá giới hạn 5 MB.",
+            "ZIP không hợp lệ.",
+        )?;
         if archive.len() > MAX_PLUGIN_FILES {
             return Err("ZIP chứa quá nhiều file (tối đa 10 file).");
         }
@@ -36,29 +37,14 @@ impl PluginPackage {
             let mut file = archive
                 .by_index(i)
                 .map_err(|_| "Không thể đọc mục trong ZIP.")?;
-            let name_cow = file
-                .name()
-                .map_err(|_| "Tên file trong ZIP không hợp lệ.")?;
-            let name = name_cow.to_string();
-
-            // Prevent path traversal, subdirectories, backslashes and relative paths
-            if name.contains('/') || name.contains('\\') || name.contains("..") {
-                return Err("ZIP chứa đường dẫn không an toàn hoặc thư mục con.");
-            }
+            let name = ensure_safe_flat_entry(
+                &file,
+                "ZIP chứa đường dẫn không an toàn hoặc thư mục con.",
+                "ZIP chứa symlink bị cấm.",
+                "ZIP không được chứa thư mục con.",
+            )?;
             if !seen_names.insert(name.clone()) {
                 return Err("ZIP chứa mục trùng lặp.");
-            }
-
-            // Check symlink
-            if let Some(mode) = file.unix_mode() {
-                if (mode & 0o170000) == 0o120000 {
-                    return Err("ZIP chứa symlink bị cấm.");
-                }
-            }
-
-            // Check if directory
-            if file.is_dir() {
-                return Err("ZIP không được chứa thư mục con.");
             }
 
             // Only contract-supported files allowed
@@ -76,11 +62,8 @@ impl PluginPackage {
                 MAX_UNCOMPRESSED_TOTAL_BYTES.saturating_sub(total_actual_uncompressed);
             let read_cap = std::cmp::min(max_file_limit, remaining_total);
 
-            let mut buffer = Vec::new();
-            file.by_ref()
-                .take((read_cap + 1) as u64)
-                .read_to_end(&mut buffer)
-                .map_err(|_| "Lỗi khi đọc nội dung file trong ZIP.")?;
+            let buffer =
+                read_bounded_entry(&mut file, read_cap, "Lỗi khi đọc nội dung file trong ZIP.")?;
 
             if buffer.len() > max_file_limit {
                 return match name.as_str() {
@@ -119,8 +102,6 @@ impl PluginPackage {
         let manifest = PluginManifest::from_json_str(&manifest_text)?;
 
         // Validate Wasm module structure using Wasmi
-        // This validates section headers, function signatures, imports and exports.
-        // It DOES NOT execute any guest code.
         let module = Module::new(engine, &wasm_bytes)
             .map_err(|_| "Module WebAssembly không hợp lệ hoặc cấu trúc bị lỗi.")?;
 

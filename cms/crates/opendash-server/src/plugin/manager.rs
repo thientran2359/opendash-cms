@@ -1,7 +1,9 @@
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
+
+use crate::storage::plugin as plugin_storage;
 
 use super::{
     manifest::{PluginManifest, PluginPermissions},
@@ -61,34 +63,13 @@ impl PluginManager {
         let manifest_json = serde_json::to_string(&package.manifest)
             .map_err(|e| format!("Lỗi serialize manifest: {e}"))?;
 
-        let mut conn = self
-            .db_pool
-            .acquire()
-            .await
-            .map_err(|e| format!("Lỗi kết nối cơ sở dữ liệu: {e}"))?;
-
-        sqlx::query(
-            "INSERT INTO plugins (id, version, name, description, manifest_json, wasm_blob, enabled, last_error, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, 1, NULL, datetime('now'))
-             ON CONFLICT(id) DO UPDATE SET
-                 version = excluded.version,
-                 name = excluded.name,
-                 description = excluded.description,
-                 manifest_json = excluded.manifest_json,
-                 wasm_blob = excluded.wasm_blob,
-                 enabled = 1,
-                 last_error = NULL,
-                 updated_at = excluded.updated_at",
+        plugin_storage::upsert_plugin(
+            &self.db_pool,
+            &package.manifest,
+            &manifest_json,
+            &package.wasm_bytes,
         )
-        .bind(&package.manifest.id)
-        .bind(&package.manifest.version)
-        .bind(&package.manifest.name)
-        .bind(&package.manifest.description)
-        .bind(&manifest_json)
-        .bind(&package.wasm_bytes)
-        .execute(&mut *conn)
-        .await
-        .map_err(|e| format!("Lỗi lưu plugin vào database: {e}"))?;
+        .await?;
 
         self.get_plugin(&package.manifest.id)
             .await?
@@ -96,118 +77,19 @@ impl PluginManager {
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginSummary>, String> {
-        let rows = sqlx::query(
-            "SELECT id, version, name, description, manifest_json, enabled, last_error, installed_at, updated_at
-             FROM plugins ORDER BY id ASC",
-        )
-        .fetch_all(&self.db_pool)
-        .await
-        .map_err(|e| format!("Lỗi truy vấn plugins: {e}"))?;
-
-        let mut list = Vec::with_capacity(rows.len());
-        for row in rows {
-            let id: String = row.get("id");
-            let version: String = row.get("version");
-            let name: String = row.get("name");
-            let description: String = row.get("description");
-            let manifest_json: String = row.get("manifest_json");
-            let enabled: bool = row.get::<i64, _>("enabled") == 1;
-            let last_error: Option<String> = row.get("last_error");
-            let installed_at: String = row.get("installed_at");
-            let updated_at: String = row.get("updated_at");
-
-            let permissions =
-                if let Ok(manifest) = serde_json::from_str::<PluginManifest>(&manifest_json) {
-                    manifest.permissions
-                } else {
-                    PluginPermissions {
-                        sqlite: vec![],
-                        http: vec![],
-                    }
-                };
-
-            list.push(PluginSummary {
-                id,
-                version,
-                name,
-                description,
-                enabled,
-                permissions,
-                last_error,
-                installed_at,
-                updated_at,
-            });
-        }
-
-        Ok(list)
+        plugin_storage::list_plugins(&self.db_pool).await
     }
 
     pub async fn get_plugin(&self, id: &str) -> Result<Option<PluginSummary>, String> {
-        let row_opt = sqlx::query(
-            "SELECT id, version, name, description, manifest_json, enabled, last_error, installed_at, updated_at
-             FROM plugins WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.db_pool)
-        .await
-        .map_err(|e| format!("Lỗi truy vấn plugin: {e}"))?;
-
-        let Some(row) = row_opt else {
-            return Ok(None);
-        };
-
-        let manifest_json: String = row.get("manifest_json");
-        let permissions =
-            if let Ok(manifest) = serde_json::from_str::<PluginManifest>(&manifest_json) {
-                manifest.permissions
-            } else {
-                PluginPermissions {
-                    sqlite: vec![],
-                    http: vec![],
-                }
-            };
-
-        Ok(Some(PluginSummary {
-            id: row.get("id"),
-            version: row.get("version"),
-            name: row.get("name"),
-            description: row.get("description"),
-            enabled: row.get::<i64, _>("enabled") == 1,
-            permissions,
-            last_error: row.get("last_error"),
-            installed_at: row.get("installed_at"),
-            updated_at: row.get("updated_at"),
-        }))
+        plugin_storage::get_plugin(&self.db_pool, id).await
     }
 
     pub async fn disable_plugin(&self, id: &str) -> Result<(), String> {
-        let res = sqlx::query(
-            "UPDATE plugins SET enabled = 0, updated_at = datetime('now') WHERE id = ?",
-        )
-        .bind(id)
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| format!("Lỗi cập nhật trạng thái plugin: {e}"))?;
-
-        if res.rows_affected() == 0 {
-            return Err("Plugin không tồn tại.".to_string());
-        }
-        Ok(())
+        plugin_storage::set_plugin_enabled(&self.db_pool, id, false).await
     }
 
     pub async fn enable_plugin(&self, id: &str) -> Result<(), String> {
-        let res = sqlx::query(
-            "UPDATE plugins SET enabled = 1, updated_at = datetime('now') WHERE id = ?",
-        )
-        .bind(id)
-        .execute(&self.db_pool)
-        .await
-        .map_err(|e| format!("Lỗi cập nhật trạng thái plugin: {e}"))?;
-
-        if res.rows_affected() == 0 {
-            return Err("Plugin không tồn tại.".to_string());
-        }
-        Ok(())
+        plugin_storage::set_plugin_enabled(&self.db_pool, id, true).await
     }
 
     pub async fn run_plugin(
@@ -218,25 +100,22 @@ impl PluginManager {
         let token = crate::auth::generate_random_token();
         let correlation_id = format!("run_{}", &token[..16.min(token.len())]);
 
-        let row_opt =
-            sqlx::query("SELECT wasm_blob, manifest_json, enabled FROM plugins WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.db_pool)
-                .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        PluginRunResponse {
-                            success: false,
-                            data: None,
-                            error: Some(format!("Lỗi cơ sở dữ liệu: {e}")),
-                            code: Some("db_error".into()),
-                            correlation_id: correlation_id.clone(),
-                        },
-                    )
-                })?;
+        let row_opt = plugin_storage::load_plugin_executable(&self.db_pool, id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some(format!("Lỗi cơ sở dữ liệu: {e}")),
+                        code: Some("db_error".into()),
+                        correlation_id: correlation_id.clone(),
+                    },
+                )
+            })?;
 
-        let Some(row) = row_opt else {
+        let Some((wasm_blob, manifest_json, enabled)) = row_opt else {
             return Err((
                 StatusCode::NOT_FOUND,
                 PluginRunResponse {
@@ -249,7 +128,6 @@ impl PluginManager {
             ));
         };
 
-        let enabled: bool = row.get::<i64, _>("enabled") == 1;
         if !enabled {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -263,8 +141,6 @@ impl PluginManager {
             ));
         }
 
-        let wasm_blob: Vec<u8> = row.get("wasm_blob");
-        let manifest_json: String = row.get("manifest_json");
         let manifest = serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -292,18 +168,15 @@ impl PluginManager {
 
         match run_res {
             Ok(val) => {
-                let _ = sqlx::query(
-                    "INSERT INTO plugin_logs (plugin_id, correlation_id, level, message) VALUES (?, ?, 'info', 'Thực thi thành công')",
+                plugin_storage::record_plugin_execution_result(
+                    &self.db_pool,
+                    id,
+                    &correlation_id,
+                    "info",
+                    "Thực thi thành công",
+                    None,
                 )
-                .bind(id)
-                .bind(&correlation_id)
-                .execute(&self.db_pool)
                 .await;
-
-                let _ = sqlx::query("UPDATE plugins SET last_error = NULL, updated_at = datetime('now') WHERE id = ?")
-                    .bind(id)
-                    .execute(&self.db_pool)
-                    .await;
 
                 Ok(PluginRunResponse {
                     success: true,
@@ -328,21 +201,14 @@ impl PluginManager {
                     PluginError::Internal(_) => ("internal_error", err.to_string()),
                 };
 
-                let _ = sqlx::query(
-                    "INSERT INTO plugin_logs (plugin_id, correlation_id, level, message) VALUES (?, ?, 'error', ?)",
+                plugin_storage::record_plugin_execution_result(
+                    &self.db_pool,
+                    id,
+                    &correlation_id,
+                    "error",
+                    &err_msg,
+                    Some(&err_msg),
                 )
-                .bind(id)
-                .bind(&correlation_id)
-                .bind(&err_msg)
-                .execute(&self.db_pool)
-                .await;
-
-                let _ = sqlx::query(
-                    "UPDATE plugins SET last_error = ?, updated_at = datetime('now') WHERE id = ?",
-                )
-                .bind(&err_msg)
-                .bind(id)
-                .execute(&self.db_pool)
                 .await;
 
                 Err((

@@ -15,3 +15,7 @@ Thư mục này dùng cho kế hoạch cụ thể theo giai đoạn, đặt tên
 5. Kiểm tra `cargo fmt --check`, `cargo build --locked`, `cargo test --workspace --locked`, đóng gói và smoke tests tương ứng sau mỗi bước chuyển cấu trúc. Ghi lệnh chạy, kết quả và hạn chế; không đánh dấu `verified` trước khi có bằng chứng.
 
 M3 (Content/Media) chỉ bắt đầu sau khi mã M1/M2 thực và bộ kiểm chứng nền đã được xác nhận. Các module chưa triển khai không tạo file rỗng chỉ để biểu thị tiến độ.
+
+## M2.5 — Bộ khung Lõi (Core Kernel) & Quy chuẩn Code
+
+Xem [kế hoạch chi tiết M2.5](2026-11-07-m2-5-core-kernel-and-standards.md) và hợp đồng [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md). Mốc này chuẩn hóa các hàm cơ bản (`id`, `registry`, `hooks`), tập trung SQL về `storage/`, hợp nhất kiểm tra gói ZIP và thiết lập UI/API primitives trước khi mở M3.

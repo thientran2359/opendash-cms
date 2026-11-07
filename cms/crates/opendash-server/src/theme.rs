@@ -1,8 +1,7 @@
-use std::io::{Cursor, Read};
-
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 pub use opendash_core::theme::{Block, BlockDescriptor, Fields};
-use zip::ZipArchive;
+
+use crate::package::{open_bounded_zip, read_bounded_entry};
 
 pub const MAX_ZIP_BYTES: usize = 64 * 1024;
 
@@ -13,11 +12,12 @@ pub struct Theme {
 
 impl Theme {
     pub fn from_zip(bytes: &[u8]) -> Result<Self, &'static str> {
-        if bytes.len() > MAX_ZIP_BYTES {
-            return Err("ZIP vượt quá giới hạn kích thước.");
-        }
-
-        let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|_| "ZIP không hợp lệ.")?;
+        let mut archive = open_bounded_zip(
+            bytes,
+            MAX_ZIP_BYTES,
+            "ZIP vượt quá giới hạn kích thước.",
+            "ZIP không hợp lệ.",
+        )?;
         if archive.len() != 2 {
             return Err("ZIP phải chứa block.json và block.html.");
         }
@@ -26,9 +26,12 @@ impl Theme {
         let mut template = None;
         let mut remaining = MAX_ZIP_BYTES;
         for index in 0..archive.len() {
-            let entry = archive.by_index(index).map_err(|_| "Không đọc được ZIP.")?;
-            let name = entry.name().map_err(|_| "Tên mục ZIP không hợp lệ.")?;
-            let slot = match name.as_ref() {
+            let mut entry = archive.by_index(index).map_err(|_| "Không đọc được ZIP.")?;
+            let name = entry
+                .name()
+                .map_err(|_| "Tên mục ZIP không hợp lệ.")?
+                .to_string();
+            let slot = match name.as_str() {
                 "block.json" if descriptor.is_none() => &mut descriptor,
                 "block.html" if template.is_none() => &mut template,
                 _ => return Err("ZIP chứa đường dẫn lạ hoặc mục bị trùng."),
@@ -36,10 +39,12 @@ impl Theme {
             if entry.size() > remaining as u64 {
                 return Err("Nội dung ZIP vượt quá giới hạn kích thước.");
             }
-            let mut content = String::new();
-            entry
-                .take(remaining as u64 + 1)
-                .read_to_string(&mut content)
+            let raw_bytes = read_bounded_entry(
+                &mut entry,
+                remaining,
+                "Không đọc được nội dung ZIP dạng UTF-8.",
+            )?;
+            let content = String::from_utf8(raw_bytes)
                 .map_err(|_| "Không đọc được nội dung ZIP dạng UTF-8.")?;
             remaining = remaining
                 .checked_sub(content.len())

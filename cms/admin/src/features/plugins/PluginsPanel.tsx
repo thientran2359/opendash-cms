@@ -1,5 +1,6 @@
 import React from 'react';
 import { PluginSummary } from '../../types.ts';
+import { ZipUploadField } from '../../components/FormPrimitives.tsx';
 
 interface PluginsPanelProps {
   plugins: PluginSummary[];
@@ -31,16 +32,12 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   return (
     <div className="admin-section" id="plugin-management-section">
       <h2>Quản lý Plugin (Wasmi)</h2>
-      <div className="form-group">
-        <label htmlFor="plugin-zip">Cài đặt Plugin ZIP:</label>
-        <input
-          id="plugin-zip"
-          type="file"
-          accept=".zip"
-          onChange={onPluginUpload}
-          disabled={isProcessing}
-        />
-      </div>
+      <ZipUploadField
+        id="plugin-zip"
+        label="Cài đặt Plugin ZIP:"
+        onChange={onPluginUpload}
+        disabled={isProcessing}
+      />
 
       <div className="plugin-list" style={{ marginTop: '0.75rem' }}>
         <h3>Danh sách Plugin ({plugins.length})</h3>
