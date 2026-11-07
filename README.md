@@ -76,3 +76,23 @@ cd ..
 ```
 
 Script trình duyệt nhận `--browser` để chọn executable Chromium đã cài. Các smoke test tạo site riêng trong thư mục tạm. Để tạo ZIP theme thử từ gốc repo, chạy `python cms/scripts/windows_smoke.py --theme "$env:TEMP/opendash-banner.zip"` rồi chọn tệp đó trong Builder.
+
+## CodeGraph cho Codex, Antigravity và Chat On Steroids
+
+CodeGraph 0.21.0 lập chỉ mục cú pháp và quan hệ gọi hàm trên mã Rust/TypeScript của OpenDash để các AI agent có thể tra cứu `symbol_search`, `get_call_graph`, `analyze_impact` và `get_edit_context` trước khi sửa code. Chỉ mục riêng cho từng workspace lưu ngoài Git tại `~/.codegraph/`; các tài liệu sản phẩm, kiến trúc và contract được nạp thêm để tra cứu thiết kế. Xem [bằng chứng, cách kết nối MCP và giới hạn](docs/verification/2026-11-07-codegraph-setup.md).
+
+Sau khi thay đổi tài liệu nguồn trong các mục đã định nghĩa, chạy lại từ gốc repo:
+
+```powershell
+node cms/scripts/codegraph-index-docs.mjs
+```
+
+Chat On Steroids Core (terminal) cũng có thể truy vấn trực tiếp khi chưa kết nối plugin MCP:
+
+```powershell
+node cms/scripts/codegraph-query.mjs symbol HookDispatcher
+node cms/scripts/codegraph-query.mjs callgraph cms/crates/opendash-server/src/plugin/host_ops.rs 94
+node cms/scripts/codegraph-query.mjs docs "plugin ABI"
+```
+
+Chỉ mục code được cập nhật khi CodeGraph khởi động hoặc phát hiện file thay đổi. CodeGraph hỗ trợ việc định hướng; tài liệu contract và source code vẫn là nguồn để xác minh hành vi.
