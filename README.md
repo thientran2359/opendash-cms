@@ -2,7 +2,7 @@
 
 CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress. Rust, SQLite, một file thực thi cho mỗi bản cài và hệ theme/plugin riêng.
 
-**Hiện trạng (08/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.3 đã có mô hình CPT/custom fields, API tạo/liệt kê CPT và backend CRUD entry, [kiểm chứng trên macOS](docs/verification/2026-11-08-m3-3-content-entry-crud.md). Chưa có màn hình Admin cho CPT/Entry, template render CPT ra trang công khai, Media, builder nhiều tầng hay backup/restore.
+**Hiện trạng (08/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.4 đã có CPT/custom fields, SQLite/API entry CRUD và [giao diện Admin cho nội dung](docs/verification/2026-11-08-m3-4-admin-content-ui.md), kiểm chứng trên macOS. Chưa có template render CPT ra trang công khai, Media Library, builder nhiều tầng hay backup/restore.
 
 ## Cấu trúc thư mục
 
@@ -108,6 +108,14 @@ python3 cms/scripts/content_entries_smoke.py --binary cms/target/debug/opendash
 ```
 
 **Lưu ý:** Slice này lưu nội dung vào SQLite, chưa tích hợp renderer CPT để hiển thị ra trang công khai. `rich_text` vẫn là dữ liệu chưa được sanitize, tham chiếu media chưa được xác minh. Xem [kế hoạch](docs/plans/2026-11-08-m3-3-content-entry-crud.md) và [kiểm chứng M3.3](docs/verification/2026-11-08-m3-3-content-entry-crud.md).
+
+## M3.4 — Admin Content UI
+
+Sau khi đăng nhập, chọn tab **Nội dung** bên cạnh **Builder**. Admin có thể tạo CPT/schema với các trường theo 9 kiểu V1; Admin và Editor đều có thể mở CPT, liệt kê, tạo, sửa và xóa entry.
+
+Form gửi JSON theo đúng kiểu field và dùng ETag/If-Match khi sửa/xóa. Khi phiên đăng nhập hết hạn (401) hoặc dữ liệu có phiên bản mới (412), bản nháp vẫn được giữ để người dùng đăng nhập lại hoặc chủ động tải bản mới. Tab Builder không bị thay thế.
+
+Ảnh và gallery mới nhận mã media, chưa có media picker. HTML rich text được lưu như dữ liệu và không được thực thi khi nhập; lưu entry chưa khiến nội dung xuất hiện trên website công khai. Xem [kế hoạch](docs/plans/2026-11-08-m3-4-admin-content-ui.md) và [bằng chứng kiểm thử UI](docs/verification/2026-11-08-m3-4-admin-content-ui.md).
 
 ## CodeGraph cho Codex, Antigravity và Chat On Steroids
 

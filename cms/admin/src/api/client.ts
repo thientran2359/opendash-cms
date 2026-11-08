@@ -14,6 +14,8 @@ export interface ApiRequestOptions {
   contentType?: string;
   body?: BodyInit | null;
   signal?: AbortSignal;
+  /** M3 optimistic edit version, serialized as If-Match: "vN". */
+  ifMatchVersion?: number;
   defaultErrorMessage: string;
   oversizeErrorMessage?: string;
 }
@@ -21,6 +23,7 @@ export interface ApiRequestOptions {
 function buildRequestHeaders(
   csrfToken?: string | null,
   contentType?: string,
+  ifMatchVersion?: number,
 ): Record<string, string> {
   const headers: Record<string, string> = {};
   if (contentType) {
@@ -28,6 +31,9 @@ function buildRequestHeaders(
   }
   if (csrfToken) {
     headers['X-CSRF-Token'] = csrfToken;
+  }
+  if (ifMatchVersion !== undefined) {
+    headers['If-Match'] = `"v${ifMatchVersion}"`;
   }
   return headers;
 }
@@ -44,7 +50,7 @@ export async function requestText(url: string, options: ApiRequestOptions): Prom
   const res = await fetch(url, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: buildRequestHeaders(options.csrfToken, options.contentType),
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion),
     body: options.body,
     signal: options.signal,
   });
@@ -55,7 +61,7 @@ export async function requestJson<T>(url: string, options: ApiRequestOptions): P
   const res = await fetch(url, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: buildRequestHeaders(options.csrfToken, options.contentType),
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion),
     body: options.body,
     signal: options.signal,
   });

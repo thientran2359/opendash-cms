@@ -22,4 +22,4 @@ Xem [kế hoạch chi tiết M2.5](2026-11-07-m2-5-core-kernel-and-standards.md)
 
 ## M3 — Quản lý nội dung (Content/Media)
 
-Bắt đầu với [M3.1 — mô hình CPT & Custom Fields](2026-11-08-m3-content-types-and-fields.md) trong `opendash-core`, tiếp theo là [M3.2 — SQLite và API CPT](2026-11-08-m3-2-content-types-backend.md) và [M3.3 — Content Entry CRUD](2026-11-08-m3-3-content-entry-crud.md). Màn hình Admin, media, renderer nội dung và taxonomy chia thành các slice riêng có nghiệm thu.
+Bắt đầu với [M3.1 — mô hình CPT & Custom Fields](2026-11-08-m3-content-types-and-fields.md) trong `opendash-core`, tiếp theo là [M3.2 — SQLite và API CPT](2026-11-08-m3-2-content-types-backend.md), [M3.3 — Content Entry CRUD](2026-11-08-m3-3-content-entry-crud.md) và [M3.4 — Admin Content UI](2026-11-08-m3-4-admin-content-ui.md). Media, renderer nội dung và taxonomy chia thành các slice riêng có nghiệm thu.

@@ -14,8 +14,11 @@ interface AdminShellProps {
   onSetup: () => void;
   onLogin: () => void;
   onLogout: () => void;
+  activeView: 'builder' | 'content';
+  onViewChange: (view: 'builder' | 'content') => void;
   sidebarContent: React.ReactNode;
   previewContent: React.ReactNode;
+  contentContent: React.ReactNode;
 }
 
 export const AdminShell: React.FC<AdminShellProps> = ({
@@ -30,8 +33,11 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   onSetup,
   onLogin,
   onLogout,
+  activeView,
+  onViewChange,
   sidebarContent,
   previewContent,
+  contentContent,
 }) => {
   return (
     <div>
@@ -51,9 +57,43 @@ export const AdminShell: React.FC<AdminShellProps> = ({
         onLogout={onLogout}
       />
 
-      <main id="builder-main" className={user ? '' : 'hidden'}>
+      <nav className={user ? 'admin-view-tabs' : 'hidden'} role="tablist" aria-label="Khu vực quản trị">
+        <button
+          type="button"
+          id="tab-builder"
+          role="tab"
+          aria-controls="builder-main"
+          aria-selected={activeView === 'builder'}
+          className={activeView === 'builder' ? 'selected' : 'btn-secondary'}
+          onClick={() => onViewChange('builder')}
+        >Builder</button>
+        <button
+          type="button"
+          id="tab-content"
+          role="tab"
+          aria-controls="content-main"
+          aria-selected={activeView === 'content'}
+          className={activeView === 'content' ? 'selected' : 'btn-secondary'}
+          onClick={() => onViewChange('content')}
+        >Nội dung</button>
+      </nav>
+
+      <main
+        id="builder-main"
+        role="tabpanel"
+        aria-labelledby="tab-builder"
+        className={user && activeView === 'builder' ? '' : 'hidden'}
+      >
         <section className="editor-sidebar">{sidebarContent}</section>
         {previewContent}
+      </main>
+      <main
+        id="content-main"
+        role="tabpanel"
+        aria-labelledby="tab-content"
+        className={user && activeView === 'content' ? '' : 'hidden'}
+      >
+        {contentContent}
       </main>
     </div>
   );

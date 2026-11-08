@@ -6,7 +6,7 @@ Mỗi chức năng thực tế dùng thư mục riêng dưới `src/features/` (
 - `users/` — Panel tạo tài khoản Editor. Đăng nhập và hiển thị phiên nằm trong `shell/`.
 - `builder/` ở cấp `src/` xử lý nhập ZIP theme một block. Màn Theme Options thuộc mốc sau.
 - `plugins/` — Cài đặt plugin ZIP, hiển thị quyền theo [Plugin ABI v1](../../../../docs/contracts/PLUGIN_ABI.md), bật/tắt và báo lỗi runtime Wasmi (nhập từ M2).
-- `content/` — (Mở ở M3) Danh sách nội dung, form nhập liệu, Custom Post Types, custom fields và taxonomies.
+- `content/` — (M3.4) Danh sách CPT/entry, tạo CPT và custom fields, form entry cho 9 kiểu dữ liệu và ETag/If-Match. Taxonomy, media picker, public renderer thuộc các bước sau.
 - `media/` — (Mở ở M3) Thư viện ảnh, upload và media picker.
 - `settings/` — Cài đặt website, SMTP, SEO và backup/restore theo phạm vi V1.
 

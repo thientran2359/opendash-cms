@@ -80,6 +80,9 @@ interface TextFieldProps {
   label: string;
   value: string;
   disabled?: boolean;
+  placeholder?: string;
+  required?: boolean;
+  maxLength?: number;
   onChange: (value: string) => void;
 }
 
@@ -89,6 +92,9 @@ export const TextField: React.FC<TextFieldProps> = ({
   label,
   value,
   disabled,
+  placeholder,
+  required,
+  maxLength,
   onChange,
 }) => (
   <FormGroup>
@@ -99,7 +105,59 @@ export const TextField: React.FC<TextFieldProps> = ({
       value={value}
       onChange={e => onChange(e.target.value)}
       disabled={disabled}
+      placeholder={placeholder}
+      required={required}
+      maxLength={maxLength}
     />
   </FormGroup>
+);
+
+interface TextAreaFieldProps {
+  id: string;
+  label: string;
+  value: string;
+  rows?: number;
+  disabled?: boolean;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}
+
+export const TextAreaField: React.FC<TextAreaFieldProps> = ({
+  id, label, value, rows = 4, disabled, placeholder, onChange,
+}) => (
+  <FormGroup>
+    <label htmlFor={id}>{label}</label>
+    <textarea
+      id={id}
+      rows={rows}
+      value={value}
+      placeholder={placeholder}
+      disabled={disabled}
+      onChange={event => onChange(event.target.value)}
+    />
+  </FormGroup>
+);
+
+interface CheckboxFieldProps {
+  id: string;
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+export const CheckboxField: React.FC<CheckboxFieldProps> = ({
+  id, label, checked, disabled, onChange,
+}) => (
+  <label className="check-field" htmlFor={id}>
+    <input
+      id={id}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      onChange={event => onChange(event.target.checked)}
+    />
+    {label}
+  </label>
 );
 

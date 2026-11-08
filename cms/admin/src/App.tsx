@@ -6,6 +6,7 @@ import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { BuilderControls, BuilderPreview, normalizeValues } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
+import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -13,6 +14,9 @@ export const App: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<string>('Đang kiểm tra trạng thái phiên...');
   const [isError, setIsError] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [activeView, setActiveView] = useState<'builder' | 'content'>('builder');
+  const [contentDirty, setContentDirty] = useState(false);
+  const [contentRevision, setContentRevision] = useState(0);
 
   // Auth inputs
   const [authUsername, setAuthUsername] = useState<string>('');
@@ -158,6 +162,9 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    if (contentDirty && !window.confirm('Có bản nháp nội dung chưa lưu. Đăng xuất sẽ bỏ bản nháp. Tiếp tục?')) {
+      return;
+    }
     setIsProcessing(true);
     try {
       await api.logout(csrfToken);
@@ -173,6 +180,9 @@ export const App: React.FC = () => {
       setRegistry({});
       setBlockData({ type: '', values: {} });
       setPreviewHtml('');
+      setContentRevision(previous => previous + 1);
+      setContentDirty(false);
+      setActiveView('builder');
       setStatus('Đã đăng xuất.', false);
     } catch (err) {
       handleApiError(err, 'Lỗi khi đăng xuất.');
@@ -369,6 +379,8 @@ export const App: React.FC = () => {
       onSetup={handleSetup}
       onLogin={handleLogin}
       onLogout={handleLogout}
+      activeView={activeView}
+      onViewChange={setActiveView}
       sidebarContent={
         <>
           <BuilderControls
@@ -411,6 +423,15 @@ export const App: React.FC = () => {
         </>
       }
       previewContent={<BuilderPreview previewHtml={previewHtml} />}
+      contentContent={
+        <ContentWorkspace
+          key={contentRevision}
+          user={user}
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onDirtyChange={setContentDirty}
+        />
+      }
     />
   );
 };
