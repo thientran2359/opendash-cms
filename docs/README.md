@@ -21,7 +21,7 @@ Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc
 | Quyết định kiến trúc | [`decisions/`](decisions/ADR-0001-workspace-layout.md) | ADR có bối cảnh, quyết định, hệ quả và trạng thái |
 | Kế hoạch triển khai | [`plans/`](plans/README.md) | Mỗi kế hoạch nêu phạm vi, mốc và tiêu chí nghiệm thu |
 | Bằng chứng thực thi | [`verification/`](verification/README.md) | Chỉ ghi `verified` khi có lệnh, môi trường và kết quả thực tế |
-| Thảo luận giữa AI | [`discussions/`](discussions/PROTOCOL.md) | Giữ lịch sử theo lượt, không tự coi đồng thuận AI là chỉ đạo chủ dự án |
+| Thảo luận giữa AI | [Giao thức](discussions/PROTOCOL.md) · [Điều phối agent](discussions/AGENT_COORDINATION.md) | Giữ lịch sử theo lượt, phân công qua Prime, không tự coi đồng thuận AI là chỉ đạo chủ dự án |
 
 Không tạo thư mục/module rỗng chỉ để khớp sơ đồ. Khi nguồn mã được đưa vào, đối chiếu cây thư mục và kiểm thử trước khi sửa tài liệu trạng thái.
 

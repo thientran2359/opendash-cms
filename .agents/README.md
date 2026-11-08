@@ -1,5 +1,7 @@
 # Cơ chế Giao việc & Báo hiệu Tự động Codex ↔ Antigravity (`antigravity-handoff`)
 
+> **Phạm vi nền tảng:** Các script PowerShell, hook `powershell.exe` và Windows `EventWaitHandle` dưới đây dành cho môi trường Windows. Trên macOS, xem [quy trình điều phối và giới hạn handoff](../docs/discussions/AGENT_COORDINATION.md) trước khi giao việc; chưa có cơ chế báo hoàn thành tự động tương đương được kiểm chứng.
+
 Thư mục `.agents/` chứa **Workspace Skill** `antigravity-handoff`, cấu hình **Lifecycle Hook** của Antigravity và bộ script đồng bộ giúp **Codex** giao việc cho **Antigravity** chỉ với 1 dòng lệnh và nhận lại ngay báo cáo kết quả khi Antigravity làm xong mà **không cần quét (poll) file liên tục** (thư mục con `.agents/sync/` chứa dữ liệu tạm đã được ignore trong `.gitignore`).
 
 ---
