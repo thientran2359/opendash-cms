@@ -284,7 +284,12 @@ def test_database_upgrade(binary, baseline_db_path: Path):
     with TemporaryDirectory(prefix="opendash-upgrade-") as folder:
         test_db = Path(folder) / "cms.sqlite"
         # Clone using SQLite online backup API for consistent snapshot
-        src = sqlite3.connect(baseline_db_path)
+        # The checked-in baseline is read-only test data. Opening it normally
+        # can create -wal/-shm sidecars beside the tracked fixture on SQLite.
+        src = sqlite3.connect(
+            f"{baseline_db_path.resolve().as_uri()}?mode=ro&immutable=1",
+            uri=True,
+        )
         dst = sqlite3.connect(test_db)
         src.backup(dst)
         dst.close()

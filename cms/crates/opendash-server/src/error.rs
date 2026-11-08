@@ -26,6 +26,18 @@ impl ApiError {
         Self(StatusCode::CONFLICT, message.into())
     }
 
+    pub fn not_found(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::NOT_FOUND, message.into())
+    }
+
+    pub fn precondition_failed(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::PRECONDITION_FAILED, message.into())
+    }
+
+    pub fn precondition_required(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::PRECONDITION_REQUIRED, message.into())
+    }
+
     pub fn unsupported_media_type(message: impl Into<Cow<'static, str>>) -> Self {
         Self(StatusCode::UNSUPPORTED_MEDIA_TYPE, message.into())
     }

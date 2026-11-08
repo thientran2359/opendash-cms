@@ -19,3 +19,7 @@ M3 (Content/Media) chỉ bắt đầu sau khi mã M1/M2 thực và bộ kiểm c
 ## M2.5 — Bộ khung Lõi (Core Kernel) & Quy chuẩn Code
 
 Xem [kế hoạch chi tiết M2.5](2026-11-07-m2-5-core-kernel-and-standards.md) và hợp đồng [CORE_FOUNDATION.md](../contracts/CORE_FOUNDATION.md). Mốc này chuẩn hóa các hàm cơ bản (`id`, `registry`, `hooks`), tập trung SQL về `storage/`, hợp nhất kiểm tra gói ZIP và thiết lập UI/API primitives trước khi mở M3.
+
+## M3 — Quản lý nội dung (Content/Media)
+
+Bắt đầu với [M3.1 — mô hình CPT & Custom Fields](2026-11-08-m3-content-types-and-fields.md) trong `opendash-core`, tiếp theo là [M3.2 — SQLite và API CPT](2026-11-08-m3-2-content-types-backend.md) và [M3.3 — Content Entry CRUD](2026-11-08-m3-3-content-entry-crud.md). Màn hình Admin, media, renderer nội dung và taxonomy chia thành các slice riêng có nghiệm thu.

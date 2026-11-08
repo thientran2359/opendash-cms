@@ -17,6 +17,11 @@ use crate::{
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup, create_editor},
         builder::{builder, install, page, preview, registry, save, serve_asset},
+        content::{MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list},
+        entries::{
+            MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
+            entry_update,
+        },
         plugin::{
             MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES, plugin_disable, plugin_enable,
             plugin_install, plugin_list, plugin_run,
@@ -70,6 +75,25 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", post(auth_logout))
         .route("/api/admin/users", post(create_editor))
+        .route(
+            "/api/admin/content-types",
+            get(content_type_list)
+                .post(content_type_create)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries",
+            get(entry_list)
+                .post(entry_create)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}",
+            get(entry_get)
+                .put(entry_update)
+                .delete(entry_delete)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
         .route(
             "/api/admin/plugins",
             get(plugin_list)

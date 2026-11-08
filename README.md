@@ -2,7 +2,7 @@
 
 CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress. Rust, SQLite, một file thực thi cho mỗi bản cài và hệ theme/plugin riêng.
 
-**Hiện trạng (07/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng tại đích](docs/verification/2026-11-07-m1-m2-import.md). CPT/Media, builder nhiều tầng và backup/restore thuộc các mốc sau.
+**Hiện trạng (08/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.3 đã có mô hình CPT/custom fields, API tạo/liệt kê CPT và backend CRUD entry, [kiểm chứng trên macOS](docs/verification/2026-11-08-m3-3-content-entry-crud.md). Chưa có màn hình Admin cho CPT/Entry, template render CPT ra trang công khai, Media, builder nhiều tầng hay backup/restore.
 
 ## Cấu trúc thư mục
 
@@ -55,7 +55,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File cms/scripts/build.ps1 -Relea
 
 Mở [Admin](http://127.0.0.1:18766/admin/) hoặc [Builder](http://127.0.0.1:18766/builder). Trên site mới, nhập tên và mật khẩu, bấm **Thiết lập Admin**, rồi **Đăng nhập**. Admin có thể nhập ZIP theme, tạo Editor và cài [plugin mẫu](cms/examples/plugins/sample-plugin/README.md). Xem trước dùng dữ liệu đang sửa. Bấm **Lưu** cập nhật [trang công khai](http://127.0.0.1:18766/).
 
-Binary bind loopback, mặc định cổng 18766. Binary phân phối lưu SQLite ở `database/opendash.sqlite` cạnh executable; bản trong `cms/target/` dùng gốc dự án. Đặt `OPENDASH_SITE_ROOT` để chọn site, `OPENDASH_DB_PATH` để chọn riêng SQLite và `OPENDASH_PORT` để chọn cổng. Lần mở đầu chạy migration 0001–0003. Để dùng thử với dữ liệu riêng, đặt `$env:OPENDASH_SITE_ROOT` tới một thư mục trống trước khi chạy. Khi server đang chạy, dùng `powershell -File cms/scripts/check-health.ps1` để kiểm tra SQLite.
+Binary bind loopback, mặc định cổng 18766. Binary phân phối lưu SQLite ở `database/opendash.sqlite` cạnh executable; bản trong `cms/target/` dùng gốc dự án. Đặt `OPENDASH_SITE_ROOT` để chọn site, `OPENDASH_DB_PATH` để chọn riêng SQLite và `OPENDASH_PORT` để chọn cổng. Lần mở đầu chạy migration 0001–0005. Để dùng thử với dữ liệu riêng, đặt `$env:OPENDASH_SITE_ROOT` tới một thư mục trống trước khi chạy. Khi server đang chạy, dùng `powershell -File cms/scripts/check-health.ps1` để kiểm tra SQLite.
 
 ## Kiểm chứng tại workspace
 
@@ -70,12 +70,44 @@ python scripts/windows_smoke.py --binary target/release/opendash.exe
 python scripts/windows_auth_smoke.py --binary target/release/opendash.exe
 python scripts/windows_distribution_smoke.py --binary target/release/opendash.exe
 python scripts/windows_plugin_smoke.py --binary target/release/opendash.exe
+python scripts/content_types_smoke.py --binary target/release/opendash.exe
+python scripts/content_entries_smoke.py --binary target/release/opendash.exe
 # Bổ sung khi đã có Python Playwright và Chromium
 python scripts/windows_admin_browser.py
 cd ..
 ```
 
 Script trình duyệt nhận `--browser` để chọn executable Chromium đã cài. Các smoke test tạo site riêng trong thư mục tạm. Để tạo ZIP theme thử từ gốc repo, chạy `python cms/scripts/windows_smoke.py --theme "$env:TEMP/opendash-banner.zip"` rồi chọn tệp đó trong Builder.
+
+## M3.2 — CPT backend API
+
+- `GET /api/admin/content-types`: yêu cầu đăng nhập, cho phép Admin và Editor xem các định nghĩa CPT cùng owner/status.
+- `POST /api/admin/content-types`: Admin và header `X-CSRF-Token` hợp lệ, nhận JSON `ContentTypeDefinition`, trả `201` khi tạo, `400` nếu schema sai, `409` nếu khóa CPT trùng. Giới hạn body 512 KiB.
+- Migration `0004_content_types.sql` lưu CPT và custom field schema trên SQLite, giữ lại thông tin provider không hoạt động. API không có endpoint sửa/xóa CPT trong slice này.
+
+Từ root trên macOS, sau khi build Admin (`cd cms/admin && npm ci && npm run build && cd ../..`), kiểm chứng binary debug và API bằng:
+
+```sh
+cargo build --manifest-path cms/Cargo.toml --locked
+python3 cms/scripts/content_types_smoke.py --binary cms/target/debug/opendash
+```
+
+Test dùng site và SQLite tạm, bao gồm nâng cấp từ fixture cũ; xem [báo cáo M3.2](docs/verification/2026-11-08-m3-2-content-types-backend.md).
+
+## M3.3 — Content Entry CRUD API
+
+Admin và Editor có quyền tạo/sửa/xóa entry của CPT đã khai báo. Dữ liệu entry được lưu trong migration `0005_content_entries.sql` và sống độc lập với vòng đời theme/plugin. Mọi route dưới đây đều yêu cầu đăng nhập:
+
+- `GET/POST /api/admin/content-types/{type_key}/entries`: liệt kê có phân trang hoặc tạo entry. POST cần `X-CSRF-Token`, thành công trả `201` và `ETag: "v1"`.
+- `GET/PUT/DELETE /api/admin/content-types/{type_key}/entries/{id}`: đọc, thay thế đầy đủ hoặc xóa entry. PUT/DELETE cần CSRF và `If-Match: "vN"`; bản đã cũ trả `412`, thiếu If-Match trả `428`.
+- Giá trị `values` được kiểm tra theo 9 loại custom fields; body tối đa 512 KiB. Trùng slug trong cùng CPT trả `409`, không tồn tại trả `404`.
+
+```sh
+cargo build --manifest-path cms/Cargo.toml --locked
+python3 cms/scripts/content_entries_smoke.py --binary cms/target/debug/opendash
+```
+
+**Lưu ý:** Slice này lưu nội dung vào SQLite, chưa tích hợp renderer CPT để hiển thị ra trang công khai. `rich_text` vẫn là dữ liệu chưa được sanitize, tham chiếu media chưa được xác minh. Xem [kế hoạch](docs/plans/2026-11-08-m3-3-content-entry-crud.md) và [kiểm chứng M3.3](docs/verification/2026-11-08-m3-3-content-entry-crud.md).
 
 ## CodeGraph cho Codex, Antigravity và Chat On Steroids
 
