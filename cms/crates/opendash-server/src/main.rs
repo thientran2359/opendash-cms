@@ -1,5 +1,6 @@
 mod app;
 mod auth;
+mod content_render;
 mod error;
 mod hooks;
 mod media;

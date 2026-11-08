@@ -1,0 +1,227 @@
+//! Public CPT HTML view model. Data is never evaluated as a MiniJinja template.
+//! Rich-text stays untrusted text and is HTML-escaped, not marked |safe.
+
+use std::collections::BTreeMap;
+
+use opendash_core::content::{ContentFieldType, ContentTypeDefinition};
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::{
+    error::{ApiError, ApiResult},
+    storage::{entries::ContentEntryRecord, media::valid_media_id},
+    theme,
+};
+
+pub const DEFAULT_ARCHIVE: &str = r##"<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ content_type.label }}</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;margin:0 auto;padding:2rem 1rem;max-width:850px;color:#172033;overflow-wrap:anywhere;box-sizing:border-box}
+a{color:#155e9b}article{padding:1rem 0;border-bottom:1px solid #d8dfe9}
+img{max-width:100%;height:auto;max-height:260px;object-fit:contain;border-radius:8px}
+nav{display:flex;gap:1rem;margin-top:2rem}
+</style></head><body><main>
+<h1>{{ content_type.label }}</h1>
+{% for entry in entries %}
+<article><h2><a href="{{ entry.url }}">{{ entry.title }}</a></h2>
+{% if entry.cover_url %}<a href="{{ entry.url }}"><img src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy"></a>{% endif %}
+</article>
+{% else %}<p>Chưa có nội dung.</p>{% endfor %}
+<nav>{% if previous_url %}<a href="{{ previous_url }}">← Trang trước</a>{% endif %}
+{% if next_url %}<a href="{{ next_url }}">Trang sau →</a>{% endif %}</nav>
+</main></body></html>"##;
+
+pub const DEFAULT_SINGLE: &str = r##"<!doctype html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ entry.title }} — {{ content_type.label }}</title>
+<style>
+body{font:16px/1.6 system-ui,sans-serif;margin:0 auto;padding:2rem 1rem;max-width:850px;color:#172033;overflow-wrap:anywhere;box-sizing:border-box}
+a{color:#155e9b}dl{margin-top:2rem}dt{font-weight:700;margin-top:1.5rem}
+dd{margin:0.3rem 0 1rem;white-space:pre-wrap;overflow-wrap:anywhere}
+img{max-width:100%;height:auto;border-radius:8px}
+.gallery{display:flex;flex-wrap:wrap;gap:0.75rem}.gallery img{width:190px;height:150px;object-fit:contain}
+</style></head><body><main>
+<nav><a href="{{ archive_url }}">← {{ content_type.label }}</a></nav>
+<article><h1>{{ entry.title }}</h1>
+<dl>{% for field in entry.fields %}
+{% if field.text or field.image_url or field.gallery_urls %}
+<dt>{{ field.label }}</dt>
+{% if field.image_url %}<dd><img src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>
+{% elif field.gallery_urls %}<dd class="gallery">{% for url in field.gallery_urls %}<img src="{{ url }}" alt="{{ field.label }}" loading="lazy">{% endfor %}</dd>
+{% else %}<dd>{{ field.text }}</dd>{% endif %}
+{% endif %}
+{% endfor %}</dl>
+</article></main></body></html>"##;
+
+#[derive(Debug, Serialize)]
+pub struct FieldView {
+    pub key: String,
+    pub label: String,
+    pub kind: &'static str,
+    pub text: String,
+    pub image_url: Option<String>,
+    pub gallery_urls: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EntryView {
+    pub id: i64,
+    pub title: String,
+    pub slug: String,
+    pub url: String,
+    pub updated_at: String,
+    pub values: BTreeMap<String, Value>,
+    pub fields: Vec<FieldView>,
+    pub cover_url: Option<String>,
+}
+
+fn media_url(value: &Value) -> Option<String> {
+    let id = value.as_str()?;
+    valid_media_id(id).then(|| format!("/media/{id}/file"))
+}
+
+pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) -> EntryView {
+    let mut cover_url = None;
+    let mut fields = Vec::with_capacity(schema.fields.len());
+    for definition in &schema.fields {
+        let value = record.values.get(&definition.key).unwrap_or(&Value::Null);
+        let kind = match definition.field_type {
+            ContentFieldType::ShortText => "short_text",
+            ContentFieldType::LongText => "long_text",
+            ContentFieldType::RichText => "rich_text",
+            ContentFieldType::Number => "number",
+            ContentFieldType::Boolean => "boolean",
+            ContentFieldType::Date => "date",
+            ContentFieldType::Select => "select",
+            ContentFieldType::Image => "image",
+            ContentFieldType::Gallery => "gallery",
+        };
+        let image_url = if definition.field_type == ContentFieldType::Image {
+            media_url(value)
+        } else {
+            None
+        };
+        if cover_url.is_none() {
+            cover_url = image_url.clone();
+        }
+        let gallery_urls = if definition.field_type == ContentFieldType::Gallery {
+            value
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(media_url)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let text = match definition.field_type {
+            ContentFieldType::Image | ContentFieldType::Gallery => String::new(),
+            ContentFieldType::Boolean if value.is_boolean() => if value == &Value::Bool(true) {
+                "Có"
+            } else {
+                "Không"
+            }
+            .to_string(),
+            _ => match value {
+                Value::Null => String::new(),
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            },
+        };
+        fields.push(FieldView {
+            key: definition.key.clone(),
+            label: definition.label.clone(),
+            kind,
+            text,
+            image_url,
+            gallery_urls,
+        });
+    }
+    let url = format!("/content/{}/{}", schema.key, record.slug);
+    EntryView {
+        id: record.id,
+        title: record.title,
+        slug: record.slug,
+        url,
+        updated_at: record.updated_at,
+        values: record.values,
+        fields,
+        cover_url,
+    }
+}
+
+pub fn render_archive(
+    schema: &ContentTypeDefinition,
+    entries: &[EntryView],
+    previous_url: Option<&str>,
+    next_url: Option<&str>,
+    selected_template: Option<&str>,
+) -> ApiResult<String> {
+    theme::render_content(
+        selected_template.unwrap_or(DEFAULT_ARCHIVE),
+        &serde_json::json!({
+            "content_type": schema,
+            "entries": entries,
+            "previous_url": previous_url,
+            "next_url": next_url,
+        }),
+    )
+    .map_err(ApiError::internal)
+}
+
+pub fn render_single(
+    schema: &ContentTypeDefinition,
+    entry: &EntryView,
+    selected_template: Option<&str>,
+) -> ApiResult<String> {
+    theme::render_content(
+        selected_template.unwrap_or(DEFAULT_SINGLE),
+        &serde_json::json!({
+            "content_type": schema,
+            "entry": entry,
+            "archive_url": format!("/content/{}", schema.key),
+        }),
+    )
+    .map_err(ApiError::internal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opendash_core::content::{ContentFieldDefinition, ContentFieldType};
+
+    #[test]
+    fn escapes_untrusted_title_rich_text_and_template_tokens() {
+        let schema = ContentTypeDefinition {
+            key: "post".into(),
+            label: "Bài viết".into(),
+            fields: vec![ContentFieldDefinition {
+                key: "body".into(),
+                label: "Nội dung".into(),
+                field_type: ContentFieldType::RichText,
+                required: false,
+                options: vec![],
+            }],
+        };
+        let record = ContentEntryRecord {
+            id: 1,
+            content_type_key: "post".into(),
+            slug: "hello".into(),
+            title: "<script>alert(1)</script>".into(),
+            values: [(
+                "body".into(),
+                Value::String("<img src=x onerror=alert(2)> {{ 7*7 }}".into()),
+            )]
+            .into(),
+            version: 1,
+            created_at: "".into(),
+            updated_at: "".into(),
+        };
+        let html = render_single(&schema, &entry_view(record, &schema), None).unwrap();
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;&#x2f;script&gt;"));
+        assert!(html.contains("&lt;img src=x onerror=alert(2)&gt;"));
+        assert!(html.contains("{{ 7*7 }}"));
+        assert!(!html.contains("<script>alert(1)</script>"));
+    }
+}

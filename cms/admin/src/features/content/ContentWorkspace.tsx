@@ -132,6 +132,10 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
   const selectedType = types.find(type => type.descriptor.key === selectedTypeKey);
   const entryDirty = draft !== null && JSON.stringify(draft) !== baseline;
   const dirty = entryDirty || schemaDirty;
+  // The public URL must point to the persisted slug, not an unsaved edit.
+  const savedSlug = draft?.id !== null && baseline
+    ? (JSON.parse(baseline) as EntryDraft).slug
+    : null;
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -269,7 +273,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
       const next = draftFromEntry(result);
       setDraft(next);
       setBaseline(JSON.stringify(next));
-      setNotice('Đã lưu entry vào cơ sở dữ liệu. Chưa xuất bản trên trang công khai.');
+      setNotice('Đã lưu entry. Nội dung được cập nhật ngay trên trang công khai.');
       await refreshEntries(selectedTypeKey, offset);
     } catch (cause) {
       reportError(cause, 'Không thể lưu entry.');
@@ -348,7 +352,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
       <header className="content-header">
         <div>
           <h2>Nội dung &amp; Custom Post Types</h2>
-          <p>Quản lý nội dung đã lưu trong SQLite. Template hiển thị công khai sẽ được tích hợp sau.</p>
+          <p>Quản lý nội dung trong SQLite. Lưu entry sẽ cập nhật trang công khai theo URL và template hiện có.</p>
         </div>
         {user?.role === 'admin' && (
           <button
@@ -454,6 +458,13 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                 <div>
                   <h3>Entry: {selectedType.descriptor.label}</h3>
                   <p className="content-help">Slug duy nhất trong từng CPT.</p>
+                  <a
+                    href={`/content/${encodeURIComponent(selectedTypeKey)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Xem danh sách công khai
+                  </a>
                 </div>
                 <div className="content-header-actions">
                   <button
@@ -584,7 +595,16 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                         onClick={removeEntry}
                       >Xóa entry</button>
                     )}
-                    <span className="content-help">Lưu vào SQLite, chưa hiển thị ngoài website.</span>
+                    {savedSlug && (
+                      <a
+                        href={`/content/${encodeURIComponent(selectedTypeKey)}/${encodeURIComponent(savedSlug)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Xem trang công khai (bản đã lưu)
+                      </a>
+                    )}
+                    <span className="content-help">Lưu thành công sẽ cập nhật nội dung công khai ngay.</span>
                   </div>
                 </form>
               )}

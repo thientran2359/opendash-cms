@@ -2,7 +2,7 @@
 
 CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress. Rust, SQLite, một file thực thi cho mỗi bản cài và hệ theme/plugin riêng.
 
-**Hiện trạng (09/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.5 đã có CPT/custom fields, SQLite/API entry CRUD, giao diện Admin nội dung và [Media Library upload/chọn ảnh](docs/verification/2026-11-09-m3-5-media-library.md) kiểm chứng trên macOS. Chưa có template render CPT ra trang công khai, taxonomy, builder nhiều tầng, xóa media hoặc backup/restore.
+**Hiện trạng (09/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.6 đã có CPT/custom fields, SQLite/API entry CRUD, giao diện Admin nội dung, [Media Library](docs/verification/2026-11-09-m3-5-media-library.md) và [trang CPT công khai](docs/verification/2026-11-09-m3-6-public-content-rendering.md) kiểm chứng trên macOS. Chưa có taxonomy, Builder nhiều tầng, active theme riêng, xóa media hoặc backup/restore.
 
 ## Cấu trúc thư mục
 
@@ -55,7 +55,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File cms/scripts/build.ps1 -Relea
 
 Mở [Admin](http://127.0.0.1:18766/admin/) hoặc [Builder](http://127.0.0.1:18766/builder). Trên site mới, nhập tên và mật khẩu, bấm **Thiết lập Admin**, rồi **Đăng nhập**. Admin có thể nhập ZIP theme, tạo Editor và cài [plugin mẫu](cms/examples/plugins/sample-plugin/README.md). Xem trước dùng dữ liệu đang sửa. Bấm **Lưu** cập nhật [trang công khai](http://127.0.0.1:18766/).
 
-Binary bind loopback, mặc định cổng 18766. Binary phân phối lưu SQLite ở `database/opendash.sqlite` cạnh executable; bản trong `cms/target/` dùng gốc dự án. Đặt `OPENDASH_SITE_ROOT` để chọn site, `OPENDASH_DB_PATH` để chọn riêng SQLite và `OPENDASH_PORT` để chọn cổng. Lần mở đầu chạy migration 0001–0006. Để dùng thử với dữ liệu riêng, đặt `$env:OPENDASH_SITE_ROOT` tới một thư mục trống trước khi chạy. Khi server đang chạy, dùng `powershell -File cms/scripts/check-health.ps1` để kiểm tra SQLite.
+Binary bind loopback, mặc định cổng 18766. Binary phân phối lưu SQLite ở `database/opendash.sqlite` cạnh executable; bản trong `cms/target/` dùng gốc dự án. Đặt `OPENDASH_SITE_ROOT` để chọn site, `OPENDASH_DB_PATH` để chọn riêng SQLite và `OPENDASH_PORT` để chọn cổng. Lần mở đầu chạy migration 0001–0007. Để dùng thử với dữ liệu riêng, đặt `$env:OPENDASH_SITE_ROOT` tới một thư mục trống trước khi chạy. Khi server đang chạy, dùng `powershell -File cms/scripts/check-health.ps1` để kiểm tra SQLite.
 
 ## Kiểm chứng tại workspace
 
@@ -73,6 +73,7 @@ python scripts/windows_plugin_smoke.py --binary target/release/opendash.exe
 python scripts/content_types_smoke.py --binary target/release/opendash.exe
 python scripts/content_entries_smoke.py --binary target/release/opendash.exe
 python scripts/media_smoke.py --binary target/release/opendash.exe
+python scripts/public_content_smoke.py --binary target/release/opendash.exe
 # Bổ sung khi đã có Python Playwright và Chromium
 python scripts/windows_admin_browser.py
 cd ..
@@ -108,7 +109,7 @@ cargo build --manifest-path cms/Cargo.toml --locked
 python3 cms/scripts/content_entries_smoke.py --binary cms/target/debug/opendash
 ```
 
-**Lưu ý:** Slice này lưu nội dung vào SQLite, chưa tích hợp renderer CPT để hiển thị ra trang công khai. `rich_text` vẫn là dữ liệu chưa được sanitize; từ M3.5, ảnh tham chiếu trong entry mới/sửa phải có trong Media Library. Xem [kế hoạch](docs/plans/2026-11-08-m3-3-content-entry-crud.md) và [kiểm chứng M3.3](docs/verification/2026-11-08-m3-3-content-entry-crud.md).
+**Lưu ý:** M3.3 là lớp lưu trữ; từ M3.6, nội dung đã lưu được hiển thị công khai tại `/content/{type}/{slug}` (không có cơ chế draft/publish riêng). `rich_text` chỉ hiển thị dưới dạng văn bản đã escape; từ M3.5, ảnh tham chiếu trong entry mới/sửa phải có trong Media Library. Xem [kế hoạch](docs/plans/2026-11-08-m3-3-content-entry-crud.md) và [kiểm chứng M3.3](docs/verification/2026-11-08-m3-3-content-entry-crud.md).
 
 ## M3.4 — Admin Content UI
 
@@ -116,7 +117,7 @@ Sau khi đăng nhập, chọn tab **Nội dung** bên cạnh **Builder**. Admin 
 
 Form gửi JSON theo đúng kiểu field và dùng ETag/If-Match khi sửa/xóa. Khi phiên đăng nhập hết hạn (401) hoặc dữ liệu có phiên bản mới (412), bản nháp vẫn được giữ để người dùng đăng nhập lại hoặc chủ động tải bản mới. Tab Builder không bị thay thế.
 
-HTML rich text được lưu như dữ liệu và không được thực thi khi nhập; lưu entry chưa khiến nội dung xuất hiện trên website công khai. Từ M3.5, field ảnh/gallery đã có thư viện chọn ảnh. Xem [kế hoạch M3.4](docs/plans/2026-11-08-m3-4-admin-content-ui.md) và [bằng chứng UI](docs/verification/2026-11-08-m3-4-admin-content-ui.md).
+HTML rich text được lưu như dữ liệu và không được thực thi khi nhập; từ M3.6, lưu entry sẽ cập nhật trang công khai. Từ M3.5, field ảnh/gallery đã có thư viện chọn ảnh. Xem [kế hoạch M3.4](docs/plans/2026-11-08-m3-4-admin-content-ui.md) và [bằng chứng UI](docs/verification/2026-11-08-m3-4-admin-content-ui.md).
 
 ## M3.5 — Media Library
 
@@ -132,7 +133,24 @@ cargo build --manifest-path cms/Cargo.toml --locked
 python3 cms/scripts/media_smoke.py --binary cms/target/debug/opendash
 ```
 
-Chưa có xóa media khỏi thư viện, public image URL, backup/restore uploads hoặc render entry CPT ra website. Xem [kế hoạch M3.5](docs/plans/2026-11-09-m3-5-media-library.md) và [báo cáo kiểm chứng](docs/verification/2026-11-09-m3-5-media-library.md).
+Chưa có xóa media khỏi thư viện hay backup/restore uploads. Từ M3.6, ảnh đã được gắn trong entry có URL công khai `/media/{id}/file`, ảnh chưa được dùng vẫn chỉ đọc được qua API Admin. Xem [kế hoạch M3.5](docs/plans/2026-11-09-m3-5-media-library.md) và [báo cáo kiểm chứng](docs/verification/2026-11-09-m3-5-media-library.md).
+
+## M3.6 — Hiển thị nội dung CPT công khai
+
+Trong **Admin → Nội dung**, các liên kết **Xem danh sách công khai** và **Xem trang công khai (bản đã lưu)** mở URL thực theo CPT/slug:
+
+- `GET /content/{type_key}`: archive 20 entry/trang (phân trang bằng `?page=N`).
+- `GET /content/{type_key}/{slug}`: single của nội dung đã lưu; khi Admin/Editor bấm Lưu, website cập nhật ngay, không có bước publish riêng.
+- `GET /media/{id}/file` và `/thumbnail`: ảnh công khai chỉ khi đang được tham chiếu bởi entry trong field khai báo `image` hoặc `gallery`. Ảnh chưa dùng được giữ riêng tư.
+
+Renderer mặc định có HTML auto-escape, CSP chặn script và chỉ dùng ảnh nội bộ. `rich_text` được escape thành văn bản, **chưa hỗ trợ render HTML có định dạng**. Theme ZIP gồm `block.json` và `block.html` trước đây vẫn hoạt động; theme mới có thể thêm `content-list.html` và `content-single.html`. M3.6 lấy template từ block trang chủ đang lưu, nếu không có sẽ dùng mẫu mặc định. Dữ liệu CPT/entry không phụ thuộc vòng đời theme.
+
+```sh
+cargo build --manifest-path cms/Cargo.toml --locked
+python3 cms/scripts/public_content_smoke.py --binary cms/target/debug/opendash
+```
+
+Chưa có active theme registry riêng, taxonomy, chỉnh archive/single bằng Builder hay preview entry chưa lưu. Xem [kế hoạch M3.6](docs/plans/2026-11-09-m3-6-public-content-rendering.md) và [báo cáo kiểm chứng](docs/verification/2026-11-09-m3-6-public-content-rendering.md).
 
 ## CodeGraph cho Codex, Antigravity và Chat On Steroids
 

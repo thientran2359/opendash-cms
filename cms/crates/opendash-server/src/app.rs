@@ -29,6 +29,7 @@ use crate::{
             plugin_install, plugin_list, plugin_run,
         },
         public::public_page,
+        public_content::{archive, media_file, media_thumb, single},
     },
     theme::MAX_ZIP_BYTES,
 };
@@ -72,6 +73,10 @@ pub struct AdminAssets;
 pub fn build_router(state: AppState, expected_host: String) -> Router {
     Router::new()
         .route("/", get(public_page))
+        .route("/content/{type_key}", get(archive))
+        .route("/content/{type_key}/{slug}", get(single))
+        .route("/media/{id}/file", get(media_file))
+        .route("/media/{id}/thumbnail", get(media_thumb))
         .route("/api/health", get(crate::routes::health::status))
         .route("/admin", get(builder))
         .route("/admin/", get(builder))

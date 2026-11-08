@@ -19,13 +19,18 @@ pub async fn list_theme_blocks(db: &SqlitePool) -> ApiResult<BTreeMap<String, Fi
 }
 
 pub async fn insert_theme_block(db: &SqlitePool, theme: &Theme) -> ApiResult<()> {
-    let result =
-        sqlx::query("INSERT INTO theme_blocks (id, fields_json, template) VALUES (?, ?, ?)")
-            .bind(&theme.descriptor.id)
-            .bind(serde_json::to_string(&theme.descriptor.fields)?)
-            .bind(&theme.template)
-            .execute(db)
-            .await;
+    let result = sqlx::query(
+        "INSERT INTO theme_blocks
+                     (id, fields_json, template, content_list_template, content_single_template)
+                     VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&theme.descriptor.id)
+    .bind(serde_json::to_string(&theme.descriptor.fields)?)
+    .bind(&theme.template)
+    .bind(&theme.content_list_template)
+    .bind(&theme.content_single_template)
+    .execute(db)
+    .await;
     match result {
         Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
             Err(ApiError::conflict("ID block đã có trong dữ liệu."))
@@ -35,6 +40,21 @@ pub async fn insert_theme_block(db: &SqlitePool, theme: &Theme) -> ApiResult<()>
             Ok(())
         }
     }
+}
+
+/// Active theme is the block currently saved in the public home_page.
+/// Optional content templates travel with the theme, with a built-in fallback.
+pub async fn active_content_templates(
+    db: &SqlitePool,
+) -> ApiResult<(Option<String>, Option<String>)> {
+    let templates: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT t.content_list_template, t.content_single_template
+         FROM home_page AS p JOIN theme_blocks AS t ON t.id = p.block_id
+         WHERE p.id = 1",
+    )
+    .fetch_optional(db)
+    .await?;
+    Ok(templates.unwrap_or((None, None)))
 }
 
 pub async fn load_theme_block(db: &SqlitePool, block_id: &str) -> ApiResult<(String, Fields)> {

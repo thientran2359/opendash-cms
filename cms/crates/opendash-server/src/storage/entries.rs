@@ -23,7 +23,7 @@ pub struct ContentEntryRecord {
 
 type EntryRow = (i64, String, String, String, String, i64, String, String);
 
-fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
+pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
     let (id, content_type_key, slug, title, json, version, created_at, updated_at) = row;
     let values: BTreeMap<String, Value> = serde_json::from_str(&json)
         .map_err(|_| ApiError::internal("Dữ liệu custom fields không hợp lệ."))?;
