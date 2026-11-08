@@ -1,5 +1,24 @@
-# Codex <-> Antigravity handoff state (keep scripts and skills tracked)
+# Retired handoff runtime (do not recreate as an active queue)
 /.agents/sync/
+
+# Project-agent drafts may be Git-tracked; runtime state and credentials must not.
+/.agents/**/runtime/
+/.agents/**/cache/
+/.agents/**/logs/
+/.agents/**/secrets/
+/.agents/**/credentials/
+/.agents/**/tokens/
+/.agents/**/state.lock
+/.agents/**/state.json
+/.agents/**/session*.json
+/.agents/**/*.sqlite
+/.agents/**/*.sqlite-*
+/.agents/**/*.db
+/.agents/**/*.log
+/.agents/**/*.pem
+/.agents/**/*.key
+/.agents/**/credentials*.json
+/.agents/**/token*.json
 
 # Rust and frontend build outputs
 /target/

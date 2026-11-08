@@ -8,7 +8,7 @@ Tài liệu này dành cho người quản lý dự án và các coding agent. M
 
 1. Đọc [roadmap V1](ROADMAP_V1.md), xác định milestone đang mở và điều kiện chuyển bước.
 2. Tìm module theo ID trong [danh mục module](MODULE_CATALOG_V1.md); kiểm tra phạm vi đã có, dependency và các tài liệu liên quan.
-3. Với module chưa đủ thiết kế, duy trì **một Living Module Brief** theo [mẫu](templates/MODULE_BRIEF.md): chứa G0 scope, G1 research tóm tắt, G2 decisions và G3 breakdown; chỉ tách `docs/research/` khi cần khảo sát lớn, benchmark hoặc bảo toàn dữ liệu đối chiếu.
+3. Nghiên cứu kỹ thuật và thảo luận G0–G2 chưa duyệt nằm trong `.agents/research/` và `.agents/discussions/`. Sau khi qua gate/chấp thuận, tổng hợp **chỉ phần đã chốt** vào Living Module Brief chính thức trong `docs/plans/` theo [mẫu](templates/MODULE_BRIEF.md), phân biệt G0 scope, G1 evidence, G2 decisions và G3 breakdown. Hồ sơ cũ trong `docs/research/` giữ làm lịch sử, không thêm bản nháp mới tại đó.
 4. Phân loại **Full-Track/Fast-Track** trước khi giao việc. Với Full-Track, phải qua G1 và chốt G2 trước khi chia task G3. ADR/contract chỉ cập nhật nếu có quyết định liên module hoặc thay đổi hợp đồng hiện hữu. Task ở dạng bảng trong module brief; [mẫu task](templates/SLICE_TASK.md) dùng để handoff, không mặc định tạo file task riêng.
 5. Chỉ bắt đầu thay đổi source sau khi nêu được contract, dependency, cách dùng lại API lõi, cách kiểm thử, dữ liệu cần bảo toàn và phần ngoài phạm vi. Ghi bằng chứng chạy thực tế tại `docs/verification/`.
 
@@ -36,7 +36,7 @@ Ví dụ truy vết: `V1 → M3 → M3-S01 → M3-S01-T01` dự kiến triển k
 | Milestone | `M` + số, mốc trung gian có dạng `M2.5` | `M3` |
 | Slice | Milestone + `-S` + số | `M3-S01` |
 | Task | Slice + `-T` + số | `M3-S01-T02` |
-| Tài liệu nghiên cứu | `docs/research/<module>-<topic>.md` | `docs/research/cnt-01-cpt-data-model.md` |
+| Nghiên cứu đang chuẩn bị | `.agents/research/<module>-<topic>.md` | `.agents/research/cnt-01-cpt-data-model.md` trên branch agent |
 | Kế hoạch milestone | `docs/plans/milestones/<Mốc>-<chủ-đề>.md` | `milestones/M2.5-core-foundation.md` |
 
 Mọi slice ghi rõ module/capability liên quan, các dependency chặn triển khai, đầu ra và link đến PRD, contract, quyết định, kiểm chứng. Các ID đã sử dụng không đổi hoặc tái cấp phát; nếu tách module thì ghi lịch sử kế thừa.

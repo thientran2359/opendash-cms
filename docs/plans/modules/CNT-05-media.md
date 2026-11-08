@@ -2,7 +2,9 @@
 
 **Scope:** PRD V1 `AGREED` / ranh giới module đã thống nhất · **Milestone dự kiến:** M3 / `M3-S04` · **PRD:** [Content/media](../../product/PRODUCT_REQUIREMENTS.md) · **Track:** `Full-Track` vì upload, quyền, filesystem/SQLite và public serving.
 
-**Trạng thái hiện tại (08/11/2026):** Research `REVIEWED` (source/CodeGraph tại `main@2bad893` và phản biện Codex ↔ Antigravity đến Turn 5, 07/11/2026) · Design `PROPOSED` (**G2 đang mở, chưa `AGREED`**) · Implementation `NOT_STARTED` · Verification `NOT_RUN`; capability và task bên dưới chưa `READY`.
+**Cập nhật trạng thái (09/11/2026):** CNT-05 hiện **PARTIAL**. Media API upload raster/metadata/thumbnail, image/gallery picker và restart đã có [bằng chứng M3.5](../../verification/2026-11-09-m3-5-media-library.md); ảnh công khai chỉ khi được tham chiếu theo [M3.6](../../verification/2026-11-09-m3-6-public-content-rendering.md) đã có test macOS. Chưa có video, thao tác xóa asset khỏi thư viện/GC, backup/restore hoặc Windows/Linux nghiệm thu. Xem [bảng trạng thái M3](../M3_STATUS_2026-11-09.md). Các đề xuất G1–G3 bên dưới **là hồ sơ lịch sử 08/11**; không thực thi chúng như task mới nếu chưa đối chiếu source hiện tại và gate còn mở.
+
+**Hồ sơ trạng thái nghiên cứu ngày 08/11/2026 (lịch sử, không phải tình trạng hiện nay):** Research `REVIEWED` (source/CodeGraph tại `main@2bad893` và phản biện Codex ↔ Antigravity đến Turn 5, 07/11/2026) · Design `PROPOSED` (**G2 đang mở, chưa `AGREED`**) · Implementation `NOT_STARTED` · Verification `NOT_RUN`; capability và task bên dưới chưa `READY`.
 
 Living Module Brief G0–G3 giữ một nguồn chi tiết từ scope đến task. V1 cần ảnh/media upload và image/gallery picker; video là phần cần xác minh mức hỗ trợ/giới hạn khi G2. **Opaque `media_id` thay URL/path trong field là ứng viên G1**, chưa chốt kiểu ID, schema metadata, public route hay cơ chế dọn file. Xem [planning consensus](../../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) và [Pre-M3 readiness](../../discussions/threads/2026-11-07-pre-m3-codegraph-readiness.md).
 
@@ -91,7 +93,7 @@ Living Module Brief G0–G3 giữ một nguồn chi tiết từ scope đến tas
 
 **Kết luận G1 (`REVIEWED`):** thống nhất ưu tiên opaque MediaRef, reference projection có điều kiện, pending-state upload + filesystem/DB reconciliation và CSP/sandbox đã thử trên fixture cô lập. Đủ cơ sở **mở G2**, nhưng chưa chốt SQL schema, ID/URL contract, endpoint, file format/limits, public/private policy, xóa/GC hay backup semantics; các ca fault injection, thực thi Rust/Windows và CMS browser integration vẫn `NOT_RUN`. [Thread đồng thuận G1](../../discussions/threads/2026-11-07-m3-g1-content-types-media-research.md).
 
-## G2 — Đề xuất thiết kế v0.1 (đang phản biện, **`PROPOSED`**)
+## G2 — Hồ sơ đề xuất thiết kế v0.1 (08/11/2026) (đang phản biện, **`PROPOSED`**)
 
 **Nguồn:** G1/E2/E3 ở trên và [luồng thảo luận G2](../../discussions/threads/2026-11-08-m3-g2-content-types-media-design.md). **Contract đầu vào:** [PRD](../../product/PRODUCT_REQUIREMENTS.md), [CORE_FOUNDATION](../../contracts/CORE_FOUNDATION.md), [Module Catalog](../MODULE_CATALOG_V1.md), [roadmap M3](../ROADMAP_V1.md). **Phạm vi:** `CNT-05` quản lý định danh, metadata, byte storage, upload/serve/delete và resolver; `CNT-02` sở hữu validation kiểu field, `CNT-04` sở hữu transaction nội dung và projection, `OPS-01` sở hữu backup/restore. **Ngoài phạm vi:** CDN/transcoding, media editor, advanced search, job định kỳ, backup engine M8. Chưa có API/table/file code được triển khai ở M3.
 
@@ -147,7 +149,7 @@ Living Module Brief G0–G3 giữ một nguồn chi tiết từ scope đến tas
 
 **Phạm vi sản phẩm còn mở:** PRD V1 xác nhận field `image/gallery` nhưng Roadmap và Module Catalog hiện ghi M3 hỗ trợ upload **ảnh/video**; chưa được tự xóa video khỏi phạm vi M3 chỉ vì PRD không có *field video*. G2 yêu cầu xác nhận một phương án nhất quán giữa các nguồn (hoặc chuyển video sang milestone khác qua quyết định phạm vi có lưu vết), trước khi bỏ `mp4/webm`/HTTP Range. `GET /media/{id}` public ngay sau upload là **hành vi truy cập được trước khi Save**, dù URL UUID khó đoán; UUID không thay cho access control và không chứng minh giữ riêng tư. `iframe sandbox=""` không đủ để kết luận cookie luôn vắng trên mọi browser; nếu cần media private phải thử Admin-proxied/signed preview URL trong iframe thật và giữ script sandbox. Giữ lựa chọn public-on-upload **PROPOSED**, không tự coi đã đồng thuận từ G1/E3 hoặc PRD Save semantics. Trước `AGREED`, cần chốt explicit public/private contract và browser regression trên CMS thật.
 
-## G3 — Breakdown task dự kiến (chưa sẵn sàng giao code)
+## G3 — Các task ứng viên từ lịch sử nghiên cứu (cần đối chiếu triển khai hiện hành) (chưa sẵn sàng giao code)
 
 | Task ID giữ từ bản nháp | Đầu ra khi qua G3 | Phụ thuộc và điều kiện |
 | --- | --- | --- |
@@ -157,4 +159,4 @@ Living Module Brief G0–G3 giữ một nguồn chi tiết từ scope đến tas
 
 **Ánh xạ lịch sử ID:** `M3-S04-T01` (Research) và `M3-S04-T02` (Design G2) là nhãn task trong discovery draft cũ; nay được chuyển thành các mục G1/G2, **không tái cấp phát hai ID đó**. Các `T03..T05` mới chỉ là candidates, chưa `READY`.
 
-Sau khi G2 được chốt, dùng [mẫu handoff](../templates/SLICE_TASK.md) trong `.agents/sync/task-for-ag.md`, không tạo task files riêng. Không triển khai Media M3 theo bản nháp này.
+Sau khi G2 được chốt, dùng [mẫu handoff](../templates/SLICE_TASK.md) để chuẩn bị GitHub Issue; bản nháp nếu cần nằm ở `.agents/tasks/`, không tạo hàng loạt task files riêng. Không triển khai Media M3 theo bản nháp này.

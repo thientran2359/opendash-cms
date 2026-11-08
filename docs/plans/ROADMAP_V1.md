@@ -1,8 +1,8 @@
 # OpenDash V1 — Roadmap theo release, milestone và slice
 
-**Phạm vi sản phẩm:** [PRD V1 đã duyệt](../product/PRODUCT_REQUIREMENTS.md). **Trạng thái roadmap:** phương pháp planning và phân định owner module đã thống nhất theo [Turn 5](../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md); phương án phân rã M3–M8 vẫn cần G1/G2 trước khi ghi `AGREED` ở tầng thiết kế.
+**Phạm vi sản phẩm:** [PRD V1 đã duyệt](../product/PRODUCT_REQUIREMENTS.md). **Hiện trạng 09/11/2026:** M3.1–M3.6 có source và evidence trên macOS, nhưng M3 vẫn `PARTIAL`; xem [bảng đối chiếu M3](M3_STATUS_2026-11-09.md). M4–M8 tiếp tục qua gate tương ứng.
 
-**Cập nhật 08/11/2026:** M1/M2 có [bằng chứng Windows](../verification/2026-11-07-m1-m2-import.md); **M2.5 đã kiểm chứng đầy đủ 8 mục** tại [báo cáo M2.5](../verification/2026-11-07-m2-5-core-kernel.md), theo [ADR-0002](../decisions/ADR-0002-core-extension-contract.md). CNT-01 và CNT-05 đã `G1 REVIEWED` và mở [G2 Design `PROPOSED`](../discussions/threads/2026-11-08-m3-g2-content-types-media-design.md), chưa `AGREED`, chưa có migration/code M3. Trước khi triển khai, kiểm tra lại HEAD/source.
+**Mốc nghiên cứu 08/11/2026:** M2.5 đã [kiểm chứng](../verification/2026-11-07-m2-5-core-kernel.md); G1 CNT-01/CNT-05 được review, G2 là đề xuất vào thời điểm đó. **Sau mốc nghiên cứu**, M3.1–M3.6 đã có [kiểm chứng macOS](M3_STATUS_2026-11-09.md); không dùng nhãn `NOT_STARTED` cũ để giao lại việc.
 
 ## Hai cách theo dõi tiến độ
 
@@ -18,7 +18,7 @@ Xem [Planning Workflow](PLANNING_WORKFLOW.md) về research gates, status và m�
 | **M1** — CMS baseline | Auth/Admin/Editor, theme một block, Preview/Lưu, SQLite và Windows executable | FND-02/03/04/05, BLD-01, THM-01 | **Baseline verified** trong [M1/M2 import report](../verification/2026-11-07-m1-m2-import.md); chỉ phạm vi baseline |
 | **M2** — Plugin sandbox baseline | Plugin ZIP + Wasmi process-isolated worker, permissions, timeout, log, quản lý lifecycle cơ bản | PLG-01, FND-03 | **Baseline verified** theo [M1/M2 import report](../verification/2026-11-07-m1-m2-import.md), chưa đồng nghĩa extension V1 đầy đủ |
 | **M2.5** — Core Foundation | Registry ownership và lifecycle thực cho block, hook dispatcher, Base APIs dùng chung, boundary SQL/ZIP/auth, quy chuẩn có kiểm tra | FND-01, FND-05, PLG-02 | **Closed / verified** cho 8 mục đã chốt theo [kế hoạch](milestones/M2.5-core-foundation.md), [bằng chứng](../verification/2026-11-07-m2-5-core-kernel.md) và ADR-0002; Content hooks thuộc M3 |
-| **M3** — Content & Media | CPT, fields, taxonomy, entry CRUD, media library, owner persistence và Admin forms; plugin bridge tối thiểu | CNT-01–05, PLG-03 (bridge tối thiểu) | **Planned / G2 active**: [CNT-01](modules/CNT-01-content-types.md), [CNT-05](modules/CNT-05-media.md) `G1 REVIEWED`, `G2 PROPOSED`; source M3 chưa triển khai |
+| **M3** — Content & Media | CPT, fields, taxonomy, entry CRUD, media library, owner persistence và Admin forms; plugin bridge tối thiểu | CNT-01–05, PLG-03 (bridge tối thiểu) | **PARTIAL**: M3.1–M3.6 [đã có bằng chứng](../verification/2026-11-09-m3-6-public-content-rendering.md), [phạm vi chi tiết](M3_STATUS_2026-11-09.md); taxonomy/bridge/video/xóa media/backup chưa hoàn tất |
 | **M4** — Visual Builder | Cây Section/Row/Column/Element, core elements, tree + preview + inspector, responsive, binding và list block | BLD-01–05, CNT-01–05 | **Proposed** |
 | **M5** — Theme & Templates | Dựng page/header/footer/archive/single, Theme Options qua SITE-01 engine tối thiểu, import mẫu, đổi/cập nhật theme bảo toàn dữ liệu/layout | THM-01–03, SITE-01, BLD-05, CNT-04 | **Proposed**; request URL context cần tách khỏi template selection |
 | **M6** — Plugin Extensions | APIs/action/event, external calls trong quyền, đăng ký CPT/fields/block/template/settings, declarative plugin Admin UI | PLG-02–04 | **Proposed**; một phần PLG-03 phải được thử ngay tại M3 |
@@ -45,7 +45,7 @@ Các gates này đề cập **hành vi cần có**. Một milestone có thể đ
 
 Theo [bằng chứng M2.5](../verification/2026-11-07-m2-5-core-kernel.md), 8 mục đã được kiểm chứng bằng unit tests, `check-standards.py` cùng self-test, `windows_kernel_smoke.py` và bộ Windows regressions. Content hooks chưa được kích hoạt cho mô hình CPT chưa có; điểm này được chuyển đúng sang M3. Không mở lại M2.5 chỉ vì M3 phát triển thêm nghiệp vụ sử dụng Base APIs.
 
-### M3 — Content & Media (backlog G0; chưa chốt schema/route ở G2)
+### M3 — Content & Media (backlog lịch sử; [phần triển khai hiện hành](M3_STATUS_2026-11-09.md))
 
 | Slice dự kiến | Hành vi nghiệm thu | Module | Phụ thuộc |
 | --- | --- | --- | --- |
@@ -54,6 +54,8 @@ Theo [bằng chứng M2.5](../verification/2026-11-07-m2-5-core-kernel.md), 8 m�
 | `M3-S03` — Taxonomy | Tạo category cha–con và tag; liên kết entry, query theo taxonomy, phân quyền | CNT-03, CNT-04 | M3-S01/S02 |
 | `M3-S04` — Media library & picker | Upload/serve ảnh/video an toàn trong uploads, DB metadata và reference ổn định; tích hợp picker cho image/gallery, test restart/missing-file | CNT-05, CNT-02 | G2 MediaRef và upload security; picker cần schema CNT-02 từ M3-S02 |
 | `M3-S05` — Cross-module verification | E2E **plugin** khai báo CPT/field qua cầu nối đã duyệt → entry/media/taxonomy → disable/restart/re-enable; schema/data vẫn quản lý được; quyền và migration test trên DB copy | CNT-01–05, PLG-03 | M3-S01–S04; **theme switch E2E thuộc THM-03 ở M5** |
+
+**Lưu ý:** S01–S05 là phân rã dự kiến của giai đoạn G0/G2 trước đây, **không ánh xạ 1:1** với những slice M3.1–M3.6 đã code. Xem [đối chiếu M3](M3_STATUS_2026-11-09.md) trước khi tạo Issue mới; phần chưa hoàn thiện vẫn phải qua gate liên quan.
 
 S02 và phần backend upload của S04 có thể nghiên cứu/thi công độc lập **sau khi** chốt MediaRef; phần picker tích hợp phải đi sau schema field S02. Thay đổi HTTP/upload/migration thuộc **Full-Track**. Các ID slice là nhãn đề xuất, không phải task `READY` hay capability được verified.
 
@@ -87,14 +89,14 @@ Các mục dưới đây cụ thể hóa PRD và dependency, không chốt schem
 
 **Contract phục hồi từ đầu:** khi chốt G2 dữ liệu/file ở M3, và package/theme ở M5–M6, FND-03/CNT-05/THM-01/PLG-01 phải đối chiếu OPS-01 về nguồn dữ liệu canonical, snapshot nhất quán DB + files/config/packages, định danh qua restore, write isolation và recovery sau lỗi. Chốt ràng buộc trước khi triển khai phần phụ thuộc; chưa xây backup engine sớm. M8 kiểm restore vào site root riêng rồi chạy và chỉnh sửa website thực, không chỉ kiểm archive backup tồn tại.
 
-## Hai module đã qua G1, hiện mở G2
+## Hồ sơ G1/G2 lịch sử và phần còn mở sau M3.1–M3.6
 
 | Module | Living Module Brief | Quyết định cần chốt trong G2 |
 | --- | --- | --- |
 | **CNT-01 — Content Types** | [Module brief](modules/CNT-01-content-types.md) | Registry và DB giữ quyền sở hữu thế nào, provider tắt vẫn quản lý nội dung ra sao, có cần migration nào? |
 | **CNT-05 — Media Library** | [Module brief](modules/CNT-05-media.md) | Media reference ổn định thế nào, validation upload, link tới fields, cleanup và phạm vi backup? |
 
-G1 của hai module đã `REVIEWED`; đề xuất G2 đang được phản biện tại [thread G2](../discussions/threads/2026-11-08-m3-g2-content-types-media-design.md). Code M3 bắt đầu sau khi G2 `AGREED` và G3 chuẩn bị task `READY` cho slice liên quan. Cần đồng bộ quyết định `CNT-02/04` (entry/field/media reference) trước khi khóa migration có quan hệ chéo. Chi tiết capability/primary acceptance slice nằm trong living module briefs.
+G1 của hai module được `REVIEWED` ngày 08/11, còn [G2 trong thread lịch sử](../discussions/threads/2026-11-08-m3-g2-content-types-media-design.md) ở trạng thái `PROPOSED` tại thời điểm đó. **Sau đó M3.1–M3.6 đã được triển khai**; không suy rằng phương án G2 đã được phê duyệt hồi tố. Việc tiếp tục plugin bridge, taxonomy, schema edit, video/media deletion và lifecycle cần đối chiếu với [trạng thái mới](M3_STATUS_2026-11-09.md), sau đó quyết định gate cho từng phạm vi.
 
 ## Definition of Done của Release V1
 

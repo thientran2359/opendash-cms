@@ -1,5 +1,12 @@
 # Điều phối nhiều AI agent trong OpenDash
 
+> **Historical process (retired):** The Windows PowerShell and
+> Antigravity handoff scripts, Stop hook and previous skills mentioned
+> below have been retired into `.agents/archive/` or removed from the
+> active paths. Do not follow the commands below as current instructions.
+> For the active rules, see [PROTOCOL](PROTOCOL.md) and
+> [`.agents/README.md`](../../.agents/README.md).
+
 **Mục đích:** Một cách giao việc, thảo luận và nhận kết quả nhất quán giữa Chat On Steroids (CoS), Codex và Antigravity. Đây là hướng dẫn vận hành, không phải quyết định kiến trúc CMS.
 
 ## 1. Ai điều phối ai?

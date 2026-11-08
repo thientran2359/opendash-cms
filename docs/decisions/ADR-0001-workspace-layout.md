@@ -28,6 +28,14 @@ OpenDash là CMS Rust + SQLite, đóng gói một executable cho mỗi website, 
 
 ## Tham chiếu
 
+> **Ghi chú vận hành 09/11/2026 (không thay đổi quyết định kiến trúc):** Dòng
+> quyết định về `.agents/sync/` phía trên mô tả workflow Codex ↔ Antigravity
+> tại thời điểm tạo ADR. Hook/script đó hiện đã ngừng sử dụng và chuyển vào
+> [archive kỹ năng](../../.agents/archive/README.md). Cấu trúc `.agents/` hiện
+> chứa nghiên cứu, thảo luận và task chưa duyệt; các tài liệu đã chốt nằm trong
+> `docs/`. Xem [quy trình GitHub mới](../../.agents/GITHUB_WORKFLOW.md).
+> Không coi chú thích này là thay đổi hồi tố của ADR-0001.
+
 - [Yêu cầu V1](../product/PRODUCT_REQUIREMENTS.md)
 - [Cấu trúc và kế hoạch chuyển đổi chi tiết](../architecture/CMS_ARCHITECTURE.md)
 - [Tech stack đã duyệt](../architecture/TECH_STACK.md)

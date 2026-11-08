@@ -1,6 +1,6 @@
 # <TASK-ID> — <Mục tiêu có thể nghiệm thu>
 
-**Cách dùng:** mẫu viết một task **sau G3** để handoff qua `.agents/sync/task-for-ag.md` hoặc đoạn task ở brief. Không tạo file Markdown riêng cho từng task chỉ để đủ thủ tục; G1/G2 không phải task code.
+**Cách dùng:** mẫu viết một task **sau G3** để giao qua GitHub Issue (bản nháp nếu cần nằm ở `.agents/tasks/`) hoặc đoạn task ở brief. Không tạo file Markdown riêng cho từng task chỉ để đủ thủ tục; G1/G2 không phải task code.
 
 - **Thuộc:** Release ..., Milestone ..., Slice ..., Module ID / Capability ID ...
 - **Primary Acceptance Slice của capability:** ... (một slice nghiệm thu chính, có thể được regression lại về sau)

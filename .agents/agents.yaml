@@ -1,0 +1,30 @@
+version: 1
+repository: https://github.com/thientran2359/opendash-cms.git
+task_ledger: github-issues-and-pull-requests
+muse_dispatch: proposed-requires-verified-adapters
+agents:
+  atlas:
+    product: Codex
+    host: windows
+    branch: agent/atlas
+    role: coordinator
+  nova:
+    product: Antigravity
+    host: windows
+    branch: agent/nova
+    role: coordinator
+  forge:
+    product: Chat on Steroids
+    host: windows
+    branch: agent/forge
+    role: implementer
+  harbor:
+    product: Chat on Steroids
+    host: macos
+    branch: agent/harbor
+    role: implementer
+  orion:
+    product: Antigravity
+    host: macos
+    branch: agent/orion
+    role: implementer

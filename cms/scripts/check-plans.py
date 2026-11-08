@@ -114,9 +114,19 @@ def check(root: Path) -> list[str]:
             errors.append(f"{catalog.relative_to(root)}:{number}: duplicate module ID {module_id}")
         seen.add(module_id)
 
-    # Markdown links are checked in the actual docs tree and root README,
-    # excluding external URLs, anchors without file paths and fenced examples.
-    files = sorted(docs.rglob("*.md")) + ([root / "README.md"] if (root / "README.md").is_file() else [])
+    # Check official docs, active agent guidance and repository entry points.
+    # Retired skills and legacy handoffs are intentionally excluded: those are
+    # historical snapshots with stale links, not current operational guidance.
+    agent_dir = root / ".agents"
+    agent_files = (
+        [file for file in agent_dir.rglob("*.md") if "archive" not in file.relative_to(agent_dir).parts]
+        if agent_dir.is_dir()
+        else []
+    )
+    files = sorted(docs.rglob("*.md")) + sorted(agent_files)
+    files += [
+        file for file in (root / "README.md", root / "AGENTS.md") if file.is_file()
+    ]
     for file in files:
         for number, line in content_lines(file):
             for link in links_in(line):
@@ -173,6 +183,14 @@ def check(root: Path) -> list[str]:
                     f"{roadmap.relative_to(root)}:{number}: {cells[0]} verified status "
                     "missing direct docs/verification/*.md evidence link"
                 )
+
+    # The current M3 status register prevents a new agent from relying on
+    # obsolete G1/G2 planning claims as the present implementation state.
+    m3_status = plans / "M3_STATUS_2026-11-09.md"
+    if m3_status.is_file():
+        for file in (root / "README.md", plans / "README.md", roadmap, catalog):
+            if file.is_file() and m3_status.name not in file.read_text(encoding="utf-8-sig"):
+                errors.append(f"{file.relative_to(root)}: missing current M3 status reference")
 
     return errors
 

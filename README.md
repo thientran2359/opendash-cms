@@ -4,6 +4,15 @@ CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress
 
 **Hiện trạng (09/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Xem thêm [kiểm chứng bộ khung lõi M2.5](docs/verification/2026-11-07-m2-5-core-kernel.md). Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.6 đã có CPT/custom fields, SQLite/API entry CRUD, giao diện Admin nội dung, [Media Library](docs/verification/2026-11-09-m3-5-media-library.md) và [trang CPT công khai](docs/verification/2026-11-09-m3-6-public-content-rendering.md) kiểm chứng trên macOS. Chưa có taxonomy, Builder nhiều tầng, active theme riêng, xóa media hoặc backup/restore.
 
+
+Five agents can use five independent local working directories and agent-specific
+branches of the same GitHub opendash-cms repository. Repository .agents/ holds
+unapproved technical research/discussions/task handoffs; docs/ holds official
+approved records and real verification. Completed tasks are committed and pushed
+to the agent's own branch for Issue/PR review, never auto-merged into main.
+Muse.ai dispatch to CoS/Antigravity remains a proposed integration requiring
+verification of real adapters and permissions.
+
 ## Cấu trúc thư mục
 
 **Phân chia:** mã nguồn và công cụ phát triển nằm trong [`cms/`](cms/README.md), tài liệu nằm ở [`docs/`](docs/README.md), còn dữ liệu website được đặt trực tiếp ở root. `.agents/`, `AGENTS.md` và `.gitignore` cũng ở root để các AI và Git dùng chung. [Kiểm kê trước khi tạo scaffold](docs/verification/2026-11-06-repository-inventory.md).
@@ -18,7 +27,7 @@ CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress
 | [`plugins/`](plugins/README.md) | Plugin đã cài của website; từng plugin nằm trong `plugins/<plugin-id>/` khi CMS hỗ trợ cài ZIP |
 | [`uploads/`](uploads/README.md) | Ảnh/video và media người dùng tải lên; nội dung không commit vào Git |
 | [`database/`](database/README.md) | SQLite `opendash.sqlite`, file WAL/SHM; dữ liệu của website, được giữ nguyên khi đổi từ `data/` |
-| `.agents/` | Workflow Codex ↔ Antigravity; `.agents/sync/` là dữ liệu tạm và được ignore |
+| `.agents/` | Research, draft discussions, task handoffs and reference archives; retired skills are in `.agents/archive/skills/` |
 
 M1 lưu template và dữ liệu trang trong SQLite. M2 lưu manifest, Wasm, KV và log của plugin trong cùng database. Các thư mục website ở gốc dành cho bố cục triển khai V1.
 
@@ -28,7 +37,7 @@ M1 lưu template và dữ liệu trang trong SQLite. M2 lưu manifest, Wasm, KV 
 2. Đọc [kiến trúc CMS và cấu trúc thư mục](docs/architecture/CMS_ARCHITECTURE.md) cùng [đề xuất CMS-first](docs/architecture/CMS_PROPOSAL.md) để nắm ranh giới module trước khi triển khai.
 3. Dùng [mục lục docs](docs/README.md) để phân biệt thiết kế đã duyệt, kế hoạch và bằng chứng kiểm chứng. Khi làm việc bằng AI, đọc [AGENTS.md](AGENTS.md) và [giao thức thảo luận](docs/discussions/PROTOCOL.md).
 4. Tra lại phạm vi và nguồn M1/M2 theo [kế hoạch nhập mã](docs/plans/README.md) và ghi bằng chứng mới vào [verification](docs/verification/README.md). Không thay thế migrations hay plugin runtime đã kiểm chứng bằng mã mẫu.
-5. Khi lập kế hoạch tính năng V1, đọc [Roadmap](docs/plans/ROADMAP_V1.md), [Module Catalog](docs/plans/MODULE_CATALOG_V1.md) và [quy trình chia task](docs/plans/PLANNING_WORKFLOW.md). M3 là mốc nghiên cứu tiếp theo sau M2.5 đã kiểm chứng.
+5. Khi lập kế hoạch tính năng V1, đọc [Roadmap](docs/plans/ROADMAP_V1.md), [Module Catalog](docs/plans/MODULE_CATALOG_V1.md) và [quy trình chia task](docs/plans/PLANNING_WORKFLOW.md). M3.1–M3.6 đã có [bằng chứng theo slice](docs/plans/M3_STATUS_2026-11-09.md); toàn M3 vẫn PARTIAL và các capability còn thiếu phải qua gate phù hợp.
 
 ## Bộ tài liệu
 

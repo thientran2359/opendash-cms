@@ -2,9 +2,11 @@
 
 **Scope:** PRD V1 `AGREED` / ranh giới module đã thống nhất · **Milestone dự kiến:** M3 (`M3-S01`, `M3-S05`) · **PRD:** [Content & ownership](../../product/PRODUCT_REQUIREMENTS.md) · **Track:** `Full-Track` vì cần core contract, migration SQLite và API.
 
-**Trạng thái hiện tại (08/11/2026):** Research `REVIEWED` (source/CodeGraph tại `main@2bad893` và phản biện Codex ↔ Antigravity đến Turn 5, 07/11/2026) · Design `PROPOSED` (**G2 đang mở, chưa `AGREED`**) · Implementation `NOT_STARTED` · Verification `NOT_RUN`. Đề xuất G2 dưới đây **chưa cho phép giao task code**; phải phản biện/chốt contract trước G3.
+**Cập nhật trạng thái (09/11/2026):** CNT-01 hiện **PARTIAL**. Domain CPT và 9 custom fields [M3.1](../../verification/2026-11-08-m3-1-content-domain.md), SQLite/Admin CPT GET/POST [M3.2](../../verification/2026-11-08-m3-2-content-types-backend.md) và giao diện tạo CPT [M3.4](../../verification/2026-11-08-m3-4-admin-content-ui.md) đã có bằng chứng macOS. Chưa có full schema update/delete hoặc plugin/theme manifest registration E2E; chưa được đánh dấu toàn CNT-01 `VERIFIED`. Xem [bảng trạng thái M3](../M3_STATUS_2026-11-09.md). Các phương án và task ứng viên G1–G3 phía dưới **là hồ sơ lịch sử 08/11**, phải đối chiếu source/Issue trước khi mở task tiếp, không giao lại các phần đã triển khai.
 
-Đây là **Living Module Brief** chứa G0–G3 tại một nơi. Kết quả G1 là khảo sát/đề xuất cần phản biện, **không phải schema hay interface đã duyệt**. Chỉ tách `docs/research/` cho đánh giá lớn/benchmark, không tạo file task rời. Xem [planning consensus](../../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) và [Pre-M3 readiness](../../discussions/threads/2026-11-07-pre-m3-codegraph-readiness.md).
+**Hồ sơ trạng thái nghiên cứu ngày 08/11/2026 (lịch sử, không phải tình trạng hiện nay):** Research `REVIEWED` (source/CodeGraph tại `main@2bad893` và phản biện Codex ↔ Antigravity đến Turn 5, 07/11/2026) · Design `PROPOSED` (**G2 đang mở, chưa `AGREED`**) · Implementation `NOT_STARTED` · Verification `NOT_RUN`. Đề xuất G2 dưới đây **chưa cho phép giao task code**; phải phản biện/chốt contract trước G3.
+
+Đây là **Living Module Brief** chứa G0–G3 tại một nơi. Kết quả G1 là khảo sát/đề xuất cần phản biện, **không phải schema hay interface đã duyệt**. Nghiên cứu mới chưa duyệt đặt trong `.agents/research/` cho đánh giá lớn/benchmark, không tạo file task rời. Xem [planning consensus](../../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) và [Pre-M3 readiness](../../discussions/threads/2026-11-07-pre-m3-codegraph-readiness.md).
 
 ## G0 — Năng lực cần có
 
@@ -86,7 +88,7 @@
 
 **Kết luận G1 (`REVIEWED`):** thống nhất **ứng viên D — declaration lifecycle tách provider availability**; seed built-in `post/page` qua migration mới là ứng viên ưu tiên, giữ `home_page` và các migration cũ. Đã đủ khảo sát để **mở thiết kế G2**, nhưng cách lưu state cho mọi owner, migration, schema field, interface/event, plugin manifest bridge và chính sách upgrade/enable **chưa được chốt**. Không đánh dấu implementation/verification M3 từ các thí nghiệm cô lập. [Thread đồng thuận G1](../../discussions/threads/2026-11-07-m3-g1-content-types-media-research.md).
 
-## G2 — Đề xuất thiết kế v0.1 (đang phản biện, **`PROPOSED`**)
+## G2 — Hồ sơ đề xuất thiết kế v0.1 (08/11/2026) (đang phản biện, **`PROPOSED`**)
 
 **Nguồn:** kết quả G1 ở trên và [luồng thảo luận G2](../../discussions/threads/2026-11-08-m3-g2-content-types-media-design.md). **Contract đầu vào:** [PRD](../../product/PRODUCT_REQUIREMENTS.md), [CORE_FOUNDATION](../../contracts/CORE_FOUNDATION.md), [PLUGIN_ABI v1](../../contracts/PLUGIN_ABI.md), [ADR-0002](../../decisions/ADR-0002-core-extension-contract.md). **Phạm vi G2:** định nghĩa CPT, ownership, persistence, API và plugin registration tối thiểu trong M3-S01/S05. **Ngoài phạm vi brief CNT-01:** entry schema/CRUD (`CNT-02/04`), template/public URL resolver (`CNT-04/THM-02/SITE-02`), theme switch đầy đủ (`M5`), manifest cho blocks/templates (`M4/M6`). **Field declaration bridge vẫn thuộc M3:** CNT-02 sở hữu schema/validation, PLG-03 sở hữu adapter tại M3-S02; phải chốt G2 riêng trước triển khai để M3-S05 nghiệm thu plugin CPT + fields. Không trì hoãn field bridge sang M6 và không nhúng field schema vào CPT descriptor. Đây là thiết kế ứng viên, không phải migration hoặc API đã tồn tại.
 
@@ -149,7 +151,7 @@ Route dùng `auth::require_session`/`require_admin_with_csrf` và `ApiError`, ha
 
 **Những điểm cần chốt để chuyển `PROPOSED → AGREED`:** hình dạng/version/giới hạn của `descriptor_json`; hợp đồng PluginManifest optional và chính sách reinstall disabled; status khi Theme chưa có provider state M5; chỗ đặt event hooks trong `CNT-04`; migration số và bảng liên module. Nếu thay hợp đồng chung, tạo ADR/cập nhật `docs/contracts/` **sau khi duyệt G2, trước G3**.
 
-## G3 — Breakdown task dự kiến (chưa sẵn sàng giao code)
+## G3 — Các task ứng viên từ lịch sử nghiên cứu (cần đối chiếu triển khai hiện hành) (chưa sẵn sàng giao code)
 
 | Task ID giữ từ bản nháp | Đầu ra khi qua G3 | Phụ thuộc và điều kiện |
 | --- | --- | --- |
@@ -160,4 +162,4 @@ Route dùng `auth::require_session`/`require_admin_with_csrf` và `ApiError`, ha
 
 **Ánh xạ lịch sử ID:** `M3-S01-T01` và `M3-S01-T02` trong discovery draft cũ từng chỉ G1/G2; nay chuyển về các mục G1/G2 ở trên và **giữ hai số ID đó ở trạng thái retired, không tái cấp phát**. `T03..T06` là *task candidates*, chưa `READY`; bảng này chỉ được chốt ở G3.
 
-Khi qua G2, chuyển từng task sang [mẫu giao việc](../templates/SLICE_TASK.md) trong `.agents/sync/task-for-ag.md`, ghi file ownership theo lượt, test và rollback. Không tạo hàng loạt file task mới; chưa được phép triển khai M3 từ nội dung brief này.
+Khi qua G2, dùng [mẫu giao việc](../templates/SLICE_TASK.md) để chuẩn bị GitHub Issue cho từng task; bản nháp có thể đặt ở `.agents/tasks/` khi cần, ghi file ownership theo lượt, test và rollback. Không tạo hàng loạt file task mới; chưa được phép triển khai M3 từ nội dung brief này.

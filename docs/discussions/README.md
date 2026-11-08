@@ -1,4 +1,12 @@
-# Chủ đề thảo luận Codex ↔ Antigravity
+# Hồ sơ thảo luận Codex ↔ Antigravity (lịch sử)
+
+> **Lưu trữ:** Các thread bên dưới là bằng chứng/hồ sơ thảo luận tại ngày
+> ghi trong file, **không phải** danh sách task/thiết kế đang chờ thực hiện.
+> Thảo luận mới chưa duyệt đặt trong
+> [`.agents/discussions/`](../../.agents/discussions/), Issue đang triển khai
+> do GitHub quản lý theo [quy trình hiện hành](../../.agents/GITHUB_WORKFLOW.md).
+> Trạng thái triển khai M3 hiện tại nằm trong
+> [bảng đối chiếu M3](../plans/M3_STATUS_2026-11-09.md).
 
 Các chủ đề sử dụng [PROTOCOL.md](PROTOCOL.md): lượt trao đổi append-only, cập nhật metadata ở đầu thread và phân biệt `OPEN`, `NEEDS_HUMAN_INPUT`, `CONSENSUS_REACHED`. Kết luận trao đổi không thay cho quyết định của chủ dự án hoặc bằng chứng kiểm chứng.
 

@@ -123,7 +123,7 @@ opendash/
 
 ```text
 opendash-cms/
-├── .agents/                   # Codex ↔ Antigravity (giữ ở root)
+├── .agents/                   # Nghiên cứu/thảo luận/task nháp của các AI; kỹ năng cũ trong archive/
 ├── .vscode/                   # settings.json cấu hình rust-analyzer.linkedProjects -> cms/Cargo.toml
 ├── cms/                       # Mã nguồn và công cụ phát triển (xem cây bên dưới)
 ├── docs/                      # Yêu cầu sản phẩm, kiến trúc, ADR và verification
