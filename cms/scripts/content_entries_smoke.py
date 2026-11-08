@@ -15,6 +15,9 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from content_types_smoke import login, request, running
+from media_smoke import upload_image
+
+MEDIA_IDS = ["asset_1", "asset_2"]  # Overwritten with real uploads before writes.
 
 
 def api(base, method, path, body=None, headers=None):
@@ -60,7 +63,7 @@ def entry(slug="demo-project"):
             "caption": "Giới thiệu", "description": "Dòng một\nDòng hai",
             "html": "<strong>Chưa render</strong>", "price": 0, "active": False,
             "date": "2024-02-29", "state": "open",
-            "cover": "asset_1", "gallery": ["asset_1", "asset_2"],
+            "cover": MEDIA_IDS[0], "gallery": MEDIA_IDS,
         },
     }
 
@@ -82,6 +85,11 @@ def check_crud(binary):
             admin_credentials = {"username": "admin", "password": "password123"}
             assert_status(request(base, "/auth/setup", admin_credentials), 201, "Setup")
             admin = login(base, **admin_credentials)
+            global MEDIA_IDS
+            MEDIA_IDS = [
+                upload_image(base, admin, seed=11)["id"],
+                upload_image(base, admin, seed=19)["id"],
+            ]
             assert_status(request(base, "/api/admin/content-types", definition(), admin), 201, "Create CPT")
             assert_status(request(base, "/api/admin/content-types", definition("news"), admin), 201, "Create second CPT")
             assert_status(api(base, "GET", "/api/admin/content-types/missing/entries", headers=admin), 404, "Missing CPT")
@@ -101,7 +109,7 @@ def check_crud(binary):
                 {**entry("bad-date"), "values": {**entry()["values"], "date": "2025-02-29"}},
                 {**entry("bad-short"), "values": {**entry()["values"], "caption": "a" * 513}},
                 {**entry("bad-image"), "values": {**entry()["values"], "cover": "../bad"}},
-                {**entry("bad-gallery"), "values": {**entry()["values"], "gallery": ["asset_1", "asset_1"]}},
+                {**entry("bad-gallery"), "values": {**entry()["values"], "gallery": [MEDIA_IDS[0], MEDIA_IDS[0]]}},
                 {**entry("bad-slug"), "slug": "Invalid Slug"},
             ]
             for invalid in invalid_cases:
@@ -199,6 +207,11 @@ def check_legacy_upgrade(binary, fixture):
             credentials = {"username": "admin", "password": "password123"}
             assert_status(request(base, "/auth/setup", credentials), 201, "Upgrade setup")
             admin = login(base, **credentials)
+            global MEDIA_IDS
+            MEDIA_IDS = [
+                upload_image(base, admin, seed=11)["id"],
+                upload_image(base, admin, seed=19)["id"],
+            ]
             assert_status(request(base, "/api/admin/content-types", definition(), admin), 201, "Upgrade CPT")
             assert_status(api(base, "POST", "/api/admin/content-types/portfolio/entries", entry(), admin), 201, "Upgrade entry")
             assert_status(api(base, "GET", "/api/admin/content-types/portfolio/entries", headers=admin), 200, "Upgrade list")

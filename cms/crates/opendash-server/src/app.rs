@@ -13,6 +13,7 @@ use sqlx::SqlitePool;
 
 use crate::{
     hooks::HookDispatcher,
+    media::{MAX_MEDIA_BYTES, MediaStore},
     plugin::PluginManager,
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup, create_editor},
@@ -22,6 +23,7 @@ use crate::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
             entry_update,
         },
+        media::{media_list, media_original, media_thumbnail, media_upload},
         plugin::{
             MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES, plugin_disable, plugin_enable,
             plugin_install, plugin_list, plugin_run,
@@ -36,6 +38,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub plugin_manager: Arc<PluginManager>,
     pub hooks: Arc<HookDispatcher>,
+    pub media_store: Arc<MediaStore>,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -53,6 +56,12 @@ impl axum::extract::FromRef<AppState> for Arc<PluginManager> {
 impl axum::extract::FromRef<AppState> for Arc<HookDispatcher> {
     fn from_ref(state: &AppState) -> Self {
         state.hooks.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<MediaStore> {
+    fn from_ref(state: &AppState) -> Self {
+        state.media_store.clone()
     }
 }
 
@@ -94,6 +103,14 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
                 .delete(entry_delete)
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
         )
+        .route(
+            "/api/admin/media",
+            get(media_list)
+                .post(media_upload)
+                .layer(DefaultBodyLimit::max(MAX_MEDIA_BYTES)),
+        )
+        .route("/api/admin/media/{id}/file", get(media_original))
+        .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))
         .route(
             "/api/admin/plugins",
             get(plugin_list)

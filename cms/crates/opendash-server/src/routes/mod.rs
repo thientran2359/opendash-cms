@@ -3,5 +3,6 @@ pub mod builder;
 pub mod content;
 pub mod entries;
 pub mod health;
+pub mod media;
 pub mod plugin;
 pub mod public;

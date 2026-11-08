@@ -7,3 +7,5 @@ Xem [lệnh chạy các bộ kiểm thử](../../README.md#kiểm-chứng-tại-
 `content_types_smoke.py` chạy được bằng Python 3 trên macOS/Windows sau khi build binary. Tại root: `python3 cms/scripts/content_types_smoke.py --binary cms/target/debug/opendash` (đổi đường dẫn binary tương ứng trên Windows). Script tạo website/database tạm, không dùng SQLite thực của dự án.
 
 `content_entries_smoke.py` kiểm chứng M3.3 trên HTTP/SQLite thực (entry CRUD, field type validation, Editor/CSRF, slug, phiên bản If-Match, provider inactive và upgrade fixture). Tại root: `python3 cms/scripts/content_entries_smoke.py --binary cms/target/debug/opendash`. Cũng dùng SQLite tạm.
+
+`media_smoke.py` kiểm chứng M3.5: upload raster thật, thumbnail, Auth/CSRF/Origin, từ chối file giả và quá cỡ, xác minh media refs trong entry, dữ liệu qua restart. Từ root: `python3 cms/scripts/media_smoke.py --binary cms/target/debug/opendash`. Các ca test dùng site/database tạm, không ghi vào `uploads/` của website thật.

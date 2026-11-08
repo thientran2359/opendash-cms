@@ -2,6 +2,7 @@ mod app;
 mod auth;
 mod error;
 mod hooks;
+mod media;
 mod package;
 mod paths;
 mod plugin;
@@ -13,6 +14,7 @@ use std::{env, net::Ipv4Addr, sync::Arc};
 
 use app::{AppState, build_router};
 use hooks::HookDispatcher;
+use media::MediaStore;
 use plugin::PluginManager;
 
 #[tokio::main]
@@ -36,6 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db: db.clone(),
         plugin_manager,
         hooks,
+        media_store: Arc::new(MediaStore::new(paths.uploads_dir())),
     };
 
     let port = env::var("OPENDASH_PORT")

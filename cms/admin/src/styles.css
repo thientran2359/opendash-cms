@@ -419,3 +419,113 @@ button.btn-danger {
     flex-direction: column;
   }
 }
+
+/* M3.5: media picker isolated from Builder's iframe and Admin form layout. */
+.media-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+.media-modal {
+  width: min(980px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+  border-radius: 12px;
+  padding: 22px;
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.media-toolbar,
+.media-field-actions,
+.media-dialog-footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+.media-upload-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.media-upload-control input { max-width: 200px; }
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  min-height: 150px;
+}
+.media-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 8px;
+  text-align: left;
+  background: #f8fafc;
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+.media-tile:hover:not(:disabled) { background: #eaf5ff; }
+.media-tile.selected { border: 3px solid var(--color-primary); }
+.media-tile img {
+  width: 100%;
+  height: 110px;
+  object-fit: contain;
+  background: #e2e8f0;
+}
+.media-tile small { color: var(--color-text-muted); }
+.media-filename {
+  overflow-wrap: anywhere;
+  font-size: 0.83rem;
+}
+.media-inline-preview {
+  display: block;
+  width: 130px;
+  height: 100px;
+  object-fit: contain;
+  background: #e2e8f0;
+  margin: 8px 0;
+  border: 1px solid var(--color-border);
+}
+.media-selected-gallery {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+.media-selected-item {
+  width: 120px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  padding: 6px;
+  background: #f8fafc;
+}
+.media-selected-item img {
+  width: 100%;
+  height: 80px;
+  object-fit: contain;
+}
+.media-selected-item code {
+  display: block;
+  margin: 4px 0;
+  font-size: 0.75rem;
+}
+.media-selected-item button { padding: 4px 8px; }
+@media (max-width: 520px) {
+  .media-modal { padding: 12px; max-height: 96vh; }
+  .media-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

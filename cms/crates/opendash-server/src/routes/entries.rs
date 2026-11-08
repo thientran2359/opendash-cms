@@ -20,7 +20,9 @@ use crate::{
     auth::{require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
-    storage::{content::load_content_type_definition, entries as entry_storage},
+    storage::{
+        content::load_content_type_definition, entries as entry_storage, media as media_storage,
+    },
 };
 
 pub const MAX_CONTENT_ENTRY_JSON_BYTES: usize = 512 * 1024;
@@ -118,6 +120,7 @@ pub async fn entry_create(
     input
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
+    media_storage::require_existing_references(&db, &schema, &input).await?;
     hooks.emit(
         HookEvent::ContentBeforeSave,
         json!({ "type_key": &type_key, "operation": "create" }),
@@ -154,6 +157,7 @@ pub async fn entry_update(
     input
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
+    media_storage::require_existing_references(&db, &schema, &input).await?;
     hooks.emit(
         HookEvent::ContentBeforeSave,
         json!({ "type_key": &type_key, "id": id, "operation": "update" }),

@@ -13,6 +13,7 @@ import { TextField } from '../../components/FormPrimitives.tsx';
 import { AuthUser } from '../../types.ts';
 import { ContentTypeForm } from './ContentTypeForm.tsx';
 import { FieldValueInput } from './FieldValueInput.tsx';
+import { MediaPicker } from '../media/MediaPicker.tsx';
 import {
   ContentEntryInput,
   ContentEntryRecord,
@@ -121,6 +122,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [staleVersion, setStaleVersion] = useState(false);
+  const [pickerTarget, setPickerTarget] = useState<{ mode: 'browse' | 'image' | 'gallery'; fieldKey: string | null } | null>(null);
   const lastSignedInUser = useRef<number | null>(null);
   const currentListKey = useRef(selectedTypeKey);
   const currentListOffset = useRef(offset);
@@ -358,6 +360,14 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
             {showTypeForm ? 'Ẩn form CPT' : '+ Tạo loại nội dung'}
           </button>
         )}
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!user}
+          onClick={() => setPickerTarget({ mode: 'browse', fieldKey: null })}
+        >
+          Media Library
+        </button>
       </header>
 
       {(notice || error) && (
@@ -546,6 +556,10 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                         value={draft.values[field.key] ?? ''}
                         disabled={!user || processing}
                         onChange={value => editField(field.key, value)}
+                        onPickMedia={() => setPickerTarget({
+                          mode: field.type === 'gallery' ? 'gallery' : 'image',
+                          fieldKey: field.key,
+                        })}
                       />
                     ))}
                   </div>
@@ -578,6 +592,22 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
           )}
         </section>
       </div>
+      {user && pickerTarget && (
+        <MediaPicker
+          key={`${pickerTarget.mode}-${pickerTarget.fieldKey ?? 'library'}`}
+          mode={pickerTarget.mode}
+          csrfToken={csrfToken}
+          selectedIds={pickerTarget.fieldKey
+            ? (draft?.values[pickerTarget.fieldKey] ?? '').split(/[\n,]+/).map(id => id.trim()).filter(Boolean)
+            : []}
+          onApply={ids => {
+            if (pickerTarget.fieldKey) editField(pickerTarget.fieldKey, ids.join('\n'));
+            setPickerTarget(null);
+          }}
+          onClose={() => setPickerTarget(null)}
+          onError={reportError}
+        />
+      )}
     </div>
   );
 };

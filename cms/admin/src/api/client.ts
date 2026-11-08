@@ -16,6 +16,8 @@ export interface ApiRequestOptions {
   signal?: AbortSignal;
   /** M3 optimistic edit version, serialized as If-Match: "vN". */
   ifMatchVersion?: number;
+  /** Encoded display name for raw binary media uploads (never a server path). */
+  uploadFilename?: string;
   defaultErrorMessage: string;
   oversizeErrorMessage?: string;
 }
@@ -24,6 +26,7 @@ function buildRequestHeaders(
   csrfToken?: string | null,
   contentType?: string,
   ifMatchVersion?: number,
+  uploadFilename?: string,
 ): Record<string, string> {
   const headers: Record<string, string> = {};
   if (contentType) {
@@ -34,6 +37,9 @@ function buildRequestHeaders(
   }
   if (ifMatchVersion !== undefined) {
     headers['If-Match'] = `"v${ifMatchVersion}"`;
+  }
+  if (uploadFilename) {
+    headers['X-File-Name'] = encodeURIComponent(uploadFilename);
   }
   return headers;
 }
@@ -50,7 +56,7 @@ export async function requestText(url: string, options: ApiRequestOptions): Prom
   const res = await fetch(url, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion),
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename),
     body: options.body,
     signal: options.signal,
   });
@@ -61,7 +67,7 @@ export async function requestJson<T>(url: string, options: ApiRequestOptions): P
   const res = await fetch(url, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion),
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename),
     body: options.body,
     signal: options.signal,
   });

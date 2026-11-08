@@ -199,8 +199,8 @@ fn valid_field_value(field: &ContentFieldDefinition, value: &Value) -> bool {
     }
 }
 
-/// Provisional opaque media identifiers; existence/permissions will be checked
-/// when M3 Media Library is implemented, not by this domain-only validator.
+/// The domain checks opaque media identifier syntax; the server storage layer
+/// additionally verifies each image/gallery ID exists before saving entries.
 fn valid_media_id(value: &str) -> bool {
     (1..=128).contains(&value.len())
         && value.bytes().all(|c| {
