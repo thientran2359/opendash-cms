@@ -1,0 +1,46 @@
+# <TASK-ID> — <Mục tiêu có thể nghiệm thu>
+
+**Cách dùng:** mẫu viết một task **sau G3** để handoff qua `.agents/sync/task-for-ag.md` hoặc đoạn task ở brief. Không tạo file Markdown riêng cho từng task chỉ để đủ thủ tục; G1/G2 không phải task code.
+
+- **Thuộc:** Release ..., Milestone ..., Slice ..., Module ID / Capability ID ...
+- **Primary Acceptance Slice của capability:** ... (một slice nghiệm thu chính, có thể được regression lại về sau)
+- **Track:** Full-Track / Fast-Track; lý do và trạng thái G2 (nếu cần).
+- **Trạng thái:** PLANNED / READY / IN_PROGRESS / IMPLEMENTED / VERIFIED / BLOCKED.
+- **Nguồn quyết định:** PRD ..., contract ..., ADR ..., module brief ..., predecessor ...
+- **Người triển khai / review:** ...
+
+## Mục tiêu và hành vi quan sát được
+
+Từ tình huống ... người dùng làm ... hệ thống phải trả kết quả ... sau khi restart/đổi provider/401 (nếu liên quan).
+
+## Đầu vào, phần được sửa và ngoài phạm vi
+
+- Đầu vào hoặc API đã có: ...
+- Danh sách **file người thực thi được phép sửa trong lượt này** (kiểm tra source trước khi bắt đầu): ...
+- File/hợp đồng do Codex hoặc agent khác sở hữu trong lượt, không được sửa đồng thời: ...
+- Phần ngoài phạm vi: ...
+- Dependency đang chặn (nếu có): ...
+
+## Cách triển khai theo contract
+
+API lõi phải tái sử dụng, các thao tác storage, transaction, quyền, UI và backward compatibility; ghi phương án khi phát hiện thiết kế cần đổi. Không tự tạo API tương đương với API lõi.
+
+**Stop-and-Propose:** nếu phát sinh thay đổi PRD, contract công khai, migration đã chạy, security/ABI hoặc phá G2 thì tạm dừng tại ranh giới, báo blocker và tối thiểu hai phương án; không tự chốt G2. Tinh chỉnh nội bộ không phá contract phải báo `Design Delta` và test để review.
+
+## Nghiệm thu
+
+- [ ] ...
+- [ ] ...
+- [ ] Có kiểm tra lỗi và quyền đối với đường có rủi ro.
+- [ ] Bằng chứng thực chạy cho luồng chính, có ghi lệnh, commit/branch, môi trường và phạm vi.
+- [ ] Không làm hỏng các hành vi M1/M2 hoặc dữ liệu cũ liên quan.
+
+## Bàn giao và review
+
+- Diff/đường dẫn thay đổi: ...
+- Kiểm tra đã chạy, kết quả, giới hạn: ...
+- Rủi ro, backup/rollback/migration (nếu có): ... (Git revert không rollback DB đã migrate; test bằng DB copy).
+- Review phát hiện và xử lý: ...
+- Link báo cáo verification: ...
+
+**Quy tắc:** chỉ đánh VERIFIED cho đúng phạm vi có kết quả thực chạy. Mọi lần kiểm chứng sau đó vẫn giữ evidence lịch sử; khi có regression phải cập nhật trạng thái hiện hành. Không đổi PRD/contract vượt quyền hoặc phát động deploy từ task.

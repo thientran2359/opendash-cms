@@ -1,3 +1,4 @@
+use crate::storage::plugin_kv;
 use std::{
     collections::BTreeMap,
     sync::{
@@ -290,12 +291,7 @@ impl PluginRuntime {
                                     let db = db_pool_clone.clone();
 
                                     let query_fut = async move {
-                                        sqlx::query_scalar::<_, String>(
-                                            "SELECT value_json FROM plugin_kv WHERE plugin_id = ? AND key = ?",
-                                        )
-                                        .bind(&plugin_id)
-                                        .bind(&key_str)
-                                        .fetch_optional(&db)
+                                        plugin_kv::get(&db, &plugin_id, &key_str)
                                         .await
                                     };
 
@@ -455,10 +451,8 @@ impl PluginRuntime {
                 }
             };
 
-            let initial_busy_timeout: i64 = sqlx::query_scalar("PRAGMA busy_timeout")
-                .fetch_one(&mut *conn)
-                .await
-                .unwrap_or(5000);
+            let initial_busy_timeout: i64 =
+                plugin_kv::busy_timeout(&mut conn).await.unwrap_or(5000);
 
             let mut commit_guard = StagedCommitGuard {
                 conn: Some(conn),
@@ -476,22 +470,13 @@ impl PluginRuntime {
             }
 
             let begin_budget_ms = cur_rem.as_millis().max(1);
-            if let Err(e) = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                "PRAGMA busy_timeout = {begin_budget_ms}"
-            )))
-            .execute(&mut **conn)
-            .await
-            {
+            if let Err(e) = plugin_kv::set_busy_timeout(conn, begin_budget_ms as u128).await {
                 guard.cleanup();
                 return Err(PluginError::Internal(format!("Lỗi set busy_timeout: {e}")));
             }
 
-            if let Err(e) = sqlx::query("BEGIN IMMEDIATE").execute(&mut **conn).await {
-                let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                    "PRAGMA busy_timeout = {initial_busy_timeout}"
-                )))
-                .execute(&mut **conn)
-                .await;
+            if let Err(e) = plugin_kv::begin_immediate(conn).await {
+                let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                 guard.cleanup();
                 let err_str = e.to_string();
                 if err_str.contains("database is locked")
@@ -508,31 +493,20 @@ impl PluginRuntime {
             for (key, val) in staged_writes {
                 let cur_rem = deadline.saturating_duration_since(Instant::now());
                 if cur_rem.is_zero() || cancellation_token.load(Ordering::Relaxed) {
-                    let _ = sqlx::query("ROLLBACK").execute(&mut **conn).await;
-                    let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                        "PRAGMA busy_timeout = {initial_busy_timeout}"
-                    )))
-                    .execute(&mut **conn)
-                    .await;
+                    let _ = plugin_kv::rollback(conn).await;
+                    let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                     guard.cleanup();
                     return Err(PluginError::Timeout);
                 }
                 let insert_budget_ms = cur_rem.as_millis().max(1);
-                let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                    "PRAGMA busy_timeout = {insert_budget_ms}"
-                )))
-                .execute(&mut **conn)
-                .await;
+                let _ = plugin_kv::set_busy_timeout(conn, insert_budget_ms as u128).await;
 
                 let val_str = match serde_json::to_string(&val) {
                     Ok(s) => s,
                     Err(e) => {
-                        let _ = sqlx::query("ROLLBACK").execute(&mut **conn).await;
-                        let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                            "PRAGMA busy_timeout = {initial_busy_timeout}"
-                        )))
-                        .execute(&mut **conn)
-                        .await;
+                        let _ = plugin_kv::rollback(conn).await;
+                        let _ =
+                            plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                         guard.cleanup();
                         return Err(PluginError::Internal(format!(
                             "Lỗi serialize staged KV: {e}"
@@ -540,23 +514,9 @@ impl PluginRuntime {
                     }
                 };
 
-                if let Err(e) = sqlx::query(
-                    "INSERT INTO plugin_kv (plugin_id, key, value_json, updated_at)
-                     VALUES (?, ?, ?, datetime('now'))
-                     ON CONFLICT(plugin_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at",
-                )
-                .bind(&plugin_id)
-                .bind(&key)
-                .bind(&val_str)
-                .execute(&mut **conn)
-                .await
-                {
-                    let _ = sqlx::query("ROLLBACK").execute(&mut **conn).await;
-                    let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                        "PRAGMA busy_timeout = {initial_busy_timeout}"
-                    )))
-                    .execute(&mut **conn)
-                    .await;
+                if let Err(e) = plugin_kv::set(conn, &plugin_id, &key, &val_str).await {
+                    let _ = plugin_kv::rollback(conn).await;
+                    let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                     guard.cleanup();
                     let err_str = e.to_string();
                     if err_str.contains("database is locked")
@@ -580,31 +540,19 @@ impl PluginRuntime {
             // --- COMMIT HANDOVER POINT ---
             // If deadline expired or cancelled before sending COMMIT, we must rollback and confirm cleanup.
             if Instant::now() >= deadline || cancellation_token.load(Ordering::Relaxed) {
-                let _ = sqlx::query("ROLLBACK").execute(&mut **conn).await;
-                let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                    "PRAGMA busy_timeout = {initial_busy_timeout}"
-                )))
-                .execute(&mut **conn)
-                .await;
+                let _ = plugin_kv::rollback(conn).await;
+                let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                 guard.cleanup();
                 return Err(PluginError::Timeout);
             }
 
             let cur_rem = deadline.saturating_duration_since(Instant::now());
             let commit_budget_ms = cur_rem.as_millis().max(1);
-            let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                "PRAGMA busy_timeout = {commit_budget_ms}"
-            )))
-            .execute(&mut **conn)
-            .await;
+            let _ = plugin_kv::set_busy_timeout(conn, commit_budget_ms as u128).await;
 
-            let commit_res = sqlx::query("COMMIT").execute(&mut **conn).await;
+            let commit_res = plugin_kv::commit(conn).await;
             // Always restore initial busy_timeout so it never leaks to other callers from the pool
-            let _ = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
-                "PRAGMA busy_timeout = {initial_busy_timeout}"
-            )))
-            .execute(&mut **conn)
-            .await;
+            let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
 
             match commit_res {
                 Ok(_) => {
@@ -613,7 +561,7 @@ impl PluginRuntime {
                     commit_guard.committed = true;
                 }
                 Err(e) => {
-                    let _ = sqlx::query("ROLLBACK").execute(&mut **conn).await;
+                    let _ = plugin_kv::rollback(conn).await;
                     guard.cleanup();
                     let err_str = e.to_string();
                     if err_str.contains("database is locked")

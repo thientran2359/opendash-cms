@@ -26,6 +26,9 @@ pub struct PluginManifest {
     pub entrypoint: String,
     #[serde(default)]
     pub permissions: PluginPermissions,
+    /// Optional lifecycle subscriptions; manual invocation input remains unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hooks: Vec<crate::hooks::HookEvent>,
 }
 
 fn default_entrypoint() -> String {
@@ -56,6 +59,14 @@ impl PluginManifest {
         }
         if self.entrypoint != "plugin.wasm" {
             return Err("Entrypoint phải là 'plugin.wasm'.");
+        }
+        if self.hooks.len() > 1
+            || self
+                .hooks
+                .iter()
+                .any(|event| *event != crate::hooks::HookEvent::PageAfterSave)
+        {
+            return Err("Only one page/after_save subscription is supported.");
         }
         for perm in &self.permissions.sqlite {
             if perm != "kv_read" && perm != "kv_write" {
@@ -136,5 +147,36 @@ mod scaffold_validation_tests {
         assert!(!valid_plugin_id("-bad"));
         assert!(!valid_plugin_id("bad-"));
         assert!(!valid_plugin_id("Invalid_Plugin"));
+    }
+}
+
+#[cfg(test)]
+mod hook_tests {
+    use super::*;
+    #[test]
+    fn subscriptions_are_optional_unique_and_limited_to_implemented_events() {
+        let mut value = serde_json::json!({"id":"hook-plugin", "name":"Hook", "version":"1.0.0", "api_version":1});
+        assert!(
+            PluginManifest::from_json_str(&value.to_string())
+                .unwrap()
+                .hooks
+                .is_empty()
+        );
+        value["hooks"] = serde_json::json!(["page/after_save"]);
+        assert_eq!(
+            PluginManifest::from_json_str(&value.to_string())
+                .unwrap()
+                .hooks
+                .len(),
+            1
+        );
+        for invalid in [
+            serde_json::json!(["page/after_save", "page/after_save"]),
+            serde_json::json!(["content/before_save"]),
+            serde_json::json!(["page_after_save"]),
+        ] {
+            value["hooks"] = invalid;
+            assert!(PluginManifest::from_json_str(&value.to_string()).is_err());
+        }
     }
 }

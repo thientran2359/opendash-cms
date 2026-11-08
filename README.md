@@ -2,7 +2,7 @@
 
 CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress. Rust, SQLite, một file thực thi cho mỗi bản cài và hệ theme/plugin riêng.
 
-**Hiện trạng (09/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.6 đã có CPT/custom fields, SQLite/API entry CRUD, giao diện Admin nội dung, [Media Library](docs/verification/2026-11-09-m3-5-media-library.md) và [trang CPT công khai](docs/verification/2026-11-09-m3-6-public-content-rendering.md) kiểm chứng trên macOS. Chưa có taxonomy, Builder nhiều tầng, active theme riêng, xóa media hoặc backup/restore.
+**Hiện trạng (09/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Xem thêm [kiểm chứng bộ khung lõi M2.5](docs/verification/2026-11-07-m2-5-core-kernel.md). Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.6 đã có CPT/custom fields, SQLite/API entry CRUD, giao diện Admin nội dung, [Media Library](docs/verification/2026-11-09-m3-5-media-library.md) và [trang CPT công khai](docs/verification/2026-11-09-m3-6-public-content-rendering.md) kiểm chứng trên macOS. Chưa có taxonomy, Builder nhiều tầng, active theme riêng, xóa media hoặc backup/restore.
 
 ## Cấu trúc thư mục
 
@@ -28,6 +28,7 @@ M1 lưu template và dữ liệu trang trong SQLite. M2 lưu manifest, Wasm, KV 
 2. Đọc [kiến trúc CMS và cấu trúc thư mục](docs/architecture/CMS_ARCHITECTURE.md) cùng [đề xuất CMS-first](docs/architecture/CMS_PROPOSAL.md) để nắm ranh giới module trước khi triển khai.
 3. Dùng [mục lục docs](docs/README.md) để phân biệt thiết kế đã duyệt, kế hoạch và bằng chứng kiểm chứng. Khi làm việc bằng AI, đọc [AGENTS.md](AGENTS.md) và [giao thức thảo luận](docs/discussions/PROTOCOL.md).
 4. Tra lại phạm vi và nguồn M1/M2 theo [kế hoạch nhập mã](docs/plans/README.md) và ghi bằng chứng mới vào [verification](docs/verification/README.md). Không thay thế migrations hay plugin runtime đã kiểm chứng bằng mã mẫu.
+5. Khi lập kế hoạch tính năng V1, đọc [Roadmap](docs/plans/ROADMAP_V1.md), [Module Catalog](docs/plans/MODULE_CATALOG_V1.md) và [quy trình chia task](docs/plans/PLANNING_WORKFLOW.md). M3 là mốc nghiên cứu tiếp theo sau M2.5 đã kiểm chứng.
 
 ## Bộ tài liệu
 
@@ -37,9 +38,9 @@ M1 lưu template và dữ liệu trang trong SQLite. M2 lưu manifest, Wasm, KV 
 | **Yêu cầu & Stack đã chốt** | [Đánh giá tech stack (TECH_STACK)](docs/architecture/TECH_STACK.md) | Stack đã duyệt (Axum, SQLx/SQLite, React/Vite, MiniJinja, Wasmi) và kết quả bản thử |
 | **Kiến trúc & Đề xuất đang dùng** | [Kiến trúc CMS và cấu trúc thư mục (CMS_ARCHITECTURE)](docs/architecture/CMS_ARCHITECTURE.md) | Cấu trúc Workspace 2 crate (`opendash-core` / `opendash-server` / `admin`), luồng Preview/Lưu và trình tự chuyển đổi |
 | **Kiến trúc & Đề xuất đang dùng** | [Đề xuất CMS-first (CMS_PROPOSAL)](docs/architecture/CMS_PROPOSAL.md) | **Đề xuất nền đang dùng có chọn lọc:** Dùng lại ranh giới module (Mục 2) và nguyên tắc tách dữ liệu khỏi theme; các phần khác đối chiếu theo `PRODUCT_REQUIREMENTS`, `TECH_STACK` và `CMS_ARCHITECTURE` |
-| **Hợp đồng kỹ thuật (Contract)** | [Hợp đồng ABI Plugin (PLUGIN_ABI)](docs/contracts/PLUGIN_ABI.md) | Quy ước bộ nhớ, hàm host, quyền, giới hạn tài nguyên và mã lỗi giữa host Wasmi và SDK plugin |
+| **Hợp đồng kỹ thuật (Contract)** | [Bộ khung lõi & Quy chuẩn code (CORE_FOUNDATION)](docs/contracts/CORE_FOUNDATION.md) · [Hợp đồng ABI Plugin (PLUGIN_ABI)](docs/contracts/PLUGIN_ABI.md) | Danh mục Base APIs bắt buộc tái sử dụng, quy chuẩn phân tầng/SQL và giao thức giữa host Wasmi với SDK plugin |
 | **Quy trình đang áp dụng** | [AGENTS.md](AGENTS.md) · [Giao thức thảo luận (PROTOCOL)](docs/discussions/PROTOCOL.md) | Quy tắc làm việc bắt buộc trong repo và giao thức phối hợp Antigravity ↔ Codex |
-| **Quyết định tổ chức repository** | [ADR-0001](docs/decisions/ADR-0001-workspace-layout.md) | Ranh giới 2 crate + React Admin; trạng thái thiết kế `AGREED` |
+| **Quyết định kiến trúc** | [ADR-0001](docs/decisions/ADR-0001-workspace-layout.md) · [ADR-0002](docs/decisions/ADR-0002-core-extension-contract.md) | Ranh giới 2 crate + React Admin và cơ chế mở rộng lõi M2.5 (`RegistryCatalog`, `HookDispatcher`, `storage/plugin_kv`) |
 | **Trạng thái và kế hoạch** | [Kiểm kê](docs/verification/2026-11-06-repository-inventory.md) · [Kế hoạch](docs/plans/README.md) | Những gì có trong workspace mới, điều kiện để import source và kiểm chứng |
 
 Khi có khác biệt, ưu tiên chỉ đạo mới nhất của chủ dự án và yêu cầu đã xác nhận trong [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md).
@@ -62,6 +63,8 @@ Binary bind loopback, mặc định cổng 18766. Binary phân phối lưu SQLit
 Sau khi build Admin và plugin mẫu bằng script trên, chạy từ gốc:
 
 ```powershell
+python cms/scripts/check-standards.py
+python cms/scripts/check-standards.py --self-test
 cargo fmt --manifest-path cms/Cargo.toml --all --check
 cargo build --manifest-path cms/Cargo.toml --locked
 cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
@@ -70,6 +73,7 @@ python scripts/windows_smoke.py --binary target/release/opendash.exe
 python scripts/windows_auth_smoke.py --binary target/release/opendash.exe
 python scripts/windows_distribution_smoke.py --binary target/release/opendash.exe
 python scripts/windows_plugin_smoke.py --binary target/release/opendash.exe
+python scripts/windows_kernel_smoke.py --binary target/release/opendash.exe
 python scripts/content_types_smoke.py --binary target/release/opendash.exe
 python scripts/content_entries_smoke.py --binary target/release/opendash.exe
 python scripts/media_smoke.py --binary target/release/opendash.exe

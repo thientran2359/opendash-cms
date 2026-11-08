@@ -77,7 +77,7 @@ pub fn validate_semver(version: &str) -> bool {
     let mut parts = version.splitn(2, '+');
     let main_and_pre = parts.next().unwrap_or("");
     if let Some(build) = parts.next() {
-        if build.is_empty()
+        if build.split('.').any(|part| part.is_empty())
             || !build
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
@@ -88,10 +88,14 @@ pub fn validate_semver(version: &str) -> bool {
     let mut pre_parts = main_and_pre.splitn(2, '-');
     let numbers_part = pre_parts.next().unwrap_or("");
     if let Some(pre) = pre_parts.next() {
-        if pre.is_empty()
-            || !pre
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+        if pre.split('.').any(|part| {
+            part.is_empty()
+                || (part.len() > 1
+                    && part.starts_with('0')
+                    && part.bytes().all(|b| b.is_ascii_digit()))
+        }) || !pre
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
         {
             return false;
         }
@@ -105,9 +109,6 @@ pub fn validate_semver(version: &str) -> bool {
             return false;
         }
         if !num.chars().all(|c| c.is_ascii_digit()) {
-            return false;
-        }
-        if num.parse::<u64>().is_err() {
             return false;
         }
     }
@@ -138,5 +139,18 @@ mod tests {
         assert!(validate_semver("1.0.0"));
         assert!(validate_semver("2.1.3-beta.1+exp.sha"));
         assert!(!validate_semver("1.0"));
+        for bad in [
+            "1.0.0-alpha..1",
+            "1.0.0-01",
+            "1.0.0+build..x",
+            "1.0.0-",
+            "1.0.0+",
+            "01.0.0",
+        ] {
+            assert!(!validate_semver(bad), "{bad}");
+        }
+        assert!(validate_semver("1.0.0-0a+001"));
+        assert!(valid_namespaced_block_id("legacy-/block-")); // M1 compatibility
+        assert!(!valid_package_id("legacy-"));
     }
 }

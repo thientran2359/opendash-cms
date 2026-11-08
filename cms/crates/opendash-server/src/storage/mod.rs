@@ -4,6 +4,7 @@ pub mod entries;
 pub mod media;
 pub mod page;
 pub mod plugin;
+pub mod plugin_kv;
 pub mod public_content;
 
 use std::{path::Path, time::Duration};

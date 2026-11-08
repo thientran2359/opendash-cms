@@ -1,4 +1,5 @@
 import React from 'react';
+import { TextInput } from '../components/FormPrimitives.tsx';
 import { AuthUser } from '../types.ts';
 
 interface AuthPanelProps {
@@ -32,21 +33,21 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
     <div id="auth-bar">
       {!user ? (
         <div id="guest-panel" className="panel-row">
-          <input
+          <TextInput
             id="auth-username"
             placeholder="Tên đăng nhập"
             autoComplete="username"
             value={authUsername}
-            onChange={e => onUsernameChange(e.target.value)}
+            onValueChange={onUsernameChange}
             disabled={isProcessing}
           />
-          <input
+          <TextInput
             id="auth-password"
             type="password"
             placeholder="Mật khẩu"
             autoComplete="current-password"
             value={authPassword}
-            onChange={e => onPasswordChange(e.target.value)}
+            onValueChange={onPasswordChange}
             disabled={isProcessing}
           />
           <button id="auth-setup" onClick={onSetup} disabled={isProcessing}>

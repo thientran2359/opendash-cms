@@ -5,6 +5,7 @@ mod error;
 mod hooks;
 mod media;
 mod package;
+mod page;
 mod paths;
 mod plugin;
 mod routes;

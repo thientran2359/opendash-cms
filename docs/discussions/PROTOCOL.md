@@ -44,6 +44,7 @@ Trước khi viết phản hồi mới, cả 2 AI cần đọc [README.md](../..
 
 ## 4. Điều phối và kết thúc
 
+- **Vị trí làm việc mặc định cho thảo luận:** tạo và cập nhật `docs/discussions/threads/*.md` **trực tiếp trên worktree `main` hiện có**, không tự tạo branch/worktree mới chỉ để mở một chủ đề. Kiểm tra `git status` và `HEAD` trước khi ghi; không đè thay đổi chưa commit của người khác. Nếu có tác vụ song song gây xung đột thực sự, điều phối quyền sửa theo lượt hoặc trao đổi với chủ dự án thay vì mặc nhiên tách worktree.
 - Một bên ghi các file chung trong mỗi lượt. Đọc lại metadata/diff ngay trước khi ghi; bên điều phối thông báo rõ file bên kia được sửa. Không cùng sửa summary và thread khi chưa phân vai.
 - Khi chủ dự án giao tự thảo luận, trao đổi hữu hạn theo điểm còn bất đồng, rồi tổng hợp kết quả và tiêu chí kiểm chứng. Không yêu cầu chủ dự án copy từng lượt nếu đã có đường tương tác được cho phép; không tạo watcher/vòng gọi AI vô hạn. Khi Codex giao việc và chờ Antigravity hoàn thành một lượt thực thi, dùng skill `.agents/skills/antigravity-handoff/SKILL.md` (`prepare-task.ps1` + `wait-for-ag.ps1`; xem `.agents/README.md`) thay vì gõ prompt dài trên web hoặc polling đọc file liên tục.
 - `CONSENSUS_REACHED` là kết thúc trao đổi thiết kế, không phải đã triển khai/nghiệm thu. `Lượt tiếp theo: HUMAN` sau tổng kết chỉ ghi người nhận báo cáo, không tự tạo thêm yêu cầu phê duyệt.

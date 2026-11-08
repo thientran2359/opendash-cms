@@ -1,5 +1,15 @@
 import React from 'react';
 
+// Bare controlled input for compact auth/user forms; TextField adds a labeled group.
+interface TextInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'> {
+  value: string;
+  onValueChange: (value: string) => void;
+}
+
+export const TextInput: React.FC<TextInputProps> = ({ onValueChange, ...props }) => (
+  <input {...props} onChange={event => onValueChange(event.target.value)} />
+);
+
 interface FormGroupProps {
   children: React.ReactNode;
 }
@@ -99,11 +109,11 @@ export const TextField: React.FC<TextFieldProps> = ({
 }) => (
   <FormGroup>
     <label htmlFor={id}>{label}</label>
-    <input
+    <TextInput
       id={id}
       name={name}
       value={value}
-      onChange={e => onChange(e.target.value)}
+      onValueChange={onChange}
       disabled={disabled}
       placeholder={placeholder}
       required={required}

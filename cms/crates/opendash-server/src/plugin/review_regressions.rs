@@ -58,6 +58,7 @@ async fn invocation_timeout_must_not_commit_later() {
         write.len()
     );
     let manifest = PluginManifest {
+        hooks: vec![],
         id: "late-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
@@ -184,6 +185,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
         write.len()
     );
     let manifest = PluginManifest {
+        hooks: vec![],
         id: "commit-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
@@ -315,6 +317,7 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
         write.len()
     );
     let manifest = PluginManifest {
+        hooks: vec![],
         id: "commit-success-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
@@ -397,6 +400,7 @@ async fn ipc_kv_get_stuck_parent_must_cancel_and_clean_up() {
     );
 
     let manifest = PluginManifest {
+        hooks: vec![],
         id: "ipc-hang-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
@@ -499,6 +503,7 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
     );
 
     let manifest = PluginManifest {
+        hooks: vec![],
         id: "staged-abort-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
@@ -621,6 +626,7 @@ async fn ipc_kv_get_stuck_parent_must_timeout_and_clean_up() {
     );
 
     let manifest = PluginManifest {
+        hooks: vec![],
         id: "ipc-timeout-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,

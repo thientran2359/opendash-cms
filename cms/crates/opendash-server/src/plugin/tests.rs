@@ -159,6 +159,7 @@ mod tests {
         "#;
         let wasm_bytes = wat::parse_str(wat_src).unwrap();
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "loop-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -214,6 +215,7 @@ mod tests {
         "#;
         let wasm_bytes = wat::parse_str(wat_src).unwrap();
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "trap-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -278,6 +280,7 @@ mod tests {
         let wasm_bytes = wat::parse_str(wat_src).unwrap();
         // Manifest has NO sqlite permissions
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "no-perm-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -340,6 +343,7 @@ mod tests {
         "#;
         let wasm_bytes = wat::parse_str(wat_src).unwrap();
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "mem-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -414,6 +418,7 @@ mod tests {
 
         let wasm_bytes = wat::parse_str(&wat_src).unwrap();
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "http-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -456,8 +461,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_sqlite_lock_timeout_and_zero_late_writes() {
-        let db_dir =
-            std::env::temp_dir().join(format!("opendash_test_lock_{}", std::process::id()));
+        let db_dir = std::env::temp_dir().join(format!(
+            "opendash_test_lock_{}_{}",
+            std::process::id(),
+            crate::auth::generate_random_token()
+        ));
         std::fs::create_dir_all(&db_dir).unwrap();
         let db_file = db_dir.join("test.sqlite");
 
@@ -522,6 +530,15 @@ mod tests {
             include_bytes!("../../../../examples/plugins/sample-plugin/sample-plugin.zip");
         manager.install_plugin(zip_bytes).await.unwrap();
 
+        let initial_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plugin_kv")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            initial_count, 0,
+            "Test must start with a fresh isolated database"
+        );
+
         // Connection 1 acquires exclusive write lock
         let mut lock_tx = pool.begin().await.unwrap();
         sqlx::query(
@@ -567,8 +584,10 @@ mod tests {
             "Plugin run failed to recover after lock was released!"
         );
 
-        // Clean up temp file
-        let _ = std::fs::remove_dir_all(&db_dir);
+        // Close Windows SQLite handles before deleting this unique test-owned directory.
+        drop(manager);
+        pool.close().await;
+        std::fs::remove_dir_all(&db_dir).unwrap();
     }
 
     fn build_test_zip(wasm_bytes: &[u8], plugin_id: &str) -> Vec<u8> {
@@ -712,6 +731,7 @@ mod tests {
         )"#;
         let wasm_abort = wat::parse_str(wat_abort).unwrap();
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "abort-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -758,6 +778,7 @@ mod tests {
         )"#;
         let wasm_utf8 = wat::parse_str(wat_invalid_utf8).unwrap();
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "utf8-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -840,6 +861,7 @@ mod tests {
         .unwrap();
 
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "worker-teardown".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -924,6 +946,7 @@ mod tests {
 
         let wasm = wat::parse_str(wat).unwrap();
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "slow-worker-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -998,6 +1021,7 @@ mod tests {
         )"#;
         let wasm_out = wat::parse_str(wat_out).unwrap();
         let manifest_echo = PluginManifest {
+            hooks: vec![],
             id: "echo-recovery".into(),
             version: "1.0.0".into(),
             api_version: 1,
@@ -1066,6 +1090,7 @@ mod tests {
 
         let wasm = wat::parse_str(wat).unwrap();
         let manifest = PluginManifest {
+            hooks: vec![],
             id: "hang-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,

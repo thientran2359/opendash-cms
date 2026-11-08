@@ -43,6 +43,24 @@ pub struct RegistryCatalog<T> {
     entries: BTreeMap<String, OwnedDescriptor<T>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistryError {
+    AlreadyRegistered,
+    OwnerConflict,
+    NotFound,
+}
+
+impl std::fmt::Display for RegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::AlreadyRegistered => "Resource already registered",
+            Self::OwnerConflict => "Resource belongs to another owner",
+            Self::NotFound => "Resource not found",
+        })
+    }
+}
+impl std::error::Error for RegistryError {}
+
 impl<T> Default for RegistryCatalog<T> {
     fn default() -> Self {
         Self {
@@ -56,16 +74,45 @@ impl<T> RegistryCatalog<T> {
         Self::default()
     }
 
-    /// Registers or updates a descriptor under `key` with the given `owner`.
-    pub fn register(&mut self, key: impl Into<String>, owner: ResourceOwner, descriptor: T) {
+    /// Registers a new resource. Updates and provider activation are explicit operations.
+    pub fn register(
+        &mut self,
+        key: impl Into<String>,
+        owner: ResourceOwner,
+        descriptor: T,
+    ) -> Result<(), RegistryError> {
+        let key = key.into();
+        if let Some(existing) = self.entries.get(&key) {
+            return Err(if existing.owner == owner {
+                RegistryError::AlreadyRegistered
+            } else {
+                RegistryError::OwnerConflict
+            });
+        }
         self.entries.insert(
-            key.into(),
+            key,
             OwnedDescriptor {
                 owner,
                 status: ProviderStatus::Active,
                 descriptor,
             },
         );
+        Ok(())
+    }
+
+    /// Updates provider metadata only; never implicitly activates a provider.
+    pub fn update(
+        &mut self,
+        key: &str,
+        owner: &ResourceOwner,
+        descriptor: T,
+    ) -> Result<(), RegistryError> {
+        let entry = self.entries.get_mut(key).ok_or(RegistryError::NotFound)?;
+        if &entry.owner != owner {
+            return Err(RegistryError::OwnerConflict);
+        }
+        entry.descriptor = descriptor;
+        Ok(())
     }
 
     pub fn get(&self, key: &str) -> Option<&OwnedDescriptor<T>> {
@@ -115,13 +162,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rejects_owner_takeover_and_keeps_inactive_status_on_update() {
+        let mut catalog = RegistryCatalog::new();
+        let owner = ResourceOwner::Plugin("first".into());
+        catalog
+            .register("portfolio", owner.clone(), "original")
+            .unwrap();
+        assert_eq!(
+            catalog.register("portfolio", ResourceOwner::User, "stolen"),
+            Err(RegistryError::OwnerConflict)
+        );
+        assert_eq!(
+            catalog.register("portfolio", owner.clone(), "replacement"),
+            Err(RegistryError::AlreadyRegistered)
+        );
+        catalog.deactivate_owner(&owner);
+        assert_eq!(
+            catalog.update("portfolio", &ResourceOwner::User, "stolen"),
+            Err(RegistryError::OwnerConflict)
+        );
+        assert_eq!(catalog.get("portfolio").unwrap().descriptor, "original");
+        catalog
+            .update("portfolio", &owner, "new definition")
+            .unwrap();
+        assert_eq!(
+            catalog.get("portfolio").unwrap().status,
+            ProviderStatus::ProviderInactive
+        );
+        assert_eq!(
+            catalog.update("missing", &owner, "new"),
+            Err(RegistryError::NotFound)
+        );
+        catalog.activate_owner(&owner);
+        assert_eq!(
+            catalog.get("portfolio").unwrap().descriptor,
+            "new definition"
+        );
+    }
+
+    #[test]
     fn preserves_registered_resources_when_plugin_or_theme_deactivates() {
         let mut catalog = RegistryCatalog::new();
         let plugin_owner = ResourceOwner::Plugin("seo-helper".into());
         let user_owner = ResourceOwner::User;
 
-        catalog.register("portfolio", plugin_owner.clone(), "Portfolio CPT");
-        catalog.register("company_news", user_owner.clone(), "News CPT");
+        catalog
+            .register("portfolio", plugin_owner.clone(), "Portfolio CPT")
+            .unwrap();
+        catalog
+            .register("company_news", user_owner.clone(), "News CPT")
+            .unwrap();
 
         assert_eq!(catalog.len(), 2);
         assert_eq!(catalog.deactivate_owner(&plugin_owner), 1);
