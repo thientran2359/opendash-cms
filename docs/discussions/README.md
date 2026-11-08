@@ -6,4 +6,5 @@ Các chủ đề sử dụng [PROTOCOL.md](PROTOCOL.md): lượt trao đổi app
 
 - [Roadmap, Module Catalog và Planning Workflow — 07/11/2026](threads/2026-11-07-roadmap-module-planning-workflow.md) — `CONSENSUS_REACHED` cho **quy trình planning**, không chốt schema M3.
 - [Pre-M3 CodeGraph Readiness — 07/11/2026](threads/2026-11-07-pre-m3-codegraph-readiness.md) — `CONSENSUS_REACHED` cho mức độ sẵn sàng **bắt đầu G1**; các thiết kế M3 vẫn cần nghiên cứu và chốt G2 riêng.
-- [M3 G1 Research — CNT-01 Content Types & CNT-05 Media — 07/11/2026](threads/2026-11-07-m3-g1-content-types-media-research.md) — `CONSENSUS_REACHED` cho hướng nghiên cứu G1; hai Living Module Brief đã `Research: REVIEWED`, G2 Design vẫn `NOT_STARTED`.
+- [M3 G1 Research — CNT-01 Content Types & CNT-05 Media — 07/11/2026](threads/2026-11-07-m3-g1-content-types-media-research.md) — `CONSENSUS_REACHED` cho hướng nghiên cứu G1; hai Living Module Brief đã `Research: REVIEWED` (tại lúc đóng G1, G2 chưa mở).
+- [M3 G2 Design — CNT-01 Content Types & CNT-05 Media — 08/11/2026](threads/2026-11-08-m3-g2-content-types-media-design.md) — `OPEN`, đề xuất schema/API/ownership/media lifecycle đang `PROPOSED`, chờ phản biện/chốt contract trước G3.
