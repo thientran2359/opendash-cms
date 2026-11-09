@@ -26,3 +26,4 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [M3.6 — Public CPT Rendering, theme templates và public media ACL (2026-11-09)](2026-11-09-m3-6-public-content-rendering.md).
 - [Đối chiếu tài liệu M3, workflow GitHub và CodeGraph (2026-11-09)](2026-11-09-agent-documentation-reconciliation.md) — chỉ xác minh tài liệu/công cụ, không phải kiểm thử lại CMS.
 - [G5 GitHub Management (2026-11-09)](2026-11-09-github-governance-g5.md) — Issue Forms, Project, Ruleset, CI và giới hạn của evidence.
+- [TW-01 Windows read-only metadata (2026-11-09)](2026-11-09-muse-cos-win-tw01-readonly.md) — GitHub Project v2 thiếu quyền `read:project`; CoS health/agents/project mapping có snapshot PASS, idle đầy đủ chưa chứng minh, PR #7 chặn branch; không dispatch.
