@@ -5,7 +5,7 @@ description: "Use when Atlas hoặc Nova được yêu cầu review PR OpenDash,
 
 # Atlas / Nova — review và merge PR
 
-Đọc [AGENTS.md](../../../AGENTS.md), [GitHub workflow](../../GITHUB_WORKFLOW.md), [agent identities](../../agents.yaml) và Issue/contract của từng PR. Chỉ thao tác repo `thientran2359/opendash-cms`, đích `main`, bằng GitHub connector đã xác thực hoặc API/CLI tương đương được cấp quyền. Không đổi ruleset, bypass checks hoặc dùng quyền admin để vượt gate.
+Đọc [AGENTS.md](../../../AGENTS.md), [Agent Operating Standard](../../AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../GITHUB_WORKFLOW.md), [agent identities](../../agents.yaml) và Issue/contract của từng PR. Chỉ thao tác repo `thientran2359/opendash-cms`, đích `main`, bằng GitHub connector đã xác thực hoặc API/CLI tương đương được cấp quyền. Nếu cần GitHub UI trên máy có CoS Desktop, attach Chrome đã đăng nhập đúng tài khoản theo Operating Standard; không dùng Plugins Browser profile khác. Không đổi ruleset, bypass checks hoặc dùng quyền admin để vượt gate.
 
 ## Chế độ và quyền được giao
 
