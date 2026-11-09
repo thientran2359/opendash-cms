@@ -46,6 +46,13 @@
 - GitHub Issues are the source of truth for active task state, and PRs record
   changes and review. Follow [the GitHub workflow](.agents/GITHUB_WORKFLOW.md);
   `.agents/tasks/` must not become a competing live queue.
+- Follow the shared [Agent Operating Standard](.agents/AGENT_OPERATING_STANDARD.md)
+  directly **within the current agent/chat**: confirm workspace/branch, fetch
+  remote Git refs without overwriting work, consult GitHub Connector, and
+  enforce task/PR ownership. **Do not create a separate Agent Preflight Check
+  agent, skill, script or background process.** For authenticated GitHub UI
+  on CoS, use **Desktop Browser** attached to the user's already signed-in
+  Chrome session, rather than the isolated Plugins Browser profile.
 - For cross-agent document/design reviews, the reviewer records actionable
   findings on the GitHub PR; the PR author owns fixes, commits and non-force
   pushes on their branch, and the reviewer rechecks the updated PR. If GitHub

@@ -15,7 +15,7 @@ real verification. Historical docs already linked from plans remain preserved.
 - `skills/`: three on-demand skills (`github-task-pickup`, `discussion-turn-responder`, `github-pr-review-merge`); no autonomous polling
 - `archive/skills/`: retired skills preserved solely for reference
 
-**Quy trình task/branch:** [GITHUB_WORKFLOW.md](GITHUB_WORKFLOW.md) là hướng dẫn hiện hành; GitHub Issue là nguồn trạng thái task và PR là nguồn review. [Bảng trạng thái M3](../docs/plans/M3_STATUS_2026-11-09.md) phân biệt phần đã làm và backlog.
+**Quy trình thao tác chung:** [AGENT_OPERATING_STANDARD.md](AGENT_OPERATING_STANDARD.md) quy định cách kiểm branch/Git fetch, GitHub Connector và CoS Desktop Browser dùng đúng phiên Chrome đăng nhập, thực hiện **bởi chính agent trong chat**, không tạo Agent Preflight Check. [GITHUB_WORKFLOW.md](GITHUB_WORKFLOW.md) vẫn là chuẩn Issues/PR; GitHub Issue là nguồn trạng thái task và PR là nguồn review. [Bảng trạng thái M3](../docs/plans/M3_STATUS_2026-11-09.md) phân biệt phần đã làm và backlog.
 
 **Review tài liệu giữa agent:** reviewer đưa findings trực tiếp lên GitHub PR;
 tác giả PR sửa và commit/push lên branch của mình; reviewer kiểm tra lại trên

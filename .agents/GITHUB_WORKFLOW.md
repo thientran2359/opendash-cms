@@ -6,6 +6,13 @@ mỗi agent chỉ sửa branch `agent/<name>` được gán trong [agents.yaml](
 Tạo branch mới không tự tạo được một phiên Codex/Antigravity/CoS hoặc điều khiển
 remote. Adapter điều phối Muse chưa được xác nhận/khởi chạy.
 
+**Quy trình thao tác thủ công:** tất cả agent đọc [Agent Operating Standard](AGENT_OPERATING_STANDARD.md)
+trong chat đang làm việc (không tạo agent/skill/script "Agent Preflight Check").
+Ưu tiên GitHub Connector/Plugin cho Issue/PR/Project. Khi cần GitHub UI đã đăng
+nhập trên CoS, dùng **Chat On Steroids Desktop Browser** và attach tab của
+**Chrome đang đăng nhập đúng tài khoản GitHub**; Plugins Browser Playwright dùng
+profile riêng, không chứng minh tài khoản đang đăng nhập.
+
 ## Nguồn sự thật cho task và tài liệu
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |
