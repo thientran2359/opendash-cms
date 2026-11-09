@@ -12,7 +12,7 @@ real verification. Historical docs already linked from plans remain preserved.
 - `inbox/`: durable handoff notes, never runtime secrets
 - `scripts/`: future local tools, not automatically enabled
 - `templates/`: task, research and discussion templates
-- `skills/`: exactly two on-demand skills (`github-task-pickup`, `discussion-turn-responder`); no autonomous polling
+- `skills/`: three on-demand skills (`github-task-pickup`, `discussion-turn-responder`, `github-pr-review-merge`); no autonomous polling
 - `archive/skills/`: retired skills preserved solely for reference
 
 **Quy trình task/branch:** [GITHUB_WORKFLOW.md](GITHUB_WORKFLOW.md) là hướng dẫn hiện hành; GitHub Issue là nguồn trạng thái task và PR là nguồn review. [Bảng trạng thái M3](../docs/plans/M3_STATUS_2026-11-09.md) phân biệt phần đã làm và backlog.
@@ -32,6 +32,9 @@ Atlas/Codex Win, Nova/Antigravity Win, Forge/CoS Win, Harbor/CoS Mac and
 Orion/Antigravity Mac. Commit validated task-scoped work, non-force push to
 the corresponding agent branch and link the commit/PR to the GitHub Issue.
 A push is not review, merge, approval or independent verification.
+Atlas/Nova may review and merge eligible implementation PRs when the owner
+invokes the delegated review-and-merge flow in GITHUB_WORKFLOW.md. This is
+not a background job or authority to self-review or waive security gates.
 
 Muse-to-CoS/Antigravity dispatch is a proposal requiring tested adapters and
 authorization, not an installed feature. Never upload credentials, private
