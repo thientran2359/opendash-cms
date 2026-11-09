@@ -1,0 +1,94 @@
+name: "Implementation task (G3 READY)"
+description: "Task triển khai đã có G3 READY trong tài liệu OpenDash; dành cho người quản lý và coding agent."
+title: "[M?-S??-T??] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issue phải đọc hiểu độc lập. Đặc tả G3 đã duyệt trong `docs/plans/` là nguồn kỹ thuật chuẩn;
+        thay đổi yêu cầu/acceptance ở tài liệu trước rồi đồng bộ Issue. Không chuyển
+        task G1/G2 còn PROPOSED, task lịch sử hoặc phần đã triển khai thành READY.
+        Muse nên sinh cùng bố cục bằng `.agents/scripts/prepare-github-issue.py`.
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID
+      description: "ID chính thức trong breakdown G3, ví dụ M3-S07-T01 (không sử dụng ID đã retired)."
+      placeholder: "M3-S07-T01"
+    validations:
+      required: true
+  - type: textarea
+    id: overview
+    attributes:
+      label: Tổng quan và giá trị
+      description: "Mô tả bằng tiếng Việt dễ hiểu: vì sao cần task này, người dùng sẽ được lợi gì?"
+      placeholder: "Hiện trạng, vấn đề, lợi ích với người dùng CMS..."
+    validations:
+      required: true
+  - type: textarea
+    id: objective
+    attributes:
+      label: Mục tiêu và hành vi mong đợi
+      placeholder: "Khi người quản trị ..., hệ thống phải ..."
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Phạm vi công việc
+      placeholder: "- [ ] Xây dựng ...\n- [ ] Tích hợp ..."
+    validations:
+      required: true
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Ngoài phạm vi
+      placeholder: "Những hành vi, API, migration hoặc module không được tự mở rộng."
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Tiêu chí nghiệm thu
+      description: "Các kết quả quan sát/kiểm tra được; không tự đánh dấu hoàn thành khi mới tạo Issue."
+      value: "- [ ] "
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies và điều kiện chặn
+      placeholder: "Task/phần đã chốt bắt buộc có trước, rủi ro giao đồng thời..."
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Thông tin kỹ thuật và file ownership
+      description: "Module/capability, milestone/slice, Full/Fast-Track, G2, API/contract, file được phép sửa, file người khác sở hữu."
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Kiểm thử, rủi ro và rollback
+      placeholder: "Lệnh test, negative cases, dữ liệu cần bảo toàn và hướng rollback..."
+    validations:
+      required: true
+  - type: textarea
+    id: links
+    attributes:
+      label: Nguồn tài liệu đã duyệt
+      description: "Repo-relative path, link blob tại source SHA đã duyệt và baseline code SHA; tránh chỉ dẫn tới HEAD thay đổi theo thời gian."
+      placeholder: "docs/plans/modules/...md\nSource SHA: ...\nBase SHA: ..."
+    validations:
+      required: true
+  - type: checkboxes
+    id: gate_confirmation
+    attributes:
+      label: Kiểm tra trước khi giao
+      options:
+        - label: "Task này có G3 READY đã duyệt; nếu Full-Track, G2 đã AGREED; đã đối chiếu hiện trạng source và task cũ."
+          required: true
+        - label: "Nội dung Issue khớp với đặc tả ở commit nguồn, không phải suy diễn thêm bởi Muse."
+          required: true

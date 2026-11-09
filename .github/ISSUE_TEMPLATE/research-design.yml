@@ -1,0 +1,37 @@
+name: "Research / design (G1–G2)"
+description: "Theo dõi việc khảo sát và quyết định thiết kế; không phải implementation task G3 READY."
+title: "[Research/Design] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Chỉ dùng để theo dõi nghiên cứu/thiết kế chưa qua G3. Không cấp hoặc tái sử dụng
+        Task ID triển khai `M*-S*-T*` và không tự giao code từ Issue này.
+  - type: input
+    id: module
+    attributes:
+      label: Module / capability liên quan
+      placeholder: "CNT-03 / CNT-03.1"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Vấn đề cần nghiên cứu hoặc quyết định
+      placeholder: "Hiện trạng, mục tiêu và vì sao cần G1/G2..."
+    validations:
+      required: true
+  - type: textarea
+    id: deliverable
+    attributes:
+      label: Kết quả cần bàn giao
+      placeholder: "Báo cáo source/CodeGraph, phương án A/B, rủi ro, đề xuất contract..."
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: Tài liệu và dependency
+      placeholder: "Roadmap, module brief, PRD, contracts, lịch sử thảo luận..."
+    validations:
+      required: true
