@@ -89,7 +89,7 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    tiến độ, owner hoặc blocker: chỉ cập nhật Issue/Project. Không duy trì
    JSON/YAML task mirror trong Git như một bảng trạng thái cạnh tranh.
 
-**Ngoại lệ hạ tầng POC Muse → CoS Phase 1 (G3 DRAFT):** các mã
+**Ngoại lệ hạ tầng POC Muse → CoS Phase 1 (G3 APPROVED 09/11/2026, Issues chưa READY):** các mã
 `P1-W01..P1-W08` trong [breakdown Phase 1](../docs/plans/muse-cos-win-phase1-g2.md)
 không phải product task `Mx-Sxx-Txx`. Công cụ
 `prepare-github-issue.py` **không hỗ trợ** namespace/source/metadata này;
