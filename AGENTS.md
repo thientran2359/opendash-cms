@@ -34,7 +34,11 @@
   (see `.agents/README.md` and `.agents/agents.yaml`). Official approved
   decisions, plans/contracts and actual verification belong in `docs/`.
   Keep existing historical references and their source evidence.
-- `.agents/skills/` contains only active skills (currently none).
+- `.agents/skills/` contains two **manual chat skills**:
+  [github-task-pickup](.agents/skills/github-task-pickup/SKILL.md) when asked to fetch/perform one's GitHub Issue,
+  and [discussion-turn-responder](.agents/skills/discussion-turn-responder/SKILL.md) when asked to check and answer one's discussion turns.
+  Read the corresponding SKILL.md on request even if the host does not auto-discover repo skills.
+  Neither skill starts any background process, cronjob or automatic CoS dispatch.
   `.agents/archive/skills/` contains retired skills for reference ONLY.
   Do not invoke archived handoff scripts, PowerShell Stop hooks or the previous
   opendash-orchestrator as if they were active automation.
@@ -60,6 +64,9 @@
   establish completion, approval or authority to change contracts.
 - No infinite agent loops, blind retries of ambiguous deliveries, or secrets
   and private runtime state in Git.
+- The owner has **paused the Python Task Watcher / cronjob plan** in favor of
+  on-demand GitHub issue pickup and discussion replies. TW proposals do not
+  authorize running watcher/PONG or bypassing Project Ready and security gates.
 
 ## Tra cứu quan hệ mã nguồn với CodeGraph
 
