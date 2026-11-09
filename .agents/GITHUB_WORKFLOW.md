@@ -151,6 +151,14 @@ verified và sẽ khiến Issue bị đóng sớm. Trạng thái BLOCKED phải 
 nhân/hướng xử lý trong Issue, không tự chuyển Done. Duy trì một nguồn trạng
 thái Project duy nhất, không phát tán tiến độ sang JSON/Markdown bản sao.
 
+**Branch protection + CI (G5):** [Ruleset #26833341](https://github.com/thientran2359/opendash-cms/settings/rules/26833341)
+Active trên default branch: yêu cầu PR, cấm xóa và force-push, không bắt
+buộc số review của tài khoản khác. Workflow
+`.github/workflows/governance.yml` kiểm tra tài liệu/task handoff trên Ubuntu
+và Windows, read-only, cho mọi PR vào `main` và push `main`. Xem
+[báo cáo G5](../docs/verification/2026-11-09-github-governance-g5.md): chỉ
+bật required checks sau khi GitHub phát sinh đúng tên check và có PASS.
+
 Các hành động trên là **cấu hình GitHub hiện có**, không phải bằng chứng
 Muse dispatch, adapter CoS hay tự động chốt G5 đã chạy. Muse khi được nối
 GitHub cần dùng REST/GraphQL theo quyền được cấp, kiểm tra idempotency và
