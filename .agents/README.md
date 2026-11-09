@@ -17,6 +17,11 @@ real verification. Historical docs already linked from plans remain preserved.
 
 **Quy trình task/branch:** [GITHUB_WORKFLOW.md](GITHUB_WORKFLOW.md) là hướng dẫn hiện hành; GitHub Issue là nguồn trạng thái task và PR là nguồn review. [Bảng trạng thái M3](../docs/plans/M3_STATUS_2026-11-09.md) phân biệt phần đã làm và backlog.
 
+**Review tài liệu giữa agent:** reviewer đưa findings trực tiếp lên GitHub PR;
+tác giả PR sửa và commit/push lên branch của mình; reviewer kiểm tra lại trên
+commit mới. Xem [quy trình review PR](GITHUB_WORKFLOW.md#review-tài-liệuthiết-kế-qua-pr-giữa-các-agent).
+Chỉ giao reviewer quyền sửa file khi đã chỉ định rõ branch và file ownership.
+
 No archived SKILL.md should be loaded or executed automatically. The former
 PowerShell handoff hooks and scripts are retired. Restore only after a
 fresh technical/security review.

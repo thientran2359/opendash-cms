@@ -41,6 +41,11 @@
 - GitHub Issues are the source of truth for active task state, and PRs record
   changes and review. Follow [the GitHub workflow](.agents/GITHUB_WORKFLOW.md);
   `.agents/tasks/` must not become a competing live queue.
+- For cross-agent document/design reviews, the reviewer records actionable
+  findings on the GitHub PR; the PR author owns fixes, commits and non-force
+  pushes on their branch, and the reviewer rechecks the updated PR. If GitHub
+  comments are unavailable, relay findings to the author to record on the PR.
+  A reviewer edits files only with explicit file/branch ownership reassignment.
 - Branch names in `.agents/agents.yaml` describe desired agent identities,
   not proof that remote branches or AI sessions are configured.
 - Assign one responsible implementer and one coordinator per task, with issue

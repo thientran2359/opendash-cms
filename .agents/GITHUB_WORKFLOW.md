@@ -182,6 +182,43 @@ PR chưa merge, không đưa task không liên quan vào cùng branch; chờ rev
 đồng bộ hoặc dùng task branch tách riêng sau quyết định thay đổi quy ước.
 Đảm bảo ownership file/schema/API tránh hai agent ghi cùng một hợp đồng.
 
+## Review tài liệu/thiết kế qua PR giữa các agent
+
+Áp dụng cả với **Draft PR** chứa nghiên cứu/G1/G2 còn `PROPOSED` (ví dụ
+[PR #4](https://github.com/thientran2359/opendash-cms/pull/4)). Review thiết kế
+không mặc nhiên cấp quyền triển khai hoặc chuyển G2 thành `AGREED`.
+
+1. **Tác giả PR** chỉ định reviewer và ghi rõ trong PR body hoặc comment:
+   mục tiêu, tài liệu/commit cần xem, tiêu chí phản biện, người sở hữu sửa
+   đổi, hình thức phản hồi và điều kiện review lại. Mặc định tác giả PR sở hữu
+   việc chỉnh sửa các file thuộc PR; không giao hai agent viết cùng file.
+2. **Reviewer** đọc chính xác `head SHA` của PR và ghi findings **trực tiếp
+   trên GitHub PR** bằng inline review comment (nếu gắn được dòng) hoặc
+   Conversation comment/review summary. Mỗi finding nêu mức độ ưu tiên,
+   file/đoạn liên quan, vấn đề, hậu quả và đề xuất sửa cụ thể. Nếu không có
+   finding, ghi rõ phạm vi đã xem và giới hạn kiểm tra. Reviewer có thể giữ
+   repo ở chế độ read-only; **được phép ghi GitHub review comment** không
+   đồng nghĩa được phép sửa file, commit hoặc push.
+3. Nếu reviewer **không có quyền hoặc công cụ ghi GitHub PR**, báo blocker
+   cùng lỗi cụ thể và chuyển toàn bộ findings qua chat cho coordinator/tác
+   giả; **tác giả đưa bản tổng hợp lên PR có ghi nguồn và liên kết phiên
+   review**, rồi mới xử lý. Không coi phản hồi chat đơn lẻ là review đã được
+   lưu trên GitHub; không tuyên bố đã comment khi API chưa xác nhận.
+4. **Tác giả PR** phân loại từng finding (`accept`, `reject` có lý do,
+   hoặc `needs-decision`), sửa tài liệu trên **branch head của mình**, chạy
+   checker phù hợp, commit và non-force push. Trả lời từng thread bằng commit
+   SHA hoặc lý do không sửa; không tự đánh dấu quyết định G2 đã được chốt.
+5. **Reviewer** đọc lại `head SHA` mới, kiểm diff và các thread để xác nhận
+   finding đã giải quyết; gửi review follow-up trên cùng PR. Chỉ người có
+   thẩm quyền mới chốt G2/merge; CI PASS, một comment `LGTM` hoặc chat phản
+   hồi chưa phải G5 verification.
+
+**Ngoại lệ reviewer trực tiếp sửa tài liệu:** phải giao lại rõ Issue/PR,
+file ownership, branch đích và phạm vi trước khi viết. Reviewer sửa trên
+branch `agent/<reviewer>`, commit/push non-force và mở PR riêng hoặc quy
+trình tích hợp được duyệt; **không push vào `agent/<author>`** chỉ vì đang
+review. Sau khi giao sửa, cần một lượt review độc lập với thay đổi đó.
+
 ## Khởi tạo code trên từng máy
 
 Bước 1: clone độc lập ở máy đó từ GitHub nếu chưa có; kiểm tra `git remote -v`.
