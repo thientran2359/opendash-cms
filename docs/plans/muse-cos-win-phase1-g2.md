@@ -1,5 +1,9 @@
 # Muse → CoS Windows — Phase 1: G2 AGREED / G3 APPROVED (P0–P4)
 
+> **THAY ĐỔI KIẾN TRÚC DO CHỦ DỰ ÁN CHỌN — 09/11/2026; G2/G3 amendment đang chờ review/merge.** Thay kế hoạch orchestration/Poller nhiều thành phần bằng **một Python Task Watcher nhỏ chạy trên Windows**, kiểm tra GitHub Issues khoảng **120 giây/lần** và đánh thức Forge qua CoS Local Control API; Forge tự đọc Issue đầy đủ bằng GitHub Plugin. Chi tiết thiết kế mới ở **§6 (G2 amendment)** và **§7 (G3 breakdown đề xuất)**; §8 quy định chuyển đổi. Các §1–§5 bên dưới được **giữ nguyên như bản G2/G3 đã phê duyệt tại PR #4**, phục vụ audit, **không phải chỉ thị triển khai Poller cũ sau quyết định thay đổi**. Quyết định phương án trong hội thoại **không tự đồng nghĩa amendment đã review/merge, runtime đã VERIFIED hoặc các task mới đã READY**.
+>
+> **Không can thiệp W01:** [PR #7](https://github.com/thientran2359/opendash-cms/pull/7) là evidence CoS Windows trên branch `agent/forge`; Atlas Round 2 chấp nhận **discovery với security blocker**, không phải xác nhận P0 hoàn tất hoặc cho phép merge/dispatch. Giữ Issue #6 mở, `W01-SEC-01 BLOCKED_SECURITY`, và [Issue #5](https://github.com/thientran2359/opendash-cms/issues/5) `NO_DISPATCH`. Amendment này **không mặc nhiên chấp nhận rủi ro ACL hoặc bật quyền CoS**.
+
 - **Quyết định chủ dự án:** **G2 Phase 1 APPROVED / design = AGREED**, 2026-11-09. Phạm vi phê duyệt **chỉ P0–P4** và phép thử `TEST-PONG-01`; không phê duyệt Phase 2/P5.
 - **Track:** Full-Track cho phần hạ tầng điều phối (GitHub auth, local CoS Control API, secrets, durable receipt, failure recovery); **không thuộc code runtime CMS**.
 - **Scope:** AGREED · **Research:** REVIEWED · **Design/G2:** AGREED (chỉ Phase 1) · **G3 Breakdown:** APPROVED bởi chủ dự án (09/11/2026), sau [Nova Round 4 — READY_FOR_G3_APPROVAL](https://github.com/thientran2359/opendash-cms/pull/4) · **Implementation Issues:** chưa có task READY · **Implementation:** NOT_STARTED · **Verification:** NOT_RUN.
@@ -151,3 +155,63 @@ Các lượt triển khai đề xuất: **W01 → W02 → (P0 sync reviewed/merg
 Chỉ cho một task `READY` sau khi **đồng thời** có: (1) G2 Phase 1 + G3 breakdown và các P0 dependencies tương ứng đã review/merge `main` tại immutable `source_sha`; (2) scope/track rõ, dùng **`P1-Wxx` infra exception thủ công**, không dùng `prepare-github-issue.py` hoặc cấp M3 module/milestone giả; (3) implementation Issue mới **theo đúng 8 mục trong form**, tiêu đề `[P1-Wxx] ...`, nhãn `type:implementation`/`agent:forge`/`area:agent-workflow`, bản sao acceptance, baseline `base_sha`, owner/file ownership không giao đồng thời và link blob tại approved `source_sha`; (4) quyền GitHub/CoS và dependency của task đã được kiểm chứng; (5) acceptance/negative tests/rollback/evidence; (6) Nova/CI/chủ dự án review theo workflow. Muse/coordinator tìm cả Issue open và closed theo **P1-Wxx chính xác** để tránh trùng, không phát signal `TEST-PONG-01` khi tạo Issue. Nếu thiếu điều kiện, task giữ `DRAFT/BLOCKED`, không tự bật `READY`.
 
 **Tình trạng tại thời điểm phê duyệt G3:** đã chốt scope W01–W08, PR #4 cần được merge vào `main` làm baseline; **chưa có Issue implementation nào được tạo hoặc đánh dấu READY**. Mọi P0–P4 runtime **NOT_RUN**; Issue #5 vẫn **NO_DISPATCH**. Phê duyệt G3 không tự gửi PONG hay bật Poller trước khi P0/P1 và quyền đã kiểm chứng.
+
+---
+
+## 6. G2 amendment — Python Task Watcher tối giản (quyết định hướng kiến trúc của chủ dự án, chờ review)
+
+### 6.1. Mục tiêu và những gì thay đổi
+
+**Hướng mới được chủ dự án chọn ngày 09/11/2026:** GitHub Issues là **task queue/nguồn sự thật**, CoS là **agent runtime**, GitHub Plugin giúp **Forge tự đọc chi tiết Issue và tự cập nhật tiến độ**. Một `task_watcher.py` Windows chạy khi người dùng mở nó, vòng lặp khoảng **2 phút/lần** đến khi người dùng dừng bằng `Ctrl+C` hoặc tắt process; nó chỉ **kiểm tra điều kiện và đánh thức agent đang rảnh**, **không** đọc toàn bộ Issue để tự biên dịch prompt tùy ý, tự code, chạy shell hay thực hiện Git/PR. Đây vẫn là polling ở mức kỹ thuật nhưng **không** triển khai kiến trúc Poller nhiều lớp/relay/dispatcher/supervisor riêng của §1–§5.
+
+**Quyết định giữ lại:** chạy hoàn toàn trên **Windows local**, GitHub HTTPS **outbound**, CoS Local Control API qua `127.0.0.1`; **không** dùng inbound webhook, Cloudflare, VPS, service, server hay password/login mới. Watcher dùng credential GitHub **hiện có/được cấp riêng với quyền tối thiểu** cho API (không tự lấy credential từ một cuộc chat); CoS dùng **bearer token tự sinh** từ `control-api/token`, đọc cùng `endpoint.json` khi cần, **không hardcode hoặc ghi token vào Git**. GitHub Plugin được kết nối trong **CoS Forge chat** không thể được script Python ngoài CoS gọi như một hàm nội bộ; watcher dùng GitHub HTTPS API để đọc metadata và Forge mới sử dụng Plugin để xem nội dung đầy đủ.
+
+**Đơn giản hóa có chủ đích:** không SQLite ledger/ETag manager/receipt publisher/CLI operator/supervisor như những package **W04–W08 cũ** cho bản đầu; chỉ **một file state JSON bền vững ngoài Git + single-instance lock**, ghi bằng temp-file + atomic replace khi khả thi. Không mặc định cài Windows autorun/service hoặc chạy 24/7 khi CoS tắt. Không tự thêm nhãn `status:ready` hay cơ sở dữ liệu trạng thái thứ hai.
+
+### 6.2. Hợp đồng kích hoạt task thực
+
+| Điều kiện bắt buộc | Cách thực hiện tối thiểu |
+| --- | --- |
+| Repo và agent | Chỉ repo allowlist `thientran2359/opendash-cms`, Issue **open** có nhãn `agent:forge`. Không lấy PR, issue khác repo, worktree/agent khác |
+| Trạng thái | Dùng **GitHub Project #3 — Status = Ready**, theo [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md), **không** suy từ nhãn agent/Issue body; khi Project API/quyền không đọc được thì **không dispatch** |
+| Quyền phát hành | Chỉ task đã có G3/Issue được phê duyệt, dependency không `BLOCKED`, owner/file ownership và source SHA hợp lệ; không tự biến Issue Backlog/research/design thành implementation |
+| Agent rảnh | Không có active watcher-owned job và CoS không có turn/agent run đang hoạt động hoặc chưa xác định. Không gửi vào worker/helper, không chen ngang chat người dùng; nếu không chắc idle thì bỏ qua chu kỳ |
+| Nhận task | **Chỉ một watcher cho Forge trên Windows**, khóa single-instance trước vòng lặp; re-fetch Issue/Project Status ngay trước giao. Ghi claim `issue_number`/`input_uuid`/trạng thái vào state trước khi POST; nếu hai máy cùng điều phối Forge thì **STOP**, không giả vờ có distributed lock |
+| Giao việc | Gửi **prompt cố định theo mẫu** tới đúng `projectId` ↔ canonical Forge worktree: tham chiếu Issue số N, yêu cầu Forge tự dùng GitHub Plugin kiểm tra G3, scope, acceptance rồi xử lý theo workflow. Watcher **không** gửi thẳng raw Issue body/code/shell từ GitHub vào CoS |
+| Thành công và chống trùng | HTTP `202` nghĩa là queued, **không** nghĩa agent hoàn thành. Lưu input UUID/Issue trước khi gửi; nếu timeout/crash/không rõ delivery, giữ `UNKNOWN`, kiểm CoS outbox/session bằng đúng UUID và yêu cầu người vận hành xử lý, **không tự gửi UUID mới**. Chỉ giải phóng job khi có kết quả xác thực và Issue đã chuyển trạng thái phù hợp; không lặp vô hạn gửi lại |
+| Trạng thái GitHub | Forge dùng GitHub Plugin để cập nhật `In progress → In review` và PR/evidence theo quy trình; Watcher không đặt `Done` thay cho G5 VERIFIED, không tự merge/deploy |
+| Mất kết nối | GitHub 401/403/429, Project API lỗi, CoS tắt, health sai, `Allow actions` off, token/port/PID stale, mapping không duy nhất hoặc runtime chưa xác minh ⇒ **skip / fail-closed**, log ngắn đã redacted, thử ở chu kỳ sau; không bật quyền CoS hay sửa ACL tự động |
+
+**Ví dụ điều kiện chọn Issue:** `is:issue is:open repo:thientran2359/opendash-cms label:agent:forge` **và** Project #3 `Ready` **và** G3 hợp lệ **và** Forge idle **và** chưa claim. Không tìm theo tiêu đề hoặc `agent:forge` đơn độc. Chỉ một job mỗi lần; nếu nhiều Issue hợp lệ, chọn thứ tự nhất quán (ưu tiên Project nếu có, sau đó created_at/number), không xử lý song song.
+
+**Điểm cần chứng minh khi triển khai:** cách lấy Project v2 Status qua GitHub GraphQL/API với đúng credential Windows; cách xác định idle chính xác từ CoS bản cài; CoS lifecycle tạo main chat đúng project; quyền ghi Project Status/Issue receipt. Khi không có API/evidence thực thì báo `BLOCKED`, **không** đoán.
+
+### 6.3. Phạm vi phiên bản đầu, bảo mật và tiêu chí hoàn thành
+
+**Bản đầu (pilot):** Watcher ưu tiên `--dry-run` mặc định; phát hiện `agent:forge + Ready`, hiển thị lý do chọn/bỏ qua (không chứa secret), kiểm tra idle và đánh dấu state **giả lập**, **không** POST. Sau khi chủ máy duyệt riêng và CoS preflight được review, chạy **một PONG cố định** qua Issue #5 (vẫn `NO_DISPATCH` cho tới khi được arm rõ ràng); xác nhận `202` → assistant `PONG` + `turn_end`, no duplicate sau restart. **Task lập trình thực từ Issue Ready là giai đoạn tiếp theo, chỉ bật sau pilot và một quyết định rõ của chủ dự án**, không suy diễn được phép chạy shell/PR từ việc G2 amendment được viết.
+
+**Biên bảo mật tối thiểu:** GitHub API và Project/Issue được kiểm tra đúng repo/status/agent/owner; token CoS chỉ dùng trên loopback, không log; một job một lúc; fail-closed khi sai/bị tắt; không chạy mã trích từ Issue trực tiếp trong Python. Không xây hệ thống password thứ ba. Cảnh báo ACL `W01-SEC-01` liên quan các principal/capability của Codex sandbox **chưa hết hiệu lực**: owner phải chọn cách xử lý hoặc chấp nhận rủi ro **có ghi nhận rõ + evidence phù hợp**, trước khi bật dispatch. Không xóa ACL toàn profile, đổi ledger Codex, tự thay token hay bật `Allow actions`.
+
+**Acceptance của pilot:** (1) GitHub trả đúng Issue phù hợp và từ chối Issue `Backlog`/sai agent/ngoài repo; (2) Forge busy/offline ⇒ **0 send**; (3) run dry-run ⇒ **0 POST**; (4) pilot có quyền rõ ⇒ **một** CoS main chat đúng worktree, `PONG + turn_end` và trace Issue/input UUID; (5) timeout/crash/restart ⇒ không tạo hai chat, `UNKNOWN` cần đối chiếu; (6) state/secret không nằm trong Git, test mock trên Windows và Ubuntu PASS; (7) không tự đóng Issue hoặc đánh dấu VERIFIED khi chưa qua review. **Mọi kiểm thử pilot hiện NOT_RUN**.
+
+## 7. G3 amendment — thay breakdown W02–W08 bằng ba gói nhỏ (đề xuất, chưa READY)
+
+| Gói dự kiến | Owner / reviewer | Phụ thuộc | Phạm vi/file ownership đề xuất | Acceptance |
+| --- | --- | --- | --- | --- |
+| **TW-01 — Task selection contract** | Forge / Atlas | Amendment G2/G3 review/merge; GH Project API/access evidence | Thiết kế mapping Status/agent/Ready, quyền token, idle predicate, cách tránh claim trùng. **Chỉ tài liệu** với tên file/Issue và source SHA được giao sau review | Query metadata đúng Project #3, dry-run trên fixtures không dispatch; status/permissions rõ |
+| **TW-02 — Minimal Windows watcher** | Forge / Atlas | TW-01 merged, CoS W01 security disposition + approved recheck | `.agents/scripts/task_watcher.py`, `.agents/scripts/tests/test_task_watcher.py` và README ngắn; **Python standard library**, JSON state/lock dưới `%LOCALAPPDATA%\OpenDash\task-watcher\` (không trong Git) | Cấu hình mặc định 120 s, `--dry-run`, Ctrl+C, repo/status/idle, CoS health/auth/project, skip/offline, không duplicate, mocked CI |
+| **TW-03 — Controlled PONG pilot + handoff** | Forge / Atlas | TW-02 mock PASS; owner bật thử riêng Issue #5 | `docs/verification/muse-cos-win-task-watcher-pilot.md`; chỉ sửa code nếu có Issue riêng và ownership cụ thể | Một PONG chính xác, trace UUID/events, không retry mù, evidence/redaction/restart được review. Sau pilot, **quyết định riêng** trước khi giao Issue lập trình thật |
+
+**Ghi chú scope:** TW-01..03 là **tên gói đề xuất, không phải Task ID G3 đã READY**. Không tự tạo Issue implementation hoặc đổi Project Status từ bảng này. Khi được phê duyệt, coordinator tạo Issue riêng theo [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md), pin source/base SHA và file ownership; chỉ một writer thực thi. Reviewer của G2/G3 amendment và evidence dự kiến **Atlas**; không tự nhận lời chấp thuận của Atlas.
+
+## 8. Chuyển đổi từ bản G2/G3 lịch sử
+
+| Thành phần cũ | Quy tắc chuyển đổi đề xuất |
+| --- | --- |
+| **§1–§5, W01–W08** từ PR #4 | **Giữ nguyên lịch sử đã AGREED/APPROVED.** Sau khi amendment được review/merge, **không phát hành thêm W02–W08 theo contract Poller cũ**; thay bằng TW-01..03. Không viết lại evidence hoặc giả vờ PR #4 chưa được phê duyệt |
+| **W01 / Issue #6 / PR #7** | Discovery CoS vẫn có giá trị; Atlas Round 2 `W01_P0_ACCEPTED_WITH_SECURITY_BLOCKER`. **Chưa đóng security hold, chưa tự merge** PR #7. Theo dõi risk disposition/effective-access và API preflight trước bật Watcher |
+| **Issue #5 — TEST-PONG-01** | Vẫn `COORDINATION_ONLY / NO_DISPATCH` đến khi có quyết định arm pilot; không dùng Issue #5 như task lập trình `Ready` |
+| **GitHub Project #3 / GitHub Plugin** | Dùng workflow, nhãn và Project Status đã có; **không** tạo queue khác, label `status:ready`, password hoặc project mới |
+| **PR và bằng chứng** | Review/merge amendment **riêng khỏi W01 PR #7**. Task lập trình watcher không được `READY` cho đến khi contract mới merge, quyền đã chứng minh và blocker tương ứng xử lý/được owner chấp nhận có bằng chứng. Không đánh dấu P0–P4 `VERIFIED` chỉ vì đổi phương án |
+
+**Next gate:** Atlas review bản amendment này, chủ dự án chốt những điều kiện còn mở (ACL trust boundary, GH Project v2 API quyền thực, chính sách cho chạy task code sau pilot), rồi merge tài liệu. Chỉ sau đó mở TW-01 theo ownership/Issue riêng. **Không** thực thi Poller cũ, Watcher mới, GitHub signal hay CoS `POST` từ việc sửa tài liệu.
