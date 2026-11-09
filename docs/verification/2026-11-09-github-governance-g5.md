@@ -16,8 +16,8 @@ Baseline `main@b39bfd39db88499eb89d6598e24b52f9f33e9982` (PR
 | Issue và Project | **PASS** | [Project #3 / Team items](https://github.com/users/thientran2359/projects/3/views/3) chứa Issue #1 với label và `In review`. |
 | Merge không tự đóng Issue | **PASS (quan sát trạng thái)** | PR #2 đã merge nhưng [Issue #1](https://github.com/thientran2359/opendash-cms/issues/1) vẫn open / `In review`; không tạo PR giả để kiểm thử event. |
 | Labels/Milestones | **PASS (cấu hình)** | [9 milestone](https://github.com/thientran2359/opendash-cms/milestones) gồm M2.5; [module/type/agent labels](https://github.com/thientran2359/opendash-cms/labels) đã có. |
-| Branch Ruleset | **PASS (cấu hình)** | [Ruleset #26833341](https://github.com/thientran2359/opendash-cms/settings/rules/26833341) Active, target default branch: yêu cầu PR, chặn xóa và force-push; 0 required approvals. Không thử force-push hoặc xóa nhánh thật. |
-| GitHub Actions CI mới | **NOT_RUN trước PR G5** | `.github/workflows/governance.yml` được bổ sung ở PR G5. Chỉ bật required checks sau khi có kết quả thực chạy trên GitHub. |
+| Branch Ruleset | **PASS (cấu hình)** | [Ruleset #26833341](https://github.com/thientran2359/opendash-cms/settings/rules/26833341) Active, target default branch: yêu cầu PR, chặn xóa và force-push; 0 required approvals. Đã bật hai required status checks đúng tên và nguồn GitHub Actions sau khi CI PASS, rồi reload xác nhận. Không thử force-push hoặc xóa nhánh thật. |
+| GitHub Actions CI mới | **PASS — PR #3, commit `fff367e`** | [Run #42572931323](https://github.com/thientran2359/opendash-cms/actions/runs/42572931323): `governance-ubuntu-latest` và `governance-windows-latest` đều hoàn thành `success`; mọi bước test/check trong cả hai job PASS. |
 | Muse tạo task / dispatch | **NOT_RUN** | Chưa cài adapter, không tạo task G3 giả. |
 
 ## Các lệnh thực chạy tại Windows
@@ -32,9 +32,9 @@ Baseline `main@b39bfd39db88499eb89d6598e24b52f9f33e9982` (PR
 
 ## Kết luận và giới hạn
 
-- CI chưa được coi là PASS chỉ vì có workflow. Cần kiểm tra trực tiếp check
-  `governance-ubuntu-latest` và `governance-windows-latest` trên PR thực tế;
-  chỉ sau đó mới thêm làm required checks cho Ruleset.
+- CI đã thực chạy tại GitHub trên PR #3 (commit `fff367e`) và hai job PASS;
+  Ruleset đã bắt buộc hai check này. Nếu có thêm commit, phải đối chiếu run mới
+  trên HEAD trước khi merge; không suy mọi commit tương lai sẽ PASS.
 - Issue Forms không tự kiểm tra G3 READY khi người dùng nhập tay; gate thuộc
   `.agents/scripts/prepare-github-issue.py` và quy trình review.
 - `MERGED` không đồng nghĩa `VERIFIED`; không tự đóng Issue #1 hoặc chuyển

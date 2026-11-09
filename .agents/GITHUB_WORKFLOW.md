@@ -158,6 +158,10 @@ buộc số review của tài khoản khác. Workflow
 và Windows, read-only, cho mọi PR vào `main` và push `main`. Xem
 [báo cáo G5](../docs/verification/2026-11-09-github-governance-g5.md): chỉ
 bật required checks sau khi GitHub phát sinh đúng tên check và có PASS.
+Hai required checks hiện đã bật sau khi [run đầu tiên của PR #3](https://github.com/thientran2359/opendash-cms/actions/runs/42572931323)
+PASS trên cả Ubuntu và Windows: `governance-ubuntu-latest` và
+`governance-windows-latest` (source GitHub Actions). Không dùng lời khẳng định
+PASS của agent thay cho trạng thái checks trên commit PR đang review.
 
 Các hành động trên là **cấu hình GitHub hiện có**, không phải bằng chứng
 Muse dispatch, adapter CoS hay tự động chốt G5 đã chạy. Muse khi được nối
