@@ -1,11 +1,12 @@
-# Test matrix (PROPOSED): Muse → CoS Windows → GitHub
+# Test matrix: Muse → CoS Windows → GitHub (Phase 1 approved, runtime NOT_RUN)
 
 - **Agent / ngày:** Forge, 2026-11-09
-- **Trạng thái:** **PROPOSED / toàn bộ test chưa chạy**
+- **Trạng thái:** **G2 Phase 1 P0–P4 APPROVED (scope/contract) / mọi test NOT_RUN**; Phase 2/P5 vẫn PROPOSED.
 - **Source SHA:** `8833fc0f9f13903373ace8cdb4e67ee29b8cfb16`
 - **Thiết kế:** [Muse Orchestrator POC](muse-cos-win-orchestrator-poc.md)
 - **Nguồn phản biện:** [Nova F-01–F-09 và Round 2 R2-01–R2-03 trên PR #4](https://github.com/thientran2359/opendash-cms/pull/4) (`READY_FOR_G2_APPROVAL` cho Phase 1, **chưa phải G2 được chủ dự án phê duyệt**); test expected vẫn `PROPOSED`, chưa chạy.
 - **Quyết định chủ dự án (09/11/2026):** **Outbound GitHub Poller được chọn** cho POC; không triển khai Inbound Relay/Cloudflare nếu Poller chứng minh khả thi. ChatGPT Web Project mapping **không phải điều kiện PASS**; yêu cầu đúng CoS Project/worktree và khả năng dispatch Forge. **Chưa có P0–P5 runtime PASS.**
+- **G2 Phase 1 được chủ dự án phê duyệt (09/11/2026):** [Approved Phase 1 contract](../../docs/plans/muse-cos-win-phase1-g2.md); **GitHub Issue #5** là kênh phối hợp PONG duy nhất, trạng thái NO_DISPATCH cho tới khi P0/G3 cho phép. Approval không phải P0–P4 runtime PASS.
 
 ## Nguyên tắc nghiệm thu
 

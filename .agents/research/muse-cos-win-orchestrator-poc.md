@@ -2,7 +2,7 @@
 
 - **Agent / ngày:** Forge (Chat On Steroids Windows), 2026-11-09
 - **Source SHA đối chiếu:** `8833fc0f9f13903373ace8cdb4e67ee29b8cfb16` (`main`, PR #3 đã merge)
-- **Trạng thái:** **PROPOSED — CHƯA PHÊ DUYỆT THIẾT KẾ / CHƯA TRIỂN KHAI**
+- **Trạng thái:** hồ sơ nghiên cứu/thiết kế gốc; **G2 Phase 1 (P0–P4) đã được chủ dự án APPROVED** trong [tài liệu chốt](../../docs/plans/muse-cos-win-phase1-g2.md); **Phase 2/P5 còn PROPOSED**, tất cả runtime test NOT_RUN.
 - **Liên quan:** [GitHub workflow](../GITHUB_WORKFLOW.md), [Agent registry](../agents.yaml), [Issue #1 đã verified](https://github.com/thientran2359/opendash-cms/issues/1), [Project #3](https://github.com/users/thientran2359/projects/3)
 - **Kế hoạch kiểm thử:** [Muse POC test matrix](muse-cos-win-poc-test-matrix.md)
 - **Phản biện:** [Nova — PR #4, 09/11/2026](https://github.com/thientran2359/opendash-cms/pull/4) (F-01–F-09 đã được Nova xác nhận RESOLVED; Round 2 R2-01–R2-03 và khuyến nghị `READY_FOR_G2_APPROVAL` cho Phase 1). Khuyến nghị reviewer **không phải quyết định G2 của chủ dự án**.
@@ -152,4 +152,4 @@ Không có endpoint `/dispatch`, `/jobs` hoặc `/health` mở qua HTTP để Mu
 
 ## 11. Decision / promotion reference (chỉ điền sau khi được phê duyệt)
 
-**ĐÃ CÓ QUYẾT ĐỊNH CỤ THỂ của chủ dự án:** dùng Outbound GitHub Poller và cho phép CoS Project isolation; **không còn mở** transport fork hay yêu cầu ChatGPT Web Project mapping. **CHƯA có phê duyệt G2 đầy đủ cho hai phase hoặc bằng chứng P0–P5 runtime.** Sau Nova F-01–F-09, đề xuất tách **G2 Phase 1** (P0–P4, chỉ `TEST-PONG-01`, không cấp quyền thao tác source/terminal; CoS vẫn cần quyền tạo chat mới do chủ máy bật) khỏi **G2 Phase 2** (P5 GitHub Issue G3 thật). Cần duyệt contract GitHub signal/permissions/receipt và scope Phase 1 trước implementation; chỉ sau evidence P0–P4 VERIFIED mới đề xuất/chốt contract Phase 2. Đưa kết luận đã duyệt vào `docs/plans/` hoặc ADR/contract; không tạo Issue implementation G3 READY từ tài liệu `PROPOSED`, không coi PR review/merge là test runtime.
+**ĐÃ ĐƯỢC CHỦ DỰ ÁN DUYỆT G2 PHASE 1 (09/11/2026):** Outbound GitHub Poller + CoS Project isolation, giới hạn **P0–P4 và `TEST-PONG-01`**. Quyết định đã được tổng hợp thành [G2 Phase 1 approved scope/contract](../../docs/plans/muse-cos-win-phase1-g2.md) với kênh thử nghiệm [Issue #5](https://github.com/thientran2359/opendash-cms/issues/5) hiện **NO_DISPATCH**. Tài liệu research này vẫn giữ phương án/đề xuất lịch sử, đặc biệt **Phase 2/P5 chưa được duyệt**; mọi runtime tests đều NOT_RUN. Chỉ triển khai theo task G3 riêng sau khi scope và file ownership được review/merge; phê duyệt thiết kế không tự merge PR hoặc cấp task code `READY`.
