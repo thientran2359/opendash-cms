@@ -89,6 +89,26 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    tiến độ, owner hoặc blocker: chỉ cập nhật Issue/Project. Không duy trì
    JSON/YAML task mirror trong Git như một bảng trạng thái cạnh tranh.
 
+**Ngoại lệ hạ tầng POC Muse → CoS Phase 1 (G3 APPROVED 09/11/2026, Issues chưa READY):** các mã
+`P1-W01..P1-W08` trong [breakdown Phase 1](../docs/plans/muse-cos-win-phase1-g2.md)
+không phải product task `Mx-Sxx-Txx`. Công cụ
+`prepare-github-issue.py` **không hỗ trợ** namespace/source/metadata này;
+**không chạy CLI đó** hoặc gán module/milestone CMS giả. **Chỉ sau khi** G3
+work package tương ứng được review/merge vào `main`, các điều kiện và
+dependency đạt, coordinator có thể **tạo Issue riêng theo mẫu**
+[Implementation task](../.github/ISSUE_TEMPLATE/implementation.yml):
+tiêu đề `[P1-Wxx] ...`, nhãn `type:implementation`, `agent:forge`,
+`area:agent-workflow`, đủ 8 mục kỹ thuật/nghiệp vụ, file ownership, gate
+`READY`, approved `source_sha` (Git blob immutable), `base_sha`, owner,
+acceptance và rollback. Không tự gán GitHub milestone M3 hoặc `Module:` giả.
+Kiểm cả Issue open/closed theo **ID chính xác** trước khi publish và giữ
+[Issue #5](https://github.com/thientran2359/opendash-cms/issues/5) **chỉ
+coordination / `NO_DISPATCH`**, không dùng làm implementation Issue.
+**Staged activation:** lúc đầu chỉ W01/W02 được xem xét `READY`; W03–W08
+phải chờ P0 evidence + signal contract + cập nhật các brief tương ứng đã
+review/merge, rồi pin lại SHA nguồn mới. Đây là ngoại lệ **riêng Phase 1**,
+không nới guard của tool phát hành task module CMS.
+
 ### GitHub trực tiếp: cấu hình đã xác nhận 09/11/2026
 
 - **Repository:** [Issues](https://github.com/thientran2359/opendash-cms/issues),
@@ -181,6 +201,43 @@ không tự coi lời nhắn đã gửi hoặc commit tồn tại là hoàn thà
 PR chưa merge, không đưa task không liên quan vào cùng branch; chờ review/
 đồng bộ hoặc dùng task branch tách riêng sau quyết định thay đổi quy ước.
 Đảm bảo ownership file/schema/API tránh hai agent ghi cùng một hợp đồng.
+
+## Review tài liệu/thiết kế qua PR giữa các agent
+
+Áp dụng cả với **Draft PR** chứa nghiên cứu/G1/G2 còn `PROPOSED` (ví dụ
+[PR #4](https://github.com/thientran2359/opendash-cms/pull/4)). Review thiết kế
+không mặc nhiên cấp quyền triển khai hoặc chuyển G2 thành `AGREED`.
+
+1. **Tác giả PR** chỉ định reviewer và ghi rõ trong PR body hoặc comment:
+   mục tiêu, tài liệu/commit cần xem, tiêu chí phản biện, người sở hữu sửa
+   đổi, hình thức phản hồi và điều kiện review lại. Mặc định tác giả PR sở hữu
+   việc chỉnh sửa các file thuộc PR; không giao hai agent viết cùng file.
+2. **Reviewer** đọc chính xác `head SHA` của PR và ghi findings **trực tiếp
+   trên GitHub PR** bằng inline review comment (nếu gắn được dòng) hoặc
+   Conversation comment/review summary. Mỗi finding nêu mức độ ưu tiên,
+   file/đoạn liên quan, vấn đề, hậu quả và đề xuất sửa cụ thể. Nếu không có
+   finding, ghi rõ phạm vi đã xem và giới hạn kiểm tra. Reviewer có thể giữ
+   repo ở chế độ read-only; **được phép ghi GitHub review comment** không
+   đồng nghĩa được phép sửa file, commit hoặc push.
+3. Nếu reviewer **không có quyền hoặc công cụ ghi GitHub PR**, báo blocker
+   cùng lỗi cụ thể và chuyển toàn bộ findings qua chat cho coordinator/tác
+   giả; **tác giả đưa bản tổng hợp lên PR có ghi nguồn và liên kết phiên
+   review**, rồi mới xử lý. Không coi phản hồi chat đơn lẻ là review đã được
+   lưu trên GitHub; không tuyên bố đã comment khi API chưa xác nhận.
+4. **Tác giả PR** phân loại từng finding (`accept`, `reject` có lý do,
+   hoặc `needs-decision`), sửa tài liệu trên **branch head của mình**, chạy
+   checker phù hợp, commit và non-force push. Trả lời từng thread bằng commit
+   SHA hoặc lý do không sửa; không tự đánh dấu quyết định G2 đã được chốt.
+5. **Reviewer** đọc lại `head SHA` mới, kiểm diff và các thread để xác nhận
+   finding đã giải quyết; gửi review follow-up trên cùng PR. Chỉ người có
+   thẩm quyền mới chốt G2/merge; CI PASS, một comment `LGTM` hoặc chat phản
+   hồi chưa phải G5 verification.
+
+**Ngoại lệ reviewer trực tiếp sửa tài liệu:** phải giao lại rõ Issue/PR,
+file ownership, branch đích và phạm vi trước khi viết. Reviewer sửa trên
+branch `agent/<reviewer>`, commit/push non-force và mở PR riêng hoặc quy
+trình tích hợp được duyệt; **không push vào `agent/<author>`** chỉ vì đang
+review. Sau khi giao sửa, cần một lượt review độc lập với thay đổi đó.
 
 ## Khởi tạo code trên từng máy
 
