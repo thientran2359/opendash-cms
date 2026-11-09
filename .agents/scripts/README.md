@@ -8,6 +8,9 @@
 - `prepare-github-issue.py`: đọc đặc tả task G3 READY từ **Git blob tại
   `origin/main`** (hoặc commit `--ref` đã duyệt), validate gate/nội dung và
   xuất JSON `title`/`body`/`labels` có mô tả đầy đủ cho Muse/GitHub API.
+  Output còn có GitHub `milestone` (number), `milestone_title` để
+  đối chiếu với GitHub trước khi publish và `project_url` (Project hiện
+  có tự thêm Issue mở); **không tạo label `status:*`/`milestone:*`**.
   Không tạo Issue, không ghi file hoặc gửi task; phải kiểm tra trùng Task ID
   ở GitHub trước khi publish. Ví dụ khi đã có task hợp lệ:
 

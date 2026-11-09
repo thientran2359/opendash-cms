@@ -68,6 +68,7 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    Full-Track G2 chưa AGREED, heading không duy nhất, phần mô tả/checklist
    chưa hoàn chỉnh. `--base-ref <code-sha>` cho phép tách baseline source
    code khỏi commit chứa tài liệu. Output có `title`, `body`, `labels`,
+   `milestone` (GitHub number), `milestone_title`, `project_url`,
    `source_sha`, `base_sha`, `task_id`; **không tạo Issue hoặc gửi chat**.
 4. Muse **kiểm tra cả Issue open và closed** theo Task ID (so sánh task ID
    chính xác, không chỉ chuỗi gần đúng). Nếu đã có, update cùng Issue khi
@@ -75,27 +76,85 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    đảm bảo atomic chống trùng từ GitHub search: Muse phải serialize việc
    publish theo Task ID, xác nhận kết quả sau timeout/ambiguous failure
    trước khi retry. Không sinh Issue thứ hai cho cùng task/đợt triển khai.
-5. Gắn label/Project status theo quy ước bên dưới. Tạo label trước khi gọi
-   GitHub API (GitHub không tự hiểu `agent:forge` là username assignee). Chỉ
-   gán GitHub assignee nếu có tài khoản thực được cấp quyền; agent runtime
-   identity nằm ở `agent:*` label hoặc custom field.
+5. Muse **xác nhận lại** GitHub milestone number + title từ API rồi truyền
+   `milestone` vào `create_issue`; gắn `labels` của output. Nếu milestone
+   bị đổi/xóa, **BLOCKED**, không âm thầm chọn mốc khác. GitHub Project đã có
+   auto-add Issue mới từ repository; Muse xác nhận Issue xuất hiện ở Project
+   và đặt `Status=Ready` sau khi xác minh G3, không đánh dấu hoàn thành.
+   (GitHub không hiểu `agent:forge` là username assignee.) Chỉ gán GitHub
+   assignee nếu là tài khoản thực có quyền; agent runtime identity nằm ở
+   `agent:*` label.
 6. Khi scope, contract hoặc acceptance thay đổi: sửa tài liệu trong repo,
    review/merge và **đồng bộ lại body Issue + source SHA**. Khi chỉ đổi
    tiến độ, owner hoặc blocker: chỉ cập nhật Issue/Project. Không duy trì
    JSON/YAML task mirror trong Git như một bảng trạng thái cạnh tranh.
 
-### GitHub Project và nhãn đề xuất
+### GitHub trực tiếp: cấu hình đã xác nhận 09/11/2026
 
-Board GitHub Project `OpenDash CMS` có field `Status` cho READY, CLAIMED,
-IN_PROGRESS, BLOCKED, SUBMITTED, REVIEWED, MERGED, VERIFIED; lọc theo
-Milestone/Module/Agent. Issue chứa label `type:implementation` hoặc
-`type:research`/`type:design`, `module:CNT-xx`, `milestone:M3`,
-`agent:forge|harbor|atlas|nova|orion` khi được gán và **một nhãn**
-`status:*` khớp Project Status. Chuyển trạng thái phải gỡ nhãn cũ; board
-không thay thế bằng chứng verification. Issue Research/Design được theo dõi
-riêng và không tự gán READY cho implementation. Đây là **quy ước cần cấu
-hình** trên GitHub, không có Project/label hay tự đồng bộ nào được tạo ra
-chỉ bằng việc thêm tài liệu vào repo.
+- **Repository:** [Issues](https://github.com/thientran2359/opendash-cms/issues),
+  [Labels](https://github.com/thientran2359/opendash-cms/labels),
+  [Milestones](https://github.com/thientran2359/opendash-cms/milestones).
+- **Project duy nhất:** [Opendash cms #3](https://github.com/users/thientran2359/projects/3).
+  Đã có sẵn và liên kết với repo; **không tạo Project thứ hai**. Các view
+  `Backlog` (board), `Priority board`, `Team items` (table),
+  `Roadmap`, `My items` vẫn được giữ. View `Team items` hiển thị
+  `Labels` và `Milestone` bên cạnh Status/PR để phân biệt module và mốc.
+- **27 label `module:*`:** theo toàn bộ ID trong
+  [Module Catalog](../docs/plans/MODULE_CATALOG_V1.md), chia màu theo nhóm
+  FND/CNT/BLD/THM/PLG/SITE/OPS. Các nhóm khác:
+  `type:implementation|research|design|verification|process`,
+  `agent:atlas|nova|forge|harbor|orion`, `area:agent-workflow`.
+  Giữ 10 nhãn mặc định của GitHub, không xóa/đổi nhãn sẵn có.
+- **GitHub Milestone:** tạo 9 mốc từ roadmap; tên/mã và number sau được
+  `prepare-github-issue.py` dùng để chuẩn bị dữ liệu. Trước mỗi lần tạo
+  Issue, coordinator/Muse phải đối chiếu **số và tên live** qua GitHub API:
+
+  | Roadmap ID | GitHub Milestone | Number |
+  | --- | --- | --- |
+  | M1 | M1 — CMS Baseline | 1 |
+  | M2 | M2 — Plugin Sandbox Baseline | 2 |
+  | M2.5 | M2.5 — Core Foundation | 3 |
+  | M3 | M3 — Content & Media | 4 |
+  | M4 | M4 — Visual Builder | 5 |
+  | M5 | M5 — Theme & Templates | 6 |
+  | M6 | M6 — Plugin Extensions | 7 |
+  | M7 | M7 — Site Features | 8 |
+  | M8 | M8 — Operations & Release | 9 |
+
+  Chưa đặt ngày kết thúc. M1/M2 là baseline lịch sử theo evidence phạm vi,
+  M2.5 đã verified, M3 còn PARTIAL, M4–M8 là kế hoạch; không suy trạng thái
+  nghiệm thu toàn module từ việc có Milestone trên GitHub.
+
+**Một trạng thái có một chủ sở hữu:** GitHub **Milestone** là mốc roadmap,
+GitHub **Project Status** là trạng thái thực thi; **không tạo**
+`milestone:M3` hoặc `status:ready` labels để lưu bản sao trạng thái.
+Issue phải mang một `type:*`, một `module:*` cho task thuộc module (một
+task liên module ghi primary owner và cross-module dependencies trong body);
+và `agent:*` nếu đã phân công. Task quy trình liên module dùng
+`type:process` + `area:agent-workflow` nhưng không gán module/milestone giả
+(ví dụ [Issue #1](https://github.com/thientran2359/opendash-cms/issues/1)).
+
+**Project Status hiện có (không tạo thêm trạng thái trùng):**
+
+| Project Status | Task workflow |
+| --- | --- |
+| Backlog | Research/design đang mở, task chưa đủ G3; không được tự thực thi |
+| Ready | Implementation G3 READY đã duyệt và đủ nguồn/acceptance |
+| In progress | CLAIMED/IN_PROGRESS (hoặc BLOCKED với blocker nêu trong Issue) |
+| In review | SUBMITTED, REVIEWED hoặc MERGED nhưng chưa có G5 verification |
+| Done | Chỉ khi đã VERIFIED đúng phạm vi có evidence và chấp thuận đóng |
+
+Project đã bật auto-add Issue mở từ repo `opendash-cms` (lọc
+`is:issue is:open`) và workflow `Done → close Issue`. Workflow mặc định
+`Pull request merged → Done` **đã được tắt**, vì merge không chứng minh
+verified và sẽ khiến Issue bị đóng sớm. Trạng thái BLOCKED phải ghi nguyên
+nhân/hướng xử lý trong Issue, không tự chuyển Done. Duy trì một nguồn trạng
+thái Project duy nhất, không phát tán tiến độ sang JSON/Markdown bản sao.
+
+Các hành động trên là **cấu hình GitHub hiện có**, không phải bằng chứng
+Muse dispatch, adapter CoS hay tự động chốt G5 đã chạy. Muse khi được nối
+GitHub cần dùng REST/GraphQL theo quyền được cấp, kiểm tra idempotency và
+trạng thái post-create; không tự phê duyệt G2/G3/G5.
 
 ## Vòng đời trạng thái
 

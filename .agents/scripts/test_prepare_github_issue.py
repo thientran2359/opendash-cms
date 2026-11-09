@@ -66,7 +66,22 @@ class ParseTaskTests(unittest.TestCase):
         self.assertIn("## Tiêu chí nghiệm thu", payload["body"])
         self.assertIn("- [ ] Có thể tạo", payload["body"])
         self.assertIn("blob/" + "a" * 40, payload["body"])
-        self.assertEqual(payload["labels"], ["type:implementation", "status:ready", "module:CNT-03", "milestone:M3", "agent:forge"])
+        self.assertEqual(payload["labels"], ["type:implementation", "module:CNT-03", "agent:forge"])
+        self.assertEqual(payload["milestone"], 4)
+        self.assertEqual(payload["milestone_title"], "M3 — Content & Media")
+        self.assertEqual(payload["project_url"], "https://github.com/users/thientran2359/projects/3")
+        self.assertNotIn("status:ready", payload["labels"])
+        self.assertNotIn("milestone:M3", payload["labels"])
+
+    def test_milestone_map_covers_approved_roadmap(self):
+        self.assertEqual(
+            set(MODULE.GITHUB_MILESTONES),
+            {"M1", "M2", "M2.5", "M3", "M4", "M5", "M6", "M7", "M8"},
+        )
+        task = MODULE.parse_task(example(), "M3-S07-T01")
+        task["id"] = "M9-S07-T01"
+        with self.assertRaisesRegex(MODULE.TaskError, "chưa có ánh xạ"):
+            MODULE.issue_payload(task, "docs/plans/modules/CNT-03-taxonomy.md", "a" * 40, "a" * 40, None)
 
     def test_refuse_not_ready_and_unapproved_g2(self):
         for kwargs in ({"g3": "PROPOSED"}, {"g2": "PROPOSED"}):

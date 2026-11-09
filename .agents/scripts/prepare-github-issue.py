@@ -17,6 +17,21 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "thientran2359/opendash-cms"
+PROJECT_URL = "https://github.com/users/thientran2359/projects/3"
+# GitHub milestone IDs verified on 2026-11-09. The publishing coordinator
+# MUST resolve/compare these against live GitHub before creating an Issue.
+# They are not authoritative for the roadmap status, only GitHub references.
+GITHUB_MILESTONES = {
+    "M1": (1, "M1 — CMS Baseline"),
+    "M2": (2, "M2 — Plugin Sandbox Baseline"),
+    "M2.5": (3, "M2.5 — Core Foundation"),
+    "M3": (4, "M3 — Content & Media"),
+    "M4": (5, "M4 — Visual Builder"),
+    "M5": (6, "M5 — Theme & Templates"),
+    "M6": (7, "M6 — Plugin Extensions"),
+    "M7": (8, "M7 — Site Features"),
+    "M8": (9, "M8 — Operations & Release"),
+}
 TASK_ID = re.compile(r"M\d+(?:\.\d+)?-S\d{2}-T\d{2}\Z")
 HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 TASK_HEADING = re.compile(
@@ -180,6 +195,11 @@ def issue_payload(
     sections = task["sections"]
     assert isinstance(metadata, dict) and isinstance(sections, dict)
     milestone, slice_number, _ = task_id.split("-")
+    if milestone not in GITHUB_MILESTONES:
+        raise TaskError(
+            f"Milestone {milestone} chưa có ánh xạ GitHub được xác minh; cần review roadmap"
+        )
+    github_milestone, milestone_title = GITHUB_MILESTONES[milestone]
     url = f"https://github.com/{REPOSITORY}/blob/{source_sha}/{source}"
     display_names = {
         "Tổng quan và giá trị": "Tổng quan — vì sao cần làm",
@@ -224,7 +244,9 @@ def issue_payload(
             "sửa đặc tả trong repo qua review trước rồi đồng bộ Issue.",
         ]
     )
-    labels = ["type:implementation", "status:ready", f"module:{metadata['module']}", f"milestone:{milestone}"]
+    # GitHub Milestone tracks the roadmap; GitHub Project Status tracks execution.
+    # Do not duplicate either one into status:* or milestone:* labels.
+    labels = ["type:implementation", f"module:{metadata['module']}"]
     if agent:
         labels.append(f"agent:{agent}")
     return {
@@ -232,6 +254,9 @@ def issue_payload(
         "title": f"[{task_id}] {task['title']}",
         "body": "\n".join(body) + "\n",
         "labels": labels,
+        "milestone": github_milestone,
+        "milestone_title": milestone_title,
+        "project_url": PROJECT_URL,
         "task_id": task_id,
         "source_path": source,
         "source_sha": source_sha,
