@@ -88,6 +88,7 @@ Một task mới thêm CRUD route **không** mặc nhiên thuộc Fast-Track: ph
 | Milestone/slice, dependency và tiến độ điều phối | [ROADMAP_V1](ROADMAP_V1.md) |
 | Domain/module ID và coverage V1 | [MODULE_CATALOG_V1](MODULE_CATALOG_V1.md) |
 | Chi tiết capability, research, design, bảng task và primary slice khi mở module | `docs/plans/modules/<module>.md` |
+| Phân công task, trạng thái vận hành và đối chiếu GitHub Issue/PR | [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md) |
 | Contract và kiến trúc đã quyết định | [CORE_FOUNDATION](../contracts/CORE_FOUNDATION.md), các ADR liên quan |
 | Test đã thực hiện theo commit/môi trường | [Verification](../verification/README.md) |
 
@@ -97,6 +98,7 @@ README chỉ làm mục lục. Không dựng thêm JSON/YAML manifest giữ bả
 
 - Mỗi slice nên tạo được một thay đổi chạy xuyên qua giao diện/API/storage khi có thể. Không chia thuần theo tên file nếu không có hành vi kiểm chứng được.
 - Một task cần có **mục tiêu**, **module/capability**, **chế độ gate**, **đầu vào**, **file được sửa trong lượt**, **phần ngoài phạm vi**, **dependency**, **tiêu chí nghiệm thu**, **cách kiểm tra**, **rủi ro/rollback** và **bằng chứng bàn giao**. G1 và G2 là hoạt động trước G3, không gắn số `-Txx` như task code.
+- Khi G3 READY và đã được review/merge, GitHub Issue cho task phải ghi **mô tả nghiệp vụ và mục tiêu dễ hiểu độc lập** với source code, cùng phạm vi, loại trừ, acceptance checklist và liên kết đặc tả tại commit SHA cố định. Issue là nguồn trạng thái/assignee, nhưng không phải nơi tự ý sửa contract/acceptance; xem [quy trình GitHub](../../.agents/GITHUB_WORKFLOW.md). Không tạo Issue READY từ bảng ứng viên G3 lịch sử hoặc nội dung G2 PROPOSED.
 - Nếu hai task cùng sửa contract/schema/API chung, xác định thứ tự sở hữu trước khi giao song song; không cho hai agent ghi cùng file. **File ownership là theo lượt/task**, không khóa vĩnh viễn cả thư mục cho một AI.
 - Phù hợp cách phối hợp hiện tại: Codex có thể chuẩn bị research/plan và review, Antigravity triển khai slice. Luồng phối hợp tuân theo [PROTOCOL](../discussions/PROTOCOL.md); danh sách nhiệm vụ ở đây không tự cấp quyền cho agent triển khai/deploy.
 - Trước khi code, tra API và quan hệ caller/callee bằng CodeGraph nếu sẵn có; xác minh lại source thực. Giữ đúng các Base APIs của [CORE_FOUNDATION](../contracts/CORE_FOUNDATION.md).
