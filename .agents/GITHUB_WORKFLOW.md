@@ -239,6 +239,36 @@ branch `agent/<reviewer>`, commit/push non-force và mở PR riêng hoặc quy
 trình tích hợp được duyệt; **không push vào `agent/<author>`** chỉ vì đang
 review. Sau khi giao sửa, cần một lượt review độc lập với thay đổi đó.
 
+## Review và merge implementation PR được ủy quyền
+
+Theo chỉ đạo chủ dự án ngày 10/11/2026, **Atlas và Nova được phép review và tự
+merge implementation PR do agent khác thực hiện** khi được gọi luồng
+[github-pr-review-merge](skills/github-pr-review-merge/SKILL.md) trong chat.
+Đây là ngoại lệ cụ thể cho quy tắc không auto-merge: một lượt do người dùng
+khởi tạo, không background polling; không cần xin lại quyền cho mỗi PR đủ gate.
+Lệnh chỉ “review/re-review PR” không cấp quyền merge.
+
+- Xác minh reviewer/implementer bằng role, Issue, branch và signed evidence;
+  login GitHub dùng chung không chứng minh tự review hoặc độc lập. Không tự
+  review/merge PR mình viết; Atlas và Nova phải review chéo nếu là tác giả.
+- Chỉ implementation có scope/gate đã duyệt, đúng repo/main, acceptance trước
+  merge đạt, dependency có evidence, findings bắt buộc đã giải quyết, required
+  checks tại head/integration hiện tại PASS và protection cho phép. Không dùng
+  quyền này để chốt PRD/G2/contract/risk acceptance mới hay bỏ security blocker.
+- Review trên head/base SHA cụ thể; re-fetch trước merge và sau mỗi PR. Head
+  đổi phải re-review; base đổi phải đánh giá integration/validation lại. Merge
+  dùng expected head SHA, không bật auto-merge đợi checks, không force/admin
+  bypass, không sửa branch tác giả hoặc xóa branch agent.
+- Nếu account chung không được APPROVE, COMMENT ghi verdict/role chỉ đủ khi
+  ruleset không đòi approval bằng account khác; không giả satisfied approval.
+- Timeout merge phải đối chiếu PR/merge SHA trước retry. Ghi receipt lên PR/Issue;
+  **MERGED khác VERIFIED**. Không tự Done/close; closing keywords trong PR hoặc
+  commit còn có thể đóng Issue thiếu G5 phải được author/coordinator xử lý
+  trước merge. Khi cần G5 sau merge, giữ Issue mở và ghi phần còn NOT_RUN.
+
+Skill mới cũng là thay đổi do Atlas/Nova viết: tác giả không tự merge PR tạo
+hoặc cập nhật skill của mình. Chi tiết điều kiện/chế độ và output ở SKILL.md.
+
 ## Khởi tạo code trên từng máy
 
 Bước 1: clone độc lập ở máy đó từ GitHub nếu chưa có; kiểm tra `git remote -v`.

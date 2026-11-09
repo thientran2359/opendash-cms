@@ -34,11 +34,12 @@
   (see `.agents/README.md` and `.agents/agents.yaml`). Official approved
   decisions, plans/contracts and actual verification belong in `docs/`.
   Keep existing historical references and their source evidence.
-- `.agents/skills/` contains two **manual chat skills**:
+- `.agents/skills/` contains three **manual chat skills**:
   [github-task-pickup](.agents/skills/github-task-pickup/SKILL.md) when asked to fetch/perform one's GitHub Issue,
-  and [discussion-turn-responder](.agents/skills/discussion-turn-responder/SKILL.md) when asked to check and answer one's discussion turns.
+  [discussion-turn-responder](.agents/skills/discussion-turn-responder/SKILL.md) when asked to check and answer one's discussion turns,
+  and [github-pr-review-merge](.agents/skills/github-pr-review-merge/SKILL.md) for Atlas/Nova reviewing and merging other agents' eligible implementation PRs.
   Read the corresponding SKILL.md on request even if the host does not auto-discover repo skills.
-  Neither skill starts any background process, cronjob or automatic CoS dispatch.
+  No skill starts any background process, cronjob or automatic CoS dispatch.
   `.agents/archive/skills/` contains retired skills for reference ONLY.
   Do not invoke archived handoff scripts, PowerShell Stop hooks or the previous
   opendash-orchestrator as if they were active automation.
@@ -58,7 +59,10 @@
   changes and avoid two writers on the same file.
 - After actual validation, stage only task-owned changes, commit with task ID
   and non-force push to its agent branch. Link commit and tests to GitHub
-  Issue/PR for review. No automatic merge to main or deployment.
+  Issue/PR for review. No background merge or deployment. Atlas/Nova may merge
+  independently reviewed implementation PRs under the owner-delegated
+  review-and-merge flow in .agents/GITHUB_WORKFLOW.md; review-only stays read-only
+  for code and never merges, and authors cannot self-review/self-merge.
 - Muse-to-CoS/Antigravity dispatch must be verified through authenticated
   host-specific adapters first. Chat delivery or AI consensus does not
   establish completion, approval or authority to change contracts.
