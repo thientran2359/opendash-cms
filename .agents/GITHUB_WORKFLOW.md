@@ -89,6 +89,26 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    tiến độ, owner hoặc blocker: chỉ cập nhật Issue/Project. Không duy trì
    JSON/YAML task mirror trong Git như một bảng trạng thái cạnh tranh.
 
+**Ngoại lệ hạ tầng POC Muse → CoS Phase 1 (G3 DRAFT):** các mã
+`P1-W01..P1-W08` trong [breakdown Phase 1](../docs/plans/muse-cos-win-phase1-g2.md)
+không phải product task `Mx-Sxx-Txx`. Công cụ
+`prepare-github-issue.py` **không hỗ trợ** namespace/source/metadata này;
+**không chạy CLI đó** hoặc gán module/milestone CMS giả. **Chỉ sau khi** G3
+work package tương ứng được review/merge vào `main`, các điều kiện và
+dependency đạt, coordinator có thể **tạo Issue riêng theo mẫu**
+[Implementation task](../.github/ISSUE_TEMPLATE/implementation.yml):
+tiêu đề `[P1-Wxx] ...`, nhãn `type:implementation`, `agent:forge`,
+`area:agent-workflow`, đủ 8 mục kỹ thuật/nghiệp vụ, file ownership, gate
+`READY`, approved `source_sha` (Git blob immutable), `base_sha`, owner,
+acceptance và rollback. Không tự gán GitHub milestone M3 hoặc `Module:` giả.
+Kiểm cả Issue open/closed theo **ID chính xác** trước khi publish và giữ
+[Issue #5](https://github.com/thientran2359/opendash-cms/issues/5) **chỉ
+coordination / `NO_DISPATCH`**, không dùng làm implementation Issue.
+**Staged activation:** lúc đầu chỉ W01/W02 được xem xét `READY`; W03–W08
+phải chờ P0 evidence + signal contract + cập nhật các brief tương ứng đã
+review/merge, rồi pin lại SHA nguồn mới. Đây là ngoại lệ **riêng Phase 1**,
+không nới guard của tool phát hành task module CMS.
+
 ### GitHub trực tiếp: cấu hình đã xác nhận 09/11/2026
 
 - **Repository:** [Issues](https://github.com/thientran2359/opendash-cms/issues),
