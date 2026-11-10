@@ -1,32 +1,17 @@
 # Giao thức phối hợp các agent — OpenDash CMS
 
-Năm agent Atlas, Nova, Forge, Harbor và Orion dùng các thư mục code cục bộ
-riêng, cùng repository GitHub `opendash-cms` và branch `agent/<name>`.
-Đây là quy ước vận hành; danh sách branch trong cấu hình không chứng minh
-chúng đã được tạo trên GitHub hoặc phiên AI đã được kết nối.
+Năm agent Atlas, Nova, Forge, Harbor, Orion dùng checkout/branch riêng và GitHub làm nguồn sự thật. Áp dụng [ADR-0003](../decisions/ADR-0003-agent-consensus-governance.md) và [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md).
 
-## Phân quyền nguồn tài liệu và task
+## Luồng quyết định
 
-- Nghiên cứu, phương án G0–G2, lượt phản biện chưa duyệt: `.agents/research/`
-  và `.agents/discussions/`. Mỗi lượt có tác giả, thời gian và bằng chứng,
-  không ghi đè phản biện trước đó.
-- Bản nháp giao việc: `.agents/tasks/`. Khi đủ gate/acceptance, **GitHub Issue**
-  trở thành nguồn trạng thái duy nhất cho task, assignee và dependency.
-- **GitHub PR** chứa diff, commit, kiểm thử, review và quyết định merge.
-- `docs/` giữ yêu cầu, hợp đồng, kế hoạch đã được duyệt và báo cáo kiểm chứng
-  có lệnh/môi trường/kết quả thực. Đồng thuận AI không tự cấp quyền thay đổi
-  PRD, contract hoặc đánh dấu `VERIFIED`.
+1. Draft nghiên cứu, phản biện và authored turns tại .agents/research, .agents/discussions hoặc GitHub Issue/PR có turn ký tên. Mỗi turn có In reply to, Next agent, evidence/source SHA, blocker; phân biệt shared GitHub login với role.
+2. Sau khi các agent **đồng thuận có căn cứ**, coordinator ghi **Final Decision** gồm phương án được chọn, trade-offs, dependency, file ownership, acceptance/negative cases, phần chưa test và links evidence. **Status: CONCLUDED_BY_AGENTS; Next agent: none.** Không chuyển Next agent: owner theo mặc định. Đồng bộ metadata Issue (status/current turn/next agent) hoặc decision index sau khi xác nhận comment; **không** tự đổi Project Ready/Done.
+3. Nếu còn phản biện substantive hoặc cần kiểm định độc lập do rủi ro, chuyển **reviewer độc lập** (ưu tiên Atlas/Nova). Reviewer ghi **DECIDED_BY_REVIEWER** nếu đủ evidence hoặc **BLOCKED** cùng việc cần bổ sung; không tự review việc mình viết, không waive security/data blocker.
+4. Agent được giao ownership đưa phần đã chốt vào docs/plans, ADR hoặc docs/contracts qua PR; reviewer khác author kiểm source, diff, CI/docs guards và merge đủ gate theo workflow. Consensus không có nghĩa đã test PASS.
+5. Coordinator dùng docs đã merge để phát hành G3/Issue và gán task theo Project Ready, dependency, ownership. Owner chỉ theo dõi; chỉ hỏi khi cần yêu cầu sản phẩm mới hoặc ủy quyền ngoài quyền agent.
 
-Xem [quy trình vận hành GitHub](../../.agents/GITHUB_WORKFLOW.md) và
-[đối chiếu trạng thái M3](../plans/M3_STATUS_2026-11-09.md) trước khi giao
-task mới.
+## Lưu trữ và an toàn
 
-## Lịch sử và an toàn
-
-Các thread trong `docs/discussions/threads/` được giữ để truy vết nguồn
-tài liệu cũ, không nhận thêm lượt thảo luận mới. Các lựa chọn `PROPOSED`
-trong thread không trở thành quyết định được duyệt chỉ vì code đã triển khai.
-
-Không tự động merge/deploy, force push, phát động agent loop vô hạn hoặc
-gửi trùng task khi chưa biết kết quả gửi trước đó. Không lưu khóa/secret
-hay dữ liệu riêng tư trong GitHub Issue hoặc repository public.
+- Issue là nguồn nhiệm vụ/tiến độ; PR là diff/review/merge; docs/verification là bằng chứng có lệnh, SHA, OS; .agents/tasks không phải queue.
+- docs/discussions/threads và .agents/archive là lịch sử read-only, không tiếp tục các turn cũ.
+- Không tự tạo agent loop, watcher, dispatch, deploy, force push, bypass required checks, gửi trùng sau timeout hay tiết lộ secrets. BLOCKED_SECURITY hoặc thiếu G5 phải giữ nguyên.

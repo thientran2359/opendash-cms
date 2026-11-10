@@ -1,16 +1,7 @@
-# Discussions
+# Active agent discussions
 
-Use a directory per topic and separate authored timestamped files for turns.
-Do not rewrite a previous agent's turn. Preserve objections and ask for product
-approval when needed. See ../templates/DISCUSSION.md.
+Create one topic folder under .agents/discussions and append authored turns without editing earlier turns. See [template](../templates/DISCUSSION.md), [protocol](../../docs/discussions/PROTOCOL.md) and [ADR-0003](../../docs/decisions/ADR-0003-agent-consensus-governance.md).
 
-**On-demand participation:** each active topic/turn should identify `Status`,
-`Next agent` (one of atlas/nova/forge/harbor/orion/owner/none), turn number and
-`In reply to` source. Use the latest authored turn to decide whose turn is next;
-do not infer the agent solely from a shared GitHub account. Only topics with a
-clear, active handoff are eligible for auto-response **when the owner asks the
-agent in chat**. Add a new turn file, never edit prior turns. Historical
-`docs/discussions/threads/` is read-only.
+An OPEN/NEEDS_RESPONSE topic has explicit Next agent (atlas/nova/forge/harbor/orion). After evidence-backed consensus, coordinator adds a Final Decision CONCLUDED_BY_AGENTS, Next agent: none — no automatic owner signoff. If material disagreement or risk needs final review, assign an **independent** Atlas/Nova reviewer; DECIDED_BY_REVIEWER concludes or BLOCKED identifies missing evidence. Only an agent with explicit file ownership publishes resulting docs PR. Archived docs/discussions/threads are read-only.
 
-See [discussion-turn-responder](../skills/discussion-turn-responder/SKILL.md);
-there is no background monitor or automatic multi-agent loop.
+The [discussion-turn-responder](../skills/discussion-turn-responder/SKILL.md) skill runs once on request; no background monitor/agent loop.
