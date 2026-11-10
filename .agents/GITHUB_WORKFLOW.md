@@ -15,6 +15,58 @@ nhập trên CoS, dùng **Chat On Steroids Desktop Browser** và attach tab củ
 **Chrome đang đăng nhập đúng tài khoản GitHub**; Plugins Browser Playwright dùng
 profile riêng, không chứng minh tài khoản đang đăng nhập.
 
+## Danh tính 5 agent trên một tài khoản GitHub
+
+Atlas, Nova, Forge, Harbor và Orion dùng chung tài khoản GitHub để thao tác
+trên repo; **không tạo GitHub Apps hoặc thêm tài khoản bot**. Danh tính tác nghiệp
+lấy từ [agents.yaml](agents.yaml), workspace/branch, Issue ownership và
+metadata agent ghi trên PR, commit, comment. Nhãn `agent:<name>` thể hiện
+**người chịu trách nhiệm thực hiện** trên Issue, không phải GitHub username.
+
+- **Commit:** giữ Task ID trong tiêu đề và thêm Git trailer `Agent: Forge`
+  (thay bằng agent thực sự tạo commit). Có thể đặt `user.name` tương ứng agent
+  cho **một lệnh commit**; dùng email no-reply đã xác minh của tài khoản GitHub
+  đang dùng để giữ attribution. Ví dụ:
+
+  ```powershell
+  git -c user.name="Forge" -c user.email="<verified-github-noreply-email>" commit -m "M3-Sxx-Txx: mô tả thay đổi" -m "Agent: Forge"
+  ```
+
+  Đây là cú pháp minh họa; thay Task ID/email thực trước khi chạy. Nếu các
+  worktree dùng chung một Git database, **không** đặt `git config --local
+  user.name` cho một agent vì có thể ảnh hưởng tới các worktree khác.
+- **Pull Request:** tác giả ghi `Agent`, `Role`, `Issue/Task ID`, branch,
+  baseline/head SHA, phạm vi và kiểm chứng trong body. Dùng
+  [PR template](../.github/PULL_REQUEST_TEMPLATE.md) khi tạo PR bằng UI; khi
+  dùng API/CLI điền thông tin tương đương. Không ghi nhận một reviewer đã
+  thực hiện review chỉ vì tên họ nằm trong danh sách reviewer dự kiến.
+- **Review hoặc thảo luận trên PR/Issue:** mỗi lượt ký `Agent` và `Role`,
+  kèm đúng `Reviewed head SHA` nếu đang review code. Reviewer ghi
+  `Verdict`, findings có vị trí/mức độ, kiểm chứng và giới hạn. Ví dụ:
+
+  ```text
+  Agent: Atlas
+  Role: Reviewer
+  Reviewed head SHA: <full-commit-sha>
+  Verdict: CHANGES_REQUESTED
+  Findings: P2 — path:line — nguyên nhân, ảnh hưởng, cách sửa
+  Validation: NOT_RUN (review tài liệu)
+  ```
+
+  Follow-up review phải cập nhật SHA và kết luận sau khi đọc commit mới.
+  Nếu tác giả thay mặt reviewer chuyển findings lên PR, ghi rõ
+  `Relayed by` và nguồn review; không giả làm review trực tiếp.
+
+**Giới hạn danh tính:** trên GitHub, `author.login`, người gửi review/comment
+và người push vẫn là account thực đã xác thực. `Agent`, Git author name và
+trailer là **metadata tự khai báo để truy vết**, không chứng minh danh tính độc
+lập. Một comment ghi `Verdict: APPROVED` hoặc `CHANGES_REQUESTED` không
+tương đương một GitHub review APPROVE/REQUEST_CHANGES và không thay thế required
+review trong ruleset. Không tự gán kết quả AI thành approval GitHub, không bỏ
+qua CI, ownership hoặc gate. **M3 vẫn áp dụng ngoại lệ [ADR-0005](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md)**:
+Harbor/Forge có thể tự merge PR M3 đủ gates mà không cần review chéo; khi đó
+ghi `Review: N/A — ADR-0005` trong PR và không tạo review giả.
+
 ## Nguồn sự thật cho task và tài liệu
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |
@@ -326,10 +378,13 @@ là BLOCKED, không tự force.
    `python cms/scripts/check-plans.py --self-test`,
    `python .agents/scripts/check-agent-artifacts.py` và `git diff --check`.
 4. Commit ghi task ID (ví dụ `M3-S03-T01: ...`), non-force
-   `git push -u origin agent/<name>` sau khi HEAD/remote đúng.
+   `git push -u origin agent/<name>` sau khi HEAD/remote đúng; với task branch
+   được giao, push đúng `task/...`. Commit có trailer `Agent: <name>`.
 5. Đính commit SHA, môi trường và lệnh PASS/FAIL/NOT_RUN vào Issue và PR;
-   reviewer so sánh source, dependency, contract và DB migration impact.
-6. Chỉ merge sau review/CI/approval. `MERGED` ≠ `VERIFIED` cho scope chưa
+   reviewer so sánh source, dependency, contract và DB migration impact; ghi
+   verdict kèm `Reviewed head SHA` theo quy chuẩn trên.
+6. Chỉ merge khi đủ các gate áp dụng, bao gồm review nếu quy trình yêu cầu,
+   CI và quyền merge; xem ngoại lệ M3 tại ADR-0005. `MERGED` ≠ `VERIFIED` cho scope chưa
    chạy nghiệm thu; cập nhật trạng thái trong docs khi có evidence.
 
 ## Giới hạn Muse
