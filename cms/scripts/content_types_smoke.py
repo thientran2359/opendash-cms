@@ -93,7 +93,11 @@ def test_fresh_site(binary):
             admin = {"username": "admin", "password": "password123"}
             assert request(base, "/auth/setup", admin)[0] == 201
             auth = login(base, **admin)
-            assert json.loads(request(base, endpoint, headers=auth)[1]) == []
+            builtins = json.loads(request(base, endpoint, headers=auth)[1])
+            assert [item["descriptor"]["key"] for item in builtins] == ["page", "post"], builtins
+            assert all(item["owner"] == {"kind": "core"} and item["status"] == "active" for item in builtins)
+            assert request(base, endpoint, sample_content_type("post"), auth)[0] == 409
+            assert request(base, endpoint, sample_content_type("page"), auth)[0] == 409
 
             definition = sample_content_type()
             assert request(base, endpoint, definition)[0] == 401
@@ -123,7 +127,7 @@ def test_fresh_site(binary):
             status, listing, _ = request(base, endpoint, headers=auth)
             assert status == 200
             keys = [item["descriptor"]["key"] for item in json.loads(listing)]
-            assert keys == ["news_item", "portfolio_item"], keys
+            assert keys == ["news_item", "page", "portfolio_item", "post"], keys
 
             editor = {"username": "editor", "password": "password123"}
             assert request(base, "/api/admin/users", editor, auth)[0] == 201
@@ -133,7 +137,7 @@ def test_fresh_site(binary):
             assert request(base, endpoint, {"key": "huge", "label": "X" * 600_000}, auth)[0] == 413
 
         with sqlite3.connect(db) as conn:
-            assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 2
+            assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 4
             assert conn.execute(
                 "SELECT owner_kind, owner_id, provider_status FROM content_types WHERE key = 'portfolio_item'"
             ).fetchone() == ("user", None, "active")
@@ -160,7 +164,7 @@ def test_fresh_site(binary):
             status, body, _ = request(base, "/api/admin/content-types", headers=auth)
             assert status == 200
             items = {item["descriptor"]["key"]: item for item in json.loads(body)}
-            assert len(items) == 2
+            assert len(items) == 4
             assert items["portfolio_item"]["owner"] == {"kind": "plugin", "id": "missing-plugin"}
             assert items["portfolio_item"]["status"] == "provider_inactive"
             assert items["portfolio_item"]["descriptor"]["fields"][1]["type"] == "select"
@@ -187,8 +191,9 @@ def test_upgrading_legacy_database(binary, fixture):
         with sqlite3.connect(db) as conn:
             after = conn.execute("SELECT block_id, values_json FROM home_page WHERE id = 1").fetchone()
             assert after == before, (before, after)
-            assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 1
+            assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 3
             assert conn.execute("SELECT success FROM _sqlx_migrations WHERE version = 4").fetchone() == (1,)
+            assert conn.execute("SELECT success FROM _sqlx_migrations WHERE version = 8").fetchone() == (1,)
 
 
 if __name__ == "__main__":
