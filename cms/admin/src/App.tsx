@@ -41,6 +41,8 @@ export const App: React.FC = () => {
   // Race prevention for preview responses
   const previewSeq = useRef<number>(0);
   const blockDataRef = useRef<BlockData>(blockData);
+  // Retain a draft across a 401 only when the same account signs back in.
+  const lastAuthenticatedUserId = useRef<number | null>(null);
   blockDataRef.current = blockData;
 
   // Hash routing works from /admin/ and /builder without server catch-all.
@@ -139,6 +141,7 @@ export const App: React.FC = () => {
     (async () => {
       try {
         const auth = await api.getAuthMe();
+        lastAuthenticatedUserId.current = auth.user.id;
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
@@ -178,6 +181,16 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       const res = await api.login(authUsername, authPassword);
+      if (lastAuthenticatedUserId.current !== null &&
+          lastAuthenticatedUserId.current !== res.user.id) {
+        // Never expose an expired account's unsaved Builder data to another user.
+        const emptyBlock: BlockData = { type: '', values: {} };
+        blockDataRef.current = emptyBlock;
+        setBlockData(emptyBlock);
+        setPreviewHtml('');
+        setBuilderDirty(false);
+      }
+      lastAuthenticatedUserId.current = res.user.id;
       setUser(res.user);
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
@@ -216,6 +229,7 @@ export const App: React.FC = () => {
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
       setBuilderDirty(false);
+      lastAuthenticatedUserId.current = null;
       setActiveView('dashboard');
       window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
       setStatus('Đã đăng xuất.', false);
