@@ -11,7 +11,7 @@ Mỗi milestone có kế hoạch ghi phạm vi, module/capability liên quan, de
 | M2.5 — Core Foundation | [M2.5](M2.5/README.md), [plan gốc](M2.5-core-foundation.md) | [M2.5-P01..P08](M2.5/TASK_PLAN.md) | Roadmap CLOSED/VERIFIED đúng scope M2.5 |
 | M3 — Core CMS & WordPress-like Admin | [M3](M3/README.md), [sáu slice có code](M3/README.md#các-slice-và-nguồn-kiểm-chứng) | [M3-P01..P19](M3/TASK_PLAN.md) | PARTIAL; usable core chưa G5 |
 | M4 — Builder + Taxonomy | [M4](M4/README.md) | [M4-P01..P10](M4/TASK_PLAN.md) | PLANNED |
-| M5 — Theme & Templates | [M5](M5/README.md) | [M5-P01..P08](M5/TASK_PLAN.md) | PLANNED |
+| M5 — Theme & Templates | [M5](M5/README.md) | [M5-P01..P10](M5/TASK_PLAN.md) | PLANNED; theme declarations/menu storage trước sample import |
 | M6 — Plugin Extensions | [M6](M6/README.md) | [M6-P01..P08](M6/TASK_PLAN.md) | PLANNED |
 | M7 — Site Features + Video | [M7](M7/README.md) | [M7-P01..P08](M7/TASK_PLAN.md) | PLANNED |
 | M8 — Operations & Release | [M8](M8/README.md) | [M8-P01..P08](M8/TASK_PLAN.md) | PLANNED |
