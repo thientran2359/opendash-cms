@@ -4,6 +4,8 @@
 
 `milestones/M3/slices/` giữ tài liệu triển khai theo **lát cắt**, không lưu theo trạng thái Ready/In progress/Done và không phải kho archive. [Module briefs](../../modules/README.md) quản lý các capability xuyên milestone; [GitHub Project #3](https://github.com/users/thientran2359/projects/3) quản lý trạng thái task và [GitHub PR](https://github.com/thientran2359/opendash-cms/pulls) quản lý review.
 
+**Muốn biết công việc M3 tiếp theo và điều kiện giao task:** đọc [M3 — TASK_PLAN](TASK_PLAN.md). Đây là danh sách **nhóm công việc cần nghiên cứu/kiểm chứng**, thứ tự và gate theo Final Decision #15, **không phải queue task `READY`**. Sau khi G3 được review/merge, task cụ thể mới được phát hành bằng GitHub Issue và theo dõi trong Project #3.
+
 ## Các slice và nguồn kiểm chứng
 
 | Slice | Kế hoạch | Bằng chứng (phạm vi macOS tại SHA báo cáo) |
@@ -15,6 +17,6 @@
 | M3.5 | [Media Library](slices/2026-11-09-m3-5-media-library.md) | [Raster/thumbnail/picker](../../../verification/2026-11-09-m3-5-media-library.md) |
 | M3.6 | [Public CPT Rendering](slices/2026-11-09-m3-6-public-content-rendering.md) | [Public CPT/media ACL](../../../verification/2026-11-09-m3-6-public-content-rendering.md) |
 
-**Còn thiếu để đóng M3:** taxonomy CNT-03, provider CPT/field bridge (CNT-01/02 × PLG-03), media delete/reconcile/video, các contract liên quan và Windows/Linux parity đúng acceptance. [Issue #15 — Final Decision](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) quy định thứ tự nghiên cứu/verification, **không tự cấp task G3 READY**.
+**Còn thiếu để đóng M3:** taxonomy CNT-03, provider CPT/field bridge (CNT-01/02 × PLG-03), media delete/reconcile/video, các contract liên quan và Windows/Linux parity đúng acceptance. [Issue #15 — Final Decision](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) quy định thứ tự nghiên cứu/verification, thể hiện thành các **candidate có gate/acceptance** trong [TASK_PLAN](TASK_PLAN.md), **không tự cấp task G3 READY**.
 
 **Đường dẫn được đổi vì tổ chức tài liệu:** sáu file trên ban đầu nằm ở `docs/plans/<tên-file>`, sau đó từng xuất hiện tạm thời tại `docs/archive/plans/m3/<tên-file>` trên PR #17 chưa merge. Đường dẫn được chốt: `docs/plans/milestones/M3/slices/<tên-file>`. Các link tương đối trong repository đã được đối chiếu; link mutable `blob/main` ở bên ngoài phải chuyển sang đường dẫn mới sau PR merge, còn immutable historical-SHA URLs không đổi. Không giữ stub ở root `docs/plans/` để thư mục gọn.

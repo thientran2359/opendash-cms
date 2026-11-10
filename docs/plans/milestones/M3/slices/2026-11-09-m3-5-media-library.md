@@ -1,6 +1,6 @@
 # M3.5 — Media Library và Image/Gallery Picker
 
-- **Trạng thái:** `VERIFIED` trên macOS cho backend/API và giao diện chọn ảnh đã kiểm thử; xem [báo cáo M3.5](../../../../verification/2026-11-09-m3-5-media-library.md).
+- **Verification theo slice (không phải task `Done`):** `VERIFIED` trên macOS cho backend/API và giao diện chọn ảnh đã kiểm thử; xem [báo cáo M3.5](../../../../verification/2026-11-09-m3-5-media-library.md). Trạng thái task phải tra [GitHub Project #3](https://github.com/users/thientran2359/projects/3).
 - **Hợp đồng:** [PRODUCT_REQUIREMENTS](../../../../product/PRODUCT_REQUIREMENTS.md), [CORE_FOUNDATION](../../../../contracts/CORE_FOUNDATION.md), [M3.3 Content Entry CRUD](2026-11-08-m3-3-content-entry-crud.md), [M3.4 Admin Content UI](2026-11-08-m3-4-admin-content-ui.md).
 - **Mục tiêu:** Admin và Editor có thể upload ảnh, duyệt thumbnail và chọn ảnh/gallery cho CPT entry, không dùng URL/path do người dùng nhập để phục vụ file; giữ media độc lập theme/plugin.
 

@@ -1,6 +1,6 @@
 # M3.3 — Content Entry CRUD và kiểm tra giá trị custom fields
 
-- **Trạng thái:** `VERIFIED` trong phạm vi backend trên macOS; xem [báo cáo kiểm chứng M3.3](../../../../verification/2026-11-08-m3-3-content-entry-crud.md).
+- **Verification theo slice (không phải task `Done`):** `VERIFIED` trong phạm vi backend trên macOS; xem [báo cáo kiểm chứng M3.3](../../../../verification/2026-11-08-m3-3-content-entry-crud.md). Trạng thái task phải tra [GitHub Project #3](https://github.com/users/thientran2359/projects/3).
 - **Hợp đồng:** [PRODUCT_REQUIREMENTS](../../../../product/PRODUCT_REQUIREMENTS.md), [CORE_FOUNDATION](../../../../contracts/CORE_FOUNDATION.md), [M3.1](2026-11-08-m3-content-types-and-fields.md), [M3.2](2026-11-08-m3-2-content-types-backend.md).
 - **Mục tiêu:** Admin/Editor quản lý nội dung thuộc CPT đã khai báo, lưu dữ liệu qua restart và khi theme/plugin cung cấp CPT ngừng hoạt động; không thay đổi dữ liệu/chuỗi migration cũ.
 

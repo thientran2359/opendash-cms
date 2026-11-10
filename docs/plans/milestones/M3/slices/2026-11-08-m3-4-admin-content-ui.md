@@ -1,6 +1,6 @@
 # M3.4 — Giao diện quản trị CPT và Content Entries
 
-- **Trạng thái:** `VERIFIED` trong phạm vi frontend/backend tích hợp trên macOS; xem [báo cáo M3.4](../../../../verification/2026-11-08-m3-4-admin-content-ui.md). Chưa kiểm thử Windows release/browser.
+- **Verification theo slice (không phải task `Done`):** `VERIFIED` trong phạm vi frontend/backend tích hợp trên macOS; xem [báo cáo M3.4](../../../../verification/2026-11-08-m3-4-admin-content-ui.md). Chưa kiểm thử Windows release/browser; trạng thái task phải tra [GitHub Project #3](https://github.com/users/thientran2359/projects/3).
 - **Hợp đồng:** [PRODUCT_REQUIREMENTS](../../../../product/PRODUCT_REQUIREMENTS.md), [CORE_FOUNDATION](../../../../contracts/CORE_FOUNDATION.md), [M3.1](2026-11-08-m3-content-types-and-fields.md), [M3.2](2026-11-08-m3-2-content-types-backend.md), [M3.3](2026-11-08-m3-3-content-entry-crud.md).
 - **Mục đích:** chủ website và biên tập viên có thể quản lý CPT/entry bằng trình duyệt, dùng lại React Admin/Builder và API có sẵn, không phải nhập JSON trực tiếp.
 
