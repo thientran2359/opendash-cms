@@ -85,6 +85,9 @@ interface AdminShellProps {
   sidebarContent: React.ReactNode;
   previewContent: React.ReactNode;
   contentContent: React.ReactNode;
+  postsContent: React.ReactNode;
+  pagesContent: React.ReactNode;
+  mediaContent: React.ReactNode;
   pluginsContent: React.ReactNode;
   usersContent: React.ReactNode;
   settingsContent: React.ReactNode;
@@ -106,7 +109,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   activeView, onViewChange, hasUnsavedChanges, sidebarContent, previewContent,
-  contentContent, pluginsContent, usersContent, settingsContent,
+  contentContent, postsContent, pagesContent, mediaContent, pluginsContent, usersContent, settingsContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
@@ -222,7 +225,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                       <span className="flex-1 text-left">
                         <span className="block font-semibold text-slate-900">{item.label}</span>
                         <span className="mt-1 block text-xs text-slate-500">
-                          {item.id === 'builder' || item.id === 'content' || item.id === 'plugins' || item.id === 'users'
+                          {item.id === 'builder' || item.id === 'content' || item.id === 'posts' || item.id === 'pages' || item.id === 'plugins' || item.id === 'users'
                             ? 'Mở công cụ hiện có' : 'Xem trạng thái phát triển'}
                         </span>
                       </span>
@@ -232,9 +235,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 </div>
               </main>
             )}
-            {user && activeView === 'posts' && <main><PendingPage title="Bài viết" message="Giao diện quản lý bài viết built-in đang được phát triển trong M3. Hiện chưa kết nối đầy đủ thao tác tạo, sửa và xuất bản bài viết; hệ thống sẽ không thực hiện thao tác giả." /></main>}
-            {user && activeView === 'pages' && <main><PendingPage title="Trang" message="Quản lý Page built-in và quy trình Lưu nháp/Xuất bản sẽ có giao diện riêng ở slice kế tiếp. Builder hiện vẫn hỗ trợ chỉnh sửa trang chủ." /></main>}
-            {user && activeView === 'media' && <main><PendingPage title="Thư viện ảnh" message="Chọn và tải ảnh đã có trong trường Media của màn hình Nội dung tùy chỉnh. Giao diện duyệt thư viện độc lập đang được phát triển." /></main>}
+            <section className={user && activeView === 'posts' ? 'od-editor-panel' : 'hidden'} aria-label="Bài viết" aria-hidden={!user || activeView !== 'posts'}>{postsContent}</section>
+            <section className={user && activeView === 'pages' ? 'od-editor-panel' : 'hidden'} aria-label="Trang" aria-hidden={!user || activeView !== 'pages'}>{pagesContent}</section>
+            {user && activeView === 'media' && mediaContent}
             {user?.role === 'admin' && activeView === 'themes' && <main><PendingPage title="Quản lý Themes" message="Quản lý danh sách và kích hoạt theme độc lập đang được phát triển. Hiện có thể nạp gói theme ZIP tại Builder."><button type="button" className="od-primary-action mt-6" onClick={() => navigate('builder')}>Mở Builder</button></PendingPage></main>}
 
             {/* Keep both editors mounted when navigating: forms and preview must survive switching sections. */}

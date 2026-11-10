@@ -7,6 +7,8 @@ import { BuilderControls, BuilderPreview, normalizeValues } from './builder/Buil
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
 import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
+import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
+import { MediaRoute } from './shell/MediaRoute.tsx';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -17,6 +19,8 @@ export const App: React.FC = () => {
   const [activeView, setActiveView] = useState<AdminView>(() => parseAdminView(window.location.hash, window.location.pathname));
   const [contentDirty, setContentDirty] = useState(false);
   const [builderDirty, setBuilderDirty] = useState(false);
+  const [postsDirty, setPostsDirty] = useState(false);
+  const [pagesDirty, setPagesDirty] = useState(false);
   const [contentRevision, setContentRevision] = useState(0);
 
   // Auth inputs
@@ -62,14 +66,14 @@ export const App: React.FC = () => {
   }, [user?.role]);
 
   useEffect(() => {
-    if (!builderDirty) return;
+    if (!(builderDirty || contentDirty || postsDirty || pagesDirty)) return;
     const guard = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [builderDirty]);
+  }, [builderDirty, contentDirty, postsDirty, pagesDirty]);
 
   const navigateTo = (view: AdminView) => {
     if (!user || !isViewAllowed(view, user.role)) return;
@@ -208,7 +212,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((contentDirty || builderDirty) && !window.confirm('Có dữ liệu chưa lưu trong Builder hoặc Nội dung. Đăng xuất sẽ bỏ bản nháp. Tiếp tục?')) {
+    if ((contentDirty || builderDirty || postsDirty || pagesDirty) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -229,6 +233,8 @@ export const App: React.FC = () => {
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
       setBuilderDirty(false);
+      setPostsDirty(false);
+      setPagesDirty(false);
       lastAuthenticatedUserId.current = null;
       setActiveView('dashboard');
       window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
@@ -433,7 +439,7 @@ export const App: React.FC = () => {
       onLogout={handleLogout}
       activeView={activeView}
       onViewChange={navigateTo}
-      hasUnsavedChanges={contentDirty || builderDirty}
+      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
       sidebarContent={
         <BuilderControls
           role={user?.role}
@@ -479,6 +485,27 @@ export const App: React.FC = () => {
           onDirtyChange={setContentDirty}
         />
       }
+      postsContent={
+        <PostPageWorkspace
+          key={'posts-' + contentRevision}
+          type="post"
+          user={user}
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onDirtyChange={setPostsDirty}
+        />
+      }
+      pagesContent={
+        <PostPageWorkspace
+          key={'pages-' + contentRevision}
+          type="page"
+          user={user}
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onDirtyChange={setPagesDirty}
+        />
+      }
+      mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
     />
   );
 };
