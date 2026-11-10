@@ -1,5 +1,7 @@
 # GitHub workflow cho 5 agent — đề xuất chuẩn vận hành
 
+> **Ngoại lệ owner phê duyệt cho M3 ngày 2026-11-11:** [ADR-0005 — Harbor/Forge autonomous M3](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) **ưu tiên áp dụng trong phạm vi M3** khi các hướng dẫn chung dưới đây yêu cầu Atlas/Nova coordinator, reviewer độc lập, cấm self-merge, hoặc chờ owner duyệt task. Harbor/Forge tự lập G2/G3, chọn task, tạo Issue và tự merge PR **khi tất cả safety/tests/CI/Project gates PASS**, không yêu cầu agent khác review. Các mục cũ dưới đây vẫn áp dụng ngoài M3; nhánh Forge cũ/PR #7, #9 và các security blocker hạ tầng không được miễn. Không tự kích hoạt watcher/remote dispatch.
+
 **Repository nguồn duy nhất:** `thientran2359/opendash-cms`.
 Code nằm trong 5 worktree/checkout **cục bộ** tách biệt trên Windows và macOS;
 mỗi agent chỉ sửa branch `agent/<name>` được gán trong [agents.yaml](agents.yaml).

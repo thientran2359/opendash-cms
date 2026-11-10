@@ -1,5 +1,7 @@
 # Chuẩn thao tác chung cho 5 agent OpenDash (thủ công trong chat)
 
+> **M3 override (owner, 2026-11-11):** Đối với **Harbor hoặc Forge đang làm M3**, áp dụng [ADR-0005](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md): tự điều phối, triển khai và tự merge PR đủ required checks/security/test gates, không cần peer review hay Atlas/Nova coordinator. Task phải có G3 merged/Issue/Project Ready thực, branch task riêng tránh công việc cũ; không tự biến merge thành G5 Done. Các quy định review độc lập phía dưới còn hiệu lực cho **ngoài M3**.
+
 > **Áp dụng:** Atlas, Nova, Forge, Harbor, Orion. Đây là hướng dẫn cho **chính agent đang được người dùng gọi**, không phải Agent Preflight Check, agent thứ sáu, script, cronjob hoặc Task Watcher. [AGENTS.md](../AGENTS.md) và [GitHub workflow](GITHUB_WORKFLOW.md) là các quy định nền tảng; quyền review/merge được ủy quyền cho Atlas/Nova vẫn tuân theo workflow và skill riêng.
 
 ## 1. Nguồn dữ liệu và công cụ

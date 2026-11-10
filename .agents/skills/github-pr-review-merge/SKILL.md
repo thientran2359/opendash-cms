@@ -5,6 +5,8 @@ description: "Use when Atlas hoặc Nova review PR OpenDash, review và merge im
 
 # Atlas / Nova — review và merge PR
 
+> **M3 exception (owner, 2026-11-11):** Harbor/Forge **không gọi skill Atlas/Nova này** để review/merge PR M3. [ADR-0005](../../../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) cho mỗi agent tự merge PR M3 của mình nếu G3/Issue/Project, required GitHub CI, tests và security/data gates đạt. Skill này tiếp tục áp dụng cho việc review độc lập **ngoài M3**; không dùng nó để tạo fake reviewer hoặc vượt GitHub protection.
+
 Đọc [AGENTS.md](../../../AGENTS.md), [Agent Operating Standard](../../AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../GITHUB_WORKFLOW.md), [agent identities](../../agents.yaml) và Issue/contract của từng PR. Chỉ thao tác repo `thientran2359/opendash-cms`, đích `main`, bằng GitHub connector đã xác thực hoặc API/CLI tương đương được cấp quyền. Nếu cần GitHub UI trên máy có CoS Desktop, attach Chrome đã đăng nhập đúng tài khoản theo Operating Standard; không dùng Plugins Browser profile khác. Không đổi ruleset, bypass checks hoặc dùng quyền admin để vượt gate.
 
 ## Chế độ và quyền được giao
