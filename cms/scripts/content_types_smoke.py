@@ -136,7 +136,7 @@ def test_fresh_site(binary):
             assert request(base, endpoint, sample_content_type("editor_type"), editor_auth)[0] == 403
             assert request(base, endpoint, {"key": "huge", "label": "X" * 600_000}, auth)[0] == 413
 
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 4
             assert conn.execute(
                 "SELECT owner_kind, owner_id, provider_status FROM content_types WHERE key = 'portfolio_item'"
@@ -188,7 +188,7 @@ def test_upgrading_legacy_database(binary, fixture):
             assert request(base, "/api/admin/content-types", sample_content_type(), auth)[0] == 201
             assert request(base, "/")[0] == 200
 
-        with sqlite3.connect(db) as conn:
+        with closing(sqlite3.connect(db)) as conn, conn:
             after = conn.execute("SELECT block_id, values_json FROM home_page WHERE id = 1").fetchone()
             assert after == before, (before, after)
             assert conn.execute("SELECT COUNT(*) FROM content_types").fetchone()[0] == 3
