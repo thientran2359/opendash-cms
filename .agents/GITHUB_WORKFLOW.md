@@ -17,7 +17,7 @@ profile riêng, không chứng minh tài khoản đang đăng nhập.
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |
 | --- | --- | --- |
-| Scope/G0–G3 đã duyệt, contract, ADR | `docs/` | Người có thẩm quyền chốt; review PR |
+| Scope/G0–G3 đã chốt, contract, ADR | `docs/` | Coordinator kết luận consensus hoặc reviewer độc lập quyết định cuối, sau đó PR review/merge; xem [ADR-0003](../docs/decisions/ADR-0003-agent-consensus-governance.md) |
 | Điều tra, thảo luận, đề xuất/task draft | `.agents/research/`, `.agents/discussions/`, `.agents/tasks/` | Agent trên branch của mình |
 | Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator/Muse được ủy quyền, sau khi gate sẵn sàng |
 | Source diff, test, phản biện, chấp thuận tích hợp | **GitHub PR** | Assignee rồi reviewer/CI |
@@ -234,11 +234,14 @@ không mặc nhiên cấp quyền triển khai hoặc chuyển G2 thành `AGREED
 4. **Tác giả PR** phân loại từng finding (`accept`, `reject` có lý do,
    hoặc `needs-decision`), sửa tài liệu trên **branch head của mình**, chạy
    checker phù hợp, commit và non-force push. Trả lời từng thread bằng commit
-   SHA hoặc lý do không sửa; không tự đánh dấu quyết định G2 đã được chốt.
+   SHA hoặc lý do không sửa; G2 chỉ được chốt từ Final Decision có evidence
+   và reviewer độc lập khi cần, không tự nâng draft lên AGREED.
 5. **Reviewer** đọc lại `head SHA` mới, kiểm diff và các thread để xác nhận
-   finding đã giải quyết; gửi review follow-up trên cùng PR. Chỉ người có
-   thẩm quyền mới chốt G2/merge; CI PASS, một comment `LGTM` hoặc chat phản
-   hồi chưa phải G5 verification.
+   finding đã giải quyết; gửi review follow-up trên cùng PR. **Agent consensus
+   có Final Decision** hoặc **reviewer độc lập có verdict** chốt phương án;
+   reviewer khác tác giả có thể merge PR docs/design đủ gate khi được gọi
+   theo skill, **không cần owner review mặc định**. CI PASS, một comment `LGTM`
+   hoặc chat phản hồi chưa phải G5 verification.
 
 **Ngoại lệ reviewer trực tiếp sửa tài liệu:** phải giao lại rõ Issue/PR,
 file ownership, branch đích và phạm vi trước khi viết. Reviewer sửa trên
@@ -248,20 +251,22 @@ review. Sau khi giao sửa, cần một lượt review độc lập với thay �
 
 ## Review và merge implementation PR được ủy quyền
 
-Theo chỉ đạo chủ dự án ngày 10/11/2026, **Atlas và Nova được phép review và tự
-merge implementation PR do agent khác thực hiện** khi được gọi luồng
+Theo chỉ đạo chủ dự án ngày 10/11/2026 và [ADR-0003](../docs/decisions/ADR-0003-agent-consensus-governance.md), **Atlas/Nova được review và merge implementation PR cùng technical-doc/design PR đã chốt** do agent khác thực hiện khi được gọi luồng
 [github-pr-review-merge](skills/github-pr-review-merge/SKILL.md) trong chat.
-Đây là ngoại lệ cụ thể cho quy tắc không auto-merge: một lượt do người dùng
-khởi tạo, không background polling; không cần xin lại quyền cho mỗi PR đủ gate.
+Luồng review-and-merge được gọi rõ trong chat, **không background polling**;
+không cần owner ký từng PR đủ gate. Theo ADR-0003, technical-doc/design PR
+đã có Final Decision hoặc reviewer verdict cũng được xử lý theo cổng review này.
 Lệnh chỉ “review/re-review PR” không cấp quyền merge.
 
 - Xác minh reviewer/implementer bằng role, Issue, branch và signed evidence;
   login GitHub dùng chung không chứng minh tự review hoặc độc lập. Không tự
   review/merge PR mình viết; Atlas và Nova phải review chéo nếu là tác giả.
-- Chỉ implementation có scope/gate đã duyệt, đúng repo/main, acceptance trước
-  merge đạt, dependency có evidence, findings bắt buộc đã giải quyết, required
-  checks tại head/integration hiện tại PASS và protection cho phép. Không dùng
-  quyền này để chốt PRD/G2/contract/risk acceptance mới hay bỏ security blocker.
+- Chỉ implementation có scope/gate đã chốt **hoặc technical-doc/design PR có Final Decision**,
+  đúng repo/main, acceptance trước merge đạt, dependency có evidence, findings
+  bắt buộc đã giải quyết, required checks tại head/integration hiện tại PASS và
+  protection cho phép. Reviewer được chốt phương án kỹ thuật khi cần nhưng
+  **không** được tự thay mục tiêu sản phẩm, waive security blocker hoặc risk-accept
+  ảnh hưởng live secrets/data chỉ để merge.
 - Review trên head/base SHA cụ thể; re-fetch trước merge và sau mỗi PR. Head
   đổi phải re-review; base đổi phải đánh giá integration/validation lại. Merge
   dùng expected head SHA, không bật auto-merge đợi checks, không force/admin

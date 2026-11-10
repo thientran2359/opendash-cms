@@ -5,9 +5,9 @@ Local Control API dispatch):
 
 | Skill | Khi gọi trong chat | Hành vi |
 | --- | --- | --- |
-| [github-task-pickup](github-task-pickup/SKILL.md) | "Hãy vào GitHub Issue lấy task của Forge về làm" | Tìm task đang giao/đang làm, kiểm gate/PR/branch; nếu không có task đủ điều kiện thì **đề xuất để chủ dự án xác nhận trước khi nhận task của người khác** |
+| [github-task-pickup](github-task-pickup/SKILL.md) | "Hãy vào GitHub Issue lấy task của Forge về làm" | Tìm task đang giao/đang làm, kiểm gate/PR/branch; nếu không có task đủ điều kiện thì đề xuất cho **coordinator phân công**, không chờ owner ký thường lệ |
 | [discussion-turn-responder](discussion-turn-responder/SKILL.md) | "Kiểm tra các thảo luận đến lượt Forge rồi trả lời" | Xác minh người đang chờ câu trả lời trên GitHub PR/Issue hoặc `.agents/discussions/`, trả lời đúng lượt một lần; không tự phản hồi khi chưa rõ lượt |
-| [github-pr-review-merge](github-pr-review-merge/SKILL.md) | "Atlas/Nova review và merge các task đã code đang chờ review" | Review độc lập, đăng findings hoặc merge implementation PR đủ gate trên đúng SHA; lệnh chỉ review không merge, không tự review/merge PR mình viết |
+| [github-pr-review-merge](github-pr-review-merge/SKILL.md) | "Atlas/Nova review và merge các task đã code đang chờ review" | Review độc lập, đăng findings hoặc merge implementation và technical-doc/design PR đã chốt đủ gate trên đúng SHA; lệnh chỉ review không merge, không tự review/merge PR mình viết |
 
 Skills dùng chuẩn `SKILL.md` (frontmatter `name`/`description`). Với Codex,
 gọi rõ `$github-task-pickup` / `$discussion-turn-responder` / `$github-pr-review-merge` hoặc hỏi bằng câu

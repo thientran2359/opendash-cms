@@ -1,6 +1,6 @@
 # Quy trình quản lý roadmap, module và task của OpenDash
 
-**Trạng thái tài liệu:** Quy trình planning V1 được chủ dự án cho áp dụng sau [5 lượt thảo luận Codex ↔ Antigravity](../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) (`CONSENSUS_REACHED` **cho quy trình**, không phải cho thiết kế M3). Quy ước ID, gates và status không thay thế [yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md), [hợp đồng kỹ thuật](../contracts/CORE_FOUNDATION.md) hoặc quyết định có ADR.
+**Trạng thái tài liệu:** Quy trình planning V1 được chủ dự án cho áp dụng sau [5 lượt thảo luận Codex ↔ Antigravity](../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) (`CONSENSUS_REACHED` **cho quy trình**, không phải cho thiết kế M3). **Hiện hành:** [ADR-0003](../decisions/ADR-0003-agent-consensus-governance.md) chuyển quyền chốt kỹ thuật G0–G3 cho agent consensus/reviewer độc lập, owner theo dõi. Quy ước ID, gates và status không thay thế [yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md), [hợp đồng kỹ thuật](../contracts/CORE_FOUNDATION.md) hoặc ADR.
 
 Tài liệu này dành cho người quản lý dự án và các coding agent. Mục tiêu là nhìn được toàn bộ chức năng cần có, tiến độ từng phiên bản, lý do của quyết định kỹ thuật và bằng chứng nghiệm thu; cùng một module có thể được triển khai trong nhiều milestone.
 
@@ -49,7 +49,7 @@ Không dùng một checkbox duy nhất để đánh dấu “xong module”. Mod
 
 | Thuộc tính | Giá trị hợp lệ | Ý nghĩa |
 | --- | --- | --- |
-| `scope` | `PROPOSED`, `AGREED` | Danh mục/ưu tiên do AI đề xuất hay đã được chủ dự án chốt |
+| `scope` | `PROPOSED`, `AGREED` | Phương án đang đề xuất hay đã có Final Decision agent/reviewer và docs PR được merge, trong ranh giới PRD/chỉ đạo owner |
 | `research` | `NOT_STARTED`, `IN_PROGRESS`, `REVIEWED` | Đã khảo sát phương án, source và dependency hay chưa |
 | `design` | `NOT_STARTED`, `PROPOSED`, `AGREED` | Giao diện, contract, migration và luồng dữ liệu đã chốt chưa |
 | `implementation` | `NOT_STARTED`, `IN_PROGRESS`, `IMPLEMENTED` | Có code dùng được trong phạm vi được chỉ rõ hay chưa |
@@ -102,12 +102,12 @@ README chỉ làm mục lục. Không dựng thêm JSON/YAML manifest giữ bả
 - Nếu hai task cùng sửa contract/schema/API chung, xác định thứ tự sở hữu trước khi giao song song; không cho hai agent ghi cùng file. **File ownership là theo lượt/task**, không khóa vĩnh viễn cả thư mục cho một AI.
 - Phù hợp cách phối hợp hiện tại: Codex có thể chuẩn bị research/plan và review, Antigravity triển khai slice. Luồng phối hợp tuân theo [PROTOCOL](../discussions/PROTOCOL.md); danh sách nhiệm vụ ở đây không tự cấp quyền cho agent triển khai/deploy.
 - Trước khi code, tra API và quan hệ caller/callee bằng CodeGraph nếu sẵn có; xác minh lại source thực. Giữ đúng các Base APIs của [CORE_FOUNDATION](../contracts/CORE_FOUNDATION.md).
-- **Stop-and-Propose:** nếu chỉ là tinh chỉnh nội bộ không phá contract, báo `Design Delta` cùng test để Codex review. Nếu đụng PRD, migration/schema đã sử dụng, security, API/ABI hoặc quyết định G2 thì dừng ở ranh giới đó, báo hai phương án và chỉ làm tiếp sau khi chốt lại; không tự thay đổi contract.
+- **Stop-and-Propose:** tinh chỉnh nội bộ không phá contract vẫn ghi `Design Delta` và test. Nếu đụng PRD, migration/schema đã sử dụng, security, API/ABI hoặc G2 thì dừng, so sánh phương án có evidence; agent consensus chốt hoặc reviewer độc lập ra quyết định cuối theo ADR-0003, sau đó cập nhật contract qua PR. **Security/data blocker chưa có remediation/evidence thì vẫn BLOCKED**, không tự thay đổi contract.
 - **An toàn migration:** test trên bản sao DB / site root riêng, nâng cấp từ fixture cũ; snapshot/backup nhất quán trước nâng cấp dữ liệu thật. Git revert không rollback DB đã migrate; migration đã phát hành không được chỉnh/xóa, thay bằng forward migration khi cần.
 
 ## Thay đổi kế hoạch và kiểm soát chất lượng
 
-1. Thay đổi **phạm vi sản phẩm**: đối chiếu PRD và xin quyết định chủ dự án; cập nhật catalog và roadmap cùng lúc sau khi chốt.
+1. Thay đổi **phạm vi sản phẩm**: đối chiếu PRD/chỉ đạo owner hiện có; agent consensus chốt phạm vi kỹ thuật trong giới hạn đã xác nhận, reviewer độc lập phân xử điểm còn tranh luận. Nếu xuất hiện **mục tiêu sản phẩm mới** không có căn cứ PRD thì không tự giả định; ghi câu hỏi cần bổ sung. Sau Final Decision và PR review/merge mới cập nhật catalog/roadmap, không dùng owner approval làm gate mặc định.
 2. Thay đổi **kiến trúc/contract**: ghi phương án và hậu quả, dùng ADR/contract theo quy ước; chỉ cập nhật task liên quan sau khi quyết định.
 3. Thay đổi **thứ tự milestone**: giữ nguyên ID module; cập nhật dependency, lý do và gate, không sửa lịch sử bằng chứng.
 4. Thay đổi **code**: chọn kiểm chứng theo tác động (preview, lưu, theme/plugin lifecycle, data preservation, backup). Không dùng kế hoạch thay cho test thực chạy.

@@ -6,7 +6,7 @@
 - Đọc [README.md](README.md) và [docs/product/PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) trước khi đề xuất tech stack hoặc thay đổi kiến trúc/code.
 - Dự án phát triển trước trên Windows. Lát cắt Rust và cách kiểm chứng được ghi trong [README.md](README.md). Không báo đã build/test/benchmark nếu chưa thực hiện được trên mã thật.
 - Giữ các ràng buộc đã xác nhận trong [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md), bao gồm Rust + SQLite, một file thực thi, builder và plugin chạy logic server từ bản đầu. Hướng stack và Wasmi đã được chủ dự án chốt trong [docs/architecture/TECH_STACK.md](docs/architecture/TECH_STACK.md); cấu trúc dự án theo [docs/architecture/CMS_ARCHITECTURE.md](docs/architecture/CMS_ARCHITECTURE.md), bộ khung lõi và quy chuẩn code theo [docs/contracts/CORE_FOUNDATION.md](docs/contracts/CORE_FOUNDATION.md) và hợp đồng ABI theo [docs/contracts/PLUGIN_ABI.md](docs/contracts/PLUGIN_ABI.md).
-- Chỉ đạo mới của chủ dự án và [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) có ưu tiên cao nhất. Đồng thuận AI là ý kiến kỹ thuật, tách biệt với quyết định của chủ dự án và kết quả kiểm chứng.
+- Chỉ đạo mới của chủ dự án và [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) có ưu tiên cao nhất. Theo [ADR-0003](docs/decisions/ADR-0003-agent-consensus-governance.md), các agent **tự chốt quyết định kỹ thuật bằng consensus có bằng chứng**; khi cần phân xử thì reviewer độc lập (ưu tiên Atlas/Nova) quyết định cuối. Owner theo dõi tiến độ, không là cổng ký duyệt mặc định. Consensus khác `IMPLEMENTED`/`VERIFIED` và không được hạ chuẩn bảo mật.
 
 ## Ranh giới kỹ thuật
 
@@ -31,9 +31,9 @@
   macOS) and Orion (Antigravity macOS) work in separate local folders, on
   `agent/<name>` branches of the same `thientran2359/opendash-cms` Git remote.
 - Draft technical research, discussions and task handoffs belong in `.agents/`
-  (see `.agents/README.md` and `.agents/agents.yaml`). Official approved
-  decisions, plans/contracts and actual verification belong in `docs/`.
-  Keep existing historical references and their source evidence.
+  (see `.agents/README.md` and `.agents/agents.yaml`). **Agent-concluded and peer-reviewed**
+  decisions, plans/contracts and actual verification belong in `docs/` after PR merge.
+  Keep existing historical references and their source evidence. Use [ADR-0003](docs/decisions/ADR-0003-agent-consensus-governance.md).
 - `.agents/skills/` contains three **manual chat skills**:
   [github-task-pickup](.agents/skills/github-task-pickup/SKILL.md) when asked to fetch/perform one's GitHub Issue,
   [discussion-turn-responder](.agents/skills/discussion-turn-responder/SKILL.md) when asked to check and answer one's discussion turns,
@@ -67,12 +67,14 @@
 - After actual validation, stage only task-owned changes, commit with task ID
   and non-force push to its agent branch. Link commit and tests to GitHub
   Issue/PR for review. No background merge or deployment. Atlas/Nova may merge
-  independently reviewed implementation PRs under the owner-delegated
-  review-and-merge flow in .agents/GITHUB_WORKFLOW.md; review-only stays read-only
-  for code and never merges, and authors cannot self-review/self-merge.
+  independently reviewed **implementation and concluded technical-document/design** PRs
+  in the explicitly invoked review-and-merge flow in .agents/GITHUB_WORKFLOW.md;
+  review-only stays read-only for code, and authors cannot self-review/self-merge.
+  Existing security blockers, CI and preservation gates are not waived.
 - Muse-to-CoS/Antigravity dispatch must be verified through authenticated
   host-specific adapters first. Chat delivery or AI consensus does not
-  establish completion, approval or authority to change contracts.
+  establish completion or VERIFIED evidence. **Reviewed Final Decision + merged docs PR**
+  is the technical-contract authority under ADR-0003, not chat consensus alone.
 - No infinite agent loops, blind retries of ambiguous deliveries, or secrets
   and private runtime state in Git.
 - The owner has **paused the Python Task Watcher / cronjob plan** in favor of
