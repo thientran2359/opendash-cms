@@ -6,6 +6,8 @@
 
 **G2 cập nhật 10/11/2026:** [ADR-0004 Final Decision — G2 AGREED trực tiếp bởi owner](../../../decisions/ADR-0004-m3-post-page-publication-boundary.md) cho **M3-P07/P08/P16** (collision/migration, Admin/Editor Publish+CAS, draft preview authenticated, media ACL, fail-closed release sequencing). [G3 work packages](slices/2026-11-10-post-page-publication-g3.md) là **DRAFT**, chưa cấp Task ID/Issue/Project Ready; không được triển khai seed-only, không coi đây là waiver CI/security hoặc đóng G5/M3.
 
+**Execution update 11/11/2026:** [ADR-0005](../../../decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) cho Harbor/Forge tự chọn và self-merge từng task M3 khi CI/tests/security pass, không cần peer review. [M3-S20-T01 và M3-S21-T01](slices/2026-11-11-m3-autonomous-first-tasks.md) là hai đặc tả G3 mở đầu; các hàng `M3-Pxx` phía dưới vẫn là planning candidates và không tự biến thành GitHub Issue/Project Ready.
+
 ## M3 phương án A — mapping capability → task candidate
 
 M3 tập trung **CNT-01/02/04/05, FND-02/05, SITE-01 tối thiểu, THM-01 và PLG-01 UI/lifecycle tối thiểu**, với FND/OPS prerequisite. **CNT-03 taxonomy chuyển M4, PLG-03 bridge chuyển M6, media video chuyển M7, xóa/reconcile chuyển M8** (giữ đủ scope V1 trong [coverage](../COVERAGE_MATRIX.md)). `M3-Pxx` là **planning IDs**, không phải `M3-Sxx-Txx` G3, GitHub Issue hay Project Status. Sáu slice có code cần closure riêng, không phát hành lại task code. Không tự coi source hiện có là đã qua acceptance mới.

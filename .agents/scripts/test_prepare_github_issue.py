@@ -68,7 +68,7 @@ class ParseTaskTests(unittest.TestCase):
         self.assertIn("blob/" + "a" * 40, payload["body"])
         self.assertEqual(payload["labels"], ["type:implementation", "module:CNT-03", "agent:forge"])
         self.assertEqual(payload["milestone"], 4)
-        self.assertEqual(payload["milestone_title"], "M3 — Content & Media")
+        self.assertEqual(payload["milestone_title"], "M3 — Core CMS & WordPress-like Admin")
         self.assertEqual(payload["project_url"], "https://github.com/users/thientran2359/projects/3")
         self.assertNotIn("status:ready", payload["labels"])
         self.assertNotIn("milestone:M3", payload["labels"])

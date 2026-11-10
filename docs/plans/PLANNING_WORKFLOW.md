@@ -2,6 +2,8 @@
 
 **Trạng thái tài liệu:** Quy trình planning V1 được chủ dự án cho áp dụng sau [5 lượt thảo luận Codex ↔ Antigravity](../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) (`CONSENSUS_REACHED` **cho quy trình**, không phải cho thiết kế M3). **Hiện hành:** [ADR-0003](../decisions/ADR-0003-agent-consensus-governance.md) chuyển quyền chốt kỹ thuật G0–G3 cho agent consensus/reviewer độc lập, owner theo dõi. Quy ước ID, gates và status không thay thế [yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md), [hợp đồng kỹ thuật](../contracts/CORE_FOUNDATION.md) hoặc ADR.
 
+**Owner override riêng M3 từ 11/11/2026:** [ADR-0005 Harbor–Forge autonomous](../decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) cho hai agent tự chốt G2/G3 trong G0 đã duyệt, chọn/triển khai task và self-merge PR M3 đủ security/tests/CI; **không cần agent khác review**. Project Ready, data/ACL và G5 không được miễn. Quy trình ADR-0003 và reviewer độc lập phía dưới tiếp tục là mặc định **ngoài M3**.
+
 Tài liệu này dành cho người quản lý dự án và các coding agent. Mục tiêu là nhìn được toàn bộ chức năng cần có, tiến độ từng phiên bản, lý do của quyết định kỹ thuật và bằng chứng nghiệm thu; cùng một module có thể được triển khai trong nhiều milestone.
 
 ## Bắt đầu một lượt làm việc

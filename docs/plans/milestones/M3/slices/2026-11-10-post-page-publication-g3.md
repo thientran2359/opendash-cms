@@ -1,5 +1,7 @@
 # M3 Post/Page publication — G3 work packages (DRAFT)
 
+**Execution update 11/11/2026:** owner sau đó phê duyệt [ADR-0005 hai agent tự chủ M3](../../../../decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md), miễn peer review riêng M3 nhưng giữ security/CI. [M3-S20-T01](2026-11-11-m3-autonomous-first-tasks.md) gom WP-A/B/C vào một **G3 READY design-source** cho Harbor để tránh intermediate public leak. Các WP còn lại dưới đây vẫn là **work packages tham khảo**, không phát hành Issue tự động; không cần Atlas/Nova làm coordinator cho M3.
+
 **G2:** [ADR-0004 owner-approved](../../../../decisions/ADR-0004-m3-post-page-publication-boundary.md), 2026-11-10. **G3:** DRAFT / NOT_ISSUED; no Project #3 Ready verified. **Coverage:** M3-P07/P08/P16; Full-Track; M3 stays PARTIAL. Source research [PR #21](https://github.com/thientran2359/opendash-cms/pull/21); code reviewed at `main@f72dc69ca4c6303f289559308257e18f7d584ff1`.
 
 These are **work-package labels**, not implementation task IDs or five ready-to-dispatch GitHub Issues. Before issuance, coordinator must allocate new non-conflicting `M3-Sxx-Txx` in the approved task brief/Module Living Brief, specify exact writable files, one implementer plus independent reviewer, candidate/primary-acceptance slice, pinned `source_sha` and `base_sha`, acceptance tests, blockers and **GitHub Project #3 Ready**. Never reuse historical `M3-S01-T01/T02` or `M3-S04-T01/T02`; only issued GitHub tasks belong in [TASK_INDEX](../../../TASK_INDEX.md).

@@ -25,7 +25,7 @@ GITHUB_MILESTONES = {
     "M1": (1, "M1 — CMS Baseline"),
     "M2": (2, "M2 — Plugin Sandbox Baseline"),
     "M2.5": (3, "M2.5 — Core Foundation"),
-    "M3": (4, "M3 — Content & Media"),
+    "M3": (4, "M3 — Core CMS & WordPress-like Admin"),
     "M4": (5, "M4 — Visual Builder"),
     "M5": (6, "M5 — Theme & Templates"),
     "M6": (7, "M6 — Plugin Extensions"),

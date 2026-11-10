@@ -1,6 +1,6 @@
 ---
 name: github-task-pickup
-description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tục Issue được giao hoặc đề xuất task. Agent tự kiểm Issue/Project; chưa có task thì trình coordinator Atlas/Nova quyết định phân công, owner theo dõi. Không tự chiếm task khác hoặc chạy polling/cron."
+description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tục Issue được giao hoặc đề xuất task. Kiểm Issue/Project; riêng M3 Harbor/Forge tự chọn task đủ gate theo ADR-0005, ngoài M3 coordinator quyết định. Không chiếm task khác hoặc chạy polling/cron."
 ---
 
 # Nhận task thủ công từ GitHub Issues
@@ -11,6 +11,8 @@ description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tụ
 - Đọc repo [AGENTS.md](../../../AGENTS.md), [Agent Operating Standard](../../AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../GITHUB_WORKFLOW.md), [agents.yaml](../../agents.yaml) và metadata Git của **workspace đang thao tác**. Định danh agent bằng ngữ cảnh người dùng + worktree + cấu hình (ví dụ Forge ⇒ label `agent:forge`, branch `agent/forge`); nếu không xác minh được, chỉ đọc và báo thiếu định danh. GitHub account `thientran2359` được nhiều agent sử dụng, **không đồng nghĩa với vai trò Forge**.
 - Nguồn active task: **GitHub Issues và Project #3 Status**, không phải `.agents/tasks/`. Issue mô tả scope; G3/contract đã duyệt trên `origin/main` tại SHA nguồn là tiêu chuẩn kỹ thuật; PR quản lý thay đổi/review. Ưu tiên GitHub Connector đã kết nối; nếu thiếu công cụ truy cập Project v2, dùng GitHub API/CLI đã xác thực hoặc **CoS Desktop Browser attach Chrome đúng tài khoản đã đăng nhập** theo Operating Standard. Không dùng Plugins Browser profile riêng để suy ra trạng thái đăng nhập. Không yêu cầu token trong chat, không lấy token từ transcript, không in secret.
 - Giữ các khóa bảo vệ hiện hành: **một implementation task active/agent branch**, không ghi đè thay đổi chưa commit, không tự merge/deploy/đánh dấu VERIFIED, không tự sửa ACL/credentials.
+
+**Owner-approved M3 exception (2026-11-11):** [ADR-0005](../../../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) cho **Harbor và Forge trong M3** quyền tự chọn/claim task khi G3/Issue/Project Ready/ownership và dependency đã xác minh, không cần Atlas/Nova quyết định phân công hoặc review độc lập. Dùng **task branch/worktree riêng** từ main; các PR cũ của Forge không được reset/ghi đè. Những điều kiện kiểm tra/Ready và security trong skill này **vẫn bắt buộc**; các đoạn yêu cầu coordinator bên dưới là mặc định **ngoài M3**.
 
 ## Quy trình nhận task
 
