@@ -2,7 +2,7 @@
 
 Kế hoạch tách biệt với kết quả thực chạy. Khi một bước có bằng chứng trên mã thực, ghi sang [verification](../verification/README.md).
 
-**Điểm bắt đầu hiện hành:** đọc [Module Catalog](MODULE_CATALOG_V1.md) → [Coverage Matrix — 27 module, 9 milestone, task theo mốc](milestones/COVERAGE_MATRIX.md) → [mục lục milestone và task](milestones/README.md) → [M3 snapshot theo slice/OS](M3_STATUS_2026-11-09.md). **M3 vẫn PARTIAL**; M3.1–M3.6 có bằng chứng theo scope macOS, không mặc định Windows/Linux release. [Issue #15 Final Decision](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) chỉ là **ưu tiên nghiên cứu/kiểm chứng con**, không đại diện cho toàn bộ milestone/task V1.
+**Điểm bắt đầu hiện hành:** [Module Catalog](MODULE_CATALOG_V1.md) → [Coverage Matrix — 27 module, 9 milestone, task theo mốc](milestones/COVERAGE_MATRIX.md) → [mục lục milestone và task](milestones/README.md) → [M3 Core CMS phương án A đã chốt](milestones/M3/README.md). **M3 vẫn PARTIAL**; [snapshot M3.1–M3.6](M3_STATUS_2026-11-09.md) là evidence của scope cũ trên macOS, không mặc định Windows/Linux hay acceptance mới G5. [Issue #15 Final Decision](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) chỉ là ưu tiên nghiên cứu kỹ thuật lịch sử, không đại diện toàn V1.
 
 **Phân loại nguồn, không nhân bản trạng thái vận hành:**
 
@@ -37,8 +37,8 @@ Các nhiệm vụ mới được lập theo [Planning Workflow](PLANNING_WORKFLO
 
 **Kiểm tra tự động:** từ root worktree, chạy `python cms/scripts/check-plans.py` và `python cms/scripts/check-plans.py --self-test`; checker chỉ xác thực tính nhất quán tài liệu, không thay thế code/tests hoặc phê duyệt G2.
 
-## M3 — Quản lý nội dung (Content/Media)
+## M3 — Core CMS & WordPress-like Admin (phương án A, G0 10/11/2026)
 
-**Đọc trước:** [snapshot M3 hiện hành](M3_STATUS_2026-11-09.md) đối chiếu module còn thiếu, source/evidence và giới hạn OS. Các slice M3.1–M3.6 **đã có implementation và verification theo phạm vi riêng**, không đóng toàn M3.
+**Đọc trước:** [M3 scope & acceptance mới](milestones/M3/README.md) và [task plan M3 P01–P19](milestones/M3/TASK_PLAN.md). Có built-in post/page, Admin Tailwind WordPress-inspired, Media/Users/Settings/Themes/Plugins; taxonomy/plugin bridge/video/delete nâng cao chuyển M4/M6/M7/M8, không bỏ khỏi V1. [Snapshot M3 09/11](M3_STATUS_2026-11-09.md) chỉ dùng đối chiếu source/evidence giới hạn OS trước đổi G0.
 
-**Sáu plan M3.1–M3.6 đã chuyển khỏi root:** xem [mục lục milestone M3](milestones/M3/README.md), hoặc từng plan [M3.1 — mô hình CPT & Custom Fields](milestones/M3/slices/2026-11-08-m3-content-types-and-fields.md), [M3.2 — SQLite và API CPT](milestones/M3/slices/2026-11-08-m3-2-content-types-backend.md), [M3.3 — Content Entry CRUD](milestones/M3/slices/2026-11-08-m3-3-content-entry-crud.md), [M3.4 — Admin Content UI](milestones/M3/slices/2026-11-08-m3-4-admin-content-ui.md), [M3.5 — Media Library](milestones/M3/slices/2026-11-09-m3-5-media-library.md), [M3.6 — Public CPT Rendering](milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md). [**M3 Task Plan — đủ các năng lực M3 và nhóm A0/A1/B/C/D**](milestones/M3/TASK_PLAN.md) liên kết 15 candidate theo module, **không phải bảng trạng thái thực thi**. Sáu slice chỉ có **bằng chứng thực thi macOS giới hạn**; xác nhận Done phụ thuộc GitHub Issue/Project và G5 đúng acceptance, taxonomy/Builder/provider và parity còn mở.
+**Sáu plan M3.1–M3.6 vẫn ở M3/slices/, không archive:** [M3.1 — CPT & Fields](milestones/M3/slices/2026-11-08-m3-content-types-and-fields.md), [M3.2 — SQLite/API CPT](milestones/M3/slices/2026-11-08-m3-2-content-types-backend.md), [M3.3 — Entry CRUD](milestones/M3/slices/2026-11-08-m3-3-content-entry-crud.md), [M3.4 — Admin Content UI](milestones/M3/slices/2026-11-08-m3-4-admin-content-ui.md), [M3.5 — Media](milestones/M3/slices/2026-11-09-m3-5-media-library.md), [M3.6 — Public Rendering](milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md). [**M3 Task Plan — 19 planning candidates**](milestones/M3/TASK_PLAN.md), không phải bảng task Ready; các slice cũ chỉ có bằng chứng macOS giới hạn, Done phụ thuộc GitHub Project/G5.
