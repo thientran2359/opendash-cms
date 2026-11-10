@@ -3,7 +3,7 @@
 - **Ngày:** 2026-11-08
 - **Môi trường:** macOS Intel (Darwin x86_64), Rust/Cargo 1.99.1, Python 3, Admin dist đã build từ M3.1/M3.2.
 - **Mã nguồn:** `/local-sites/opendash-cms`.
-- **Phạm vi:** [kế hoạch M3.3](../plans/2026-11-08-m3-3-content-entry-crud.md), chỉ backend.
+- **Phạm vi:** [kế hoạch M3.3](../plans/milestones/M3/slices/2026-11-08-m3-3-content-entry-crud.md), chỉ backend.
 
 ## Thay đổi đã kiểm chứng
 

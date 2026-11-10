@@ -1,6 +1,8 @@
 # Hồ sơ lịch sử của OpenDash
 
-Thư mục này lưu các tài liệu mô tả công việc **đã hoàn tất**, không còn dùng để điều phối backlog hiện tại. Giữ nội dung và liên kết bằng chứng để truy xuất các quyết định và cách chuyển đổi trước đây.
+Thư mục này chỉ lưu hồ sơ lịch sử/đã ngừng hiệu lực, không dùng để điều phối backlog hiện tại. Giữ nội dung và bằng chứng để truy xuất quyết định cũ. **Code đã triển khai hoặc có test theo slice không tự làm task/milestone DONE và không phải điều kiện tự động để archive.**
+
+Các kế hoạch M3 đang theo dõi (dù đã có source macOS theo slice) được giữ ở [milestones/M3/slices](../plans/milestones/M3/README.md), **không nằm trong archive**; toàn M3 vẫn PARTIAL.
 
 ## Chuyển đổi repository và dữ liệu
 

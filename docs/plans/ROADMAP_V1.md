@@ -11,6 +11,8 @@
 
 Xem [Planning Workflow](PLANNING_WORKFLOW.md) về research gates, status và mẫu task. Roadmap là công cụ điều phối: không thay thế thiết kế, ADR, code hoặc bằng chứng test.
 
+**Phân quyền trạng thái:** Roadmap mô tả milestone, phụ thuộc và snapshot; [living module briefs](modules/CNT-01-content-types.md) mô tả scope/G0–G3; **GitHub Issues / Project #3** giữ trạng thái thực thi, assignee và dependency đang chạy; **PR** giữ diff/review; [verification](../verification/README.md) ghi kết quả thực chạy theo SHA, OS và phạm vi. Không coi các hàng backlog bên dưới là task `READY`.
+
 ## Release V1 — Các mốc và điều kiện đóng
 
 | Milestone | Kết quả cần đạt | Module chính | Trạng thái & căn cứ |
@@ -38,6 +40,16 @@ Không gắn ngày kết thúc khi chưa có phạm vi, thời lượng kiểm c
 7. **Đóng V1:** test và bằng chứng trên Linux, restore từ backup rồi chạy website với content/media/theme/plugin; kiểm tra quyền, CSRF, preview, lưu và vô hiệu hóa extension.
 
 Các gates này đề cập **hành vi cần có**. Một milestone có thể được chia lại khi research cho thấy phụ thuộc khác; ID module không đổi.
+
+## Trạng thái M3 đã triển khai và khoảng trống trước backlog lịch sử
+
+**Nguồn:** [M3 status — snapshot 09/11 tại main@`b561805`](M3_STATUS_2026-11-09.md), [verification M3.1–M3.6](../verification/README.md), code hiện hành tại `main@e4a143291cbaaf3a302cd30e974e27ea9ab886f0` (không có thay đổi `cms/` sau baseline khảo sát [#15](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410)). Bằng chứng slice trên **macOS**, không suy thành Windows/Linux M3 PASS hoặc G5 toàn milestone.
+
+- **Đã có theo slice:** CPT/9 fields (M3.1), CPT GET/POST và SQLite (M3.2), entry CRUD (M3.3), Admin content form (M3.4), raster media/picker (M3.5), public archive/single và media reference ACL (M3.6).
+- **Còn thiếu:** CNT-03 taxonomy; CNT-01/02 ↔ PLG-03 provider registration/lifecycle; CNT-05 xóa/reconcile/video/backup boundary; kiểm chứng Windows/Linux; Builder AST/binding và policy URL/theme ở các module M4/M5. M3 vẫn **PARTIAL**.
+- **Thứ tự nghiên cứu/kiểm chứng đã kết luận** trong [Issue #15 Final Decision](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410): A0 Windows smoke harness → A1 parity, G1/G2 taxonomy B trước provider bridge C khi code, D media/backup invariants và E Builder AST research có thể song song. Đây là **quyết định sequence/gate**, **không phải task READY** hay G2 schema mới được duyệt.
+
+Các bảng S01–S05 dưới đây là **bản thiết kế lịch sử**, không ánh xạ 1:1 sang M3.1–M3.6 hoặc tạo queue thực thi. [Issue #14 Final Decision](https://github.com/thientran2359/opendash-cms/issues/14#issuecomment-6760144662) giữ nguyên các plan/snapshot tại đường dẫn hiện có trong đợt cập nhật index đầu tiên.
 
 ## Backlog slice sơ bộ cho các mốc sắp tới
 
