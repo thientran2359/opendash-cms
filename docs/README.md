@@ -20,8 +20,9 @@ Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc
 | Giao diện kỹ thuật giữa các phần | [`contracts/`](contracts/CORE_FOUNDATION.md) — [Core Foundation](contracts/CORE_FOUNDATION.md) · [Plugin ABI](contracts/PLUGIN_ABI.md) | Contract có version, trạng thái `AGREED` khác `verified` |
 | Quyết định kiến trúc & điều phối | [`decisions/`](decisions/ADR-0001-workspace-layout.md) — [ADR-0001](decisions/ADR-0001-workspace-layout.md) · [ADR-0002](decisions/ADR-0002-core-extension-contract.md) · [ADR-0003](decisions/ADR-0003-agent-consensus-governance.md) | ADR có bối cảnh, quyết định, hệ quả, reviewer nếu cần và trạng thái |
 | Roadmap và danh mục module | [Roadmap V1](plans/ROADMAP_V1.md) · [Module Catalog](plans/MODULE_CATALOG_V1.md) · [Quy trình](plans/PLANNING_WORKFLOW.md) | Hai trục chức năng và tiến độ, ID module, research/design gates, mẫu task |
-| Kế hoạch triển khai | [`plans/`](plans/README.md) · [Milestones](plans/milestones/README.md) | Mỗi kế hoạch nêu phạm vi, mốc và tiêu chí nghiệm thu; có mẫu module và task |
-| Hồ sơ lịch sử và plan đã triển khai theo slice | [`archive/`](archive/README.md) · [M3.1–M3.6](archive/plans/m3/README.md) | Lưu kế hoạch đã triển khai trong phạm vi kiểm chứng, không nhầm archive một slice thành đóng cả M3; giữ link verification |
+| Kế hoạch triển khai | [`plans/`](plans/README.md) · [Milestones](plans/milestones/README.md) · [M3/Slices](plans/milestones/M3/README.md) | Milestone quy định điều kiện đóng mốc; slice là phần thực hiện, không phân thư mục theo trạng thái Ready/Done |
+| Module/Capability xuyên milestone | [`plans/modules/`](plans/modules/README.md) · [Module Catalog](plans/MODULE_CATALOG_V1.md) | Nguồn mô tả chức năng, G0–G3 và dependency; module có thể thuộc nhiều milestone |
+| Hồ sơ lịch sử | [`archive/`](archive/README.md) | Chỉ lưu hồ sơ lịch sử/retired, không tự archive một task chỉ vì đã triển khai code |
 | Bằng chứng thực thi | [`verification/`](verification/README.md) | Chỉ ghi `verified` khi có lệnh, môi trường và kết quả thực tế |
 | Điều phối agent | [Giao thức hiện hành](discussions/PROTOCOL.md) · [Quy trình GitHub](../.agents/GITHUB_WORKFLOW.md) · [Handoff cũ](discussions/AGENT_COORDINATION.md) | Handoff trước đây chỉ để tham khảo, không còn là cơ chế hoạt động |
 

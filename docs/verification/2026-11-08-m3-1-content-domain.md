@@ -2,7 +2,7 @@
 
 - **Ngày:** 2026-11-08
 - **Môi trường:** macOS Darwin Intel x86_64, Rust/Cargo 1.99.1 (`stable-x86_64-apple-darwin`).
-- **Phạm vi:** [M3.1 Content Types & Fields](../archive/plans/m3/2026-11-08-m3-content-types-and-fields.md), chỉ module `opendash-core`.
+- **Phạm vi:** [M3.1 Content Types & Fields](../plans/milestones/M3/slices/2026-11-08-m3-content-types-and-fields.md), chỉ module `opendash-core`.
 
 ## Thay đổi đã thực hiện
 

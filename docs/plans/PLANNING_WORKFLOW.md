@@ -38,8 +38,11 @@ Ví dụ truy vết: `V1 → M3 → M3-S01 → M3-S01-T01` dự kiến triển k
 | Task | Slice + `-T` + số | `M3-S01-T02` |
 | Nghiên cứu đang chuẩn bị | `.agents/research/<module>-<topic>.md` | `.agents/research/cnt-01-cpt-data-model.md` trên branch agent |
 | Kế hoạch milestone | `docs/plans/milestones/<Mốc>-<chủ-đề>.md` | `milestones/M2.5-core-foundation.md` |
+| Kế hoạch slice theo milestone | `docs/plans/milestones/<Mốc>/slices/<slice>.md` | `milestones/M3/slices/2026-11-09-m3-5-media-library.md` |
 
 Mọi slice ghi rõ module/capability liên quan, các dependency chặn triển khai, đầu ra và link đến PRD, contract, quyết định, kiểm chứng. Các ID đã sử dụng không đổi hoặc tái cấp phát; nếu tách module thì ghi lịch sử kế thừa.
+
+**Quy ước tổ chức được chốt 10/11/2026:** `milestones/` chứa kế hoạch mốc (hoặc `<Mốc>/README.md` khi có nhiều slice), `milestones/<Mốc>/slices/` chứa các plan thực hiện **không phụ thuộc trạng thái hoàn tất**; `modules/` chứa Living Module Brief theo capability xuyên milestone. **GitHub Issues/Project** quản lý trạng thái task Backlog → Ready → In progress → In review → Done; không tạo các thư mục theo status, không chuyển vào `archive/` chỉ vì code hiện hữu hoặc có kiểm chứng trên một OS.
 
 **Primary Acceptance Slice:** mỗi capability ID có đúng một slice nghiệm thu chính tại phạm vi/release cụ thể. Một module có thể xuất hiện trong nhiều milestone, nhưng không nhân đôi tiến độ capability. Các kiểm thử hồi quy sau đó bổ sung evidence mà không tạo capability giả.
 

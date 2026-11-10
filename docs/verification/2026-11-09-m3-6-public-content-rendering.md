@@ -3,7 +3,7 @@
 - **Ngày:** 2026-11-09.
 - **Môi trường:** Mac Intel x86_64, Cargo/Rust 1.99.1, Python 3, Node.js 24.22.2, React 18/TypeScript 5.6.3/Vite 6.0.7.
 - **Git baseline:** `4213bba feat(cms): add secure media library and image gallery picker`; commit M3.5 đã được tạo, M3.6 được thực hiện sau đó.
-- **Kế hoạch:** [M3.6](../archive/plans/m3/2026-11-09-m3-6-public-content-rendering.md).
+- **Kế hoạch:** [M3.6](../plans/milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md).
 
 ## Thay đổi
 

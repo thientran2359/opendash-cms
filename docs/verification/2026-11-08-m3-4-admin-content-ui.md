@@ -3,7 +3,7 @@
 - **Ngày:** 2026-11-08
 - **Môi trường:** macOS Intel (Darwin), Rust/Cargo 1.99.1, Node.js 24.22.2, React 18.3.1, TypeScript 5.6.3, Vite 6.0.7.
 - **Code:** `/local-sites/opendash-cms`, sau commit backend `7defd2d`.
-- **Phạm vi:** [kế hoạch M3.4](../archive/plans/m3/2026-11-08-m3-4-admin-content-ui.md), giao diện React Admin và tích hợp backend M3.2/3.
+- **Phạm vi:** [kế hoạch M3.4](../plans/milestones/M3/slices/2026-11-08-m3-4-admin-content-ui.md), giao diện React Admin và tích hợp backend M3.2/3.
 
 ## Mã và luồng đã thêm
 
