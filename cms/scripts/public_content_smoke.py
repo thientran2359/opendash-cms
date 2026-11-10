@@ -10,6 +10,7 @@ import json
 import os
 import sqlite3
 import subprocess
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -166,7 +167,7 @@ def test_public(binary: Path) -> None:
             assert "Trang sau" in require(raw_request(base, "GET", listing), 200, "Page1")[1].decode()
             assert "Trang trước" in require(raw_request(base, "GET", listing + "?page=2"), 200, "Page2")[1].decode()
 
-        with sqlite3.connect(db) as con:
+        with closing(sqlite3.connect(db)) as con, con:
             assert con.execute("SELECT success FROM _sqlx_migrations WHERE version = 7").fetchone() == (1,)
             assert con.execute("SELECT content_single_template IS NOT NULL FROM theme_blocks WHERE id='sample/banner'").fetchone() == (1,)
             assert con.execute("SELECT content_single_template IS NULL FROM theme_blocks WHERE id='old/banner'").fetchone() == (1,)
@@ -303,7 +304,7 @@ def test_post_page_publication(binary: Path) -> None:
             legacy_id = json.loads(legacy[1])["id"]
             # Negative ACL fixture: a draft gallery must not pass the OR
             # branch of media_is_referenced even if its JSON contains the ID.
-            with sqlite3.connect(db) as con:
+            with closing(sqlite3.connect(db)) as con, con:
                 con.execute(
                     "UPDATE content_entries SET publication_status='draft' WHERE id=?",
                     (legacy_id,),
@@ -315,7 +316,7 @@ def test_post_page_publication(binary: Path) -> None:
                     404, "Draft gallery may not bypass publication AND")
             require(raw_request(base, "GET", f"/media/{private_media}/thumbnail"),
                     404, "Draft gallery thumb not public")
-            with sqlite3.connect(db) as con:
+            with closing(sqlite3.connect(db)) as con, con:
                 con.execute(
                     "UPDATE content_entries SET publication_status='published' WHERE id=?",
                     (legacy_id,),
@@ -329,7 +330,7 @@ def test_post_page_publication(binary: Path) -> None:
             require(raw_request(base, "GET", f"/media/{private_media}/thumbnail"), 404, "Private after gallery delete")
             require(raw_request(base, "GET", "/"), 200, "Legacy Builder homepage intact")
 
-        with sqlite3.connect(db) as con:
+        with closing(sqlite3.connect(db)) as con, con:
             assert con.execute("SELECT success FROM _sqlx_migrations WHERE version = 8").fetchone() == (1,)
             assert con.execute("SELECT publication_status FROM content_entries WHERE id = ?",
                                (record["id"],)).fetchone() == ("draft",)
@@ -354,7 +355,7 @@ def test_post_page_publication(binary: Path) -> None:
         # collision. Actual SQLx startup must reject it *before* migration.
         collision_db = Path(folder) / "collision" / "database" / "opendash.sqlite"
         collision_db.parent.mkdir(parents=True)
-        with sqlite3.connect(db) as source, sqlite3.connect(collision_db) as target:
+        with closing(sqlite3.connect(db)) as source, closing(sqlite3.connect(collision_db)) as target, target:
             source.backup(target)
             target.execute("DROP INDEX idx_content_entries_published_type_id")
             target.execute("DROP TRIGGER content_entries_core_insert_draft")
@@ -367,7 +368,7 @@ def test_post_page_publication(binary: Path) -> None:
                    OPENDASH_DB_PATH=str(collision_db))
         result = subprocess.run([str(binary)], env=env, capture_output=True, text=True, timeout=15)
         assert result.returncode != 0 and "M3-S20 preflight" in result.stderr, result.stderr
-        with sqlite3.connect(collision_db) as con:
+        with closing(sqlite3.connect(collision_db)) as con, con:
             assert con.execute("SELECT owner_kind FROM content_types WHERE key='post'").fetchone() == ("user",)
             assert con.execute("SELECT COUNT(*) FROM _sqlx_migrations WHERE version=8").fetchone() == (0,)
             assert "publication_status" not in [r[1] for r in con.execute("PRAGMA table_info(content_entries)")]
@@ -380,7 +381,7 @@ def test_post_page_publication(binary: Path) -> None:
             con.commit()
         result = subprocess.run([str(binary)], env=env, capture_output=True, text=True, timeout=15)
         assert result.returncode != 0 and "M3-S20 preflight" in result.stderr, result.stderr
-        with sqlite3.connect(collision_db) as con:
+        with closing(sqlite3.connect(collision_db)) as con, con:
             assert con.execute("SELECT json_extract(definition_json,'$.label') "
                                "FROM content_types WHERE key='post'").fetchone() == ("Unexpected",)
             assert con.execute("SELECT COUNT(*) FROM _sqlx_migrations WHERE version=8").fetchone() == (0,)
@@ -389,7 +390,7 @@ def test_post_page_publication(binary: Path) -> None:
         # Existing non-Core entries must become published; Core seed is fresh.
         upgrade_db = Path(folder) / "upgrade" / "database" / "opendash.sqlite"
         upgrade_db.parent.mkdir(parents=True)
-        with sqlite3.connect(db) as source, sqlite3.connect(upgrade_db) as target:
+        with closing(sqlite3.connect(db)) as source, closing(sqlite3.connect(upgrade_db)) as target, target:
             source.backup(target)
             target.execute("DELETE FROM content_entries WHERE content_type_key IN ('post','page')")
             target.execute("DELETE FROM content_types WHERE key IN ('post','page')")
@@ -415,7 +416,7 @@ def test_post_page_publication(binary: Path) -> None:
                 201, "Post after upgrade starts draft",
             )[1])
             assert new_draft["publication_status"] == "draft"
-        with sqlite3.connect(upgrade_db) as con:
+        with closing(sqlite3.connect(upgrade_db)) as con, con:
             assert con.execute("SELECT success FROM _sqlx_migrations WHERE version=8").fetchone() == (1,)
             assert con.execute("SELECT publication_status FROM content_entries "
                                "WHERE slug='legacy-before-0008'").fetchone() == ("published",)
