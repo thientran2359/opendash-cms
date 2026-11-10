@@ -20,6 +20,7 @@ profile riêng, không chứng minh tài khoản đang đăng nhập.
 | Scope/G0–G3 đã chốt, contract, ADR | `docs/` | Coordinator kết luận consensus hoặc reviewer độc lập quyết định cuối, sau đó PR review/merge; xem [ADR-0003](../docs/decisions/ADR-0003-agent-consensus-governance.md) |
 | Điều tra, thảo luận, đề xuất/task draft | `.agents/research/`, `.agents/discussions/`, `.agents/tasks/` | Agent trên branch của mình |
 | Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator/Muse được ủy quyền, sau khi gate sẵn sàng |
+| Tổng hợp 9 milestone, candidate và tình trạng task để chủ dự án đọc nhanh | [TASK_INDEX](../docs/plans/TASK_INDEX.md) (**snapshot**, không authoritative) | Coordinator thêm task sau G3; agent/reviewer hoàn tất G5 cập nhật qua PR, đối chiếu Issue/Project |
 | Source diff, test, phản biện, chấp thuận tích hợp | **GitHub PR** | Assignee rồi reviewer/CI |
 | Evidence thực chạy/acceptance đã duyệt | `docs/verification/` | Theo quy trình review, không suy từ báo cáo AI |
 | Chat/session/runtime secrets/locks | **Không đưa vào Git** | Từng công cụ giữ riêng |
@@ -92,9 +93,14 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    assignee nếu là tài khoản thực có quyền; agent runtime identity nằm ở
    `agent:*` label.
 6. Khi scope, contract hoặc acceptance thay đổi: sửa tài liệu trong repo,
-   review/merge và **đồng bộ lại body Issue + source SHA**. Khi chỉ đổi
-   tiến độ, owner hoặc blocker: chỉ cập nhật Issue/Project. Không duy trì
-   JSON/YAML task mirror trong Git như một bảng trạng thái cạnh tranh.
+   review/merge và **đồng bộ lại body Issue + source SHA**. Khi đổi
+   tiến độ, owner hoặc blocker: **Issue/Project phải cập nhật trước**.
+   Theo chỉ đạo mới, riêng [TASK_INDEX](../docs/plans/TASK_INDEX.md) được phép
+   phản ánh trạng thái có nguồn/link Issue và ngày đối chiếu: coordinator thêm
+   hàng task G3 đã phát hành; khi **G5 VERIFIED + Project Done**, agent được
+   giao closure cập nhật hàng Done qua PR docs. Nếu chỉ merge code nhưng
+   chưa G5, giữ In review/Partial theo GitHub, không tự ghi Done. Không duy
+   trì JSON/YAML mirror hoặc queue song song khác và không dựa vào index để pickup.
 
 **Ngoại lệ hạ tầng POC Muse → CoS Phase 1 (G3 APPROVED 09/11/2026, Issues chưa READY):** các mã
 `P1-W01..P1-W08` trong [breakdown Phase 1](../docs/plans/muse-cos-win-phase1-g2.md)
