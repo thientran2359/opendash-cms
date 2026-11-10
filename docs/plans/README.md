@@ -2,7 +2,7 @@
 
 Kế hoạch tách biệt với kết quả thực chạy. Khi một bước có bằng chứng trên mã thực, ghi sang [verification](../verification/README.md).
 
-**Điểm bắt đầu hiện hành (main@`e4a143291cbaaf3a302cd30e974e27ea9ab886f0`, 10/11/2026):** đọc [M3 status — snapshot theo slice/OS](M3_STATUS_2026-11-09.md) và [Module Catalog](MODULE_CATALOG_V1.md) trước khi dùng backlog lịch sử. **M3 vẫn PARTIAL**; M3.1–M3.6 đã có triển khai và bằng chứng **trong phạm vi macOS ghi ở từng báo cáo**, không phải xác nhận toàn M3 hoặc Windows/Linux release. [Issue #15 — Final Decision](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) xác định hướng nghiên cứu/kiểm chứng tiếp theo, **không phải queue task READY**.
+**Điểm bắt đầu hiện hành:** [Module Catalog](MODULE_CATALOG_V1.md) → [Coverage Matrix — 27 module, 9 milestone, task theo mốc](milestones/COVERAGE_MATRIX.md) → [mục lục milestone và task](milestones/README.md) → [M3 Core CMS phương án A đã chốt](milestones/M3/README.md). **M3 vẫn PARTIAL**; [snapshot M3.1–M3.6](M3_STATUS_2026-11-09.md) là evidence của scope cũ trên macOS, không mặc định Windows/Linux hay acceptance mới G5. [Issue #15 Final Decision](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) chỉ là ưu tiên nghiên cứu kỹ thuật lịch sử, không đại diện toàn V1.
 
 **Phân loại nguồn, không nhân bản trạng thái vận hành:**
 
@@ -21,23 +21,24 @@ Roadmap và danh mục module được quản lý theo hai trục liên kết b�
 
 1. [Roadmap V1](ROADMAP_V1.md) — mốc M1–M8, dependencies, gates và các slice M3 dự kiến.
 2. [Module Catalog V1](MODULE_CATALOG_V1.md) — danh mục ID module, phạm vi capability và trạng thái theo bằng chứng (số lượng lấy từ catalog, không duy trì số đếm riêng tại đây).
-3. [Planning Workflow](PLANNING_WORKFLOW.md) — G0–G5, Full-Track/Fast-Track, trạng thái/evidence, source of truth và cách chia task.
+3. [Milestone Coverage Matrix](milestones/COVERAGE_MATRIX.md) và [9 Milestone Task Plans](milestones/README.md) — liên kết module→mốc→task candidate/dependency/acceptance; chỉ Issue/Project giữ trạng thái thực thi.
+4. [Planning Workflow](PLANNING_WORKFLOW.md) — G0–G5, Full-Track/Fast-Track, trạng thái/evidence, source of truth và cách chia task.
    [Muse → CoS Windows Phase 1 — lịch sử G2/G3, hiện PAUSED](muse-cos-win-phase1-g2.md) — lưu Poller P0–P4 và [8 work packages G3 từng được duyệt](muse-cos-win-phase1-g2.md#5-g3-breakdown--8-work-packages-đã-được-phê-duyệt); **không vận hành Poller/Task Watcher, không có implementation Issue READY**, Issue #5 vẫn NO_DISPATCH, P0–P4 chưa có G5 runtime PASS.
-4. [Modules — giải thích chức năng xuyên milestone](modules/README.md), mẫu [Living Module Brief](templates/MODULE_BRIEF.md) và [handoff Slice Task](templates/SLICE_TASK.md); hai brief đầu tiên là [CNT-01 CPT](modules/CNT-01-content-types.md) và [CNT-05 Media](modules/CNT-05-media.md) — **G1 được review theo hồ sơ lịch sử; G2 ứng viên cần đối chiếu implementation hiện hành**.
+5. [Modules — giải thích chức năng xuyên milestone](modules/README.md), mẫu [Living Module Brief](templates/MODULE_BRIEF.md) và [handoff Slice Task](templates/SLICE_TASK.md); hai brief đầu tiên là [CNT-01 CPT](modules/CNT-01-content-types.md) và [CNT-05 Media](modules/CNT-05-media.md) — **G1 được review theo hồ sơ lịch sử; G2 ứng viên cần đối chiếu implementation hiện hành**.
 
 **Giới hạn hiện trạng:** M1/M2 và M2.5 đã có bằng chứng Windows theo mốc lịch sử; M2.5 được đóng ở commit `da79304`. M3.1–M3.6 [đã có source và evidence theo slice trên macOS](M3_STATUS_2026-11-09.md); **M3 còn PARTIAL**, các capability chưa hoàn tất vẫn cần gate/verification và parity Windows/Linux riêng. M4–M8 là kế hoạch tiếp theo, không mặc định đã triển khai.
 
 ## Kế hoạch milestone và hồ sơ lịch sử
 
-- [Milestone Plans](milestones/README.md) lưu kế hoạch chi tiết từng mốc. M2.5 đã [hoàn thành và kiểm chứng](milestones/M2.5-core-foundation.md); xem [báo cáo M2.5](../verification/2026-11-07-m2-5-core-kernel.md) và [ADR-0002](../decisions/ADR-0002-core-extension-contract.md).
+- [Milestone Plans M1–M8](milestones/README.md) lưu đầy đủ kế hoạch từng mốc và task candidates theo module; [ma trận coverage 27 module](milestones/COVERAGE_MATRIX.md) giúp phát hiện module nào chưa có việc. M2.5 đã [hoàn thành và kiểm chứng trong scope](milestones/M2.5-core-foundation.md); xem [báo cáo M2.5](../verification/2026-11-07-m2-5-core-kernel.md) và [ADR-0002](../decisions/ADR-0002-core-extension-contract.md).
 - [Bản đối chiếu nhập mã M1/M2](../archive/migrations/2026-11-07-m1-m2-module-map.md) là hồ sơ lịch sử của đợt nhập mã đã hoàn tất; kết quả kiểm chứng ở [workspace đích](../verification/2026-11-07-m1-m2-import.md).
 
 Các nhiệm vụ mới được lập theo [Planning Workflow](PLANNING_WORKFLOW.md). Kế hoạch đã đóng vẫn giữ liên kết tới contract, ADR và báo cáo thực chạy để truy vết.
 
 **Kiểm tra tự động:** từ root worktree, chạy `python cms/scripts/check-plans.py` và `python cms/scripts/check-plans.py --self-test`; checker chỉ xác thực tính nhất quán tài liệu, không thay thế code/tests hoặc phê duyệt G2.
 
-## M3 — Quản lý nội dung (Content/Media)
+## M3 — Core CMS & WordPress-like Admin (phương án A, G0 10/11/2026)
 
-**Đọc trước:** [snapshot M3 hiện hành](M3_STATUS_2026-11-09.md) đối chiếu module còn thiếu, source/evidence và giới hạn OS. Các slice M3.1–M3.6 **đã có implementation và verification theo phạm vi riêng**, không đóng toàn M3.
+**Đọc trước:** [M3 scope & acceptance mới](milestones/M3/README.md) và [task plan M3 P01–P19](milestones/M3/TASK_PLAN.md). Có built-in post/page, Admin Tailwind WordPress-inspired, Media/Users/Settings/Themes/Plugins; taxonomy/plugin bridge/video/delete nâng cao chuyển M4/M6/M7/M8, không bỏ khỏi V1. [Snapshot M3 09/11](M3_STATUS_2026-11-09.md) chỉ dùng đối chiếu source/evidence giới hạn OS trước đổi G0.
 
-**Sáu plan M3.1–M3.6 đã chuyển khỏi root:** xem [mục lục milestone M3](milestones/M3/README.md), hoặc từng plan [M3.1 — mô hình CPT & Custom Fields](milestones/M3/slices/2026-11-08-m3-content-types-and-fields.md), [M3.2 — SQLite và API CPT](milestones/M3/slices/2026-11-08-m3-2-content-types-backend.md), [M3.3 — Content Entry CRUD](milestones/M3/slices/2026-11-08-m3-3-content-entry-crud.md), [M3.4 — Admin Content UI](milestones/M3/slices/2026-11-08-m3-4-admin-content-ui.md), [M3.5 — Media Library](milestones/M3/slices/2026-11-09-m3-5-media-library.md), [M3.6 — Public CPT Rendering](milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md). [**M3 Task Plan — việc còn thiếu, thứ tự A0/A1/B/C/D/E và gate**](milestones/M3/TASK_PLAN.md) là hướng dẫn lập task tiếp theo, **không phải bảng trạng thái thực thi**. Sáu slice chỉ có **bằng chứng thực thi macOS giới hạn**; xác nhận Done phụ thuộc GitHub Issue/Project và G5 đúng acceptance, taxonomy/Builder/provider và parity còn mở.
+**Sáu plan M3.1–M3.6 vẫn ở M3/slices/, không archive:** [M3.1 — CPT & Fields](milestones/M3/slices/2026-11-08-m3-content-types-and-fields.md), [M3.2 — SQLite/API CPT](milestones/M3/slices/2026-11-08-m3-2-content-types-backend.md), [M3.3 — Entry CRUD](milestones/M3/slices/2026-11-08-m3-3-content-entry-crud.md), [M3.4 — Admin Content UI](milestones/M3/slices/2026-11-08-m3-4-admin-content-ui.md), [M3.5 — Media](milestones/M3/slices/2026-11-09-m3-5-media-library.md), [M3.6 — Public Rendering](milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md). [**M3 Task Plan — 19 planning candidates**](milestones/M3/TASK_PLAN.md), không phải bảng task Ready; các slice cũ chỉ có bằng chứng macOS giới hạn, Done phụ thuộc GitHub Project/G5.
