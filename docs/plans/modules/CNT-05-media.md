@@ -8,6 +8,19 @@
 
 Living Module Brief G0–G3 giữ một nguồn chi tiết từ scope đến task. V1 cần ảnh/media upload và image/gallery picker; video là phần cần xác minh mức hỗ trợ/giới hạn khi G2. **Opaque `media_id` thay URL/path trong field là ứng viên G1**, chưa chốt kiểu ID, schema metadata, public route hay cơ chế dọn file. Xem [planning consensus](../../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) và [Pre-M3 readiness](../../discussions/threads/2026-11-07-pre-m3-codegraph-readiness.md).
 
+## Đối chiếu implementation hiện hành và G2 lịch sử — 10/11/2026
+
+**Baseline code:** `main@e4a143291cbaaf3a302cd30e974e27ea9ab886f0`. Đối chiếu này là source inspection; **không phải chạy lại G5** tại SHA này. CNT-05 và toàn M3 vẫn **PARTIAL** theo [snapshot M3](../M3_STATUS_2026-11-09.md).
+
+| Lớp bằng chứng | Đối chiếu ở source / thiếu gì |
+| --- | --- |
+| **Current implementation** | [Migration `0006`](../../../cms/migrations/0006_media_assets.sql) lưu `media_assets` dùng **ID SHA-256** dài 64 ký tự, JPEG/PNG/WebP, tối đa **8 MiB** và kích thước tối đa 6.000 px/cạnh; [decoder hiện hành](../../../cms/crates/opendash-server/src/media.rs) giới hạn thêm **20 triệu pixel**. [Admin media routes](../../../cms/crates/opendash-server/src/routes/media.rs) upload/list/file/thumbnail có session/CSRF phù hợp hành vi; [public reference ACL](../../../cms/crates/opendash-server/src/storage/public_content.rs) chỉ cho tải media public khi đang được entry image/gallery tham chiếu. Upload riêng tư chưa lưu entry không tự public. |
+| **Evidence verified-by-slice** | [M3.5 — raster upload/thumbnail/picker](../../verification/2026-11-09-m3-5-media-library.md), [M3.6 — public reference ACL](../../verification/2026-11-09-m3-6-public-content-rendering.md): PASS **trên macOS và các SHA được ghi riêng**. Script mang tên `windows_*` chạy trên Mac **không** chứng minh Windows; Linux chưa được xác minh. |
+| **Historical G2 PROPOSED (08/11)** | [G2.1/G2.3 bên dưới](#g2--hồ-sơ-đề-xuất-thiết-kế-v01-08112026-đang-phản-biện-proposed) đưa ứng viên **UUID**, GIF và **10 MiB**, cùng đề xuất `GET /media/{id}` public trực tiếp. Các lựa chọn này **khác** implementation SHA-256/8 MiB/reference ACL đã có; là lịch sử G2, **không phải contract/API được duyệt cho hiện tại**. |
+| **Missing G1/G2/G5 gates** | Chưa có lifecycle xóa/GC/reconcile, crash-safe file↔DB recovery, video V1, invariant snapshot/restore DB+uploads khi `OPENDASH_DB_PATH` ngoài site root, kiểm chứng Windows/Linux mới. Không tự hard-delete/auto-GC khi còn bất định reference hoặc restore. Chính sách referenced-delete/tombstone, MIME/codec/Range, concurrency, negative tests cần **Full-Track G2** và reviewer độc lập trước code. |
+
+**Quyết định tiếp theo:** [Issue #15 Final Decision — nhóm D CNT-05 × OPS-01](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) giữ video trong phạm vi V1/M3 của kế hoạch hiện hành nhưng chưa chốt định dạng/giới hạn; backup engine còn thuộc OPS-01/M8. **Không xóa hoặc viết lại G2 lịch sử** và không biến đề xuất G3 cũ thành task `READY`.
+
 ## G0 — Năng lực cần có
 
 | ID | Capability | Primary acceptance slice dự kiến | Nghiệm thu dự kiến |
