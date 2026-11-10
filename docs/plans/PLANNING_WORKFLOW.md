@@ -39,10 +39,13 @@ Ví dụ truy vết: `V1 → M3 → M3-S01 → M3-S01-T01` dự kiến triển k
 | Nghiên cứu đang chuẩn bị | `.agents/research/<module>-<topic>.md` | `.agents/research/cnt-01-cpt-data-model.md` trên branch agent |
 | Kế hoạch milestone | `docs/plans/milestones/<Mốc>-<chủ-đề>.md` | `milestones/M2.5-core-foundation.md` |
 | Kế hoạch slice theo milestone | `docs/plans/milestones/<Mốc>/slices/<slice>.md` | `milestones/M3/slices/2026-11-09-m3-5-media-library.md` |
+| Kế hoạch task candidate trong mốc | `docs/plans/milestones/<Mốc>/TASK_PLAN.md` | `milestones/M4/TASK_PLAN.md` (trước G3) |
 
 Mọi slice ghi rõ module/capability liên quan, các dependency chặn triển khai, đầu ra và link đến PRD, contract, quyết định, kiểm chứng. Các ID đã sử dụng không đổi hoặc tái cấp phát; nếu tách module thì ghi lịch sử kế thừa.
 
 **Quy ước tổ chức được chốt 10/11/2026:** `milestones/` chứa kế hoạch mốc (hoặc `<Mốc>/README.md` khi có nhiều slice), `milestones/<Mốc>/slices/` chứa các plan thực hiện **không phụ thuộc trạng thái hoàn tất**; `modules/` chứa Living Module Brief theo capability xuyên milestone. **GitHub Issues/Project** quản lý trạng thái task Backlog → Ready → In progress → In review → Done; không tạo các thư mục theo status, không chuyển vào `archive/` chỉ vì code hiện hữu hoặc có kiểm chứng trên một OS.
+
+**Quy trình lập kế hoạch đầy đủ:** [Module Catalog](MODULE_CATALOG_V1.md) → [Coverage Matrix](milestones/COVERAGE_MATRIX.md) → [9 milestone plans](milestones/README.md) → các hàng `Mx-Pxx` có scope/dependency/acceptance. Đây là **planning IDs**, tuyệt đối **không** dùng `Mx-Pxx` thay G3 Task ID `Mx-Sxx-Txx` hoặc tạo GitHub Issue từ bảng. Khi một candidate đủ nghiên cứu, coordinator chốt G2/G3, chuyển thành task brief đầy đủ theo [SLICE_TASK](templates/SLICE_TASK.md) tại `docs/plans/milestones/` (script `prepare-github-issue.py` chấp nhận nguồn milestone) hoặc module brief đã review, dùng **task ID mới không xung đột lịch sử**, rồi mới tạo Issue có milestone GitHub number đúng và Project Ready. Không coi một module được nhắc ở nhiều mốc là nhiều lần nghiệm thu cùng capability.
 
 **Primary Acceptance Slice:** mỗi capability ID có đúng một slice nghiệm thu chính tại phạm vi/release cụ thể. Một module có thể xuất hiện trong nhiều milestone, nhưng không nhân đôi tiến độ capability. Các kiểm thử hồi quy sau đó bổ sung evidence mà không tạo capability giả.
 

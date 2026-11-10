@@ -4,7 +4,7 @@
 
 `milestones/M3/slices/` giữ tài liệu triển khai theo **lát cắt**, không lưu theo trạng thái Ready/In progress/Done và không phải kho archive. [Module briefs](../../modules/README.md) quản lý các capability xuyên milestone; [GitHub Project #3](https://github.com/users/thientran2359/projects/3) quản lý trạng thái task và [GitHub PR](https://github.com/thientran2359/opendash-cms/pulls) quản lý review.
 
-**Muốn biết công việc M3 tiếp theo và điều kiện giao task:** đọc [M3 — TASK_PLAN](TASK_PLAN.md). Đây là danh sách **nhóm công việc cần nghiên cứu/kiểm chứng**, thứ tự và gate theo Final Decision #15, **không phải queue task `READY`**. Sau khi G3 được review/merge, task cụ thể mới được phát hành bằng GitHub Issue và theo dõi trong Project #3.
+**Muốn biết toàn bộ phần việc M3:** đọc [M3 — TASK_PLAN](TASK_PLAN.md) với mapping CNT-01–05/PLG-03 → các slice đã có và task candidates còn thiếu. Nhóm A0/A1/B/C/D trong Final Decision #15 là **ưu tiên con**, không phải toàn bộ kế hoạch M3. Sau G3 review/merge mới có GitHub Issue task; đây **không phải queue `READY`**.
 
 ## Các slice và nguồn kiểm chứng
 

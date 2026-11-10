@@ -1,8 +1,32 @@
-# M3 — Kế hoạch chuyển phần việc còn mở thành task có thể nghiệm thu
+# M3 — Phân rã đầy đủ task Content & Media
 
 **Loại tài liệu:** kế hoạch tĩnh về **phạm vi, thứ tự, dependency và gate**; **không phải bảng trạng thái Backlog/Ready/In progress/In review/Done**. [GitHub Project #3](https://github.com/users/thientran2359/projects/3) và [GitHub Issues](https://github.com/thientran2359/opendash-cms/issues) giữ trạng thái thực tế, assignee, blocker và acceptance checklist theo từng task; [GitHub PR](https://github.com/thientran2359/opendash-cms/pulls) giữ diff/review. Không suy status GitHub Project chỉ từ một file, commit, test hoặc PR.
 
-**Nguồn lập kế hoạch:** [Issue #15 — Final Decision của Atlas](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410), [Roadmap V1](../../ROADMAP_V1.md), [Module Catalog](../../MODULE_CATALOG_V1.md), [M3 status snapshot](../../M3_STATUS_2026-11-09.md), [Planning Workflow](../../PLANNING_WORKFLOW.md). Baseline source được quyết định đối chiếu: `main@e4a143291cbaaf3a302cd30e974e27ea9ab886f0` (10/11/2026). **Không chạy lại CMS test trong lượt soạn plan này**; evidence M3.1–M3.6 nằm ở từng SHA/OS trong [verification](../../../verification/README.md).
+**Nguồn lập kế hoạch:** [Module Catalog](../../MODULE_CATALOG_V1.md) → [Roadmap V1](../../ROADMAP_V1.md) → [M3 milestone](README.md) → các task candidate; [ma trận coverage toàn V1](../COVERAGE_MATRIX.md), [M3 status snapshot](../../M3_STATUS_2026-11-09.md), [Planning Workflow](../../PLANNING_WORKFLOW.md). [Issue #15 — Final Decision của Atlas](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) chỉ chốt **một phần ưu tiên nghiên cứu/kiểm chứng**, không phải danh sách đầy đủ module→milestone→task như chủ dự án yêu cầu. Baseline khảo sát `main@e4a143291cbaaf3a302cd30e974e27ea9ab886f0`, tài liệu kế hoạch đã merge ở `main@5287811a208be26a3007831afc5fed926de08f66`. **Không chạy lại CMS test trong lượt soạn plan này**; evidence M3.1–M3.6 nằm ở từng SHA/OS trong [verification](../../../verification/README.md).
+
+## M3 đầy đủ — mapping module → slice → task candidate
+
+M3 phải bao quát **CNT-01, CNT-02, CNT-03, CNT-04, CNT-05 và phần bridge tối thiểu PLG-03**, với FND/OPS làm prerequisite. Những `M3-Pxx` chỉ là **planning IDs nội bộ** (không phải `M3-Sxx-Txx` G3 IDs, GitHub Issue hay Project Status). Đối với sáu slice có code, cần **kiểm tra closure riêng** chứ không tạo lại implementation task. Thứ tự G1/G2 của #15 được gắn dưới task phụ thuộc, không thay cấu trúc milestone.
+
+| Candidate | Slice/task và phạm vi | Module primary | Dependency/gate | Acceptance dự kiến/nguồn đối chiếu |
+| --- | --- | --- | --- | --- |
+| M3-P01 | M3.1 — model CPT và 9 loại field | CNT-01/02 | M2.5 core validation | Source và [evidence M3.1](../../../verification/2026-11-08-m3-1-content-domain.md); không mặc định task Done |
+| M3-P02 | M3.2 — CPT SQLite và GET/POST Admin | CNT-01 | P01, FND-02/03 | CRUD tạo/liệt kê, RBAC/CSRF, migration/restart theo [evidence M3.2](../../../verification/2026-11-08-m3-2-content-types-backend.md) |
+| M3-P03 | M3.3 — Entry CRUD và field value validation | CNT-02/04 | P02, concurrency/If-Match | POST/PUT/DELETE/ETag, transaction, restart theo [evidence M3.3](../../../verification/2026-11-08-m3-3-content-entry-crud.md) |
+| M3-P04 | M3.4 — Admin Content form | CNT-01/02/04 | P03, FND-05 | 9 field form, 401/412/draft, browser theo [evidence M3.4](../../../verification/2026-11-08-m3-4-admin-content-ui.md) |
+| M3-P05 | M3.5 — Media raster, thumbnail, picker | CNT-05/02 | P03/P04, upload security | JPEG/PNG/WebP upload/refs/picker theo [evidence M3.5](../../../verification/2026-11-09-m3-5-media-library.md), video/xóa còn thiếu |
+| M3-P06 | M3.6 — Public CPT archive/single, media ref ACL | CNT-04/05 | P03/P05, CSP/escaping | Public routes, XSS/privacy, theme fallback theo [evidence M3.6](../../../verification/2026-11-09-m3-6-public-content-rendering.md) |
+| M3-P07 | CPT schema change, built-in post/page và owner lifecycle còn thiếu | CNT-01 | P02, Full-Track G2 schema/upgrade/backward compatibility | Update/withdraw/restore, namespace conflict; provider disable/restart không xóa entry; giữ M1 `home_page` |
+| M3-P08 | Taxonomy CRUD: category cha–con và tag qua Admin | CNT-03 | P02/P03, **B G1/G2** term identity/slug/depth/cycle/ownership | CRUD, RBAC/CSRF, slug collision, no cycles, delete/reparent policy, restart/upgrade bảo toàn entry |
+| M3-P09 | Term↔entry links, Admin filter/query taxonomy | CNT-03/04 | P08 và P03; G2 cardinality/concurrency | Gắn nhiều term, lọc entry, remove term không xóa entry, ETag và restart; public taxonomy URL chờ M5 |
+| M3-P10 | CPT/field plugin bridge tối thiểu & provider persistence | PLG-03 (CNT-01/02) | P07..P09, **C G1/G2**; code sau B để tránh trùng file | Plugin declare CPT/fields, collision/versioning, disable/restart/reinstall dữ liệu user còn quản lý được; blocks/templates/settings sau M6 |
+| M3-P11 | Media video V1: format, serving/metadata/limits | CNT-05 | P05; **D Full-Track G2** codec/MIME/Range/size/privacy | Video hợp lệ phục vụ theo policy, invalid media/Range/permissions bị chặn; không tự lùi phạm vi V1 |
+| M3-P12 | Media delete/referenced policy, reconcile, backup boundary | CNT-05 (OPS-01) | P05/P06, **D G2** consistency/GC/restore | No unsafe hard-delete khi còn refs, failpoint/restart/reconcile/idempotency, DB có thể ở ngoài site root; backup engine M8 |
+| M3-P13 | Windows SQLite smoke harness deterministic cleanup (**A0**) | OPS-02 (FND-04) | P02/P03/P05/P06 source, test-only Fast-Track nếu không đổi contract | 4 smoke scripts exit 0 trên Windows, connection close và temp cleanup sạch, không bỏ assertions |
+| M3-P14 | Windows release parity / Linux smoke riêng (**A1**) | OPS-02 (FND-04/CNT-05) | P13 merge, release binary/runner, negative matrix | Migration 0001→0007, auth/CSRF/ETag, entry/media/restart/plugin/browser; Linux riêng `NOT_RUN` khi thiếu runner |
+| M3-P15 | G5 M3 cross-module content E2E và closure | CNT-01–05 (PLG-03) | P07..P14 + G2/G3/CI từng task; M3 evidence theo OS | Content taxonomy/media/provider disable/re-enable, CRUD/persistence/security, upgrade và frontend; không đóng M3 nếu còn V1 scope hoặc parity gap |
+
+**Primary acceptance và tránh trùng:** M3-P01..P06 là **đối chiếu nguồn đã có**, không phát hành sáu task code trùng. P08/P09 nối B, P10 nối C, P11/P12 nối D, P13/P14 nối A0/A1 của #15. Nghiên cứu E (BLD-02/03) thuộc [M4/TASK_PLAN](../M4/TASK_PLAN.md), không tính là M3 implementation/closure.
 
 ## 1. Việc có code ≠ task đã Done
 
@@ -18,7 +42,7 @@ Sáu [plan M3.1–M3.6](README.md#các-slice-và-nguồn-kiểm-chứng) là h�
 
 `BLOCKED` là nguyên nhân/next action ghi trong Issue, không được che bằng cách chuyển `Ready` hoặc `Done`. Không lập danh sách `pending/doing/done` hoặc mirror YAML/Markdown giữ trạng thái song song.
 
-## 2. Phần cần làm tiếp theo — candidate, không phải task READY
+## 2. Bổ sung quyết định ưu tiên #15 cho task candidate — không phải toàn bộ M3
 
 Các ký hiệu **A0/A1/B/C/D/E** là **nhóm công việc trong Final Decision #15**, **không phải Task ID G3**. Chỉ coordinator phát hành task với ID và GitHub Issue sau khi gate/handoff chính thức đủ điều kiện. Không tự tái sử dụng các số `M3-S01-T01/T02`, `M3-S04-T01/T02` đã retired trong discovery cũ; `M3-S01..S05` ở Roadmap là **slice đề xuất lịch sử, không ánh xạ 1:1** tới M3.1–M3.6 đã code.
 

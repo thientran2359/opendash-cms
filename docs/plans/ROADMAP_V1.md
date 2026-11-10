@@ -13,6 +13,8 @@ Xem [Planning Workflow](PLANNING_WORKFLOW.md) về research gates, status và m�
 
 **Phân quyền trạng thái:** Roadmap mô tả milestone, phụ thuộc và snapshot; [living module briefs](modules/CNT-01-content-types.md) mô tả scope/G0–G3; **GitHub Issues / Project #3** giữ trạng thái thực thi, assignee và dependency đang chạy; **PR** giữ diff/review; [verification](../verification/README.md) ghi kết quả thực chạy theo SHA, OS và phạm vi. Không coi các hàng backlog bên dưới là task `READY`.
 
+**Kế hoạch V1 đầy đủ theo yêu cầu chủ dự án:** [Coverage Matrix — 27 Module → 9 Milestone → task](milestones/COVERAGE_MATRIX.md), [mục lục task theo từng milestone](milestones/README.md). Các kế hoạch `M1..M8/TASK_PLAN.md` tách việc đã có evidence và candidate tương lai, ghi dependency/acceptance; chúng không tự cập nhật trạng thái Project. **Issue #15 chỉ chốt một số hướng nghiên cứu/kế tiếp**: A0/A1 thuộc M3 verification, B/C/D thuộc M3 capability, E thuộc M4 research; không dùng làm toàn bộ roadmap.
+
 ## Release V1 — Các mốc và điều kiện đóng
 
 | Milestone | Kết quả cần đạt | Module chính | Trạng thái & căn cứ |
