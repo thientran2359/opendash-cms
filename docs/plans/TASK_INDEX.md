@@ -1,6 +1,6 @@
 # Danh sách milestone & task — OpenDash V1
 
-**Bản tổng hợp cho người theo dõi công việc · cập nhật 2026-11-10 · nguồn: main@e36e404 (PR #19).**
+**Bản tổng hợp cho người theo dõi công việc · cập nhật 2026-11-10 · nguồn baseline main@f72dc69 (PR #21) và [ADR-0004 G2 owner-direct](../decisions/ADR-0004-m3-post-page-publication-boundary.md).**
 Gồm **9 milestone / 82 planning candidates** theo các TASK_PLAN.md; 9 GitHub Milestones đang mở nhưng **chưa gắn GitHub Issue nào** ở thời điểm lập bảng.
 Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://github.com/thientran2359/opendash-cms/issues) và [Project #3](https://github.com/users/thientran2359/projects/3)** mới là nguồn chính thức cho task thực tế, owner và trạng thái live. Nếu hai nơi khác nhau, **lấy GitHub làm chuẩn và sửa lại bảng**, không sửa GitHub để khớp bảng.
 
@@ -54,8 +54,8 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 | [M3-P04](milestones/M3/TASK_PLAN.md) | M3.4 — Admin Content form | Có code/evidence slice (chưa G3) | — |
 | [M3-P05](milestones/M3/TASK_PLAN.md) | M3.5 — Media raster, thumbnail, picker | Có code/evidence slice (chưa G3) | — |
 | [M3-P06](milestones/M3/TASK_PLAN.md) | M3.6 — Public CPT archive/single, media ref ACL | Có code/evidence slice (chưa G3) | — |
-| [M3-P07](milestones/M3/TASK_PLAN.md) | Built-in `post`/`page` core-owned và schema/seed an toàn | G1/G2 — PROPOSED | [PR #19 (research)](https://github.com/thientran2359/opendash-cms/pull/19) |
-| [M3-P08](milestones/M3/TASK_PLAN.md) | Posts/Pages trong Admin: list/create/edit/delete, tiêu đề/slug/body/ảnh đại diện và trạng thái draft/published tối thiểu | Chưa G3 | — |
+| [M3-P07](milestones/M3/TASK_PLAN.md) | Built-in `post`/`page` core-owned và schema/seed an toàn | **G2 AGREED (owner); G3 DRAFT, chưa Issue** | [ADR-0004](../decisions/ADR-0004-m3-post-page-publication-boundary.md) · [G3 WP-A](milestones/M3/slices/2026-11-10-post-page-publication-g3.md) |
+| [M3-P08](milestones/M3/TASK_PLAN.md) | Posts/Pages trong Admin: list/create/edit/delete, tiêu đề/slug/body/ảnh đại diện và trạng thái draft/published tối thiểu | **G2 AGREED (owner); G3 DRAFT, chưa Issue** | [ADR-0004](../decisions/ADR-0004-m3-post-page-publication-boundary.md) · [G3 WP-B/D](milestones/M3/slices/2026-11-10-post-page-publication-g3.md) |
 | [M3-P09](milestones/M3/TASK_PLAN.md) | AdminShell Tailwind CSS với sidebar/topbar/routing/responsive/RBAC | Chưa G3 | — |
 | [M3-P10](milestones/M3/TASK_PLAN.md) | Dashboard cơ bản + lối tắt quản trị | Chưa G3 | — |
 | [M3-P11](milestones/M3/TASK_PLAN.md) | Media Library thành trang độc lập, dùng lại upload/raster thumbnails/picker M3.5 | Chưa G3 | — |
@@ -63,7 +63,7 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 | [M3-P13](milestones/M3/TASK_PLAN.md) | General Settings tối thiểu: site title/tagline/timezone, lưu DB + màn Admin | Chưa G3 | — |
 | [M3-P14](milestones/M3/TASK_PLAN.md) | Appearance → Themes: upload ZIP, danh sách và activate theme cơ bản | Chưa G3 | — |
 | [M3-P15](milestones/M3/TASK_PLAN.md) | Plugins: màn Admin độc lập dùng ZIP install/list/enable/disable baseline | Chưa G3 | — |
-| [M3-P16](milestones/M3/TASK_PLAN.md) | Public Post/Page cơ bản và preview/visibility | Chưa G3 | — |
+| [M3-P16](milestones/M3/TASK_PLAN.md) | Public Post/Page cơ bản và preview/visibility | **G2 AGREED (owner); G3 DRAFT, chưa Issue** | [ADR-0004](../decisions/ADR-0004-m3-post-page-publication-boundary.md) · [G3 WP-C/E](milestones/M3/slices/2026-11-10-post-page-publication-g3.md) |
 | [M3-P17](milestones/M3/TASK_PLAN.md) | E2E usable core trên macOS và hồi quy bảo mật dữ liệu | Chưa G3 | — |
 | [M3-P18](milestones/M3/TASK_PLAN.md) | Windows SQLite smoke harness deterministic cleanup (A0, lịch sử #15) | Chưa G3 | — |
 | [M3-P19](milestones/M3/TASK_PLAN.md) | Windows core CMS parity và G5 M3 closure; Linux early smoke riêng (A1) | Chưa G3 | — |
