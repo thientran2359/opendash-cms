@@ -7,7 +7,9 @@ Usage from repository root:
 import argparse
 import io
 import json
+import os
 import sqlite3
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -178,9 +180,251 @@ def test_public(binary: Path) -> None:
             require(raw_request(base, "GET", f"/api/admin/media/{a}/file", headers=auth), 200, "Admin media still exists")
 
 
+def test_post_page_publication(binary: Path) -> None:
+    """Real SQLx migration, draft privacy, version CAS and media ACL on copies."""
+    with TemporaryDirectory(prefix="opendash-m3-s20-") as folder:
+        site = Path(folder) / "site"
+        db = site / "database" / "opendash.sqlite"
+        post_list = "/api/admin/content-types/post/entries"
+        with running(binary, db) as base:
+            require(request(base, "/auth/setup", {"username": "admin", "password": "password123"}),
+                    201, "Setup for publication")
+            admin = login(base, "admin", "password123")
+            require(request(base, "/api/admin/users",
+                            {"username": "editor", "password": "password123"}, admin),
+                    201, "Create Editor")
+            editor = login(base, "editor", "password123")
+            schema_response = json.loads(require(api(base, "GET", "/api/admin/content-types",
+                                                     headers=admin), 200, "Built-in schemas")[1])
+            schemas = {item["descriptor"]["key"]: item for item in schema_response}
+            assert schemas["post"]["owner"] == schemas["page"]["owner"] == {"kind": "core"}
+            for reserved in ("post", "page"):
+                require(request(base, "/api/admin/content-types",
+                                {"key": reserved, "label": "Hijack"}, admin),
+                        409, "Reserved key cannot be claimed")
+
+            draft_media = upload_image(base, admin, seed=33)["id"]
+            private_media = upload_image(base, admin, seed=44)["id"]
+            post_input = {
+                "title": "<script>alert('x')</script>",
+                "slug": "secret-draft",
+                "values": {
+                    "body": "<img src=x onerror=alert(1)> {{7*7}}",
+                    "featured_image": draft_media,
+                },
+            }
+            created = require(api(base, "POST", post_list, post_input, admin), 201, "Create private draft")
+            record = json.loads(created[1])
+            assert record["publication_status"] == "draft" and record["version"] == 1
+            item_path = f"{post_list}/{record['id']}"
+            publish_path = item_path + "/publication"
+            preview_path = item_path + "/preview"
+            require(api(base, "POST", "/api/admin/content-types/page/entries",
+                        {"title": "Private Page", "slug": "hidden-page", "values": {}}, editor),
+                    201, "Page starts private")
+            require(raw_request(base, "GET", "/content/post/secret-draft"), 404, "Draft single 404")
+            require(raw_request(base, "GET", "/content/page/hidden-page"), 404, "Draft page 404")
+            require(raw_request(base, "GET", f"/media/{draft_media}/file"), 404, "Draft-only image 404")
+            require(raw_request(base, "GET", f"/media/{draft_media}/thumbnail"), 404, "Draft-only thumb 404")
+            require(api(base, "GET", preview_path), 401, "Guest preview denied")
+            preview = require(api(base, "GET", preview_path, headers=editor), 200, "Editor private preview")
+            assert preview[2]["Cache-Control"] == "no-store"
+            assert "script-src 'none'" in preview[2]["Content-Security-Policy"]
+            assert "&lt;script&gt;" in preview[1] and "<script>alert('x')</script>" not in preview[1]
+            assert "/api/admin/media/" in preview[1].replace("&#x2f;", "/")
+            assert f"/media/{draft_media}/file" not in preview[1].replace("/api/admin/media/", "/private-admin/")
+
+            # Even many recent drafts must not occupy a public LIMIT/OFFSET slot.
+            for index in range(21):
+                require(api(base, "POST", post_list,
+                            {"title": f"Draft {index}", "slug": f"draft-{index}", "values": {}}, editor),
+                        201, "Batch drafts")
+            archive = require(raw_request(base, "GET", "/content/post"), 200, "Private archive")
+            assert b"secret-draft" not in archive[1] and b"draft-20" not in archive[1]
+            assert b"Trang sau" not in archive[1]
+
+            require(api(base, "POST", publish_path, {"status": "published"}), 401, "Guest publish denied")
+            require(api(base, "POST", publish_path, {"status": "published"},
+                        {"Cookie": admin["Cookie"], "If-Match": '"v1"'}), 403, "Publish needs CSRF")
+            require(api(base, "POST", publish_path, {"status": "published"},
+                        {**admin, "Origin": "http://evil.invalid", "If-Match": '"v1"'}),
+                    403, "Publish Origin")
+            require(api(base, "POST", publish_path, {"status": "published"}, admin),
+                    428, "Publish requires ETag")
+            require(api(base, "POST", publish_path, {"status": "scheduled"},
+                        {**admin, "If-Match": '"v1"'}), 400, "Invalid publish status")
+            require(api(base, "POST", publish_path, {"status": "published"},
+                        {**admin, "If-Match": '"v0"'}), 400, "Bad If-Match")
+            require(api(base, "POST", "/api/admin/content-types/invalid/entries/1/publication",
+                        {"status": "published"}, {**admin, "If-Match": '"v1"'}),
+                    400, "Legacy non-core publish denied")
+            published = require(api(base, "POST", publish_path, {"status": "published"},
+                                    {**editor, "If-Match": '"v1"'}), 200, "Editor publishes")
+            assert json.loads(published[1])["publication_status"] == "published"
+            assert published[2]["ETag"] == '"v2"'
+            require(api(base, "POST", publish_path, {"status": "draft"},
+                        {**admin, "If-Match": '"v1"'}), 412, "Stale CAS")
+            require(api(base, "POST", f"{post_list}/999999/publication",
+                        {"status": "published"}, {**admin, "If-Match": '"v1"'}),
+                    404, "Unknown ID")
+            require(raw_request(base, "GET", "/content/post/secret-draft"), 200, "Published single")
+            public_list = require(raw_request(base, "GET", "/content/post"), 200, "Published list")[1]
+            assert b"secret-draft" in public_list and b"draft-20" not in public_list
+            assert b"Trang sau" not in public_list
+            require(raw_request(base, "GET", f"/media/{draft_media}/file"), 200, "Published image 200")
+            require(raw_request(base, "GET", f"/media/{draft_media}/thumbnail"), 200, "Published thumb 200")
+
+            edited = dict(post_input, title="Published Save")
+            updated = require(api(base, "PUT", item_path, edited,
+                                  {**admin, "If-Match": '"v2"'}), 200, "Save preserves published")
+            assert json.loads(updated[1])["publication_status"] == "published"
+            assert updated[2]["ETag"] == '"v3"'
+            unpublished = require(api(base, "POST", publish_path, {"status": "draft"},
+                                      {**admin, "If-Match": '"v3"'}), 200, "Unpublish")
+            assert json.loads(unpublished[1])["publication_status"] == "draft"
+            require(raw_request(base, "GET", "/content/post/secret-draft"), 404, "Unpublished 404")
+            require(raw_request(base, "GET", f"/media/{draft_media}/file"), 404, "Last public image ref revoked")
+
+            # A legacy public gallery sharing an asset keeps that asset public.
+            gallery_type = {
+                "key": "gallery_legacy", "label": "Gallery",
+                "fields": [{"key": "photos", "label": "Ảnh", "type": "gallery"}],
+            }
+            require(request(base, "/api/admin/content-types", gallery_type, admin),
+                    201, "Legacy gallery schema")
+            legacy_list = "/api/admin/content-types/gallery_legacy/entries"
+            legacy = require(api(base, "POST", legacy_list, {
+                "title": "Shared asset", "slug": "legacy-gallery",
+                "values": {"photos": [draft_media, private_media]},
+            }, admin), 201, "Legacy gallery Save public")
+            assert json.loads(legacy[1])["publication_status"] == "published"
+            require(raw_request(base, "GET", f"/media/{draft_media}/file"), 200, "Shared SHA stays public")
+            require(raw_request(base, "GET", f"/media/{private_media}/thumbnail"), 200, "Public gallery thumbnail")
+            legacy_id = json.loads(legacy[1])["id"]
+            # Negative ACL fixture: a draft gallery must not pass the OR
+            # branch of media_is_referenced even if its JSON contains the ID.
+            with sqlite3.connect(db) as con:
+                con.execute(
+                    "UPDATE content_entries SET publication_status='draft' WHERE id=?",
+                    (legacy_id,),
+                )
+                con.commit()
+            require(raw_request(base, "GET", "/content/gallery_legacy/legacy-gallery"),
+                    404, "Draft gallery single private")
+            require(raw_request(base, "GET", f"/media/{draft_media}/file"),
+                    404, "Draft gallery may not bypass publication AND")
+            require(raw_request(base, "GET", f"/media/{private_media}/thumbnail"),
+                    404, "Draft gallery thumb not public")
+            with sqlite3.connect(db) as con:
+                con.execute(
+                    "UPDATE content_entries SET publication_status='published' WHERE id=?",
+                    (legacy_id,),
+                )
+                con.commit()
+            require(raw_request(base, "GET", f"/media/{draft_media}/file"),
+                    200, "Republished gallery reference")
+            require(api(base, "DELETE", f"{legacy_list}/{legacy_id}",
+                        headers={**admin, "If-Match": '"v1"'}), 204, "Delete last gallery")
+            require(raw_request(base, "GET", f"/media/{draft_media}/file"), 404, "Draft-only after gallery delete")
+            require(raw_request(base, "GET", f"/media/{private_media}/thumbnail"), 404, "Private after gallery delete")
+            require(raw_request(base, "GET", "/"), 200, "Legacy Builder homepage intact")
+
+        with sqlite3.connect(db) as con:
+            assert con.execute("SELECT success FROM _sqlx_migrations WHERE version = 8").fetchone() == (1,)
+            assert con.execute("SELECT publication_status FROM content_entries WHERE id = ?",
+                               (record["id"],)).fetchone() == ("draft",)
+            assert con.execute("SELECT owner_kind, owner_id FROM content_types WHERE key='post'").fetchone() == ("core", None)
+            try:
+                con.execute(
+                    "INSERT INTO content_entries(content_type_key,slug,title,values_json) "
+                    "VALUES('post','unsafe-direct-write','Unsafe default','{}')"
+                )
+            except sqlite3.IntegrityError:
+                pass
+            else:
+                raise AssertionError("Direct Post INSERT must not inherit published default")
+
+        with running(binary, db) as base:
+            admin = login(base, "admin", "password123")
+            restarted = require(api(base, "GET", item_path, headers=admin), 200, "Restart preserves draft")
+            assert json.loads(restarted[1])["publication_status"] == "draft"
+            require(raw_request(base, "GET", "/content/post/secret-draft"), 404, "Restart draft private")
+
+        # Reconstruct a disposable pre-0008 database with a legacy 'post'
+        # collision. Actual SQLx startup must reject it *before* migration.
+        collision_db = Path(folder) / "collision" / "database" / "opendash.sqlite"
+        collision_db.parent.mkdir(parents=True)
+        with sqlite3.connect(db) as source, sqlite3.connect(collision_db) as target:
+            source.backup(target)
+            target.execute("DROP INDEX idx_content_entries_published_type_id")
+            target.execute("DROP TRIGGER content_entries_core_insert_draft")
+            target.execute("ALTER TABLE content_entries DROP COLUMN publication_status")
+            target.execute("DELETE FROM _sqlx_migrations WHERE version=8")
+            target.execute("UPDATE content_types SET owner_kind='user' WHERE key='post'")
+            target.commit()
+        env = dict(os.environ, OPENDASH_PORT="0",
+                   OPENDASH_SITE_ROOT=str(collision_db.parent.parent),
+                   OPENDASH_DB_PATH=str(collision_db))
+        result = subprocess.run([str(binary)], env=env, capture_output=True, text=True, timeout=15)
+        assert result.returncode != 0 and "M3-S20 preflight" in result.stderr, result.stderr
+        with sqlite3.connect(collision_db) as con:
+            assert con.execute("SELECT owner_kind FROM content_types WHERE key='post'").fetchone() == ("user",)
+            assert con.execute("SELECT COUNT(*) FROM _sqlx_migrations WHERE version=8").fetchone() == (0,)
+            assert "publication_status" not in [r[1] for r in con.execute("PRAGMA table_info(content_entries)")]
+            # A superficially Core-owned key with a mismatched descriptor is
+            # also a collision; preserve it without any automatic rewrite.
+            con.execute(
+                "UPDATE content_types SET owner_kind='core', definition_json=? WHERE key='post'",
+                (json.dumps({"key": "post", "label": "Unexpected", "fields": []}),),
+            )
+            con.commit()
+        result = subprocess.run([str(binary)], env=env, capture_output=True, text=True, timeout=15)
+        assert result.returncode != 0 and "M3-S20 preflight" in result.stderr, result.stderr
+        with sqlite3.connect(collision_db) as con:
+            assert con.execute("SELECT json_extract(definition_json,'$.label') "
+                               "FROM content_types WHERE key='post'").fetchone() == ("Unexpected",)
+            assert con.execute("SELECT COUNT(*) FROM _sqlx_migrations WHERE version=8").fetchone() == (0,)
+
+        # Positive legacy 0007 -> 0008 path on a separate DB copy.
+        # Existing non-Core entries must become published; Core seed is fresh.
+        upgrade_db = Path(folder) / "upgrade" / "database" / "opendash.sqlite"
+        upgrade_db.parent.mkdir(parents=True)
+        with sqlite3.connect(db) as source, sqlite3.connect(upgrade_db) as target:
+            source.backup(target)
+            target.execute("DELETE FROM content_entries WHERE content_type_key IN ('post','page')")
+            target.execute("DELETE FROM content_types WHERE key IN ('post','page')")
+            target.execute(
+                "INSERT INTO content_entries(content_type_key, slug, title, values_json) "
+                "VALUES('gallery_legacy','legacy-before-0008','Legacy retained','{}')"
+            )
+            target.execute("DROP INDEX idx_content_entries_published_type_id")
+            target.execute("DROP TRIGGER content_entries_core_insert_draft")
+            target.execute("ALTER TABLE content_entries DROP COLUMN publication_status")
+            target.execute("DELETE FROM _sqlx_migrations WHERE version=8")
+            target.commit()
+        with running(binary, upgrade_db) as base:
+            require(raw_request(base, "GET", "/content/gallery_legacy/legacy-before-0008"),
+                    200, "Legacy content remains public through 0008 upgrade")
+            auth = login(base, "admin", "password123")
+            seeded = json.loads(require(api(base, "GET", "/api/admin/content-types",
+                                             headers=auth), 200, "Core re-seed on upgrade")[1])
+            assert {"post", "page"}.issubset({x["descriptor"]["key"] for x in seeded})
+            new_draft = json.loads(require(
+                api(base, "POST", post_list,
+                    {"title": "New draft", "slug": "new-after-upgrade", "values": {}}, auth),
+                201, "Post after upgrade starts draft",
+            )[1])
+            assert new_draft["publication_status"] == "draft"
+        with sqlite3.connect(upgrade_db) as con:
+            assert con.execute("SELECT success FROM _sqlx_migrations WHERE version=8").fetchone() == (1,)
+            assert con.execute("SELECT publication_status FROM content_entries "
+                               "WHERE slug='legacy-before-0008'").fetchone() == ("published",)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / "target/debug/opendash")
     options = parser.parse_args()
     test_public(options.binary.resolve())
+    test_post_page_publication(options.binary.resolve())
     print("M3.6 PUBLIC CONTENT SMOKE: PASS (CPT archive/single, theme templates, XSS, media ACL, pagination, restart)")

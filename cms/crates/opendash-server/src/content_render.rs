@@ -151,6 +151,30 @@ pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) ->
     }
 }
 
+/// Draft preview runs behind an authenticated Admin route. In contrast to
+/// public entry rendering, media must resolve through authenticated URLs.
+pub fn authenticated_preview_view(
+    record: ContentEntryRecord,
+    schema: &ContentTypeDefinition,
+) -> EntryView {
+    let mut view = entry_view(record, schema);
+    let admin_media = |url: &str| url.replacen("/media/", "/api/admin/media/", 1);
+    view.cover_url = view.cover_url.as_deref().map(admin_media);
+    for field in &mut view.fields {
+        field.image_url = field.image_url.as_deref().map(admin_media);
+        field.gallery_urls = field
+            .gallery_urls
+            .iter()
+            .map(|url| admin_media(url))
+            .collect();
+    }
+    view.url = format!(
+        "/api/admin/content-types/{}/entries/{}/preview",
+        schema.key, view.id
+    );
+    view
+}
+
 pub fn render_archive(
     schema: &ContentTypeDefinition,
     entries: &[EntryView],
@@ -214,6 +238,7 @@ mod tests {
                 Value::String("<img src=x onerror=alert(2)> {{ 7*7 }}".into()),
             )]
             .into(),
+            publication_status: "draft".into(),
             version: 1,
             created_at: "".into(),
             updated_at: "".into(),

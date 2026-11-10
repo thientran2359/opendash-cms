@@ -34,6 +34,9 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, Box<dyn std::error::E
         .connect_with(options)
         .await?;
 
+    // Must run before SQLx migration 0008: never overwrite an existing
+    // user/theme/plugin post/page descriptor during bootstrap.
+    content::preflight_builtin_key_collisions(&db).await?;
     sqlx::migrate!("../../migrations").run(&db).await?;
     Ok(db)
 }
