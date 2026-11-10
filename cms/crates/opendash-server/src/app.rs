@@ -21,7 +21,7 @@ use crate::{
         content::{MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list},
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
-            entry_update,
+            entry_preview, entry_publication, entry_update,
         },
         media::{media_list, media_original, media_thumbnail, media_upload},
         plugin::{
@@ -107,6 +107,14 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
                 .put(entry_update)
                 .delete(entry_delete)
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/publication",
+            post(entry_publication).layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/preview",
+            get(entry_preview),
         )
         .route(
             "/api/admin/media",

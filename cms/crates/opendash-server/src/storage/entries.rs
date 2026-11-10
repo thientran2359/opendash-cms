@@ -16,15 +16,37 @@ pub struct ContentEntryRecord {
     pub slug: String,
     pub title: String,
     pub values: BTreeMap<String, Value>,
+    /// Server-owned status; legacy CPT entries remain published on Save.
+    pub publication_status: String,
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
 }
 
-type EntryRow = (i64, String, String, String, String, i64, String, String);
+type EntryRow = (
+    i64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+);
 
 pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
-    let (id, content_type_key, slug, title, json, version, created_at, updated_at) = row;
+    let (
+        id,
+        content_type_key,
+        slug,
+        title,
+        json,
+        publication_status,
+        version,
+        created_at,
+        updated_at,
+    ) = row;
     let values: BTreeMap<String, Value> = serde_json::from_str(&json)
         .map_err(|_| ApiError::internal("Dữ liệu custom fields không hợp lệ."))?;
     Ok(ContentEntryRecord {
@@ -33,6 +55,7 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
         slug,
         title,
         values,
+        publication_status,
         version,
         created_at,
         updated_at,
@@ -45,7 +68,7 @@ pub async fn get_entry(
     id: i64,
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<EntryRow> = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, version, created_at, updated_at
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
@@ -62,7 +85,7 @@ pub async fn list_entries(
     offset: i64,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
     let rows: Vec<EntryRow> = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, version, created_at, updated_at
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ?
          ORDER BY id DESC LIMIT ? OFFSET ?",
     )
@@ -81,13 +104,14 @@ pub async fn create_entry(
 ) -> ApiResult<ContentEntryRecord> {
     let json = serde_json::to_string(&input.values)?;
     let result = sqlx::query(
-        "INSERT INTO content_entries (content_type_key, slug, title, values_json)
-         VALUES (?, ?, ?, ?)",
+        "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
+         VALUES (?, ?, ?, ?, CASE WHEN ? IN ('post', 'page') THEN 'draft' ELSE 'published' END)",
     )
     .bind(type_key)
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
+    .bind(type_key)
     .execute(db)
     .await;
     let id = match result {
@@ -157,6 +181,34 @@ pub async fn delete_entry(
         return Err(missing_or_stale(db, type_key, id).await?);
     }
     Ok(())
+}
+
+/// Version-CAS transition. Save/update never touches publication_status.
+pub async fn set_publication_status(
+    db: &SqlitePool,
+    type_key: &str,
+    id: i64,
+    expected_version: i64,
+    status: &str,
+) -> ApiResult<ContentEntryRecord> {
+    let result = sqlx::query(
+        "UPDATE content_entries
+         SET publication_status = ?, version = version + 1, updated_at = datetime('now')
+         WHERE content_type_key = ? AND id = ? AND version = ?
+           AND content_type_key IN ('post', 'page')",
+    )
+    .bind(status)
+    .bind(type_key)
+    .bind(id)
+    .bind(expected_version)
+    .execute(db)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(missing_or_stale(db, type_key, id).await?);
+    }
+    get_entry(db, type_key, id)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))
 }
 
 async fn missing_or_stale(db: &SqlitePool, type_key: &str, id: i64) -> ApiResult<ApiError> {

@@ -1,5 +1,5 @@
 //! Public CPT archive/single routes and referenced-only media delivery.
-//! Entries have no draft/published distinction in V1: a successful Save is live.
+//! Legacy CPT Save stays live; core post/page draft data is never served here.
 
 use std::sync::Arc;
 
@@ -17,8 +17,8 @@ use crate::{
     error::{ApiError, ApiResult},
     media::MediaStore,
     storage::{
-        content::load_content_type_definition, entries::list_entries, media,
-        page::active_content_templates, public_content,
+        content::load_content_type_definition, media, page::active_content_templates,
+        public_content,
     },
 };
 
@@ -65,7 +65,8 @@ pub async fn archive(
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
     let offset = (page - 1) * ARCHIVE_SIZE;
-    let mut records = list_entries(&db, &type_key, ARCHIVE_SIZE + 1, offset).await?;
+    let mut records =
+        public_content::list_published(&db, &type_key, ARCHIVE_SIZE + 1, offset).await?;
     let has_more = records.len() > ARCHIVE_SIZE as usize;
     records.truncate(ARCHIVE_SIZE as usize);
     let entries: Vec<_> = records
