@@ -3,7 +3,7 @@
 - **Ngày:** 2026-11-09 (Asia/Bangkok).
 - **Môi trường:** macOS Intel x86_64, Rust/Cargo 1.99.1, Python 3, Node.js 24.22.2, React 18, TypeScript 5.6.3, Vite 6.0.7.
 - **Workspace:** `/local-sites/opendash-cms`; khởi đầu từ commit `9784b1b` của M3.4.
-- **Phạm vi:** backend+frontend theo [kế hoạch M3.5](../plans/2026-11-09-m3-5-media-library.md), SQLite/site test nằm trong thư mục tạm.
+- **Phạm vi:** backend+frontend theo [kế hoạch M3.5](../archive/plans/m3/2026-11-09-m3-5-media-library.md), SQLite/site test nằm trong thư mục tạm.
 
 ## Các thay đổi
 

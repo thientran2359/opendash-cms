@@ -1,7 +1,7 @@
 # M3.6 — Public CPT Content Rendering
 
-- **Trạng thái:** `VERIFIED` trong phạm vi SSR/API và kiểm thử trên macOS; xem [báo cáo M3.6](../verification/2026-11-09-m3-6-public-content-rendering.md).
-- **Hợp đồng:** [Yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md), [Core Foundation](../contracts/CORE_FOUNDATION.md), [kiến trúc CMS](../architecture/CMS_ARCHITECTURE.md) và các mốc [M3.3](2026-11-08-m3-3-content-entry-crud.md)–[M3.5](2026-11-09-m3-5-media-library.md).
+- **Trạng thái:** `VERIFIED` trong phạm vi SSR/API và kiểm thử trên macOS; xem [báo cáo M3.6](../../../verification/2026-11-09-m3-6-public-content-rendering.md).
+- **Hợp đồng:** [Yêu cầu sản phẩm](../../../product/PRODUCT_REQUIREMENTS.md), [Core Foundation](../../../contracts/CORE_FOUNDATION.md), [kiến trúc CMS](../../../architecture/CMS_ARCHITECTURE.md) và các mốc [M3.3](2026-11-08-m3-3-content-entry-crud.md)–[M3.5](2026-11-09-m3-5-media-library.md).
 - **Mục tiêu:** bài/entry lưu bằng Admin được hiển thị công khai theo CPT và slug, dùng template có escape mặc định, có hình ảnh đã được tham chiếu; không ảnh hưởng giao diện Builder hay homepage `/`.
 
 ## HTTP và URL

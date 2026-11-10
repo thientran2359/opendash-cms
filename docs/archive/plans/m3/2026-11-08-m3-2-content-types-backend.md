@@ -1,8 +1,8 @@
 # M3.2 — Lưu và truy cập Custom Post Types qua HTTP
 
-- **Trạng thái:** `VERIFIED` trong phạm vi backend trên macOS. Xem [báo cáo chạy thực tế](../verification/2026-11-08-m3-2-content-types-backend.md).
-- **Dựa trên:** [M3.1 CPT & Custom Fields](2026-11-08-m3-content-types-and-fields.md) và [bộ khung lõi](../contracts/CORE_FOUNDATION.md).
-- **Hợp đồng sản phẩm:** [PRODUCT_REQUIREMENTS](../product/PRODUCT_REQUIREMENTS.md) — Admin tạo CPT, Editor quản lý nội dung, dữ liệu/schema được giữ khi đổi theme hoặc tắt plugin.
+- **Trạng thái:** `VERIFIED` trong phạm vi backend trên macOS. Xem [báo cáo chạy thực tế](../../../verification/2026-11-08-m3-2-content-types-backend.md).
+- **Dựa trên:** [M3.1 CPT & Custom Fields](2026-11-08-m3-content-types-and-fields.md) và [bộ khung lõi](../../../contracts/CORE_FOUNDATION.md).
+- **Hợp đồng sản phẩm:** [PRODUCT_REQUIREMENTS](../../../product/PRODUCT_REQUIREMENTS.md) — Admin tạo CPT, Editor quản lý nội dung, dữ liệu/schema được giữ khi đổi theme hoặc tắt plugin.
 
 ## Phạm vi đã triển khai
 

@@ -1,8 +1,8 @@
 # M3.1 — Mô hình Custom Post Type và Custom Fields
 
-- **Trạng thái:** `VERIFIED` trong phạm vi domain schema + validation trên macOS (xem [báo cáo kiểm chứng M3.1](../verification/2026-11-08-m3-1-content-domain.md)); chưa có API/SQLite/Admin.
-- **Hợp đồng:** [Yêu cầu V1](../product/PRODUCT_REQUIREMENTS.md), [Core Foundation](../contracts/CORE_FOUNDATION.md), [CMS Architecture](../architecture/CMS_ARCHITECTURE.md).
-- **Phần đã kiểm chứng làm nền:** [M2.5 Core Kernel](../verification/2026-11-07-m2-5-core-kernel.md).
+- **Trạng thái:** `VERIFIED` trong phạm vi domain schema + validation trên macOS (xem [báo cáo kiểm chứng M3.1](../../../verification/2026-11-08-m3-1-content-domain.md)); chưa có API/SQLite/Admin.
+- **Hợp đồng:** [Yêu cầu V1](../../../product/PRODUCT_REQUIREMENTS.md), [Core Foundation](../../../contracts/CORE_FOUNDATION.md), [CMS Architecture](../../../architecture/CMS_ARCHITECTURE.md).
+- **Phần đã kiểm chứng làm nền:** [M2.5 Core Kernel](../../../verification/2026-11-07-m2-5-core-kernel.md).
 
 ## Phạm vi slice đầu tiên
 

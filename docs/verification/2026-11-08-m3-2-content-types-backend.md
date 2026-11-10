@@ -2,7 +2,7 @@
 
 - **Ngày:** 2026-11-08
 - **Môi trường:** macOS Darwin Intel x86_64; Rust/Cargo 1.99.1, Python 3 và Admin assets đã build từ Node.js 24.
-- **Phạm vi:** [M3.2](../plans/2026-11-08-m3-2-content-types-backend.md), chạy trên mã `/local-sites/opendash-cms` hiện tại.
+- **Phạm vi:** [M3.2](../archive/plans/m3/2026-11-08-m3-2-content-types-backend.md), chạy trên mã `/local-sites/opendash-cms` hiện tại.
 
 ## Thay đổi
 
