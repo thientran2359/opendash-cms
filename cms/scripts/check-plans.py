@@ -28,6 +28,10 @@ MODULE_COUNT_CLAIM = re.compile(r"(?<![\d–-])(\d+)\s+modules?\b", re.IGNORECAS
 STATUS_BOLD = re.compile(r"^\*\*([^*]+)\*\*")
 MILESTONE = re.compile(r"^\*\*M\d+(?:\.\d+)?\*\*")
 FENCE = re.compile(r"^\s*(?:`{3,}|~{3,})")
+TASK_PLAN_ROW = re.compile(r"^\|\s*(M\d+(?:\.\d+)?-P\d{2})\s*\|")
+TASK_INDEX_ROW = re.compile(
+    r"^\|\s*\[(M\d+(?:\.\d+)?-P\d{2})\]\(milestones/([^)/]+)/TASK_PLAN\.md\)\s*\|"
+)
 
 
 def content_lines(file: Path) -> list[tuple[int, str]]:
@@ -192,6 +196,36 @@ def check(root: Path) -> list[str]:
             if file.is_file() and m3_status.name not in file.read_text(encoding="utf-8-sig"):
                 errors.append(f"{file.relative_to(root)}: missing current M3 status reference")
 
+    # The owner-facing task index is a snapshot, not a second task ledger.
+    # It must list every milestone planning candidate exactly once; G3 task rows
+    # are allowed beneath candidates, but are owned by GitHub Issue/Project.
+    milestone_plans = sorted((plans / "milestones").glob("M*/TASK_PLAN.md"))
+    index = plans / "TASK_INDEX.md"
+    if milestone_plans and not index.is_file():
+        errors.append("docs/plans/TASK_INDEX.md: missing task index")
+    if index.is_file():
+        source_ids: dict[str, str] = {}
+        indexed_ids: set[str] = set()
+        for plan in milestone_plans:
+            for number, line in content_lines(plan):
+                match = TASK_PLAN_ROW.match(line)
+                if match:
+                    task_id = match.group(1)
+                    if task_id in source_ids:
+                        errors.append(f"{plan.relative_to(root)}:{number}: duplicate task candidate {task_id}")
+                    source_ids[task_id] = plan.parent.name
+        for number, line in content_lines(index):
+            match = TASK_INDEX_ROW.match(line)
+            if match:
+                task_id, milestone = match.groups()
+                if task_id in indexed_ids:
+                    errors.append(f"{index.relative_to(root)}:{number}: duplicate task candidate {task_id}")
+                indexed_ids.add(task_id)
+                if source_ids.get(task_id) != milestone:
+                    errors.append(f"{index.relative_to(root)}:{number}: invalid task candidate source {task_id}")
+        for task_id in sorted(source_ids.keys() - indexed_ids):
+            errors.append(f"{index.relative_to(root)}: missing task candidate {task_id}")
+
     return errors
 
 
@@ -228,6 +262,7 @@ def fixture(root: Path) -> None:
 def self_test() -> None:
     cases = [
         ("valid", None, None),
+        ("valid_task_index", None, "task_index_valid"),
         ("duplicate", "duplicate module ID", "catalog"),
         ("unknown", "unknown module ID", "roadmap"),
         ("range", "inverted module range", "inverted_range"),
@@ -235,6 +270,9 @@ def self_test() -> None:
         ("link", "broken Markdown link", "readme"),
         ("evidence", "missing direct docs/verification", "catalog"),
         ("roadmap_evidence", "missing direct docs/verification", "roadmap_evidence"),
+        ("task_index_missing", "missing task index", "task_index_missing"),
+        ("task_index_omits_row", "missing task candidate", "task_index_omits"),
+        ("task_index_duplicate", "duplicate task candidate", "task_index_duplicate"),
     ]
     for name, expected, location in cases:
         with tempfile.TemporaryDirectory(prefix="opendash-check-plans-") as tmp:
@@ -269,6 +307,20 @@ def self_test() -> None:
                     ),
                     encoding="utf-8",
                 )
+            elif location is not None and location.startswith("task_index_"):
+                milestone_dir = root / "docs/plans/milestones/M1"
+                milestone_dir.mkdir(parents=True, exist_ok=True)
+                (milestone_dir / "TASK_PLAN.md").write_text(
+                    "| M1-P01 | Bootstrap | FND-01 | — | — |\n", encoding="utf-8"
+                )
+                if location != "task_index_missing":
+                    row = "| [M1-P01](milestones/M1/TASK_PLAN.md) | Bootstrap | Chưa G3 | — |\n"
+                    (root / "docs/plans/TASK_INDEX.md").write_text(
+                        "# Task index\n"
+                        + ("" if location == "task_index_omits" else row)
+                        + (row if location == "task_index_duplicate" else ""),
+                        encoding="utf-8",
+                    )
             errors = check(root)
             if expected is None and errors:
                 raise AssertionError(f"{name}: expected clean fixture, got {errors}")
@@ -291,7 +343,7 @@ def main() -> int:
             print(f"FAIL {problem}", file=sys.stderr)
         print(f"FAIL check-plans: {len(problems)} issue(s)", file=sys.stderr)
         return 1
-    print("PASS check-plans: markdown links, module IDs/counts, verified evidence")
+    print("PASS check-plans: markdown links, module IDs/counts, verified evidence, task index coverage")
     return 0
 
 

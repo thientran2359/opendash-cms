@@ -2,6 +2,8 @@
 
 Kế hoạch tách biệt với kết quả thực chạy. Khi một bước có bằng chứng trên mã thực, ghi sang [verification](../verification/README.md).
 
+**Xem nhanh toàn bộ 9 milestone và 82 task candidate:** [TASK_INDEX — danh sách task, mô tả ngắn và trạng thái đối chiếu GitHub](TASK_INDEX.md). Đây là **một bảng tổng hợp để đọc**, không thay thế Issue/Project làm nguồn trạng thái live; sau khi task được nghiệm thu G5/Project Done, agent phụ trách closure cập nhật hàng tương ứng qua PR tài liệu.
+
 **Điểm bắt đầu hiện hành:** [Module Catalog](MODULE_CATALOG_V1.md) → [Coverage Matrix — 27 module, 9 milestone, task theo mốc](milestones/COVERAGE_MATRIX.md) → [mục lục milestone và task](milestones/README.md) → [M3 Core CMS phương án A đã chốt](milestones/M3/README.md). **M3 vẫn PARTIAL**; [snapshot M3.1–M3.6](M3_STATUS_2026-11-09.md) là evidence của scope cũ trên macOS, không mặc định Windows/Linux hay acceptance mới G5. [Issue #15 Final Decision](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) chỉ là ưu tiên nghiên cứu kỹ thuật lịch sử, không đại diện toàn V1.
 
 **Phân loại nguồn, không nhân bản trạng thái vận hành:**
