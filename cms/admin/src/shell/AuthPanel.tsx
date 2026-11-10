@@ -32,7 +32,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   return (
     <div id="auth-bar">
       {!user ? (
-        <div id="guest-panel" className="panel-row">
+        <form id="guest-panel" className="panel-row" onSubmit={event => { event.preventDefault(); onLogin(); }}>
           <TextInput
             id="auth-username"
             placeholder="Tên đăng nhập"
@@ -50,13 +50,13 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             onValueChange={onPasswordChange}
             disabled={isProcessing}
           />
-          <button id="auth-setup" onClick={onSetup} disabled={isProcessing}>
+          <button type="button" id="auth-setup" onClick={onSetup} disabled={isProcessing}>
             Thiết lập Admin
           </button>
-          <button id="auth-login" onClick={onLogin} disabled={isProcessing}>
+          <button type="submit" id="auth-login" disabled={isProcessing}>
             Đăng nhập
           </button>
-        </div>
+        </form>
       ) : (
         <div id="user-panel" className="panel-row">
           <span id="user-info">
