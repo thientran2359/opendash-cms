@@ -47,6 +47,22 @@ Lượt build full workspace đầu tiên **FAIL vì worktree mới chưa có `c
 
 ## Giới hạn và chuyển giao
 
-- Đây là **core-only** (G4 implementation/test tại branch); HTTP, SQLite, homepage M3 projection, Preview/Save, renderer, media existence/ACL và chẩn đoán Admin thuộc **M4-S02-T01 / Issue #78**. Không tuyên bố G5 hoặc Project Done cho #77 khi PR chưa được tích hợp và hậu kiểm.
+- Đây là **core-only** (G4 implementation/test tại branch); HTTP, SQLite, homepage M3 projection, Preview/Save, renderer, media existence/ACL và chẩn đoán Admin thuộc **M4-S02-T01 / Issue #78**. Trạng thái G4 lịch sử chưa phải G5; xem kiểm chứng sau merge ở mục tiếp theo.
 - Resolver / registry được inject bởi tầng server; core chỉ kiểm cú pháp media ID, còn tính tồn tại và quyền public media phải được kiểm ở storage/save khi triển khai P02. Khi provider thiếu, downstream renderer phải bỏ qua node và cung cấp diagnostic theo node ID theo ADR-0007.
 - Rollback là code-only; không có migration hay thay đổi dữ liệu site. Kiểm thử chạy trên source/worktree; chưa chạy browser hoặc server smoke cho P02.
+
+## G5 — Kiểm chứng độc lập trên main sau merge
+
+**Kết luận M4-S01-T01: G5 VERIFIED cho phạm vi Builder core** trên Windows 11 Pro 10.0.26200. Mã nguồn được checkout **đúng merge commit `main@23c76ff94c83ada1a743ec894920511c88f417c9`** ([PR #83](https://github.com/thientran2359/opendash-cms/pull/83)); đây không phải phép suy luận từ lượt test trước merge.
+
+- Môi trường: Windows 11 Pro 10.0.26200; worktree riêng `opendash-cms-forge-m4-s01-g5`, checkout SHA trên ở detached HEAD trước khi lập PR tài liệu. `git status --porcelain` sạch sau kiểm thử.
+- `cd cms/admin; npm ci --no-audit --no-fund; npm run build`: **PASS** (Vite 62 modules). Node 22 / npm 10, khóa version bằng `package-lock.json`.
+- `cargo fmt --manifest-path cms/Cargo.toml --all --check`: **PASS**.
+- `cargo build --manifest-path cms/Cargo.toml --locked`: **PASS**.
+- `cargo test --manifest-path cms/Cargo.toml --workspace --locked`: **PASS 78/78** (core 25, server 53, 0 doc-tests). Dùng `CARGO_TARGET_DIR` trỏ tới target cache của worktree task Forge; Cargo **biên dịch lại hai crate từ source post-merge** tại worktree G5. Cache build không thay đổi checkout SHA.
+- `python cms/scripts/check-standards.py`, `python cms/scripts/check-plans.py` và `python cms/scripts/check-plans.py --self-test`: **PASS** (12 fixtures cho self-test).
+- `PYTHONIOENCODING=utf-8 python cms/scripts/themes_smoke.py --binary <G5-built-target>/debug/opendash.exe --baseline-db cms/fixtures/baseline_0001.sqlite`: **PASS** trên bản sao dữ liệu site tạm, các trường hợp A→B tương thích, A→C ẩn nhưng giữ block, C→A phục hồi, restart, schema và SQLite lịch sử upgrade không mất homepage.
+- CI PR #83 ở exact implementation head `fc813ada7a6b7aa84b9442cd70cdf4be51dc975f`: [OpenDash Governance run 43023525312](https://github.com/thientran2359/opendash-cms/actions/runs/43023525312) **Ubuntu SUCCESS, Windows SUCCESS**; Forge có [self-review](https://github.com/thientran2359/opendash-cms/pull/83), không ghi nhận là independent peer review.
+- Rollback: code-only cho mô hình Builder; task không thay migration hay ghi SQLite. Bản sao M3, legacy homepage/block và theme-switch regression được kiểm thật; **không chạy restore binary lịch sử riêng** cho task core-only này. HTTP/Preview/Save, media ACL và giao diện nằm ở [#78](https://github.com/thientran2359/opendash-cms/issues/78), không được đánh dấu VERIFIED từ bằng chứng này.
+
+**Sign-off:** Forge (CoS Windows), 2026-11-11. `MERGED` và `G5 VERIFIED` là hai bước độc lập: merge PR #83 trước, kiểm native Windows đúng merged SHA `23c76ff` sau đó. Project/Issue được phép chuyển `Done`/closed completed chỉ cho phạm vi M4-S01-T01, không suy ra đã nghiệm thu toàn M4.
