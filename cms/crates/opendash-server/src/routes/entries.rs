@@ -6,7 +6,7 @@ use axum::{
     Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
 };
 use opendash_core::{
     content::{ContentEntryInput, valid_content_type_key},
@@ -18,14 +18,26 @@ use sqlx::SqlitePool;
 
 use crate::{
     auth::{require_session, require_session_with_csrf},
+    content_render,
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
     storage::{
         content::load_content_type_definition, entries as entry_storage, media as media_storage,
+        page::active_content_templates,
     },
 };
 
 pub const MAX_CONTENT_ENTRY_JSON_BYTES: usize = 512 * 1024;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicationInput {
+    pub status: String,
+}
+
+fn is_builtin(key: &str) -> bool {
+    matches!(key, "post" | "page")
+}
 
 #[derive(Deserialize, Default)]
 pub struct EntryPagination {
@@ -180,6 +192,59 @@ pub async fn entry_delete(
     valid_type_key(&type_key)?;
     entry_storage::delete_entry(&db, &type_key, id, version).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Publish/Unpublish is a separate, authenticated optimistic-CAS operation.
+/// Ordinary PUT/Save deliberately never alters the current status.
+pub async fn entry_publication(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    Json(input): Json<PublicationInput>,
+) -> ApiResult<Response> {
+    require_session_with_csrf(&headers, &db).await?;
+    valid_type_key(&type_key)?;
+    if !is_builtin(&type_key) || !matches!(input.status.as_str(), "draft" | "published") {
+        return Err(ApiError::bad_request(
+            "Chỉ Post/Page hỗ trợ draft/published.",
+        ));
+    }
+    let version = expected_version(&headers)?;
+    let record =
+        entry_storage::set_publication_status(&db, &type_key, id, version, &input.status).await?;
+    // No success hooks are emitted until state is durable; on CAS failures
+    // storage returns 404/412 without any external side effects.
+    Ok(([(header::ETAG, etag(record.version))], Json(record)).into_response())
+}
+
+/// Persisted Post/Page preview is private and never shares the public reader.
+pub async fn entry_preview(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    valid_type_key(&type_key)?;
+    if !is_builtin(&type_key) {
+        return Err(ApiError::bad_request("Preview chỉ hỗ trợ Post/Page."));
+    }
+    let schema = content_schema(&db, &type_key).await?;
+    let entry = entry_storage::get_entry(&db, &type_key, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+    let view = content_render::authenticated_preview_view(entry, &schema);
+    let (_, selected_template) = active_content_templates(&db).await?;
+    let html = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    Ok((
+        [
+            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        Html(html),
+    )
+        .into_response())
 }
 
 #[cfg(test)]

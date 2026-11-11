@@ -1,6 +1,8 @@
 # Quy trình quản lý roadmap, module và task của OpenDash
 
-**Trạng thái tài liệu:** Quy trình planning V1 được chủ dự án cho áp dụng sau [5 lượt thảo luận Codex ↔ Antigravity](../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) (`CONSENSUS_REACHED` **cho quy trình**, không phải cho thiết kế M3). Quy ước ID, gates và status không thay thế [yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md), [hợp đồng kỹ thuật](../contracts/CORE_FOUNDATION.md) hoặc quyết định có ADR.
+**Trạng thái tài liệu:** Quy trình planning V1 được chủ dự án cho áp dụng sau [5 lượt thảo luận Codex ↔ Antigravity](../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) (`CONSENSUS_REACHED` **cho quy trình**, không phải cho thiết kế M3). **Hiện hành:** [ADR-0003](../decisions/ADR-0003-agent-consensus-governance.md) chuyển quyền chốt kỹ thuật G0–G3 cho agent consensus/reviewer độc lập, owner theo dõi. Quy ước ID, gates và status không thay thế [yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md), [hợp đồng kỹ thuật](../contracts/CORE_FOUNDATION.md) hoặc ADR.
+
+**Owner override riêng M3 từ 11/11/2026:** [ADR-0005 Harbor–Forge autonomous](../decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) cho hai agent tự chốt G2/G3 trong G0 đã duyệt, chọn/triển khai task và self-merge PR M3 đủ security/tests/CI; **không cần agent khác review**. Project Ready, data/ACL và G5 không được miễn. Quy trình ADR-0003 và reviewer độc lập phía dưới tiếp tục là mặc định **ngoài M3**.
 
 Tài liệu này dành cho người quản lý dự án và các coding agent. Mục tiêu là nhìn được toàn bộ chức năng cần có, tiến độ từng phiên bản, lý do của quyết định kỹ thuật và bằng chứng nghiệm thu; cùng một module có thể được triển khai trong nhiều milestone.
 
@@ -38,8 +40,16 @@ Ví dụ truy vết: `V1 → M3 → M3-S01 → M3-S01-T01` dự kiến triển k
 | Task | Slice + `-T` + số | `M3-S01-T02` |
 | Nghiên cứu đang chuẩn bị | `.agents/research/<module>-<topic>.md` | `.agents/research/cnt-01-cpt-data-model.md` trên branch agent |
 | Kế hoạch milestone | `docs/plans/milestones/<Mốc>-<chủ-đề>.md` | `milestones/M2.5-core-foundation.md` |
+| Kế hoạch slice theo milestone | `docs/plans/milestones/<Mốc>/slices/<slice>.md` | `milestones/M3/slices/2026-11-09-m3-5-media-library.md` |
+| Kế hoạch task candidate trong mốc | `docs/plans/milestones/<Mốc>/TASK_PLAN.md` | `milestones/M4/TASK_PLAN.md` (trước G3) |
 
 Mọi slice ghi rõ module/capability liên quan, các dependency chặn triển khai, đầu ra và link đến PRD, contract, quyết định, kiểm chứng. Các ID đã sử dụng không đổi hoặc tái cấp phát; nếu tách module thì ghi lịch sử kế thừa.
+
+**Quy ước tổ chức được chốt 10/11/2026:** `milestones/` chứa kế hoạch mốc (hoặc `<Mốc>/README.md` khi có nhiều slice), `milestones/<Mốc>/slices/` chứa các plan thực hiện **không phụ thuộc trạng thái hoàn tất**; `modules/` chứa Living Module Brief theo capability xuyên milestone. **GitHub Issues/Project** quản lý trạng thái task Backlog → Ready → In progress → In review → Done; không tạo các thư mục theo status, không chuyển vào `archive/` chỉ vì code hiện hữu hoặc có kiểm chứng trên một OS.
+
+**Bổ sung theo yêu cầu chủ dự án 10/11/2026:** duy trì duy nhất [TASK_INDEX](TASK_INDEX.md) làm **bảng tổng quan milestone/task ngắn gọn**: toàn bộ planning candidates kèm mô tả, trạng thái, và hàng G3 task + Issue khi được phát hành. Các agent chỉ cập nhật trạng thái có chứng cứ từ **GitHub Project/Issue**, đặc biệt khi G5 đã VERIFIED và Project chuyển Done thì phải đưa hàng task tương ứng thành Done qua PR tài liệu. Không lấy status trong TASK_INDEX để cấp Ready/nhận task, không tạo task ledger thứ hai hay chạy watcher nền. Nếu lệch GitHub, sửa index theo GitHub và nêu thời điểm đối chiếu.
+
+**Quy trình lập kế hoạch đầy đủ:** [Module Catalog](MODULE_CATALOG_V1.md) → [Coverage Matrix](milestones/COVERAGE_MATRIX.md) → [9 milestone plans](milestones/README.md) → các hàng `Mx-Pxx` có scope/dependency/acceptance. Đây là **planning IDs**, tuyệt đối **không** dùng `Mx-Pxx` thay G3 Task ID `Mx-Sxx-Txx` hoặc tạo GitHub Issue từ bảng. Khi một candidate đủ nghiên cứu, coordinator chốt G2/G3, chuyển thành task brief đầy đủ theo [SLICE_TASK](templates/SLICE_TASK.md) tại `docs/plans/milestones/` (script `prepare-github-issue.py` chấp nhận nguồn milestone) hoặc module brief đã review, dùng **task ID mới không xung đột lịch sử**, rồi mới tạo Issue có milestone GitHub number đúng và Project Ready. Không coi một module được nhắc ở nhiều mốc là nhiều lần nghiệm thu cùng capability.
 
 **Primary Acceptance Slice:** mỗi capability ID có đúng một slice nghiệm thu chính tại phạm vi/release cụ thể. Một module có thể xuất hiện trong nhiều milestone, nhưng không nhân đôi tiến độ capability. Các kiểm thử hồi quy sau đó bổ sung evidence mà không tạo capability giả.
 
@@ -49,7 +59,7 @@ Không dùng một checkbox duy nhất để đánh dấu “xong module”. Mod
 
 | Thuộc tính | Giá trị hợp lệ | Ý nghĩa |
 | --- | --- | --- |
-| `scope` | `PROPOSED`, `AGREED` | Danh mục/ưu tiên do AI đề xuất hay đã được chủ dự án chốt |
+| `scope` | `PROPOSED`, `AGREED` | Phương án đang đề xuất hay đã có Final Decision agent/reviewer và docs PR được merge, trong ranh giới PRD/chỉ đạo owner |
 | `research` | `NOT_STARTED`, `IN_PROGRESS`, `REVIEWED` | Đã khảo sát phương án, source và dependency hay chưa |
 | `design` | `NOT_STARTED`, `PROPOSED`, `AGREED` | Giao diện, contract, migration và luồng dữ liệu đã chốt chưa |
 | `implementation` | `NOT_STARTED`, `IN_PROGRESS`, `IMPLEMENTED` | Có code dùng được trong phạm vi được chỉ rõ hay chưa |
@@ -102,12 +112,12 @@ README chỉ làm mục lục. Không dựng thêm JSON/YAML manifest giữ bả
 - Nếu hai task cùng sửa contract/schema/API chung, xác định thứ tự sở hữu trước khi giao song song; không cho hai agent ghi cùng file. **File ownership là theo lượt/task**, không khóa vĩnh viễn cả thư mục cho một AI.
 - Phù hợp cách phối hợp hiện tại: Codex có thể chuẩn bị research/plan và review, Antigravity triển khai slice. Luồng phối hợp tuân theo [PROTOCOL](../discussions/PROTOCOL.md); danh sách nhiệm vụ ở đây không tự cấp quyền cho agent triển khai/deploy.
 - Trước khi code, tra API và quan hệ caller/callee bằng CodeGraph nếu sẵn có; xác minh lại source thực. Giữ đúng các Base APIs của [CORE_FOUNDATION](../contracts/CORE_FOUNDATION.md).
-- **Stop-and-Propose:** nếu chỉ là tinh chỉnh nội bộ không phá contract, báo `Design Delta` cùng test để Codex review. Nếu đụng PRD, migration/schema đã sử dụng, security, API/ABI hoặc quyết định G2 thì dừng ở ranh giới đó, báo hai phương án và chỉ làm tiếp sau khi chốt lại; không tự thay đổi contract.
+- **Stop-and-Propose:** tinh chỉnh nội bộ không phá contract vẫn ghi `Design Delta` và test. Nếu đụng PRD, migration/schema đã sử dụng, security, API/ABI hoặc G2 thì dừng, so sánh phương án có evidence; agent consensus chốt hoặc reviewer độc lập ra quyết định cuối theo ADR-0003, sau đó cập nhật contract qua PR. **Security/data blocker chưa có remediation/evidence thì vẫn BLOCKED**, không tự thay đổi contract.
 - **An toàn migration:** test trên bản sao DB / site root riêng, nâng cấp từ fixture cũ; snapshot/backup nhất quán trước nâng cấp dữ liệu thật. Git revert không rollback DB đã migrate; migration đã phát hành không được chỉnh/xóa, thay bằng forward migration khi cần.
 
 ## Thay đổi kế hoạch và kiểm soát chất lượng
 
-1. Thay đổi **phạm vi sản phẩm**: đối chiếu PRD và xin quyết định chủ dự án; cập nhật catalog và roadmap cùng lúc sau khi chốt.
+1. Thay đổi **phạm vi sản phẩm**: đối chiếu PRD/chỉ đạo owner hiện có; agent consensus chốt phạm vi kỹ thuật trong giới hạn đã xác nhận, reviewer độc lập phân xử điểm còn tranh luận. Nếu xuất hiện **mục tiêu sản phẩm mới** không có căn cứ PRD thì không tự giả định; ghi câu hỏi cần bổ sung. Sau Final Decision và PR review/merge mới cập nhật catalog/roadmap, không dùng owner approval làm gate mặc định.
 2. Thay đổi **kiến trúc/contract**: ghi phương án và hậu quả, dùng ADR/contract theo quy ước; chỉ cập nhật task liên quan sau khi quyết định.
 3. Thay đổi **thứ tự milestone**: giữ nguyên ID module; cập nhật dependency, lý do và gate, không sửa lịch sử bằng chứng.
 4. Thay đổi **code**: chọn kiểm chứng theo tác động (preview, lưu, theme/plugin lifecycle, data preservation, backup). Không dùng kế hoạch thay cho test thực chạy.

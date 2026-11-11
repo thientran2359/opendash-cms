@@ -122,7 +122,7 @@ cargo build --manifest-path cms/Cargo.toml --locked
 python3 cms/scripts/content_entries_smoke.py --binary cms/target/debug/opendash
 ```
 
-**Lưu ý:** M3.3 là lớp lưu trữ; từ M3.6, nội dung đã lưu được hiển thị công khai tại `/content/{type}/{slug}` (không có cơ chế draft/publish riêng). `rich_text` chỉ hiển thị dưới dạng văn bản đã escape; từ M3.5, ảnh tham chiếu trong entry mới/sửa phải có trong Media Library. Xem [kế hoạch](docs/plans/2026-11-08-m3-3-content-entry-crud.md) và [kiểm chứng M3.3](docs/verification/2026-11-08-m3-3-content-entry-crud.md).
+**Lưu ý:** M3.3 là lớp lưu trữ; từ M3.6, nội dung đã lưu được hiển thị công khai tại `/content/{type}/{slug}` (không có cơ chế draft/publish riêng). `rich_text` chỉ hiển thị dưới dạng văn bản đã escape; từ M3.5, ảnh tham chiếu trong entry mới/sửa phải có trong Media Library. Xem [kế hoạch](docs/plans/milestones/M3/slices/2026-11-08-m3-3-content-entry-crud.md) và [kiểm chứng M3.3](docs/verification/2026-11-08-m3-3-content-entry-crud.md).
 
 ## M3.4 — Admin Content UI
 
@@ -130,7 +130,7 @@ Sau khi đăng nhập, chọn tab **Nội dung** bên cạnh **Builder**. Admin 
 
 Form gửi JSON theo đúng kiểu field và dùng ETag/If-Match khi sửa/xóa. Khi phiên đăng nhập hết hạn (401) hoặc dữ liệu có phiên bản mới (412), bản nháp vẫn được giữ để người dùng đăng nhập lại hoặc chủ động tải bản mới. Tab Builder không bị thay thế.
 
-HTML rich text được lưu như dữ liệu và không được thực thi khi nhập; từ M3.6, lưu entry sẽ cập nhật trang công khai. Từ M3.5, field ảnh/gallery đã có thư viện chọn ảnh. Xem [kế hoạch M3.4](docs/plans/2026-11-08-m3-4-admin-content-ui.md) và [bằng chứng UI](docs/verification/2026-11-08-m3-4-admin-content-ui.md).
+HTML rich text được lưu như dữ liệu và không được thực thi khi nhập; từ M3.6, lưu entry sẽ cập nhật trang công khai. Từ M3.5, field ảnh/gallery đã có thư viện chọn ảnh. Xem [kế hoạch M3.4](docs/plans/milestones/M3/slices/2026-11-08-m3-4-admin-content-ui.md) và [bằng chứng UI](docs/verification/2026-11-08-m3-4-admin-content-ui.md).
 
 ## M3.5 — Media Library
 
@@ -146,7 +146,7 @@ cargo build --manifest-path cms/Cargo.toml --locked
 python3 cms/scripts/media_smoke.py --binary cms/target/debug/opendash
 ```
 
-Chưa có xóa media khỏi thư viện hay backup/restore uploads. Từ M3.6, ảnh đã được gắn trong entry có URL công khai `/media/{id}/file`, ảnh chưa được dùng vẫn chỉ đọc được qua API Admin. Xem [kế hoạch M3.5](docs/plans/2026-11-09-m3-5-media-library.md) và [báo cáo kiểm chứng](docs/verification/2026-11-09-m3-5-media-library.md).
+Chưa có xóa media khỏi thư viện hay backup/restore uploads. Từ M3.6, ảnh đã được gắn trong entry có URL công khai `/media/{id}/file`, ảnh chưa được dùng vẫn chỉ đọc được qua API Admin. Xem [kế hoạch M3.5](docs/plans/milestones/M3/slices/2026-11-09-m3-5-media-library.md) và [báo cáo kiểm chứng](docs/verification/2026-11-09-m3-5-media-library.md).
 
 ## M3.6 — Hiển thị nội dung CPT công khai
 
@@ -163,7 +163,7 @@ cargo build --manifest-path cms/Cargo.toml --locked
 python3 cms/scripts/public_content_smoke.py --binary cms/target/debug/opendash
 ```
 
-Chưa có active theme registry riêng, taxonomy, chỉnh archive/single bằng Builder hay preview entry chưa lưu. Xem [kế hoạch M3.6](docs/plans/2026-11-09-m3-6-public-content-rendering.md) và [báo cáo kiểm chứng](docs/verification/2026-11-09-m3-6-public-content-rendering.md).
+Chưa có active theme registry riêng, taxonomy, chỉnh archive/single bằng Builder hay preview entry chưa lưu. Xem [kế hoạch M3.6](docs/plans/milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md) và [báo cáo kiểm chứng](docs/verification/2026-11-09-m3-6-public-content-rendering.md).
 
 ## CodeGraph cho Codex, Antigravity và Chat On Steroids
 

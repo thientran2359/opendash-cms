@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import sqlite3
+from contextlib import closing
 import struct
 import zlib
 from pathlib import Path
@@ -117,7 +118,7 @@ def smoke(binary):
             assert request(base, entry_path, missing, editor)[0] == 400
             assert raw_request(base, "GET", f"{endpoint}/{'a' * 64}/file", headers=admin)[0] == 404
 
-        with sqlite3.connect(db) as connection:
+        with closing(sqlite3.connect(db)) as connection, connection:
             assert connection.execute("SELECT COUNT(*) FROM media_assets").fetchone() == (2,)
             assert connection.execute("SELECT success FROM _sqlx_migrations WHERE version = 6").fetchone() == (1,)
             original_path = site / "uploads" / "media" / media_id[:2] / f"{media_id}.png"

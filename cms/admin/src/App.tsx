@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AuthUser, BlockData, BlockRegistry, PluginSummary } from './types.ts';
 import * as api from './api/index.ts';
-import { AdminShell } from './shell/AdminShell.tsx';
+import { AdminShell, isViewAllowed, parseAdminView, type AdminView } from './shell/AdminShell.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { BuilderControls, BuilderPreview, normalizeValues } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
 import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
+import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
+import { MediaRoute } from './shell/MediaRoute.tsx';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -14,8 +16,11 @@ export const App: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<string>('Đang kiểm tra trạng thái phiên...');
   const [isError, setIsError] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [activeView, setActiveView] = useState<'builder' | 'content'>('builder');
+  const [activeView, setActiveView] = useState<AdminView>(() => parseAdminView(window.location.hash, window.location.pathname));
   const [contentDirty, setContentDirty] = useState(false);
+  const [builderDirty, setBuilderDirty] = useState(false);
+  const [postsDirty, setPostsDirty] = useState(false);
+  const [pagesDirty, setPagesDirty] = useState(false);
   const [contentRevision, setContentRevision] = useState(0);
 
   // Auth inputs
@@ -40,7 +45,41 @@ export const App: React.FC = () => {
   // Race prevention for preview responses
   const previewSeq = useRef<number>(0);
   const blockDataRef = useRef<BlockData>(blockData);
+  // Retain a draft across a 401 only when the same account signs back in.
+  const lastAuthenticatedUserId = useRef<number | null>(null);
   blockDataRef.current = blockData;
+
+  // Hash routing works from /admin/ and /builder without server catch-all.
+  // The existing editors stay mounted in AdminShell across route changes.
+  useEffect(() => {
+    const synchronize = () => {
+      const requested = parseAdminView(window.location.hash, window.location.pathname);
+      const next = user && !isViewAllowed(requested, user.role) ? 'dashboard' : requested;
+      setActiveView(next);
+      if (user && next !== requested) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/' + next);
+      }
+    };
+    synchronize();
+    window.addEventListener('hashchange', synchronize);
+    return () => window.removeEventListener('hashchange', synchronize);
+  }, [user?.role]);
+
+  useEffect(() => {
+    if (!(builderDirty || contentDirty || postsDirty || pagesDirty)) return;
+    const guard = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', guard);
+    return () => window.removeEventListener('beforeunload', guard);
+  }, [builderDirty, contentDirty, postsDirty, pagesDirty]);
+
+  const navigateTo = (view: AdminView) => {
+    if (!user || !isViewAllowed(view, user.role)) return;
+    setActiveView(view);
+    if (window.location.hash !== '#/' + view) window.location.hash = '/' + view;
+  };
 
   const setStatus = (msg: string, error: boolean = false) => {
     setStatusMessage(msg);
@@ -106,6 +145,7 @@ export const App: React.FC = () => {
     (async () => {
       try {
         const auth = await api.getAuthMe();
+        lastAuthenticatedUserId.current = auth.user.id;
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
@@ -145,6 +185,16 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       const res = await api.login(authUsername, authPassword);
+      if (lastAuthenticatedUserId.current !== null &&
+          lastAuthenticatedUserId.current !== res.user.id) {
+        // Never expose an expired account's unsaved Builder data to another user.
+        const emptyBlock: BlockData = { type: '', values: {} };
+        blockDataRef.current = emptyBlock;
+        setBlockData(emptyBlock);
+        setPreviewHtml('');
+        setBuilderDirty(false);
+      }
+      lastAuthenticatedUserId.current = res.user.id;
       setUser(res.user);
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
@@ -162,7 +212,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if (contentDirty && !window.confirm('Có bản nháp nội dung chưa lưu. Đăng xuất sẽ bỏ bản nháp. Tiếp tục?')) {
+    if ((contentDirty || builderDirty || postsDirty || pagesDirty) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -182,7 +232,12 @@ export const App: React.FC = () => {
       setPreviewHtml('');
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
-      setActiveView('builder');
+      setBuilderDirty(false);
+      setPostsDirty(false);
+      setPagesDirty(false);
+      lastAuthenticatedUserId.current = null;
+      setActiveView('dashboard');
+      window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
       setStatus('Đã đăng xuất.', false);
     } catch (err) {
       handleApiError(err, 'Lỗi khi đăng xuất.');
@@ -309,6 +364,7 @@ export const App: React.FC = () => {
 
   const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newType = e.target.value;
+    setBuilderDirty(true);
     setBlockData(prev => ({
       type: newType,
       values: normalizeValues(newType, registry, prev.values),
@@ -316,6 +372,7 @@ export const App: React.FC = () => {
   };
 
   const handleFieldChange = (name: string, val: string) => {
+    setBuilderDirty(true);
     setBlockData(prev => ({
       ...prev,
       values: {
@@ -357,6 +414,7 @@ export const App: React.FC = () => {
     };
     try {
       const html = await api.saveBlock(payload, csrfToken);
+      if (JSON.stringify(payload) === JSON.stringify(blockDataRef.current)) setBuilderDirty(false);
       setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${html}`);
       setStatus('Đã lưu', false);
     } catch (err) {
@@ -380,49 +438,44 @@ export const App: React.FC = () => {
       onLogin={handleLogin}
       onLogout={handleLogout}
       activeView={activeView}
-      onViewChange={setActiveView}
+      onViewChange={navigateTo}
+      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
       sidebarContent={
-        <>
-          <BuilderControls
-            role={user?.role}
-            registry={registry}
-            blockData={blockData}
-            isProcessing={isProcessing}
-            onThemeUpload={handleThemeUpload}
-            onTypeChange={handleTypeChange}
-            onFieldChange={handleFieldChange}
-            onPreview={handlePreview}
-            onSave={handleSave}
-          />
-          {user?.role === 'admin' && (
-            <>
-              <SystemStatus />
-              <UsersPanel
-                editorUsername={editorUsername}
-                editorPassword={editorPassword}
-                isProcessing={isProcessing}
-                onEditorUsernameChange={setEditorUsername}
-                onEditorPasswordChange={setEditorPassword}
-                onCreateEditor={handleCreateEditor}
-              />
-              <PluginsPanel
-                plugins={plugins}
-                selectedPluginId={selectedPluginId}
-                pluginInputJson={pluginInputJson}
-                pluginRunOutput={pluginRunOutput}
-                isProcessing={isProcessing}
-                onPluginUpload={handlePluginUpload}
-                onSelectPlugin={setSelectedPluginId}
-                onDisablePlugin={handleDisablePlugin}
-                onEnablePlugin={handleEnablePlugin}
-                onPluginInputChange={setPluginInputJson}
-                onRunPlugin={handleRunPlugin}
-              />
-            </>
-          )}
-        </>
+        <BuilderControls
+          role={user?.role}
+          registry={registry}
+          blockData={blockData}
+          isProcessing={isProcessing}
+          onThemeUpload={handleThemeUpload}
+          onTypeChange={handleTypeChange}
+          onFieldChange={handleFieldChange}
+          onPreview={handlePreview}
+          onSave={handleSave}
+        />
       }
       previewContent={<BuilderPreview previewHtml={previewHtml} />}
+      settingsContent={<SystemStatus />}
+      usersContent={<UsersPanel
+        editorUsername={editorUsername}
+        editorPassword={editorPassword}
+        isProcessing={isProcessing}
+        onEditorUsernameChange={setEditorUsername}
+        onEditorPasswordChange={setEditorPassword}
+        onCreateEditor={handleCreateEditor}
+      />}
+      pluginsContent={<PluginsPanel
+        plugins={plugins}
+        selectedPluginId={selectedPluginId}
+        pluginInputJson={pluginInputJson}
+        pluginRunOutput={pluginRunOutput}
+        isProcessing={isProcessing}
+        onPluginUpload={handlePluginUpload}
+        onSelectPlugin={setSelectedPluginId}
+        onDisablePlugin={handleDisablePlugin}
+        onEnablePlugin={handleEnablePlugin}
+        onPluginInputChange={setPluginInputJson}
+        onRunPlugin={handleRunPlugin}
+      />}
       contentContent={
         <ContentWorkspace
           key={contentRevision}
@@ -432,6 +485,27 @@ export const App: React.FC = () => {
           onDirtyChange={setContentDirty}
         />
       }
+      postsContent={
+        <PostPageWorkspace
+          key={'posts-' + contentRevision}
+          type="post"
+          user={user}
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onDirtyChange={setPostsDirty}
+        />
+      }
+      pagesContent={
+        <PostPageWorkspace
+          key={'pages-' + contentRevision}
+          type="page"
+          user={user}
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onDirtyChange={setPagesDirty}
+        />
+      }
+      mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
     />
   );
 };

@@ -168,7 +168,7 @@ def check_crud(binary):
             assert_status(api(base, "GET", "/api/admin/content-types/news/entries", headers=admin), 200, "Second CPT list")
             assert_status(api(base, "GET", list_path + "/999999", headers=admin), 404, "Missing entry")
 
-        with sqlite3.connect(db) as con:
+        with closing(sqlite3.connect(db)) as con, con:
             con.execute("PRAGMA foreign_keys = ON")
             assert con.execute("SELECT COUNT(*) FROM content_entries WHERE content_type_key = 'portfolio'").fetchone()[0] == 1
             assert con.execute("SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 5 AND success = 1").fetchone()[0] == 1
@@ -215,7 +215,7 @@ def check_legacy_upgrade(binary, fixture):
             assert_status(request(base, "/api/admin/content-types", definition(), admin), 201, "Upgrade CPT")
             assert_status(api(base, "POST", "/api/admin/content-types/portfolio/entries", entry(), admin), 201, "Upgrade entry")
             assert_status(api(base, "GET", "/api/admin/content-types/portfolio/entries", headers=admin), 200, "Upgrade list")
-        with sqlite3.connect(db) as con:
+        with closing(sqlite3.connect(db)) as con, con:
             assert con.execute("SELECT block_id, values_json FROM home_page WHERE id = 1").fetchone() == before
             assert con.execute("SELECT COUNT(*) FROM content_entries").fetchone() == (1,)
             assert con.execute("SELECT success FROM _sqlx_migrations WHERE version = 5").fetchone() == (1,)

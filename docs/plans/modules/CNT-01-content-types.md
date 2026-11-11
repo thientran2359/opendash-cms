@@ -4,9 +4,24 @@
 
 **Cập nhật trạng thái (09/11/2026):** CNT-01 hiện **PARTIAL**. Domain CPT và 9 custom fields [M3.1](../../verification/2026-11-08-m3-1-content-domain.md), SQLite/Admin CPT GET/POST [M3.2](../../verification/2026-11-08-m3-2-content-types-backend.md) và giao diện tạo CPT [M3.4](../../verification/2026-11-08-m3-4-admin-content-ui.md) đã có bằng chứng macOS. Chưa có full schema update/delete hoặc plugin/theme manifest registration E2E; chưa được đánh dấu toàn CNT-01 `VERIFIED`. Xem [bảng trạng thái M3](../M3_STATUS_2026-11-09.md). Các phương án và task ứng viên G1–G3 phía dưới **là hồ sơ lịch sử 08/11**, phải đối chiếu source/Issue trước khi mở task tiếp, không giao lại các phần đã triển khai.
 
+**Final Decision mới (10/11/2026, phạm vi hẹp M3-P07/P08/P16):** [ADR-0004 Post/Page publication — G2 AGREED bởi owner trực tiếp](../../decisions/ADR-0004-m3-post-page-publication-boundary.md) chốt Core `post/page`, preflight collision, create-as-draft, API publish và deny-all công khai trong giai đoạn chuyển tiếp. [Năm gói G3](../milestones/M3/slices/2026-11-10-post-page-publication-g3.md) vẫn **DRAFT / chưa Issue Ready**. Không coi đây là phê duyệt toàn bộ G2 lịch sử CNT-01/PLG-03, implementation hay G5; giữ các hồ sơ 08/11 dưới đây nguyên trạng và CNT-01 **PARTIAL**. Owner đã miễn formal GitHub review riêng G2 này; không có Atlas/Nova review.
+
 **Hồ sơ trạng thái nghiên cứu ngày 08/11/2026 (lịch sử, không phải tình trạng hiện nay):** Research `REVIEWED` (source/CodeGraph tại `main@2bad893` và phản biện Codex ↔ Antigravity đến Turn 5, 07/11/2026) · Design `PROPOSED` (**G2 đang mở, chưa `AGREED`**) · Implementation `NOT_STARTED` · Verification `NOT_RUN`. Đề xuất G2 dưới đây **chưa cho phép giao task code**; phải phản biện/chốt contract trước G3.
 
 Đây là **Living Module Brief** chứa G0–G3 tại một nơi. Kết quả G1 là khảo sát/đề xuất cần phản biện, **không phải schema hay interface đã duyệt**. Nghiên cứu mới chưa duyệt đặt trong `.agents/research/` cho đánh giá lớn/benchmark, không tạo file task rời. Xem [planning consensus](../../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) và [Pre-M3 readiness](../../discussions/threads/2026-11-07-pre-m3-codegraph-readiness.md).
+
+## Đối chiếu implementation hiện hành và G2 lịch sử — 10/11/2026
+
+**Baseline code:** `main@e4a143291cbaaf3a302cd30e974e27ea9ab886f0`. Các kết quả test dưới đây **chỉ phản ánh môi trường, SHA và hành vi từng báo cáo**, không phải G5 mới chạy lại tại SHA này. Toàn CNT-01 vẫn **PARTIAL**, M3 vẫn **PARTIAL** theo [snapshot M3](../M3_STATUS_2026-11-09.md).
+
+| Lớp bằng chứng | Đối chiếu ở source / thiếu gì |
+| --- | --- |
+| **Current implementation** | [Migration `0004`](../../../cms/migrations/0004_content_types.sql) lưu bảng **`content_types`** gồm `key`, `definition_json`, `owner_kind`, `owner_id`, `provider_status`. [Storage content](../../../cms/crates/opendash-server/src/storage/content.rs) và [router](../../../cms/crates/opendash-server/src/app.rs) đã có API Admin CPT **GET/POST** (tạo/liệt kê); 9 field types và content entry có các slice riêng. Cột `provider_status` **không chứng minh** plugin/theme manifest đăng ký CPT end-to-end. |
+| **Evidence verified-by-slice** | [M3.1 — domain](../../verification/2026-11-08-m3-1-content-domain.md), [M3.2 — SQLite/API](../../verification/2026-11-08-m3-2-content-types-backend.md), [M3.4 — Admin UI](../../verification/2026-11-08-m3-4-admin-content-ui.md): bằng chứng **macOS tại các commit trong báo cáo**, không phải nghiệm thu lifecycle/plugin/Windows/Linux toàn module. |
+| **Historical G2 PROPOSED (08/11)** | Thiết kế ở [mục G2 bên dưới](#g2--hồ-sơ-đề-xuất-thiết-kế-v01-08112026-đang-phản-biện-proposed) đề nghị bảng **`content_type_definitions`** và các lifecycle/registration contracts khác implementation `0004`. Đó là đề xuất tại thời điểm viết, **không phải migration chuẩn hiện hành** và không tự được phê chuẩn hồi tố do code sau này đã chạy. |
+| **Missing G1/G2/G5 gates** | Chưa xác nhận schema edit/delete, built-in `post`/`page` bootstrap, provider namespace/collision/inactive/reinstall và `PluginManifest` CPT/field declarations E2E ([manifest hiện hành](../../../cms/crates/opendash-core/src/plugin.rs)); schema evolution, ABI/permissions và dữ liệu còn quản lý được khi provider tắt cần **Full-Track G1/G2, independent review và G3** trước bất kỳ migration/API mới nào. |
+
+**Quyết định tiếp theo:** [Issue #15 Final Decision — thứ tự taxonomy B trước provider bridge C khi code](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410). Đây là thứ tự/gate nghiên cứu, không phải G2 schema đã `AGREED` hoặc task `READY`. **Giữ nguyên toàn bộ phản biện/G2 lịch sử bên dưới**, không thay proposal để hợp thức hóa schema `0004`.
 
 ## G0 — Năng lực cần có
 

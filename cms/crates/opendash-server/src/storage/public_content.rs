@@ -12,15 +12,38 @@ pub async fn get_by_slug(
     type_key: &str,
     slug: &str,
 ) -> ApiResult<Option<ContentEntryRecord>> {
-    let row: Option<(i64, String, String, String, String, i64, String, String)> = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, version, created_at, updated_at
-         FROM content_entries WHERE content_type_key = ? AND slug = ?",
+    let row: Option<(i64, String, String, String, String, String, i64, String, String)> = sqlx::query_as(
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+         FROM content_entries WHERE content_type_key = ? AND slug = ? AND publication_status = 'published'",
     )
     .bind(type_key)
     .bind(slug)
     .fetch_optional(db)
     .await?;
     row.map(decode_row).transpose()
+}
+
+/// Publication filtering happens in SQL before paging, so a draft never
+/// displaces a published entry or influences public next/previous links.
+pub async fn list_published(
+    db: &SqlitePool,
+    type_key: &str,
+    limit: i64,
+    offset: i64,
+) -> ApiResult<Vec<ContentEntryRecord>> {
+    let rows: Vec<(i64, String, String, String, String, String, i64, String, String)> =
+        sqlx::query_as(
+            "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+             FROM content_entries
+             WHERE content_type_key = ? AND publication_status = 'published'
+             ORDER BY id DESC LIMIT ? OFFSET ?",
+        )
+        .bind(type_key)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(db)
+        .await?;
+    rows.into_iter().map(decode_row).collect()
 }
 
 /// Images become public only while referenced by an image/gallery custom field
@@ -33,7 +56,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            FROM content_entries AS e
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN json_each(t.definition_json, '$.fields') AS f
-           WHERE
+           WHERE e.publication_status = 'published'
+             AND (
              (
                json_extract(f.value, '$.type') = 'image'
                AND json_extract(e.values_json, '$.' || json_extract(f.value, '$.key')) = ?
@@ -45,6 +69,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                  FROM json_each(json_extract(e.values_json, '$.' || json_extract(f.value, '$.key'))) AS item
                  WHERE item.value = ?
                )
+             )
              )
            LIMIT 1
          )"#,

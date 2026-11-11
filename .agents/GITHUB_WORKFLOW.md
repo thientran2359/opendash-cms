@@ -1,18 +1,91 @@
 # GitHub workflow cho 5 agent — đề xuất chuẩn vận hành
 
+> **Ngoại lệ owner phê duyệt cho M3 ngày 2026-11-11:** [ADR-0005 — Harbor/Forge autonomous M3](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) **ưu tiên áp dụng trong phạm vi M3** khi các hướng dẫn chung dưới đây yêu cầu Atlas/Nova coordinator, reviewer độc lập, cấm self-merge, hoặc chờ owner duyệt task. Harbor/Forge tự lập G2/G3, chọn task, tạo Issue và tự merge PR **khi tất cả safety/tests/CI/Project gates PASS**, không yêu cầu agent khác review. Các mục cũ dưới đây vẫn áp dụng ngoài M3; nhánh Forge cũ/PR #7, #9 và các security blocker hạ tầng không được miễn. Không tự kích hoạt watcher/remote dispatch.
+
 **Repository nguồn duy nhất:** `thientran2359/opendash-cms`.
 Code nằm trong 5 worktree/checkout **cục bộ** tách biệt trên Windows và macOS;
 mỗi agent chỉ sửa branch `agent/<name>` được gán trong [agents.yaml](agents.yaml).
 Tạo branch mới không tự tạo được một phiên Codex/Antigravity/CoS hoặc điều khiển
 remote. Adapter điều phối Muse chưa được xác nhận/khởi chạy.
 
+**Quy trình thao tác thủ công:** tất cả agent đọc [Agent Operating Standard](AGENT_OPERATING_STANDARD.md)
+trong chat đang làm việc (không tạo agent/skill/script "Agent Preflight Check").
+Ưu tiên GitHub Connector/Plugin cho Issue/PR/Project. Khi cần GitHub UI đã đăng
+nhập trên CoS, dùng **Chat On Steroids Desktop Browser** và attach tab của
+**Chrome đang đăng nhập đúng tài khoản GitHub**; Plugins Browser Playwright dùng
+profile riêng, không chứng minh tài khoản đang đăng nhập.
+
+## Danh tính 5 agent trên một tài khoản GitHub
+
+Atlas, Nova, Forge, Harbor và Orion dùng chung tài khoản GitHub để thao tác
+trên repo; **không tạo GitHub Apps hoặc thêm tài khoản bot**. Danh tính tác nghiệp
+lấy từ [agents.yaml](agents.yaml), workspace/branch, Issue ownership và
+metadata agent ghi trên PR, commit, comment. Nhãn `agent:<name>` thể hiện
+**người chịu trách nhiệm thực hiện** trên Issue, không phải GitHub username.
+
+- **Commit:** giữ Task ID trong tiêu đề và thêm Git trailer `Agent: <Agent>`
+  (Atlas/Nova/Forge/Harbor/Orion, đúng agent thực sự tạo commit). **Mặc định
+  cấu hình `user.name` theo từng Git worktree**, không đổi `git config
+  --global` và không đặt `git config --local user.name` ở repo dùng chung
+  nhiều worktree. Thực hiện từng bước an toàn, kiểm tra và rollback theo
+  [Git worktree identity setup](GIT_WORKTREE_IDENTITY.md). Giữ `user.email`
+  là địa chỉ GitHub no-reply đã xác minh và được cấp từ cấu hình hiện có;
+  không tự đặt email giả hoặc secret vào Git.
+
+  ```powershell
+  # Chạy trong chính worktree của agent, sau khi kiểm tra common config.
+  git config --local extensions.worktreeConfig true
+  git config --worktree user.name "Forge"  # thay bằng tên agent hiện tại
+  git config --show-origin --show-scope --get user.name
+  git commit -m "M3-Sxx-Txx: mô tả thay đổi" -m "Agent: Forge"
+  ```
+
+  `extensions.worktreeConfig` bật một lần ở **shared repository config**
+  cho những linked worktree cùng Git database; chỉ `user.name` viết bằng
+  `--worktree` mới nằm trong config riêng của worktree. Không bật mù nếu
+  `core.worktree`/`core.bare` hoặc shared config hiện tại có thiết lập
+  bất thường; đọc hướng dẫn trước. Nếu không thể cấu hình an toàn, dùng
+  `git -c user.name="Forge" commit ...` cho riêng lệnh commit và ghi lý do.
+- **Pull Request:** tác giả ghi `Agent`, `Role`, `Issue/Task ID`, branch,
+  baseline/head SHA, phạm vi và kiểm chứng trong body. Dùng
+  [PR template](../.github/PULL_REQUEST_TEMPLATE.md) khi tạo PR bằng UI; khi
+  dùng API/CLI điền thông tin tương đương. Không ghi nhận một reviewer đã
+  thực hiện review chỉ vì tên họ nằm trong danh sách reviewer dự kiến.
+- **Review hoặc thảo luận trên PR/Issue:** mỗi lượt ký `Agent` và `Role`,
+  kèm đúng `Reviewed head SHA` nếu đang review code. Reviewer ghi
+  `Verdict`, findings có vị trí/mức độ, kiểm chứng và giới hạn. Ví dụ:
+
+  ```text
+  Agent: Atlas
+  Role: Reviewer
+  Reviewed head SHA: <full-commit-sha>
+  Verdict: CHANGES_REQUESTED
+  Findings: P2 — path:line — nguyên nhân, ảnh hưởng, cách sửa
+  Validation: NOT_RUN (review tài liệu)
+  ```
+
+  Follow-up review phải cập nhật SHA và kết luận sau khi đọc commit mới.
+  Nếu tác giả thay mặt reviewer chuyển findings lên PR, ghi rõ
+  `Relayed by` và nguồn review; không giả làm review trực tiếp.
+
+**Giới hạn danh tính:** trên GitHub, `author.login`, người gửi review/comment
+và người push vẫn là account thực đã xác thực. `Agent`, Git author name và
+trailer là **metadata tự khai báo để truy vết**, không chứng minh danh tính độc
+lập. Một comment ghi `Verdict: APPROVED` hoặc `CHANGES_REQUESTED` không
+tương đương một GitHub review APPROVE/REQUEST_CHANGES và không thay thế required
+review trong ruleset. Không tự gán kết quả AI thành approval GitHub, không bỏ
+qua CI, ownership hoặc gate. **M3 vẫn áp dụng ngoại lệ [ADR-0005](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md)**:
+Harbor/Forge có thể tự merge PR M3 đủ gates mà không cần review chéo; khi đó
+ghi `Review: N/A — ADR-0005` trong PR và không tạo review giả.
+
 ## Nguồn sự thật cho task và tài liệu
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |
 | --- | --- | --- |
-| Scope/G0–G3 đã duyệt, contract, ADR | `docs/` | Người có thẩm quyền chốt; review PR |
+| Scope/G0–G3 đã chốt, contract, ADR | `docs/` | Coordinator kết luận consensus hoặc reviewer độc lập quyết định cuối, sau đó PR review/merge; xem [ADR-0003](../docs/decisions/ADR-0003-agent-consensus-governance.md) |
 | Điều tra, thảo luận, đề xuất/task draft | `.agents/research/`, `.agents/discussions/`, `.agents/tasks/` | Agent trên branch của mình |
 | Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator/Muse được ủy quyền, sau khi gate sẵn sàng |
+| Tổng hợp 9 milestone, candidate và tình trạng task để chủ dự án đọc nhanh | [TASK_INDEX](../docs/plans/TASK_INDEX.md) (**snapshot**, không authoritative) | Coordinator thêm task sau G3; agent/reviewer hoàn tất G5 cập nhật qua PR, đối chiếu Issue/Project |
 | Source diff, test, phản biện, chấp thuận tích hợp | **GitHub PR** | Assignee rồi reviewer/CI |
 | Evidence thực chạy/acceptance đã duyệt | `docs/verification/` | Theo quy trình review, không suy từ báo cáo AI |
 | Chat/session/runtime secrets/locks | **Không đưa vào Git** | Từng công cụ giữ riêng |
@@ -85,9 +158,14 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    assignee nếu là tài khoản thực có quyền; agent runtime identity nằm ở
    `agent:*` label.
 6. Khi scope, contract hoặc acceptance thay đổi: sửa tài liệu trong repo,
-   review/merge và **đồng bộ lại body Issue + source SHA**. Khi chỉ đổi
-   tiến độ, owner hoặc blocker: chỉ cập nhật Issue/Project. Không duy trì
-   JSON/YAML task mirror trong Git như một bảng trạng thái cạnh tranh.
+   review/merge và **đồng bộ lại body Issue + source SHA**. Khi đổi
+   tiến độ, owner hoặc blocker: **Issue/Project phải cập nhật trước**.
+   Theo chỉ đạo mới, riêng [TASK_INDEX](../docs/plans/TASK_INDEX.md) được phép
+   phản ánh trạng thái có nguồn/link Issue và ngày đối chiếu: coordinator thêm
+   hàng task G3 đã phát hành; khi **G5 VERIFIED + Project Done**, agent được
+   giao closure cập nhật hàng Done qua PR docs. Nếu chỉ merge code nhưng
+   chưa G5, giữ In review/Partial theo GitHub, không tự ghi Done. Không duy
+   trì JSON/YAML mirror hoặc queue song song khác và không dựa vào index để pickup.
 
 **Ngoại lệ hạ tầng POC Muse → CoS Phase 1 (G3 APPROVED 09/11/2026, Issues chưa READY):** các mã
 `P1-W01..P1-W08` trong [breakdown Phase 1](../docs/plans/muse-cos-win-phase1-g2.md)
@@ -227,17 +305,52 @@ không mặc nhiên cấp quyền triển khai hoặc chuyển G2 thành `AGREED
 4. **Tác giả PR** phân loại từng finding (`accept`, `reject` có lý do,
    hoặc `needs-decision`), sửa tài liệu trên **branch head của mình**, chạy
    checker phù hợp, commit và non-force push. Trả lời từng thread bằng commit
-   SHA hoặc lý do không sửa; không tự đánh dấu quyết định G2 đã được chốt.
+   SHA hoặc lý do không sửa; G2 chỉ được chốt từ Final Decision có evidence
+   và reviewer độc lập khi cần, không tự nâng draft lên AGREED.
 5. **Reviewer** đọc lại `head SHA` mới, kiểm diff và các thread để xác nhận
-   finding đã giải quyết; gửi review follow-up trên cùng PR. Chỉ người có
-   thẩm quyền mới chốt G2/merge; CI PASS, một comment `LGTM` hoặc chat phản
-   hồi chưa phải G5 verification.
+   finding đã giải quyết; gửi review follow-up trên cùng PR. **Agent consensus
+   có Final Decision** hoặc **reviewer độc lập có verdict** chốt phương án;
+   reviewer khác tác giả có thể merge PR docs/design đủ gate khi được gọi
+   theo skill, **không cần owner review mặc định**. CI PASS, một comment `LGTM`
+   hoặc chat phản hồi chưa phải G5 verification.
 
 **Ngoại lệ reviewer trực tiếp sửa tài liệu:** phải giao lại rõ Issue/PR,
 file ownership, branch đích và phạm vi trước khi viết. Reviewer sửa trên
 branch `agent/<reviewer>`, commit/push non-force và mở PR riêng hoặc quy
 trình tích hợp được duyệt; **không push vào `agent/<author>`** chỉ vì đang
 review. Sau khi giao sửa, cần một lượt review độc lập với thay đổi đó.
+
+## Review và merge implementation PR được ủy quyền
+
+Theo chỉ đạo chủ dự án ngày 10/11/2026 và [ADR-0003](../docs/decisions/ADR-0003-agent-consensus-governance.md), **Atlas/Nova được review và merge implementation PR cùng technical-doc/design PR đã chốt** do agent khác thực hiện khi được gọi luồng
+[github-pr-review-merge](skills/github-pr-review-merge/SKILL.md) trong chat.
+Luồng review-and-merge được gọi rõ trong chat, **không background polling**;
+không cần owner ký từng PR đủ gate. Theo ADR-0003, technical-doc/design PR
+đã có Final Decision hoặc reviewer verdict cũng được xử lý theo cổng review này.
+Lệnh chỉ “review/re-review PR” không cấp quyền merge.
+
+- Xác minh reviewer/implementer bằng role, Issue, branch và signed evidence;
+  login GitHub dùng chung không chứng minh tự review hoặc độc lập. Không tự
+  review/merge PR mình viết; Atlas và Nova phải review chéo nếu là tác giả.
+- Chỉ implementation có scope/gate đã chốt **hoặc technical-doc/design PR có Final Decision**,
+  đúng repo/main, acceptance trước merge đạt, dependency có evidence, findings
+  bắt buộc đã giải quyết, required checks tại head/integration hiện tại PASS và
+  protection cho phép. Reviewer được chốt phương án kỹ thuật khi cần nhưng
+  **không** được tự thay mục tiêu sản phẩm, waive security blocker hoặc risk-accept
+  ảnh hưởng live secrets/data chỉ để merge.
+- Review trên head/base SHA cụ thể; re-fetch trước merge và sau mỗi PR. Head
+  đổi phải re-review; base đổi phải đánh giá integration/validation lại. Merge
+  dùng expected head SHA, không bật auto-merge đợi checks, không force/admin
+  bypass, không sửa branch tác giả hoặc xóa branch agent.
+- Nếu account chung không được APPROVE, COMMENT ghi verdict/role chỉ đủ khi
+  ruleset không đòi approval bằng account khác; không giả satisfied approval.
+- Timeout merge phải đối chiếu PR/merge SHA trước retry. Ghi receipt lên PR/Issue;
+  **MERGED khác VERIFIED**. Không tự Done/close; closing keywords trong PR hoặc
+  commit còn có thể đóng Issue thiếu G5 phải được author/coordinator xử lý
+  trước merge. Khi cần G5 sau merge, giữ Issue mở và ghi phần còn NOT_RUN.
+
+Skill mới cũng là thay đổi do Atlas/Nova viết: tác giả không tự merge PR tạo
+hoặc cập nhật skill của mình. Chi tiết điều kiện/chế độ và output ở SKILL.md.
 
 ## Khởi tạo code trên từng máy
 
@@ -276,10 +389,13 @@ là BLOCKED, không tự force.
    `python cms/scripts/check-plans.py --self-test`,
    `python .agents/scripts/check-agent-artifacts.py` và `git diff --check`.
 4. Commit ghi task ID (ví dụ `M3-S03-T01: ...`), non-force
-   `git push -u origin agent/<name>` sau khi HEAD/remote đúng.
+   `git push -u origin agent/<name>` sau khi HEAD/remote đúng; với task branch
+   được giao, push đúng `task/...`. Commit có trailer `Agent: <name>`.
 5. Đính commit SHA, môi trường và lệnh PASS/FAIL/NOT_RUN vào Issue và PR;
-   reviewer so sánh source, dependency, contract và DB migration impact.
-6. Chỉ merge sau review/CI/approval. `MERGED` ≠ `VERIFIED` cho scope chưa
+   reviewer so sánh source, dependency, contract và DB migration impact; ghi
+   verdict kèm `Reviewed head SHA` theo quy chuẩn trên.
+6. Chỉ merge khi đủ các gate áp dụng, bao gồm review nếu quy trình yêu cầu,
+   CI và quyền merge; xem ngoại lệ M3 tại ADR-0005. `MERGED` ≠ `VERIFIED` cho scope chưa
    chạy nghiệm thu; cập nhật trạng thái trong docs khi có evidence.
 
 ## Giới hạn Muse

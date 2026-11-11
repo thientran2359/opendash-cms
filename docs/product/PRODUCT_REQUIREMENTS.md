@@ -19,8 +19,14 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 - Quản trị viên tạo loại nội dung tùy chỉnh (CPT), custom fields, danh mục có cha–con và thẻ qua giao diện. Theme/plugin có thể định nghĩa sẵn các thành phần này.
 - Các field bản đầu gồm chữ ngắn/dài, trình soạn thảo nội dung, số, bật/tắt, ngày, lựa chọn, ảnh và thư viện ảnh.
 - Người nhập liệu có thể làm việc qua form. Template lấy dữ liệu của nội dung tương ứng để hiển thị.
-- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. Bấm **Lưu** cập nhật website công khai.
+- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. **Phân biệt Lưu và Xuất bản:** với `post`/`page` đang ở `draft`, **Lưu** chỉ ghi bản nháp vào DB, không làm nội dung xuất hiện trên URL công khai, archive, sitemap hoặc media public qua tham chiếu draft. Chỉ chuyển trạng thái sang `published` bằng thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một `post`/`page` đã `published` cập nhật nội dung công khai. Preview draft phải yêu cầu phiên đăng nhập/quyền hợp lệ. Với **Builder/homepage** hiện hữu, **Lưu** tiếp tục cập nhật trang công khai ngay; không tự thêm workflow draft cho Builder hoặc CPT khác. Phần trạng thái/endpoint/schema cụ thể cần G2 trước triển khai.
 - Hai vai trò là Quản trị viên và Biên tập viên. Quản trị viên quản lý hệ thống, cấu hình, theme và plugin. Biên tập viên quản lý và cập nhật nội dung công khai.
+
+## Quyết định bổ sung M3 — Core CMS usable (10/11/2026)
+
+Chủ dự án chốt **phương án A** cho milestone M3: sản phẩm phải sử dụng được trong Admin **gần WordPress**, giao diện xây bằng **Tailwind CSS**, có Dashboard; Posts/Pages với `post` và `page` **built-in**; Media Library ảnh + picker; Users Admin/Editor (list/create/edit/role/password), login/logout; General Settings tối thiểu (site title/tagline/timezone); Appearance→Themes (ZIP install/list/activate cơ bản); Plugins (ZIP install/list/enable/disable). Giữ hoạt động Builder/preview và bảo vệ session/RBAC/CSRF/media; không coi M3 hoàn tất khi chỉ có backend hoặc API.
+
+**Ngoại lệ nhỏ so với giới hạn V1 cũ:** riêng `post`/`page` M3 có trạng thái **draft/published tối thiểu** theo quy tắc Lưu/Xuất bản bên trên (không có approval workflow, scheduled publishing, revision history). Quy trình biên tập đa bước vẫn để sau V1. Taxonomy, plugin CPT/field bridge, video/media delete/reconcile, Builder AST, template/Theme Options, SEO/contact và backup/restore **vẫn nằm trong V1**, nhưng không phải điều kiện đóng M3 phương án A; xem [roadmap](../plans/ROADMAP_V1.md) để biết mốc chính.
 
 ## Builder và theme
 
@@ -46,7 +52,7 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 
 ## Để sau bản đầu
 
-Bán hàng, AI dựng trang từ ảnh, luồng lưu nháp và xuất bản riêng, lịch sử và khôi phục phiên bản, repeater, quan hệ giữa nội dung, khối đồng bộ tùy ý, lọc nâng cao cho khách truy cập, giao diện plugin tùy ý, tác vụ định kỳ, sao lưu theo lịch, quản lý nội dung đa ngữ và chuyển ngôn ngữ Admin.
+Bán hàng, AI dựng trang từ ảnh, luồng **duyệt/phê duyệt xuất bản nhiều bước** (ngoài trạng thái draft/published tối thiểu M3), lịch sử và khôi phục phiên bản, repeater, quan hệ giữa nội dung, khối đồng bộ tùy ý, lọc nâng cao cho khách truy cập, giao diện plugin tùy ý, tác vụ định kỳ, sao lưu theo lịch, quản lý nội dung đa ngữ và chuyển ngôn ngữ Admin.
 
 ## Quyết định kỹ thuật còn mở
 

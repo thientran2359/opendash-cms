@@ -4,9 +4,24 @@
 
 **Cập nhật trạng thái (09/11/2026):** CNT-05 hiện **PARTIAL**. Media API upload raster/metadata/thumbnail, image/gallery picker và restart đã có [bằng chứng M3.5](../../verification/2026-11-09-m3-5-media-library.md); ảnh công khai chỉ khi được tham chiếu theo [M3.6](../../verification/2026-11-09-m3-6-public-content-rendering.md) đã có test macOS. Chưa có video, thao tác xóa asset khỏi thư viện/GC, backup/restore hoặc Windows/Linux nghiệm thu. Xem [bảng trạng thái M3](../M3_STATUS_2026-11-09.md). Các đề xuất G1–G3 bên dưới **là hồ sơ lịch sử 08/11**; không thực thi chúng như task mới nếu chưa đối chiếu source hiện tại và gate còn mở.
 
+**Quyết định ACL riêng M3 Post/Page (10/11/2026):** [ADR-0004 — G2 AGREED owner-direct](../../decisions/ADR-0004-m3-post-page-publication-boundary.md) yêu cầu public `/media/{id}/file|thumbnail` chỉ nhận tham chiếu từ legacy CPT public hoặc built-in `post/page` đã `published`, cho cả image và gallery. Asset chỉ thuộc draft phải 404 công khai, preview qua Admin media có xác thực; asset SHA-256 dùng chung với published vẫn public. Đây là G2 cho P07/P08/P16, **không phải** G2 phê duyệt video/delete/reconcile/backup của CNT-05, chưa có G4/G5 mới. [G3 hiện DRAFT](../milestones/M3/slices/2026-11-10-post-page-publication-g3.md).
+
 **Hồ sơ trạng thái nghiên cứu ngày 08/11/2026 (lịch sử, không phải tình trạng hiện nay):** Research `REVIEWED` (source/CodeGraph tại `main@2bad893` và phản biện Codex ↔ Antigravity đến Turn 5, 07/11/2026) · Design `PROPOSED` (**G2 đang mở, chưa `AGREED`**) · Implementation `NOT_STARTED` · Verification `NOT_RUN`; capability và task bên dưới chưa `READY`.
 
 Living Module Brief G0–G3 giữ một nguồn chi tiết từ scope đến task. V1 cần ảnh/media upload và image/gallery picker; video là phần cần xác minh mức hỗ trợ/giới hạn khi G2. **Opaque `media_id` thay URL/path trong field là ứng viên G1**, chưa chốt kiểu ID, schema metadata, public route hay cơ chế dọn file. Xem [planning consensus](../../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) và [Pre-M3 readiness](../../discussions/threads/2026-11-07-pre-m3-codegraph-readiness.md).
+
+## Đối chiếu implementation hiện hành và G2 lịch sử — 10/11/2026
+
+**Baseline code:** `main@e4a143291cbaaf3a302cd30e974e27ea9ab886f0`. Đối chiếu này là source inspection; **không phải chạy lại G5** tại SHA này. CNT-05 và toàn M3 vẫn **PARTIAL** theo [snapshot M3](../M3_STATUS_2026-11-09.md).
+
+| Lớp bằng chứng | Đối chiếu ở source / thiếu gì |
+| --- | --- |
+| **Current implementation** | [Migration `0006`](../../../cms/migrations/0006_media_assets.sql) lưu `media_assets` dùng **ID SHA-256** dài 64 ký tự, JPEG/PNG/WebP, tối đa **8 MiB** và kích thước tối đa 6.000 px/cạnh; [decoder hiện hành](../../../cms/crates/opendash-server/src/media.rs) giới hạn thêm **20 triệu pixel**. [Admin media routes](../../../cms/crates/opendash-server/src/routes/media.rs) upload/list/file/thumbnail có session/CSRF phù hợp hành vi; [public reference ACL](../../../cms/crates/opendash-server/src/storage/public_content.rs) chỉ cho tải media public khi đang được entry image/gallery tham chiếu. Upload riêng tư chưa lưu entry không tự public. |
+| **Evidence verified-by-slice** | [M3.5 — raster upload/thumbnail/picker](../../verification/2026-11-09-m3-5-media-library.md), [M3.6 — public reference ACL](../../verification/2026-11-09-m3-6-public-content-rendering.md): PASS **trên macOS và các SHA được ghi riêng**. Script mang tên `windows_*` chạy trên Mac **không** chứng minh Windows; Linux chưa được xác minh. |
+| **Historical G2 PROPOSED (08/11)** | [G2.1/G2.3 bên dưới](#g2--hồ-sơ-đề-xuất-thiết-kế-v01-08112026-đang-phản-biện-proposed) đưa ứng viên **UUID**, GIF và **10 MiB**, cùng đề xuất `GET /media/{id}` public trực tiếp. Các lựa chọn này **khác** implementation SHA-256/8 MiB/reference ACL đã có; là lịch sử G2, **không phải contract/API được duyệt cho hiện tại**. |
+| **Missing G1/G2/G5 gates** | Chưa có lifecycle xóa/GC/reconcile, crash-safe file↔DB recovery, video V1, invariant snapshot/restore DB+uploads khi `OPENDASH_DB_PATH` ngoài site root, kiểm chứng Windows/Linux mới. Không tự hard-delete/auto-GC khi còn bất định reference hoặc restore. Chính sách referenced-delete/tombstone, MIME/codec/Range, concurrency, negative tests cần **Full-Track G2** và reviewer độc lập trước code. |
+
+**Quyết định tiếp theo:** [Issue #15 Final Decision — nhóm D CNT-05 × OPS-01](https://github.com/thientran2359/opendash-cms/issues/15#issuecomment-6760145410) giữ video trong phạm vi V1/M3 của kế hoạch hiện hành nhưng chưa chốt định dạng/giới hạn; backup engine còn thuộc OPS-01/M8. **Không xóa hoặc viết lại G2 lịch sử** và không biến đề xuất G3 cũ thành task `READY`.
 
 ## G0 — Năng lực cần có
 
