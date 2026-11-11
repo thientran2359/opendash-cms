@@ -1,6 +1,6 @@
 # M3-S25-T01 — General Settings, macOS integrated verification
 
-**Issue:** [#49](https://github.com/thientran2359/opendash-cms/issues/49) · **Agent:** Harbor (CoS macOS) · **Date:** 2026-11-11 · **Status:** Integrated local acceptance PASS; PR/CI, post-merge verification, G5 and Project Done pending at the time of this evidence commit.
+**Issue:** [#49](https://github.com/thientran2359/opendash-cms/issues/49) (closed, completed) · **Agent:** Harbor (CoS macOS) · **Date:** 2026-11-11 · **Status:** **Done / task G5 VERIFIED** on macOS at exact main code merge SHA `08f8d210bd1632f1ae5c3d2b27c62d74be2ff387`; GitHub Project #3 **Done**. M3 full-release E2E/Windows parity gates remain separate.
 
 ## Baseline, contracts, and ownership
 
@@ -22,7 +22,7 @@
 
 macOS 15.8.2 x86_64; Cargo 1.99.1; Node 24.22.2, Vite 6.4.6; Chrome 157.0.8103.51; Python 3.9 with Playwright 1.55.0 in a throwaway testing venv.
 
-All results below were executed from the **actual merged/integrated task source** in `../harbor-m3-s25-t01`, with embedded React Admin and actual Rust/SQLite, not the detached early validation copy. The early validation copy is no longer the source of the verification claim. `PATH` in the CoS shell requires the existing Cargo (`~/.cargo/bin`) and Node (`~/.nvm/versions/node/v24.22.2/bin`) paths.
+All results below were executed from the **actual integrated task source** in `../harbor-m3-s25-t01`, with embedded React Admin and actual Rust/SQLite, not the detached early validation copy. The same core acceptance suite was repeated **after merge** in a clean worktree checked out at `main@08f8d210`. `PATH` in the CoS shell requires the existing Cargo (`~/.cargo/bin`) and Node (`~/.nvm/versions/node/v24.22.2/bin`) paths.
 
 | Check actually executed | Result |
 | --- | --- |
@@ -40,8 +40,10 @@ All results below were executed from the **actual merged/integrated task source*
 
 All HTTP/browser tests use temporary site roots, loopback ports and SQLite fixtures; none use a live site DB. Baseline `cef71f3` binary was compiled in a **separate detached rollback worktree**; old and new binaries were never started on the same upgraded DB at once. The rollback smoke uses a real SQLite snapshot and exclusively operates on temporary copies.
 
-## Remaining delivery / G5 gate
+## G5 post-merge verification and governance
 
-1. Worktree-specific Git `user.name=Harbor`, `user.email=daiduongtihon.vn@gmail.com` are configured following owner confirmation. Global identity stays unset; follow [identity policy](../../.agents/GIT_WORKTREE_IDENTITY.md).
-2. Commit/push integration, open PR to main, verify exact head/base and required GitHub checks. Self-merge only when ADR-0005 checks/security gates PASS. Then rerun post-merge verification at exact main SHA, update Issue and Project state; **merged does not automatically mean G5 verified**.
-3. M3 full release macOS/Windows E2E, distribution and milestone closure belong to later M3-S29/S30 tasks; this evidence is scoped to SITE-01. No production deployment or live migration was performed.
+1. **Code PR:** [#57](https://github.com/thientran2359/opendash-cms/pull/57), head `57481e7827a4f98283f307a0a16d05648636cb4a`, base `cef71f3bc534dbe28ff6719d00f30cf8327f0f33`, merge commit **`08f8d210bd1632f1ae5c3d2b27c62d74be2ff387`**. At exact PR head, [OpenDash Governance run 42971340202](https://github.com/thientran2359/opendash-cms/actions/runs/42971340202) finished **SUCCESS** on both Ubuntu and Windows. Mergeability and latest base were rechecked; expected-head self-merge complied with ADR-0005.
+2. **Actual post-merge macOS x86_64 at exact SHA `08f8d210`:** a separate clean detached worktree was built after merge with `npm ci --prefix cms/admin`, `npm run build --prefix cms/admin`, `cargo test --manifest-path cms/Cargo.toml --locked` (**65/65 PASS**) and locked Cargo build (**PASS**). `general_settings_smoke.py` with actual pre-0010 binary including backup/restore (**PASS**), `general_settings_browser.py` on real Chrome 390px (**PASS**) and `public_content_smoke.py` (**PASS**) ran again. `cargo fmt --check`, plan checker and self-test, agent-artifact guard, `git diff --check`: **PASS**. Post-merge worktree git status clean before the docs-only update. All used disposable DB/site roots.
+3. [Issue #49 G5 evidence comment](https://github.com/thientran2359/opendash-cms/issues/49#issuecomment-6788709692) records actual commands, OS, fixtures, PR and code SHA. Issue closed as **completed** and Project #3 Status verified **Done** afterward. No independent peer review is claimed; autonomous M3 delivery is governed by ADR-0005.
+4. Commit author/committer in task and docs worktrees: `Harbor <daiduongtihon.vn@gmail.com>` (worktree-local only), following owner confirmation and [identity policy](../../.agents/GIT_WORKTREE_IDENTITY.md). No global Git identity change.
+5. M3 full release macOS/Windows E2E, distribution and milestone closure belong to later M3-S29/S30 tasks; **this G5 is SITE-01.1 task-scoped**. No production deployment or live migration was performed. A restored pre-0010 database must be paired with the pre-0010 executable; an upgraded DB must not be opened by that older binary.
