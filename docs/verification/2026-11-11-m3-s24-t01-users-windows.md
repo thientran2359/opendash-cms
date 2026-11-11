@@ -64,7 +64,8 @@ Một worktree tạm ở \`6d6f4b5a9e9420d6aba4d72311391c24c12fa3b0\` được b
 
 - **Phạm vi:** riêng task Users `M3-S24-T01` / [Issue #48](https://github.com/thientran2359/opendash-cms/issues/48), không phải release G5 của toàn M3.
 - **Code PR:** [#56](https://github.com/thientran2359/opendash-cms/pull/56), head `93d1f59439c0ffd78fcf2185b5823a3434b0b7d2`, merge SHA `cef71f3bc534dbe28ff6719d00f30cf8327f0f33`. [GitHub Governance run 42967716364](https://github.com/thientran2359/opendash-cms/actions/runs/42967716364) Ubuntu/Windows **SUCCESS** tại head code PR.
-- **Mã sản phẩm hậu kiểm:** worktree sạch tích hợp `origin/main@51aae56ed232e4d7be881b7baab01977c5881d11` (Users, Settings, Plugins, Dashboard). Các merge tài liệu G5 #61/#62 sau đó không thay bất kỳ file `cms/` nào; `git diff --name-only 51aae56..081e08d -- cms` rỗng. Binary Windows `cms/target/debug/opendash.exe` được build lại từ source đúng SHA đó với Admin Vite đã nhúng.
+- **Mã sản phẩm hậu kiểm vòng đầu:** worktree sạch tích hợp `origin/main@51aae56ed232e4d7be881b7baab01977c5881d11` (Users, Settings, Plugins, Dashboard). Các merge tài liệu G5 #61/#62 sau đó không thay bất kỳ file `cms/` nào; `git diff --name-only 51aae56..081e08d -- cms` rỗng. Binary Windows `cms/target/debug/opendash.exe` được build lại từ source đúng SHA đó với Admin Vite đã nhúng.
+- **Kiểm chứng lại sau Themes:** `origin/main@774d08245a6d18da72bc2b6cad652ad216f80f9e` có PR #63/#64, migration **0011** và Admin Themes. Forge đã merge baseline này vào branch kiểm chứng riêng, build lại binary/embedded Admin và chạy lại Users G5 với **cùng binary thật pre-0009**. Không sửa mã Rust/React hoặc migration của Harbor; thay đổi thuộc riêng harness Users và tài liệu.
 - **Môi trường:** Windows 11 Pro, Rust/Cargo 1.99.1, Node 22.16.0, Python 3.13.4, Chrome 157.0.8103.50; site root, SQLite, port loopback riêng theo từng test; không chạm dữ liệu thật.
 
 | Lệnh / test hậu kiểm thực chạy | Kết quả |
@@ -76,13 +77,26 @@ Một worktree tạm ở \`6d6f4b5a9e9420d6aba4d72311391c24c12fa3b0\` được b
 | `cd cms; python scripts/content_types_smoke.py --binary target/debug/opendash.exe` | **PASS** — schema/CSRF/validation, legacy upgrade |
 | `cd cms; python scripts/content_entries_smoke.py --binary target/debug/opendash.exe`; `public_content_smoke.py`; `general_settings_smoke.py --baseline fixtures/baseline_0001.sqlite` | **PASS** — auth/RBAC, CRUD, publication/public ACL, Settings CAS, upgrade và restart |
 | `cd cms; python scripts/windows_auth_smoke.py --binary <integrated-binary> --baseline-binary <actual-pre-0009-binary>` | **PASS** sau sửa fixture test-only — Auth/CSRF/Origin, race, last Admin, session revoke, SQLite lock 503, pre-0009 upgrade và old-binary snapshot restore |
-| `cd cms; python scripts/windows_auth_smoke.py --binary <integrated-binary>` | **PASS** — đường fixture tổng hợp không có baseline binary, chỉ cho phép migration 0009/0010 đã biết |
+| `cd cms; python scripts/windows_auth_smoke.py --binary <integrated-binary>` | **PASS** trên baseline 0010 trước Themes; trên baseline 0011, toàn bộ Auth/race/current-upgrade **PASS**, nhưng báo **SKIP** ca pre-0009 rollback khi không cấp binary cũ (không giả nhận G5 từ ca SKIP) |
 | Python `py_compile`, `check-plans.py`, `check-plans.py --self-test`, `check-standards.py`, `git diff --check` | **PASS** — gồm 12 planning fixtures |
+
+### Chạy lại sau tích hợp Themes #51 (`main@774d082`)
+
+| Kiểm tra trên Windows với mã nguồn Themes đã merge | Kết quả thực chạy |
+| --- | --- |
+| `npm ci --prefix cms/admin`; `npm run build --prefix cms/admin`; `cargo fmt --manifest-path cms/Cargo.toml --all --check`; `cargo build --manifest-path cms/Cargo.toml --locked`; `cargo test --manifest-path cms/Cargo.toml --locked` | **PASS** — Vite **60 modules**; Rust locked build và unit tests PASS |
+| `cd cms; python scripts/windows_auth_smoke.py --binary target/debug/opendash.exe --baseline-binary <actual-pre-0009-binary>` | **PASS toàn bộ** — binary cũ mở lại snapshot pre-0009, sessions/hash và login còn nguyên, schema mới 0009/0010/0011 áp dụng được lên DB copy |
+| `cd cms; python scripts/windows_auth_smoke.py --binary target/debug/opendash.exe` | **PASS nhóm Auth/RBAC/CSRF/race/upgrade hiện hành**; **SKIP có thông báo rõ** riêng pre-0009 rollback vì migration `[9,10,11]` cần genuine old binary |
+| `cd cms; python scripts/windows_users_browser.py --binary target/debug/opendash.exe --browser 'C:/Program Files/Google/Chrome/Application/chrome.exe'`; `windows_admin_browser.py` tương tự | **PASS** — real Chrome Users CRUD/responsive 390px và Builder/Admin hồi quy |
+| `cd cms; $env:PYTHONIOENCODING='utf-8'; python scripts/themes_smoke.py --binary target/debug/opendash.exe --baseline-db fixtures/baseline_0001.sqlite` | **PASS** — A→B, A→C, C→A, CAS, activation, restart, migration 0011, historical SQLite upgrade, homepage giữ nguyên |
+| `cd cms; python scripts/content_entries_smoke.py --binary target/debug/opendash.exe`; `public_content_smoke.py`; `general_settings_smoke.py --baseline fixtures/baseline_0001.sqlite` | **PASS** — Content/Post/Page, public ACL, Settings upgrade/restart |
+
+Lưu ý khi chạy Theme regression trên Windows: PowerShell/CoS mặc định dùng stdout `cp1252`, vì vậy đặt `PYTHONIOENCODING=utf-8` để in được ký tự `→` trong dòng PASS; từ thư mục `cms/`, thêm `--baseline-db fixtures/baseline_0001.sqlite` để không tìm nhầm fixture theo đường dẫn mặc định. Hai lỗi lệnh gọi ban đầu (encode và missing fixture) không phải lỗi hành vi CMS. Chỉ dòng lệnh đã sửa ở bảng trên mới được tính là Theme smoke PASS.
 
 ### Sửa sai lệch fixture kiểm thử, không sửa CMS
 
 Trong lượt hậu kiểm đầu tiên, `windows_auth_smoke.py` tạo database giả lập pre-0009 từ binary mới (đã có Settings migration 0010) nhưng chỉ xóa `users.version` và journal 0009. Bản snapshot vẫn có journal 0010, khiến binary trước 0009 trả `VersionMissing(10)` một cách **đúng và an toàn**; đây không phải lỗi migration sản phẩm. Chi tiết đã báo trên [Issue #48](https://github.com/thientran2359/opendash-cms/issues/48).
 
-Sửa duy nhất harness `cms/scripts/windows_auth_smoke.py`: khi được cung cấp genuine baseline binary tại `main@6d6f4b5a9e9420d6aba4d72311391c24c12fa3b0`, tạo fixture và các session ngay bằng binary cũ (schema thật trước 0009), snapshot SQLite, nâng cấp bằng binary hiện hành, so hash/session dữ liệu nguyên vẹn, rồi **mở snapshot lại bằng chính binary cũ**. Khi không có baseline binary, đường giả lập chỉ được xóa hai migration 0009/0010 trên DB **tạm**, kiểm không còn `site_general_settings` và từ chối schema mới chưa biết thay vì âm thầm tạo backup không thể khôi phục. Hai đường smoke đều **PASS** sau chỉnh sửa; không sửa migration trong repo, code runtime hay database thật.
+Sửa duy nhất harness `cms/scripts/windows_auth_smoke.py`: khi được cung cấp genuine baseline binary tại `main@6d6f4b5a9e9420d6aba4d72311391c24c12fa3b0`, tạo fixture và các session ngay bằng binary cũ (schema thật trước 0009), snapshot SQLite, nâng cấp bằng binary hiện hành, so hash/session dữ liệu nguyên vẹn, rồi **mở snapshot lại bằng chính binary cũ**. Khi không có baseline binary, đường giả lập chỉ được xóa migration 0009/0010 trên DB **tạm** nếu schema đúng các version đã biết; từ 0011 trở đi, **SKIP riêng rollback lịch sử, ghi rõ yêu cầu `--baseline-binary`** thay vì dựng một snapshot sai. Test với binary cũ thật **PASS đầy đủ** cả trước và sau Themes; không sửa migration trong repo, code runtime hay database thật.
 
 **Verdict: task G5 VERIFIED trên Windows cho M3-S24-T01 Users.** Các trường hợp last-Admin, revoked session và rollback đã có evidence chạy thật sau merge. **Không được suy ra** M3 release G5, macOS parity, hay đóng Issue #53/#54; các gate này phải chạy release candidate chung sau khi Themes tích hợp.
