@@ -11,8 +11,12 @@ use crate::{
     theme::{self, Block},
 };
 use opendash_core::{
-    builder::{BindingTarget, BuilderDocument, ElementContent, KnownElement},
+    builder::{
+        BindingTarget, BuilderDocument, ElementContent, KnownElement, Responsive, ResponsiveStyle,
+        TextAlign,
+    },
     hooks::HookEvent,
+    id::valid_package_id,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -50,6 +54,108 @@ fn escape_html(value: &str) -> String {
     out
 }
 
+#[derive(Clone, Copy)]
+enum ContainerKind {
+    Section,
+    Row,
+    Column,
+}
+
+fn responsive_declarations(style: Option<&ResponsiveStyle>, kind: ContainerKind) -> String {
+    let mut css = String::new();
+    let Some(style) = style else { return css };
+    if let Some(value) = style.padding_px {
+        css.push_str(&format!("padding:{value}px;"));
+    }
+    if matches!(kind, ContainerKind::Row) {
+        if let Some(value) = style.gap_px {
+            css.push_str(&format!("gap:{value}px;"));
+        }
+        if let Some(value) = style.columns_per_row {
+            css.push_str(&format!(
+                "grid-template-columns:repeat({value},minmax(0,1fr));"
+            ));
+        }
+    }
+    if matches!(kind, ContainerKind::Column) {
+        if let Some(value) = style.text_align {
+            let value = match value {
+                TextAlign::Start => "start",
+                TextAlign::Center => "center",
+                TextAlign::End => "end",
+            };
+            css.push_str(&format!("text-align:{value};"));
+        }
+    }
+    css
+}
+
+fn push_scoped_rule(target: &mut String, id: &str, properties: &str) {
+    // These IDs are validated on save; also refuse invalid historical IDs
+    // so no untrusted value can enter the CSS selector or style element.
+    if !properties.is_empty() && valid_package_id(id) {
+        target.push_str(&format!(
+            "main[data-builder-version=\"1\"] [data-node-id=\"{id}\"]{{{properties}}}"
+        ));
+    }
+}
+
+/// One CSS source is used for both authenticated Preview and public HTML.
+/// The range queries preserve exact CSS-pixel boundaries, including fractions.
+fn builder_responsive_css(document: &BuilderDocument) -> String {
+    let mut desktop = String::new();
+    let mut tablet = String::new();
+    let mut mobile = String::new();
+    let mut append = |id: &str, responsive: Option<&Responsive>, kind: ContainerKind| {
+        let Some(responsive) = responsive else { return };
+        let mut base = String::new();
+        if matches!(kind, ContainerKind::Row) && responsive.opts_into_grid() {
+            base.push_str("display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:0px;");
+        }
+        base.push_str(&responsive_declarations(responsive.desktop.as_ref(), kind));
+        push_scoped_rule(&mut desktop, id, &base);
+        push_scoped_rule(
+            &mut tablet,
+            id,
+            &responsive_declarations(responsive.tablet.as_ref(), kind),
+        );
+        push_scoped_rule(
+            &mut mobile,
+            id,
+            &responsive_declarations(responsive.mobile.as_ref(), kind),
+        );
+    };
+    for section in &document.sections {
+        append(
+            &section.id,
+            section.responsive.as_ref(),
+            ContainerKind::Section,
+        );
+        for row in &section.children {
+            append(&row.id, row.responsive.as_ref(), ContainerKind::Row);
+            for column in &row.children {
+                append(
+                    &column.id,
+                    column.responsive.as_ref(),
+                    ContainerKind::Column,
+                );
+            }
+        }
+    }
+    if desktop.is_empty() && tablet.is_empty() && mobile.is_empty() {
+        return String::new();
+    }
+    let mut css = format!("<style data-builder-responsive>{desktop}");
+    if !tablet.is_empty() {
+        css.push_str(&format!("@media (width < 1024px){{{tablet}}}"));
+    }
+    if !mobile.is_empty() {
+        css.push_str(&format!("@media (width < 768px){{{mobile}}}"));
+    }
+    css.push_str("</style>");
+    css
+}
+
 /// Template selection comes from one storage snapshot. Unsupported legacy
 /// nodes are invisible in public markup but remain intact in Builder JSON.
 /// Only renderer-known core elements can add public media references.
@@ -70,7 +176,10 @@ pub fn render_builder_resolved(
     is_preview: bool,
     bindings: &BindingResults,
 ) -> ApiResult<RenderedLayout> {
-    let mut html = String::from("<main data-builder-version=\"1\">");
+    // Keep the original v1 main/section child structure intact; the optional
+    // stylesheet precedes the root and every selector is scoped to that root.
+    let mut html = builder_responsive_css(document);
+    html.push_str("<main data-builder-version=\"1\">");
     let mut diagnostics = Vec::new();
     for section in &document.sections {
         html.push_str(&format!(

@@ -3,9 +3,10 @@ import * as api from '../api/index.ts';
 import type { AuthUser, BlockRegistry } from '../types.ts';
 import type { BuilderDiagnostic, HomepageOpen } from '../api/builder.ts';
 import {
-  type BuilderDocument, type ElementType, type NodeKind, ELEMENT_TYPES, EMPTY_DOCUMENT,
+  type BuilderDocument, type BuilderViewport, type ElementType, type NodeKind, type ResponsiveAlign,
+  type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
   allNodes, appendNode, isElement, isLockedElement, locate, moveNode, preservesAnchors,
-  removeNode, setNodeField,
+  removeNode, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
 import { BuilderCanvas } from './BuilderCanvas.tsx';
@@ -88,6 +89,8 @@ export function BuilderWorkspace({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [elementType, setElementType] = useState<ElementType>('core/heading');
   const [mode, setMode] = useState<'canvas' | 'preview'>('canvas');
+  // Pure UI state: changing viewport never changes homepage JSON or revision.
+  const [viewport, setViewport] = useState<BuilderViewport>('desktop');
   const [previewHtml, setPreviewHtml] = useState('');
   const [diagnostics, setDiagnostics] = useState<BuilderDiagnostic[]>([]);
   const [revision, setRevision] = useState(0);
@@ -244,6 +247,14 @@ export function BuilderWorkspace({
     if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
     changeDraft(setNodeField(draftRef.current, id, field, value), id);
   };
+  const editResponsive = (
+    id: string, target: BuilderViewport, field: ResponsiveField,
+    value: number | ResponsiveAlign | null,
+  ) => {
+    const next = setResponsiveField(draftRef.current, id, target, field, value);
+    if (!next) return message('Thuộc tính responsive không hợp lệ.', true);
+    changeDraft(next, id);
+  };
 
   const preview = async () => {
     if (!csrfToken || !user || !loadedRef.current) return;
@@ -358,6 +369,12 @@ export function BuilderWorkspace({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="builder-viewport" className="text-sm font-medium text-slate-600">Viewport</label>
+          <select id="builder-viewport" aria-label="Viewport Builder" className="text-sm"
+            value={viewport} onChange={event => setViewport(event.target.value as BuilderViewport)}>
+            {(['desktop', 'tablet', 'mobile'] as BuilderViewport[]).map(key =>
+              <option key={key} value={key}>{VIEWPORT_LABELS[key]} · {VIEWPORT_WIDTHS[key]}px</option>)}
+          </select>
           <button type="button" className="btn-secondary" disabled={loading || !user} onClick={() => void reload()}>
             Tải bản server
           </button>
@@ -398,13 +415,20 @@ export function BuilderWorkspace({
               disabled={!previewHtml} aria-pressed={mode === 'preview'}
               onClick={() => setMode('preview')}>Preview HTML</button>
           </div>
-          <div className={mode === 'canvas' ? 'block' : 'hidden'}>
-            <BuilderCanvas document={draft} selectedId={selectedId} registry={registry} onSelect={setSelectedId} />
+          <div className={mode === 'canvas' ? 'block overflow-x-auto' : 'hidden'}
+            data-testid="builder-structural-viewport">
+            <div style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: 'none', minWidth: 0 }}>
+              <BuilderCanvas document={draft} selectedId={selectedId} registry={registry}
+                viewport={viewport} onSelect={setSelectedId} />
+            </div>
           </div>
           {mode === 'preview' && (
-            <iframe id="canvas" title="Preview homepage (sandbox opaque)" sandbox=""
-              referrerPolicy="no-referrer" className="!h-[650px] !w-full !border-0"
-              srcDoc={previewHtml} />
+            <div className="overflow-x-auto" data-testid="builder-preview-viewport">
+              <iframe id="canvas" title="Preview homepage (sandbox opaque)" sandbox=""
+                referrerPolicy="no-referrer" className="!h-[650px] !border-0"
+                style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: 'none', display: 'block' }}
+                srcDoc={previewHtml} />
+            </div>
           )}
           {diagnostics.length > 0 && <div className="border-t border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
             <strong>Chẩn đoán renderer:</strong>
@@ -415,7 +439,8 @@ export function BuilderWorkspace({
         </section>
         <div className="min-w-0">
           <BuilderInspector document={draft} selectedId={selectedId} registry={registry}
-            csrfToken={csrfToken} onChange={editField} onError={onApiError} />
+            csrfToken={csrfToken} viewport={viewport} onChange={editField}
+            onResponsiveChange={editResponsive} onError={onApiError} />
         </div>
       </div>
     </div>

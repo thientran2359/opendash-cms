@@ -1,18 +1,20 @@
 import { useState } from 'react';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
-import type { BuilderDocument, BuilderElement } from './document.ts';
-import { isElement, isLockedElement, locate, nodeTitle } from './document.ts';
+import type { BuilderDocument, BuilderElement, BuilderViewport, ResponsiveAlign, ResponsiveField, ResponsiveContainer } from './document.ts';
+import { effectiveResponsive, isElement, isLockedElement, locate, nodeTitle, RESPONSIVE_FIELDS, VIEWPORT_LABELS } from './document.ts';
 
 interface Props {
   document: BuilderDocument;
   selectedId: string | null;
   registry: Record<string, Record<string, string>>;
   csrfToken: string | null;
+  viewport: BuilderViewport;
   onChange: (id: string, key: string, value: string | number) => void;
+  onResponsiveChange: (id: string, viewport: BuilderViewport, field: ResponsiveField, value: number | ResponsiveAlign | null) => void;
   onError: (error: unknown, fallback: string) => void;
 }
 
-export function BuilderInspector({ document, selectedId, registry, csrfToken, onChange, onError }: Props) {
+export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, onChange, onResponsiveChange, onError }: Props) {
   const [showPicker, setShowPicker] = useState(false);
   const item = locate(document, selectedId);
   if (!item) return (
@@ -53,6 +55,18 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, on
     return typeof current === 'string' || typeof current === 'number' ? String(current) : '';
   };
   const binding = element?.props.binding;
+  const responsiveNode = element ? null : item.node as ResponsiveContainer;
+  const responsiveFields = item.kind === 'element' ? [] : RESPONSIVE_FIELDS[item.kind];
+  const direct = responsiveNode?.responsive?.[viewport] ?? {};
+  const inherited = responsiveNode ? effectiveResponsive(responsiveNode,
+    viewport === 'mobile' ? 'tablet' : 'desktop') : {};
+  const fieldNames: Record<ResponsiveField, string> = {
+    padding_px: 'Padding (px)', gap_px: 'Gap (px)',
+    columns_per_row: 'Số cột mỗi hàng', text_align: 'Căn chữ',
+  };
+  const defaults: Record<ResponsiveField, number | string> = {
+    padding_px: 0, gap_px: 0, columns_per_row: 1, text_align: 'start',
+  };
   return (
     <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4" aria-label="Inspector">
       <div>
@@ -60,6 +74,56 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, on
         <p className="mt-1 text-sm text-slate-600">{nodeTitle(item)}</p>
         <code className="block break-all text-[11px] text-slate-400">{item.node.id}</code>
       </div>
+      {responsiveNode && (
+        <fieldset className="space-y-3 rounded-lg border border-slate-200 p-3" aria-label="Responsive overrides">
+          <legend className="px-1 text-sm font-semibold text-slate-800">
+            Responsive · {VIEWPORT_LABELS[viewport]}
+          </legend>
+          <p className="text-xs text-slate-500">
+            Để trống sẽ kế thừa từng thuộc tính từ viewport rộng hơn. Giá trị 0 là hợp lệ.
+          </p>
+          {responsiveFields.map(field => {
+            const directValue = direct[field];
+            const inheritedValue = inherited[field] ?? defaults[field];
+            const isText = field === 'text_align';
+            return <div key={field} className="space-y-1">
+              <label htmlFor={'responsive-' + field} className="block text-xs font-semibold text-slate-700">
+                {fieldNames[field]}
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                {isText ? <select
+                  id={'responsive-' + field} aria-label={fieldNames[field]}
+                  className="min-w-0 flex-1 text-sm"
+                  value={directValue ?? ''}
+                  onChange={event => onResponsiveChange(item.node.id, viewport, field,
+                    event.target.value === '' ? null : event.target.value as ResponsiveAlign)}>
+                  <option value="">Kế thừa ({inheritedValue})</option>
+                  <option value="start">Start</option><option value="center">Center</option><option value="end">End</option>
+                </select> : <input
+                  id={'responsive-' + field} aria-label={fieldNames[field]}
+                  className="min-w-0 flex-1 text-sm" type="number" step={1}
+                  min={field === 'columns_per_row' ? 1 : 0}
+                  max={field === 'columns_per_row' ? 6 : 64}
+                  placeholder={'Kế thừa: ' + inheritedValue}
+                  value={directValue ?? ''}
+                  onChange={event => {
+                    const raw = event.target.value;
+                    if (raw === '') return onResponsiveChange(item.node.id, viewport, field, null);
+                    const number = Number(raw);
+                    if (Number.isInteger(number)
+                        && number >= (field === 'columns_per_row' ? 1 : 0)
+                        && number <= (field === 'columns_per_row' ? 6 : 64))
+                      onResponsiveChange(item.node.id, viewport, field, number);
+                  }} />}
+                {directValue !== undefined && <button type="button"
+                  className="btn-secondary !px-2 !py-1.5 text-xs"
+                  aria-label={'Bỏ override ' + field}
+                  onClick={() => onResponsiveChange(item.node.id, viewport, field, null)}>Bỏ override</button>}
+              </div>
+            </div>;
+          })}
+        </fieldset>
+      )}
       {locked && (
         <p role="status" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
           Node không resolve được hoặc provider đã mất. Nội dung và vị trí được bảo toàn;
@@ -70,7 +134,7 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, on
         <p className="text-xs text-slate-500">Block theme: {String(element.props.block_id)}</p>
       )}
       {!element && <p className="text-sm text-slate-500">
-        Node bố cục hiện dùng thiết lập mặc định. Chọn các nút trong Tree để thêm, xóa hoặc đổi thứ tự.
+        Các thay đổi responsive chỉ ghi vào document khi bấm Lưu. Thêm hoặc đổi thứ tự node từ Tree.
       </p>}
       {element && !locked && (
         <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label="Thuộc tính phần tử">
