@@ -45,6 +45,10 @@ impl ApiError {
     pub fn internal(message: impl Into<Cow<'static, str>>) -> Self {
         Self(StatusCode::INTERNAL_SERVER_ERROR, message.into())
     }
+
+    pub fn service_unavailable(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::SERVICE_UNAVAILABLE, message.into())
+    }
 }
 
 impl IntoResponse for ApiError {

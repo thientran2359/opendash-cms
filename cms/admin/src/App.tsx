@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AuthUser, BlockData, BlockRegistry, PluginSummary } from './types.ts';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { AuthUser, BlockData, BlockRegistry, PluginSummary, type Role } from './types.ts';
 import * as api from './api/index.ts';
 import { AdminShell, isViewAllowed, parseAdminView, type AdminView } from './shell/AdminShell.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
@@ -27,9 +27,9 @@ export const App: React.FC = () => {
   const [authUsername, setAuthUsername] = useState<string>('');
   const [authPassword, setAuthPassword] = useState<string>('');
 
-  // Admin user creation inputs
-  const [editorUsername, setEditorUsername] = useState<string>('');
-  const [editorPassword, setEditorPassword] = useState<string>('');
+  // Keep the Users draft when an expired session signs back in to the same account.
+  const [accountContextId, setAccountContextId] = useState<number | null>(null);
+  const [accountContextRole, setAccountContextRole] = useState<Role | null>(null);
 
   // Plugin management state (Admin only)
   const [plugins, setPlugins] = useState<PluginSummary[]>([]);
@@ -86,7 +86,7 @@ export const App: React.FC = () => {
     setIsError(error);
   };
 
-  const handleApiError = (err: unknown, fallback: string) => {
+  const handleApiError = useCallback((err: unknown, fallback: string) => {
     const is401 = err instanceof api.ApiClientError && err.status === 401;
     const msg = err instanceof Error ? err.message : fallback;
     setStatus(msg, true);
@@ -95,7 +95,7 @@ export const App: React.FC = () => {
       setCsrfToken(null);
       // Session expired: preserve blockData (unsaved inputs) as required by contract!
     }
-  };
+  }, []);
 
   const loadRegistryAndPage = async (preserveExistingBlock: boolean = false) => {
     try {
@@ -146,6 +146,8 @@ export const App: React.FC = () => {
       try {
         const auth = await api.getAuthMe();
         lastAuthenticatedUserId.current = auth.user.id;
+        setAccountContextId(auth.user.id);
+        setAccountContextRole(auth.user.role);
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
@@ -195,6 +197,8 @@ export const App: React.FC = () => {
         setBuilderDirty(false);
       }
       lastAuthenticatedUserId.current = res.user.id;
+      setAccountContextId(res.user.id);
+      setAccountContextRole(res.user.role);
       setUser(res.user);
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
@@ -222,8 +226,8 @@ export const App: React.FC = () => {
       setCsrfToken(null);
       setAuthUsername('');
       setAuthPassword('');
-      setEditorUsername('');
-      setEditorPassword('');
+      setAccountContextId(null);
+      setAccountContextRole(null);
       setPlugins([]);
       setSelectedPluginId('');
       setPluginRunOutput('');
@@ -246,26 +250,12 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleCreateEditor = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!csrfToken) return;
-    if (!editorUsername || !editorPassword) {
-      setStatus('Vui lòng nhập đủ thông tin biên tập viên.', true);
-      return;
-    }
-    setIsProcessing(true);
-    try {
-      const created = await api.createEditor(editorUsername, editorPassword, csrfToken);
-      setStatus(`Đã tạo biên tập viên "${created.username}".`, false);
-      setEditorUsername('');
-      setEditorPassword('');
-    } catch (err) {
-      handleApiError(err, 'Lỗi khi tạo biên tập viên.');
-    } finally {
-      setIsProcessing(false);
-    }
+  const handleOwnAccountChanged = () => {
+    setUser(null);
+    setCsrfToken(null);
+    setAuthPassword('');
+    setStatus('Phiên tài khoản đã được thu hồi. Vui lòng đăng nhập lại.', false);
   };
-
   const handleThemeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !csrfToken) return;
@@ -455,13 +445,12 @@ export const App: React.FC = () => {
       }
       previewContent={<BuilderPreview previewHtml={previewHtml} />}
       settingsContent={<SystemStatus />}
-      usersContent={<UsersPanel
-        editorUsername={editorUsername}
-        editorPassword={editorPassword}
-        isProcessing={isProcessing}
-        onEditorUsernameChange={setEditorUsername}
-        onEditorPasswordChange={setEditorPassword}
-        onCreateEditor={handleCreateEditor}
+      usersContent={accountContextRole === 'admin' && <UsersPanel
+        key={accountContextId ?? 'anonymous'}
+        csrfToken={csrfToken}
+        currentUserId={accountContextId}
+        onApiError={handleApiError}
+        onOwnAccountChanged={handleOwnAccountChanged}
       />}
       pluginsContent={<PluginsPanel
         plugins={plugins}
