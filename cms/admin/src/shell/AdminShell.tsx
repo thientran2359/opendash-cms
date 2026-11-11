@@ -88,6 +88,7 @@ interface AdminShellProps {
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
   mediaContent: React.ReactNode;
+  dashboardContent: React.ReactNode;
   pluginsContent: React.ReactNode;
   usersContent: React.ReactNode;
   settingsContent: React.ReactNode;
@@ -109,7 +110,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   activeView, onViewChange, hasUnsavedChanges, sidebarContent, previewContent,
-  contentContent, postsContent, pagesContent, mediaContent, pluginsContent, usersContent, settingsContent,
+  contentContent, postsContent, pagesContent, mediaContent, dashboardContent, pluginsContent, usersContent, settingsContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
@@ -217,9 +218,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                   <h2 className="mt-3 text-2xl font-bold text-white sm:text-3xl">Xin chào, {user.username}!</h2>
                   <p className="mt-3 max-w-xl text-sm leading-6 text-slate-200">Chọn một khu vực bên dưới để tiếp tục công việc. Các tính năng đang phát triển được ghi rõ trạng thái.</p>
                 </div>
+                {dashboardContent}
                 <h2 className="mb-4 text-lg font-semibold text-slate-900">Truy cập nhanh</h2>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {allItems.filter(item => ['content', 'builder', 'posts', 'media', 'plugins', 'users'].includes(item.id) && (!item.adminOnly || user.role === 'admin')).map(item => (
+                  {allItems.filter(item => ['content', 'builder', 'posts', 'pages', 'media', 'plugins', 'users'].includes(item.id) && (!item.adminOnly || user.role === 'admin')).map(item => (
                     <button key={item.id} type="button" className="od-quick-link" onClick={() => navigate(item.id)}>
                       <span className="od-quick-icon"><NavIcon name={item.icon} /></span>
                       <span className="flex-1 text-left">

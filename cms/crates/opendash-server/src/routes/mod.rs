@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod builder;
 pub mod content;
+pub mod dashboard;
 pub mod entries;
 pub mod health;
 pub mod media;

@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod content;
+pub mod dashboard;
 pub mod entries;
 pub mod media;
 pub mod page;
