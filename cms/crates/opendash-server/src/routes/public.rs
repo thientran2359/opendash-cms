@@ -7,8 +7,8 @@ use sqlx::SqlitePool;
 
 use crate::{
     error::ApiResult,
-    page::{render_builder, render_legacy_state},
-    storage::builder,
+    page::{render_builder_resolved, render_legacy_state},
+    storage::{builder, builder_binding},
 };
 
 pub async fn public_page(State(db): State<SqlitePool>) -> ApiResult<Response> {
@@ -16,8 +16,9 @@ pub async fn public_page(State(db): State<SqlitePool>) -> ApiResult<Response> {
     // templates. Do not split them across old / and new Builder reads.
     let state = builder::read(&db).await?;
     if let Some(document) = &state.saved {
+        let bindings = builder_binding::resolve(&db, document, false).await?;
         return Ok(rendered_layout(
-            render_builder(&state, document, false)?.html,
+            render_builder_resolved(&state, document, false, &bindings)?.html,
         ));
     }
     let html = match render_legacy_state(&state)? {

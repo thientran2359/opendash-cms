@@ -12,7 +12,11 @@ use serde_json::Value;
 use url::Url;
 
 use crate::{
-    id::{valid_namespaced_block_id, valid_package_id},
+    content::valid_content_type_key,
+    id::{
+        valid_kebab_segment_with_limit, valid_namespaced_block_id, valid_package_id,
+        valid_snake_key,
+    },
     registry::{ProviderStatus, RegistryCatalog},
     theme::{Block, BlockDescriptor, Fields},
 };
@@ -87,12 +91,16 @@ pub enum KnownElement {
 pub struct HeadingProps {
     pub level: u8,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<ElementBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextProps {
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<ElementBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +108,8 @@ pub struct TextProps {
 pub struct ImageProps {
     pub media_id: String,
     pub alt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<ElementBinding>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +117,47 @@ pub struct ImageProps {
 pub struct ButtonProps {
     pub label: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<ElementBinding>,
+}
+
+/// An allowlisted, exact-entry field reference. No arbitrary queries or JSON paths.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElementBinding {
+    pub type_key: String,
+    pub entry_slug: String,
+    pub source: BindingSource,
+    pub target: BindingTarget,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BindingSource {
+    Title,
+    Field { key: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BindingTarget {
+    Text,
+    MediaId,
+    Alt,
+    Label,
+    Url,
+}
+
+impl KnownElement {
+    pub fn binding(&self) -> Option<&ElementBinding> {
+        match self {
+            Self::Heading(p) => p.binding.as_ref(),
+            Self::Text(p) => p.binding.as_ref(),
+            Self::Image(p) => p.binding.as_ref(),
+            Self::Button(p) => p.binding.as_ref(),
+            Self::Legacy(_) => None,
+        }
+    }
 }
 
 /// Preserves the exact M3 block ID and field-value map, including after a
@@ -179,6 +230,7 @@ impl BuilderDocument {
         }
         let mut ids = HashSet::new();
         let mut count = 0;
+        let mut sources = HashSet::new();
         for (s, section) in self.sections.iter().enumerate() {
             check_node_id(&section.id, &mut ids, &mut count)?;
             for (r, row) in section.children.iter().enumerate() {
@@ -188,7 +240,17 @@ impl BuilderDocument {
                     for (e, element) in column.children.iter().enumerate() {
                         check_node_id(&element.id, &mut ids, &mut count)?;
                         let result = match &element.content {
-                            ElementContent::Known(known) => validate_known(known, catalog),
+                            ElementContent::Known(known) => {
+                                if let Some(binding) = known.binding() {
+                                    sources.insert((&binding.type_key, &binding.entry_slug));
+                                    if sources.len() > 32 {
+                                        return Err(BuilderError::Invalid(
+                                            "Too many Builder binding sources",
+                                        ));
+                                    }
+                                }
+                                validate_known(known, catalog)
+                            }
                             ElementContent::Unresolved(_) => {
                                 Err("Unknown or malformed Builder element")
                             }
@@ -252,22 +314,55 @@ fn validate_known(
 ) -> Result<(), &'static str> {
     match element {
         KnownElement::Heading(props) => {
-            if !(1..=6).contains(&props.level) || !valid_text(&props.text, 512, true) {
+            if !(1..=6).contains(&props.level)
+                || !valid_text(&props.text, 512, props.binding.is_none())
+                || !valid_binding(props.binding.as_ref(), &[BindingTarget::Text])
+            {
                 return Err("Invalid Heading level or text");
             }
         }
         KnownElement::Text(props) => {
-            if !valid_text(&props.text, 16_384, false) {
+            if !valid_text(&props.text, 16_384, false)
+                || !valid_binding(props.binding.as_ref(), &[BindingTarget::Text])
+            {
                 return Err("Invalid Text content");
             }
         }
         KnownElement::Image(props) => {
-            if !valid_media_id(&props.media_id) || !valid_text(&props.alt, 512, false) {
+            if !(valid_media_id(&props.media_id)
+                || (props.media_id.is_empty()
+                    && props
+                        .binding
+                        .as_ref()
+                        .is_some_and(|b| b.target == BindingTarget::MediaId)))
+                || !valid_text(&props.alt, 512, false)
+                || !valid_binding(
+                    props.binding.as_ref(),
+                    &[BindingTarget::MediaId, BindingTarget::Alt],
+                )
+            {
                 return Err("Invalid Image media ID or alt text");
             }
         }
         KnownElement::Button(props) => {
-            if !valid_text(&props.label, 200, true) || !valid_button_url(&props.url) {
+            if !valid_text(
+                &props.label,
+                200,
+                !props
+                    .binding
+                    .as_ref()
+                    .is_some_and(|b| b.target == BindingTarget::Label),
+            ) || !(valid_button_url(&props.url)
+                || (props.url.is_empty()
+                    && props
+                        .binding
+                        .as_ref()
+                        .is_some_and(|b| b.target == BindingTarget::Url)))
+                || !valid_binding(
+                    props.binding.as_ref(),
+                    &[BindingTarget::Label, BindingTarget::Url],
+                )
+            {
                 return Err("Invalid Button label or URL");
             }
         }
@@ -289,6 +384,22 @@ fn validate_known(
         }
     }
     Ok(())
+}
+
+fn valid_binding(binding: Option<&ElementBinding>, targets: &[BindingTarget]) -> bool {
+    let Some(binding) = binding else { return true };
+    if !targets.contains(&binding.target)
+        || !valid_content_type_key(&binding.type_key)
+        || !valid_kebab_segment_with_limit(&binding.entry_slug, 64)
+    {
+        return false;
+    }
+    match &binding.source {
+        BindingSource::Title => {
+            !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
+        }
+        BindingSource::Field { key } => valid_snake_key(key),
+    }
 }
 
 fn valid_media_id(value: &str) -> bool {
@@ -375,12 +486,14 @@ mod tests {
                                 KnownElement::Heading(HeadingProps {
                                     level: 2,
                                     text: "Ocean".into(),
+                                    binding: None,
                                 }),
                             ),
                             element(
                                 "text-1",
                                 KnownElement::Text(TextProps {
                                     text: "<script>plain text</script>".into(),
+                                    binding: None,
                                 }),
                             ),
                             element(
@@ -388,6 +501,7 @@ mod tests {
                                 KnownElement::Image(ImageProps {
                                     media_id: "a".repeat(64),
                                     alt: "Anemone".into(),
+                                    binding: None,
                                 }),
                             ),
                             element(
@@ -395,6 +509,7 @@ mod tests {
                                 KnownElement::Button(ButtonProps {
                                     label: "Explore".into(),
                                     url: "/species?order=latest".into(),
+                                    binding: None,
                                 }),
                             ),
                             element(
@@ -457,7 +572,10 @@ mod tests {
             .map(|index| {
                 element(
                     &format!("node-{index}"),
-                    KnownElement::Text(TextProps { text: "x".into() }),
+                    KnownElement::Text(TextProps {
+                        text: "x".into(),
+                        binding: None,
+                    }),
                 )
             })
             .collect();
@@ -476,6 +594,7 @@ mod tests {
                             &format!("text-{s}"),
                             KnownElement::Text(TextProps {
                                 text: "x".repeat(5000),
+                                binding: None,
                             }),
                         )],
                     }],
@@ -492,18 +611,22 @@ mod tests {
             KnownElement::Heading(HeadingProps {
                 level: 0,
                 text: "Title".into(),
+                binding: None,
             }),
             KnownElement::Heading(HeadingProps {
                 level: 7,
                 text: "Title".into(),
+                binding: None,
             }),
             KnownElement::Image(ImageProps {
                 media_id: "../file".into(),
                 alt: "x".into(),
+                binding: None,
             }),
             KnownElement::Button(ButtonProps {
                 label: "Go".into(),
                 url: "javascript:alert(1)".into(),
+                binding: None,
             }),
         ] {
             let mut doc = fixture();
@@ -598,6 +721,68 @@ mod tests {
                 .validate_for_save(&registry(), Some(&persisted))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn validates_field_binding_protocol_and_distinct_source_cap() {
+        let mut doc = fixture();
+        let elements = &mut doc.sections[0].children[0].children[0].children;
+        elements.clear();
+        for index in 0..32 {
+            elements.push(element(
+                &format!("binding-{index}"),
+                KnownElement::Text(TextProps {
+                    text: String::new(),
+                    binding: Some(ElementBinding {
+                        type_key: "post".into(),
+                        entry_slug: format!("post-{index}"),
+                        source: BindingSource::Title,
+                        target: BindingTarget::Text,
+                    }),
+                }),
+            ));
+        }
+        doc.validate_for_save(&registry(), None).unwrap();
+        assert_eq!(
+            BuilderDocument::from_json(&doc.to_json().unwrap()).unwrap(),
+            doc
+        );
+        let bound = &mut doc.sections[0].children[0].children[0].children[0].content;
+        let ElementContent::Known(KnownElement::Text(props)) = bound else {
+            panic!()
+        };
+        let binding = props.binding.as_mut().unwrap();
+        binding.target = BindingTarget::Url;
+        assert!(doc.validate_for_save(&registry(), None).is_err());
+        let ElementContent::Known(KnownElement::Text(props)) =
+            &mut doc.sections[0].children[0].children[0].children[0].content
+        else {
+            panic!()
+        };
+        props.binding.as_mut().unwrap().target = BindingTarget::Text;
+        props.binding.as_mut().unwrap().entry_slug = "../broken".into();
+        assert!(doc.validate_for_save(&registry(), None).is_err());
+        let ElementContent::Known(KnownElement::Text(props)) =
+            &mut doc.sections[0].children[0].children[0].children[0].content
+        else {
+            panic!()
+        };
+        props.binding.as_mut().unwrap().entry_slug = "post-0".into();
+        doc.sections[0].children[0].children[0]
+            .children
+            .push(element(
+                "binding-33",
+                KnownElement::Text(TextProps {
+                    text: String::new(),
+                    binding: Some(ElementBinding {
+                        type_key: "post".into(),
+                        entry_slug: "extra".into(),
+                        source: BindingSource::Title,
+                        target: BindingTarget::Text,
+                    }),
+                }),
+            ));
+        assert!(doc.validate_for_save(&registry(), None).is_err());
     }
 
     #[test]

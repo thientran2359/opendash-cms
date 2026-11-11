@@ -20,7 +20,7 @@ use crate::{
     page::{self as page_usecase, render_block, save_page},
     routes::public::rendered,
     storage::{
-        builder as builder_storage,
+        builder as builder_storage, builder_binding,
         page::{insert_theme_block, list_theme_blocks},
     },
     theme::{Block, Fields, Theme},
@@ -230,7 +230,8 @@ pub async fn homepage_preview(
     let current = builder_storage::read(&db).await?;
     current.validate(&document)?;
     builder_storage::check_preview_images(&db, &document).await?;
-    let rendered = page_usecase::render_builder(&current, &document, true)?;
+    let bindings = builder_binding::resolve(&db, &document, true).await?;
+    let rendered = page_usecase::render_builder_resolved(&current, &document, true, &bindings)?;
     Ok((builder_headers(None), Json(rendered)).into_response())
 }
 
@@ -244,8 +245,8 @@ pub async fn homepage_put(
     let version = parse_builder_if_match(&headers)?;
     let document = decode_document(&headers, &bytes)?;
     let (version, rendered) =
-        builder_storage::save_and_render(&db, &document, version, |current, draft| {
-            page_usecase::render_builder(current, draft, false)
+        builder_storage::save_and_render(&db, &document, version, |current, draft, bindings| {
+            page_usecase::render_builder_resolved(current, draft, false, bindings)
         })
         .await?;
     page_usecase::dispatch_saved_hook(
