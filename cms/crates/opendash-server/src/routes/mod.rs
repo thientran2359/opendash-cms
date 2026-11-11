@@ -7,4 +7,5 @@ pub mod media;
 pub mod plugin;
 pub mod public;
 pub mod public_content;
+pub mod settings;
 pub mod users;

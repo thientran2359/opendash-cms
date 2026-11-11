@@ -3,6 +3,7 @@ import { AuthUser, BlockData, BlockRegistry, PluginSummary, type Role } from './
 import * as api from './api/index.ts';
 import { AdminShell, isViewAllowed, parseAdminView, type AdminView } from './shell/AdminShell.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
+import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { BuilderControls, BuilderPreview, normalizeValues } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
@@ -444,7 +445,10 @@ export const App: React.FC = () => {
         />
       }
       previewContent={<BuilderPreview previewHtml={previewHtml} />}
-      settingsContent={<SystemStatus />}
+      settingsContent={<>
+        <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
+      </>}
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}
         csrfToken={csrfToken}

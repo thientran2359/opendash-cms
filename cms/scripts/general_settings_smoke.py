@@ -196,6 +196,9 @@ def smoke(binary: Path):
             assert conn.execute(
                 "SELECT success FROM _sqlx_migrations WHERE version=10"
             ).fetchone() == (1,)
+            assert conn.execute(
+                "SELECT success FROM _sqlx_migrations WHERE version=9"
+            ).fetchone() == (1,)
             assert conn.execute("SELECT COUNT(*) FROM users").fetchone() == (2,)
             assert conn.execute("SELECT COUNT(*) FROM content_entries").fetchone() == (1,)
 
@@ -250,6 +253,9 @@ def upgrade(binary: Path, baseline: Path):
             assert conn.execute(
                 "SELECT success FROM _sqlx_migrations WHERE version=10"
             ).fetchone() == (1,)
+            assert conn.execute(
+                "SELECT success FROM _sqlx_migrations WHERE version=9"
+            ).fetchone() == (1,)
             assert conn.execute("SELECT COUNT(*) FROM users").fetchone() == (1,)
             # Simulate an otherwise valid legacy timezone removed from a later
             # catalog. It must remain editable when submitted unchanged.
@@ -275,10 +281,88 @@ def upgrade(binary: Path, baseline: Path):
         print("PASS: upgrade baseline_0001, homepage/theme preserved and legacy timezone")
 
 
+def rollback(binary: Path, baseline_binary: Path, baseline: Path):
+    """Restore a pre-0010 snapshot and reopen it with the actual pre-0010 binary."""
+    with TemporaryDirectory(prefix="opendash-m3-s25-rollback-") as folder:
+        db = Path(folder) / "site" / "database" / "opendash.sqlite"
+        db.parent.mkdir(parents=True)
+        shutil.copy2(baseline, db)
+
+        # First install and authenticate with the Users release, whose newest
+        # migration is 0009. Capture the complete SQLite state using backup().
+        with running(baseline_binary, db) as base:
+            check(request(base, "/auth/setup", {
+                "username": "rollbackadmin", "password": "password123",
+            }), 201, "baseline auth setup")
+            legacy_auth = login(base, "rollbackadmin", "password123")
+            check(get(base, "/auth/me", legacy_auth), 200, "baseline session")
+            check(get(base, "/"), 200, "baseline Builder homepage")
+
+        snapshot = Path(folder) / "pre-0010-snapshot.sqlite"
+        with closing(sqlite3.connect(db)) as conn:
+            baseline_home = conn.execute(
+                "SELECT block_id, values_json FROM home_page WHERE id=1"
+            ).fetchone()
+            baseline_themes = sorted(row[0] for row in conn.execute(
+                "SELECT id FROM theme_blocks"
+            ))
+            assert conn.execute(
+                "SELECT success FROM _sqlx_migrations WHERE version=9"
+            ).fetchone() == (1,)
+            assert conn.execute(
+                "SELECT success FROM _sqlx_migrations WHERE version=10"
+            ).fetchone() is None
+            with closing(sqlite3.connect(snapshot)) as backup:
+                conn.backup(backup)
+
+        # Migrate + update Settings using the integrated new executable.
+        with running(binary, db) as base:
+            admin = login(base, "rollbackadmin", "password123")
+            check(put(base, {
+                "site_title": "After migration", "tagline": "rollback",
+                "timezone": "Asia/Ho_Chi_Minh",
+            }, admin, 1), 200, "new binary settings update")
+        with closing(sqlite3.connect(db)) as conn:
+            assert conn.execute(
+                "SELECT success FROM _sqlx_migrations WHERE version=10"
+            ).fetchone() == (1,)
+
+        # Restore the *snapshot* into an isolated site root. Never downgrade an
+        # upgraded database in place with the old executable.
+        for suffix in ("", "-wal", "-shm"):
+            candidate = Path(str(db) + suffix)
+            if candidate.exists():
+                candidate.unlink()
+        shutil.copy2(snapshot, db)
+        with running(baseline_binary, db) as base:
+            old_admin = login(base, "rollbackadmin", "password123")
+            check(get(base, "/auth/me", old_admin), 200, "restored baseline user")
+            check(get(base, "/"), 200, "restored baseline homepage")
+        with closing(sqlite3.connect(db)) as conn:
+            assert conn.execute(
+                "SELECT success FROM _sqlx_migrations WHERE version=10"
+            ).fetchone() is None
+            assert conn.execute(
+                "SELECT success FROM _sqlx_migrations WHERE version=9"
+            ).fetchone() == (1,)
+            assert conn.execute(
+                "SELECT block_id, values_json FROM home_page WHERE id=1"
+            ).fetchone() == baseline_home
+            assert sorted(row[0] for row in conn.execute(
+                "SELECT id FROM theme_blocks"
+            )) == baseline_themes
+            assert conn.execute("SELECT COUNT(*) FROM users").fetchone() == (1,)
+        print("PASS: backup/restore pre-0010 snapshot, old binary, Builder/Users unchanged")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path("cms/target/debug/opendash"))
     parser.add_argument("--baseline", type=Path, default=Path("cms/fixtures/baseline_0001.sqlite"))
+    parser.add_argument("--baseline-binary", type=Path,
+                        help="Optional actual Users/main pre-0010 executable for rollback test")
     args = parser.parse_args()
     smoke(args.binary.resolve())
     upgrade(args.binary.resolve(), args.baseline.resolve())
+    if args.baseline_binary:
+        rollback(args.binary.resolve(), args.baseline_binary.resolve(), args.baseline.resolve())

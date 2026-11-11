@@ -54,6 +54,11 @@ def verify(binary: Path, browser_path: str | None):
             tagline.fill("Mô tả <img src=x onerror=alert(1)>")
             timezone.select_option("Asia/Ho_Chi_Minh")
             expect(first.get_by_test_id("timezone-preview")).to_contain_text("Mùa hè")
+            # P13 requires explicit zone offsets for fixed UTC instants,
+            # not just a visible placeholder/zone label in the preview.
+            vietnam_samples = first.get_by_test_id("timezone-preview").locator("p")
+            assert "19:00" in vietnam_samples.nth(0).inner_text()
+            assert "19:00" in vietnam_samples.nth(1).inner_text()
             first.get_by_role("button", name="Lưu cài đặt").click()
             expect(first.get_by_text("Đã lưu cài đặt website.")).to_be_visible()
 
@@ -77,6 +82,9 @@ def verify(binary: Path, browser_path: str | None):
             expect(second.get_by_label("Tên website")).to_have_value("Tab một đã lưu")
             second.get_by_label("Múi giờ", exact=True).select_option("America/New_York")
             expect(second.get_by_test_id("timezone-preview")).to_contain_text("Mùa đông")
+            new_york_samples = second.get_by_test_id("timezone-preview").locator("p")
+            assert "07:00" in new_york_samples.nth(0).inner_text()
+            assert "08:00" in new_york_samples.nth(1).inner_text()
             second.get_by_role("button", name="Lưu cài đặt").click()
             expect(second.get_by_text("Đã lưu cài đặt website.")).to_be_visible()
 
