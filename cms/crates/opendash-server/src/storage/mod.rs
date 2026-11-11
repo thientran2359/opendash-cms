@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod builder;
+pub mod builder_binding;
 pub mod content;
 pub mod dashboard;
 pub mod entries;

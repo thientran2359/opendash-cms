@@ -6,7 +6,7 @@
 - Đọc [README.md](README.md) và [docs/product/PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) trước khi đề xuất tech stack hoặc thay đổi kiến trúc/code.
 - Dự án phát triển trước trên Windows. Lát cắt Rust và cách kiểm chứng được ghi trong [README.md](README.md). Không báo đã build/test/benchmark nếu chưa thực hiện được trên mã thật.
 - Giữ các ràng buộc đã xác nhận trong [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md), bao gồm Rust + SQLite, một file thực thi, builder và plugin chạy logic server từ bản đầu. Hướng stack và Wasmi đã được chủ dự án chốt trong [docs/architecture/TECH_STACK.md](docs/architecture/TECH_STACK.md); cấu trúc dự án theo [docs/architecture/CMS_ARCHITECTURE.md](docs/architecture/CMS_ARCHITECTURE.md), bộ khung lõi và quy chuẩn code theo [docs/contracts/CORE_FOUNDATION.md](docs/contracts/CORE_FOUNDATION.md) và hợp đồng ABI theo [docs/contracts/PLUGIN_ABI.md](docs/contracts/PLUGIN_ABI.md).
-- Chỉ đạo mới của chủ dự án và [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) có ưu tiên cao nhất. Theo [ADR-0003](docs/decisions/ADR-0003-agent-consensus-governance.md), các agent **tự chốt quyết định kỹ thuật bằng consensus có bằng chứng**; khi cần phân xử thì reviewer độc lập (ưu tiên Atlas/Nova) quyết định cuối. Owner theo dõi tiến độ, không là cổng ký duyệt mặc định. Consensus khác `IMPLEMENTED`/`VERIFIED` và không được hạ chuẩn bảo mật.
+- Chỉ đạo mới của chủ dự án và [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) có ưu tiên cao nhất. Theo [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas điều phối toàn dự án và có quyền chốt quyết định kỹ thuật. Agent tự chủ quyết định cách triển khai task đã đủ contract. Owner theo dõi tiến độ, không là cổng ký duyệt mặc định. Consensus khác `IMPLEMENTED`/`VERIFIED` và không được hạ chuẩn bảo mật.
 
 ## Ranh giới kỹ thuật
 
@@ -18,6 +18,7 @@
 
 ## Tài liệu và kiểm chứng
 
+- Khi chủ dự án giao Atlas chuẩn bị một milestone, đầu ra bắt buộc là bộ đặc tả G3 cho toàn bộ task trong phạm vi milestone, kể cả task sẽ triển khai sau. Atlas chốt các quyết định G1/G2 cần thiết, ghi thứ tự phụ thuộc và quyền sở hữu theo [Planning Workflow](docs/plans/PLANNING_WORKFLOW.md#chuẩn-bị-g3-cho-toàn-bộ-milestone). Chỉ chuyển từng task sang Project `Ready` khi task đó thực sự đủ điều kiện nhận triển khai.
 - Trước khi làm một slice: nêu contract liên quan, tiêu chí nghiệm thu và phần ngoài phạm vi. Sau khi làm: ghi thay đổi, lệnh/check thực chạy, kết quả và giới hạn.
 - Với thay đổi hành vi, chọn kiểm chứng theo phạm vi: preview chưa lưu, cập nhật khi Lưu, dữ liệu và bố cục khi đổi theme, quyền và lỗi plugin, hoặc backup/restore. Không tạo test chỉ lặp lại implementation.
 - Trạng thái thiết kế `AGREED` khác `implemented` và `verified`. Giữ các trạng thái này riêng; không đánh dấu hoàn thành khi thiếu fixtures/bằng chứng thực tế.
@@ -33,11 +34,11 @@
 - Draft technical research, discussions and task handoffs belong in `.agents/`
   (see `.agents/README.md` and `.agents/agents.yaml`). **Agent-concluded and peer-reviewed**
   decisions, plans/contracts and actual verification belong in `docs/` after PR merge.
-  Keep existing historical references and their source evidence. Use [ADR-0003](docs/decisions/ADR-0003-agent-consensus-governance.md).
+  Keep existing historical references and their source evidence. Apply [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md).
 - `.agents/skills/` contains three **manual chat skills**:
   [github-task-pickup](.agents/skills/github-task-pickup/SKILL.md) when asked to fetch/perform one's GitHub Issue,
   [discussion-turn-responder](.agents/skills/discussion-turn-responder/SKILL.md) when asked to check and answer one's discussion turns,
-  and [github-pr-review-merge](.agents/skills/github-pr-review-merge/SKILL.md) for Atlas/Nova reviewing and merging other agents' eligible implementation PRs.
+  and [github-pr-review-merge](.agents/skills/github-pr-review-merge/SKILL.md) for Atlas reviewing and merging eligible implementation and concluded design PRs.
   Read the corresponding SKILL.md on request even if the host does not auto-discover repo skills.
   No skill starts any background process, cronjob or automatic CoS dispatch.
   `.agents/archive/skills/` contains retired skills for reference ONLY.
@@ -68,26 +69,22 @@
   ID, base SHA, exact file ownership, explicit acceptance and approved gate.
   Keep one active implementation task per agent branch. Protect uncommitted
   changes and avoid two writers on the same file.
-- **Owner authorization from 2026-11-11:** [ADR-0008](docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md)
-  extends Harbor/Forge autonomous implementation, review and merge from M3
-  to M4 and later milestones. The two agents may coordinate their own approved
-  tasks and self-merge eligible PRs after actual tests, required CI and security
-  gates; a self-review is identified as such, never represented as independent
-  approval. Verified G3/ownership and Project Ready remain prerequisites to
-  picking up implementation, with a documented Project status sync permitted
-  after confirming the source and dependencies. Never bypass branch protection.
-- After actual validation, stage only task-owned changes, commit with task ID
-  and non-force push to its agent branch. Link commit and tests to GitHub
-  Issue/PR for review. No background merge or deployment. Atlas/Nova may merge
-  independently reviewed **implementation and concluded technical-document/design** PRs
-  in the explicitly invoked review-and-merge flow in .agents/GITHUB_WORKFLOW.md;
-  review-only stays read-only for code, and authors outside the explicit
-  Harbor/Forge autonomy exceptions cannot self-review/self-merge.
-  Existing security blockers, CI and preservation gates are not waived.
+- **Owner authorization (2026-11-11):** [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)
+  gives Atlas project-wide coordination, final technical decisions and merge
+  authority for all eligible PRs, including its own. Nova, Harbor and Forge
+  may pick up eligible work and self-review/self-merge their own PRs without
+  waiting for assignment approval or peer review. Orion uses Atlas review.
+  Implementation pickup requires verified G3, ownership, dependencies and
+  Project Ready. Authorized agents may sync eligible items to Ready.
+- Stage only task-owned changes after validation and non-force push to the
+  authorized branch. Before merge, record the reviewed head SHA, self-review
+  or reviewer verdict, acceptance, tests and required CI. Branch protection,
+  security and data preservation gates apply. Review-only stays review-only.
+  No background merge or deployment.
 - Muse-to-CoS/Antigravity dispatch must be verified through authenticated
   host-specific adapters first. Chat delivery or AI consensus does not
-  establish completion or VERIFIED evidence. **Reviewed Final Decision + merged docs PR**
-  is the technical-contract authority under ADR-0003, not chat consensus alone.
+  establish completion or VERIFIED evidence. **Recorded Final Decision + merged docs PR**
+  is the technical-contract authority under ADR-0010.
 - No infinite agent loops, blind retries of ambiguous deliveries, or secrets
   and private runtime state in Git.
 - The owner has **paused the Python Task Watcher / cronjob plan** in favor of

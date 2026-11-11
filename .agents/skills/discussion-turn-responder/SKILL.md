@@ -14,12 +14,12 @@ description: "Dùng khi người dùng yêu cầu 'kiểm tra tôi có thảo lu
 
 ## Khi nào thật sự "đến lượt"
 
-**Nguồn chính sách hiện hành:** [ADR-0003 agent consensus](../../../docs/decisions/ADR-0003-agent-consensus-governance.md). Với Issue lịch sử có `Next agent: owner` trước khi ADR-0003 có hiệu lực, không tự post thêm lượt; coordinator được giao phải rà lại consensus rồi đưa Final Decision theo policy mới, không giả turn hoặc tự động đổi metadata.
+**Nguồn chính sách hiện hành:** [ADR-0010](../../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md). Với Issue lịch sử có `Next agent: owner` trước khi ADR-0003 có hiệu lực, không tự post thêm lượt; coordinator được giao phải rà lại consensus rồi đưa Final Decision theo policy mới, không giả turn hoặc tự động đổi metadata.
 
 1. **Có danh tính và sự tham gia thật:** agent đã viết một turn có tên/metadata trong topic, được chỉ định reviewer/owner trong PR/Issue, được tag `@forge`/tên agent rõ ràng, hoặc có field `Next agent: forge` trong thảo luận hiện hành. Dùng *vai trò và nội dung do agent ký*, **không** chỉ dùng GitHub `author.login` chung để suy ra người phát biểu.
 2. **Có lời mời/việc đang chờ phản hồi:** latest pending turn/comment **sau lần trả lời cuối của agent** ghi rõ cần agent phản biện/đáp câu hỏi/re-review, hoặc `Next agent`/thread assignment chỉ định chính agent. Kiểm thứ tự timestamp + ID/turn number và trạng thái `OPEN` hoặc `NEEDS_RESPONSE`. Comment mới nói chung hoặc mention để FYI **không** đủ.
 3. **Chưa trả lời cùng lượt:** trước khi gửi, **re-fetch** latest comments/turn files; nếu agent đã đáp vào đúng comment/turn ID, thread đã resolved/closed, có message mới chuyển lượt, hoặc kết quả đọc không đầy đủ ⇒ bỏ qua, báo lý do. Không tự trả lời comment của mình, không quote vòng, không trả lời nhiều lượt liên tiếp nếu chưa có người khác phản hồi.
-4. **Agent là bên chốt kỹ thuật (ADR-0003):** khi phản biện đủ evidence và các agent đồng thuận, coordinator ghi **Final Decision: CONCLUDED_BY_AGENTS**, `Next agent: none`. Nếu còn bất đồng thực chất, rủi ro trọng yếu hoặc cần kiểm định độc lập, **chuyển một reviewer độc lập Atlas/Nova** để ra `DECIDED_BY_REVIEWER` hoặc `BLOCKED` với evidence cần bổ sung. **Không chuyển `Next agent: owner` chỉ để xin ký duyệt**. Reviewer không được tự chốt khi là tác giả, không waive security/data blocker. Owner chỉ theo dõi; chỉ yêu cầu input mới thật sự ngoài PRD/ủy quyền thực tế cần thiết, không tự chạy task từ comment.
+4. **Chốt quyết định có bằng chứng ([ADR-0010](../../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md)):** khi đồng thuận, ghi **Final Decision: CONCLUDED_BY_AGENTS**, Next agent: none. Khi còn bất đồng hoặc thay đổi contract liên task, chuyển Atlas để quyết định hoặc ghi blocker. Nova, Harbor và Forge tự quyết cách triển khai task đủ contract. Chỉ yêu cầu owner khi thật sự cần input ngoài phạm vi đã giao; không tự chạy task từ comment.
 
 ## Hành động khi đúng lượt
 

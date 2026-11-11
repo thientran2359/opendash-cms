@@ -32,9 +32,7 @@ Atlas/Codex Win, Nova/Antigravity Win, Forge/CoS Win, Harbor/CoS Mac and
 Orion/Antigravity Mac. Commit validated task-scoped work, non-force push to
 the corresponding agent branch and link the commit/PR to the GitHub Issue.
 A push is not review, merge, approval or independent verification.
-Atlas/Nova may review and merge eligible implementation PRs when the owner
-invokes the delegated review-and-merge flow in GITHUB_WORKFLOW.md. This is
-not a background job or authority to self-review or waive security gates.
+Under [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas coordinates the project and may merge any eligible PR. Nova, Harbor and Forge may self-review and merge their own eligible PRs. Required checks, security and data gates apply.
 
 Muse-to-CoS/Antigravity dispatch is a proposal requiring tested adapters and
 authorization, not an installed feature. Never upload credentials, private
