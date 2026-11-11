@@ -3,10 +3,10 @@ import * as api from '../api/index.ts';
 import type { AuthUser, BlockRegistry } from '../types.ts';
 import type { BuilderDiagnostic, HomepageOpen } from '../api/builder.ts';
 import {
-  type BuilderDocument, type BuilderViewport, type ElementType, type NodeKind, type ResponsiveAlign,
+  type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type NodeKind, type ResponsiveAlign,
   type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
   allNodes, appendNode, isElement, isLockedElement, locate, moveNode, preservesAnchors,
-  removeNode, setNodeField, setResponsiveField,
+  removeNode, setElementBinding, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
 import { BuilderCanvas } from './BuilderCanvas.tsx';
@@ -247,6 +247,13 @@ export function BuilderWorkspace({
     if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
     changeDraft(setNodeField(draftRef.current, id, field, value), id);
   };
+  // D1 (#104): typed binding objects cannot be passed through the static
+  // string/number edit handler; reuse the same immutable draft/CAS pipeline.
+  const editBinding = (id: string, binding: ElementBinding | null) => {
+    const entry = locate(draftRef.current, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
+    changeDraft(setElementBinding(draftRef.current, id, binding), id);
+  };
   const editResponsive = (
     id: string, target: BuilderViewport, field: ResponsiveField,
     value: number | ResponsiveAlign | null,
@@ -440,7 +447,7 @@ export function BuilderWorkspace({
         <div className="min-w-0">
           <BuilderInspector document={draft} selectedId={selectedId} registry={registry}
             csrfToken={csrfToken} viewport={viewport} onChange={editField}
-            onResponsiveChange={editResponsive} onError={onApiError} />
+            onBindingChange={editBinding} onResponsiveChange={editResponsive} onError={onApiError} />
         </div>
       </div>
     </div>
