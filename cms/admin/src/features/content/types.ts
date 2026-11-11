@@ -58,9 +58,12 @@ export interface ContentEntryInput {
   title: string;
   slug: string;
   values: Record<string, ContentFieldValue>;
+  /** Omitted on legacy updates to preserve existing links; [] removes every link. */
+  term_ids?: number[];
 }
 
 export interface ContentEntryRecord extends ContentEntryInput {
+  term_ids: number[];
   id: number;
   content_type_key: string;
   version: number;

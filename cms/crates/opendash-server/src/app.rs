@@ -8,6 +8,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
 use rust_embed::RustEmbed;
 use sqlx::SqlitePool;
 
@@ -17,7 +18,10 @@ use crate::{
     plugin::PluginManager,
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
-        builder::{builder, install, page, preview, registry, save, serve_asset},
+        builder::{
+            builder, homepage_get, homepage_preview, homepage_put, install, page, preview,
+            registry, save, serve_asset,
+        },
         content::{MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list},
         dashboard::dashboard_get,
         entries::{
@@ -32,6 +36,10 @@ use crate::{
         public::public_page,
         public_content::{archive, media_file, media_thumb, single},
         settings::{general_get, general_put, timezones_get},
+        taxonomy::{
+            MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_list,
+            taxonomy_patch,
+        },
         themes::{theme_activate, theme_install, theme_list},
         users::{
             max_users_json_bytes, user_create, user_delete, user_list, user_patch,
@@ -97,12 +105,34 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
         .route("/auth/logout", post(auth_logout))
         .route("/api/admin/dashboard", get(dashboard_get))
         .route(
+            "/api/admin/builder/homepage",
+            get(homepage_get)
+                .put(homepage_put)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/builder/homepage/preview",
+            post(homepage_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/settings/general",
             get(general_get)
                 .put(general_put)
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/settings/timezones", get(timezones_get))
+        .route(
+            "/api/admin/taxonomy/terms",
+            get(taxonomy_list)
+                .post(taxonomy_create)
+                .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/taxonomy/terms/{id}",
+            axum::routing::patch(taxonomy_patch)
+                .delete(taxonomy_delete)
+                .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
         .route(
             "/api/admin/themes",
             get(theme_list)

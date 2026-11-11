@@ -1,5 +1,7 @@
 # ADR-0003 — Agent chốt quyết định kỹ thuật; owner theo dõi
 
+> **Cập nhật phân quyền:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md) là nguồn hiện hành về vai trò, tự chủ triển khai, review và merge. Các quy định cũ dưới đây được giữ làm lịch sử quyết định.
+
 - **Trạng thái:** PROPOSED trong PR này; có hiệu lực khi reviewer độc lập review và merge vào main.
 - **Ngày:** 2026-11-10.
 - **Nguồn chỉ đạo:** Owner chuyển sang vai trò theo dõi tiến độ, không làm cổng phê duyệt mặc định cho thảo luận, G0–G3 hay tài liệu kỹ thuật.

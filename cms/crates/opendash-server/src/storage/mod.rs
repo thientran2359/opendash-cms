@@ -1,4 +1,6 @@
 pub mod auth;
+pub mod builder;
+pub mod builder_binding;
 pub mod content;
 pub mod dashboard;
 pub mod entries;
@@ -8,6 +10,7 @@ pub mod plugin;
 pub mod plugin_kv;
 pub mod public_content;
 pub mod settings;
+pub mod taxonomy;
 pub mod theme;
 
 use std::{path::Path, time::Duration};

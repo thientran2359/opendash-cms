@@ -79,6 +79,20 @@ where
     F: FnOnce(SelectedTemplate) -> ApiResult<T>,
 {
     let mut tx = db.begin().await?;
+    // Builder conversion is one-way. Reserve the same singleton writer used
+    // by layout Save *before* touching M3 home_page; a legacy request racing
+    // with conversion can never revive the old public source.
+    let changed = sqlx::query(
+        "UPDATE builder_homepage SET version = version + 1
+         WHERE id = 1 AND document_json IS NULL AND version < 9223372036854775807",
+    )
+    .execute(&mut *tx)
+    .await?;
+    if changed.rows_affected() != 1 {
+        return Err(ApiError::conflict(
+            "Homepage đã chuyển sang Builder dạng cây. Hãy mở /api/admin/builder/homepage.",
+        ));
+    }
     sqlx::query(
         "INSERT INTO home_page (id, block_id, values_json) VALUES (1, ?, ?)
          ON CONFLICT(id) DO UPDATE SET block_id = excluded.block_id, values_json = excluded.values_json",
@@ -175,9 +189,16 @@ pub async fn list(db: &SqlitePool) -> ApiResult<ThemeList> {
         sqlx::query_as("SELECT id, compatible_block_id FROM theme_blocks ORDER BY id")
             .fetch_all(db)
             .await?;
-    let saved: Option<String> = sqlx::query_scalar("SELECT block_id FROM home_page WHERE id = 1")
-        .fetch_optional(db)
-        .await?;
+    // Once the Builder layout is saved, the old M3 home_page is retained
+    // solely for backup/restore. Its single-block compatibility must not be
+    // reported as compatibility of the new (possibly mixed) Builder tree.
+    let saved: Option<String> = sqlx::query_scalar(
+        "SELECT p.block_id FROM home_page p
+         JOIN builder_homepage b ON b.id = 1 AND b.document_json IS NULL
+         WHERE p.id = 1",
+    )
+    .fetch_optional(db)
+    .await?;
     let homepage_compatible = match (saved.as_deref(), active_id.as_deref()) {
         (Some(source), Some(id)) => Some(
             rows.iter()

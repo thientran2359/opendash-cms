@@ -265,6 +265,7 @@ mod tests {
                 Value::String("<img src=x onerror=alert(2)> {{ 7*7 }}".into()),
             )]
             .into(),
+            term_ids: vec![],
             publication_status: "draft".into(),
             version: 1,
             created_at: "".into(),

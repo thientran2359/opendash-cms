@@ -12,7 +12,7 @@ agents:
     product: Antigravity
     host: windows
     branch: agent/nova
-    role: coordinator
+    role: implementer
   forge:
     product: Chat on Steroids
     host: windows

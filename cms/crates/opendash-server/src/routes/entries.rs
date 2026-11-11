@@ -43,6 +43,9 @@ fn is_builtin(key: &str) -> bool {
 pub struct EntryPagination {
     limit: Option<i64>,
     offset: Option<i64>,
+    category_id: Option<i64>,
+    tag_id: Option<i64>,
+    include_descendants: Option<bool>,
 }
 
 fn valid_type_key(key: &str) -> ApiResult<()> {
@@ -102,8 +105,26 @@ pub async fn entry_list(
     if !(1..=100).contains(&limit) || !(0..=1_000_000).contains(&offset) {
         return Err(ApiError::bad_request("Phân trang không hợp lệ."));
     }
+    if pagination
+        .category_id
+        .into_iter()
+        .chain(pagination.tag_id)
+        .any(|id| id <= 0)
+    {
+        return Err(ApiError::bad_request("ID bộ lọc taxonomy phải dương."));
+    }
+    if pagination.include_descendants.unwrap_or(false) && pagination.category_id.is_none() {
+        return Err(ApiError::bad_request(
+            "include_descendants chỉ được dùng cùng category_id.",
+        ));
+    }
+    let filters = entry_storage::EntryFilters {
+        category_id: pagination.category_id,
+        tag_id: pagination.tag_id,
+        include_descendants: pagination.include_descendants.unwrap_or(false),
+    };
     Ok(Json(
-        entry_storage::list_entries(&db, &type_key, limit, offset).await?,
+        entry_storage::list_entries(&db, &type_key, limit, offset, filters).await?,
     ))
 }
 
@@ -127,7 +148,7 @@ pub async fn entry_create(
     Path(type_key): Path<String>,
     Json(input): Json<ContentEntryInput>,
 ) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     let schema = content_schema(&db, &type_key).await?;
     input
         .validate_against(&schema)
@@ -137,7 +158,7 @@ pub async fn entry_create(
         HookEvent::ContentBeforeSave,
         json!({ "type_key": &type_key, "operation": "create" }),
     );
-    let entry = entry_storage::create_entry(&db, &type_key, &input).await?;
+    let entry = entry_storage::create_entry(&db, &actor, &type_key, &input).await?;
     hooks.emit(
         HookEvent::ContentAfterSave,
         json!({ "type_key": &type_key, "id": entry.id, "operation": "create", "version": entry.version }),
@@ -163,7 +184,7 @@ pub async fn entry_update(
     Path((type_key, id)): Path<(String, i64)>,
     Json(input): Json<ContentEntryInput>,
 ) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     let version = expected_version(&headers)?;
     let schema = content_schema(&db, &type_key).await?;
     input
@@ -174,7 +195,7 @@ pub async fn entry_update(
         HookEvent::ContentBeforeSave,
         json!({ "type_key": &type_key, "id": id, "operation": "update" }),
     );
-    let entry = entry_storage::update_entry(&db, &type_key, id, version, &input).await?;
+    let entry = entry_storage::update_entry(&db, &actor, &type_key, id, version, &input).await?;
     hooks.emit(
         HookEvent::ContentAfterSave,
         json!({ "type_key": &type_key, "id": entry.id, "operation": "update", "version": entry.version }),

@@ -4,6 +4,8 @@ import type { ContentEntryInput } from '../content/types.ts';
 import { MediaPicker } from '../media/MediaPicker.tsx';
 import { mediaThumbnailUrl } from '../../api/media.ts';
 import { ApiClientError } from '../../api/client.ts';
+import type { EntryTermFilters } from '../../api/taxonomy.ts';
+import { TermFilters, TermPicker } from '../taxonomy/TermPicker.tsx';
 import {
   changePostPagePublication, checkPostPagePreview, createPostPage, deletePostPage,
   getPostPage, listPostPages, postPagePreviewUrl, savePostPage,
@@ -21,6 +23,7 @@ interface EditorDraft {
   body: string;
   featuredImage: string | null;
   status: PublicationStatus;
+  termIds: number[];
 }
 
 interface Props {
@@ -38,7 +41,7 @@ function slugify(value: string): string {
 }
 
 function newDraft(): EditorDraft {
-  return { id: null, version: null, title: '', slug: '', body: '', featuredImage: null, status: 'draft' };
+  return { id: null, version: null, title: '', slug: '', body: '', featuredImage: null, status: 'draft', termIds: [] };
 }
 
 function fromRecord(item: PostPageRecord): EditorDraft {
@@ -48,6 +51,7 @@ function fromRecord(item: PostPageRecord): EditorDraft {
     featuredImage: typeof item.values.featured_image === 'string' && item.values.featured_image
       ? item.values.featured_image : null,
     status: item.publication_status,
+    termIds: [...(item.term_ids ?? [])].sort((a, b) => a - b),
   };
 }
 
@@ -55,6 +59,7 @@ function entryInput(draft: EditorDraft): ContentEntryInput {
   return {
     title: draft.title.trim(), slug: draft.slug.trim(),
     values: { body: draft.body, featured_image: draft.featuredImage },
+    term_ids: draft.termIds,
   };
 }
 
@@ -83,6 +88,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
   const label = type === 'post' ? 'Bài viết' : 'Trang';
   const [items, setItems] = useState<PostPageRecord[]>([]);
   const [offset, setOffset] = useState(0);
+  const [filters, setFilters] = useState<EntryTermFilters>({});
   const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -121,7 +127,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
     if (!user) return;
     let active = true;
     setLoading(true);
-    listPostPages(type, PAGE_SIZE, offset)
+    listPostPages(type, PAGE_SIZE, offset, filters)
       .then(list => {
         if (!active) return;
         if (list.length === 0 && offset > 0) {
@@ -137,7 +143,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [type, user?.id, offset, revision]);
+  }, [type, user?.id, offset, revision, filters]);
 
   const reportError = (cause: unknown, fallback: string) => {
     setError(errorMessage(cause, fallback));
@@ -352,6 +358,19 @@ export const PostPageWorkspace: React.FC<Props> = ({
             </div>
             <button type="button" className="btn-secondary" onClick={() => setRevision(previous => previous + 1)} disabled={busy || loading}>Tải lại</button>
           </div>
+          <div className="mb-4 rounded-lg border border-slate-200 p-3">
+            <TermFilters
+              userId={user.id}
+              value={filters}
+              disabled={busy}
+              onApiError={reportError}
+              onChange={next => {
+                setFilters(next);
+                setOffset(0);
+                setItems([]);
+              }}
+            />
+          </div>
           {loading && <p className="od-posts-placeholder" role="status">Đang tải danh sách…</p>}
           {!loading && items.length === 0 && <p className="od-posts-placeholder">Chưa có {label.toLowerCase()} nào. Chọn “Thêm {label.toLowerCase()}” để bắt đầu.</p>}
           {!loading && items.length > 0 && (
@@ -390,7 +409,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
             </label>
             <label className="od-posts-field">
               <span>Đường dẫn (slug) <span aria-hidden="true">*</span></span>
-              <input type="text" required maxLength={64} value={editor.slug} onChange={event => setEditor(previous => previous && { ...previous, slug: event.target.value })} disabled={busy} placeholder="duong-dan-noi-dung" pattern="[a-z][a-z0-9-]{0,63}" title="Bắt đầu bằng chữ thường a-z, sau đó là chữ thường, số hoặc dấu gạch ngang" />
+              <input type="text" required maxLength={64} value={editor.slug} onChange={event => setEditor(previous => previous && { ...previous, slug: event.target.value })} disabled={busy} placeholder="duong-dan-noi-dung" pattern="[a-z](?:[a-z0-9]|-){0,63}" title="Bắt đầu bằng chữ thường a-z, sau đó là chữ thường, số hoặc dấu gạch ngang" />
               <small>Chữ thường không dấu, số và dấu gạch ngang. Slug phải duy nhất trong {label.toLowerCase()}.</small>
             </label>
             <label className="od-posts-field">
@@ -398,6 +417,16 @@ export const PostPageWorkspace: React.FC<Props> = ({
               <textarea rows={14} value={editor.body} onChange={event => setEditor(previous => previous && { ...previous, body: event.target.value })} disabled={busy} placeholder="Viết nội dung tại đây…" />
               <small>Hiện hỗ trợ văn bản. Nội dung HTML được hiển thị dưới dạng văn bản an toàn.</small>
             </label>
+            <div className="min-w-0">
+              <h3 className="mb-3 text-base font-semibold">Danh mục &amp; Thẻ</h3>
+              <TermPicker
+                userId={user.id}
+                selectedIds={editor.termIds}
+                disabled={busy}
+                onApiError={reportError}
+                onChange={termIds => setEditor(previous => previous && { ...previous, termIds })}
+              />
+            </div>
           </div>
           <aside className="od-posts-aside">
             <section className="od-posts-card">

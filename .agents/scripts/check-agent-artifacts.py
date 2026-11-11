@@ -14,6 +14,7 @@ ACTIVE_SKILLS = {
     ".agents/skills/github-task-pickup/SKILL.md": "github-task-pickup",
     ".agents/skills/discussion-turn-responder/SKILL.md": "discussion-turn-responder",
     ".agents/skills/github-pr-review-merge/SKILL.md": "github-pr-review-merge",
+    ".agents/skills/atlas-task-dispatch/SKILL.md": "atlas-task-dispatch",
 }
 STRONG_SECRETS = [
     re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
