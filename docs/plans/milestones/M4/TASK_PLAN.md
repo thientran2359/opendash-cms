@@ -2,6 +2,8 @@
 
 **Tất cả `M4-Pxx` dưới đây là task candidates để lập G1/G2/G3**, không phải `READY`. Không chốt AST schema/API/ABI chỉ từ bảng này; code Builder thay contract cần Full-Track và reviewer độc lập. [Milestone](README.md) · [V1 scope](../../../product/PRODUCT_REQUIREMENTS.md) · [M3 prerequisites](../M3/README.md).
 
+[ADR-0007](../../../decisions/ADR-0007-m4-builder-taxonomy-foundation.md) ghi quyết định G2 cho nền tảng Builder P01/P02 và taxonomy P09/P10, gồm chuyển đổi homepage khi Lưu, quyền category/tag và điều kiện lọc trước phân trang.
+
 | Candidate | Slice / task outcome | Module primary (phối hợp) | Dependency / gate | Acceptance (phải thành test khi G3) |
 | --- | --- | --- | --- | --- |
 | M4-P01 | Thiết kế AST node Section/Row/Column/Element và descriptors Heading/Text/Image/Button | BLD-02 (BLD-01, FND-01) | M2.5 registry + M1 block compatibility; Full-Track G1/G2 AST/migration | Serialize/validate tree; invalid node/cycle/size, unknown provider fail safely; legacy one-block vẫn mở được |
