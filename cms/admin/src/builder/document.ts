@@ -5,6 +5,15 @@ export interface BuilderElement {
   type: string;
   props: Record<string, unknown>;
 }
+/** ADR-0009: one typed source reference per eligible core element. */
+export type BindingTarget = 'text' | 'media_id' | 'alt' | 'label' | 'url';
+export type BindingSource = { kind: 'title' } | { kind: 'field'; key: string };
+export interface ElementBinding {
+  type_key: string;
+  entry_slug: string;
+  source: BindingSource;
+  target: BindingTarget;
+}
 export type BuilderViewport = 'desktop' | 'tablet' | 'mobile';
 export type ResponsiveField = 'padding_px' | 'gap_px' | 'columns_per_row' | 'text_align';
 export type ResponsiveAlign = 'start' | 'center' | 'end';
@@ -281,5 +290,21 @@ export function setNodeField(
   } else {
     element.props = { ...element.props, [field]: value };
   }
+  return next;
+}
+
+/** Typed binding updates are kept separate from editing static props.
+ * Unbind removes only binding, preserving static values and responsive metadata.
+ */
+export function setElementBinding(
+  document: BuilderDocument, id: string, binding: ElementBinding | null,
+): BuilderDocument | null {
+  const next = clone(document);
+  const item = locate(next, id);
+  if (!item || !isElement(item.node) || !ELEMENT_TYPES.includes(item.node.type as ElementType)) return null;
+  const props = { ...item.node.props };
+  if (binding === null) delete props.binding;
+  else props.binding = { ...binding, source: { ...binding.source } };
+  item.node.props = props;
   return next;
 }

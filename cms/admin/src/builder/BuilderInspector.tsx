@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
-import type { BuilderDocument, BuilderElement, BuilderViewport, ResponsiveAlign, ResponsiveField, ResponsiveContainer } from './document.ts';
+import type { BuilderDocument, BuilderElement, BuilderViewport, ElementBinding, ResponsiveAlign, ResponsiveField, ResponsiveContainer } from './document.ts';
 import { effectiveResponsive, isElement, isLockedElement, locate, nodeTitle, RESPONSIVE_FIELDS, VIEWPORT_LABELS } from './document.ts';
+import { BuilderBindingFields } from './BuilderBindingFields.tsx';
 
 interface Props {
   document: BuilderDocument;
@@ -10,11 +11,12 @@ interface Props {
   csrfToken: string | null;
   viewport: BuilderViewport;
   onChange: (id: string, key: string, value: string | number) => void;
+  onBindingChange: (id: string, binding: ElementBinding | null) => void;
   onResponsiveChange: (id: string, viewport: BuilderViewport, field: ResponsiveField, value: number | ResponsiveAlign | null) => void;
   onError: (error: unknown, fallback: string) => void;
 }
 
-export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, onChange, onResponsiveChange, onError }: Props) {
+export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, onChange, onBindingChange, onResponsiveChange, onError }: Props) {
   const [showPicker, setShowPicker] = useState(false);
   const item = locate(document, selectedId);
   if (!item) return (
@@ -161,6 +163,9 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
           )}
           {fields.length === 0 && <p className="text-xs text-slate-500">Block không có field có thể chỉnh.</p>}
         </form>
+      )}
+      {element && !locked && ['core/heading', 'core/text', 'core/image', 'core/button'].includes(element.type) && (
+        <BuilderBindingFields key={element.id} element={element} onBindingChange={onBindingChange} onError={onError} />
       )}
       {binding != null && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900">
