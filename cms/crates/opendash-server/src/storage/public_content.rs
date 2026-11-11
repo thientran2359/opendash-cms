@@ -72,8 +72,13 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              )
              )
            LIMIT 1
+         ) OR EXISTS (
+           SELECT 1 FROM builder_homepage_media AS bm
+           JOIN builder_homepage AS b ON b.id = 1
+           WHERE bm.media_id = ? AND b.document_json IS NOT NULL
          )"#,
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .fetch_one(db)
