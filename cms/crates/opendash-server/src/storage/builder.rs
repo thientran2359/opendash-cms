@@ -16,6 +16,7 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::{
     error::{ApiError, ApiResult},
+    storage::builder_binding::{self, BindingResults},
     storage::media::valid_media_id,
     theme::{Block, Fields},
 };
@@ -213,7 +214,11 @@ pub fn image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
             for column in &row.children {
                 for element in &column.children {
                     if let ElementContent::Known(KnownElement::Image(image)) = &element.content {
-                        ids.insert(image.media_id.as_str());
+                        if !image.binding.as_ref().is_some_and(|b| {
+                            b.target == opendash_core::builder::BindingTarget::MediaId
+                        }) {
+                            ids.insert(image.media_id.as_str());
+                        }
                     }
                 }
             }
@@ -251,7 +256,7 @@ pub async fn save_and_render<T, F>(
     render: F,
 ) -> ApiResult<(i64, T)>
 where
-    F: FnOnce(&HomeState, &BuilderDocument) -> ApiResult<T>,
+    F: FnOnce(&HomeState, &BuilderDocument, &BindingResults) -> ApiResult<T>,
 {
     let mut tx = db.begin().await?;
     // First query inside transaction reserves the writer and arbitrates CAS,
@@ -286,7 +291,8 @@ where
             ));
         }
     }
-    let rendered = render(&current, document)?;
+    let bindings = builder_binding::resolve_in_tx(&mut tx, document, false).await?;
+    let rendered = render(&current, document, &bindings)?;
     let bytes = document
         .to_json()
         .map_err(|error| ApiError::bad_request(error.to_string()))?;

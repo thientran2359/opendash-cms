@@ -4,13 +4,14 @@ use crate::{
     hooks::HookDispatcher,
     storage::{
         builder::HomeState,
+        builder_binding::{BindingResult, BindingResults},
         page::load_theme_block,
         theme::{self as theme_storage, HomeSnapshot, SelectedTemplate},
     },
     theme::{self, Block},
 };
 use opendash_core::{
-    builder::{BuilderDocument, ElementContent, KnownElement},
+    builder::{BindingTarget, BuilderDocument, ElementContent, KnownElement},
     hooks::HookEvent,
 };
 use serde::Serialize;
@@ -52,10 +53,22 @@ fn escape_html(value: &str) -> String {
 /// Template selection comes from one storage snapshot. Unsupported legacy
 /// nodes are invisible in public markup but remain intact in Builder JSON.
 /// Only renderer-known core elements can add public media references.
+#[cfg(test)]
 pub fn render_builder(
     state: &HomeState,
     document: &BuilderDocument,
     is_preview: bool,
+) -> ApiResult<RenderedLayout> {
+    render_builder_resolved(state, document, is_preview, &BindingResults::new())
+}
+
+/// All bound values are obtained by the storage layer under Preview/public ACL.
+/// The renderer never reads SQL or treats rich text as raw markup.
+pub fn render_builder_resolved(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
 ) -> ApiResult<RenderedLayout> {
     let mut html = String::from("<main data-builder-version=\"1\">");
     let mut diagnostics = Vec::new();
@@ -75,7 +88,59 @@ pub fn render_builder(
                     escape_html(&column.id)
                 ));
                 for element in &column.children {
-                    let rendered = match &element.content {
+                    let mut materialized = None;
+                    if let ElementContent::Known(known) = &element.content {
+                        if let Some(binding) = known.binding() {
+                            let value = match bindings.get(&element.id) {
+                                Some(BindingResult::Value(value)) => value,
+                                result => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: match result {
+                                            Some(BindingResult::Incompatible) => {
+                                                "binding_incompatible"
+                                            }
+                                            Some(BindingResult::UrlRejected) => {
+                                                "binding_url_rejected"
+                                            }
+                                            _ => "binding_unavailable",
+                                        },
+                                    });
+                                    continue;
+                                }
+                            };
+                            let mut resolved = known.clone();
+                            match (&mut resolved, binding.target) {
+                                (KnownElement::Heading(props), BindingTarget::Text) => {
+                                    props.text = value.clone()
+                                }
+                                (KnownElement::Text(props), BindingTarget::Text) => {
+                                    props.text = value.clone()
+                                }
+                                (KnownElement::Image(props), BindingTarget::MediaId) => {
+                                    props.media_id = value.clone()
+                                }
+                                (KnownElement::Image(props), BindingTarget::Alt) => {
+                                    props.alt = value.clone()
+                                }
+                                (KnownElement::Button(props), BindingTarget::Label) => {
+                                    props.label = value.clone()
+                                }
+                                (KnownElement::Button(props), BindingTarget::Url) => {
+                                    props.url = value.clone()
+                                }
+                                _ => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "binding_incompatible",
+                                    });
+                                    continue;
+                                }
+                            }
+                            materialized = Some(ElementContent::Known(resolved));
+                        }
+                    }
+                    let rendered = match materialized.as_ref().unwrap_or(&element.content) {
                         ElementContent::Known(KnownElement::Heading(props)) => Some(format!(
                             "<h{level}>{text}</h{level}>",
                             level = props.level,
@@ -421,19 +486,20 @@ mod tests {
             )
             .unwrap();
 
-        let (version, rendered) = builder_save_and_render(&db, &draft, 1, |current, document| {
-            render_builder(current, document, false)
-        })
-        .await
-        .unwrap();
+        let (version, rendered) =
+            builder_save_and_render(&db, &draft, 1, |current, document, bindings| {
+                render_builder_resolved(current, document, false, bindings)
+            })
+            .await
+            .unwrap();
         assert_eq!(version, 2);
         assert!(rendered.html.contains("Committed"));
         assert!(!observed.load(Ordering::SeqCst));
         dispatch_saved_hook(&hooks, layout_hook_payload(&draft, version)).await;
         assert!(observed.load(Ordering::SeqCst));
         assert_eq!(builder_read(&db).await.unwrap().saved, Some(draft.clone()));
-        let failure = builder_save_and_render(&db, &draft, 1, |current, document| {
-            render_builder(current, document, false)
+        let failure = builder_save_and_render(&db, &draft, 1, |current, document, bindings| {
+            render_builder_resolved(current, document, false, bindings)
         })
         .await
         .unwrap_err();
