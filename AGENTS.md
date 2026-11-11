@@ -68,12 +68,21 @@
   ID, base SHA, exact file ownership, explicit acceptance and approved gate.
   Keep one active implementation task per agent branch. Protect uncommitted
   changes and avoid two writers on the same file.
+- **Owner authorization from 2026-11-11:** [ADR-0008](docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md)
+  extends Harbor/Forge autonomous implementation, review and merge from M3
+  to M4 and later milestones. The two agents may coordinate their own approved
+  tasks and self-merge eligible PRs after actual tests, required CI and security
+  gates; a self-review is identified as such, never represented as independent
+  approval. Verified G3/ownership and Project Ready remain prerequisites to
+  picking up implementation, with a documented Project status sync permitted
+  after confirming the source and dependencies. Never bypass branch protection.
 - After actual validation, stage only task-owned changes, commit with task ID
   and non-force push to its agent branch. Link commit and tests to GitHub
   Issue/PR for review. No background merge or deployment. Atlas/Nova may merge
   independently reviewed **implementation and concluded technical-document/design** PRs
   in the explicitly invoked review-and-merge flow in .agents/GITHUB_WORKFLOW.md;
-  review-only stays read-only for code, and authors cannot self-review/self-merge.
+  review-only stays read-only for code, and authors outside the explicit
+  Harbor/Forge autonomy exceptions cannot self-review/self-merge.
   Existing security blockers, CI and preservation gates are not waived.
 - Muse-to-CoS/Antigravity dispatch must be verified through authenticated
   host-specific adapters first. Chat delivery or AI consensus does not

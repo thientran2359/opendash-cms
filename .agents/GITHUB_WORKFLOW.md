@@ -1,6 +1,6 @@
 # GitHub workflow cho 5 agent — đề xuất chuẩn vận hành
 
-> **Ngoại lệ owner phê duyệt cho M3 ngày 2026-11-11:** [ADR-0005 — Harbor/Forge autonomous M3](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) **ưu tiên áp dụng trong phạm vi M3** khi các hướng dẫn chung dưới đây yêu cầu Atlas/Nova coordinator, reviewer độc lập, cấm self-merge, hoặc chờ owner duyệt task. Harbor/Forge tự lập G2/G3, chọn task, tạo Issue và tự merge PR **khi tất cả safety/tests/CI/Project gates PASS**, không yêu cầu agent khác review. Các mục cũ dưới đây vẫn áp dụng ngoài M3; nhánh Forge cũ/PR #7, #9 và các security blocker hạ tầng không được miễn. Không tự kích hoạt watcher/remote dispatch.
+> **Ủy quyền trực tiếp của owner ngày 2026-11-11:** [ADR-0005 — M3](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) và [ADR-0008 — M4 trở đi](../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md) cho **Harbor/Forge** quyền tự điều phối, code, review và merge PR của chính mình trên các milestone OpenDash khi G3/ownership, security, tests, required CI và Project gates đều đạt. Không cần Atlas/Nova hoặc review độc lập cho PR của hai agent này; cần ghi self-review trung thực, không giả approval độc lập. Các agent khác vẫn theo quy trình reviewer chung. Không bypass branch protection/rollback/ACL; không tự kích hoạt watcher, remote dispatch hoặc deploy.
 
 **Repository nguồn duy nhất:** `thientran2359/opendash-cms`.
 Code nằm trong 5 worktree/checkout **cục bộ** tách biệt trên Windows và macOS;
@@ -74,9 +74,9 @@ trailer là **metadata tự khai báo để truy vết**, không chứng minh da
 lập. Một comment ghi `Verdict: APPROVED` hoặc `CHANGES_REQUESTED` không
 tương đương một GitHub review APPROVE/REQUEST_CHANGES và không thay thế required
 review trong ruleset. Không tự gán kết quả AI thành approval GitHub, không bỏ
-qua CI, ownership hoặc gate. **M3 vẫn áp dụng ngoại lệ [ADR-0005](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md)**:
-Harbor/Forge có thể tự merge PR M3 đủ gates mà không cần review chéo; khi đó
-ghi `Review: N/A — ADR-0005` trong PR và không tạo review giả.
+qua CI, ownership hoặc gate. **Harbor/Forge áp dụng [ADR-0005](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) tại M3 và [ADR-0008](../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md) từ M4**:
+được tự kiểm tra và merge PR đủ gates; ghi `Self-review: <Agent> — reviewed head <SHA>`
+và validation thật trong PR. Không tạo review giả từ một tài khoản chung.
 
 ## Nguồn sự thật cho task và tài liệu
 
@@ -180,7 +180,7 @@ tiêu đề `[P1-Wxx] ...`, nhãn `type:implementation`, `agent:forge`,
 `READY`, approved `source_sha` (Git blob immutable), `base_sha`, owner,
 acceptance và rollback. Không tự gán GitHub milestone M3 hoặc `Module:` giả.
 Kiểm cả Issue open/closed theo **ID chính xác** trước khi publish và giữ
-[Issue #5](https://github.com/thientran2359/opendash-cms/issues/5) **chỉ
+  [Issue #5](https://github.com/thientran2359/opendash-cms/issues/5) **chỉ
 coordination / `NO_DISPATCH`**, không dùng làm implementation Issue.
 **Staged activation:** lúc đầu chỉ W01/W02 được xem xét `READY`; W03–W08
 phải chờ P0 evidence + signal contract + cập nhật các brief tương ứng đã
@@ -241,6 +241,13 @@ và `agent:*` nếu đã phân công. Task quy trình liên module dùng
 | In progress | CLAIMED/IN_PROGRESS (hoặc BLOCKED với blocker nêu trong Issue) |
 | In review | SUBMITTED, REVIEWED hoặc MERGED nhưng chưa có G5 verification |
 | Done | Chỉ khi đã VERIFIED đúng phạm vi có evidence và chấp thuận đóng |
+
+**Đồng bộ task đã G3 nhưng còn Backlog:** theo [ADR-0008](../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md),
+Harbor/Forge có thể trực tiếp chuyển Issue đã giao đúng agent từ `Backlog`
+sang `Ready` **sau khi** đối chiếu source G3 merged, dependency, acceptance,
+file ownership và không có blocker thực. Kiểm lại `Ready` trên Project trước
+khi claim. Không sử dụng thao tác này để bypass điều kiện `Ready` hoặc nhận
+Issue của agent khác.
 
 Project đã bật auto-add Issue mở từ repo `opendash-cms` (lọc
 `is:issue is:open`) và workflow `Done → close Issue`. Workflow mặc định
@@ -329,6 +336,13 @@ không cần owner ký từng PR đủ gate. Theo ADR-0003, technical-doc/design
 đã có Final Decision hoặc reviewer verdict cũng được xử lý theo cổng review này.
 Lệnh chỉ “review/re-review PR” không cấp quyền merge.
 
+**Harbor/Forge từ M4 trở đi:** áp dụng ngoại lệ owner trong
+[ADR-0008](../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md).
+Hai agent có thể tự review và merge PR của chính mình sau khi ghi self-review
+theo head SHA, kiểm all checks/security/acceptance và re-fetch PR/base/head.
+Không yêu cầu gọi Atlas/Nova cho các PR này. Các giới hạn trong danh sách dưới
+đây về reviewer độc lập và cấm self-merge chỉ áp dụng cho agent ngoài ngoại lệ.
+
 - Xác minh reviewer/implementer bằng role, Issue, branch và signed evidence;
   login GitHub dùng chung không chứng minh tự review hoặc độc lập. Không tự
   review/merge PR mình viết; Atlas và Nova phải review chéo nếu là tác giả.
@@ -392,10 +406,11 @@ là BLOCKED, không tự force.
    `git push -u origin agent/<name>` sau khi HEAD/remote đúng; với task branch
    được giao, push đúng `task/...`. Commit có trailer `Agent: <name>`.
 5. Đính commit SHA, môi trường và lệnh PASS/FAIL/NOT_RUN vào Issue và PR;
-   reviewer so sánh source, dependency, contract và DB migration impact; ghi
-   verdict kèm `Reviewed head SHA` theo quy chuẩn trên.
+   reviewer hoặc Harbor/Forge tự review so sánh source, dependency, contract
+   và DB migration impact; ghi verdict cùng `Reviewed head SHA` theo quy chuẩn.
 6. Chỉ merge khi đủ các gate áp dụng, bao gồm review nếu quy trình yêu cầu,
-   CI và quyền merge; xem ngoại lệ M3 tại ADR-0005. `MERGED` ≠ `VERIFIED` cho scope chưa
+   CI và quyền merge; xem ADR-0005 (M3) và ADR-0008 (M4+) cho Harbor/Forge.
+   `MERGED` ≠ `VERIFIED` cho scope chưa
    chạy nghiệm thu; cập nhật trạng thái trong docs khi có evidence.
 
 ## Giới hạn Muse
