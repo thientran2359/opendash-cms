@@ -585,7 +585,11 @@ def test_user_schema_upgrade(binary, baseline_binary: Path | None = None):
     print("Testing upgrade from pre-0009 users and sessions without changing hashes or cookies...")
     with TemporaryDirectory(prefix="opendash-users-upgrade-") as folder:
         db = Path(folder) / "cms.sqlite"
-        with running(binary, db) as base:
+        # Prefer a genuine pre-0009 binary. A current binary also installs later
+        # migrations (e.g. Settings 0010), so dropping only users.version would
+        # produce an impossible snapshot that the old SQLx migrator must refuse.
+        fixture_binary = baseline_binary if baseline_binary is not None else binary
+        with running(fixture_binary, db) as base:
             assert json_request(base, "/auth/setup", {
                 "username": "upgradeadmin", "password": "upgrade-password",
             })[0] == 201
@@ -595,9 +599,10 @@ def test_user_schema_upgrade(binary, baseline_binary: Path | None = None):
             }, admin)
             assert st == 201, (st, body)
             editor, _ = login_session(base, "upgradeeditor", "editor-password")
-        # Turn the isolated fixture into the exact pre-0009 shape: the user
-        # table and migration journal are both rolled back to 0008. This does
-        # not modify a real site, its migration files or the checked-in fixture.
+        # When the old binary is available it already produced an authentic
+        # pre-0009 fixture. Otherwise, support only the explicitly understood
+        # 0009/0010 test-only downgrade, refusing unknown newer migrations.
+        # No production site, migration source or committed fixture is touched.
         with closing(sqlite3.connect(db)) as con:
             with con:
                 before_users = con.execute(
@@ -607,10 +612,27 @@ def test_user_schema_upgrade(binary, baseline_binary: Path | None = None):
                     "SELECT token_hash, user_id, csrf_token, expires_at, created_at "
                     "FROM sessions ORDER BY user_id",
                 ).fetchall()
-                con.execute("ALTER TABLE users DROP COLUMN version")
-                con.execute("DELETE FROM _sqlx_migrations WHERE version = 9")
+                newer_versions = [row[0] for row in con.execute(
+                    "SELECT version FROM _sqlx_migrations WHERE version > 8 ORDER BY version",
+                )]
+                if baseline_binary is not None:
+                    assert not newer_versions, f"Old binary created newer migrations: {newer_versions}"
+                else:
+                    assert newer_versions in ([9], [9, 10]), (
+                        f"Unknown schema versions {newer_versions}; use an actual pre-0009 binary"
+                    )
+                    if 10 in newer_versions:
+                        con.execute("DROP TABLE site_general_settings")
+                    con.execute("ALTER TABLE users DROP COLUMN version")
+                    con.execute("DELETE FROM _sqlx_migrations WHERE version IN (9, 10)")
             assert con.execute("PRAGMA table_info(users)").fetchall()
             assert not any(c[1] == "version" for c in con.execute("PRAGMA table_info(users)"))
+            assert not any(row[0] > 8 for row in con.execute(
+                "SELECT version FROM _sqlx_migrations",
+            )), "Pre-0009 fixture must not contain later migrations"
+            assert con.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='site_general_settings'",
+            ).fetchone() == (0,)
         # SQLite online backup creates a pre-migration snapshot for rollback.
         baseline_db = Path(folder) / "snapshot_pre0009.sqlite"
         with closing(sqlite3.connect(db)) as source, closing(sqlite3.connect(baseline_db)) as dest:
