@@ -1,5 +1,6 @@
 import type { ContentEntryInput, ContentEntryRecord } from '../features/content/types.ts';
 import { requestJson, requestText } from './client.ts';
+import { appendEntryTermFilters, type EntryTermFilters } from './taxonomy.ts';
 
 export type BuiltinContentType = 'post' | 'page';
 export type PublicationStatus = 'draft' | 'published';
@@ -14,8 +15,12 @@ const entriesPath = (type: BuiltinContentType): string =>
 const entryPath = (type: BuiltinContentType, id: number): string =>
   entriesPath(type) + '/' + id;
 
-export function listPostPages(type: BuiltinContentType, limit: number, offset: number): Promise<PostPageRecord[]> {
-  return requestJson<PostPageRecord[]>(entriesPath(type) + '?limit=' + limit + '&offset=' + offset, {
+export function listPostPages(
+  type: BuiltinContentType, limit: number, offset: number, filters: EntryTermFilters = {},
+): Promise<PostPageRecord[]> {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  appendEntryTermFilters(query, filters);
+  return requestJson<PostPageRecord[]>(entriesPath(type) + '?' + query, {
     defaultErrorMessage: 'Không thể tải danh sách.',
   });
 }

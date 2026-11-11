@@ -9,11 +9,13 @@ import {
   updateContentEntry,
 } from '../../api/content.ts';
 import { ApiClientError } from '../../api/client.ts';
+import type { EntryTermFilters } from '../../api/taxonomy.ts';
 import { TextField } from '../../components/FormPrimitives.tsx';
 import { AuthUser } from '../../types.ts';
 import { ContentTypeForm } from './ContentTypeForm.tsx';
 import { FieldValueInput } from './FieldValueInput.tsx';
 import { MediaPicker } from '../media/MediaPicker.tsx';
+import { TermFilters, TermPicker } from '../taxonomy/TermPicker.tsx';
 import {
   ContentEntryInput,
   ContentEntryRecord,
@@ -36,6 +38,7 @@ interface EntryDraft {
   title: string;
   slug: string;
   values: Record<string, string>;
+  termIds: number[];
 }
 
 const ENTRIES_PAGE_SIZE = 50;
@@ -53,11 +56,12 @@ function draftFromEntry(entry: ContentEntryRecord): EntryDraft {
     title: entry.title,
     slug: entry.slug,
     values,
+    termIds: [...(entry.term_ids ?? [])].sort((a, b) => a - b),
   };
 }
 
 function blankDraft(): EntryDraft {
-  return { id: null, version: null, title: '', slug: '', values: {} };
+  return { id: null, version: null, title: '', slug: '', values: {}, termIds: [] };
 }
 
 function entryInput(draft: EntryDraft, schema: ContentTypeDefinition): ContentEntryInput {
@@ -89,7 +93,7 @@ function entryInput(draft: EntryDraft, schema: ContentTypeDefinition): ContentEn
       values[field.key] = raw;
     }
   }
-  return { title: draft.title, slug: draft.slug, values };
+  return { title: draft.title, slug: draft.slug, values, term_ids: draft.termIds };
 }
 
 function slugFromTitle(title: string): string {
@@ -111,6 +115,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
   const [selectedTypeKey, setSelectedTypeKey] = useState('');
   const [entries, setEntries] = useState<ContentEntryRecord[]>([]);
   const [offset, setOffset] = useState(0);
+  const [filters, setFilters] = useState<EntryTermFilters>({});
   const [draft, setDraft] = useState<EntryDraft | null>(null);
   const [baseline, setBaseline] = useState('');
   const [schemaDirty, setSchemaDirty] = useState(false);
@@ -126,8 +131,10 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
   const lastSignedInUser = useRef<number | null>(null);
   const currentListKey = useRef(selectedTypeKey);
   const currentListOffset = useRef(offset);
+  const currentListFilters = useRef(JSON.stringify(filters));
   currentListKey.current = selectedTypeKey;
   currentListOffset.current = offset;
+  currentListFilters.current = JSON.stringify(filters);
 
   const selectedType = types.find(type => type.descriptor.key === selectedTypeKey);
   const entryDirty = draft !== null && JSON.stringify(draft) !== baseline;
@@ -202,10 +209,11 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
     return () => { active = false; };
   }, [user?.id]);
 
-  const refreshEntries = async (typeKey: string, pageOffset: number) => {
-    const list = await listContentEntries(typeKey, ENTRIES_PAGE_SIZE, pageOffset);
+  const refreshEntries = async (typeKey: string, pageOffset: number, pageFilters: EntryTermFilters = filters) => {
+    const list = await listContentEntries(typeKey, ENTRIES_PAGE_SIZE, pageOffset, pageFilters);
     // A manual refresh may finish after selecting a different CPT/page.
-    if (currentListKey.current === typeKey && currentListOffset.current === pageOffset) {
+    if (currentListKey.current === typeKey && currentListOffset.current === pageOffset &&
+        currentListFilters.current === JSON.stringify(pageFilters)) {
       setEntries(list);
     }
   };
@@ -217,12 +225,12 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
     }
     let active = true;
     setLoadingEntries(true);
-    listContentEntries(selectedTypeKey, ENTRIES_PAGE_SIZE, offset)
+    listContentEntries(selectedTypeKey, ENTRIES_PAGE_SIZE, offset, filters)
       .then(list => { if (active) setEntries(list); })
       .catch(cause => { if (active) reportError(cause, 'Không thể tải danh sách entry.'); })
       .finally(() => { if (active) setLoadingEntries(false); });
     return () => { active = false; };
-  }, [user?.id, selectedTypeKey, offset]);
+  }, [user?.id, selectedTypeKey, offset, filters]);
 
   const confirmDiscard = (): boolean =>
     !entryDirty || window.confirm('Bản nháp entry chưa lưu sẽ bị bỏ. Tiếp tục?');
@@ -481,6 +489,19 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                   </button>
                 </div>
               </div>
+              <div className="mb-4 rounded-lg border border-slate-200 p-3">
+                <TermFilters
+                  userId={user?.id ?? null}
+                  value={filters}
+                  disabled={!user || processing}
+                  onApiError={reportError}
+                  onChange={next => {
+                    setFilters(next);
+                    setOffset(0);
+                    setEntries([]);
+                  }}
+                />
+              </div>
               <div className="content-entry-list" aria-label="Danh sách entry">
                 {loadingEntries && <p className="content-help">Đang tải entry…</p>}
                 {!loadingEntries && entries.length === 0 && <p className="content-help">Chưa có entry trong trang này.</p>}
@@ -575,6 +596,14 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                     ))}
                   </div>
                   {selectedType.descriptor.fields.length === 0 && <p className="content-help">CPT này không có trường bổ sung.</p>}
+                  <h4>Danh mục &amp; Thẻ</h4>
+                  <TermPicker
+                    userId={user?.id ?? null}
+                    selectedIds={draft.termIds}
+                    disabled={!user || processing}
+                    onApiError={reportError}
+                    onChange={termIds => setDraft(previous => previous ? { ...previous, termIds } : previous)}
+                  />
                   {staleVersion && draft.id !== null && (
                     <div className="content-alert error">
                       Server đã có phiên bản mới. Bản nháp của bạn được giữ nguyên.

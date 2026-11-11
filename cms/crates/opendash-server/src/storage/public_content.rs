@@ -3,7 +3,7 @@
 
 use sqlx::SqlitePool;
 
-use super::entries::{ContentEntryRecord, decode_row};
+use super::entries::{self, ContentEntryRecord, EntryFilters, decode_row};
 use crate::error::ApiResult;
 
 /// Slug is unique within each CPT; lookup never relies on a numeric admin ID.
@@ -30,20 +30,12 @@ pub async fn list_published(
     type_key: &str,
     limit: i64,
     offset: i64,
+    filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
-    let rows: Vec<(i64, String, String, String, String, String, i64, String, String)> =
-        sqlx::query_as(
-            "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
-             FROM content_entries
-             WHERE content_type_key = ? AND publication_status = 'published'
-             ORDER BY id DESC LIMIT ? OFFSET ?",
-        )
-        .bind(type_key)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(db)
-        .await?;
-    rows.into_iter().map(decode_row).collect()
+    // Share the admin/P06 taxonomy predicates. Publication, category and tag
+    // restrictions all run in SQL before paging; EXISTS cannot duplicate rows.
+    // Keep the saved Builder media ACL query below unchanged (Forge P02).
+    entries::list_published_filtered(db, type_key, limit, offset, filters).await
 }
 
 /// Images become public only while referenced by an image/gallery custom field

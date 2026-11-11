@@ -5,6 +5,7 @@ import {
   OwnedContentType,
 } from '../features/content/types.ts';
 import { requestJson, requestText } from './client.ts';
+import { appendEntryTermFilters, type EntryTermFilters } from './taxonomy.ts';
 
 const contentTypePath = (key: string): string =>
   `/api/admin/content-types/${encodeURIComponent(key)}`;
@@ -36,8 +37,11 @@ export function listContentEntries(
   typeKey: string,
   limit = 50,
   offset = 0,
+  filters: EntryTermFilters = {},
 ): Promise<ContentEntryRecord[]> {
-  return requestJson(`${entriesPath(typeKey)}?limit=${limit}&offset=${offset}`, {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  appendEntryTermFilters(query, filters);
+  return requestJson(`${entriesPath(typeKey)}?${query}`, {
     defaultErrorMessage: 'Không thể tải danh sách nội dung.',
   });
 }

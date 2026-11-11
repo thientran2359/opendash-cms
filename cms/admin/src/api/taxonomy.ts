@@ -2,6 +2,21 @@ import { requestJson, requestText } from './client.ts';
 
 export type TaxonomyKind = 'category' | 'tag';
 
+/** Optional list filters; the server applies them before pagination. */
+export interface EntryTermFilters {
+  categoryId?: number | null;
+  tagId?: number | null;
+  includeDescendants?: boolean;
+}
+
+export function appendEntryTermFilters(query: URLSearchParams, filters: EntryTermFilters): void {
+  if (filters.categoryId != null) {
+    query.set('category_id', String(filters.categoryId));
+    if (filters.includeDescendants) query.set('include_descendants', 'true');
+  }
+  if (filters.tagId != null) query.set('tag_id', String(filters.tagId));
+}
+
 export interface TaxonomyTerm {
   id: number;
   kind: TaxonomyKind;
@@ -39,6 +54,19 @@ export function listTaxonomyTerms(
     signal,
     defaultErrorMessage: 'Không thể tải danh sách category/tag.',
   });
+}
+
+/** Iterate the paged term endpoint so editors can choose every existing term. */
+export async function listAllTaxonomyTerms(kind: TaxonomyKind, signal?: AbortSignal): Promise<TaxonomyTerm[]> {
+  const unique = new Map<number, TaxonomyTerm>();
+  let offset = 0;
+  while (true) {
+    const page = await listTaxonomyTerms(kind, 100, offset, signal);
+    for (const term of page.items) unique.set(term.id, term);
+    offset += page.items.length;
+    if (page.items.length === 0 || offset >= page.total) break;
+  }
+  return [...unique.values()];
 }
 
 export function createTaxonomyTerm(input: TaxonomyTermInput, csrfToken: string): Promise<TaxonomyTerm> {

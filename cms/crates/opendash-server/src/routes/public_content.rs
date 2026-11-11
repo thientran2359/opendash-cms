@@ -17,8 +17,8 @@ use crate::{
     error::{ApiError, ApiResult},
     media::MediaStore,
     storage::{
-        content::load_content_type_definition, media, page::active_content_templates,
-        public_content, settings,
+        content::load_content_type_definition, entries::EntryFilters, media,
+        page::active_content_templates, public_content, settings,
     },
 };
 
@@ -28,6 +28,39 @@ const MAX_ARCHIVE_PAGE: i64 = 10_000;
 #[derive(Deserialize)]
 pub struct ArchiveQuery {
     page: Option<i64>,
+    category_id: Option<i64>,
+    tag_id: Option<i64>,
+    include_descendants: Option<bool>,
+}
+
+fn archive_filters(query: &ArchiveQuery) -> ApiResult<EntryFilters> {
+    if query.category_id.is_some_and(|id| id <= 0)
+        || query.tag_id.is_some_and(|id| id <= 0)
+        || (query.include_descendants.unwrap_or(false) && query.category_id.is_none())
+    {
+        return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
+    }
+    Ok(EntryFilters {
+        category_id: query.category_id,
+        tag_id: query.tag_id,
+        include_descendants: query.include_descendants.unwrap_or(false),
+    })
+}
+
+/// Preserve taxonomy selections in the existing public CPT pagination links.
+/// This is not a new public taxonomy URL or a Builder list-block endpoint.
+fn archive_page_url(type_key: &str, page: i64, filters: EntryFilters) -> String {
+    let mut url = format!("/content/{type_key}?page={page}");
+    if let Some(id) = filters.category_id {
+        url.push_str(&format!("&category_id={id}"));
+        if filters.include_descendants {
+            url.push_str("&include_descendants=true");
+        }
+    }
+    if let Some(id) = filters.tag_id {
+        url.push_str(&format!("&tag_id={id}"));
+    }
+    url
 }
 
 fn check_type_key(type_key: &str) -> ApiResult<()> {
@@ -61,20 +94,21 @@ pub async fn archive(
     if !(1..=MAX_ARCHIVE_PAGE).contains(&page) {
         return Err(ApiError::bad_request("Trang nội dung không hợp lệ."));
     }
+    let filters = archive_filters(&query)?;
     let schema = load_content_type_definition(&db, &type_key)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
     let offset = (page - 1) * ARCHIVE_SIZE;
     let mut records =
-        public_content::list_published(&db, &type_key, ARCHIVE_SIZE + 1, offset).await?;
+        public_content::list_published(&db, &type_key, ARCHIVE_SIZE + 1, offset, filters).await?;
     let has_more = records.len() > ARCHIVE_SIZE as usize;
     records.truncate(ARCHIVE_SIZE as usize);
     let entries: Vec<_> = records
         .into_iter()
         .map(|record| entry_view(record, &schema))
         .collect();
-    let previous = (page > 1).then(|| format!("/content/{type_key}?page={}", page - 1));
-    let next = has_more.then(|| format!("/content/{type_key}?page={}", page + 1));
+    let previous = (page > 1).then(|| archive_page_url(&type_key, page - 1, filters));
+    let next = has_more.then(|| archive_page_url(&type_key, page + 1, filters));
     let (list_template, _) = active_content_templates(&db).await?;
     let site = settings::get_general(&db).await?;
     let html = content_render::render_archive_with_site(

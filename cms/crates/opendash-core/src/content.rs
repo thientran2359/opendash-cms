@@ -132,6 +132,10 @@ pub struct ContentEntryInput {
     pub slug: String,
     #[serde(default)]
     pub values: BTreeMap<String, Value>,
+    /// Omitted on update: preserve existing membership (legacy client).
+    /// Explicit []: unlink all. Kind/count validation lives in storage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term_ids: Option<Vec<i64>>,
 }
 
 impl ContentEntryInput {
@@ -144,6 +148,14 @@ impl ContentEntryInput {
         }
         if !valid_kebab_segment_with_limit(&self.slug, 64) {
             return Err("Slug nội dung không hợp lệ.");
+        }
+        if let Some(ids) = &self.term_ids {
+            if ids.len() > 96
+                || ids.iter().any(|id| *id <= 0)
+                || ids.iter().copied().collect::<HashSet<_>>().len() != ids.len()
+            {
+                return Err("term_ids phải là danh sách ID dương, duy nhất (tối đa 96).");
+            }
         }
         for key in self.values.keys() {
             if !schema.fields.iter().any(|field| field.key == *key) {
@@ -366,6 +378,7 @@ mod tests {
                 ("summary".into(), json!("Nội dung")),
                 ("status".into(), json!("planned")),
             ]),
+            term_ids: None,
         }
     }
 
