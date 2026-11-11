@@ -1,10 +1,10 @@
 # M4 — Task planning: Visual Builder
 
-**Tất cả `M4-Pxx` dưới đây là task candidates để lập G1/G2/G3**, không phải `READY`. Không chốt AST schema/API/ABI chỉ từ bảng này; code Builder thay contract cần Full-Track và reviewer độc lập. [Milestone](README.md) · [V1 scope](../../../product/PRODUCT_REQUIREMENTS.md) · [M3 prerequisites](../M3/README.md).
+**Các mã `M4-Pxx` dưới đây là mã planning.** Dùng đặc tả G3 và mã triển khai đã phát hành để nhận task. Thay đổi contract Builder cần Full-Track và áp dụng quyền review/merge theo [ADR-0010](../../../decisions/ADR-0010-agent-project-and-merge-authority.md). [Milestone](README.md) · [V1 scope](../../../product/PRODUCT_REQUIREMENTS.md) · [M3 prerequisites](../M3/README.md).
 
 [ADR-0007](../../../decisions/ADR-0007-m4-builder-taxonomy-foundation.md) ghi quyết định G2 cho nền tảng Builder P01/P02 và taxonomy P09/P10, gồm chuyển đổi homepage khi Lưu, quyền category/tag và điều kiện lọc trước phân trang.
 
-[G3 nền tảng Builder và Taxonomy](slices/2026-11-11-m4-foundation-g3.md) đặc tả bốn gói P01/P02/P09/P10. P03–P08 tiếp tục qua G1/G2 và chuẩn bị nghiệm thu theo các hợp đồng phụ thuộc trong bảng dưới đây.
+[G3 nền tảng Builder và Taxonomy](slices/2026-11-11-m4-foundation-g3.md) đặc tả P01/P02/P09/P10. [G3 Field Binding](slices/2026-11-11-m4-field-binding-g3.md) đặc tả backend P05. [G3 Visual Builder còn lại](slices/2026-11-11-m4-builder-remaining-g3.md) bao phủ P03–P08 và ghi thứ tự bàn giao đến nghiệm thu M4.
 
 | Candidate | Slice / task outcome | Module primary (phối hợp) | Dependency / gate | Acceptance (phải thành test khi G3) |
 | --- | --- | --- | --- | --- |
