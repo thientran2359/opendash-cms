@@ -29,6 +29,20 @@ Môi trường: Windows, native Rust workspace tại worktree `opendash-cms-forg
 
 Lượt build full workspace đầu tiên **FAIL vì worktree mới chưa có `cms/admin/dist`** (RustEmbed yêu cầu thư mục này), kéo theo lỗi `AdminAssets::get` ở server. Đã giải quyết bằng `npm ci` + `npm run build` đúng lockfile của Admin, sau đó chạy lại nguyên lệnh Rust và nhận PASS, không cần sửa source ngoài phạm vi.
 
+### Revalidation sau khi cập nhật main (2026-11-11, Windows)
+
+- Trước cập nhật: PR implementation `1632ea8eeb974041d2630c34198ab9a71e430a4a`.
+- Source `origin/main` mới: `c98ec430d7a4780117b6d03acc8f513e4117b138` (bao gồm ADR-0008 và Harbor M4-S03-T01). Merge task branch không conflict tại `e57d09cc8629cb3f7c575ad4a532faf95312e945`. Toàn bộ file thay đổi riêng của PR so với main vẫn là `builder.rs`, `lib.rs` và báo cáo này.
+- `cd cms/admin; npm ci --no-audit --no-fund; npm run build`: **PASS** (Vite 62 modules).
+- `cargo fmt --manifest-path cms/Cargo.toml --all --check`: **PASS**.
+- `cargo build --manifest-path cms/Cargo.toml --locked`: **PASS**.
+- `cargo test --manifest-path cms/Cargo.toml --workspace --locked`: **PASS 78/78** (25 core + 53 server, 0 doctest).
+- `python cms/scripts/check-standards.py`, `python cms/scripts/check-plans.py`, `python cms/scripts/check-plans.py --self-test` (12 fixtures), `git diff --check origin/main...HEAD`: **PASS**.
+- `PYTHONIOENCODING=utf-8 python cms/scripts/themes_smoke.py --binary cms/target/debug/opendash.exe --baseline-db cms/fixtures/baseline_0001.sqlite`: **PASS** (legacy A→B, A→C, C→A, saved fields, restart, migration and historical SQLite upgrade). Script dùng site test tạm; không dùng dữ liệu sản xuất.
+- GitHub CI trên PR head cũ `1632ea8`: **PASS** Ubuntu/Windows (governance run `43013450152`). CI trên head được cập nhật **cần xác nhận lại trước merge**.
+
+**Self-review scope:** không tìm thấy blocker khi đối chiếu G3/ADR-0007 với boundary code (không ghi SQLite, không render HTML, chỉ cho phép payload unresolved round-trip từ snapshot lưu trước, không cho thêm/sửa payload thiếu descriptor). Review này do Forge tự thực hiện theo ADR-0008, **không phải independent peer review**. Merge và G5 chỉ được ký sau khi kiểm gates trên head cuối và post-merge source.
+
 **Coverage của các fixture Builder:** JSON round-trip và reorder không thay ID, typed props cho bốn loại core, block legacy từ field map M3, schema version không hỗ trợ, sai quan hệ cha-con, duplicate/invalid ID, vượt node/byte limits, URL có scheme trái phép hoặc credentials, unknown/malformed props, descriptor inactive, unknown node giữ nguyên payload và vị trí, chặn thay đổi payload/ID/di chuyển unresolved.
 
 ## Giới hạn và chuyển giao
