@@ -39,6 +39,28 @@ Run from repo root unless marked `cd cms`:
 
 Browser test simulates a server-reported `last_error="Worker timeout"` on a GET response to verify **UI recovery controls** while checking the real disable API separately. Actual worker timeouts, fuel exhaustion and zero-late-writes are enforced by existing Rust tests (all included in 61/61); this browser test does **not** claim to trigger an actual Wasmi worker timeout.
 
+## Revalidation after concurrent Settings integration
+
+Harbor merged Settings #49 while this Plugins branch was in progress. Forge fetched
+`main@255ff3ff6cf35253afdd133382b3a6c2cabb5381`, merged it without conflicts
+using `a6124be` (no force push), then rebuilt/retested on the **combined** source:
+
+| Combined-build check | Result |
+| --- | --- |
+| `npm run build --prefix cms/admin` | **PASS** — Settings + Plugins frontend |
+| `cargo build --manifest-path cms/Cargo.toml --locked` | **PASS** |
+| `cargo test --manifest-path cms/Cargo.toml --locked` | **PASS 65/65** — 19 core + 46 server |
+| `cd cms; python scripts/windows_plugins_browser.py --binary target/debug/opendash.exe --browser 'C:/Program Files/Google/Chrome/Application/chrome.exe'` | **PASS** |
+| `cd cms; python scripts/windows_admin_browser.py --binary target/debug/opendash.exe --browser 'C:/Program Files/Google/Chrome/Application/chrome.exe'` | **PASS** |
+| `cd cms; python scripts/windows_plugin_smoke.py --binary target/debug/opendash.exe` | **PASS** |
+| `cd cms; python scripts/general_settings_smoke.py --binary target/debug/opendash.exe --baseline fixtures/baseline_0001.sqlite` | **PASS** — Settings defaults, RBAC, CSRF, CAS, persistence and baseline upgrade |
+| `check-plans.py`, `--self-test`, `check-standards.py`, `git diff --check` | **PASS** |
+
+The Settings smoke harness defaults to a repo-root-relative fixture; for the
+`cd cms` invocation above the explicit `--baseline fixtures/baseline_0001.sqlite`
+is required. An initial smoke invocation omitted that argument and failed only
+at fixture lookup; the corrected command passed. This is not a CMS regression.
+
 ## Security, rollback and outstanding gates
 
 - **Security:** Backend Admin/Editor/guest access, CSRF and origin checks stay unchanged; end-to-end tests exercise both API and navigation. React escapes manifest/last-error content.
