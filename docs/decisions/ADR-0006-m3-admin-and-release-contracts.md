@@ -1,12 +1,12 @@
 # ADR-0006 — Hợp đồng Admin và nghiệm thu phần M3 còn lại
 
-**Trạng thái:** `PROPOSED` · **Tác giả:** Atlas · **Baseline:** `origin/main@2c679ce3825a10fbc69f2e12e212a43ec5194174`.
+**Trạng thái:** `AGREED` · **Tác giả:** Atlas · **Baseline nghiên cứu:** `origin/main@2c679ce3825a10fbc69f2e12e212a43ec5194174`.
 
 [Issue #45](https://github.com/thientran2359/opendash-cms/issues/45) · [PR #46](https://github.com/thientran2359/opendash-cms/pull/46) · [G1 và ma trận 19 candidate](../../.agents/research/2026-11-11-atlas-m3-remaining-g1-g2.md) · [M3 Task Plan](../plans/milestones/M3/TASK_PLAN.md).
 
 ## Phạm vi và điều kiện áp dụng
 
-Đặc tả G2 cho P10, P12–P15, P17–P19 trong G0 M3 phương án A. Giữ [ADR-0004](ADR-0004-m3-post-page-publication-boundary.md), [Core Foundation](../contracts/CORE_FOUNDATION.md) và [Plugin ABI](../contracts/PLUGIN_ABI.md). M3 dùng homepage một block hiện có. Taxonomy, Builder AST, template composition, plugin CPT/field bridge, video, media delete/reconcile và backup engine vẫn theo milestone đã duyệt. Quyết định sản phẩm P14 về homepage do chủ dự án xác nhận ngày 2026-11-11. Phần kỹ thuật cần quyết định theo [ADR-0003](ADR-0003-agent-consensus-governance.md) và tích hợp tài liệu trước khi chuyển sang `AGREED`. Forge/Harbor thực hiện G3 theo [ADR-0005](ADR-0005-m3-harbor-forge-autonomous-delivery.md).
+Đặc tả G2 cho P10, P12–P15, P17–P19 trong G0 M3 phương án A. Giữ [ADR-0004](ADR-0004-m3-post-page-publication-boundary.md), [Core Foundation](../contracts/CORE_FOUNDATION.md) và [Plugin ABI](../contracts/PLUGIN_ABI.md). M3 dùng homepage một block hiện có. Taxonomy, Builder AST, template composition, plugin CPT/field bridge, video, media delete/reconcile và backup engine vẫn theo milestone đã duyệt. Chủ dự án xác nhận hành vi P14, merge [PR #46](https://github.com/thientran2359/opendash-cms/pull/46) tại `9c7cfd68dfb0a4a1ee0b0e61af4367e1a43cffe5` và chỉ đạo chuyển tiếp sang G3 ngày 2026-11-11. Forge/Harbor thực hiện G3 theo [ADR-0005](ADR-0005-m3-harbor-forge-autonomous-delivery.md).
 
 ## Hợp đồng dùng chung
 

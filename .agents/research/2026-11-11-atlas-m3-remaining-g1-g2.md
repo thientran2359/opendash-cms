@@ -4,7 +4,7 @@
 
 [Issue #45](https://github.com/thientran2359/opendash-cms/issues/45) · [G0 M3 phương án A](../../docs/product/PRODUCT_REQUIREMENTS.md#quyết-định-bổ-sung-m3--core-cms-usable-10112026) · [M3 TASK_PLAN](../../docs/plans/milestones/M3/TASK_PLAN.md) · [Module Catalog](../../docs/plans/MODULE_CATALOG_V1.md) · [Planning Workflow](../../docs/plans/PLANNING_WORKFLOW.md) · [ADR-0003](../../docs/decisions/ADR-0003-agent-consensus-governance.md) · [ADR-0004](../../docs/decisions/ADR-0004-m3-post-page-publication-boundary.md) · [ADR-0005](../../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md).
 
-Các trạng thái dưới đây phản ánh source tại baseline và phạm vi của báo cáo đã merge. `VERIFIED` phải đọc cùng OS, SHA và acceptance của báo cáo. Các thiết kế mới ở trạng thái **PROPOSED**, các gói triển khai ở trạng thái **DRAFT**. M3 giữ taxonomy và Builder AST ở M4, CPT/field bridge của plugin ở M6, video ở M7, media delete/reconcile và backup engine ở M8.
+Các trạng thái dưới đây phản ánh source tại baseline và phạm vi của báo cáo đã merge. `VERIFIED` phải đọc cùng OS, SHA và acceptance của báo cáo. G2 đã được đưa vào [ADR-0006](../../docs/decisions/ADR-0006-m3-admin-and-release-contracts.md) qua PR #46. M3 giữ taxonomy và Builder AST ở M4, CPT/field bridge của plugin ở M6, video ở M7, media delete/reconcile và backup engine ở M8.
 
 ## G1 · Kiểm kê 19 candidate
 
@@ -30,7 +30,7 @@ Các trạng thái dưới đây phản ánh source tại baseline và phạm vi
 | P18 · OPS-02/FND-04 | IMPLEMENTED và có Windows runtime PASS theo [#33](https://github.com/thientran2359/opendash-cms/pull/33), harness commit `6896286`; bốn scripts hiện đều dùng `contextlib.closing` cho SQLite. [Evidence](../../docs/verification/2026-11-11-m3-s20-t01-post-page-publication-windows.md). | P02/P03/P05/P06. Ghi nhận A0, đưa bốn lệnh vào regression đúng SHA P19. Chỉ mở task test-only nếu tái hiện lỗi ở chính bốn harness. |
 | P19 · OPS-02/FND-04/05 | MISSING nghiệm thu release Windows toàn M3. [Evidence #35](../../docs/verification/2026-11-11-m3-s22-t01-post-page-admin-windows.md) ghi hai legacy harness lỗi còn thấy trong source: `HTTP: ok` ở [windows_admin_browser.py](../../cms/scripts/windows_admin_browser.py), migration count `3` và SQLite cleanup ở [windows_distribution_smoke.py](../../cms/scripts/windows_distribution_smoke.py). | P17/P18 và release runner. Sửa harness theo acceptance hiện hành, kiểm parity và DB copy. Linux early smoke báo độc lập. |
 
-## G2 · Hợp đồng đề xuất
+## G2 · Hợp đồng đã chốt
 
 Đặc tả API, storage, migration, xử lý đồng thời, an toàn theme/plugin và kiểm chứng release nằm tại [ADR-0006](../../docs/decisions/ADR-0006-m3-admin-and-release-contracts.md). Ma trận dưới đây dùng để chuẩn bị bàn giao và kiểm chứng theo phạm vi Issue #45.
 
