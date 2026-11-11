@@ -251,7 +251,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               <main id="content-main">{contentContent}</main>
             </section>
             {user?.role === 'admin' && activeView === 'plugins' && <main className="od-admin-card">{pluginsContent}</main>}
-            {user?.role === 'admin' && activeView === 'users' && <main className="od-admin-card"><p className="od-feature-note mb-5">Hiện hỗ trợ tạo tài khoản Editor. Danh sách người dùng, đổi vai trò và mật khẩu đang phát triển.</p>{usersContent}</main>}
+            <section className={user?.role === 'admin' && activeView === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label="Người dùng" aria-hidden={user?.role !== 'admin' || activeView !== 'users'}>
+              {usersContent}
+            </section>
             {user?.role === 'admin' && activeView === 'settings' && <main className="od-admin-card"><p className="od-feature-note mb-5">Trạng thái hệ thống hiện có bên dưới. Cài đặt tên site, tagline và múi giờ đang phát triển.</p>{settingsContent}</main>}
           </div>
         </div>

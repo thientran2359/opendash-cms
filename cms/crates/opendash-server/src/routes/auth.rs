@@ -8,9 +8,8 @@ use sqlx::SqlitePool;
 
 use crate::{
     auth::{
-        self, AuthInput, AuthResponse, AuthUser, Role, hash_password_blocking,
-        require_admin_with_csrf, require_session, require_session_with_csrf,
-        verify_password_blocking,
+        self, AuthInput, AuthResponse, AuthUser, hash_password_blocking, require_session,
+        require_session_with_csrf, verify_password_blocking,
     },
     error::{ApiError, ApiResult},
     storage::auth as auth_storage,
@@ -42,7 +41,7 @@ pub async fn auth_login(
     }
     let row = auth_storage::find_user_by_username(&db, &input.username).await?;
 
-    let (id, username, password_hash, role_str) = row.ok_or_else(invalid_creds)?;
+    let (id, username, password_hash, role_str, version) = row.ok_or_else(invalid_creds)?;
     if !verify_password_blocking(input.password, password_hash).await? {
         return Err(invalid_creds());
     }
@@ -53,7 +52,10 @@ pub async fn auth_login(
     let csrf_token = auth::generate_random_token();
     let expires_at = auth::current_time_secs() + auth::SESSION_DURATION_SECS;
 
-    auth_storage::insert_session(&db, &token_hash, id, &csrf_token, expires_at).await?;
+    if !auth_storage::insert_session(&db, &token_hash, id, &csrf_token, expires_at, version).await?
+    {
+        return Err(invalid_creds());
+    }
 
     let cookie_header = auth::session_cookie_header(&session_token);
     let body = Json(AuthResponse {
@@ -80,26 +82,4 @@ pub async fn auth_logout(State(db): State<SqlitePool>, headers: HeaderMap) -> Ap
     auth::delete_session(&db, &session.token_hash).await?;
     let clear_cookie = auth::clear_session_cookie_header();
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, clear_cookie)]).into_response())
-}
-
-pub async fn create_editor(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-    Json(input): Json<AuthInput>,
-) -> ApiResult<(StatusCode, Json<AuthUser>)> {
-    require_admin_with_csrf(&headers, &db).await?;
-
-    auth::validate_username(&input.username).map_err(ApiError::bad_request)?;
-    auth::validate_password(&input.password).map_err(ApiError::bad_request)?;
-
-    let hash = hash_password_blocking(input.password).await?;
-    let id = auth_storage::insert_editor_user(&db, &input.username, &hash).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(AuthUser {
-            id,
-            username: input.username,
-            role: Role::Editor,
-        }),
-    ))
 }
