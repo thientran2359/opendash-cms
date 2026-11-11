@@ -27,4 +27,4 @@ Payload có giới hạn: `{repository, issue_number, task_id, target, source_sh
 3. Thử duplicate/timeout/crash: input không được gửi lại mù, `UNKNOWN` được reconcile; app offline/credential sai/host sai ⇒ từ chối, không mở endpoint inbound công khai.
 4. Lưu evidence đủ host, OS, phiên bản/API, request ID đã redact, result và giới hạn qua PR tài liệu được review. Chỉ khi một host PASS mới bật `SEND` cho **host đó**; host kia vẫn `BLOCKED_ADAPTER`.
 
-Cho đến khi cả hai host có evidence, chế độ vận hành là `ASSIGN` qua GitHub và Forge/Harbor tự gọi `$github-task-pickup` khi nhận thông báo.
+Với **mỗi host chưa có evidence PASS**, chỉ dùng `ASSIGN` qua GitHub cho host đó để Forge/Harbor tự gọi `$github-task-pickup` khi nhận thông báo. Host đã PASS có thể dùng `SEND` theo đúng quyền và gate của mình.
