@@ -24,6 +24,7 @@ use crate::{
 pub const BUILDER_SCHEMA_VERSION: u32 = 1;
 pub const MAX_BUILDER_NODES: usize = 512;
 pub const MAX_BUILDER_JSON_BYTES: usize = 256 * 1024;
+pub const MAX_BUILDER_LISTS: usize = 8;
 
 /// Sparse, viewport-specific layout metadata on existing v1 container nodes.
 /// No theme CSS or arbitrary strings can enter the renderer from this payload.
@@ -198,6 +199,8 @@ pub enum KnownElement {
     Image(ImageProps),
     #[serde(rename = "core/button")]
     Button(ButtonProps),
+    #[serde(rename = "core/list")]
+    List(ListProps),
     #[serde(rename = "legacy/block")]
     Legacy(LegacyBlockProps),
 }
@@ -237,6 +240,35 @@ pub struct ButtonProps {
     pub binding: Option<ElementBinding>,
 }
 
+/// Published-only collection reference; never embeds entry values in the AST.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ListProps {
+    pub type_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_id: Option<i64>,
+    #[serde(default)]
+    pub include_descendants: bool,
+    #[serde(default)]
+    pub sort: ListSort,
+    #[serde(default = "default_list_size")]
+    pub page_size: u8,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ListSort {
+    #[default]
+    IdDesc,
+    IdAsc,
+}
+
+fn default_list_size() -> u8 {
+    6
+}
+
 /// An allowlisted, exact-entry field reference. No arbitrary queries or JSON paths.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -271,7 +303,7 @@ impl KnownElement {
             Self::Text(p) => p.binding.as_ref(),
             Self::Image(p) => p.binding.as_ref(),
             Self::Button(p) => p.binding.as_ref(),
-            Self::Legacy(_) => None,
+            Self::Legacy(_) | Self::List(_) => None,
         }
     }
 }
@@ -347,6 +379,7 @@ impl BuilderDocument {
         let mut ids = HashSet::new();
         let mut count = 0;
         let mut sources = HashSet::new();
+        let mut lists = 0_usize;
         for (s, section) in self.sections.iter().enumerate() {
             check_node_id(&section.id, &mut ids, &mut count)?;
             validate_responsive(section.responsive.as_ref(), LayoutKind::Section)?;
@@ -360,6 +393,14 @@ impl BuilderDocument {
                         check_node_id(&element.id, &mut ids, &mut count)?;
                         let result = match &element.content {
                             ElementContent::Known(known) => {
+                                if matches!(known, KnownElement::List(_)) {
+                                    lists += 1;
+                                    if lists > MAX_BUILDER_LISTS {
+                                        return Err(BuilderError::Invalid(
+                                            "Builder exceeds 8 list blocks",
+                                        ));
+                                    }
+                                }
                                 if let Some(binding) = known.binding() {
                                     sources.insert((&binding.type_key, &binding.entry_slug));
                                     if sources.len() > 32 {
@@ -500,6 +541,16 @@ fn validate_known(
             block
                 .validate_against_fields(&descriptor.descriptor.fields)
                 .map_err(|_| "Legacy field map does not match descriptor")?;
+        }
+        KnownElement::List(props) => {
+            if !valid_content_type_key(&props.type_key)
+                || !(1..=20).contains(&props.page_size)
+                || props.category_id.is_some_and(|id| id <= 0)
+                || props.tag_id.is_some_and(|id| id <= 0)
+                || (props.include_descendants && props.category_id.is_none())
+            {
+                return Err("Invalid Builder list configuration");
+            }
         }
     }
     Ok(())
@@ -1043,5 +1094,86 @@ mod tests {
         let mut invalid = serde_json::to_value(&original).unwrap();
         invalid["sections"][0]["responsive"] = json!({"phone": {"padding_px": 3}});
         assert!(BuilderDocument::from_json(invalid.to_string().as_bytes()).is_err());
+    }
+
+    #[test]
+    fn list_defaults_limits_and_preserved_reference_contract() {
+        let original = json!({
+            "schema_version": 1,
+            "sections": [{"id": "section-1", "children": [{
+                "id": "row-1", "children": [{"id": "column-1", "children": [{
+                    "id": "list-1", "type": "core/list", "props": {"type_key": "post"}
+                }]}]
+            }]}]
+        });
+        let document = BuilderDocument::from_json(original.to_string().as_bytes()).unwrap();
+        document.validate_for_save(&registry(), None).unwrap();
+        let ElementContent::Known(KnownElement::List(props)) =
+            &document.sections[0].children[0].children[0].children[0].content
+        else {
+            panic!("valid List must decode into typed core/list")
+        };
+        assert_eq!(props.page_size, 6);
+        assert_eq!(props.sort, ListSort::IdDesc);
+        assert!(!props.include_descendants);
+        assert_eq!(props.category_id, None);
+        assert_eq!(
+            BuilderDocument::from_json(&document.to_json().unwrap()).unwrap(),
+            document
+        );
+
+        for bad in [
+            json!({"page_size": 0}),
+            json!({"page_size": 21}),
+            json!({"page_size": "6"}),
+            json!({"category_id": 0}),
+            json!({"tag_id": -1}),
+            json!({"include_descendants": true}),
+            json!({"sort": "id_random"}),
+            json!({"type_key": "invalid-key"}),
+            json!({"extra": "injection"}),
+        ] {
+            let mut encoded = original.clone();
+            for (key, value) in bad.as_object().unwrap() {
+                encoded["sections"][0]["children"][0]["children"][0]["children"][0]["props"][key] =
+                    value.clone();
+            }
+            let candidate = BuilderDocument::from_json(encoded.to_string().as_bytes()).unwrap();
+            assert!(
+                candidate.validate_for_save(&registry(), None).is_err(),
+                "{bad}"
+            );
+        }
+        // Correctly typed descendant filter with valid category and tag IDs.
+        let mut filtered = original.clone();
+        filtered["sections"][0]["children"][0]["children"][0]["children"][0]["props"] = json!({"type_key": "post", "category_id": 12, "tag_id": 22,
+                   "include_descendants": true, "sort": "id_asc", "page_size": 20});
+        let filtered = BuilderDocument::from_json(filtered.to_string().as_bytes()).unwrap();
+        filtered.validate_for_save(&registry(), None).unwrap();
+
+        let mut many = original.clone();
+        let children = many["sections"][0]["children"][0]["children"][0]["children"]
+            .as_array_mut()
+            .unwrap();
+        for index in 2..=8 {
+            children.push(json!({"id": format!("list-{index}"), "type": "core/list",
+                                 "props": {"type_key": "post", "page_size": 1}}));
+        }
+        // End the mutable borrow before serializing the document.
+        let _ = children;
+        BuilderDocument::from_json(many.to_string().as_bytes())
+            .unwrap()
+            .validate_for_save(&registry(), None)
+            .unwrap();
+        many["sections"][0]["children"][0]["children"][0]["children"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"id": "list-9", "type": "core/list", "props": {"type_key": "post"}}));
+        assert!(
+            BuilderDocument::from_json(many.to_string().as_bytes())
+                .unwrap()
+                .validate_for_save(&registry(), None)
+                .is_err()
+        );
     }
 }
