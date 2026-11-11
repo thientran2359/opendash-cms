@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { AuthUser, BlockData, BlockRegistry, PluginSummary, type Role } from './types.ts';
+import { AuthUser, PluginSummary, type Role } from './types.ts';
 import * as api from './api/index.ts';
 import { AdminShell, isViewAllowed, parseAdminView, type AdminView } from './shell/AdminShell.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
-import { BuilderControls, BuilderPreview, normalizeValues } from './builder/BuilderWorkspace.tsx';
+import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
 import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
@@ -41,18 +41,10 @@ export const App: React.FC = () => {
   const [pluginInputJson, setPluginInputJson] = useState<string>('{\n  "text": "OpenDash Plugin"\n}');
   const [pluginRunOutput, setPluginRunOutput] = useState<string>('');
 
-  // Registry and editor state
-  const [registry, setRegistry] = useState<BlockRegistry>({});
-  const [blockData, setBlockData] = useState<BlockData>({ type: '', values: {} });
-  const [previewHtml, setPreviewHtml] = useState<string>('');
-  const [builderVisibility, setBuilderVisibility] = useState<'rendered' | 'unsupported' | null>(null);
-
-  // Race prevention for preview responses
-  const previewSeq = useRef<number>(0);
-  const blockDataRef = useRef<BlockData>(blockData);
-  // Retain a draft across a 401 only when the same account signs back in.
+  const [builderReset, setBuilderReset] = useState(0);
+  const [themeRevision, setThemeRevision] = useState(0);
+  // Retain the Builder draft across a 401 only when the same account signs back in.
   const lastAuthenticatedUserId = useRef<number | null>(null);
-  blockDataRef.current = blockData;
 
   // Hash routing works from /admin/ and /builder without server catch-all.
   // The existing editors stay mounted in AdminShell across route changes.
@@ -98,41 +90,9 @@ export const App: React.FC = () => {
     if (is401) {
       setUser(null);
       setCsrfToken(null);
-      // Session expired: preserve blockData (unsaved inputs) as required by contract!
+      // A 401 preserves the mounted Builder draft until the account is known.
     }
   }, []);
-
-  const loadRegistryAndPage = async (preserveExistingBlock: boolean = false) => {
-    try {
-      const reg = await api.getRegistry();
-      setRegistry(reg);
-
-      const blockKeys = Object.keys(reg);
-      if (preserveExistingBlock && blockDataRef.current.type && blockKeys.includes(blockDataRef.current.type)) {
-        setBlockData(prev => ({
-          type: prev.type,
-          values: normalizeValues(prev.type, reg, prev.values),
-        }));
-        return;
-      }
-
-      const savedPage = await api.getPage();
-      if (savedPage && savedPage.type && blockKeys.includes(savedPage.type)) {
-        setBlockData({
-          type: savedPage.type,
-          values: normalizeValues(savedPage.type, reg, savedPage.values),
-        });
-      } else if (blockKeys.length > 0) {
-        const firstType = blockKeys[0];
-        setBlockData({
-          type: firstType,
-          values: normalizeValues(firstType, reg, {}),
-        });
-      }
-    } catch (err) {
-      handleApiError(err, 'Lỗi khi tải dữ liệu registry hoặc trang.');
-    }
-  };
 
   const loadPlugins = async () => {
     try {
@@ -156,7 +116,6 @@ export const App: React.FC = () => {
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
-        await loadRegistryAndPage(false);
         if (auth.user.role === 'admin') {
           await loadPlugins();
         }
@@ -195,11 +154,7 @@ export const App: React.FC = () => {
       if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         // Never expose an expired account's unsaved Builder data to another user.
-        const emptyBlock: BlockData = { type: '', values: {} };
-        blockDataRef.current = emptyBlock;
-        setBlockData(emptyBlock);
-        setPreviewHtml('');
-        setBuilderVisibility(null);
+        setBuilderReset(value => value + 1);
         setBuilderDirty(false);
       }
       lastAuthenticatedUserId.current = res.user.id;
@@ -209,8 +164,6 @@ export const App: React.FC = () => {
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
       setStatus('Đăng nhập thành công.', false);
-      const hasUnsaved = Boolean(blockDataRef.current.type);
-      await loadRegistryAndPage(hasUnsaved);
       if (res.user.role === 'admin') {
         await loadPlugins();
       }
@@ -237,10 +190,7 @@ export const App: React.FC = () => {
       setPlugins([]);
       setSelectedPluginId('');
       setPluginRunOutput('');
-      setRegistry({});
-      setBlockData({ type: '', values: {} });
-      setPreviewHtml('');
-      setBuilderVisibility(null);
+      setBuilderReset(value => value + 1);
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
       setBuilderDirty(false);
@@ -263,23 +213,6 @@ export const App: React.FC = () => {
     setAuthPassword('');
     setStatus('Phiên tài khoản đã được thu hồi. Vui lòng đăng nhập lại.', false);
   };
-  const handleThemeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !csrfToken) return;
-    setIsProcessing(true);
-    setStatus('Đang tải lên gói theme...', false);
-    try {
-      await api.uploadTheme(file, csrfToken);
-      setStatus('Đã nạp theme.', false);
-      await loadRegistryAndPage(true);
-    } catch (err) {
-      handleApiError(err, 'Lỗi khi tải lên gói theme.');
-    } finally {
-      setIsProcessing(false);
-      e.target.value = '';
-    }
-  };
-
   const handlePluginUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !csrfToken) return;
@@ -359,72 +292,6 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newType = e.target.value;
-    setBuilderDirty(true);
-    setBuilderVisibility(null);
-    setBlockData(prev => ({
-      type: newType,
-      values: normalizeValues(newType, registry, prev.values),
-    }));
-  };
-
-  const handleFieldChange = (name: string, val: string) => {
-    setBuilderDirty(true);
-    setBuilderVisibility(null);
-    setBlockData(prev => ({
-      ...prev,
-      values: {
-        ...prev.values,
-        [name]: val,
-      },
-    }));
-  };
-
-  const handlePreview = async () => {
-    if (!csrfToken || !blockData.type) return;
-    const currentSeq = ++previewSeq.current;
-    setIsProcessing(true);
-    setStatus('Đang tạo bản xem trước...', false);
-    const payload: BlockData = {
-      type: blockData.type,
-      values: normalizeValues(blockData.type, registry, blockData.values),
-    };
-    try {
-      const result = await api.previewBlock(payload, csrfToken);
-      if (currentSeq === previewSeq.current) {
-        setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${result.html}`);
-        setBuilderVisibility(result.visibility);
-        setStatus('Đang xem trước', false);
-      }
-    } catch (err) {
-      handleApiError(err, 'Lỗi khi xem trước block.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleSave = async () => {
-    if (!csrfToken || !blockData.type) return;
-    setIsProcessing(true);
-    setStatus('Đang lưu thay đổi...', false);
-    const payload: BlockData = {
-      type: blockData.type,
-      values: normalizeValues(blockData.type, registry, blockData.values),
-    };
-    try {
-      const result = await api.saveBlock(payload, csrfToken);
-      if (JSON.stringify(payload) === JSON.stringify(blockDataRef.current)) setBuilderDirty(false);
-      setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${result.html}`);
-      setBuilderVisibility(result.visibility);
-      setStatus('Đã lưu', false);
-    } catch (err) {
-      handleApiError(err, 'Lỗi khi lưu block.');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
   return (
     <AdminShell
       user={user}
@@ -442,28 +309,14 @@ export const App: React.FC = () => {
       onViewChange={navigateTo}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
-      sidebarContent={
-        <BuilderControls
-          role={user?.role}
-          registry={registry}
-          blockData={blockData}
-          isProcessing={isProcessing}
-          onThemeUpload={handleThemeUpload}
-          onTypeChange={handleTypeChange}
-          onFieldChange={handleFieldChange}
-          onPreview={handlePreview}
-          onSave={handleSave}
-          blockVisibility={builderVisibility}
-        />
-      }
-      previewContent={<BuilderPreview previewHtml={previewHtml} />}
+      sidebarContent={<BuilderWorkspace
+        user={user} csrfToken={csrfToken} resetToken={builderReset} themeRevision={themeRevision}
+        onDirtyChange={setBuilderDirty} onApiError={handleApiError}
+      />}
+      previewContent={null}
       themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
-        onInstalled={() => { void loadRegistryAndPage(true); }}
-        onActivated={() => {
-          previewSeq.current += 1;
-          setBuilderVisibility(null);
-          setPreviewHtml('');
-        }}
+        onInstalled={() => setThemeRevision(value => value + 1)}
+        onActivated={() => setThemeRevision(value => value + 1)}
       />}
       settingsContent={<>
         <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
