@@ -32,7 +32,9 @@ def verify(binary: Path, browser_path: str | None):
             expect(page.locator("#status")).to_contain_text("Đã tạo")
             page.locator("#auth-login").click()
             expect(page.locator("#user-info")).to_contain_text("qaadmin")
+            page.get_by_role("button", name="Cài đặt").click()
             expect(page.get_by_text("HTTP: ok", exact=False)).to_be_visible()
+            page.get_by_role("button", name="Builder", exact=True).click()
             page.locator("#theme").set_input_files({
                 "name": "theme.zip", "mimeType": "application/zip", "buffer": sample_theme()
             })
@@ -57,6 +59,7 @@ def verify(binary: Path, browser_path: str | None):
 
             page.goto(base + "/builder")
             expect(title).to_have_value(draft)
+            page.get_by_role("button", name="Plugins", exact=True).click()
             plugin_zip = cms_root / "examples/plugins/sample-plugin/sample-plugin.zip"
             page.locator("#plugin-zip").set_input_files(str(plugin_zip))
             page.locator("#btn-run-plugin").click()

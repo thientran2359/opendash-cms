@@ -633,6 +633,8 @@ button.btn-danger {
     background: #fff; border: 1px solid #dbe3ee; border-radius: 13px;
     padding: 24px; box-shadow: 0 2px 6px rgba(20, 44, 73, .03);
   }
+  .od-users-table { display: block; }
+  .od-users-cards { display: none; }
   .od-feature-note {
     padding: 12px 15px; background: #eff6ff; border: 1px solid #bfdbfe;
     border-radius: 9px; color: #1e40af; font-size: 13px;
@@ -676,6 +678,10 @@ button.btn-danger {
     .od-topbar #auth-bar { margin-left: 0; }
     .od-editor-panel #builder-main { grid-template-columns: minmax(0, 1fr); }
     .od-admin-card { padding: 14px; }
+  }
+  @media (max-width: 639px) {
+    .od-users-table { display: none; }
+    .od-users-cards { display: block; }
   }
   @media (prefers-reduced-motion: reduce) {
     .od-sidebar, .od-quick-link, .od-nav-link { transition: none; }
