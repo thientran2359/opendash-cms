@@ -5,14 +5,39 @@ use axum::{
 };
 use sqlx::SqlitePool;
 
-use crate::{error::ApiResult, page::render_saved, storage::theme::public_home};
+use crate::{
+    error::ApiResult,
+    page::{render_builder, render_legacy_state},
+    storage::builder,
+};
 
 pub async fn public_page(State(db): State<SqlitePool>) -> ApiResult<Response> {
-    let html = match public_home(&db).await? {
-        Some(snapshot) => render_saved(snapshot)?.html,
+    // One SQLite read snapshot for source, document, active theme and block
+    // templates. Do not split them across old / and new Builder reads.
+    let state = builder::read(&db).await?;
+    if let Some(document) = &state.saved {
+        return Ok(rendered_layout(
+            render_builder(&state, document, false)?.html,
+        ));
+    }
+    let html = match render_legacy_state(&state)? {
+        Some(snapshot) => snapshot.html,
         None => "<p>Chưa lưu block.</p>".into(),
     };
     Ok(rendered(html))
+}
+
+pub fn rendered_layout(html: String) -> Response {
+    (
+        [
+            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        Html(html),
+    )
+        .into_response()
 }
 
 pub fn rendered(html: String) -> Response {

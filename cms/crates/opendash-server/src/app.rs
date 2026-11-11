@@ -8,6 +8,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
 use rust_embed::RustEmbed;
 use sqlx::SqlitePool;
 
@@ -17,7 +18,10 @@ use crate::{
     plugin::PluginManager,
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
-        builder::{builder, install, page, preview, registry, save, serve_asset},
+        builder::{
+            builder, homepage_get, homepage_preview, homepage_put, install, page, preview,
+            registry, save, serve_asset,
+        },
         content::{MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list},
         dashboard::dashboard_get,
         entries::{
@@ -100,6 +104,16 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", post(auth_logout))
         .route("/api/admin/dashboard", get(dashboard_get))
+        .route(
+            "/api/admin/builder/homepage",
+            get(homepage_get)
+                .put(homepage_put)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/builder/homepage/preview",
+            post(homepage_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
         .route(
             "/api/admin/settings/general",
             get(general_get)
