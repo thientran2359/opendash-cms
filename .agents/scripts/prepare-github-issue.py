@@ -170,7 +170,7 @@ def parse_task(document: str, expected_id: str) -> dict[str, object]:
         not metadata.get("lý do fast-track") or PLACEHOLDER.search(metadata["lý do fast-track"])
     ):
         raise TaskError("Fast-Track G2 NOT_APPLICABLE phải ghi Lý do Fast-Track")
-    if not re.fullmatch(r"[A-Z]{3}-\d{2}", metadata["module"]):
+    if not re.fullmatch(r"(?:[A-Z]{3}|SITE)-\d{2}", metadata["module"]):
         raise TaskError("Module ID không hợp lệ")
     if not re.fullmatch(re.escape(metadata["module"]) + r"\.\d+", metadata["capability"]):
         raise TaskError("Capability không thuộc module đã khai báo")

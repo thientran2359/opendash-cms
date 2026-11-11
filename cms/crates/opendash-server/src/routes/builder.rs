@@ -104,7 +104,7 @@ pub async fn preview(
     Json(block): Json<Block>,
 ) -> ApiResult<Response> {
     require_session_with_csrf(&headers, &db).await?;
-    Ok(rendered(render_block(&db, &block).await?))
+    Ok(builder_rendered(render_block(&db, &block).await?))
 }
 
 pub async fn save(
@@ -114,5 +114,18 @@ pub async fn save(
     Json(block): Json<Block>,
 ) -> ApiResult<Response> {
     require_session_with_csrf(&headers, &db).await?;
-    Ok(rendered(save_page(&db, &hooks, &block).await?))
+    Ok(builder_rendered(save_page(&db, &hooks, &block).await?))
+}
+
+fn builder_rendered(result: crate::page::RenderedBlock) -> Response {
+    let mut response = rendered(result.html);
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response.headers_mut().insert(
+        "X-OpenDash-Block-Visibility",
+        axum::http::HeaderValue::from_static(result.visibility),
+    );
+    response
 }

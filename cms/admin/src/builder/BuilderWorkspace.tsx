@@ -25,6 +25,7 @@ interface BuilderControlsProps {
   onFieldChange: (name: string, val: string) => void;
   onPreview: () => void;
   onSave: () => void;
+  blockVisibility?: 'rendered' | 'unsupported' | null;
 }
 
 export const BuilderControls: React.FC<BuilderControlsProps> = ({
@@ -37,6 +38,7 @@ export const BuilderControls: React.FC<BuilderControlsProps> = ({
   onFieldChange,
   onPreview,
   onSave,
+  blockVisibility,
 }) => {
   const currentDescriptor = registry[blockData.type] || {};
   const blockOptions = Object.keys(registry).map(id => ({ value: id, label: id }));
@@ -88,6 +90,14 @@ export const BuilderControls: React.FC<BuilderControlsProps> = ({
           Trang công khai
         </a>
       </div>
+      {blockVisibility === 'unsupported' && (
+        <p role="alert" data-testid="builder-visibility" className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          Theme đang kích hoạt không hỗ trợ block này. Nội dung trong Builder vẫn được giữ nguyên; khi quay về theme tương thích, block sẽ xuất hiện lại.
+        </p>
+      )}
+      {blockVisibility === 'rendered' && (
+        <p role="status" data-testid="builder-visibility" className="mt-3 text-sm text-emerald-800">Block tương thích với theme hiện tại.</p>
+      )}
     </>
   );
 };

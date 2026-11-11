@@ -58,6 +58,12 @@ Người quản trị có thể tạo danh mục có cha–con trong Admin.
 
 
 class ParseTaskTests(unittest.TestCase):
+    def test_site_module_id_is_accepted(self):
+        document = example().replace("CNT-03", "SITE-01")
+        task = MODULE.parse_task(document, "M3-S07-T01")
+        self.assertEqual(task["metadata"]["module"], "SITE-01")
+        self.assertEqual(task["metadata"]["capability"], "SITE-01.1")
+
     def test_rendered_issue_is_readable_and_traceable(self):
         task = MODULE.parse_task(example(), "M3-S07-T01")
         payload = MODULE.issue_payload(task, "docs/plans/modules/CNT-03-taxonomy.md", "a" * 40, "b" * 40, "forge")

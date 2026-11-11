@@ -1,14 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AuthUser, BlockData, BlockRegistry, PluginSummary } from './types.ts';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { AuthUser, BlockData, BlockRegistry, PluginSummary, type Role } from './types.ts';
 import * as api from './api/index.ts';
 import { AdminShell, isViewAllowed, parseAdminView, type AdminView } from './shell/AdminShell.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
+import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { BuilderControls, BuilderPreview, normalizeValues } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
 import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
 import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
 import { MediaRoute } from './shell/MediaRoute.tsx';
+import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
+import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -27,9 +30,9 @@ export const App: React.FC = () => {
   const [authUsername, setAuthUsername] = useState<string>('');
   const [authPassword, setAuthPassword] = useState<string>('');
 
-  // Admin user creation inputs
-  const [editorUsername, setEditorUsername] = useState<string>('');
-  const [editorPassword, setEditorPassword] = useState<string>('');
+  // Keep the Users draft when an expired session signs back in to the same account.
+  const [accountContextId, setAccountContextId] = useState<number | null>(null);
+  const [accountContextRole, setAccountContextRole] = useState<Role | null>(null);
 
   // Plugin management state (Admin only)
   const [plugins, setPlugins] = useState<PluginSummary[]>([]);
@@ -41,6 +44,7 @@ export const App: React.FC = () => {
   const [registry, setRegistry] = useState<BlockRegistry>({});
   const [blockData, setBlockData] = useState<BlockData>({ type: '', values: {} });
   const [previewHtml, setPreviewHtml] = useState<string>('');
+  const [builderVisibility, setBuilderVisibility] = useState<'rendered' | 'unsupported' | null>(null);
 
   // Race prevention for preview responses
   const previewSeq = useRef<number>(0);
@@ -86,7 +90,7 @@ export const App: React.FC = () => {
     setIsError(error);
   };
 
-  const handleApiError = (err: unknown, fallback: string) => {
+  const handleApiError = useCallback((err: unknown, fallback: string) => {
     const is401 = err instanceof api.ApiClientError && err.status === 401;
     const msg = err instanceof Error ? err.message : fallback;
     setStatus(msg, true);
@@ -95,7 +99,7 @@ export const App: React.FC = () => {
       setCsrfToken(null);
       // Session expired: preserve blockData (unsaved inputs) as required by contract!
     }
-  };
+  }, []);
 
   const loadRegistryAndPage = async (preserveExistingBlock: boolean = false) => {
     try {
@@ -146,6 +150,8 @@ export const App: React.FC = () => {
       try {
         const auth = await api.getAuthMe();
         lastAuthenticatedUserId.current = auth.user.id;
+        setAccountContextId(auth.user.id);
+        setAccountContextRole(auth.user.role);
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
@@ -192,9 +198,12 @@ export const App: React.FC = () => {
         blockDataRef.current = emptyBlock;
         setBlockData(emptyBlock);
         setPreviewHtml('');
+        setBuilderVisibility(null);
         setBuilderDirty(false);
       }
       lastAuthenticatedUserId.current = res.user.id;
+      setAccountContextId(res.user.id);
+      setAccountContextRole(res.user.role);
       setUser(res.user);
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
@@ -222,14 +231,15 @@ export const App: React.FC = () => {
       setCsrfToken(null);
       setAuthUsername('');
       setAuthPassword('');
-      setEditorUsername('');
-      setEditorPassword('');
+      setAccountContextId(null);
+      setAccountContextRole(null);
       setPlugins([]);
       setSelectedPluginId('');
       setPluginRunOutput('');
       setRegistry({});
       setBlockData({ type: '', values: {} });
       setPreviewHtml('');
+      setBuilderVisibility(null);
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
       setBuilderDirty(false);
@@ -246,26 +256,12 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleCreateEditor = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!csrfToken) return;
-    if (!editorUsername || !editorPassword) {
-      setStatus('Vui lòng nhập đủ thông tin biên tập viên.', true);
-      return;
-    }
-    setIsProcessing(true);
-    try {
-      const created = await api.createEditor(editorUsername, editorPassword, csrfToken);
-      setStatus(`Đã tạo biên tập viên "${created.username}".`, false);
-      setEditorUsername('');
-      setEditorPassword('');
-    } catch (err) {
-      handleApiError(err, 'Lỗi khi tạo biên tập viên.');
-    } finally {
-      setIsProcessing(false);
-    }
+  const handleOwnAccountChanged = () => {
+    setUser(null);
+    setCsrfToken(null);
+    setAuthPassword('');
+    setStatus('Phiên tài khoản đã được thu hồi. Vui lòng đăng nhập lại.', false);
   };
-
   const handleThemeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !csrfToken) return;
@@ -365,6 +361,7 @@ export const App: React.FC = () => {
   const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newType = e.target.value;
     setBuilderDirty(true);
+    setBuilderVisibility(null);
     setBlockData(prev => ({
       type: newType,
       values: normalizeValues(newType, registry, prev.values),
@@ -373,6 +370,7 @@ export const App: React.FC = () => {
 
   const handleFieldChange = (name: string, val: string) => {
     setBuilderDirty(true);
+    setBuilderVisibility(null);
     setBlockData(prev => ({
       ...prev,
       values: {
@@ -392,9 +390,10 @@ export const App: React.FC = () => {
       values: normalizeValues(blockData.type, registry, blockData.values),
     };
     try {
-      const html = await api.previewBlock(payload, csrfToken);
+      const result = await api.previewBlock(payload, csrfToken);
       if (currentSeq === previewSeq.current) {
-        setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${html}`);
+        setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${result.html}`);
+        setBuilderVisibility(result.visibility);
         setStatus('Đang xem trước', false);
       }
     } catch (err) {
@@ -413,9 +412,10 @@ export const App: React.FC = () => {
       values: normalizeValues(blockData.type, registry, blockData.values),
     };
     try {
-      const html = await api.saveBlock(payload, csrfToken);
+      const result = await api.saveBlock(payload, csrfToken);
       if (JSON.stringify(payload) === JSON.stringify(blockDataRef.current)) setBuilderDirty(false);
-      setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${html}`);
+      setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${result.html}`);
+      setBuilderVisibility(result.visibility);
       setStatus('Đã lưu', false);
     } catch (err) {
       handleApiError(err, 'Lỗi khi lưu block.');
@@ -439,6 +439,7 @@ export const App: React.FC = () => {
       onLogout={handleLogout}
       activeView={activeView}
       onViewChange={navigateTo}
+      dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
       sidebarContent={
         <BuilderControls
@@ -451,17 +452,28 @@ export const App: React.FC = () => {
           onFieldChange={handleFieldChange}
           onPreview={handlePreview}
           onSave={handleSave}
+          blockVisibility={builderVisibility}
         />
       }
       previewContent={<BuilderPreview previewHtml={previewHtml} />}
-      settingsContent={<SystemStatus />}
-      usersContent={<UsersPanel
-        editorUsername={editorUsername}
-        editorPassword={editorPassword}
-        isProcessing={isProcessing}
-        onEditorUsernameChange={setEditorUsername}
-        onEditorPasswordChange={setEditorPassword}
-        onCreateEditor={handleCreateEditor}
+      themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
+        onInstalled={() => { void loadRegistryAndPage(true); }}
+        onActivated={() => {
+          previewSeq.current += 1;
+          setBuilderVisibility(null);
+          setPreviewHtml('');
+        }}
+      />}
+      settingsContent={<>
+        <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
+      </>}
+      usersContent={accountContextRole === 'admin' && <UsersPanel
+        key={accountContextId ?? 'anonymous'}
+        csrfToken={csrfToken}
+        currentUserId={accountContextId}
+        onApiError={handleApiError}
+        onOwnAccountChanged={handleOwnAccountChanged}
       />}
       pluginsContent={<PluginsPanel
         plugins={plugins}

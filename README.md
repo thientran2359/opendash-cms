@@ -54,6 +54,39 @@ M1 lưu template và dữ liệu trang trong SQLite. M2 lưu manifest, Wasm, KV 
 
 Khi có khác biệt, ưu tiên chỉ đạo mới nhất của chủ dự án và yêu cầu đã xác nhận trong [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md).
 
+## Chạy OpenDash Dev (Windows và macOS)
+
+Tại thư mục gốc repository, chạy **cùng một file**:
+
+```sh
+python dev.py
+```
+
+Yêu cầu Python 3.10+ có Tkinter, Node.js 22+ và Rust/Cargo trong `PATH`.
+Trên macOS có thể dùng `python3 dev.py`; nếu Python thiếu Tkinter, cài bản
+Python hỗ trợ Tk hoặc chạy `python3 dev.py --headless` (dừng bằng Ctrl+C).
+Launcher mở cửa sổ điều khiển, tự build React Admin và binary Rust **debug**,
+chạy tại `http://127.0.0.1:18766/admin/#/posts`, rồi mở trình duyệt mặc định.
+Chọn **Mở Admin** / **Mở website** trong cửa sổ để mở lại; đóng cửa sổ là
+dừng server và tiến trình build do launcher quản lý. Khi sửa mã nguồn React,
+Rust hoặc migrations, launcher tự build và khởi động lại server; cần tải lại
+trang trên trình duyệt sau khi build (chưa phải Vite HMR).
+
+- Nếu `18766` đang được tiến trình **OpenDash** khác sử dụng, launcher xác thực
+  owner và health trước khi dừng nó. Nếu là chương trình khác, launcher báo lỗi
+  và **không** kết thúc tiến trình lạ.
+- Mặc định site data nằm trong `database/`, `themes/`, `plugins/` và
+  `uploads/` tại repository đang chạy. Build và restart **không xóa** dữ liệu.
+  Chọn site khác bằng `python dev.py --site-root /duong/dan/toi/site`.
+  Nếu server trước đó dùng site root khác thì cần truyền lại đường dẫn đó
+  để giữ nguyên tài khoản/nội dung, không tự copy hoặc ghi đè SQLite.
+- `python dev.py --no-watch` tắt tự build khi thay đổi; `--no-browser`
+  không tự mở tab; `--headless` dùng khi không có giao diện Tk.
+  `--port 18766` ghi đè cổng mặc định.
+- Cửa sổ launcher là bộ điều khiển tiến trình, không phải cửa sổ browser nhúng.
+  Việc đóng **tab trình duyệt** không dừng server; đóng **cửa sổ OpenDash Dev**
+  hoặc Ctrl+C ở chế độ `--headless` mới dừng server.
+
 ## Chạy OpenDash trên Windows
 
 Từ gốc repo, dùng Rust, Node.js 22+, npm và PowerShell để build Admin, plugin mẫu rồi nhúng Admin vào binary release.

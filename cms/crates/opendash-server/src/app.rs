@@ -16,9 +16,10 @@ use crate::{
     media::{MAX_MEDIA_BYTES, MediaStore},
     plugin::PluginManager,
     routes::{
-        auth::{auth_login, auth_logout, auth_me, auth_setup, create_editor},
+        auth::{auth_login, auth_logout, auth_me, auth_setup},
         builder::{builder, install, page, preview, registry, save, serve_asset},
         content::{MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list},
+        dashboard::dashboard_get,
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
             entry_preview, entry_publication, entry_update,
@@ -30,6 +31,12 @@ use crate::{
         },
         public::public_page,
         public_content::{archive, media_file, media_thumb, single},
+        settings::{general_get, general_put, timezones_get},
+        themes::{theme_activate, theme_install, theme_list},
+        users::{
+            max_users_json_bytes, user_create, user_delete, user_list, user_patch,
+            user_reset_password,
+        },
     },
     theme::MAX_ZIP_BYTES,
 };
@@ -88,7 +95,40 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
         .route("/auth/login", post(auth_login))
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", post(auth_logout))
-        .route("/api/admin/users", post(create_editor))
+        .route("/api/admin/dashboard", get(dashboard_get))
+        .route(
+            "/api/admin/settings/general",
+            get(general_get)
+                .put(general_put)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route("/api/admin/settings/timezones", get(timezones_get))
+        .route(
+            "/api/admin/themes",
+            get(theme_list)
+                .post(theme_install)
+                .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES)),
+        )
+        .route(
+            "/api/admin/themes/active",
+            axum::routing::put(theme_activate).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/users",
+            get(user_list)
+                .post(user_create)
+                .layer(DefaultBodyLimit::max(max_users_json_bytes())),
+        )
+        .route(
+            "/api/admin/users/{id}",
+            axum::routing::patch(user_patch)
+                .delete(user_delete)
+                .layer(DefaultBodyLimit::max(max_users_json_bytes())),
+        )
+        .route(
+            "/api/admin/users/{id}/password",
+            post(user_reset_password).layer(DefaultBodyLimit::max(max_users_json_bytes())),
+        )
         .route(
             "/api/admin/content-types",
             get(content_type_list)

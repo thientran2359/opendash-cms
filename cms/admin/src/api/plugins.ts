@@ -1,9 +1,10 @@
 import { PluginRunResult, PluginSummary } from '../types.ts';
 import { requestJson, requestText } from './client.ts';
 
-export async function getPlugins(): Promise<PluginSummary[]> {
+export async function getPlugins(signal?: AbortSignal): Promise<PluginSummary[]> {
   return requestJson<PluginSummary[]>('/api/admin/plugins', {
     method: 'GET',
+    signal,
     defaultErrorMessage: 'Không thể tải danh sách plugin.',
   });
 }

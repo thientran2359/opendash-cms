@@ -149,6 +149,16 @@ def test_plugin_rbac_and_csrf(binary):
             )
             assert status == 403, f"Expected 403 for Editor POST /api/admin/plugins/run, got {status}"
 
+            for action in ("enable", "disable"):
+                status, _, _ = request(
+                    base,
+                    f"/api/admin/plugins/sample-plugin/{action}",
+                    b"",
+                    "application/json",
+                    headers={"Cookie": editor_cookie, "X-CSRF-Token": editor_csrf},
+                )
+                assert status == 403, f"Editor must not {action} plugins, got {status}"
+
             # 5. Admin CSRF failure
             status, _, _ = request(
                 base,
@@ -329,6 +339,17 @@ def test_sample_plugin_full_lifecycle(binary):
             plugins_list = json.loads(body)
             assert len(plugins_list) == 1
             assert plugins_list[0]["id"] == "sample-plugin"
+            assert plugins_list[0]["permissions"]["sqlite"] == ["kv_read", "kv_write"]
+
+            # A rejected ZIP cannot replace a working installed plugin.
+            status, _, _ = request(
+                base, "/api/admin/plugins", b"not a zip", "application/zip",
+                headers={"Cookie": admin_cookie, "X-CSRF-Token": admin_csrf},
+            )
+            assert status == 400
+            status, body, _ = request(base, "/api/admin/plugins", headers={"Cookie": admin_cookie})
+            assert status == 200
+            assert len(json.loads(body)) == 1 and json.loads(body)[0]["enabled"] is True
 
             # Run plugin invocation 1
             input_payload1 = json.dumps({"text": "antigravity m2 test"}).encode()
@@ -421,6 +442,24 @@ def test_sample_plugin_full_lifecycle(binary):
             assert status == 200
             assert json.loads(body)["data"]["run_count"] == 4
 
+            # Install is replace-and-enable: an existing disabled plugin becomes
+            # enabled without losing its persisted plugin KV content.
+            status, _, _ = request(
+                base, "/api/admin/plugins/sample-plugin/disable", b"", "application/json",
+                headers={"Cookie": admin_cookie, "X-CSRF-Token": admin_csrf},
+            )
+            assert status == 200
+            status, body, _ = request(
+                base, "/api/admin/plugins", sample_zip_bytes, "application/zip",
+                headers={"Cookie": admin_cookie, "X-CSRF-Token": admin_csrf},
+            )
+            assert status == 201 and json.loads(body)["enabled"] is True
+            status, body, _ = request(
+                base, "/api/admin/plugins/sample-plugin/run", input_payload1, "application/json",
+                headers={"Cookie": admin_cookie, "X-CSRF-Token": admin_csrf},
+            )
+            assert status == 200 and json.loads(body)["data"]["run_count"] == 5
+
         # --- Phase 2: Server Restart Persistence ---
         print("Verifying persistence across server restart...")
         with running(binary, database) as base:
@@ -447,7 +486,7 @@ def test_sample_plugin_full_lifecycle(binary):
             assert plugins_list[0]["id"] == "sample-plugin"
             assert plugins_list[0]["enabled"] is True
 
-            # Run plugin: run_count must be 5, confirming SQLite KV survived restart!
+            # Run plugin: run_count must be 6, confirming replacement and restart preserved KV.
             input_payload = json.dumps({"text": "after server restart"}).encode()
             status, body, _ = request(
                 base,
@@ -460,8 +499,8 @@ def test_sample_plugin_full_lifecycle(binary):
             run_after_restart = json.loads(body)
             assert run_after_restart["success"] is True
             assert run_after_restart["data"]["transformed"] == "AFTER SERVER RESTART"
-            assert run_after_restart["data"]["run_count"] == 5, (
-                f"Expected run_count 5 after restart, got {run_after_restart['data']['run_count']}"
+            assert run_after_restart["data"]["run_count"] == 6, (
+                f"Expected run_count 6 after restart, got {run_after_restart['data']['run_count']}"
             )
 
         # Check SQLite DB directly
@@ -469,7 +508,7 @@ def test_sample_plugin_full_lifecycle(binary):
         cur = conn.cursor()
         cur.execute("SELECT value_json FROM plugin_kv WHERE plugin_id = 'sample-plugin' AND key = 'run_count'")
         row = cur.fetchone()
-        assert row is not None and row[0] == "5", f"Expected SQLite KV '5', got {row}"
+        assert row is not None and row[0] == "6", f"Expected SQLite KV '6', got {row}"
         conn.close()
 
     print("Sample plugin lifecycle and restart persistence verified successfully!")

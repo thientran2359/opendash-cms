@@ -12,7 +12,7 @@ Executes an isolated opendash.exe in a clean temporary directory with:
 """
 
 import argparse
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import io
 import json
 import os
@@ -129,11 +129,17 @@ def running_dist_binary(exe_path: Path, cwd: Path, db_path: Path | None, site_ro
         base = line.removeprefix("OpenDash: ").removesuffix("/builder")
         yield base
     finally:
-        proc.terminate()
+        if proc.poll() is None:
+            proc.terminate()
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait(timeout=5)
+        if proc.stdout:
+            proc.stdout.close()
+        if proc.stderr:
+            proc.stderr.close()
 
 
 def test_distribution_assets_and_404(dist_exe: Path, work_dir: Path):
@@ -358,11 +364,8 @@ def test_distribution_database_upgrade(dist_exe: Path, work_dir: Path, baseline_
     upgraded_db = work_dir / "upgraded.sqlite"
 
     # Copy fixture safely
-    src = sqlite3.connect(baseline_db)
-    dst = sqlite3.connect(upgraded_db)
-    src.backup(dst)
-    dst.close()
-    src.close()
+    with closing(sqlite3.connect(baseline_db)) as src, closing(sqlite3.connect(upgraded_db)) as dst:
+        src.backup(dst)
 
     with running_dist_binary(dist_exe, work_dir, upgraded_db) as base:
         # Public page works immediately from existing baseline content
@@ -425,16 +428,45 @@ def test_build_script_fail_fast():
         assert failure.returncode and "npm ci failed (77)" in failure.stderr
 
 
+def release_migration_versions() -> list[int]:
+    """Read the SQLx migration contract from the source used to build this release.
+
+    Hard-coding 3 (the M1 snapshot) silently becomes stale every time an
+    additive migration lands. A release verification must assert exact versions.
+    """
+    migrations_dir = Path(__file__).resolve().parents[1] / "migrations"
+    versions = sorted(
+        int(match.group(1))
+        for migration in migrations_dir.glob("*.sql")
+        if (match := re.fullmatch(r"(\d{4})_[\w-]+\.sql", migration.name))
+    )
+    assert versions and len(versions) == len(set(versions)), "Invalid SQLx migration sources"
+    return versions
+
+
+def assert_migrations(db_path: Path, expected: list[int]) -> None:
+    """Verify applied SQLx versions and SQLite consistency; close on failures."""
+    with closing(sqlite3.connect(db_path.as_uri() + "?mode=ro", uri=True)) as db:
+        applied = db.execute("SELECT version FROM _sqlx_migrations WHERE success = 1 ORDER BY version").fetchall()
+        failures = db.execute("SELECT version FROM _sqlx_migrations WHERE success != 1").fetchall()
+        assert [version for (version,) in applied] == expected, (applied, expected)
+        assert not failures, f"Failed migration records: {failures}"
+        assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
 def verify_distribution(source_exe: Path, baseline_db: Path):
     source_exe = source_exe.resolve()
     baseline_db = baseline_db.resolve()
 
     assert source_exe.exists(), f"Release binary not found at {source_exe}"
     binary_size = source_exe.stat().st_size
+    versions = release_migration_versions()
     print(f"=== OpenDash Distribution Verification (M1.3) ===")
     print(f"Binary path: {source_exe}")
     print(f"Binary size: {binary_size} bytes ({binary_size / (1024 * 1024):.2f} MB)")
     print(f"Baseline DB: {baseline_db}")
+    print(f"Release SQLx migrations: {versions}")
     print("=" * 48)
 
     with TemporaryDirectory(prefix="opendash-dist-isolated-") as folder:
@@ -452,13 +484,12 @@ def verify_distribution(source_exe: Path, baseline_db: Path):
                 assert http_req(base, "/api/health")[0] == 200
                 db = (root or work_dir) / "database" / "opendash.sqlite"
                 assert db.is_file() and not (launch / "database").exists()
-                with sqlite3.connect(db.as_uri() + "?mode=ro", uri=True) as conn:
-                    assert conn.execute("SELECT count(*) FROM _sqlx_migrations WHERE success").fetchone() == (3,)
-                conn.close()
+                assert_migrations(db, versions)
 
         test_distribution_assets_and_404(dist_exe, work_dir)
         test_distribution_auth_content_flow(dist_exe, work_dir)
         test_distribution_database_upgrade(dist_exe, work_dir, baseline_db)
+        assert_migrations(work_dir / "upgraded.sqlite", versions)
         test_build_script_fail_fast()
 
     print("\nALL M1.3 SINGLE WINDOWS RELEASE BINARY DISTRIBUTION TESTS PASSED!")

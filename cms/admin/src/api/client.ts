@@ -63,6 +63,22 @@ export async function requestText(url: string, options: ApiRequestOptions): Prom
   return handleResponseText(res, options.defaultErrorMessage);
 }
 
+/** Keep the preview HTML plus server visibility diagnostic outside the sandbox. */
+export async function requestBuilderHtml(
+  url: string, options: ApiRequestOptions,
+): Promise<{ html: string; visibility: 'rendered' | 'unsupported' }> {
+  const res = await fetch(url, {
+    method: options.method ?? 'GET',
+    credentials: 'same-origin',
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename),
+    body: options.body,
+    signal: options.signal,
+  });
+  const html = await handleResponseText(res, options.defaultErrorMessage);
+  const visibility = res.headers.get('X-OpenDash-Block-Visibility');
+  return { html, visibility: visibility === 'unsupported' ? 'unsupported' : 'rendered' };
+}
+
 export async function requestJson<T>(url: string, options: ApiRequestOptions): Promise<T> {
   const res = await fetch(url, {
     method: options.method ?? 'GET',

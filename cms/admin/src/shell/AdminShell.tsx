@@ -88,28 +88,18 @@ interface AdminShellProps {
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
   mediaContent: React.ReactNode;
+  dashboardContent: React.ReactNode;
   pluginsContent: React.ReactNode;
   usersContent: React.ReactNode;
   settingsContent: React.ReactNode;
-}
-
-function PendingPage({ title, message, children }: { title: string; message: string; children?: React.ReactNode }) {
-  return (
-    <section className="od-pending rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-9">
-      <div className="od-pending-mark" aria-hidden="true">○</div>
-      <div className="text-xs font-semibold uppercase tracking-widest text-sky-700">Đang phát triển</div>
-      <h2 className="mt-3 text-xl font-semibold text-slate-900">{title}</h2>
-      <p className="mt-3 max-w-xl leading-7 text-slate-600">{message}</p>
-      {children}
-    </section>
-  );
+  themesContent: React.ReactNode;
 }
 
 export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   activeView, onViewChange, hasUnsavedChanges, sidebarContent, previewContent,
-  contentContent, postsContent, pagesContent, mediaContent, pluginsContent, usersContent, settingsContent,
+  contentContent, postsContent, pagesContent, mediaContent, dashboardContent, pluginsContent, usersContent, settingsContent, themesContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
@@ -217,9 +207,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                   <h2 className="mt-3 text-2xl font-bold text-white sm:text-3xl">Xin chào, {user.username}!</h2>
                   <p className="mt-3 max-w-xl text-sm leading-6 text-slate-200">Chọn một khu vực bên dưới để tiếp tục công việc. Các tính năng đang phát triển được ghi rõ trạng thái.</p>
                 </div>
+                {dashboardContent}
                 <h2 className="mb-4 text-lg font-semibold text-slate-900">Truy cập nhanh</h2>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {allItems.filter(item => ['content', 'builder', 'posts', 'media', 'plugins', 'users'].includes(item.id) && (!item.adminOnly || user.role === 'admin')).map(item => (
+                  {allItems.filter(item => ['content', 'builder', 'posts', 'pages', 'media', 'plugins', 'users'].includes(item.id) && (!item.adminOnly || user.role === 'admin')).map(item => (
                     <button key={item.id} type="button" className="od-quick-link" onClick={() => navigate(item.id)}>
                       <span className="od-quick-icon"><NavIcon name={item.icon} /></span>
                       <span className="flex-1 text-left">
@@ -238,7 +229,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
             <section className={user && activeView === 'posts' ? 'od-editor-panel' : 'hidden'} aria-label="Bài viết" aria-hidden={!user || activeView !== 'posts'}>{postsContent}</section>
             <section className={user && activeView === 'pages' ? 'od-editor-panel' : 'hidden'} aria-label="Trang" aria-hidden={!user || activeView !== 'pages'}>{pagesContent}</section>
             {user && activeView === 'media' && mediaContent}
-            {user?.role === 'admin' && activeView === 'themes' && <main><PendingPage title="Quản lý Themes" message="Quản lý danh sách và kích hoạt theme độc lập đang được phát triển. Hiện có thể nạp gói theme ZIP tại Builder."><button type="button" className="od-primary-action mt-6" onClick={() => navigate('builder')}>Mở Builder</button></PendingPage></main>}
+            {user?.role === 'admin' && activeView === 'themes' && <main className="od-admin-card min-w-0">{themesContent}</main>}
 
             {/* Keep both editors mounted when navigating: forms and preview must survive switching sections. */}
             <section className={user && activeView === 'builder' ? 'od-editor-panel' : 'hidden'} aria-label="Builder" aria-hidden={!user || activeView !== 'builder'}>
@@ -251,8 +242,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               <main id="content-main">{contentContent}</main>
             </section>
             {user?.role === 'admin' && activeView === 'plugins' && <main className="od-admin-card">{pluginsContent}</main>}
-            {user?.role === 'admin' && activeView === 'users' && <main className="od-admin-card"><p className="od-feature-note mb-5">Hiện hỗ trợ tạo tài khoản Editor. Danh sách người dùng, đổi vai trò và mật khẩu đang phát triển.</p>{usersContent}</main>}
-            {user?.role === 'admin' && activeView === 'settings' && <main className="od-admin-card"><p className="od-feature-note mb-5">Trạng thái hệ thống hiện có bên dưới. Cài đặt tên site, tagline và múi giờ đang phát triển.</p>{settingsContent}</main>}
+            <section className={user?.role === 'admin' && activeView === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label="Người dùng" aria-hidden={user?.role !== 'admin' || activeView !== 'users'}>
+              {usersContent}
+            </section>
+            {user?.role === 'admin' && activeView === 'settings' && <main className="od-admin-card min-w-0">{settingsContent}</main>}
           </div>
         </div>
       </div>
