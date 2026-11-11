@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
-import type { BuilderDocument, BuilderElement, BuilderViewport, ElementBinding, ResponsiveAlign, ResponsiveField, ResponsiveContainer } from './document.ts';
+import type { BuilderDocument, BuilderElement, BuilderViewport, ElementBinding, ListProps, ResponsiveAlign, ResponsiveField, ResponsiveContainer } from './document.ts';
 import { effectiveResponsive, isElement, isLockedElement, locate, nodeTitle, RESPONSIVE_FIELDS, VIEWPORT_LABELS } from './document.ts';
 import { BuilderBindingFields } from './BuilderBindingFields.tsx';
+import { BuilderListFields } from './BuilderListFields.tsx';
 
 interface Props {
   document: BuilderDocument;
@@ -12,11 +13,12 @@ interface Props {
   viewport: BuilderViewport;
   onChange: (id: string, key: string, value: string | number) => void;
   onBindingChange: (id: string, binding: ElementBinding | null) => void;
+  onListChange: (id: string, config: ListProps) => void;
   onResponsiveChange: (id: string, viewport: BuilderViewport, field: ResponsiveField, value: number | ResponsiveAlign | null) => void;
   onError: (error: unknown, fallback: string) => void;
 }
 
-export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, onChange, onBindingChange, onResponsiveChange, onError }: Props) {
+export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, onChange, onBindingChange, onListChange, onResponsiveChange, onError }: Props) {
   const [showPicker, setShowPicker] = useState(false);
   const item = locate(document, selectedId);
   if (!item) return (
@@ -138,7 +140,7 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
       {!element && <p className="text-sm text-slate-500">
         Các thay đổi responsive chỉ ghi vào document khi bấm Lưu. Thêm hoặc đổi thứ tự node từ Tree.
       </p>}
-      {element && !locked && (
+      {element && !locked && element.type !== 'core/list' && (
         <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label="Thuộc tính phần tử">
           {fields.map(field => (
             <label key={field.key} className="block text-sm font-medium text-slate-700">
@@ -166,6 +168,9 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
       )}
       {element && !locked && ['core/heading', 'core/text', 'core/image', 'core/button'].includes(element.type) && (
         <BuilderBindingFields key={element.id} element={element} onBindingChange={onBindingChange} onError={onError} />
+      )}
+      {element?.type === 'core/list' && !locked && (
+        <BuilderListFields key={element.id} element={element} onChange={onListChange} onError={onError} />
       )}
       {binding != null && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900">

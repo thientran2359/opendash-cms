@@ -22,6 +22,11 @@ function ElementContent({ element, registry }: { element: BuilderElement; regist
     </div>;
   }
   switch (element.type) {
+    case 'core/list':
+      return <div className="rounded border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900">
+        Danh sách {String(element.props.type_key ?? '')} · {String(element.props.page_size ?? 6)} mục/trang
+        · Chỉ hiển thị dữ liệu published trong Preview và public
+      </div>;
     case 'core/heading':
       return <div className="font-bold text-slate-900" style={{
         fontSize: (7 - Number(element.props.level)) * 3 + 15,

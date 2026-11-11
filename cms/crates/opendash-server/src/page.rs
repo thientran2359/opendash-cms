@@ -3,7 +3,7 @@ use crate::{
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
     storage::{
-        builder::HomeState,
+        builder::{HomeState, ListResults, ResolvedList},
         builder_binding::{BindingResult, BindingResults},
         page::load_theme_block,
         theme::{self as theme_storage, HomeSnapshot, SelectedTemplate},
@@ -176,6 +176,18 @@ pub fn render_builder_resolved(
     is_preview: bool,
     bindings: &BindingResults,
 ) -> ApiResult<RenderedLayout> {
+    render_builder_with_lists(state, document, is_preview, bindings, &ListResults::new())
+}
+
+/// Query-free renderer: storage has already resolved every list against the
+/// same SQLite snapshot as the document/Field Binding sources.
+pub fn render_builder_with_lists(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
+    lists: &ListResults,
+) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
     let mut html = builder_responsive_css(document);
@@ -275,6 +287,76 @@ pub fn render_builder_resolved(
                             escape_html(&props.url),
                             escape_html(&props.label)
                         )),
+                        ElementContent::Known(KnownElement::List(props)) => {
+                            match lists.get(&element.id) {
+                                Some(ResolvedList::MissingConfig) => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "list_config_unavailable",
+                                    });
+                                    Some("<p class=\"builder-list-empty\">Danh sách chưa khả dụng.</p>".into())
+                                }
+                                Some(ResolvedList::Page {
+                                    items,
+                                    page,
+                                    has_next,
+                                    out_of_range,
+                                }) => {
+                                    let mut list_html = format!(
+                                        "<div class=\"builder-list\" data-list-type=\"{}\">",
+                                        escape_html(&props.type_key),
+                                    );
+                                    if *out_of_range {
+                                        list_html.push_str("<p>Trang này không có nội dung.</p>");
+                                        list_html.push_str(&format!(
+                                            "<a class=\"builder-list-first\" href=\"{}\">Về trang đầu</a>",
+                                            escape_html(&list_page_href(lists, &element.id, 1)),
+                                        ));
+                                    } else if items.is_empty() {
+                                        list_html.push_str(
+                                            "<p class=\"builder-list-empty\">Chưa có nội dung.</p>",
+                                        );
+                                    } else {
+                                        list_html.push_str("<ul>");
+                                        for item in items {
+                                            // Neither title nor slug is ever treated as raw HTML.
+                                            let path = format!(
+                                                "/content/{}/{}",
+                                                encode_path_segment(&props.type_key),
+                                                encode_path_segment(&item.slug),
+                                            );
+                                            list_html.push_str(&format!(
+                                                "<li><a href=\"{}\">{}</a></li>",
+                                                escape_html(&path),
+                                                escape_html(&item.title),
+                                            ));
+                                        }
+                                        list_html.push_str("</ul>");
+                                        if !is_preview && *page > 1 {
+                                            list_html.push_str(&format!(
+                                                "<a class=\"builder-list-prev\" href=\"{}\">Trang trước</a>",
+                                                escape_html(&list_page_href(lists, &element.id, page - 1)),
+                                            ));
+                                        }
+                                        if !is_preview && *has_next && *page < 100 {
+                                            list_html.push_str(&format!(
+                                                "<a class=\"builder-list-next\" href=\"{}\">Trang sau</a>",
+                                                escape_html(&list_page_href(lists, &element.id, page + 1)),
+                                            ));
+                                        }
+                                    }
+                                    list_html.push_str("</div>");
+                                    Some(list_html)
+                                }
+                                None => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "list_unavailable",
+                                    });
+                                    None
+                                }
+                            }
+                        }
                         ElementContent::Known(KnownElement::Legacy(props)) => {
                             match state.themes.get(&props.block_id) {
                                 None => {
@@ -349,6 +431,40 @@ pub fn render_builder_resolved(
     }
     html.push_str("</main>");
     Ok(RenderedLayout { html, diagnostics })
+}
+
+fn encode_path_segment(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
+}
+
+/// Canonical link: only currently resolved node IDs with valid nondefault pages
+/// survive. Unknown query parameters, duplicates and invalid values are dropped.
+fn list_page_href(lists: &ListResults, node_id: &str, target: i64) -> String {
+    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    for (id, current) in lists {
+        let ResolvedList::Page {
+            page, out_of_range, ..
+        } = current
+        else {
+            continue;
+        };
+        let effective = if id == node_id {
+            target
+        } else if *out_of_range {
+            1
+        } else {
+            *page
+        };
+        if (2..=100).contains(&effective) {
+            query.append_pair(&format!("list_page_{id}"), &effective.to_string());
+        }
+    }
+    let encoded = query.finish();
+    if encoded.is_empty() {
+        "/".into()
+    } else {
+        format!("/?{encoded}")
+    }
 }
 
 pub fn render_legacy_state(state: &HomeState) -> ApiResult<Option<RenderedBlock>> {
@@ -596,7 +712,7 @@ mod tests {
             .unwrap();
 
         let (version, rendered) =
-            builder_save_and_render(&db, &draft, 1, |current, document, bindings| {
+            builder_save_and_render(&db, &draft, 1, |current, document, bindings, _lists| {
                 render_builder_resolved(current, document, false, bindings)
             })
             .await
@@ -607,11 +723,12 @@ mod tests {
         dispatch_saved_hook(&hooks, layout_hook_payload(&draft, version)).await;
         assert!(observed.load(Ordering::SeqCst));
         assert_eq!(builder_read(&db).await.unwrap().saved, Some(draft.clone()));
-        let failure = builder_save_and_render(&db, &draft, 1, |current, document, bindings| {
-            render_builder_resolved(current, document, false, bindings)
-        })
-        .await
-        .unwrap_err();
+        let failure =
+            builder_save_and_render(&db, &draft, 1, |current, document, bindings, _lists| {
+                render_builder_resolved(current, document, false, bindings)
+            })
+            .await
+            .unwrap_err();
         assert_eq!(failure.0, axum::http::StatusCode::PRECONDITION_FAILED);
         assert_eq!(builder_read(&db).await.unwrap().version, 2);
     }

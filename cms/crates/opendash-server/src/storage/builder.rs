@@ -16,8 +16,11 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::{
     error::{ApiError, ApiResult},
-    storage::builder_binding::{self, BindingResults},
     storage::media::valid_media_id,
+    storage::{
+        builder_binding::{self, BindingResults},
+        entries::{self, EntryFilters, PublishedListResult, PublishedListSort},
+    },
     theme::{Block, Fields},
 };
 
@@ -35,6 +38,91 @@ pub struct HomeState {
     pub active_id: Option<String>,
     pub active_alias: Option<String>,
     pub active_template: Option<String>,
+}
+
+/// Only public-safe title and slug leave the list storage resolver.
+#[derive(Debug, Clone)]
+pub struct ListItem {
+    pub title: String,
+    pub slug: String,
+}
+
+#[derive(Debug)]
+pub enum ResolvedList {
+    Page {
+        page: i64,
+        items: Vec<ListItem>,
+        has_next: bool,
+        out_of_range: bool,
+    },
+    MissingConfig,
+}
+
+pub type ListResults = BTreeMap<String, ResolvedList>;
+
+/// Use the same SQLite snapshot as the saved document/field bindings.
+pub async fn resolve_lists_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    pages: &BTreeMap<String, i64>,
+) -> ApiResult<ListResults> {
+    let mut results = ListResults::new();
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    let ElementContent::Known(KnownElement::List(props)) = &element.content else {
+                        continue;
+                    };
+                    // Defensive cap even for corrupt historical stored data.
+                    if results.len() >= 8 {
+                        return Err(ApiError::bad_request("Builder vượt giới hạn 8 list."));
+                    }
+                    let page = pages
+                        .get(&element.id)
+                        .copied()
+                        .filter(|p| (1..=100).contains(p))
+                        .unwrap_or(1);
+                    let filters = EntryFilters {
+                        category_id: props.category_id,
+                        tag_id: props.tag_id,
+                        include_descendants: props.include_descendants,
+                    };
+                    let sort = match props.sort {
+                        opendash_core::builder::ListSort::IdDesc => PublishedListSort::IdDesc,
+                        opendash_core::builder::ListSort::IdAsc => PublishedListSort::IdAsc,
+                    };
+                    let result = entries::list_published_page_in_tx(
+                        tx,
+                        &props.type_key,
+                        page,
+                        i64::from(props.page_size),
+                        sort,
+                        filters,
+                    )
+                    .await?;
+                    let rendered = match result {
+                        PublishedListResult::Page(result) => ResolvedList::Page {
+                            page,
+                            out_of_range: page > 1 && result.entries.is_empty(),
+                            items: result
+                                .entries
+                                .into_iter()
+                                .map(|entry| ListItem {
+                                    title: entry.title,
+                                    slug: entry.slug,
+                                })
+                                .collect(),
+                            has_next: result.has_next,
+                        },
+                        PublishedListResult::MissingConfig(_) => ResolvedList::MissingConfig,
+                    };
+                    results.insert(element.id.clone(), rendered);
+                }
+            }
+        }
+    }
+    Ok(results)
 }
 
 impl HomeState {
@@ -186,6 +274,39 @@ pub async fn read(db: &SqlitePool) -> ApiResult<HomeState> {
     Ok(state)
 }
 
+/// Public reads document, bound fields and published list rows from *one*
+/// SQLite snapshot; the public path cannot mix pre/post-publish revisions.
+pub async fn read_public_resolved(
+    db: &SqlitePool,
+    pages: &BTreeMap<String, i64>,
+) -> ApiResult<(HomeState, BindingResults, ListResults)> {
+    let mut tx = db.begin().await?;
+    let state = read_home_tx(&mut tx).await?;
+    let (bindings, lists) = if let Some(document) = &state.saved {
+        (
+            builder_binding::resolve_in_tx(&mut tx, document, false).await?,
+            resolve_lists_in_tx(&mut tx, document, pages).await?,
+        )
+    } else {
+        (BindingResults::new(), ListResults::new())
+    };
+    tx.commit().await?;
+    Ok((state, bindings, lists))
+}
+
+/// Admin Preview queries published-only lists even when a draft Post/Page/CPT
+/// may be authorized for exact-entry Field Binding.
+pub async fn resolve_preview(
+    db: &SqlitePool,
+    document: &BuilderDocument,
+) -> ApiResult<(BindingResults, ListResults)> {
+    let mut tx = db.begin().await?;
+    let bindings = builder_binding::resolve_in_tx(&mut tx, document, true).await?;
+    let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
+    tx.commit().await?;
+    Ok((bindings, lists))
+}
+
 pub async fn legacy_page(db: &SqlitePool) -> ApiResult<Option<Block>> {
     // Single SELECT prevents a /page check against the new source racing with
     // a separate legacy read under a different SQLite snapshot.
@@ -259,7 +380,7 @@ pub async fn save_and_render<T, F>(
     render: F,
 ) -> ApiResult<(i64, T)>
 where
-    F: FnOnce(&HomeState, &BuilderDocument, &BindingResults) -> ApiResult<T>,
+    F: FnOnce(&HomeState, &BuilderDocument, &BindingResults, &ListResults) -> ApiResult<T>,
 {
     let mut tx = db.begin().await?;
     // First query inside transaction reserves the writer and arbitrates CAS,
@@ -295,7 +416,8 @@ where
         }
     }
     let bindings = builder_binding::resolve_in_tx(&mut tx, document, false).await?;
-    let rendered = render(&current, document, &bindings)?;
+    let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
+    let rendered = render(&current, document, &bindings, &lists)?;
     let bytes = document
         .to_json()
         .map_err(|error| ApiError::bad_request(error.to_string()))?;

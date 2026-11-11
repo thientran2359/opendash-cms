@@ -3,10 +3,10 @@ import * as api from '../api/index.ts';
 import type { AuthUser, BlockRegistry } from '../types.ts';
 import type { BuilderDiagnostic, HomepageOpen } from '../api/builder.ts';
 import {
-  type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type NodeKind, type ResponsiveAlign,
+  type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type ListProps, type NodeKind, type ResponsiveAlign,
   type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
   allNodes, appendNode, isElement, isLockedElement, locate, moveNode, preservesAnchors,
-  removeNode, setElementBinding, setNodeField, setResponsiveField,
+  removeNode, setElementBinding, setListProps, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
 import { BuilderCanvas } from './BuilderCanvas.tsx';
@@ -254,6 +254,13 @@ export function BuilderWorkspace({
     if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
     changeDraft(setElementBinding(draftRef.current, id, binding), id);
   };
+  // #106 Design Delta D2: typed list filters/booleans use the same immutable
+  // draft revision, ETag/CAS and stale-preview pipeline as other Inspector edits.
+  const editList = (id: string, config: ListProps) => {
+    const entry = locate(draftRef.current, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
+    changeDraft(setListProps(draftRef.current, id, config), id);
+  };
   const editResponsive = (
     id: string, target: BuilderViewport, field: ResponsiveField,
     value: number | ResponsiveAlign | null,
@@ -447,7 +454,8 @@ export function BuilderWorkspace({
         <div className="min-w-0">
           <BuilderInspector document={draft} selectedId={selectedId} registry={registry}
             csrfToken={csrfToken} viewport={viewport} onChange={editField}
-            onBindingChange={editBinding} onResponsiveChange={editResponsive} onError={onApiError} />
+            onBindingChange={editBinding} onListChange={editList}
+            onResponsiveChange={editResponsive} onError={onApiError} />
         </div>
       </div>
     </div>

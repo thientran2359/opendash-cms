@@ -14,6 +14,15 @@ export interface ElementBinding {
   source: BindingSource;
   target: BindingTarget;
 }
+export type ListSort = 'id_desc' | 'id_asc';
+export interface ListProps {
+  type_key: string;
+  category_id?: number;
+  tag_id?: number;
+  include_descendants: boolean;
+  sort: ListSort;
+  page_size: number;
+}
 export type BuilderViewport = 'desktop' | 'tablet' | 'mobile';
 export type ResponsiveField = 'padding_px' | 'gap_px' | 'columns_per_row' | 'text_align';
 export type ResponsiveAlign = 'start' | 'center' | 'end';
@@ -31,8 +40,8 @@ export interface BuilderSection extends ResponsiveContainer { id: string; childr
 export interface BuilderDocument { schema_version: number; sections: BuilderSection[] }
 export type BuilderNode = BuilderSection | BuilderRow | BuilderColumn | BuilderElement;
 export type NodeKind = 'section' | 'row' | 'column' | 'element';
-export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/button';
-export const ELEMENT_TYPES: ElementType[] = ['core/heading', 'core/text', 'core/image', 'core/button'];
+export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/button' | 'core/list';
+export const ELEMENT_TYPES: ElementType[] = ['core/heading', 'core/text', 'core/image', 'core/button', 'core/list'];
 export const EMPTY_DOCUMENT: BuilderDocument = { schema_version: 1, sections: [] };
 export interface NodeLocation {
   node: BuilderNode;
@@ -150,7 +159,7 @@ export function nodeTitle(location: NodeLocation): string {
   const element = location.node as BuilderElement;
   return ({
     'core/heading': 'Tiêu đề', 'core/text': 'Văn bản',
-    'core/image': 'Hình ảnh', 'core/button': 'Nút',
+    'core/image': 'Hình ảnh', 'core/button': 'Nút', 'core/list': 'Danh sách',
     'legacy/block': 'Block theme',
   } as Record<string, string>)[element.type] || 'Block chưa nhận diện';
 }
@@ -174,6 +183,15 @@ export function isLockedElement(element: BuilderElement, registry: Record<string
     case 'core/text': return typeof props.text !== 'string';
     case 'core/image': return typeof props.media_id !== 'string' || typeof props.alt !== 'string';
     case 'core/button': return typeof props.label !== 'string' || typeof props.url !== 'string';
+    case 'core/list': return typeof props.type_key !== 'string'
+      || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
+      || (props.category_id !== undefined && (!Number.isSafeInteger(props.category_id) || Number(props.category_id) <= 0))
+      || (props.tag_id !== undefined && (!Number.isSafeInteger(props.tag_id) || Number(props.tag_id) <= 0))
+      || (props.include_descendants !== undefined && typeof props.include_descendants !== 'boolean')
+      || (props.include_descendants === true && props.category_id === undefined)
+      || (props.sort !== undefined && !['id_desc', 'id_asc'].includes(String(props.sort)))
+      || (props.page_size !== undefined && (!Number.isInteger(props.page_size)
+        || Number(props.page_size) < 1 || Number(props.page_size) > 20));
     case 'legacy/block':
       return typeof props.block_id !== 'string' || !object(props.values)
         || !Object.hasOwn(registry, props.block_id);
@@ -240,17 +258,36 @@ export function appendNode(
   const next = clone(document);
   const children = childrenAt(next, parent);
   if (!children) return null;
+  if (kind === 'element' && elementType === 'core/list'
+      && allNodes(document).filter(item => item.kind === 'element'
+        && (item.node as BuilderElement).type === 'core/list').length >= 8) return null;
   const id = newNodeId(kind, next);
   const defaults: Record<ElementType, Record<string, unknown>> = {
     'core/heading': { level: 2, text: 'Tiêu đề mới' },
     'core/text': { text: 'Nội dung mới' },
     'core/image': { media_id: '', alt: '' },
     'core/button': { label: 'Nút mới', url: '/' },
+    'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
   };
   const node: BuilderNode = kind === 'element' ? { id, type: elementType, props: { ...defaults[elementType] } }
     : { id, children: [] };
   children.push(node);
   return { document: next, id };
+}
+
+/** Typed list updates; never encode filters/booleans as static string props. */
+export function setListProps(document: BuilderDocument, id: string, props: ListProps): BuilderDocument | null {
+  if (!props.type_key || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
+      || !Number.isInteger(props.page_size) || props.page_size < 1 || props.page_size > 20
+      || !['id_desc', 'id_asc'].includes(props.sort)
+      || (props.category_id !== undefined && (!Number.isSafeInteger(props.category_id) || props.category_id <= 0))
+      || (props.tag_id !== undefined && (!Number.isSafeInteger(props.tag_id) || props.tag_id <= 0))
+      || (props.include_descendants && props.category_id === undefined)) return null;
+  const next = clone(document);
+  const element = locate(next, id)?.node;
+  if (!element || !isElement(element) || element.type !== 'core/list') return null;
+  element.props = { ...props };
+  return next;
 }
 
 export function removeNode(document: BuilderDocument, id: string): BuilderDocument | null {
