@@ -10,6 +10,7 @@ import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
 import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
 import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
 import { MediaRoute } from './shell/MediaRoute.tsx';
+import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -430,6 +431,7 @@ export const App: React.FC = () => {
       onLogout={handleLogout}
       activeView={activeView}
       onViewChange={navigateTo}
+      dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
       sidebarContent={
         <BuilderControls
