@@ -4,6 +4,8 @@
 
 [ADR-0007](../../../decisions/ADR-0007-m4-builder-taxonomy-foundation.md) ghi quyết định G2 cho nền tảng Builder P01/P02 và taxonomy P09/P10, gồm chuyển đổi homepage khi Lưu, quyền category/tag và điều kiện lọc trước phân trang.
 
+[G3 nền tảng Builder và Taxonomy](slices/2026-11-11-m4-foundation-g3.md) đặc tả bốn gói P01/P02/P09/P10. P03–P08 tiếp tục qua G1/G2 và chuẩn bị nghiệm thu theo các hợp đồng phụ thuộc trong bảng dưới đây.
+
 | Candidate | Slice / task outcome | Module primary (phối hợp) | Dependency / gate | Acceptance (phải thành test khi G3) |
 | --- | --- | --- | --- | --- |
 | M4-P01 | Thiết kế AST node Section/Row/Column/Element và descriptors Heading/Text/Image/Button | BLD-02 (BLD-01, FND-01) | M2.5 registry + M1 block compatibility; Full-Track G1/G2 AST/migration | Serialize/validate tree; invalid node/cycle/size, unknown provider fail safely; legacy one-block vẫn mở được |
