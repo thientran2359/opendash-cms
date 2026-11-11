@@ -1,5 +1,7 @@
 # ADR-0005 — M3 thực hiện tự chủ bởi Harbor và Forge
 
+> **Cập nhật phân quyền:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md) là nguồn hiện hành về vai trò, tự chủ triển khai, review và merge. Các quy định cũ dưới đây được giữ làm lịch sử quyết định.
+
 - **Trạng thái:** **AGREED — owner direct, 2026-11-11**, áp dụng sau khi tài liệu này merge vào `main`.
 - **Phạm vi:** chỉ **M3 — Core CMS & WordPress-like Admin** và các PR/tác vụ M3 phát hành sau quyết định này; không sửa hồi tố hồ sơ, không ủy quyền thay đổi các dự án/phase khác.
 - **Nguồn:** owner trực tiếp yêu cầu Harbor (CoS macOS) và Forge (CoS Windows) chọn và triển khai **toàn bộ M3 từng task từ đầu đến cuối**, **không gọi thêm agent khác review**, đồng thời đồng ý quy trình Harbor đề xuất: agent tự lập G2/G3 phù hợp, triển khai, kiểm thử, tạo PR và **tự merge khi gate PASS**. Xác nhận trong Chat On Steroids ngày 2026-11-11; không tạo URL chat không tồn tại.

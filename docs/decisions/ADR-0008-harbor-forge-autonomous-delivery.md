@@ -1,5 +1,7 @@
 # ADR-0008 — Harbor và Forge tự chủ triển khai, review và merge từ M4
 
+> **Cập nhật phân quyền:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md) là nguồn hiện hành về vai trò, tự chủ triển khai, review và merge. Các quy định cũ dưới đây được giữ làm lịch sử quyết định.
+
 - **Trạng thái:** **AGREED — owner direct, 2026-11-11**. Có hiệu lực như quy định chung sau khi tài liệu được merge vào `main`; chỉ đạo owner trong chat có ưu tiên ngay khi làm việc.
 - **Phạm vi:** M4 và các milestone/tác vụ OpenDash tiếp theo; quyền M3 trong [ADR-0005](ADR-0005-m3-harbor-forge-autonomous-delivery.md) giữ nguyên. Không thay đổi các PR đã merge hoặc task thuộc agent khác.
 - **Nguồn:** owner trực tiếp yêu cầu Harbor (CoS macOS) và Forge (CoS Windows) có **toàn quyền code, review và merge code giống M3** từ nay về sau, trong Chat On Steroids ngày 2026-11-11. Căn cứ triển khai: [ADR-0003](ADR-0003-agent-consensus-governance.md), [ADR-0005](ADR-0005-m3-harbor-forge-autonomous-delivery.md) và [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md).

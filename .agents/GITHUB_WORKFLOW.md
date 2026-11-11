@@ -1,6 +1,6 @@
 # GitHub workflow cho 5 agent — đề xuất chuẩn vận hành
 
-> **Ủy quyền trực tiếp của owner ngày 2026-11-11:** [ADR-0005 — M3](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) và [ADR-0008 — M4 trở đi](../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md) cho **Harbor/Forge** quyền tự điều phối, code, review và merge PR của chính mình trên các milestone OpenDash khi G3/ownership, security, tests, required CI và Project gates đều đạt. Không cần Atlas/Nova hoặc review độc lập cho PR của hai agent này; cần ghi self-review trung thực, không giả approval độc lập. Các agent khác vẫn theo quy trình reviewer chung. Không bypass branch protection/rollback/ACL; không tự kích hoạt watcher, remote dispatch hoặc deploy.
+> **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao Atlas điều phối toàn dự án, chốt quyết định kỹ thuật và merge mọi PR đủ gate, kể cả PR của mình. Nova, Harbor và Forge tự nhận task đủ G3/ownership và tự review/merge PR của mình. Orion đi qua Atlas review/merge. Required CI, acceptance, security/data và GitHub protection vẫn áp dụng.
 
 **Repository nguồn duy nhất:** `thientran2359/opendash-cms`.
 Code nằm trong 5 worktree/checkout **cục bộ** tách biệt trên Windows và macOS;
@@ -74,7 +74,7 @@ trailer là **metadata tự khai báo để truy vết**, không chứng minh da
 lập. Một comment ghi `Verdict: APPROVED` hoặc `CHANGES_REQUESTED` không
 tương đương một GitHub review APPROVE/REQUEST_CHANGES và không thay thế required
 review trong ruleset. Không tự gán kết quả AI thành approval GitHub, không bỏ
-qua CI, ownership hoặc gate. **Harbor/Forge áp dụng [ADR-0005](../docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) tại M3 và [ADR-0008](../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md) từ M4**:
+qua CI, ownership hoặc gate. **Atlas, Nova, Harbor và Forge áp dụng ADR-0010**:
 được tự kiểm tra và merge PR đủ gates; ghi `Self-review: <Agent> — reviewed head <SHA>`
 và validation thật trong PR. Không tạo review giả từ một tài khoản chung.
 
@@ -82,7 +82,7 @@ và validation thật trong PR. Không tạo review giả từ một tài khoả
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |
 | --- | --- | --- |
-| Scope/G0–G3 đã chốt, contract, ADR | `docs/` | Coordinator kết luận consensus hoặc reviewer độc lập quyết định cuối, sau đó PR review/merge; xem [ADR-0003](../docs/decisions/ADR-0003-agent-consensus-governance.md) |
+| Scope/G0–G3 đã chốt, contract, ADR | `docs/` | Agent ghi Final Decision theo phạm vi được giao hoặc Atlas chốt khi cần, sau đó merge PR đủ gate theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) |
 | Điều tra, thảo luận, đề xuất/task draft | `.agents/research/`, `.agents/discussions/`, `.agents/tasks/` | Agent trên branch của mình |
 | Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator/Muse được ủy quyền, sau khi gate sẵn sàng |
 | Tổng hợp 9 milestone, candidate và tình trạng task để chủ dự án đọc nhanh | [TASK_INDEX](../docs/plans/TASK_INDEX.md) (**snapshot**, không authoritative) | Coordinator thêm task sau G3; agent/reviewer hoàn tất G5 cập nhật qua PR, đối chiếu Issue/Project |
@@ -242,8 +242,8 @@ và `agent:*` nếu đã phân công. Task quy trình liên module dùng
 | In review | SUBMITTED, REVIEWED hoặc MERGED nhưng chưa có G5 verification |
 | Done | Chỉ khi đã VERIFIED đúng phạm vi có evidence và chấp thuận đóng |
 
-**Đồng bộ task đã G3 nhưng còn Backlog:** theo [ADR-0008](../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md),
-Harbor/Forge có thể trực tiếp chuyển Issue đã giao đúng agent từ `Backlog`
+**Đồng bộ task đã G3 nhưng còn Backlog:** theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md),
+Atlas, Nova, Harbor và Forge có thể trực tiếp chuyển Issue đã giao đúng agent từ `Backlog`
 sang `Ready` **sau khi** đối chiếu source G3 merged, dependency, acceptance,
 file ownership và không có blocker thực. Kiểm lại `Ready` trên Project trước
 khi claim. Không sử dụng thao tác này để bypass điều kiện `Ready` hoặc nhận
@@ -313,39 +313,25 @@ không mặc nhiên cấp quyền triển khai hoặc chuyển G2 thành `AGREED
    hoặc `needs-decision`), sửa tài liệu trên **branch head của mình**, chạy
    checker phù hợp, commit và non-force push. Trả lời từng thread bằng commit
    SHA hoặc lý do không sửa; G2 chỉ được chốt từ Final Decision có evidence
-   và reviewer độc lập khi cần, không tự nâng draft lên AGREED.
+   hoặc chỉ đạo trực tiếp của owner. Atlas phân xử điểm còn tranh luận khi cần.
 5. **Reviewer** đọc lại `head SHA` mới, kiểm diff và các thread để xác nhận
-   finding đã giải quyết; gửi review follow-up trên cùng PR. **Agent consensus
-   có Final Decision** hoặc **reviewer độc lập có verdict** chốt phương án;
-   reviewer khác tác giả có thể merge PR docs/design đủ gate khi được gọi
-   theo skill, **không cần owner review mặc định**. CI PASS, một comment `LGTM`
+   finding đã giải quyết; gửi review follow-up trên cùng PR. **Final Decision có evidence** là căn cứ chốt phương án.
+   Quyền merge và self-review áp dụng theo ADR-0010. CI PASS, một comment `LGTM`
    hoặc chat phản hồi chưa phải G5 verification.
 
 **Ngoại lệ reviewer trực tiếp sửa tài liệu:** phải giao lại rõ Issue/PR,
 file ownership, branch đích và phạm vi trước khi viết. Reviewer sửa trên
 branch `agent/<reviewer>`, commit/push non-force và mở PR riêng hoặc quy
 trình tích hợp được duyệt; **không push vào `agent/<author>`** chỉ vì đang
-review. Sau khi giao sửa, cần một lượt review độc lập với thay đổi đó.
+review. Sau khi giao sửa, kiểm lại head và áp dụng quyền review/merge theo ADR-0010.
 
 ## Review và merge implementation PR được ủy quyền
 
-Theo chỉ đạo chủ dự án ngày 10/11/2026 và [ADR-0003](../docs/decisions/ADR-0003-agent-consensus-governance.md), **Atlas/Nova được review và merge implementation PR cùng technical-doc/design PR đã chốt** do agent khác thực hiện khi được gọi luồng
-[github-pr-review-merge](skills/github-pr-review-merge/SKILL.md) trong chat.
-Luồng review-and-merge được gọi rõ trong chat, **không background polling**;
-không cần owner ký từng PR đủ gate. Theo ADR-0003, technical-doc/design PR
-đã có Final Decision hoặc reviewer verdict cũng được xử lý theo cổng review này.
-Lệnh chỉ “review/re-review PR” không cấp quyền merge.
+Theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas có quyền review và merge mọi PR đủ gate, kể cả PR của Atlas. Nova, Harbor và Forge tự review và merge PR thuộc task mình sở hữu mà không cần agent khác phê duyệt. Khi tác giả là Orion, Atlas review/merge. Luồng [github-pr-review-merge](skills/github-pr-review-merge/SKILL.md) áp dụng khi Atlas được gọi review/merge PR; yêu cầu chỉ review giữ nguyên phạm vi.
 
-**Harbor/Forge từ M4 trở đi:** áp dụng ngoại lệ owner trong
-[ADR-0008](../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md).
-Hai agent có thể tự review và merge PR của chính mình sau khi ghi self-review
-theo head SHA, kiểm all checks/security/acceptance và re-fetch PR/base/head.
-Không yêu cầu gọi Atlas/Nova cho các PR này. Các giới hạn trong danh sách dưới
-đây về reviewer độc lập và cấm self-merge chỉ áp dụng cho agent ngoài ngoại lệ.
-
-- Xác minh reviewer/implementer bằng role, Issue, branch và signed evidence;
-  login GitHub dùng chung không chứng minh tự review hoặc độc lập. Không tự
-  review/merge PR mình viết; Atlas và Nova phải review chéo nếu là tác giả.
+- Xác minh tác giả bằng Issue, branch và signed evidence. Tác giả tự review ghi
+  self-review cùng head SHA và validation. Atlas review PR của agent khác ghi
+  verdict và bằng chứng thực tế. Shared GitHub login không chứng minh review độc lập.
 - Chỉ implementation có scope/gate đã chốt **hoặc technical-doc/design PR có Final Decision**,
   đúng repo/main, acceptance trước merge đạt, dependency có evidence, findings
   bắt buộc đã giải quyết, required checks tại head/integration hiện tại PASS và
@@ -363,8 +349,7 @@ Không yêu cầu gọi Atlas/Nova cho các PR này. Các giới hạn trong dan
   commit còn có thể đóng Issue thiếu G5 phải được author/coordinator xử lý
   trước merge. Khi cần G5 sau merge, giữ Issue mở và ghi phần còn NOT_RUN.
 
-Skill mới cũng là thay đổi do Atlas/Nova viết: tác giả không tự merge PR tạo
-hoặc cập nhật skill của mình. Chi tiết điều kiện/chế độ và output ở SKILL.md.
+PR thay đổi skill tuân theo cùng quyền và gate merge. Chi tiết điều kiện/chế độ và output ở SKILL.md.
 
 ## Khởi tạo code trên từng máy
 
@@ -406,10 +391,10 @@ là BLOCKED, không tự force.
    `git push -u origin agent/<name>` sau khi HEAD/remote đúng; với task branch
    được giao, push đúng `task/...`. Commit có trailer `Agent: <name>`.
 5. Đính commit SHA, môi trường và lệnh PASS/FAIL/NOT_RUN vào Issue và PR;
-   reviewer hoặc Harbor/Forge tự review so sánh source, dependency, contract
+   reviewer hoặc agent được tự review theo ADR-0010 so sánh source, dependency, contract
    và DB migration impact; ghi verdict cùng `Reviewed head SHA` theo quy chuẩn.
 6. Chỉ merge khi đủ các gate áp dụng, bao gồm review nếu quy trình yêu cầu,
-   CI và quyền merge; xem ADR-0005 (M3) và ADR-0008 (M4+) cho Harbor/Forge.
+   CI và quyền merge theo ADR-0010.
    `MERGED` ≠ `VERIFIED` cho scope chưa
    chạy nghiệm thu; cập nhật trạng thái trong docs khi có evidence.
 
