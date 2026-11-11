@@ -53,8 +53,8 @@ def new_entry(base, auth, type_key, slug, term_ids=None):
                              201, f"create {type_key}")[1])
 
 
-def update(base, auth, item, type_key, *, term_ids=None, omit=False, title=None):
-    payload = {"slug": item["slug"], "title": title or item["title"], "values": item["values"]}
+def update(base, auth, item, type_key, *, term_ids=None, omit=False, title=None, slug=None):
+    payload = {"slug": slug or item["slug"], "title": title or item["title"], "values": item["values"]}
     if not omit:
         payload["term_ids"] = term_ids
     return api(base, "PUT", f"{ENTRIES}/{type_key}/entries/{item['id']}", payload,
@@ -123,6 +123,34 @@ def test_fresh(binary):
             assert list_entries(base, editor, "portfolio")[0]["term_ids"] == custom["term_ids"]
             assert read(base, entry_path("page", page["id"]), editor)["term_ids"] == page["term_ids"]
 
+            # Slug changes cannot orphan the site-owned link relation (by entry ID).
+            moved_page = json.loads(expect(
+                update(base, editor, page, "page", omit=True, slug="renamed-page"),
+                200, "rename page slug preserves links")[1])
+            assert moved_page["id"] == page["id"]
+            assert moved_page["slug"] == "renamed-page"
+            assert set(moved_page["term_ids"]) == {root["id"], second_tag["id"]}
+            ensure_membership(db, moved_page["id"], moved_page["term_ids"])
+
+            # Two simultaneous editors changing content and links under the
+            # same If-Match must yield precisely one complete winner.
+            choices = ([root["id"], tag["id"]], [other["id"], second_tag["id"]])
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(
+                    lambda item: update(
+                        base, admin if item[0] == 0 else editor, moved_page, "page",
+                        title=f"Parallel {item[0]}", term_ids=choices[item[0]],
+                    ),
+                    [(0,), (1,)],
+                ))
+            assert sorted(result[0] for result in results) == [200, 412], results
+            winner = json.loads(next(result[1] for result in results if result[0] == 200))
+            saved_page = read(base, entry_path("page", page["id"]), editor)
+            assert saved_page == winner
+            assert saved_page["version"] == moved_page["version"] + 1
+            assert set(saved_page["term_ids"]) in (set(ids) for ids in choices)
+            ensure_membership(db, saved_page["id"], saved_page["term_ids"])
+
             # Old clients omit term_ids; the existing membership must remain.
             untouched = json.loads(expect(update(base, editor, posts[0], "post", omit=True,
                                                  title="Legacy save"),
@@ -159,6 +187,11 @@ def test_fresh(binary):
             }, {"Cookie": editor["Cookie"], "If-Match": f'"v{before["version"]}"'}),
                    403, "missing CSRF")
             expect(api(base, "PUT", entry_path("post", before["id"]), {
+                "slug": before["slug"], "title": "Missing version", "values": before["values"],
+                "term_ids": [],
+            }, editor), 428, "missing If-Match cannot change term membership")
+            assert read(base, entry_path("post", before["id"]), admin) == before
+            expect(api(base, "PUT", entry_path("post", before["id"]), {
                 "slug": before["slug"], "title": "Bad Origin", "values": before["values"],
                 "term_ids": [],
             }, {**editor, "Origin": "http://evil.invalid",
@@ -182,6 +215,8 @@ def test_fresh(binary):
             for invalid in (
                 "?category_id=0", "?tag_id=-1", "?category_id=not-a-number",
                 "?include_descendants=other", "?tag_id=9999999",
+                f"?category_id={tag['id']}", f"?tag_id={root['id']}",
+                "?include_descendants=true",
             ):
                 expect(api(base, "GET", f"{ENTRIES}/post/entries" + invalid, headers=editor),
                        400, invalid)
