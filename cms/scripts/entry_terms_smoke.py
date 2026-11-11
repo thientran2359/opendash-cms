@@ -9,6 +9,7 @@ Never connect to the user's actual CMS database.
 """
 
 import argparse
+import html
 import json
 import shutil
 import sqlite3
@@ -19,6 +20,7 @@ from tempfile import TemporaryDirectory
 
 from content_entries_smoke import api
 from content_types_smoke import login, request, running
+from media_smoke import raw_request, upload_image
 
 
 TERMS = "/api/admin/taxonomy/terms"
@@ -313,6 +315,107 @@ def test_fresh(binary):
         print("PASS entry_terms fresh: CRUD/CAS/ACL/FK, Post/Page/CPT, pagination/descendants, limits, restart")
 
 
+def test_public_archive(binary):
+    """Real unauthenticated archive: SQL filters, draft policy, pages and media ACL."""
+    with TemporaryDirectory(prefix="opendash-m4-s04-public-") as folder:
+        db = Path(folder) / "site" / "database" / "opendash.sqlite"
+        with running(binary, db) as base:
+            expect(request(base, "/auth/setup", {
+                "username": "admin", "password": "password123",
+            }), 201, "setup public archive")
+            admin = login(base, "admin", "password123")
+            expect(request(base, "/api/admin/content-types", {
+                "key": "projects", "label": "Projects",
+                "fields": [{"key": "summary", "label": "Summary", "type": "short_text"}],
+            }, admin), 201, "create projects")
+            root = add_term(base, admin, "category", "Public root", "public-root")
+            child = add_term(base, admin, "category", "Public child", "public-child", root["id"])
+            other = add_term(base, admin, "category", "Other root", "other-root")
+            tag = add_term(base, admin, "tag", "Public tag", "public-tag")
+            unrelated = add_term(base, admin, "tag", "Other tag", "other-tag")
+
+            # 21 published CPT entries force two pages. A single entry can
+            # match multiple category terms but must never duplicate a row.
+            for number in range(21):
+                ids = [root["id"], child["id"], tag["id"]] if number == 10 else [child["id"], tag["id"]]
+                new_entry(base, admin, "projects", f"public-{number:02}", ids)
+            new_entry(base, admin, "projects", "wrong-category", [other["id"], tag["id"]])
+            new_entry(base, admin, "projects", "wrong-tag", [child["id"], unrelated["id"]])
+
+            # A draft matching both terms must remain absent from all public
+            # archives and singles; publication state still owns public ACL.
+            draft = new_entry(base, admin, "post", "secret-draft", [child["id"], tag["id"]])
+            expect(raw_request(base, "GET", "/content/post/secret-draft"), 404, "draft single")
+            filters = f"category_id={root['id']}&include_descendants=true&tag_id={tag['id']}"
+            exact = expect(raw_request(base, "GET", f"/content/projects?category_id={root['id']}&tag_id={tag['id']}"),
+                           200, "exact category only")[1].decode()
+            assert exact.count("<article>") == 1 and "Entry public-10" in exact
+
+            first = expect(raw_request(base, "GET", "/content/projects?" + filters),
+                           200, "published category+tag page 1")[1].decode()
+            assert first.count("<article>") == 20, first
+            assert "Entry public-20" in first and "Entry public-00" not in first
+            assert "wrong-category" not in first and "wrong-tag" not in first
+            next_url = (f"/content/projects?page=2&category_id={root['id']}"
+                        f"&include_descendants=true&tag_id={tag['id']}")
+            assert next_url in html.unescape(first), first
+            last = expect(raw_request(base, "GET", next_url), 200,
+                          "published category+tag page 2")[1].decode()
+            assert last.count("<article>") == 1 and "Entry public-00" in last
+            assert "page=3" not in last
+            assert f"/content/projects?page=1&category_id={root['id']}" in html.unescape(last)
+
+            post_filter = f"/content/post?{filters}"
+            assert "secret-draft" not in expect(raw_request(base, "GET", post_filter),
+                                                  200, "public draft exclusion")[1].decode()
+            published = json.loads(expect(api(
+                base, "POST", entry_path("post", draft["id"]) + "/publication",
+                {"status": "published"}, {**admin, "If-Match": f'"v{draft["version"]}"'}),
+                200, "publish matching post")[1])
+            assert published["term_ids"] == draft["term_ids"]
+            assert "secret-draft" in expect(raw_request(base, "GET", post_filter),
+                                               200, "published post archive")[1].decode()
+            expect(raw_request(base, "GET", "/content/post/secret-draft"), 200, "published single")
+            expect(api(base, "POST", entry_path("post", draft["id"]) + "/publication",
+                       {"status": "draft"},
+                       {**admin, "If-Match": f'"v{published["version"]}"'}),
+                   200, "unpublish matching post")
+            assert "secret-draft" not in expect(raw_request(base, "GET", post_filter),
+                                                  200, "unpublished archive")[1].decode()
+            expect(raw_request(base, "GET", "/content/post/secret-draft"), 404, "unpublished single")
+
+            for invalid in (
+                "?category_id=0", "?tag_id=-1", "?include_descendants=true",
+                "?include_descendants=wrong", "?category_id=99999",
+                f"?category_id={tag['id']}", f"?tag_id={root['id']}", "?page=0",
+            ):
+                expect(raw_request(base, "GET", "/content/projects" + invalid), 400,
+                       "invalid public filter " + invalid)
+
+            # Change the parent tree; links remain by ID but public results
+            # must immediately follow the new current descendants.
+            expect(api(base, "PATCH", f"{TERMS}/{child['id']}", {
+                "parent_id": other["id"],
+            }, {**admin, "If-Match": '"v1"'}), 200, "public reparent")
+            moved = expect(raw_request(base, "GET", "/content/projects?" + filters),
+                           200, "public reparent old parent")[1].decode()
+            assert moved.count("<article>") == 1 and "Entry public-10" in moved
+            other_page = expect(raw_request(base, "GET", "/content/projects?"
+                                            f"category_id={other['id']}&include_descendants=true&tag_id={tag['id']}"),
+                                200, "public reparent new parent")[1].decode()
+            assert other_page.count("<article>") == 20
+
+            # Builder P02 media policy stays intact; tagging content never
+            # turns an unreferenced or draft-only asset into a public file.
+            asset = upload_image(base, admin, seed=88)
+            expect(raw_request(base, "GET", f"/media/{asset['id']}/file"), 404,
+                   "unreferenced image still private")
+            expect(raw_request(base, "GET", "/"), 200, "Forge Builder homepage remains public")
+        with closing(sqlite3.connect(db)) as con:
+            assert con.execute("PRAGMA foreign_key_check").fetchall() == []
+        print("PASS entry_terms public HTTP: category/tag AND, descendants, draft, pagination, reparent, media ACL")
+
+
 def test_upgrade(binary, old_binary):
     with TemporaryDirectory(prefix="opendash-m4-s04-upgrade-") as folder:
         db = Path(folder) / "site" / "database" / "opendash.sqlite"
@@ -340,11 +443,20 @@ def test_upgrade(binary, old_binary):
                 con.backup(dest)
         with running(binary, db) as base:
             admin = login(base, "admin", "password123")
+            expect(raw_request(base, "GET", "/"), 200, "Builder root after 0013 migration")
             for type_key, item in (("post", post), ("page", page), ("portfolio", cpt)):
                 saved = json.loads(expect(update(base, admin, item, type_key,
                                                  term_ids=[category["id"]]), 200, "attach upgrade")[1])
                 assert saved["term_ids"] == [category["id"]]
         with closing(sqlite3.connect(db)) as con:
+            migrations = con.execute(
+                "SELECT version, success, checksum FROM _sqlx_migrations "
+                "WHERE version IN (12, 13, 14) ORDER BY version"
+            ).fetchall()
+            assert [row[0] for row in migrations] == [12, 13, 14], migrations
+            assert all(row[1] == 1 and row[2] for row in migrations), migrations
+            assert con.execute("SELECT version, document_json FROM builder_homepage WHERE id=1").fetchone() == (1, None)
+            assert con.execute("SELECT COUNT(*) FROM builder_homepage_media").fetchone() == (0,)
             assert con.execute("SELECT success FROM _sqlx_migrations WHERE version=14").fetchone() == (1,)
             assert con.execute("SELECT COUNT(*) FROM entry_terms").fetchone() == (3,)
             after = con.execute(
@@ -366,7 +478,7 @@ def test_upgrade(binary, old_binary):
             assert con.execute(
                 "SELECT id,content_type_key,slug,title,version FROM content_entries ORDER BY id"
             ).fetchall() == before
-        print("PASS entry_terms 0012→0014 dev migration + Post/Page/CPT + SQLite snapshot rollback")
+        print("PASS entry_terms real 0012→0013→0014 + Post/Page/CPT + Builder + SQLite snapshot rollback")
 
 
 if __name__ == "__main__":
@@ -375,5 +487,6 @@ if __name__ == "__main__":
     parser.add_argument("--pre-entry-binary", type=Path, default=None)
     args = parser.parse_args()
     test_fresh(args.binary.resolve())
+    test_public_archive(args.binary.resolve())
     if args.pre_entry_binary is not None:
         test_upgrade(args.binary.resolve(), args.pre_entry_binary.resolve())

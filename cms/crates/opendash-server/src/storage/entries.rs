@@ -222,9 +222,8 @@ pub async fn list_entries(
     list_entries_filtered(db, type_key, limit, offset, filters, false).await
 }
 
-/// Reusable published-only filtering contract for P06 and the P02 public
-/// renderer handoff. Draft exclusion runs in SQL before LIMIT/OFFSET.
-#[allow(dead_code)] // Called by public_content after Forge P02's merge/handoff.
+/// Reusable published-only filtering contract for public archives and P06.
+/// Draft exclusion runs in SQL before LIMIT/OFFSET.
 pub async fn list_published_filtered(
     db: &SqlitePool,
     type_key: &str,
