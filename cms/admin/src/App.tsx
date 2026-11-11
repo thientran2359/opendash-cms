@@ -12,6 +12,7 @@ import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
 import { MediaRoute } from './shell/MediaRoute.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
+import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -518,6 +519,7 @@ export const App: React.FC = () => {
         />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
+      taxonomyContent={<TaxonomyPage user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
     />
   );
 };

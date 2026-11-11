@@ -3,7 +3,7 @@ import type { AuthUser, Role } from '../types.ts';
 import { AuthPanel } from './AuthPanel.tsx';
 
 export type AdminView =
-  | 'dashboard' | 'posts' | 'pages' | 'content' | 'media'
+  | 'dashboard' | 'posts' | 'pages' | 'content' | 'media' | 'taxonomy'
   | 'themes' | 'builder' | 'plugins' | 'users' | 'settings';
 
 type NavigationItem = { id: AdminView; label: string; icon: string; adminOnly?: boolean };
@@ -18,6 +18,7 @@ const navigation: NavigationGroup[] = [
       { id: 'pages', label: 'Trang', icon: 'pages' },
       { id: 'content', label: 'Nội dung tùy chỉnh', icon: 'content' },
       { id: 'media', label: 'Thư viện ảnh', icon: 'media' },
+      { id: 'taxonomy', label: 'Danh mục & thẻ', icon: 'taxonomy' },
     ],
   },
   {
@@ -58,6 +59,7 @@ function NavIcon({ name }: { name: string }) {
     pages: <><path d="M5 3h10l4 4v14H5zM15 3v5h4M9 12h6M9 16h6" /></>,
     content: <><path d="M4 5h16v14H4zM8 9h3v3H8zM14 9h3M14 13h3M8 16h9" /></>,
     media: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="1.5" /><path d="m4 17 5-5 4 3 3-4 5 6" /></>,
+    taxonomy: <><path d="M3 5h7l2 2h9v12H3zM7 12h10M7 16h7" /></>,
     themes: <><path d="M12 3 3 8l9 5 9-5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" /></>,
     builder: <><path d="m14 3 7 7-11 11H3v-7L14 3ZM12 5l7 7M3 17h5" /></>,
     plugins: <><path d="M9 3h6v5h5v5h-5v8H9v-8H4V8h5z" /></>,
@@ -88,6 +90,7 @@ interface AdminShellProps {
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
   mediaContent: React.ReactNode;
+  taxonomyContent: React.ReactNode;
   dashboardContent: React.ReactNode;
   pluginsContent: React.ReactNode;
   usersContent: React.ReactNode;
@@ -99,7 +102,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   activeView, onViewChange, hasUnsavedChanges, sidebarContent, previewContent,
-  contentContent, postsContent, pagesContent, mediaContent, dashboardContent, pluginsContent, usersContent, settingsContent, themesContent,
+  contentContent, postsContent, pagesContent, mediaContent, taxonomyContent, dashboardContent, pluginsContent, usersContent, settingsContent, themesContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
@@ -174,7 +177,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               );
             })}
           </nav>
-          <div className="od-sidebar-bottom px-5 py-4 text-xs text-slate-400">OpenDash · M3 Admin</div>
+          <div className="od-sidebar-bottom px-5 py-4 text-xs text-slate-400">OpenDash · Admin</div>
         </aside>
 
         <div className="od-workspace min-w-0">
@@ -210,7 +213,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 {dashboardContent}
                 <h2 className="mb-4 text-lg font-semibold text-slate-900">Truy cập nhanh</h2>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {allItems.filter(item => ['content', 'builder', 'posts', 'pages', 'media', 'plugins', 'users'].includes(item.id) && (!item.adminOnly || user.role === 'admin')).map(item => (
+                  {allItems.filter(item => ['content', 'builder', 'posts', 'pages', 'media', 'taxonomy', 'plugins', 'users'].includes(item.id) && (!item.adminOnly || user.role === 'admin')).map(item => (
                     <button key={item.id} type="button" className="od-quick-link" onClick={() => navigate(item.id)}>
                       <span className="od-quick-icon"><NavIcon name={item.icon} /></span>
                       <span className="flex-1 text-left">
@@ -229,6 +232,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
             <section className={user && activeView === 'posts' ? 'od-editor-panel' : 'hidden'} aria-label="Bài viết" aria-hidden={!user || activeView !== 'posts'}>{postsContent}</section>
             <section className={user && activeView === 'pages' ? 'od-editor-panel' : 'hidden'} aria-label="Trang" aria-hidden={!user || activeView !== 'pages'}>{pagesContent}</section>
             {user && activeView === 'media' && mediaContent}
+            {user && activeView === 'taxonomy' && <main className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</main>}
             {user?.role === 'admin' && activeView === 'themes' && <main className="od-admin-card min-w-0">{themesContent}</main>}
 
             {/* Keep both editors mounted when navigating: forms and preview must survive switching sections. */}
