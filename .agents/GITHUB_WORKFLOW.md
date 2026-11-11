@@ -23,18 +23,29 @@ lấy từ [agents.yaml](agents.yaml), workspace/branch, Issue ownership và
 metadata agent ghi trên PR, commit, comment. Nhãn `agent:<name>` thể hiện
 **người chịu trách nhiệm thực hiện** trên Issue, không phải GitHub username.
 
-- **Commit:** giữ Task ID trong tiêu đề và thêm Git trailer `Agent: Forge`
-  (thay bằng agent thực sự tạo commit). Có thể đặt `user.name` tương ứng agent
-  cho **một lệnh commit**; dùng email no-reply đã xác minh của tài khoản GitHub
-  đang dùng để giữ attribution. Ví dụ:
+- **Commit:** giữ Task ID trong tiêu đề và thêm Git trailer `Agent: <Agent>`
+  (Atlas/Nova/Forge/Harbor/Orion, đúng agent thực sự tạo commit). **Mặc định
+  cấu hình `user.name` theo từng Git worktree**, không đổi `git config
+  --global` và không đặt `git config --local user.name` ở repo dùng chung
+  nhiều worktree. Thực hiện từng bước an toàn, kiểm tra và rollback theo
+  [Git worktree identity setup](GIT_WORKTREE_IDENTITY.md). Giữ `user.email`
+  là địa chỉ GitHub no-reply đã xác minh và được cấp từ cấu hình hiện có;
+  không tự đặt email giả hoặc secret vào Git.
 
   ```powershell
-  git -c user.name="Forge" -c user.email="<verified-github-noreply-email>" commit -m "M3-Sxx-Txx: mô tả thay đổi" -m "Agent: Forge"
+  # Chạy trong chính worktree của agent, sau khi kiểm tra common config.
+  git config --local extensions.worktreeConfig true
+  git config --worktree user.name "Forge"  # thay bằng tên agent hiện tại
+  git config --show-origin --show-scope --get user.name
+  git commit -m "M3-Sxx-Txx: mô tả thay đổi" -m "Agent: Forge"
   ```
 
-  Đây là cú pháp minh họa; thay Task ID/email thực trước khi chạy. Nếu các
-  worktree dùng chung một Git database, **không** đặt `git config --local
-  user.name` cho một agent vì có thể ảnh hưởng tới các worktree khác.
+  `extensions.worktreeConfig` bật một lần ở **shared repository config**
+  cho những linked worktree cùng Git database; chỉ `user.name` viết bằng
+  `--worktree` mới nằm trong config riêng của worktree. Không bật mù nếu
+  `core.worktree`/`core.bare` hoặc shared config hiện tại có thiết lập
+  bất thường; đọc hướng dẫn trước. Nếu không thể cấu hình an toàn, dùng
+  `git -c user.name="Forge" commit ...` cho riêng lệnh commit và ghi lý do.
 - **Pull Request:** tác giả ghi `Agent`, `Role`, `Issue/Task ID`, branch,
   baseline/head SHA, phạm vi và kiểm chứng trong body. Dùng
   [PR template](../.github/PULL_REQUEST_TEMPLATE.md) khi tạo PR bằng UI; khi

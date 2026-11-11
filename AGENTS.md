@@ -46,6 +46,10 @@
 - GitHub Issues are the source of truth for active task state, and PRs record
   changes and review. Follow [the GitHub workflow](.agents/GITHUB_WORKFLOW.md);
   `.agents/tasks/` must not become a competing live queue.
+- Keep the user's Git global author identity unchanged on every machine.
+  Before an agent commits, follow [per-worktree Git identity setup](.agents/GIT_WORKTREE_IDENTITY.md)
+  and retain the `Agent: <Agent>` commit trailer. Worktree-specific identity
+  is local machine configuration, not a separate authenticated GitHub account.
 - Follow the shared [Agent Operating Standard](.agents/AGENT_OPERATING_STANDARD.md)
   directly **within the current agent/chat**: confirm workspace/branch, fetch
   remote Git refs without overwriting work, consult GitHub Connector, and
