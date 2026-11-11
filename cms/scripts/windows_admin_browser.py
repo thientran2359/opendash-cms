@@ -32,8 +32,13 @@ def verify(binary: Path, browser_path: str | None):
             expect(page.locator("#status")).to_contain_text("Đã tạo")
             page.locator("#auth-login").click()
             expect(page.locator("#user-info")).to_contain_text("qaadmin")
-            page.get_by_role("button", name="Cài đặt").click()
-            expect(page.get_by_text("HTTP: ok", exact=False)).to_be_visible()
+            # Dashboard replaced the legacy Settings/health status widget. Assert
+            # the actual Dashboard heading/counts and check health via API.
+            expect(page.get_by_role("heading", name="Thống kê nội dung")).to_be_visible()
+            for metric in ("post-draft", "post-published", "page-draft", "page-published"):
+                expect(page.locator(f'[data-dashboard-metric="{metric}"]')).to_contain_text("0")
+            health = page.request.get(base + "/api/health")
+            assert health.status == 200 and health.json()["status"] == "ok"
             page.get_by_role("button", name="Builder", exact=True).click()
             page.locator("#theme").set_input_files({
                 "name": "theme.zip", "mimeType": "application/zip", "buffer": sample_theme()
