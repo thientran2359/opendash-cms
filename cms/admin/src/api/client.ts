@@ -63,6 +63,21 @@ export async function requestText(url: string, options: ApiRequestOptions): Prom
   return handleResponseText(res, options.defaultErrorMessage);
 }
 
+/** Authenticated binary GET for private Admin media. Keep HTTP and session
+ * handling in this shared client, including AbortSignal and error statuses. */
+export async function requestBlob(url: string, options: ApiRequestOptions): Promise<Blob> {
+  const res = await fetch(url, {
+    method: options.method ?? 'GET',
+    credentials: 'same-origin',
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename),
+    body: options.body,
+    signal: options.signal,
+    cache: 'no-store',
+  });
+  if (!res.ok) await handleResponseText(res, options.defaultErrorMessage);
+  return res.blob();
+}
+
 /** Keep the preview HTML plus server visibility diagnostic outside the sandbox. */
 export async function requestBuilderHtml(
   url: string, options: ApiRequestOptions,

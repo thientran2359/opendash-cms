@@ -1,5 +1,18 @@
-import { BlockData, BlockRegistry } from '../types.ts';
-import { requestBuilderHtml, requestJson, requestText } from './client.ts';
+import type { BlockRegistry } from '../types.ts';
+import type { BuilderDocument } from '../builder/document.ts';
+import { requestBlob, requestJson } from './client.ts';
+
+export interface BuilderDiagnostic { node_id: string; code: string }
+export interface HomepageOpen {
+  document: BuilderDocument;
+  source: 'empty' | 'legacy' | 'layout';
+  version: number;
+}
+export interface HomepagePreview {
+  html: string;
+  diagnostics: BuilderDiagnostic[];
+}
+export interface HomepageSaved extends HomepageOpen, HomepagePreview {}
 
 export async function getRegistry(): Promise<BlockRegistry> {
   return requestJson<BlockRegistry>('/registry', {
@@ -8,39 +21,38 @@ export async function getRegistry(): Promise<BlockRegistry> {
   });
 }
 
-export async function getPage(): Promise<BlockData | null> {
-  return requestJson<BlockData | null>('/page', {
+export function getHomepage(): Promise<HomepageOpen> {
+  return requestJson('/api/admin/builder/homepage', {
     method: 'GET',
-    defaultErrorMessage: 'Không thể tải trang.',
+    defaultErrorMessage: 'Không thể mở homepage.',
   });
 }
 
-export async function uploadTheme(file: File, csrfToken: string): Promise<void> {
-  await requestText('/theme', {
-    method: 'POST',
-    csrfToken,
-    contentType: 'application/zip',
-    body: file,
-    defaultErrorMessage: 'Không thể tải lên theme ZIP.',
-  });
-}
-
-export async function previewBlock(block: BlockData, csrfToken: string) {
-  return requestBuilderHtml('/preview', {
+export function previewHomepage(document: BuilderDocument, csrfToken: string, signal?: AbortSignal): Promise<HomepagePreview> {
+  return requestJson('/api/admin/builder/homepage/preview', {
     method: 'POST',
     csrfToken,
     contentType: 'application/json',
-    body: JSON.stringify(block),
-    defaultErrorMessage: 'Không thể xem trước block.',
+    body: JSON.stringify(document),
+    signal,
+    defaultErrorMessage: 'Không thể xem trước homepage.',
   });
 }
 
-export async function saveBlock(block: BlockData, csrfToken: string) {
-  return requestBuilderHtml('/save', {
-    method: 'POST',
+export function saveHomepage(document: BuilderDocument, version: number, csrfToken: string): Promise<HomepageSaved> {
+  return requestJson('/api/admin/builder/homepage', {
+    method: 'PUT',
     csrfToken,
     contentType: 'application/json',
-    body: JSON.stringify(block),
-    defaultErrorMessage: 'Không thể lưu block.',
+    ifMatchVersion: version,
+    body: JSON.stringify(document),
+    defaultErrorMessage: 'Không thể lưu homepage.',
+  });
+}
+
+export function getPrivatePreviewMedia(path: string, signal: AbortSignal): Promise<Blob> {
+  return requestBlob(path, {
+    signal,
+    defaultErrorMessage: 'Không tải được ảnh riêng tư cho Preview.',
   });
 }
