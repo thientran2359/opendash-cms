@@ -76,6 +76,34 @@ pub struct EntryFilters {
     pub include_descendants: bool,
 }
 
+/// The only allowed SQL orderings for a published Builder list.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PublishedListSort {
+    #[default]
+    IdDesc,
+    IdAsc,
+}
+
+/// Missing references are a valid list configuration state, not a database failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishedListMissing {
+    ContentType,
+    Category,
+    Tag,
+}
+
+#[derive(Debug)]
+pub struct PublishedListPage {
+    pub entries: Vec<ContentEntryRecord>,
+    pub has_next: bool,
+}
+
+#[derive(Debug)]
+pub enum PublishedListResult {
+    Page(PublishedListPage),
+    MissingConfig(PublishedListMissing),
+}
+
 async fn read_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64) -> ApiResult<Vec<i64>> {
     Ok(
         sqlx::query_scalar("SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id")
@@ -234,6 +262,85 @@ pub async fn list_published_filtered(
     list_entries_filtered(db, type_key, limit, offset, filters, true).await
 }
 
+/// Query one published-only Builder list page on a consistent SQLite read
+/// snapshot. Missing CPT/terms are distinct from actual storage errors, so
+/// the Builder can preserve configuration and display a diagnostic.
+pub async fn list_published_page(
+    db: &SqlitePool,
+    type_key: &str,
+    page: i64,
+    page_size: i64,
+    sort: PublishedListSort,
+    filters: EntryFilters,
+) -> ApiResult<PublishedListResult> {
+    if !(1..=100).contains(&page) || !(1..=20).contains(&page_size) {
+        return Err(ApiError::bad_request(
+            "Trang danh sách phải từ 1–100 và page_size từ 1–20.",
+        ));
+    }
+    if filters.include_descendants && filters.category_id.is_none() {
+        return Err(ApiError::bad_request(
+            "include_descendants yêu cầu category_id.",
+        ));
+    }
+
+    let mut tx = db.begin().await?;
+    let type_exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM content_types WHERE key = ?")
+        .bind(type_key)
+        .fetch_optional(&mut *tx)
+        .await?;
+    if type_exists.is_none() {
+        return Ok(PublishedListResult::MissingConfig(
+            PublishedListMissing::ContentType,
+        ));
+    }
+
+    for (id, kind, missing) in [
+        (
+            filters.category_id,
+            "category",
+            PublishedListMissing::Category,
+        ),
+        (filters.tag_id, "tag", PublishedListMissing::Tag),
+    ] {
+        if let Some(id) = id {
+            if id <= 0 {
+                return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
+            }
+            let actual: Option<String> =
+                sqlx::query_scalar("SELECT kind FROM taxonomy_terms WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            if actual.as_deref() != Some(kind) {
+                return Ok(PublishedListResult::MissingConfig(missing));
+            }
+        }
+    }
+
+    // One extra row tells the renderer whether to expose a next-page link.
+    // Bounds above guarantee no integer overflow or unbounded fetch.
+    let offset = (page - 1) * page_size;
+    let mut entries = query_entries_filtered(
+        &mut tx,
+        type_key,
+        page_size + 1,
+        offset,
+        filters,
+        true,
+        sort,
+    )
+    .await?;
+    // ADR-0011 stops pagination at page 100 even if more records exist.
+    let has_next = page < 100 && entries.len() > page_size as usize;
+    entries.truncate(page_size as usize);
+    tx.commit().await?;
+    Ok(PublishedListResult::Page(PublishedListPage {
+        entries,
+        has_next,
+    }))
+}
+
 async fn list_entries_filtered(
     db: &SqlitePool,
     type_key: &str,
@@ -260,7 +367,38 @@ async fn list_entries_filtered(
             }
         }
     }
-    let rows: Vec<EntryRow> = sqlx::query_as(
+    let entries = query_entries_filtered(
+        &mut tx,
+        type_key,
+        limit,
+        offset,
+        filters,
+        published_only,
+        PublishedListSort::IdDesc,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(entries)
+}
+
+/// Shared category/tag AND predicates for the old archives and new list
+/// blocks. Only an internal enum can select the ORDER BY direction.
+async fn query_entries_filtered(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    limit: i64,
+    offset: i64,
+    filters: EntryFilters,
+    published_only: bool,
+    sort: PublishedListSort,
+) -> ApiResult<Vec<ContentEntryRecord>> {
+    let direction = match sort {
+        PublishedListSort::IdDesc => "DESC",
+        PublishedListSort::IdAsc => "ASC",
+    };
+    // Audited dynamic SQL: direction is a closed Rust enum mapped to one of
+    // two literal keywords; all user-controlled values remain bound params.
+    let statement = format!(
         "WITH RECURSIVE category_scope(id, depth) AS (
              SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = 'category'
              UNION ALL
@@ -280,24 +418,24 @@ async fn list_entries_filtered(
             AND (? IS NULL OR EXISTS (
                 SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id AND et.term_id = ?
             ))
-          ORDER BY e.id DESC LIMIT ? OFFSET ?",
-    )
-    .bind(filters.category_id)
-    .bind(i64::from(filters.include_descendants))
-    .bind(type_key)
-    .bind(i64::from(published_only))
-    .bind(filters.category_id)
-    .bind(filters.tag_id)
-    .bind(filters.tag_id)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(&mut *tx)
-    .await?;
+          ORDER BY e.id {direction} LIMIT ? OFFSET ?"
+    );
+    let rows: Vec<EntryRow> = sqlx::query_as(sqlx::AssertSqlSafe(statement))
+        .bind(filters.category_id)
+        .bind(i64::from(filters.include_descendants))
+        .bind(type_key)
+        .bind(i64::from(published_only))
+        .bind(filters.category_id)
+        .bind(filters.tag_id)
+        .bind(filters.tag_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
     let mut entries = Vec::with_capacity(rows.len());
     for row in rows {
-        entries.push(decoded_with_terms(&mut tx, row).await?);
+        entries.push(decoded_with_terms(tx, row).await?);
     }
-    tx.commit().await?;
     Ok(entries)
 }
 
@@ -464,6 +602,351 @@ async fn missing_or_stale(db: &SqlitePool, type_key: &str, id: i64) -> ApiResult
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn list_test_entry(
+        db: &SqlitePool,
+        type_key: &str,
+        slug: &str,
+        published: bool,
+        term_ids: &[i64],
+    ) -> i64 {
+        let id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES(?,?,'Safe','{}','draft')",
+        )
+        .bind(type_key)
+        .bind(slug)
+        .execute(db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        if published {
+            sqlx::query("UPDATE content_entries SET publication_status = 'published' WHERE id = ?")
+                .bind(id)
+                .execute(db)
+                .await
+                .unwrap();
+        }
+        for &term in term_ids {
+            sqlx::query("INSERT INTO entry_terms(entry_id,term_id) VALUES (?,?)")
+                .bind(id)
+                .bind(term)
+                .execute(db)
+                .await
+                .unwrap();
+        }
+        id
+    }
+
+    fn expect_list_page(result: PublishedListResult) -> PublishedListPage {
+        match result {
+            PublishedListResult::Page(page) => page,
+            PublishedListResult::MissingConfig(reason) => {
+                panic!("unexpected missing list configuration: {reason:?}")
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn builder_published_list_filters_before_paging_for_post_page_cpt() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        // Migration 0008 seeds Post/Page; only the custom CPT is new here.
+        sqlx::query(
+            "INSERT INTO content_types(key,definition_json,owner_kind)
+             VALUES('news',json_object('key','news','fields',json_array()),'user')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let root = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Root','list-root')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let child = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id)
+             VALUES('category','Child','list-child',?)",
+        )
+        .bind(root)
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let tag = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Tag','list-tag')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let other_tag = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Other','other-tag')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+
+        let first = list_test_entry(&db, "post", "p1", true, &[root, child, tag]).await;
+        list_test_entry(&db, "post", "draft", false, &[child, tag]).await;
+        let second = list_test_entry(&db, "post", "p2", true, &[root, tag]).await;
+        list_test_entry(&db, "post", "wrong-tag", true, &[child, other_tag]).await;
+        let third = list_test_entry(&db, "post", "p3", true, &[child, tag]).await;
+        let page_id = list_test_entry(&db, "page", "page1", true, &[child, tag]).await;
+        let cpt_id = list_test_entry(&db, "news", "news1", true, &[child, tag]).await;
+        list_test_entry(&db, "news", "draft-news", false, &[child, tag]).await;
+
+        let filters = EntryFilters {
+            category_id: Some(root),
+            tag_id: Some(tag),
+            include_descendants: true,
+        };
+        for (sort, expected) in [
+            (PublishedListSort::IdDesc, [third, second, first]),
+            (PublishedListSort::IdAsc, [first, second, third]),
+        ] {
+            for (i, &id) in expected.iter().enumerate() {
+                let page = expect_list_page(
+                    list_published_page(&db, "post", i as i64 + 1, 1, sort, filters)
+                        .await
+                        .unwrap(),
+                );
+                assert_eq!(page.entries.iter().map(|e| e.id).collect::<Vec<_>>(), [id]);
+                assert_eq!(page.has_next, i < 2);
+            }
+        }
+
+        let exact = expect_list_page(
+            list_published_page(
+                &db,
+                "post",
+                1,
+                20,
+                PublishedListSort::IdAsc,
+                EntryFilters {
+                    include_descendants: false,
+                    ..filters
+                },
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(
+            exact.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
+            [first, second],
+            "exact category only; a duplicated direct+descendant link cannot duplicate rows"
+        );
+        assert!(!exact.has_next);
+        for (type_key, id) in [("page", page_id), ("news", cpt_id)] {
+            let result = expect_list_page(
+                list_published_page(&db, type_key, 1, 20, PublishedListSort::IdDesc, filters)
+                    .await
+                    .unwrap(),
+            );
+            assert_eq!(
+                result.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
+                [id]
+            );
+            assert!(!result.has_next);
+        }
+
+        let past_end = expect_list_page(
+            list_published_page(&db, "post", 100, 1, PublishedListSort::IdAsc, filters)
+                .await
+                .unwrap(),
+        );
+        assert!(past_end.entries.is_empty());
+        assert!(!past_end.has_next);
+
+        // Existing public archive contract stays descending with offset paging.
+        let old = list_published_filtered(&db, "post", 2, 1, filters)
+            .await
+            .unwrap();
+        assert_eq!(
+            old.iter().map(|e| e.id).collect::<Vec<_>>(),
+            [second, first]
+        );
+    }
+
+    #[tokio::test]
+    async fn builder_list_rejects_bad_bounds_and_distinguishes_missing_config() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO content_types(key,definition_json,owner_kind)
+             VALUES('news',json_object('key','news','fields',json_array()),'user')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO content_types(key,definition_json,owner_kind)
+             VALUES('deleted-cpt',json_object('key','deleted-cpt','fields',json_array()),'user')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM content_types WHERE key = 'deleted-cpt'")
+            .execute(&db)
+            .await
+            .unwrap();
+        let category = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','List','list-category')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let tag = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','List','list-tag')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        for (page, size) in [(0, 6), (101, 6), (-1, 6), (1, 0), (1, 21), (1, -1)] {
+            let error = list_published_page(
+                &db,
+                "news",
+                page,
+                size,
+                PublishedListSort::IdDesc,
+                EntryFilters::default(),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+        }
+        for filters in [
+            EntryFilters {
+                include_descendants: true,
+                ..Default::default()
+            },
+            EntryFilters {
+                category_id: Some(-1),
+                ..Default::default()
+            },
+        ] {
+            let error = list_published_page(&db, "news", 1, 6, PublishedListSort::IdDesc, filters)
+                .await
+                .unwrap_err();
+            assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+        }
+        for (type_key, filters, expected) in [
+            (
+                "deleted-cpt",
+                EntryFilters::default(),
+                PublishedListMissing::ContentType,
+            ),
+            (
+                "news",
+                EntryFilters {
+                    category_id: Some(tag),
+                    ..Default::default()
+                },
+                PublishedListMissing::Category,
+            ),
+            (
+                "news",
+                EntryFilters {
+                    tag_id: Some(category),
+                    ..Default::default()
+                },
+                PublishedListMissing::Tag,
+            ),
+            (
+                "news",
+                EntryFilters {
+                    category_id: Some(999999),
+                    ..Default::default()
+                },
+                PublishedListMissing::Category,
+            ),
+            (
+                "news",
+                EntryFilters {
+                    tag_id: Some(999999),
+                    ..Default::default()
+                },
+                PublishedListMissing::Tag,
+            ),
+        ] {
+            let result =
+                list_published_page(&db, type_key, 1, 6, PublishedListSort::IdDesc, filters)
+                    .await
+                    .unwrap();
+            assert!(
+                matches!(result, PublishedListResult::MissingConfig(reason) if reason == expected)
+            );
+        }
+
+        // Deleting a previously valid, unused term must not turn into a 500.
+        sqlx::query("DELETE FROM taxonomy_terms WHERE id = ?")
+            .bind(tag)
+            .execute(&db)
+            .await
+            .unwrap();
+        let result = list_published_page(
+            &db,
+            "news",
+            1,
+            6,
+            PublishedListSort::IdDesc,
+            EntryFilters {
+                tag_id: Some(tag),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            result,
+            PublishedListResult::MissingConfig(PublishedListMissing::Tag)
+        ));
+
+        // Even when more than 100 pages exist, page 100 is the last linkable page.
+        for i in 0..101 {
+            list_test_entry(&db, "news", &format!("entry-{i}"), true, &[]).await;
+        }
+        let final_page = expect_list_page(
+            list_published_page(
+                &db,
+                "news",
+                100,
+                1,
+                PublishedListSort::IdDesc,
+                EntryFilters::default(),
+            )
+            .await
+            .unwrap(),
+        );
+        assert_eq!(final_page.entries.len(), 1);
+        assert!(!final_page.has_next);
+
+        db.close().await;
+        let error = list_published_page(
+            &db,
+            "news",
+            1,
+            6,
+            PublishedListSort::IdDesc,
+            EntryFilters::default(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
 
     #[tokio::test]
     async fn published_taxonomy_filter_excludes_drafts_before_pagination() {
