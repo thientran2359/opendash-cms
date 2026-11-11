@@ -8,7 +8,7 @@
 
 **Execution update 11/11/2026:** [ADR-0005](../../../decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) cho Harbor/Forge tự chọn và self-merge từng task M3 khi CI/tests/security pass, không cần peer review. [M3-S20-T01 và M3-S21-T01](slices/2026-11-11-m3-autonomous-first-tasks.md) là hai đặc tả G3 mở đầu; các hàng `M3-Pxx` phía dưới vẫn là planning candidates và không tự biến thành GitHub Issue/Project Ready.
 
-**Thiết kế phần M3 còn lại:** [ADR-0006](../../../decisions/ADR-0006-m3-admin-and-release-contracts.md) ghi G2 `PROPOSED` cho P10, P12–P15 và P17–P19 theo [Issue #45](https://github.com/thientran2359/opendash-cms/issues/45). Hành vi homepage theo theme active đã được chủ dự án chốt. P18 đã có fix và evidence từ PR #33, phần còn lại là regression trong P19.
+**Thiết kế phần M3 còn lại:** [ADR-0006](../../../decisions/ADR-0006-m3-admin-and-release-contracts.md) ghi G2 `AGREED` cho P10, P12–P15 và P17–P19 theo [Issue #45](https://github.com/thientran2359/opendash-cms/issues/45). [G3 đợt Users và General Settings](slices/2026-11-11-m3-users-settings-g3.md) chuẩn bị hai gói đầu. P18 đã có bản sửa và evidence từ PR #33, phần còn lại là regression trong P19.
 
 ## M3 phương án A — mapping capability → task candidate
 
