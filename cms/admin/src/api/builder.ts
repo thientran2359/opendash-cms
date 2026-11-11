@@ -1,5 +1,5 @@
 import { BlockData, BlockRegistry } from '../types.ts';
-import { requestJson, requestText } from './client.ts';
+import { requestBuilderHtml, requestJson, requestText } from './client.ts';
 
 export async function getRegistry(): Promise<BlockRegistry> {
   return requestJson<BlockRegistry>('/registry', {
@@ -25,8 +25,8 @@ export async function uploadTheme(file: File, csrfToken: string): Promise<void> 
   });
 }
 
-export async function previewBlock(block: BlockData, csrfToken: string): Promise<string> {
-  return requestText('/preview', {
+export async function previewBlock(block: BlockData, csrfToken: string) {
+  return requestBuilderHtml('/preview', {
     method: 'POST',
     csrfToken,
     contentType: 'application/json',
@@ -35,8 +35,8 @@ export async function previewBlock(block: BlockData, csrfToken: string): Promise
   });
 }
 
-export async function saveBlock(block: BlockData, csrfToken: string): Promise<string> {
-  return requestText('/save', {
+export async function saveBlock(block: BlockData, csrfToken: string) {
+  return requestBuilderHtml('/save', {
     method: 'POST',
     csrfToken,
     contentType: 'application/json',

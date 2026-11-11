@@ -92,25 +92,14 @@ interface AdminShellProps {
   pluginsContent: React.ReactNode;
   usersContent: React.ReactNode;
   settingsContent: React.ReactNode;
-}
-
-function PendingPage({ title, message, children }: { title: string; message: string; children?: React.ReactNode }) {
-  return (
-    <section className="od-pending rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-9">
-      <div className="od-pending-mark" aria-hidden="true">○</div>
-      <div className="text-xs font-semibold uppercase tracking-widest text-sky-700">Đang phát triển</div>
-      <h2 className="mt-3 text-xl font-semibold text-slate-900">{title}</h2>
-      <p className="mt-3 max-w-xl leading-7 text-slate-600">{message}</p>
-      {children}
-    </section>
-  );
+  themesContent: React.ReactNode;
 }
 
 export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   activeView, onViewChange, hasUnsavedChanges, sidebarContent, previewContent,
-  contentContent, postsContent, pagesContent, mediaContent, dashboardContent, pluginsContent, usersContent, settingsContent,
+  contentContent, postsContent, pagesContent, mediaContent, dashboardContent, pluginsContent, usersContent, settingsContent, themesContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
@@ -240,7 +229,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
             <section className={user && activeView === 'posts' ? 'od-editor-panel' : 'hidden'} aria-label="Bài viết" aria-hidden={!user || activeView !== 'posts'}>{postsContent}</section>
             <section className={user && activeView === 'pages' ? 'od-editor-panel' : 'hidden'} aria-label="Trang" aria-hidden={!user || activeView !== 'pages'}>{pagesContent}</section>
             {user && activeView === 'media' && mediaContent}
-            {user?.role === 'admin' && activeView === 'themes' && <main><PendingPage title="Quản lý Themes" message="Quản lý danh sách và kích hoạt theme độc lập đang được phát triển. Hiện có thể nạp gói theme ZIP tại Builder."><button type="button" className="od-primary-action mt-6" onClick={() => navigate('builder')}>Mở Builder</button></PendingPage></main>}
+            {user?.role === 'admin' && activeView === 'themes' && <main className="od-admin-card min-w-0">{themesContent}</main>}
 
             {/* Keep both editors mounted when navigating: forms and preview must survive switching sections. */}
             <section className={user && activeView === 'builder' ? 'od-editor-panel' : 'hidden'} aria-label="Builder" aria-hidden={!user || activeView !== 'builder'}>
