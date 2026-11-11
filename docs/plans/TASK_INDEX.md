@@ -83,16 +83,20 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 
 | Mã candidate / task | Công việc | Trạng thái | GitHub Issue / PR |
 | --- | --- | --- | --- |
-| [M4-P01](milestones/M4/TASK_PLAN.md) | Thiết kế AST node Section/Row/Column/Element và descriptors Heading/Text/Image/Button | Chưa G3 | — |
-| [M4-P02](milestones/M4/TASK_PLAN.md) | Renderer và lưu/mở lại AST, fallback provider | Chưa G3 | — |
-| [M4-P03](milestones/M4/TASK_PLAN.md) | UI tree/canvas/inspector chọn node từ cây hoặc preview | Chưa G3 | — |
-| [M4-P04](milestones/M4/TASK_PLAN.md) | Bố cục responsive desktop/tablet/mobile | Chưa G3 | — |
-| [M4-P05](milestones/M4/TASK_PLAN.md) | Bind core element với field/CPT, escaping theo ngữ cảnh | Chưa G3 | — |
-| [M4-P06](milestones/M4/TASK_PLAN.md) | Query/list block: CPT/category/sort/limit/pagination | Chưa G3 | — |
-| [M4-P07](milestones/M4/TASK_PLAN.md) | Preview chưa lưu, Save mới public, conflict/refresh | Chưa G3 | — |
-| [M4-P08](milestones/M4/TASK_PLAN.md) | Regression Builder + taxonomy và handoff Theme M5 | Chưa G3 | — |
-| [M4-P09](milestones/M4/TASK_PLAN.md) | Taxonomy B từ #15: category cha–con và tag CRUD Admin | Chưa G3 | — |
-| [M4-P10](milestones/M4/TASK_PLAN.md) | Taxonomy entry links, filter/query cho CPT và Builder | Chưa G3 | — |
+| [M4-P01](milestones/M4/TASK_PLAN.md) | Thiết kế AST node Section/Row/Column/Element và descriptors Heading/Text/Image/Button | G3 đã merge, có Issue triển khai | [Issue #77](https://github.com/thientran2359/opendash-cms/issues/77) |
+| [M4-S01-T01](milestones/M4/slices/2026-11-11-m4-foundation-g3.md) | Forge dự kiến · Mô hình cây Builder và kiểm tra dữ liệu layout | Issue đã phát hành · kiểm dependency và Project trước pickup | [Issue #77](https://github.com/thientran2359/opendash-cms/issues/77) · [PR G3 #70](https://github.com/thientran2359/opendash-cms/pull/70) |
+| [M4-P02](milestones/M4/TASK_PLAN.md) | Renderer và lưu/mở lại AST, fallback provider | G3 đã merge, có Issue triển khai | [Issue #78](https://github.com/thientran2359/opendash-cms/issues/78) |
+| [M4-S02-T01](milestones/M4/slices/2026-11-11-m4-foundation-g3.md) | Forge dự kiến · Mở, Preview và Lưu homepage dạng cây | Issue đã phát hành · kiểm dependency và Project trước pickup | [Issue #78](https://github.com/thientran2359/opendash-cms/issues/78) · [PR G3 #70](https://github.com/thientran2359/opendash-cms/pull/70) |
+| [M4-P03](milestones/M4/TASK_PLAN.md) | UI tree/canvas/inspector chọn node từ cây hoặc preview | G1/G2, chờ đặc tả triển khai | [Issue #71](https://github.com/thientran2359/opendash-cms/issues/71) |
+| [M4-P04](milestones/M4/TASK_PLAN.md) | Bố cục responsive desktop/tablet/mobile | G1/G2, chờ đặc tả triển khai | [Issue #72](https://github.com/thientran2359/opendash-cms/issues/72) |
+| [M4-P05](milestones/M4/TASK_PLAN.md) | Bind core element với field/CPT, escaping theo ngữ cảnh | G1/G2, chờ đặc tả triển khai | [Issue #73](https://github.com/thientran2359/opendash-cms/issues/73) |
+| [M4-P06](milestones/M4/TASK_PLAN.md) | Query/list block: CPT/category/sort/limit/pagination | G1/G2, chờ đặc tả triển khai | [Issue #74](https://github.com/thientran2359/opendash-cms/issues/74) |
+| [M4-P07](milestones/M4/TASK_PLAN.md) | Preview chưa lưu, Save mới public, conflict/refresh | G1/G2, chờ đặc tả triển khai | [Issue #75](https://github.com/thientran2359/opendash-cms/issues/75) |
+| [M4-P08](milestones/M4/TASK_PLAN.md) | Regression Builder + taxonomy và handoff Theme M5 | Chuẩn bị nghiệm thu | [Issue #76](https://github.com/thientran2359/opendash-cms/issues/76) |
+| [M4-P09](milestones/M4/TASK_PLAN.md) | Taxonomy B từ #15: category cha–con và tag CRUD Admin | G3 đã merge, có Issue triển khai | [Issue #79](https://github.com/thientran2359/opendash-cms/issues/79) |
+| [M4-S03-T01](milestones/M4/slices/2026-11-11-m4-foundation-g3.md) | Harbor dự kiến · Quản lý category cha–con và tag trong Admin | Issue đã phát hành · kiểm dependency và Project trước pickup | [Issue #79](https://github.com/thientran2359/opendash-cms/issues/79) · [PR G3 #70](https://github.com/thientran2359/opendash-cms/pull/70) |
+| [M4-P10](milestones/M4/TASK_PLAN.md) | Taxonomy entry links, filter/query cho CPT và Builder | G3 đã merge, có Issue triển khai | [Issue #80](https://github.com/thientran2359/opendash-cms/issues/80) |
+| [M4-S04-T01](milestones/M4/slices/2026-11-11-m4-foundation-g3.md) | Harbor dự kiến · Gắn category/tag và lọc Post, Page, CPT | Issue đã phát hành · kiểm dependency và Project trước pickup | [Issue #80](https://github.com/thientran2359/opendash-cms/issues/80) · [PR G3 #70](https://github.com/thientran2359/opendash-cms/pull/70) |
 
 ## [M5 — Theme & Templates](https://github.com/thientran2359/opendash-cms/milestone/6) (10)
 
