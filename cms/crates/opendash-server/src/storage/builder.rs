@@ -99,10 +99,13 @@ fn project_legacy(block: &Block) -> BuilderDocument {
         schema_version: BUILDER_SCHEMA_VERSION,
         sections: vec![SectionNode {
             id: format!("legacy-section-{suffix}"),
+            responsive: None,
             children: vec![RowNode {
                 id: format!("legacy-row-{suffix}"),
+                responsive: None,
                 children: vec![ColumnNode {
                     id: format!("legacy-column-{suffix}"),
+                    responsive: None,
                     children: vec![ElementNode {
                         id: format!("legacy-element-{suffix}"),
                         content: ElementContent::Known(KnownElement::Legacy(LegacyBlockProps {

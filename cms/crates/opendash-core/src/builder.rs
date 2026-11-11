@@ -25,6 +25,116 @@ pub const BUILDER_SCHEMA_VERSION: u32 = 1;
 pub const MAX_BUILDER_NODES: usize = 512;
 pub const MAX_BUILDER_JSON_BYTES: usize = 256 * 1024;
 
+/// Sparse, viewport-specific layout metadata on existing v1 container nodes.
+/// No theme CSS or arbitrary strings can enter the renderer from this payload.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Responsive {
+    #[serde(default, skip_serializing_if = "empty_style_option")]
+    pub desktop: Option<ResponsiveStyle>,
+    #[serde(default, skip_serializing_if = "empty_style_option")]
+    pub tablet: Option<ResponsiveStyle>,
+    #[serde(default, skip_serializing_if = "empty_style_option")]
+    pub mobile: Option<ResponsiveStyle>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResponsiveStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub padding_px: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gap_px: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub columns_per_row: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_align: Option<TextAlign>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextAlign {
+    Start,
+    Center,
+    End,
+}
+
+impl ResponsiveStyle {
+    pub fn is_empty(&self) -> bool {
+        self.padding_px.is_none()
+            && self.gap_px.is_none()
+            && self.columns_per_row.is_none()
+            && self.text_align.is_none()
+    }
+}
+
+impl Responsive {
+    pub fn is_empty(&self) -> bool {
+        [&self.desktop, &self.tablet, &self.mobile]
+            .iter()
+            .all(|style| empty_style_option(style))
+    }
+
+    pub fn opts_into_grid(&self) -> bool {
+        [&self.desktop, &self.tablet, &self.mobile]
+            .into_iter()
+            .flatten()
+            .any(|style| style.gap_px.is_some() || style.columns_per_row.is_some())
+    }
+}
+
+fn empty_style_option(value: &Option<ResponsiveStyle>) -> bool {
+    value.as_ref().is_none_or(ResponsiveStyle::is_empty)
+}
+
+fn empty_responsive_option(value: &Option<Responsive>) -> bool {
+    value.as_ref().is_none_or(Responsive::is_empty)
+}
+
+#[derive(Clone, Copy)]
+enum LayoutKind {
+    Section,
+    Row,
+    Column,
+}
+
+fn validate_responsive(
+    responsive: Option<&Responsive>,
+    kind: LayoutKind,
+) -> Result<(), BuilderError> {
+    let Some(responsive) = responsive else {
+        return Ok(());
+    };
+    for style in [&responsive.desktop, &responsive.tablet, &responsive.mobile]
+        .into_iter()
+        .flatten()
+    {
+        if style.padding_px.is_some_and(|n| n > 64)
+            || style.gap_px.is_some_and(|n| n > 64)
+            || style.columns_per_row.is_some_and(|n| !(1..=6).contains(&n))
+        {
+            return Err(BuilderError::Invalid(
+                "Builder responsive value out of range",
+            ));
+        }
+        let wrong_context = match kind {
+            LayoutKind::Section => {
+                style.gap_px.is_some()
+                    || style.columns_per_row.is_some()
+                    || style.text_align.is_some()
+            }
+            LayoutKind::Row => style.text_align.is_some(),
+            LayoutKind::Column => style.gap_px.is_some() || style.columns_per_row.is_some(),
+        };
+        if wrong_context {
+            return Err(BuilderError::Invalid(
+                "Builder responsive field not allowed on node",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Children preserve render order, while IDs remain independent of position.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +147,8 @@ pub struct BuilderDocument {
 #[serde(deny_unknown_fields)]
 pub struct SectionNode {
     pub id: String,
+    #[serde(default, skip_serializing_if = "empty_responsive_option")]
+    pub responsive: Option<Responsive>,
     pub children: Vec<RowNode>,
 }
 
@@ -44,6 +156,8 @@ pub struct SectionNode {
 #[serde(deny_unknown_fields)]
 pub struct RowNode {
     pub id: String,
+    #[serde(default, skip_serializing_if = "empty_responsive_option")]
+    pub responsive: Option<Responsive>,
     pub children: Vec<ColumnNode>,
 }
 
@@ -51,6 +165,8 @@ pub struct RowNode {
 #[serde(deny_unknown_fields)]
 pub struct ColumnNode {
     pub id: String,
+    #[serde(default, skip_serializing_if = "empty_responsive_option")]
+    pub responsive: Option<Responsive>,
     pub children: Vec<ElementNode>,
 }
 
@@ -233,10 +349,13 @@ impl BuilderDocument {
         let mut sources = HashSet::new();
         for (s, section) in self.sections.iter().enumerate() {
             check_node_id(&section.id, &mut ids, &mut count)?;
+            validate_responsive(section.responsive.as_ref(), LayoutKind::Section)?;
             for (r, row) in section.children.iter().enumerate() {
                 check_node_id(&row.id, &mut ids, &mut count)?;
+                validate_responsive(row.responsive.as_ref(), LayoutKind::Row)?;
                 for (c, column) in row.children.iter().enumerate() {
                     check_node_id(&column.id, &mut ids, &mut count)?;
+                    validate_responsive(column.responsive.as_ref(), LayoutKind::Column)?;
                     for (e, element) in column.children.iter().enumerate() {
                         check_node_id(&element.id, &mut ids, &mut count)?;
                         let result = match &element.content {
@@ -476,10 +595,13 @@ mod tests {
             schema_version: BUILDER_SCHEMA_VERSION,
             sections: vec![SectionNode {
                 id: "section-1".into(),
+                responsive: None,
                 children: vec![RowNode {
                     id: "row-1".into(),
+                    responsive: None,
                     children: vec![ColumnNode {
                         id: "column-1".into(),
+                        responsive: None,
                         children: vec![
                             element(
                                 "heading-1",
@@ -586,10 +708,13 @@ mod tests {
         oversized.sections = (0..100)
             .map(|s| SectionNode {
                 id: format!("section-{s}"),
+                responsive: None,
                 children: vec![RowNode {
                     id: format!("row-{s}"),
+                    responsive: None,
                     children: vec![ColumnNode {
                         id: format!("column-{s}"),
+                        responsive: None,
                         children: vec![element(
                             &format!("text-{s}"),
                             KnownElement::Text(TextProps {
@@ -807,5 +932,116 @@ mod tests {
         // A historical node is losslessly preserved while the type is unavailable.
         let raw = restored.to_json().unwrap();
         assert!(String::from_utf8(raw).unwrap().contains("must_keep"));
+    }
+
+    #[test]
+    fn responsive_sparse_zero_round_trip_and_existing_v1_compatibility() {
+        let before = fixture();
+        let old_json = before.to_json().unwrap();
+        assert!(!String::from_utf8_lossy(&old_json).contains("responsive"));
+        assert_eq!(BuilderDocument::from_json(&old_json).unwrap(), before);
+
+        let mut current = before.clone();
+        current.sections[0].responsive = Some(Responsive {
+            desktop: Some(ResponsiveStyle {
+                padding_px: Some(0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let row = &mut current.sections[0].children[0];
+        row.responsive = Some(Responsive {
+            desktop: Some(ResponsiveStyle {
+                gap_px: Some(0),
+                columns_per_row: Some(3),
+                ..Default::default()
+            }),
+            tablet: Some(ResponsiveStyle {
+                columns_per_row: Some(2),
+                ..Default::default()
+            }),
+            mobile: Some(ResponsiveStyle {
+                columns_per_row: Some(1),
+                ..Default::default()
+            }),
+        });
+        current.sections[0].children[0].children[0].responsive = Some(Responsive {
+            desktop: Some(ResponsiveStyle {
+                text_align: Some(TextAlign::Start),
+                ..Default::default()
+            }),
+            mobile: Some(ResponsiveStyle {
+                text_align: Some(TextAlign::End),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        current
+            .validate_for_save(&registry(), Some(&before))
+            .unwrap();
+        assert!(
+            current.sections[0].children[0]
+                .responsive
+                .as_ref()
+                .unwrap()
+                .opts_into_grid()
+        );
+        assert_eq!(
+            BuilderDocument::from_json(&current.to_json().unwrap()).unwrap(),
+            current
+        );
+        let mut blank = current.clone();
+        blank.sections[0].responsive = Some(Responsive {
+            desktop: Some(ResponsiveStyle::default()),
+            ..Default::default()
+        });
+        let encoded = serde_json::to_value(&blank).unwrap();
+        assert!(encoded["sections"][0].get("responsive").is_none());
+    }
+
+    #[test]
+    fn responsive_rejects_wrong_types_contexts_and_limits() {
+        let original = fixture();
+        for (node, style) in [
+            ("section", json!({"gap_px": 2})),
+            ("section", json!({"text_align": "center"})),
+            ("column", json!({"columns_per_row": 2})),
+            ("row", json!({"text_align": "end"})),
+            ("row", json!({"columns_per_row": 0})),
+            ("row", json!({"columns_per_row": 7})),
+            ("row", json!({"gap_px": 65})),
+            ("column", json!({"padding_px": 65})),
+        ] {
+            let mut value = serde_json::to_value(&original).unwrap();
+            let target = match node {
+                "section" => &mut value["sections"][0],
+                "row" => &mut value["sections"][0]["children"][0],
+                _ => &mut value["sections"][0]["children"][0]["children"][0],
+            };
+            target["responsive"] = json!({"tablet": style});
+            let doc = BuilderDocument::from_json(value.to_string().as_bytes()).unwrap();
+            assert!(
+                doc.validate_for_save(&registry(), Some(&original)).is_err(),
+                "{node}: {style}"
+            );
+        }
+        for bad in [
+            json!({"padding_px": -1}),
+            json!({"padding_px": 1.5}),
+            json!({"padding_px": "10"}),
+            json!({"padding_px": true}),
+            json!({"text_align": "justify"}),
+            json!({"gap_px": 0, "color": "red"}),
+        ] {
+            let mut value = serde_json::to_value(&original).unwrap();
+            value["sections"][0]["children"][0]["responsive"] = json!({"mobile": bad});
+            assert!(
+                BuilderDocument::from_json(value.to_string().as_bytes()).is_err(),
+                "{bad}"
+            );
+        }
+        let mut invalid = serde_json::to_value(&original).unwrap();
+        invalid["sections"][0]["responsive"] = json!({"phone": {"padding_px": 3}});
+        assert!(BuilderDocument::from_json(invalid.to_string().as_bytes()).is_err());
     }
 }

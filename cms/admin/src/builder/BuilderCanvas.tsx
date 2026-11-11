@@ -1,10 +1,11 @@
 import React from 'react';
-import type { BuilderColumn, BuilderDocument, BuilderElement, BuilderRow, BuilderSection } from './document.ts';
-import { isLockedElement } from './document.ts';
+import type { BuilderColumn, BuilderDocument, BuilderElement, BuilderRow, BuilderSection, BuilderViewport } from './document.ts';
+import { effectiveResponsive, isLockedElement, rowUsesGrid } from './document.ts';
 
 interface Props {
   document: BuilderDocument;
   selectedId: string | null;
+  viewport: BuilderViewport;
   registry: Record<string, Record<string, string>>;
   onSelect: (id: string) => void;
 }
@@ -48,7 +49,7 @@ function ElementContent({ element, registry }: { element: BuilderElement; regist
   }
 }
 
-export function BuilderCanvas({ document, selectedId, registry, onSelect }: Props) {
+export function BuilderCanvas({ document, selectedId, registry, viewport, onSelect }: Props) {
   const selectProps = (id: string) => ({
     type: 'button' as const,
     'data-canvas-id': id,
@@ -68,8 +69,12 @@ export function BuilderCanvas({ document, selectedId, registry, onSelect }: Prop
       <ElementContent element={element} registry={registry} />
     </button>
   );
-  const renderColumn = (column: BuilderColumn) => (
-    <div key={column.id} className="min-w-0 flex-1 space-y-2 rounded-lg bg-slate-50 p-2">
+  const renderColumn = (column: BuilderColumn, inGrid: boolean) => (
+    <div key={column.id} className={`min-w-0 space-y-2 rounded-lg bg-slate-50 p-2 ${inGrid ? '' : 'flex-1'}`}
+      style={{
+        padding: effectiveResponsive(column, viewport).padding_px,
+        textAlign: effectiveResponsive(column, viewport).text_align,
+      }}>
       <button {...selectProps(column.id)} aria-label={'Chọn column ' + column.id}>
         <span className="text-[10px] font-medium text-slate-500">Column</span>
       </button>
@@ -78,16 +83,25 @@ export function BuilderCanvas({ document, selectedId, registry, onSelect }: Prop
     </div>
   );
   const renderRow = (row: BuilderRow) => (
-    <div key={row.id} className="space-y-2 rounded-lg border border-slate-200 bg-white p-2">
+    <div key={row.id} className="space-y-2 rounded-lg border border-slate-200 bg-white p-2"
+      style={{ padding: effectiveResponsive(row, viewport).padding_px }}>
       <button {...selectProps(row.id)} aria-label={'Chọn row ' + row.id}>
         <span className="text-[10px] font-medium text-slate-500">Row</span>
       </button>
-      <div className="flex flex-wrap items-stretch gap-2">{row.children.map(renderColumn)}</div>
+      <div data-structural-grid={rowUsesGrid(row) ? 'true' : 'false'}
+        className={rowUsesGrid(row) ? 'grid min-w-0' : 'flex min-w-0 flex-wrap items-stretch gap-2'}
+        style={rowUsesGrid(row) ? {
+          gridTemplateColumns: `repeat(${effectiveResponsive(row, viewport).columns_per_row ?? 1}, minmax(0, 1fr))`,
+          gap: effectiveResponsive(row, viewport).gap_px ?? 0,
+        } : undefined}>
+        {row.children.map(column => renderColumn(column, rowUsesGrid(row)))}
+      </div>
       {row.children.length === 0 && <p className="p-3 text-center text-xs text-slate-400">Row trống</p>}
     </div>
   );
   const renderSection = (section: BuilderSection) => (
-    <section key={section.id} className="space-y-2 rounded-xl border border-slate-200 bg-slate-100 p-3">
+    <section key={section.id} className="space-y-2 rounded-xl border border-slate-200 bg-slate-100 p-3"
+      style={{ padding: effectiveResponsive(section, viewport).padding_px }}>
       <button {...selectProps(section.id)} aria-label={'Chọn section ' + section.id}>
         <span className="text-[10px] font-medium text-slate-500">Section</span>
       </button>

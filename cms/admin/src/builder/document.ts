@@ -5,9 +5,20 @@ export interface BuilderElement {
   type: string;
   props: Record<string, unknown>;
 }
-export interface BuilderColumn { id: string; children: BuilderElement[] }
-export interface BuilderRow { id: string; children: BuilderColumn[] }
-export interface BuilderSection { id: string; children: BuilderRow[] }
+export type BuilderViewport = 'desktop' | 'tablet' | 'mobile';
+export type ResponsiveField = 'padding_px' | 'gap_px' | 'columns_per_row' | 'text_align';
+export type ResponsiveAlign = 'start' | 'center' | 'end';
+export interface ResponsiveStyle {
+  padding_px?: number;
+  gap_px?: number;
+  columns_per_row?: number;
+  text_align?: ResponsiveAlign;
+}
+export type BuilderResponsive = Partial<Record<BuilderViewport, ResponsiveStyle>>;
+export interface ResponsiveContainer { responsive?: BuilderResponsive }
+export interface BuilderColumn extends ResponsiveContainer { id: string; children: BuilderElement[] }
+export interface BuilderRow extends ResponsiveContainer { id: string; children: BuilderColumn[] }
+export interface BuilderSection extends ResponsiveContainer { id: string; children: BuilderRow[] }
 export interface BuilderDocument { schema_version: number; sections: BuilderSection[] }
 export type BuilderNode = BuilderSection | BuilderRow | BuilderColumn | BuilderElement;
 export type NodeKind = 'section' | 'row' | 'column' | 'element';
@@ -44,6 +55,63 @@ export function locate(document: BuilderDocument, id: string | null): NodeLocati
 
 export function isElement(node: BuilderNode): node is BuilderElement {
   return 'type' in node;
+}
+
+export const VIEWPORT_WIDTHS: Record<BuilderViewport, number> = {
+  desktop: 1280, tablet: 834, mobile: 390,
+};
+export const VIEWPORT_LABELS: Record<BuilderViewport, string> = {
+  desktop: 'Desktop', tablet: 'Tablet', mobile: 'Mobile',
+};
+export const RESPONSIVE_FIELDS: Record<'section' | 'row' | 'column', ResponsiveField[]> = {
+  section: ['padding_px'],
+  row: ['padding_px', 'gap_px', 'columns_per_row'],
+  column: ['padding_px', 'text_align'],
+};
+
+/** Desktop → Tablet → Mobile property-wise cascade, including explicit zero. */
+export function effectiveResponsive(
+  node: ResponsiveContainer, viewport: BuilderViewport,
+): ResponsiveStyle {
+  const styles = node.responsive ?? {};
+  const result: ResponsiveStyle = { ...styles.desktop };
+  if (viewport !== 'desktop') Object.assign(result, styles.tablet);
+  if (viewport === 'mobile') Object.assign(result, styles.mobile);
+  return result;
+}
+
+export function rowUsesGrid(row: BuilderRow): boolean {
+  return Object.values(row.responsive ?? {}).some(style =>
+    style?.gap_px !== undefined || style?.columns_per_row !== undefined
+  );
+}
+
+/** Remove an unset viewport and parent object to keep v1 JSON sparse. */
+export function setResponsiveField(
+  document: BuilderDocument, id: string, viewport: BuilderViewport,
+  field: ResponsiveField, value: number | ResponsiveAlign | null,
+): BuilderDocument | null {
+  const next = clone(document);
+  const location = locate(next, id);
+  if (!location || location.kind === 'element'
+      || !RESPONSIVE_FIELDS[location.kind].includes(field)) return null;
+  if (value !== null) {
+    if (field === 'text_align') {
+      if (!['start', 'center', 'end'].includes(String(value))) return null;
+    } else if (typeof value !== 'number' || !Number.isInteger(value)
+        || value < (field === 'columns_per_row' ? 1 : 0)
+        || value > (field === 'columns_per_row' ? 6 : 64)) return null;
+  }
+  const node = location.node as ResponsiveContainer;
+  const responsive: BuilderResponsive = { ...node.responsive };
+  const style: ResponsiveStyle = { ...responsive[viewport] };
+  if (value === null) delete style[field];
+  else (style as Record<string, number | string>)[field] = value;
+  if (Object.keys(style).length === 0) delete responsive[viewport];
+  else responsive[viewport] = style;
+  if (Object.keys(responsive).length === 0) delete node.responsive;
+  else node.responsive = responsive;
+  return next;
 }
 
 /** IDs obey the core valid_package_id alphabet and length contract. */
