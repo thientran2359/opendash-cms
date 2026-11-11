@@ -1,3 +1,4 @@
+pub mod builder;
 pub mod content;
 pub mod hooks;
 pub mod id;
