@@ -15,13 +15,14 @@ use crate::{
 
 pub const DEFAULT_ARCHIVE: &str = r##"<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ content_type.label }}</title>
+<title>{{ content_type.label }} — {{ site.title }}</title>
 <style>
 body{font:16px/1.6 system-ui,sans-serif;margin:0 auto;padding:2rem 1rem;max-width:850px;color:#172033;overflow-wrap:anywhere;box-sizing:border-box}
 a{color:#155e9b}article{padding:1rem 0;border-bottom:1px solid #d8dfe9}
 img{max-width:100%;height:auto;max-height:260px;object-fit:contain;border-radius:8px}
 nav{display:flex;gap:1rem;margin-top:2rem}
 </style></head><body><main>
+<header><strong>{{ site.title }}</strong>{% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}</header>
 <h1>{{ content_type.label }}</h1>
 {% for entry in entries %}
 <article><h2><a href="{{ entry.url }}">{{ entry.title }}</a></h2>
@@ -34,7 +35,7 @@ nav{display:flex;gap:1rem;margin-top:2rem}
 
 pub const DEFAULT_SINGLE: &str = r##"<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ entry.title }} — {{ content_type.label }}</title>
+<title>{{ entry.title }} — {{ site.title }}</title>
 <style>
 body{font:16px/1.6 system-ui,sans-serif;margin:0 auto;padding:2rem 1rem;max-width:850px;color:#172033;overflow-wrap:anywhere;box-sizing:border-box}
 a{color:#155e9b}dl{margin-top:2rem}dt{font-weight:700;margin-top:1.5rem}
@@ -42,6 +43,7 @@ dd{margin:0.3rem 0 1rem;white-space:pre-wrap;overflow-wrap:anywhere}
 img{max-width:100%;height:auto;border-radius:8px}
 .gallery{display:flex;flex-wrap:wrap;gap:0.75rem}.gallery img{width:190px;height:150px;object-fit:contain}
 </style></head><body><main>
+<header><strong>{{ site.title }}</strong>{% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}</header>
 <nav><a href="{{ archive_url }}">← {{ content_type.label }}</a></nav>
 <article><h1>{{ entry.title }}</h1>
 <dl>{% for field in entry.fields %}
@@ -75,6 +77,19 @@ pub struct EntryView {
     pub fields: Vec<FieldView>,
     pub cover_url: Option<String>,
 }
+
+/// Only typed site strings enter the custom-template context; MiniJinja
+/// performs HTML escaping just like every other content value.
+#[derive(Debug, Serialize)]
+pub struct SiteContext<'a> {
+    pub title: &'a str,
+    pub tagline: &'a str,
+}
+
+const DEFAULT_SITE: SiteContext<'static> = SiteContext {
+    title: "OpenDash",
+    tagline: "",
+};
 
 fn media_url(value: &Value) -> Option<String> {
     let id = value.as_str()?;
@@ -175,12 +190,13 @@ pub fn authenticated_preview_view(
     view
 }
 
-pub fn render_archive(
+pub fn render_archive_with_site(
     schema: &ContentTypeDefinition,
     entries: &[EntryView],
     previous_url: Option<&str>,
     next_url: Option<&str>,
     selected_template: Option<&str>,
+    site: &SiteContext<'_>,
 ) -> ApiResult<String> {
     theme::render_content(
         selected_template.unwrap_or(DEFAULT_ARCHIVE),
@@ -189,6 +205,7 @@ pub fn render_archive(
             "entries": entries,
             "previous_url": previous_url,
             "next_url": next_url,
+            "site": site,
         }),
     )
     .map_err(ApiError::internal)
@@ -199,12 +216,22 @@ pub fn render_single(
     entry: &EntryView,
     selected_template: Option<&str>,
 ) -> ApiResult<String> {
+    render_single_with_site(schema, entry, selected_template, &DEFAULT_SITE)
+}
+
+pub fn render_single_with_site(
+    schema: &ContentTypeDefinition,
+    entry: &EntryView,
+    selected_template: Option<&str>,
+    site: &SiteContext<'_>,
+) -> ApiResult<String> {
     theme::render_content(
         selected_template.unwrap_or(DEFAULT_SINGLE),
         &serde_json::json!({
             "content_type": schema,
             "entry": entry,
             "archive_url": format!("/content/{}", schema.key),
+            "site": site,
         }),
     )
     .map_err(ApiError::internal)
@@ -248,5 +275,33 @@ mod tests {
         assert!(html.contains("&lt;img src=x onerror=alert(2)&gt;"));
         assert!(html.contains("{{ 7*7 }}"));
         assert!(!html.contains("<script>alert(1)</script>"));
+    }
+
+    #[test]
+    fn site_context_is_html_escaped_in_default_and_custom_templates() {
+        let schema = ContentTypeDefinition {
+            key: "news".into(),
+            label: "Tin tức".into(),
+            fields: vec![],
+        };
+        let site = SiteContext {
+            title: "<script>alert(1)</script>",
+            tagline: "<img src=x onerror=alert(2)>",
+        };
+        let default_html = render_archive_with_site(&schema, &[], None, None, None, &site).unwrap();
+        assert!(default_html.contains("&lt;script&gt;alert(1)&lt;"));
+        assert!(default_html.contains("&lt;img src=x onerror=alert(2)&gt;"));
+        assert!(!default_html.contains("<script>"));
+        let custom_html = render_archive_with_site(
+            &schema,
+            &[],
+            None,
+            None,
+            Some("<h1>{{ site.title }}</h1><p>{{ site.tagline }}</p>"),
+            &site,
+        )
+        .unwrap();
+        assert!(custom_html.contains("&lt;script&gt;"));
+        assert!(!custom_html.contains("<img"));
     }
 }
