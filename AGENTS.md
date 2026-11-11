@@ -18,6 +18,7 @@
 
 ## Tài liệu và kiểm chứng
 
+- Khi chủ dự án giao Atlas chuẩn bị một milestone, đầu ra bắt buộc là bộ đặc tả G3 cho toàn bộ task trong phạm vi milestone, kể cả task sẽ triển khai sau. Atlas chốt các quyết định G1/G2 cần thiết, ghi thứ tự phụ thuộc và quyền sở hữu theo [Planning Workflow](docs/plans/PLANNING_WORKFLOW.md#chuẩn-bị-g3-cho-toàn-bộ-milestone). Chỉ chuyển từng task sang Project `Ready` khi task đó thực sự đủ điều kiện nhận triển khai.
 - Trước khi làm một slice: nêu contract liên quan, tiêu chí nghiệm thu và phần ngoài phạm vi. Sau khi làm: ghi thay đổi, lệnh/check thực chạy, kết quả và giới hạn.
 - Với thay đổi hành vi, chọn kiểm chứng theo phạm vi: preview chưa lưu, cập nhật khi Lưu, dữ liệu và bố cục khi đổi theme, quyền và lỗi plugin, hoặc backup/restore. Không tạo test chỉ lặp lại implementation.
 - Trạng thái thiết kế `AGREED` khác `implemented` và `verified`. Giữ các trạng thái này riêng; không đánh dấu hoàn thành khi thiếu fixtures/bằng chứng thực tế.
