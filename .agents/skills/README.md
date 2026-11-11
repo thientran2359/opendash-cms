@@ -1,16 +1,18 @@
 # Active skills
 
-Three **on-demand** project skills live here (no cronjob, background loop, or CoS
-Local Control API dispatch):
+Four **on-demand** project skills live here (no cronjob or background loop;
+direct CoS dispatch requires separately verified, authorized host adapters):
 
 | Skill | Khi gọi trong chat | Hành vi |
 | --- | --- | --- |
 | [github-task-pickup](github-task-pickup/SKILL.md) | "Hãy vào GitHub Issue lấy task của Forge về làm" | Tìm task đang giao/đang làm, kiểm gate/PR/branch; agent tự chủ nhận task đủ điều kiện theo ADR-0010, Orion chuyển đề xuất cho Atlas |
 | [discussion-turn-responder](discussion-turn-responder/SKILL.md) | "Kiểm tra các thảo luận đến lượt Forge rồi trả lời" | Xác minh người đang chờ câu trả lời trên GitHub PR/Issue hoặc `.agents/discussions/`, trả lời đúng lượt một lần; không tự phản hồi khi chưa rõ lượt |
 | [github-pr-review-merge](github-pr-review-merge/SKILL.md) | "Atlas review và merge các task đã code đang chờ review" | Review PR hoặc self-review PR của Atlas, merge PR đã đủ gate trên đúng SHA; lệnh chỉ review không merge |
+| [atlas-task-dispatch](atlas-task-dispatch/SKILL.md) | "Atlas, giao task Ready độc lập cho Forge và Harbor rồi báo receipt" | Atlas điều phối Issue/Project theo ADR-0010; CoS nhận việc qua skill pickup hiện có. Gửi trực tiếp chỉ khi adapter trên từng host đã được kiểm chứng |
 
 Skills dùng chuẩn `SKILL.md` (frontmatter `name`/`description`). Với Codex,
-gọi rõ `$github-task-pickup` / `$discussion-turn-responder` / `$github-pr-review-merge` hoặc hỏi bằng câu
+gọi rõ `$github-task-pickup` / `$discussion-turn-responder` / `$github-pr-review-merge` /
+`$atlas-task-dispatch` hoặc hỏi bằng câu
 trên; với Nova/Antigravity hoặc host không tự liệt kê skills, yêu cầu agent **đọc đúng đường dẫn
 skill trong repo** rồi thực hiện. Khởi động lại agent nếu session cũ chưa thấy
 file mới. Skill không tự chạy cho tới khi người dùng yêu cầu.

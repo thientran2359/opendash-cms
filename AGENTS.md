@@ -35,10 +35,11 @@
   (see `.agents/README.md` and `.agents/agents.yaml`). **Agent-concluded and peer-reviewed**
   decisions, plans/contracts and actual verification belong in `docs/` after PR merge.
   Keep existing historical references and their source evidence. Apply [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md).
-- `.agents/skills/` contains three **manual chat skills**:
+- `.agents/skills/` contains four **manual chat skills**:
   [github-task-pickup](.agents/skills/github-task-pickup/SKILL.md) when asked to fetch/perform one's GitHub Issue,
   [discussion-turn-responder](.agents/skills/discussion-turn-responder/SKILL.md) when asked to check and answer one's discussion turns,
-  and [github-pr-review-merge](.agents/skills/github-pr-review-merge/SKILL.md) for Atlas reviewing and merging eligible implementation and concluded design PRs.
+  [github-pr-review-merge](.agents/skills/github-pr-review-merge/SKILL.md) for Atlas reviewing and merging eligible implementation and concluded design PRs,
+  and [atlas-task-dispatch](.agents/skills/atlas-task-dispatch/SKILL.md) for Atlas to assign/handoff tasks to Forge/Harbor through GitHub with a guarded future CoS adapter.
   Read the corresponding SKILL.md on request even if the host does not auto-discover repo skills.
   No skill starts any background process, cronjob or automatic CoS dispatch.
   `.agents/archive/skills/` contains retired skills for reference ONLY.
