@@ -32,6 +32,7 @@ use crate::{
         public::public_page,
         public_content::{archive, media_file, media_thumb, single},
         settings::{general_get, general_put, timezones_get},
+        themes::{theme_activate, theme_install, theme_list},
         users::{
             max_users_json_bytes, user_create, user_delete, user_list, user_patch,
             user_reset_password,
@@ -102,6 +103,16 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/settings/timezones", get(timezones_get))
+        .route(
+            "/api/admin/themes",
+            get(theme_list)
+                .post(theme_install)
+                .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES)),
+        )
+        .route(
+            "/api/admin/themes/active",
+            axum::routing::put(theme_activate).layer(DefaultBodyLimit::max(4096)),
+        )
         .route(
             "/api/admin/users",
             get(user_list)

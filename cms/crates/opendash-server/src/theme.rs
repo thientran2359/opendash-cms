@@ -1,5 +1,6 @@
 use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 pub use opendash_core::theme::{Block, BlockDescriptor, Fields};
+use serde::Deserialize;
 
 use crate::package::{ensure_safe_flat_entry, open_bounded_zip, read_bounded_entry};
 
@@ -10,6 +11,15 @@ pub struct Theme {
     pub template: String,
     pub content_list_template: Option<String>,
     pub content_single_template: Option<String>,
+    /// Explicitly supported block from another installed theme; never rewrites home_page.
+    pub compatible_block_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HomepageCompat {
+    version: u8,
+    accepts: String,
 }
 
 impl Theme {
@@ -20,9 +30,9 @@ impl Theme {
             "ZIP vượt quá giới hạn kích thước.",
             "ZIP không hợp lệ.",
         )?;
-        if !(2..=4).contains(&archive.len()) {
+        if !(2..=5).contains(&archive.len()) {
             return Err(
-                "ZIP phải chứa block.json, block.html và tùy chọn content-list.html/content-single.html.",
+                "ZIP cần block.json, block.html và chỉ thêm content-list.html/content-single.html/homepage-compat.json.",
             );
         }
 
@@ -30,6 +40,7 @@ impl Theme {
         let mut template = None;
         let mut content_list_template = None;
         let mut content_single_template = None;
+        let mut homepage_compat = None;
         let mut remaining = MAX_ZIP_BYTES;
         for index in 0..archive.len() {
             let mut entry = archive.by_index(index).map_err(|_| "Không đọc được ZIP.")?;
@@ -48,6 +59,7 @@ impl Theme {
                 "content-single.html" if content_single_template.is_none() => {
                     &mut content_single_template
                 }
+                "homepage-compat.json" if homepage_compat.is_none() => &mut homepage_compat,
                 _ => return Err("ZIP chứa đường dẫn lạ hoặc mục bị trùng."),
             };
             if entry.size() > remaining as u64 {
@@ -70,6 +82,19 @@ impl Theme {
             serde_json::from_str(&descriptor.ok_or("Thiếu block.json.")?)
                 .map_err(|_| "block.json không hợp lệ.")?;
         descriptor.validate()?;
+        let compatible_block_id = if let Some(raw) = homepage_compat {
+            let compat: HomepageCompat =
+                serde_json::from_str(&raw).map_err(|_| "homepage-compat.json không hợp lệ.")?;
+            if compat.version != 1
+                || !opendash_core::id::valid_namespaced_block_id(&compat.accepts)
+                || compat.accepts == descriptor.id
+            {
+                return Err("Alias homepage phải là một block khác có ID hợp lệ (version 1).");
+            }
+            Some(compat.accepts)
+        } else {
+            None
+        };
 
         let template = template.ok_or("Thiếu block.html.")?;
         if template.trim().is_empty() || environment().template_from_str(&template).is_err() {
@@ -88,6 +113,7 @@ impl Theme {
             template,
             content_list_template,
             content_single_template,
+            compatible_block_id,
         })
     }
 }

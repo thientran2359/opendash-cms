@@ -11,6 +11,7 @@ import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
 import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
 import { MediaRoute } from './shell/MediaRoute.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
+import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -43,6 +44,7 @@ export const App: React.FC = () => {
   const [registry, setRegistry] = useState<BlockRegistry>({});
   const [blockData, setBlockData] = useState<BlockData>({ type: '', values: {} });
   const [previewHtml, setPreviewHtml] = useState<string>('');
+  const [builderVisibility, setBuilderVisibility] = useState<'rendered' | 'unsupported' | null>(null);
 
   // Race prevention for preview responses
   const previewSeq = useRef<number>(0);
@@ -196,6 +198,7 @@ export const App: React.FC = () => {
         blockDataRef.current = emptyBlock;
         setBlockData(emptyBlock);
         setPreviewHtml('');
+        setBuilderVisibility(null);
         setBuilderDirty(false);
       }
       lastAuthenticatedUserId.current = res.user.id;
@@ -236,6 +239,7 @@ export const App: React.FC = () => {
       setRegistry({});
       setBlockData({ type: '', values: {} });
       setPreviewHtml('');
+      setBuilderVisibility(null);
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
       setBuilderDirty(false);
@@ -357,6 +361,7 @@ export const App: React.FC = () => {
   const handleTypeChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const newType = e.target.value;
     setBuilderDirty(true);
+    setBuilderVisibility(null);
     setBlockData(prev => ({
       type: newType,
       values: normalizeValues(newType, registry, prev.values),
@@ -365,6 +370,7 @@ export const App: React.FC = () => {
 
   const handleFieldChange = (name: string, val: string) => {
     setBuilderDirty(true);
+    setBuilderVisibility(null);
     setBlockData(prev => ({
       ...prev,
       values: {
@@ -384,9 +390,10 @@ export const App: React.FC = () => {
       values: normalizeValues(blockData.type, registry, blockData.values),
     };
     try {
-      const html = await api.previewBlock(payload, csrfToken);
+      const result = await api.previewBlock(payload, csrfToken);
       if (currentSeq === previewSeq.current) {
-        setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${html}`);
+        setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${result.html}`);
+        setBuilderVisibility(result.visibility);
         setStatus('Đang xem trước', false);
       }
     } catch (err) {
@@ -405,9 +412,10 @@ export const App: React.FC = () => {
       values: normalizeValues(blockData.type, registry, blockData.values),
     };
     try {
-      const html = await api.saveBlock(payload, csrfToken);
+      const result = await api.saveBlock(payload, csrfToken);
       if (JSON.stringify(payload) === JSON.stringify(blockDataRef.current)) setBuilderDirty(false);
-      setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${html}`);
+      setPreviewHtml(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'">${result.html}`);
+      setBuilderVisibility(result.visibility);
       setStatus('Đã lưu', false);
     } catch (err) {
       handleApiError(err, 'Lỗi khi lưu block.');
@@ -444,9 +452,18 @@ export const App: React.FC = () => {
           onFieldChange={handleFieldChange}
           onPreview={handlePreview}
           onSave={handleSave}
+          blockVisibility={builderVisibility}
         />
       }
       previewContent={<BuilderPreview previewHtml={previewHtml} />}
+      themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
+        onInstalled={() => { void loadRegistryAndPage(true); }}
+        onActivated={() => {
+          previewSeq.current += 1;
+          setBuilderVisibility(null);
+          setPreviewHtml('');
+        }}
+      />}
       settingsContent={<>
         <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
         <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>

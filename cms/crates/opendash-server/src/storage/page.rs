@@ -69,17 +69,36 @@ pub async fn insert_theme_block(db: &SqlitePool, theme: &Theme) -> ApiResult<()>
             },
         )
         .map_err(|e| ApiError::conflict(e.to_string()))?;
+    // Explicit aliases must resolve to an already-installed block with the
+    // EXACT field keys. Labels may differ; missing/extra fields cannot be
+    // silently dropped. Validate before creating any persistent state.
+    if let Some(alias) = &theme.compatible_block_id {
+        let source = catalog
+            .get(alias)
+            .ok_or_else(|| ApiError::bad_request("Alias trỏ đến block chưa được cài đặt."))?;
+        if source
+            .descriptor
+            .fields
+            .keys()
+            .ne(theme.descriptor.fields.keys())
+        {
+            return Err(ApiError::bad_request(
+                "Field keys của alias không khớp block nguồn.",
+            ));
+        }
+    }
     // The UNIQUE constraint still arbitrates concurrent installs after this snapshot check.
     let result = sqlx::query(
         "INSERT INTO theme_blocks
-                     (id, fields_json, template, content_list_template, content_single_template)
-                     VALUES (?, ?, ?, ?, ?)",
+                     (id, fields_json, template, content_list_template, content_single_template, compatible_block_id)
+                     VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&theme.descriptor.id)
     .bind(serde_json::to_string(&theme.descriptor.fields)?)
     .bind(&theme.template)
     .bind(&theme.content_list_template)
     .bind(&theme.content_single_template)
+    .bind(&theme.compatible_block_id)
     .execute(db)
     .await;
     match result {
@@ -93,15 +112,22 @@ pub async fn insert_theme_block(db: &SqlitePool, theme: &Theme) -> ApiResult<()>
     }
 }
 
-/// Active theme is the block currently saved in the public home_page.
-/// Optional content templates travel with the theme, with a built-in fallback.
+/// Explicit active theme controls CPT templates. Without an explicit activation
+/// preserve the pre-0011 home_page-selected template for migrated websites.
 pub async fn active_content_templates(
     db: &SqlitePool,
 ) -> ApiResult<(Option<String>, Option<String>)> {
     let templates: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT t.content_list_template, t.content_single_template
-         FROM home_page AS p JOIN theme_blocks AS t ON t.id = p.block_id
-         WHERE p.id = 1",
+        "SELECT
+            CASE WHEN a.block_id IS NULL THEN legacy.content_list_template
+                 ELSE active.content_list_template END,
+            CASE WHEN a.block_id IS NULL THEN legacy.content_single_template
+                 ELSE active.content_single_template END
+         FROM site_active_theme AS a
+         LEFT JOIN theme_blocks AS active ON active.id = a.block_id
+         LEFT JOIN home_page AS p ON p.id = 1
+         LEFT JOIN theme_blocks AS legacy ON legacy.id = p.block_id
+         WHERE a.id = 1",
     )
     .fetch_optional(db)
     .await?;
@@ -134,16 +160,4 @@ pub async fn load_home_page(db: &SqlitePool) -> ApiResult<Option<Block>> {
         })
     })
     .transpose()
-}
-
-pub async fn save_home_page(db: &SqlitePool, block: &Block) -> ApiResult<()> {
-    sqlx::query(
-        "INSERT INTO home_page (id, block_id, values_json) VALUES (1, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET block_id = excluded.block_id, values_json = excluded.values_json",
-    )
-    .bind(&block.kind)
-    .bind(serde_json::to_string(&block.values)?)
-    .execute(db)
-    .await?;
-    Ok(())
 }
