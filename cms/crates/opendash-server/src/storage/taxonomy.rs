@@ -572,18 +572,7 @@ mod tests {
         .await
         .unwrap()
         .last_insert_rowid();
-        // Simulate the membership table introduced later by P10; this fixture
-        // checks FK/restrict compatibility without preempting its migration.
-        sqlx::query(
-            "CREATE TABLE entry_terms (
-                entry_id INTEGER NOT NULL REFERENCES content_entries(id) ON DELETE CASCADE,
-                term_id INTEGER NOT NULL REFERENCES taxonomy_terms(id) ON DELETE RESTRICT,
-                PRIMARY KEY (entry_id, term_id)
-            )",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
+        // P10 migration 0013 now creates the entry_terms table.
         sqlx::query("INSERT INTO entry_terms (entry_id, term_id) VALUES (?, ?)")
             .bind(entry_id)
             .bind(parent.id)
