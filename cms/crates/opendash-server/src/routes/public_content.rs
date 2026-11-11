@@ -13,12 +13,12 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::{
-    content_render::{self, entry_view},
+    content_render::{self, SiteContext, entry_view},
     error::{ApiError, ApiResult},
     media::MediaStore,
     storage::{
         content::load_content_type_definition, media, page::active_content_templates,
-        public_content,
+        public_content, settings,
     },
 };
 
@@ -76,12 +76,17 @@ pub async fn archive(
     let previous = (page > 1).then(|| format!("/content/{type_key}?page={}", page - 1));
     let next = has_more.then(|| format!("/content/{type_key}?page={}", page + 1));
     let (list_template, _) = active_content_templates(&db).await?;
-    let html = content_render::render_archive(
+    let site = settings::get_general(&db).await?;
+    let html = content_render::render_archive_with_site(
         &schema,
         &entries,
         previous.as_deref(),
         next.as_deref(),
         list_template.as_deref(),
+        &SiteContext {
+            title: &site.site_title,
+            tagline: &site.tagline,
+        },
     )?;
     Ok(public_html(html))
 }
@@ -101,10 +106,15 @@ pub async fn single(
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
     let (_, single_template) = active_content_templates(&db).await?;
-    let html = content_render::render_single(
+    let site = settings::get_general(&db).await?;
+    let html = content_render::render_single_with_site(
         &schema,
         &entry_view(entry, &schema),
         single_template.as_deref(),
+        &SiteContext {
+            title: &site.site_title,
+            tagline: &site.tagline,
+        },
     )?;
     Ok(public_html(html))
 }

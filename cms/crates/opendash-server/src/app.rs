@@ -30,6 +30,7 @@ use crate::{
         },
         public::public_page,
         public_content::{archive, media_file, media_thumb, single},
+        settings::{general_get, general_put, timezones_get},
         users::{
             max_users_json_bytes, user_create, user_delete, user_list, user_patch,
             user_reset_password,
@@ -92,6 +93,13 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
         .route("/auth/login", post(auth_login))
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", post(auth_logout))
+        .route(
+            "/api/admin/settings/general",
+            get(general_get)
+                .put(general_put)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route("/api/admin/settings/timezones", get(timezones_get))
         .route(
             "/api/admin/users",
             get(user_list)

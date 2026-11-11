@@ -6,6 +6,7 @@ pub mod page;
 pub mod plugin;
 pub mod plugin_kv;
 pub mod public_content;
+pub mod settings;
 
 use std::{path::Path, time::Duration};
 
