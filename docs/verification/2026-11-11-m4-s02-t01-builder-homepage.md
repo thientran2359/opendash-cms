@@ -2,7 +2,7 @@
 
 **Issue:** [#78](https://github.com/thientran2359/opendash-cms/issues/78) · **Agent:** Forge · **Scope:** BLD-01 / BLD-01.1 · **Gate:** G3 READY ([approved source](../plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md) at `0e3d9886afa6115f84d97aa8905bc29f18fa56cb`).
 
-**Implementation base:** `origin/main@c6668b73a10c4ff7d990e61a2d14d30bba4a8842` (Builder core #77 and Taxonomy #85 already merged). Dedicated task branch/worktree `task/forge-m4-s02-t01`. **Implementation head:** recorded with PR/commit on GitHub; post-merge G5 requires independent testing at exact merged main SHA. This report documents G4 only; MERGED is not VERIFIED.
+**Implementation base:** `origin/main@c6668b73a10c4ff7d990e61a2d14d30bba4a8842` (Builder core #77 and Taxonomy #85 already merged). Dedicated task branch/worktree `task/forge-m4-s02-t01`. **Implementation head:** `368ac40479f8d29c4ae5ea1deb57d9e9a1a643d5`, merged by [PR #88](https://github.com/thientran2359/opendash-cms/pull/88) into `main@113b8351eb1d5ca527eed68f2ee210495d3b85c0`. MERGED and G5 VERIFIED are evidenced separately below.
 
 ## Implementation and contracts
 
@@ -43,3 +43,29 @@ New `builder_homepage_smoke.py` checks: guest 401; Admin/Editor access; CSRF and
 - `page/after_save` event uses the original `block_type` for exactly one legacy element; otherwise `core/layout` with numeric `layout_version`; draft props are never included in hook payload. An injected failing hook is exercised post-commit in the Rust test and leaves the saved layout intact. Event plugin-delivery logic remains the existing HookDispatcher; no new plugin permissions.
 - Migration 0013 is additive; preserve a consistent database+uploads snapshot **before upgrade** for binary-M3 rollback. Never downgrade in-place using SQLx migration row deletion. A restored M3 binary uses its corresponding pre-upgrade data.
 - The integration must still pass required GitHub Ubuntu/Windows checks at the **final PR head**. Windows native G5 after merge is a separate sign-off; no release/deploy from this task.
+
+## G5 — Native Windows validation on merged main (2026-11-11)
+
+**Verdict: G5 VERIFIED for M4-S02-T01 / Builder homepage API and public renderer.** This is an independent run **after** PR #88 merged, checked out at the exact product source `main@113b8351eb1d5ca527eed68f2ee210495d3b85c0` in a new dedicated Windows worktree `opendash-cms-forge-m4-s02-g5` (initially detached at that commit). It is not an inference from PR CI, the pre-merge worktree or an updated `main` at a later SHA.
+
+| Actual command (root unless noted) | Post-merge result |
+| --- | --- |
+| `cd cms/admin; npm ci --no-audit --no-fund; npm run build` | **PASS**, 62 Vite modules, embedded Admin assets produced |
+| `cargo fmt --manifest-path cms/Cargo.toml --all --check` | **PASS** |
+| `cargo build --manifest-path cms/Cargo.toml --locked` | **PASS**, Windows native Rust, recompiled core/server from G5 worktree source |
+| `cargo test --manifest-path cms/Cargo.toml --workspace --locked` | **PASS 82/82** (25 core, 57 server; 0 doc tests) |
+| `python cms/scripts/check-standards.py` | **PASS** |
+| `python cms/scripts/check-plans.py`, `python cms/scripts/check-plans.py --self-test` | **PASS**, 12 fixtures in self-test |
+| `python cms/scripts/builder_homepage_smoke.py --binary <new-exe> --m3-binary <real-m3-release-exe>` | **PASS**, all Builder/M3/Open/Preview/Save/ACL/CAS/race/rollback groups |
+| `python cms/scripts/themes_smoke.py --binary <new-exe> --baseline-db cms/fixtures/baseline_0001.sqlite` | **PASS** |
+| `python cms/scripts/media_smoke.py --binary <new-exe>` | **PASS** |
+| `python cms/scripts/public_content_smoke.py --binary <new-exe>` | **PASS** |
+| `python cms/scripts/taxonomy_terms_smoke.py --binary <new-exe> --pre-m4-binary <real-m3-release-exe>` | **PASS**, including actual M3 backup/restore |
+
+`CARGO_TARGET_DIR` points to the task cache folder `../opendash-cms-forge-m4-s01-t01/cms/target`; Cargo **recompiled opendash-core and opendash-server from the post-merge G5 source**, not from the pre-merge build. Python HTTP/SQLite smoke uses the new binary compiled by the G5 build and temporary site roots; no user site or production database was touched. The genuine Windows M3 release binary's checked SHA256 matches the G4 section. The G5 worktree was clean after executing tests, before changing this verification document.
+
+**Required GitHub CI:** OpenDash Governance on exact implementation head `368ac40479f8d29c4ae5ea1deb57d9e9a1a643d5`, [run 43030674547](https://github.com/thientran2359/opendash-cms/actions/runs/43030674547): **Ubuntu SUCCESS, Windows SUCCESS**, prior to merge. Forge performed a documented self-review at that exact head under ADR-0008 (not independent peer review); PR merged with `expected_head_sha`.
+
+**G5 limits:** Task #78 implements Builder document source/REST/public renderer but **not** P03 canvas, inspector or frontend layout editing controls. No Linux/macOS native release was run for this task. No in-place SQLx downgrade was attempted. Binary-M3 restore uses only a preserved pre-migration snapshot. Product source remained pinned to `113b835`; evidence-only commits after this section cannot substitute for new product test results.
+
+**Sign-off:** Forge (Windows), M4-S02-T01 — **G5 VERIFIED**. Eligible to transition Issue #78 and Project #3 to `Done`/completed, without implying G5 for unrelated M4 slices.
