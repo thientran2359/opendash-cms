@@ -1,5 +1,7 @@
 # M4 · Đặc tả responsive, list block và nghiệm thu
 
+> **Lịch sử đề xuất.** Quyết định và đặc tả có hiệu lực nằm ở [ADR-0011](../../docs/decisions/ADR-0011-m4-builder-editor-responsive-list.md) và [G3 toàn bộ phần còn lại của M4](../../docs/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md).
+
 **Atlas · G2 PROPOSED · G3 DRAFT · Source audit `main@fa0dad08fc67958a27efd0c5d96b84a7b85ddd1e`.** Phạm vi là homepage Builder. Tài liệu áp dụng [kế hoạch M4](../../docs/plans/milestones/M4/TASK_PLAN.md), [ADR-0007](../../docs/decisions/ADR-0007-m4-builder-taxonomy-foundation.md) và [ADR-0008](../../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md). Dùng mã candidate trong trao đổi thiết kế và mã task sau khi G3 có hiệu lực. GitHub Issue và Project ghi trạng thái, chủ sở hữu, source SHA và liên kết nghiệm thu.
 
 ## Trình tự và quyền sửa
