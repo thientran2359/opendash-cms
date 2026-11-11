@@ -14,6 +14,14 @@ Tài liệu này dành cho người quản lý dự án và các coding agent. M
 4. Phân loại **Full-Track/Fast-Track** trước khi giao việc. Với Full-Track, phải qua G1 và chốt G2 trước khi chia task G3. ADR/contract chỉ cập nhật nếu có quyết định liên module hoặc thay đổi hợp đồng hiện hữu. Task ở dạng bảng trong module brief; [mẫu task](templates/SLICE_TASK.md) dùng để handoff, không mặc định tạo file task riêng.
 5. Chỉ bắt đầu thay đổi source sau khi nêu được contract, dependency, cách dùng lại API lõi, cách kiểm thử, dữ liệu cần bảo toàn và phần ngoài phạm vi. Ghi bằng chứng chạy thực tế tại `docs/verification/`.
 
+## Chuẩn bị G3 cho toàn bộ milestone
+
+Khi chủ dự án giao Atlas chuẩn bị một milestone, Atlas chịu trách nhiệm hoàn thiện bộ tài liệu G3 cho **toàn bộ task trong phạm vi milestone**, kể cả task triển khai sau hoặc đang chờ dependency. Có thể chia tài liệu thành nhiều PR theo nhóm công việc. Lượt chuẩn bị hoàn tất khi mọi candidate trong phạm vi đã được đối chiếu với các task có đặc tả G3 trên `main` hoặc có quyết định đã ghi về việc gộp, dời hay loại khỏi phạm vi.
+
+1. Đối chiếu phạm vi milestone, danh sách candidate, contract đã có và task đã phát hành. Chốt các quyết định G1/G2 cần thiết cho toàn bộ phần còn lại, tái dùng đặc tả G3 đã có nếu vẫn đúng.
+2. Viết đặc tả theo [mẫu task](templates/SLICE_TASK.md). Mỗi task có mã `Mx-Sxx-Txx`, phạm vi và phần ngoài phạm vi, contract đã chốt, dependency và thứ tự bàn giao, owner và file ownership, tiêu chí nghiệm thu và cách kiểm chứng. Nếu nhiều task sửa cùng file, ghi rõ ai giữ quyền sửa ở từng lượt. Trao đổi bằng mã task và dùng GitHub Issue/Project để theo dõi trạng thái.
+3. Phân biệt tài liệu G3 đã hoàn tất với trạng thái Project `Ready`. Task phụ thuộc vẫn phải có đặc tả đầy đủ và ghi rõ điều kiện mở khóa. Chỉ chuyển từng task sang `Ready` sau khi xác minh đặc tả trên `main`, ownership, dependency và các điều kiện nhận triển khai của task đó.
+
 ## Hai trục kế hoạch độc lập
 
 | Trục | Cấp | Trả lời câu hỏi |
