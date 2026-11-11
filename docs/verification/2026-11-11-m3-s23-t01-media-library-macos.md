@@ -1,6 +1,6 @@
 # M3-S23-T01 — Media Library UI, macOS implementation and integration
 
-**Task:** [Issue #36](https://github.com/thientran2359/opendash-cms/issues/36) · **Author:** Harbor (CoS macOS) · **Status:** IMPLEMENTED and locally verified on macOS; **G5 pending exact-head CI, merge and Project closeout**.
+**Task:** [Issue #36](https://github.com/thientran2359/opendash-cms/issues/36) · **Author:** Harbor (CoS macOS) · **Status:** **G5 VERIFIED for M3-S23-T01**, 2026-11-11; Issue closed, Project #3 Done. Does not imply all M3 is complete.
 
 ## Contract, source, and ownership
 
@@ -56,7 +56,10 @@ Three real Admin screenshots were captured from the isolated site and stored wit
 
 Browser fixture uploads used Canvas-created JPEG/PNG/WebP `File` objects dispatched through the real React upload input; actual bytes were accepted by the real Rust server. Browser navigation/selection used Playwright clicks. The plugin session reported three browser console errors across the full session, including expected unauthorized requests; a dedicated page-exception audit was not run. All test media and users were confined to the temporary SQLite/site.
 
-## Pending release gates
+## Final G5 release evidence
 
-1. Commit the final integration + evidence, open a follow-up PR toward `main` for Issue #36 and verify GitHub Ubuntu/Windows governance checks on the exact PR head, mergeability and no security/data blockers.
-2. Merge with expected head SHA only after all required checks PASS under ADR-0005. Report merged SHA and G5 evidence to Issue #36 and update Project `Done` only when actual acceptance is complete. Coordinate a separate `TASK_INDEX.md` status sync with a single assigned writer.
+- Previous standalone component: [PR #38](https://github.com/thientran2359/opendash-cms/pull/38), merged to `main@92cbfe0a0c28b7f4bf06548d1caee177dc08a748`.
+- Integrated route and screenshots: [PR #42](https://github.com/thientran2359/opendash-cms/pull/42), exact tested head **`0b5e82f1fb1a05a0c338fb2fc52aae5a3c51afbd`**, `main` base **`ddab2515fc87c8a5b8145ad66c67afdb43e950e1`**. GitHub confirmed mergeable before merge.
+- Required [OpenDash Governance run 42949868148](https://github.com/thientran2359/opendash-cms/actions/runs/42949868148) completed **SUCCESS** on exact PR head. Jobs **`governance-windows-latest` SUCCESS** and **`governance-ubuntu-latest` SUCCESS**; no high severity blocker identified.
+- PR #42 was merged with `expected_head_sha=0b5e82f1fb1a05a0c338fb2fc52aae5a3c51afbd`, producing **`main@acf1ff9e4ed9b3a0be3944d37abf9aa0963abf0e`**. [Issue #36](https://github.com/thientran2359/opendash-cms/issues/36) contains signed Harbor G5 evidence and was closed `completed` after GitHub Project #3 Status was verified **Done**.
+- The only remaining documentation action was to synchronize the M3-P11/M3-S23-T01 rows in `docs/plans/TASK_INDEX.md` through a separate Harbor-owned docs PR. No further application-code change is implied by the index snapshot.
