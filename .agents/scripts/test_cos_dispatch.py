@@ -71,9 +71,43 @@ class DispatchTests(unittest.TestCase):
                                  "M4-S08-T01", "a" * 40, "b" * 40)
             with self.assertRaisesRegex(adapter.Blocked, "TASK_ALREADY_DISPATCHED"):
                 adapter.send("harbor", str(uuid.uuid4()), "issue", 104,
-                             "M4-S08-T01", "a" * 40, "c" * 40)
+                             "M4-S08-T01", "c" * 40, "d" * 40)
         self.assertEqual(first["outcome"], "ACCEPTED")
         self.assertEqual(api.call_count, 1)
+
+    def test_status_task_uses_existing_task_lock_without_request_id(self):
+        issue, task_id, source = 104, "M4-S08-T01", "a" * 40
+        with mock.patch.object(adapter, "load_config", return_value={"project_id": str(uuid.uuid4())}), \
+             mock.patch.object(adapter, "probe", return_value={"can_send": True}), \
+             mock.patch.object(adapter, "call_api", return_value=(202, {})):
+            self.assertEqual(adapter.status_task("harbor", issue, task_id, source)["outcome"], "NOT_SENT")
+            delivered = adapter.send("harbor", self.request_id, "issue", issue,
+                                     task_id, source, "b" * 40)
+        with mock.patch.object(adapter, "load_config", return_value={"project_id": str(uuid.uuid4())}), \
+             mock.patch.object(adapter, "call_api", side_effect=adapter.Blocked("OFFLINE")):
+            report = adapter.status_task("harbor", issue, task_id, source)
+        self.assertEqual(report["request_id"], self.request_id)
+        self.assertEqual(report["input_id"], delivered["input_id"])
+        self.assertEqual(report["outcome"], "ACCEPTED")
+        self.assertEqual(report["issue"], issue)
+        with mock.patch.object(adapter, "load_config", return_value={}), \
+             mock.patch.object(adapter, "call_api", side_effect=adapter.Blocked("OFFLINE")):
+            changed = adapter.status_task("harbor", issue, task_id, "c" * 40)
+        self.assertTrue(changed["source_sha_changed_since_dispatch"])
+        self.assertEqual(changed["request_id"], self.request_id)
+
+    def test_status_task_rejects_lock_mismatch_without_api(self):
+        issue, task_id, source = 104, "M4-S08-T01", "a" * 40
+        lock = adapter.issue_lock_file("forge", issue, task_id)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text(json.dumps({"target": "harbor", "issue": issue,
+                                    "task_id": task_id, "source_sha": source,
+                                    "request_id": self.request_id}), encoding="utf-8")
+        with mock.patch.object(adapter, "load_config", return_value={}), \
+             mock.patch.object(adapter, "call_api") as api:
+            with self.assertRaisesRegex(adapter.Blocked, "TASK_LOCK_MISMATCH"):
+                adapter.status_task("forge", issue, task_id, source)
+        api.assert_not_called()
 
     def test_access_check_precedes_bearer_read_for_every_route(self):
         with mock.patch.object(adapter, "security_check", return_value=(False, "UNTRUSTED_WRITER")), \
@@ -185,6 +219,20 @@ class DispatchTests(unittest.TestCase):
             returncode=255, stdout='{"configured":true}', stderr="error")):
             with self.assertRaisesRegex(adapter.Blocked, "MAC_REMOTE_COMMAND_FAILED"):
                 adapter.run_remote(args)
+
+    def test_mac_ssh_host_is_persisted_after_bootstrap(self):
+        args = argparse.Namespace(command="bootstrap", target="harbor", ssh_host="atlas@10.0.0.2",
+                                  worktree="/Users/test/Local Sites/opendash-cms-mac-cos")
+        with mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(
+            returncode=0, stdout='{"configured":true}', stderr="")):
+            adapter.run_remote(args)
+        self.assertEqual(adapter.saved_ssh_host(), "atlas@10.0.0.2")
+        args.command = "probe"
+        args.ssh_host = ""
+        with mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(
+            returncode=0, stdout='{"can_send":true}', stderr="")) as run:
+            self.assertTrue(adapter.run_remote(args)["can_send"])
+        self.assertIn("atlas@10.0.0.2", run.call_args.args[0])
 
 
 if __name__ == "__main__":

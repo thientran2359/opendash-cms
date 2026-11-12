@@ -39,7 +39,7 @@
   [github-task-pickup](.agents/skills/github-task-pickup/SKILL.md) when asked to fetch/perform one's GitHub Issue,
   [discussion-turn-responder](.agents/skills/discussion-turn-responder/SKILL.md) when asked to check and answer one's discussion turns,
   [github-pr-review-merge](.agents/skills/github-pr-review-merge/SKILL.md) for Atlas reviewing and merging eligible implementation and concluded design PRs,
-  and [atlas-task-dispatch](.agents/skills/atlas-task-dispatch/SKILL.md) for Atlas to assign/handoff tasks to Forge/Harbor through GitHub with a guarded future CoS adapter.
+  and [atlas-task-dispatch](.agents/skills/atlas-task-dispatch/SKILL.md) for Atlas to RUN/STATUS already assigned Forge/Harbor Issues through the guarded one-shot CoS adapter.
   Read the corresponding SKILL.md on request even if the host does not auto-discover repo skills.
   No skill starts any background process, cronjob or automatic CoS dispatch.
   `.agents/archive/skills/` contains retired skills for reference ONLY.
