@@ -28,3 +28,4 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [G5 GitHub Management (2026-11-09)](2026-11-09-github-governance-g5.md) — Issue Forms, Project, Ruleset, CI và giới hạn của evidence.
 - [CodeGraph — thiết lập và truy vấn trên Windows (2026-11-07)](2026-11-07-codegraph-setup.md) — kiểm chứng công cụ/index và MCP, **không phải CMS runtime E2E hoặc kết nối CodeGraph cho mọi agent**.
 - [Skill review/merge thủ công của Atlas/Nova (2026-11-10)](2026-11-10-review-merge-skill.md) — kiểm thử quy trình, artifact guard và checker theo báo cáo; **không phải CMS HTTP/browser/Windows–Linux E2E**, không suy đã merge từ trạng thái local ghi trong báo cáo.
+- [Adapter Atlas → CoS Windows: W01 ACL và PONG thực tế (2026-11-12)](2026-11-12-cos-dispatch-w01-pong.md) — chứng cứ gửi chat trên Forge và giới hạn token rotation/production Issue pickup.

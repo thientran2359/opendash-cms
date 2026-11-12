@@ -49,6 +49,25 @@ def storage_root():
     return user_data() / "atlas-dispatch"
 
 
+def saved_ssh_host():
+    """Read the Atlas PC's private SSH destination set during bootstrap."""
+    path = storage_root() / "remote-host.json"
+    try:
+        host = json.loads(path.read_text(encoding="utf-8"))["harbor"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise Blocked("MAC_SSH_HOST_NOT_CONFIGURED") from exc
+    if not isinstance(host, str) or not HOST_RE.fullmatch(host):
+        raise Blocked("INVALID_SAVED_SSH_HOST")
+    return host
+
+
+def save_ssh_host(host):
+    if not HOST_RE.fullmatch(host):
+        raise Blocked("INVALID_SSH_HOST")
+    create_private_dir(storage_root())
+    atomic_private_json(storage_root() / "remote-host.json", {"harbor": host})
+
+
 def normalized(path):
     # Each host resolves its own paths. Windows comparisons are case insensitive.
     result = os.path.realpath(os.path.abspath(os.path.expanduser(str(path))))
@@ -195,15 +214,21 @@ def bootstrap(target, worktree):
 def windows_acl_safe():
     # Inspect native SIDs; account display names cannot safely identify ACL grants.
     script = r'''
-$p = Join-Path $env:APPDATA 'chat-on-steroids\control-api'
-$state = Join-Path $env:APPDATA 'chat-on-steroids\state\projects.json'
-$private = Join-Path $env:APPDATA 'chat-on-steroids\atlas-dispatch'
+$root = Join-Path $env:APPDATA 'chat-on-steroids'
+$p = Join-Path $root 'control-api'
+$stateDir = Join-Path $root 'state'
+$state = Join-Path $stateDir 'projects.json'
+$private = Join-Path $root 'atlas-dispatch'
 $receipts = Join-Path $private 'receipts'
 $who = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$known = @($who, 'S-1-5-18', 'S-1-5-32-544')
+# CREATOR OWNER (S-1-3-0) and OWNER RIGHTS (S-1-3-4) refer to the
+# checked object's trusted owner, not to another independent user.
+$known = @($who, 'S-1-5-18', 'S-1-5-32-544', 'S-1-3-0', 'S-1-3-4')
 $unexpected = @()
-$paths = @($p, (Join-Path $p 'token'), (Join-Path $p 'endpoint.json'),
-           $state, $private, (Join-Path $private 'targets.json'), $receipts)
+$remoteHost = Join-Path $private 'remote-host.json'
+$paths = @($root, $p, (Join-Path $p 'token'), (Join-Path $p 'endpoint.json'),
+           $stateDir, $state, $private, (Join-Path $private 'targets.json'), $receipts)
+if (Test-Path -LiteralPath $remoteHost) { $paths += $remoteHost }
 if (Test-Path -LiteralPath $receipts) {
   $paths += @(Get-ChildItem -LiteralPath $receipts -Force | Select-Object -ExpandProperty FullName)
 }
@@ -230,9 +255,25 @@ foreach ($item in $paths) {
     $rights = [int]$rule.FileSystemRights
     # ReadData, WriteData, AppendData, WriteEA/attributes, Delete,
     # WriteDac or WriteOwner all compromise bearer or its redirect metadata.
-    if ($rule.AccessControlType -eq 'Allow' -and ($rights -band 0x000D0117) -and
+    if ($rule.AccessControlType -eq 'Allow' -and ($rights -band 0x000D0157) -and
         $known -notcontains $rule.IdentityReference.Value) {
       $unexpected += $rule.IdentityReference.Value
+    }
+  }
+}
+# A parent with DELETE_CHILD, WRITE_DAC or WRITE_OWNER could replace the
+# protected CoS root even when that root's own ACL is safe. Avoid hardening
+# the whole Windows APPDATA tree; simply refuse unsafe parent permissions.
+$parent = Get-Item -LiteralPath $env:APPDATA
+if (($parent.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+  $unexpected += 'APPDATA_REPARSE_POINT'
+} else {
+  $pa = Get-Acl -LiteralPath $env:APPDATA
+  foreach ($rule in $pa.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+    if ($rule.AccessControlType -eq 'Allow' -and
+        $known -notcontains $rule.IdentityReference.Value -and
+        (([int]$rule.FileSystemRights -band 0x000C0040) -ne 0)) {
+      $unexpected += 'APPDATA_UNTRUSTED_REPLACE_RIGHT'
     }
   }
 }
@@ -253,12 +294,15 @@ foreach ($item in $paths) {
 
 def posix_acl_safe():
     data = user_data()
-    paths = [data / "control-api", data / "control-api" / "token",
-             data / "control-api" / "endpoint.json", data / "state" / "projects.json",
+    paths = [data, data / "control-api", data / "control-api" / "token",
+             data / "control-api" / "endpoint.json", data / "state", data / "state" / "projects.json",
              storage_root(), storage_root() / "targets.json"]
     receipts = storage_root() / "receipts"
     if receipts.exists():
         paths.extend([receipts, *receipts.iterdir()])
+    remote_host_file = storage_root() / "remote-host.json"
+    if remote_host_file.exists():
+        paths.append(remote_host_file)
     for path in paths:
         try:
             info = path.lstat()
@@ -367,11 +411,11 @@ def receipt_file(target, request_id):
     return storage_root() / "receipts" / (identifier + ".json")
 
 
-def issue_lock_file(target, issue, task_id, source_sha):
-    # A fresh request UUID for the same approved task must not open a second
-    # chat. A repeat requires an explicit future release workflow, not a retry.
-    # base_sha can legitimately advance while a dispatch is in flight.
-    material = [target, issue, task_id, source_sha]
+def issue_lock_file(target, issue, task_id):
+    # The first RUN of this assigned Issue/task wins, even when the source
+    # or base SHA later changes. Explicit re-dispatch needs a reviewed new
+    # generation rather than a new UUID or amended GitHub source.
+    material = [target, issue, task_id]
     identifier = hashlib.sha256(json.dumps(material, separators=(",", ":")).encode("utf-8")).hexdigest()
     return storage_root() / "receipts" / ("task-" + identifier + ".json")
 
@@ -460,7 +504,7 @@ def send(target, request_id, mode, issue=None, task_id=None, source_sha=None, ba
               "input_id": input_id, "payload_hash": digest, "outcome": "UNKNOWN",
               "issue": issue, "task_id": task_id, "source_sha": source_sha, "base_sha": base_sha}
     if mode == "issue":
-        task_lock = issue_lock_file(target, issue, task_id, source_sha)
+        task_lock = issue_lock_file(target, issue, task_id)
         if task_lock.exists():
             raise Blocked("TASK_ALREADY_DISPATCHED_REUSE_EXISTING_REQUEST")
         # Reserve task identity BEFORE reserving the request/POST. A crash
@@ -515,6 +559,34 @@ def status(target, request_id):
                                        "pong_verified", "unexpected_tool_calls") if k in checked}
 
 
+def status_task(target, issue, task_id, source_sha):
+    """Find the durable receipt for an Issue without remembering its request UUID."""
+    if not isinstance(issue, int) or issue < 1 or not TASK_RE.fullmatch(task_id or ""):
+        raise Blocked("INVALID_ISSUE_ID_OR_TASK_ID")
+    if not SHA_RE.fullmatch(source_sha or ""):
+        raise Blocked("SOURCE_SHA_REQUIRED")
+    safe, reason = security_check()
+    if not safe:
+        raise Blocked("HOST_NOT_AUTHORIZED_" + reason)
+    load_config(target)
+    lock = issue_lock_file(target, issue, task_id)
+    if not lock.exists():
+        return {"target": target, "issue": issue, "task_id": task_id,
+                "outcome": "NOT_SENT"}
+    record = json.loads(lock.read_text(encoding="utf-8"))
+    if any((record.get("target") != target, record.get("issue") != issue,
+            record.get("task_id") != task_id)):
+        raise Blocked("TASK_LOCK_MISMATCH")
+    request_id = record.get("request_id")
+    if not isinstance(request_id, str):
+        raise Blocked("TASK_LOCK_INCOMPLETE")
+    result = status(target, request_id)
+    result.update(issue=issue, task_id=task_id)
+    if record.get("source_sha") != source_sha:
+        result["source_sha_changed_since_dispatch"] = True
+    return result
+
+
 def execute_local(args):
     if args.command == "bootstrap":
         return bootstrap(args.target, args.worktree)
@@ -527,13 +599,13 @@ def execute_local(args):
                     args.task_id, args.source_sha, args.base_sha)
     if args.command == "status":
         return status(args.target, args.request_id)
+    if args.command == "status-task":
+        return status_task(args.target, args.issue, args.task_id, args.source_sha)
     raise Blocked("UNKNOWN_COMMAND")
 
 
 def run_remote(args):
-    host = args.ssh_host
-    if not host:
-        raise Blocked("MAC_SSH_HOST_NOT_CONFIGURED")
+    host = args.ssh_host or saved_ssh_host()
     if not HOST_RE.fullmatch(host):
         raise Blocked("INVALID_SSH_HOST")
     command = ["python3", "-", "--local", args.command, args.target]
@@ -544,6 +616,9 @@ def run_remote(args):
     if args.command == "send-issue":
         command.extend(["--issue", str(args.issue), "--task-id", args.task_id,
                         "--source-sha", args.source_sha, "--base-sha", args.base_sha])
+    if args.command == "status-task":
+        command.extend(["--issue", str(args.issue), "--task-id", args.task_id,
+                        "--source-sha", args.source_sha])
     remote_command = " ".join(shlex.quote(c) for c in command)
     try:
         proc = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
@@ -560,6 +635,10 @@ def run_remote(args):
         raise Blocked("MAC_RESPONSE_INVALID") from exc
     if proc.returncode and not (isinstance(response, dict) and response.get("error")):
         raise Blocked("MAC_REMOTE_COMMAND_FAILED")
+    if args.command == "bootstrap" and proc.returncode == 0 and response.get("configured") is True:
+        # Once bootstrapped, Atlas can RUN/STATUS Harbor from Codex Remote
+        # without setting an environment variable on every mobile request.
+        save_ssh_host(host)
     return response
 
 
@@ -568,7 +647,7 @@ def main():
     parser.add_argument("--local", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--ssh-host", default=DEFAULT_MAC_SSH)
     sub = parser.add_subparsers(dest="command", required=True)
-    for verb in ("bootstrap", "probe", "send-pong", "send-issue", "status"):
+    for verb in ("bootstrap", "probe", "send-pong", "send-issue", "status", "status-task"):
         p = sub.add_parser(verb)
         p.add_argument("target", choices=tuple(BRANCHES))
         if verb == "bootstrap":
@@ -580,6 +659,10 @@ def main():
             p.add_argument("--task-id", required=True)
             p.add_argument("--source-sha", required=True)
             p.add_argument("--base-sha", required=True)
+        if verb == "status-task":
+            p.add_argument("--issue", type=int, required=True)
+            p.add_argument("--task-id", required=True)
+            p.add_argument("--source-sha", required=True)
     args = parser.parse_args()
     try:
         result = run_remote(args) if args.target == "harbor" and not args.local else execute_local(args)
