@@ -12,7 +12,7 @@ real verification. Historical docs already linked from plans remain preserved.
 - `inbox/`: durable handoff notes, never runtime secrets
 - `scripts/`: future local tools, not automatically enabled
 - `templates/`: task, research and discussion templates
-- `skills/`: three on-demand skills (`github-task-pickup`, `discussion-turn-responder`, `github-pr-review-merge`); no autonomous polling
+- `skills/`: four on-demand skills (`github-task-pickup`, `discussion-turn-responder`, `github-pr-review-merge`, `atlas-task-dispatch`); no autonomous polling
 - `archive/skills/`: retired skills preserved solely for reference
 
 **Quy trình thao tác chung:** [AGENT_OPERATING_STANDARD.md](AGENT_OPERATING_STANDARD.md) quy định cách kiểm branch/Git fetch, GitHub Connector và CoS Desktop Browser dùng đúng phiên Chrome đăng nhập, thực hiện **bởi chính agent trong chat**, không tạo Agent Preflight Check. [GITHUB_WORKFLOW.md](GITHUB_WORKFLOW.md) vẫn là chuẩn Issues/PR; GitHub Issue là nguồn trạng thái task và PR là nguồn review. [Bảng trạng thái M3](../docs/plans/M3_STATUS_2026-11-09.md) phân biệt phần đã làm và backlog.
@@ -34,6 +34,9 @@ the corresponding agent branch and link the commit/PR to the GitHub Issue.
 A push is not review, merge, approval or independent verification.
 Under [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas coordinates the project and may merge any eligible PR. Nova, Harbor and Forge may self-review and merge their own eligible PRs. Required checks, security and data gates apply.
 
-Muse-to-CoS/Antigravity dispatch is a proposal requiring tested adapters and
-authorization, not an installed feature. Never upload credentials, private
-records, raw runtime logs or local database copies into the public Git history.
+Atlas-to-CoS one-shot dispatch is implemented for Forge/Harbor using a local
+authenticated API and SSH to Mac; each host must pass its own security and
+delivery gate. It is invoked by Atlas on demand, not a background service.
+See [the adapter guide](research/2026-11-12-cos-one-shot-adapter.md).
+Never upload credentials, private records, raw runtime logs or local database
+copies into the public Git history.

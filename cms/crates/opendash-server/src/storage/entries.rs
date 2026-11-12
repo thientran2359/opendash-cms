@@ -273,6 +273,23 @@ pub async fn list_published_page(
     sort: PublishedListSort,
     filters: EntryFilters,
 ) -> ApiResult<PublishedListResult> {
+    let mut tx = db.begin().await?;
+    let result =
+        list_published_page_in_tx(&mut tx, type_key, page, page_size, sort, filters).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+/// #106: Use the same #105 predicate and limits within an existing Builder
+/// read/write snapshot. Never issue a second independent query on Save.
+pub async fn list_published_page_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    page: i64,
+    page_size: i64,
+    sort: PublishedListSort,
+    filters: EntryFilters,
+) -> ApiResult<PublishedListResult> {
     if !(1..=100).contains(&page) || !(1..=20).contains(&page_size) {
         return Err(ApiError::bad_request(
             "Trang danh sách phải từ 1–100 và page_size từ 1–20.",
@@ -284,11 +301,12 @@ pub async fn list_published_page(
         ));
     }
 
-    let mut tx = db.begin().await?;
-    let type_exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM content_types WHERE key = ?")
-        .bind(type_key)
-        .fetch_optional(&mut *tx)
-        .await?;
+    let type_exists: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut **tx)
+    .await?;
     if type_exists.is_none() {
         return Ok(PublishedListResult::MissingConfig(
             PublishedListMissing::ContentType,
@@ -310,7 +328,7 @@ pub async fn list_published_page(
             let actual: Option<String> =
                 sqlx::query_scalar("SELECT kind FROM taxonomy_terms WHERE id = ?")
                     .bind(id)
-                    .fetch_optional(&mut *tx)
+                    .fetch_optional(&mut **tx)
                     .await?;
             if actual.as_deref() != Some(kind) {
                 return Ok(PublishedListResult::MissingConfig(missing));
@@ -321,20 +339,11 @@ pub async fn list_published_page(
     // One extra row tells the renderer whether to expose a next-page link.
     // Bounds above guarantee no integer overflow or unbounded fetch.
     let offset = (page - 1) * page_size;
-    let mut entries = query_entries_filtered(
-        &mut tx,
-        type_key,
-        page_size + 1,
-        offset,
-        filters,
-        true,
-        sort,
-    )
-    .await?;
+    let mut entries =
+        query_entries_filtered(tx, type_key, page_size + 1, offset, filters, true, sort).await?;
     // ADR-0011 stops pagination at page 100 even if more records exist.
     let has_next = page < 100 && entries.len() > page_size as usize;
     entries.truncate(page_size as usize);
-    tx.commit().await?;
     Ok(PublishedListResult::Page(PublishedListPage {
         entries,
         has_next,
