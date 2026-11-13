@@ -119,12 +119,13 @@ pub async fn active_content_templates(
 ) -> ApiResult<(Option<String>, Option<String>)> {
     let templates: Option<(Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT
-            CASE WHEN a.block_id IS NULL THEN legacy.content_list_template
+            CASE WHEN r.legacy_block_id IS NULL THEN legacy.content_list_template
                  ELSE active.content_list_template END,
-            CASE WHEN a.block_id IS NULL THEN legacy.content_single_template
+            CASE WHEN r.legacy_block_id IS NULL THEN legacy.content_single_template
                  ELSE active.content_single_template END
-         FROM site_active_theme AS a
-         LEFT JOIN theme_blocks AS active ON active.id = a.block_id
+         FROM theme_active_selection AS a
+         LEFT JOIN theme_revisions AS r ON r.revision_id = a.revision_id
+         LEFT JOIN theme_blocks AS active ON active.id = r.legacy_block_id
          LEFT JOIN home_page AS p ON p.id = 1
          LEFT JOIN theme_blocks AS legacy ON legacy.id = p.block_id
          WHERE a.id = 1",
