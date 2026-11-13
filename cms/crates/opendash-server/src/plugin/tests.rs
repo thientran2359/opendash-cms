@@ -165,6 +165,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Loop Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
@@ -223,12 +224,14 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Trap Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions {
                 sqlite: vec!["kv_write".into()],
                 http: vec![], content_read: vec![],
+            content_write: vec![],
             },
         };
 
@@ -290,6 +293,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "No Perm".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
@@ -355,6 +359,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Mem Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
@@ -432,6 +437,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "HTTP Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
@@ -439,6 +445,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![target_url.clone()],
                 content_read: vec![],
+            content_write: vec![],
             },
         };
 
@@ -762,6 +769,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Abort".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
@@ -811,6 +819,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "UTF8".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
@@ -896,6 +905,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Worker Teardown Test".into(),
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
@@ -983,6 +993,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Slow Worker".into(),
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
@@ -990,6 +1001,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![origin.clone()],
                 content_read: vec![],
+            content_write: vec![],
             },
         };
 
@@ -1061,6 +1073,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Echo Recovery".into(),
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
@@ -1132,6 +1145,7 @@ mod tests {
             api_version: 1,
             manifest_schema: 1,
             min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Hang Plugin".into(),
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
@@ -1139,6 +1153,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![origin.clone()],
                 content_read: vec![],
+            content_write: vec![],
             },
         };
 

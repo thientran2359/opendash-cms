@@ -33,6 +33,23 @@ pub struct HostContext {
     pub cancellation_token: Arc<AtomicBool>,
     pub deadline: Instant,
     pub execution_mode: opendash_core::hooks::HookExecutionMode,
+    pub staged_content_command: Option<StagedContentCommand>,
+    pub action_capabilities: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StagedContentCommand {
+    pub type_key: String,
+    #[serde(default)]
+    pub entry_id: Option<i64>,
+    #[serde(default)]
+    pub expected_version: Option<i64>,
+    pub slug: String,
+    pub title: String,
+    #[serde(default)]
+    pub values: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub term_ids: Option<Vec<i64>>,
 }
 
 impl HostContext {
@@ -50,6 +67,20 @@ pub enum HostOperationRequest {
     KvGet { key: String },
     #[serde(rename = "kv_set")]
     KvSet { key: String, value: Value },
+    #[serde(rename = "content_save")]
+    ContentSave {
+        type_key: String,
+        #[serde(default)]
+        entry_id: Option<i64>,
+        #[serde(default)]
+        expected_version: Option<i64>,
+        slug: String,
+        title: String,
+        #[serde(default)]
+        values: BTreeMap<String, Value>,
+        #[serde(default)]
+        term_ids: Option<Vec<i64>>,
+    },
     #[serde(rename = "http_request")]
     HttpRequest {
         method: String,
@@ -113,6 +144,16 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             if ctx.execution_mode != opendash_core::hooks::HookExecutionMode::Standard {
                 return HostOperationResponse::err("Ghi KV bị cấm trong save hook.");
             }
+            if let Some(ref caps) = ctx.action_capabilities {
+                if !caps.iter().any(|c| c == "kv_write") {
+                    return HostOperationResponse::err("permission_denied: action:kv_write");
+                }
+            }
+            if ctx.staged_content_command.is_some() {
+                return HostOperationResponse::err(
+                    "Không cho phép trộn ghi KV và ghi nội dung trong cùng một action (V1).",
+                );
+            }
             handle_kv_set(ctx, &key, value)
         }
         HostOperationRequest::HttpRequest {
@@ -120,7 +161,72 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             url,
             headers,
             body,
-        } => handle_http_request(ctx, &method, &url, headers, body),
+        } => {
+            if ctx.execution_mode != opendash_core::hooks::HookExecutionMode::Standard {
+                return HostOperationResponse::err("Gọi HTTP ngoài bị cấm trong save hook.");
+            }
+            if let Some(ref caps) = ctx.action_capabilities {
+                if !caps.iter().any(|c| c == "http") {
+                    return HostOperationResponse::err("permission_denied: action:http");
+                }
+            }
+            if let Ok(parsed) = url::Url::parse(&url) {
+                let path = parsed.path();
+                if path.starts_with("/api/admin") || path == "/save" || path == "/preview" || path == "/theme" {
+                    return HostOperationResponse::err("Cấm gọi HTTP loopback tới Admin/CMS nội bộ.");
+                }
+            }
+            handle_http_request(ctx, &method, &url, headers, body)
+        }
+        HostOperationRequest::ContentSave {
+            type_key,
+            entry_id,
+            expected_version,
+            slug,
+            title,
+            values,
+            term_ids,
+        } => {
+            if ctx.execution_mode != opendash_core::hooks::HookExecutionMode::Standard {
+                return HostOperationResponse::err("Ghi nội dung bị cấm trong save hook.");
+            }
+            if let Some(ref caps) = ctx.action_capabilities {
+                if !caps.iter().any(|c| c == "content_write") {
+                    return HostOperationResponse::err("permission_denied: action:content_write");
+                }
+            }
+            if !ctx.staged_kv_writes.is_empty() {
+                return HostOperationResponse::err(
+                    "Không cho phép trộn ghi KV và ghi nội dung trong cùng một action (V1).",
+                );
+            }
+            if ctx.staged_content_command.is_some() {
+                return HostOperationResponse::err(
+                    "Mỗi action chỉ được thực thi tối đa một lệnh ghi nội dung (V1).",
+                );
+            }
+            if !ctx.manifest.can_write_content_type(&type_key) {
+                return HostOperationResponse::err("permission_denied: content_write");
+            }
+            ctx.staged_content_command = Some(StagedContentCommand {
+                type_key,
+                entry_id,
+                expected_version,
+                slug,
+                title,
+                values,
+                term_ids,
+            });
+            HostOperationResponse {
+                ok: true,
+                error: None,
+                found: None,
+                value: None,
+                status: None,
+                headers: None,
+                body: None,
+            }
+        }
     }
 }
 
@@ -325,7 +431,15 @@ fn handle_http_request(
         }
         let dns_timeout = std::cmp::min(Duration::from_secs(1), remaining);
         let lookup = format!("{}:{}", clean_host, port);
-        let lookup_res = tokio::runtime::Handle::current().block_on(async {
+        let lookup_res = if let Ok(h) = tokio::runtime::Handle::try_current() {
+            h.block_on(async { tokio::time::timeout(dns_timeout, tokio::net::lookup_host(&lookup)).await })
+        } else if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            rt.block_on(async { tokio::time::timeout(dns_timeout, tokio::net::lookup_host(&lookup)).await })
+        } else {
+            return HostOperationResponse::err("Lỗi DNS: không khởi tạo được runtime.");
+        };
+        #[cfg(any())]
+        let _unused = tokio::runtime::Handle::current().block_on(async {
             tokio::time::timeout(dns_timeout, tokio::net::lookup_host(lookup)).await
         });
         let addrs_iter = match lookup_res {

@@ -125,6 +125,41 @@ async fn decoded_with_terms(
 /// Acquire a writer before checking a term's existence or entry CAS. The same
 /// SQLite writer reservation is used by taxonomy term deletion, so no race can
 /// commit a link to a term that has just been deleted.
+#[derive(Debug, Clone)]
+pub struct PluginActionFence {
+    pub plugin_id: String,
+    pub expected_generation: i64,
+    pub required_role: String,
+}
+
+async fn verify_plugin_action_fence(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: &SessionContext,
+    fence: &PluginActionFence,
+) -> ApiResult<()> {
+    let active = crate::storage::plugin::is_plugin_generation_active(
+        &mut **tx,
+        &fence.plugin_id,
+        fence.expected_generation,
+    )
+    .await?;
+    if !active {
+        return Err(ApiError::conflict(
+            "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",
+        ));
+    }
+    let role_ok = crate::storage::plugin::is_actor_role_active(
+        &mut **tx,
+        actor.user.id,
+        &fence.required_role,
+    )
+    .await?;
+    if !role_ok {
+        return Err(ApiError::forbidden("Quyền của tài khoản đã bị thu hồi."));
+    }
+    Ok(())
+}
+
 async fn begin_entry_write<'a>(
     db: &'a SqlitePool,
     actor: &SessionContext,
@@ -455,7 +490,21 @@ pub async fn create_entry(
     schema: &opendash_core::content::ContentTypeDefinition,
     input: &ContentEntryInput,
 ) -> ApiResult<ContentEntryRecord> {
+    create_entry_with_fence(db, actor, type_key, schema, input, None).await
+}
+
+pub async fn create_entry_with_fence(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    schema: &opendash_core::content::ContentTypeDefinition,
+    input: &ContentEntryInput,
+    fence: Option<&PluginActionFence>,
+) -> ApiResult<ContentEntryRecord> {
     let mut tx = begin_entry_write(db, actor).await?;
+    if let Some(f) = fence {
+        verify_plugin_action_fence(&mut tx, actor, f).await?;
+    }
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, ids).await?;
@@ -503,7 +552,24 @@ pub async fn update_entry(
     expected_version: i64,
     input: &ContentEntryInput,
 ) -> ApiResult<ContentEntryRecord> {
+    update_entry_with_fence(db, actor, type_key, schema, id, expected_version, input, None).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn update_entry_with_fence(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    schema: &opendash_core::content::ContentTypeDefinition,
+    id: i64,
+    expected_version: i64,
+    input: &ContentEntryInput,
+    fence: Option<&PluginActionFence>,
+) -> ApiResult<ContentEntryRecord> {
     let mut tx = begin_entry_write(db, actor).await?;
+    if let Some(f) = fence {
+        verify_plugin_action_fence(&mut tx, actor, f).await?;
+    }
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
