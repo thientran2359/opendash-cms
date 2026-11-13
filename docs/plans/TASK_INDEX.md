@@ -170,16 +170,16 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 
 | Mã candidate / task | Công việc | Trạng thái | GitHub Issue / PR |
 | --- | --- | --- | --- |
-| [M7-P01](milestones/M7/TASK_PLAN.md) | Mở rộng Site Settings UI/engine core M3, phân quyền | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ M5/M6 G5 | — |
-| [M7-P02](milestones/M7/TASK_PLAN.md) | Menu/navigation CRUD và binding theme trên model M5, không tạo persistence riêng | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ M5/M6 G5 | — |
-| [M7-P03](milestones/M7/TASK_PLAN.md) | SEO fields: URL/redirect/canonical/title/description/OG/robots | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ M5/M6 G5 | — |
-| [M7-P04](milestones/M7/TASK_PLAN.md) | Sitemap tự động và invalidation | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ M5/M6 G5 | — |
-| [M7-P05](milestones/M7/TASK_PLAN.md) | Builder contact form schema/validation/submission persistence | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ M5/M6 G5 | — |
-| [M7-P06](milestones/M7/TASK_PLAN.md) | SMTP settings + thông báo/giám sát khi gửi lỗi | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ M5/M6 G5 | — |
-| [M7-P07](milestones/M7/TASK_PLAN.md) | E2E Site Features + video / security | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ M5/M6 G5 | — |
-| [M7-P08](milestones/M7/TASK_PLAN.md) | D từ #15 (video): media video V1 có metadata/serving/limits an toàn | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ M5/M6 G5 | — |
+| [M7-P01](milestones/M7/TASK_PLAN.md) | Mở rộng Site Settings UI/engine core M3, phân quyền | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | — |
+| [M7-P02](milestones/M7/TASK_PLAN.md) | Menu/navigation CRUD và binding theme trên model M5, không tạo persistence riêng | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | — |
+| [M7-P03](milestones/M7/TASK_PLAN.md) | SEO fields: URL/redirect/canonical/title/description/OG/robots | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | — |
+| [M7-P04](milestones/M7/TASK_PLAN.md) | Sitemap tự động và invalidation | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | — |
+| [M7-P05](milestones/M7/TASK_PLAN.md) | Builder contact form schema/validation/submission persistence | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | — |
+| [M7-P06](milestones/M7/TASK_PLAN.md) | SMTP settings + thông báo/giám sát khi gửi lỗi | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | — |
+| [M7-P07](milestones/M7/TASK_PLAN.md) | E2E Site Features + video / security | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | — |
+| [M7-P08](milestones/M7/TASK_PLAN.md) | D từ #15 (video): media video V1 có metadata/serving/limits an toàn | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | — |
 
-**M7 planning 14/11/2026:** 8 candidate → 14 task `M7-S01-T01` đến `M7-S08-T04`; xem [G3 coverage](milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Chưa phát hành implementation Issues/Project Ready; owner/acceptance đã đặc tả, Nova tiếp tục M6. G2/G3 docs có hiệu lực sau PR merge, implementation NOT_STARTED/runtime NOT_RUN.
+**M7 planning 14/11/2026:** 8 candidate → 14 task `M7-S01-T01` đến `M7-S08-T04`; xem [G3 coverage](milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Chưa phát hành implementation Issues/Project Ready; owner/acceptance đã đặc tả, Nova tiếp tục M6. G2/G3 docs có hiệu lực sau PR merge, implementation NOT_STARTED/runtime NOT_RUN. Theo ADR-0014 amendment, chờ M5/M6 Windows development gate; macOS hoãn nhưng cần trước V1, không đòi đóng hai Issue để pickup.
 
 ## [M8 — Operations & Release](https://github.com/thientran2359/opendash-cms/milestone/9) (8)
 

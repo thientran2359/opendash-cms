@@ -89,6 +89,20 @@ Reuse `/api/admin/media/{id}/file` and `/media/{id}/file`, canonical MediaStore 
 
 ## 9. Release and operations boundary
 
-All8 candidates covered by [14 G3 tasks](../plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). ANY M7 implementation Ready waits M5#157 and M6#188 actual G5 including native/browser/rollback evidence/no security holds. Docs may merge while these remain open; ordering change needs explicit Atlas ADR delta.
+All8 candidates covered by [14 G3 tasks](../plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Owner-approved [macOS deferral](../decisions/ADR-0014-m7-site-features.md#owner-directed-macos-deferral--2026-11-14) replaces full predecessor multi-OS closure with the Windows development gate below for implementation pickup only.
 
 M7 G5 common immutable source on native Windows x64 and macOS, binary hashes/commands, fresh+pre-M7 upgrade, old image/import/theme/plugin regression, menus/SEO/forms/SMTP TLS fixture/video playback/Range, concurrency/CAS/abuse/cancel/crash, restart and complete pre-M7 snapshot restore using matching old binary. CI governance Ubuntu/Windows not native/browser proof. Local deterministic SMTP fixtures/no real recipients, tiny valid MP4 fixtures/isolated sites; each OS separate evidence file. Product bugs fixed separately then repin common SHA and rerun affected gates on both. M8 owns Linux deployment, full backup engine, media delete/reconcile and secret-retention tooling.
+
+### Windows development gate and deferred macOS
+
+Before any M7 implementation Ready, coordinator verifies all items on a pinned M5/M6 Windows source and records a merged supplemental report (proposed `docs/verification/2026-11-14-m5-m6-windows-entry.md`, created only after actual runs) linked from #157/#188:
+
+- Locked Admin/Rust builds, workspace/M5/M6 focused tests and required CI pass, source SHA/binary hashes and OS recorded.
+- Real-browser M5 settings/options/menu/import/template override/Preview-Save, theme switch/preservation, publication/media ACL, 401/412 and security regressions pass.
+- M5 pre-M5 DB+files snapshot restores with matching M4 binary `a176414`; verify actual old site works, not just archive extraction or SQL reopen.
+- Real-browser M6 plugin install/UI/action/veto/disable/restart/re-enable, retained data/layout/settings, failure isolation and snapshot/matching-binary recovery pass.
+- No unresolved security/data blocker; macOS remains explicit NOT_RUN. Original Windows reports alone do not satisfy the missing browser/M5 rollback checks.
+
+This is a development entry gate, not M5/M6 closure. Their open macOS Issues/milestones do not block M7 pickup once Windows gate passes. Per-slice M7 dependencies may use scoped Windows acceptance with macOS NOT_RUN, after normal G3/ownership/Issue/Project checks; no automatic Ready transition here. Windows native tests replace no required Windows security/data checks. macOS-only permission/playback/native cases are deferred, not marked passed, and do not prevent implementing the Windows slice.
+
+Final M5/M6 multi-OS closure, M7-S08-T03 macOS and M7-S08-T04 release summary remain required before V1 release. Keep final common-source Windows/macOS evidence per milestone; later code fixes require affected regression on both platforms. No waiver of M8 Linux/backup/release gates or product security requirements.

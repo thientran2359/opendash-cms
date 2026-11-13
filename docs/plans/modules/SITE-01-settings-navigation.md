@@ -28,8 +28,10 @@ Contract/ADR linked là nguồn normative cho schema/API/CAS/limits/privacy/roll
 
 - `M7-S01-T01`: xem toàn bộ scope/files/interfaces/dependency/acceptance/tests trong G3 nguồn.
 - `M7-S02-T01`: xem toàn bộ scope/files/interfaces/dependency/acceptance/tests trong G3 nguồn.
-Mọi task có coordinator Atlas, owner dự kiến trong G3; Issue/Project chưa phát hành, M5#157/M6#188 G5 và seam handoff là gate thực thi. READY documentation khác Project Ready.
+Mọi task có coordinator Atlas, owner dự kiến trong G3; Issue/Project chưa phát hành, M5/M6 Windows development gate (ADR-0014§macOS deferral) và seam handoff là gate thực thi. READY documentation khác Project Ready.
 
 ## G5 — Bằng chứng và rollback
 
-Chưa có M7 runtime evidence. Integration/negative/native browser ở Primary Acceptance Slice; cross-domain S08 chạy cùng immutable SHA Windows+macOS, snapshot restore matching old binary. Evidence ghi exact commands/hash/OS/PASS/FAIL/NOT_RUN; security/data hoặc required case NOT_RUN chặn G5. Không sửa applied migration hoặc dùng Git revert để phục hồi DB.
+Chưa có M7 runtime evidence. Integration/negative/native browser ở Primary Acceptance Slice; cross-domain S08 chạy cùng immutable SHA Windows+macOS, snapshot restore matching old binary. Evidence ghi exact commands/hash/OS/PASS/FAIL/NOT_RUN; security/data hoặc required Windows case NOT_RUN chặn Windows acceptance; deferred macOS NOT_RUN vẫn chặn full multi-OS/V1 closure. Không sửa applied migration hoặc dùng Git revert để phục hồi DB.
+
+**Owner-directed development track:** implementation dependencies may use scoped Windows acceptance after M5/M6 Windows entry gate; deferred macOS cases remain NOT_RUN and still required for S08/V1 closure. [ADR amendment](../../decisions/ADR-0014-m7-site-features.md#owner-directed-macos-deferral--2026-11-14).

@@ -10,7 +10,7 @@ Nguồn: [PRD](../../../../product/PRODUCT_REQUIREMENTS.md), [ADR-0014](../../..
 Làm đủ P01–P08 trên CMS hiện tại: settings/menu, canonical URL/SEO/sitemap, form do người dùng tạo trong Builder và Admin submissions/SMTP, video library/Range/core video. Thành công cần UI/public behavior + fresh/upgrade/preservation/security/native/browser evidence, không chỉ backend.
 Không làm đa ngữ, advanced/repeater forms, arbitrary plugin UI, scheduled jobs/retries, transcoding, hard media delete/reconcile, Linux deployment hoặc backup engine M8.
 
-Mọi task Full-Track; G2 AGREED/G3 READY là **đặc tả**, trạng thái thực thi PLANNED/BLOCKED_DEPENDENCY. M5#157/M6#188 phải G5 thật trước ANY implementation Ready. Owner giao Nova hoàn tất M6 không đồng nghĩa Nova đã hoàn tất, không dispatch/chiếm M6.
+Mọi task Full-Track; G2 AGREED/G3 READY là **đặc tả**, trạng thái thực thi PLANNED/BLOCKED_DEPENDENCY. Theo owner-approved ADR-0014 amendment, M5/M6 Windows development gate (contract§9) phải PASS trước ANY implementation Ready; macOS NOT_RUN được hoãn, không cần đóng #157/#188 để pickup. Owner giao Nova hoàn tất M6 không đồng nghĩa Nova đã hoàn tất, không dispatch/chiếm M6.
 Chỉ phát hành implementation Issues từ immutable merged G3 commit, coordinator xác minh dependency/ownership/Project Ready; không tạo live queue ở .agents/tasks.
 
 ## Coverage, capability và Primary Acceptance Slice
@@ -32,6 +32,8 @@ Migration tuần tự0025→0031 theo [contract §1](../../../../contracts/M7_SI
 Đường găng an toàn: S01→S02→S03-T01→S03-T02→S04→S05-T01→S05-T02→S06→S07-T01→S07-T02→S08-T01→(S08-T02 song song S08-T03)→S08-T04.
 Có thể tối ưu lịch sau bằng handoff ghi trên Issue; không bỏ migration dependency/đổi G2 hoặc cho hai writer chung file.
 
+Mọi predecessor G5 trong dependency implementation dưới đây được đọc là acceptance theo phạm vi Windows trong development track; không thay thế native S08-T03 hay final S08-T04. Mỗi receipt ghi rõ Windows VERIFIED/macOS NOT_RUN; owner đề xuất không phải active assignment.
+
 **Shared wiring files** (chỉ task hiện tại được coordinator giao seam): cms/crates/opendash-server/src/app.rs, main.rs, routes/mod.rs, storage/mod.rs; cms/crates/opendash-core/src/lib.rs; cms/admin/src/App.tsx, api/index.ts. Chỉ thêm module/routes/nav/state phục vụ slice hiện tại; không refactor unrelated.
 Danh sách file riêng từng task dưới đây cộng shared wiring khi cần là ownership cho lần triển khai; mọi file ngoài danh sách cần coordinator giao bổ sung trước khi sửa. Auth/ZIP/package/plugin runtime không thuộc ownership M7; dùng Base APIs, issue bug riêng nếu phát hiện thiếu. File browser report cùng source không ghi đồng thời.
 
@@ -41,7 +43,7 @@ Mỗi task implementation thêm integration test đúng tên dưới đây, ch�
 Lệnh từ root: `cargo build --manifest-path cms/Cargo.toml --locked`; `cargo test --manifest-path cms/Cargo.toml --test <test-name> --locked`; `npm --prefix cms/admin run typecheck`; `npm --prefix cms/admin run build` khi sửa UI. Không dùng --locked trước lần cập nhật Cargo.lock có chủ ý cho new dependency; sau lock phải build/test --locked.
 Governance bắt buộc: `python cms/scripts/check-plans.py`, `python cms/scripts/check-plans.py --self-test`, `python cms/scripts/check-standards.py`, `python .agents/scripts/check-agent-artifacts.py`, `git diff --check`. S08 chạy toàn workspace và native browser/TLS/video/ACL trên cảOS.
 Browser runner khi có: `python cms/scripts/m7_browser_e2e.py --base-url <local-origin> --site-root <isolated-site> --artifact-dir <outside-git>`. Test report ghi exact command/path/SHA/OS/hash, không commit PII/live credentials/private runtime.
-Migration dùng copy DB/files và pre-M7 binary snapshot, không rollback bằng git revert. Security/data FAIL hoặc required NOT_RUN chặn task G5; issue fix riêng, không hạ acceptance.
+Migration dùng copy DB/files và pre-M7 binary snapshot, không rollback bằng git revert. Security/data FAIL hoặc required Windows NOT_RUN chặn scoped Windows task acceptance; macOS NOT_RUN được hoãn cho implementation slices theo ADR-0014, nhưng vẫn chặn native macOS task và multi-OS/V1 closure; issue fix riêng, không hạ acceptance.
 **Stop-and-Propose:** PRD/security/ABI/applied migration/new public contract thay đổi cần Atlas quyết định + ADR/contract delta; internal refinement ghi Design Delta/test, không tự upgrade dependency.
 **Bàn giao chung:** commit/PR head+base, file diff, commands PASS/FAIL/NOT_RUN, native/browser limits, migration snapshot path và regression evidence; Issue/Project là nguồn live, không suy Done từ PR merged.
 
@@ -81,7 +83,7 @@ Không sửa theme/plugin options, cấu hình SMTP hoặc deploy proxy.
 
 #### Phụ thuộc và điều kiện chặn
 
-M5 #157 G5 + M6 #188 G5; không có predecessor M7. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M5/M6 Windows development gate (contract§9) PASS; macOS NOT_RUN được hoãn; không có predecessor M7. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -147,7 +149,7 @@ Không tạo persistence/menu renderer thứ hai; không thêm custom link path 
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S01-T01 G5 (migration và shared App/settings handoff). Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S01-T01 G5 (migration và shared App/settings handoff). Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -215,7 +217,7 @@ Không custom taxonomy/archive URL, arbitrary redirect destinations hoặc scrip
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S02-T01 G5; bàn giao storage/menu.rs, app.rs và import.rs. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S02-T01 G5; bàn giao storage/menu.rs, app.rs và import.rs. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -293,7 +295,7 @@ Không raw HTML/schema.org, taxonomy metadata CRUD, media video làm OG hoặc r
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S03-T01 G5; độc quyền seo/storage/entries/render seams được bàn giao. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S03-T01 G5; độc quyền seo/storage/entries/render seams được bàn giao. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -368,7 +370,7 @@ Không persistent cache/background invalidation/search-console submission hoặc
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S03-T02 G5; bàn giao seo/routes rendering và app.rs. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S03-T02 G5; bàn giao seo/routes rendering và app.rs. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -433,7 +435,7 @@ Không SMTP network, CAPTCHA/upload/auto-retention hoặc guest form actions.
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S04-T01 G5; migration0027 và app.rs/seo seams đã bàn giao. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S04-T01 G5; migration0027 và app.rs/seo seams đã bàn giao. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -501,7 +503,7 @@ Không script runtime/form builder arbitrary HTML, plugin custom UI hoặc multi
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S05-T01 G5; S04-T01 đã bàn giao public/render seams. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S05-T01 G5; S04-T01 đã bàn giao public/render seams. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -575,7 +577,7 @@ Không cron/outbox worker/auto retry, SMTP arbitrary recipient, external live ma
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S05-T02 G5; migration0028 và contact/render/App handoff. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S05-T02 G5; migration0028 và contact/render/App handoff. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -650,7 +652,7 @@ Không ffmpeg/transcode/generic MP4 parser/frame thumbnail hoặc CPT field kind
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S06-T01 G5 (migration numbering0029 và Cargo/app handoff). Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S06-T01 G5 (migration numbering0029 và Cargo/app handoff). Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -721,7 +723,7 @@ Không autoplay/remote src, new field kinds, deleting uploaded assets hoặc pub
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S07-T01 G5; S05-T02/S06 bàn giao core Builder, renderer, media refs. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S07-T01 G5; S05-T02/S06 bàn giao core Builder, renderer, media refs. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -800,7 +802,7 @@ Không sửa sản phẩm trong evidence task; lỗi mở fix riêng, repin SHA;
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S01..S07 toàn bộ task G5; độc quyền fixture/test files. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S01..S07 toàn bộ task G5; độc quyền fixture/test files. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -869,7 +871,7 @@ Không suy từ CI/Wine/build thành browser/native PASS; không đóng mileston
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S08-T01 G5; Atlas pin common immutable source + pre-M7 binary snapshot. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S08-T01 G5; Atlas pin common immutable source + pre-M7 binary snapshot. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -931,7 +933,7 @@ Không nói verified Apple Silicon nếu chỉ chạy Intel; không suy macOS t�
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S08-T01 G5; cùng source pin với S08-T02, không sửa fixture giữa haiOS. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S08-T01 G5; cùng source pin với S08-T02, không sửa fixture giữa haiOS. Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 
@@ -993,7 +995,7 @@ Không Linux deployment/backup engine/M8 G5; không tự đóng milestone nếu 
 
 #### Phụ thuộc và điều kiện chặn
 
-M7-S08-T02 và T03 G5 cùngSHA; tất cả implementation G5/CI, M5#157/M6#188 closed hợp lệ. Mọi implementation Ready phải chờ M5#157 và M6#188 actual G5, merged immutable G3 và Issue/Project Ready. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
+M7-S08-T02 và T03 G5 cùngSHA; tất cả implementation G5/CI, M5#157/M6#188 full multi-OS G5 và closed hợp lệ (release gate, không dùng để chặn implementation pickup). Mọi implementation Ready cần M5/M6 Windows development gate PASS (build/tests + browser + M5 matching-M4-binary rollback + M6 recovery, evidence merged và link #157/#188), merged immutable G3 và Issue/Project Ready; macOS NOT_RUN hoãn theo ADR-0014, không tự coi VERIFIED đaOS. Coordinator Atlas; owner dự kiến trong metadata phải được ghi lại trong Issue trước claim. Đọc toàn bộ global constraints/ownership của G3 nguồn, không chỉ bản trích Issue. Không tiến hành task tiếp theo trên cùng seam khi predecessor còn dirty/PR chưa merge/G5 chưa đạt.
 
 #### Kỹ thuật và file ownership
 

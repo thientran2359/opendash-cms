@@ -101,3 +101,5 @@
 ## M7 source-backed design update — 14/11/2026
 
 SITE-01/02/03 và video CNT-05 có [G1](../../.agents/research/2026-11-14-m7-site-features-g1.md), [ADR-0014](../decisions/ADR-0014-m7-site-features.md), [contract](../contracts/M7_SITE_FEATURES.md), [full G3](milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Living briefs: [SITE-01](modules/SITE-01-settings-navigation.md), [SITE-02](modules/SITE-02-seo.md), [SITE-03](modules/SITE-03-contact.md), [CNT-05](modules/CNT-05-media.md). Earlier Planned cells are historical implementation summaries, not absence of current G2/G3. Design agreed on merge; M7 implementation NOT_STARTED/G5 NOT_RUN; no dependency waiver or Project Ready implied.
+
+**Owner sequencing update 14/11/2026:** [ADR-0014 macOS deferral](../decisions/ADR-0014-m7-site-features.md#owner-directed-macos-deferral--2026-11-14) permits M7 Windows development after the Windows entry checklist passes. macOS NOT_RUN stays explicit and blocks final multi-OS/V1 release, not implementation pickup.
