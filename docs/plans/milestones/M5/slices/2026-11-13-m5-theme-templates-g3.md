@@ -66,7 +66,7 @@ Không triển khai ZIP v2 parser, HTTP routes `/api/themes/*` hay `/theme/*` as
 Không phụ thuộc task M5 khác. Đọc `cms/migrations/0011_theme_activation.sql`, `cms/crates/opendash-server/src/storage/theme.rs`, `cms/crates/opendash-server/src/theme.rs`.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/migrations/0015_theme_packages_revisions.sql` (mới), `cms/crates/opendash-server/src/storage/theme.rs`, `cms/crates/opendash-server/src/storage/mod.rs` (chỉ nếu export thêm type), unit/integration tests trong `cms/crates/opendash-server/tests/` (tên riêng `m5_s01_t01_theme_revisions.rs`).
+- **File được sửa/tạo độc quyền:** `cms/migrations/0015_theme_packages_revisions.sql` (mới), `cms/crates/opendash-server/src/storage/theme.rs`, `cms/crates/opendash-server/src/storage/builder.rs` (chỉ cập nhật query đọc trong `read_home_tx` từ `site_active_theme` sang `theme_active_selection`), `cms/crates/opendash-server/src/storage/page.rs` (chỉ cập nhật query đọc trong `active_content_templates` từ `site_active_theme` sang `theme_active_selection`), `cms/crates/opendash-server/src/storage/mod.rs` (chỉ nếu export thêm type), unit/integration tests trong `cms/crates/opendash-server/tests/` (tên riêng `m5_s01_t01_theme_revisions.rs`).
 - **Không sửa đồng thời:** Không chạm `src/theme.rs`, `src/package.rs`, `src/routes/themes.rs` (dành cho `S01-T02`); không chạm `app.rs` hay `routes/public*.rs` (`S02-T01`).
 - **Contract/API:** Một singleton active pointer; legacy NULL giữ nguyên behavior; không dual-write pointer cũ; `A-DURABILITY` write-before-commit.
 
