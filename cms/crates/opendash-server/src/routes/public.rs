@@ -12,6 +12,7 @@ use opendash_core::id::valid_package_id;
 use crate::{
     error::ApiResult,
     page::{render_builder_with_lists, render_legacy_state},
+    public_context::{CanonicalUrlBuilder, PublicRequestContext},
     storage::builder,
 };
 
@@ -47,6 +48,9 @@ pub async fn public_page(
     State(db): State<SqlitePool>,
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
+    let _context = PublicRequestContext::Home {
+        canonical_path: CanonicalUrlBuilder::home().to_owned(),
+    };
     // One SQLite read snapshot for source, document, active theme and block
     // templates. Do not split them across old / and new Builder reads.
     let (state, bindings, lists) =

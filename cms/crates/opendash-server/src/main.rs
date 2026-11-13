@@ -8,6 +8,7 @@ mod package;
 mod page;
 mod paths;
 mod plugin;
+mod public_context;
 mod routes;
 mod storage;
 mod theme;

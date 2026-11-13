@@ -2,6 +2,7 @@
 use crate::{
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
+    public_context::CanonicalUrlBuilder,
     storage::{
         builder::{HomeState, ListResults, ResolvedList},
         builder_binding::{BindingResult, BindingResults},
@@ -320,16 +321,21 @@ pub fn render_builder_with_lists(
                                         list_html.push_str("<ul>");
                                         for item in items {
                                             // Neither title nor slug is ever treated as raw HTML.
-                                            let path = format!(
-                                                "/content/{}/{}",
-                                                encode_path_segment(&props.type_key),
-                                                encode_path_segment(&item.slug),
-                                            );
-                                            list_html.push_str(&format!(
-                                                "<li><a href=\"{}\">{}</a></li>",
-                                                escape_html(&path),
-                                                escape_html(&item.title),
-                                            ));
+                                            if let Some(path) = CanonicalUrlBuilder::entry(
+                                                &props.type_key,
+                                                &item.slug,
+                                            ) {
+                                                list_html.push_str(&format!(
+                                                    "<li><a href=\"{}\">{}</a></li>",
+                                                    escape_html(&path),
+                                                    escape_html(&item.title),
+                                                ));
+                                            } else {
+                                                list_html.push_str(&format!(
+                                                    "<li>{}</li>",
+                                                    escape_html(&item.title),
+                                                ));
+                                            }
                                         }
                                         list_html.push_str("</ul>");
                                         if !is_preview && *page > 1 {
@@ -433,14 +439,10 @@ pub fn render_builder_with_lists(
     Ok(RenderedLayout { html, diagnostics })
 }
 
-fn encode_path_segment(value: &str) -> String {
-    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
-}
-
 /// Canonical link: only currently resolved node IDs with valid nondefault pages
 /// survive. Unknown query parameters, duplicates and invalid values are dropped.
 fn list_page_href(lists: &ListResults, node_id: &str, target: i64) -> String {
-    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    let mut pages = std::collections::BTreeMap::new();
     for (id, current) in lists {
         let ResolvedList::Page {
             page, out_of_range, ..
@@ -456,15 +458,10 @@ fn list_page_href(lists: &ListResults, node_id: &str, target: i64) -> String {
             *page
         };
         if (2..=100).contains(&effective) {
-            query.append_pair(&format!("list_page_{id}"), &effective.to_string());
+            pages.insert(id.clone(), effective);
         }
     }
-    let encoded = query.finish();
-    if encoded.is_empty() {
-        "/".into()
-    } else {
-        format!("/?{encoded}")
-    }
+    CanonicalUrlBuilder::home_list_pages(&pages)
 }
 
 pub fn render_legacy_state(state: &HomeState) -> ApiResult<Option<RenderedBlock>> {
