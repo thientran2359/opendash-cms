@@ -207,7 +207,7 @@ fn project_legacy(block: &Block) -> BuilderDocument {
     }
 }
 
-async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<HomeState> {
+pub(crate) async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<HomeState> {
     let (version, raw): (i64, Option<String>) =
         sqlx::query_as("SELECT version, document_json FROM builder_homepage WHERE id = 1")
             .fetch_one(&mut **tx)

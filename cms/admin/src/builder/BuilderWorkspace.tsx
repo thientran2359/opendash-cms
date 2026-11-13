@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import type { AuthUser, BlockRegistry } from '../types.ts';
-import type { BuilderDiagnostic, HomepageOpen } from '../api/builder.ts';
+import type { BuilderDiagnostic, HomepageOpen, OverrideRole } from '../api/builder.ts';
 import {
   type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type ListProps, type NodeKind, type ResponsiveAlign,
   type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
@@ -81,6 +81,9 @@ export function BuilderWorkspace({
 }: Props) {
   const [draft, setDraft] = useState<BuilderDocument>(EMPTY_DOCUMENT);
   const draftRef = useRef<BuilderDocument>(EMPTY_DOCUMENT);
+  const [targetRole, setTargetRole] = useState<'homepage' | OverrideRole>('homepage');
+  const [scopeTypeKey, setScopeTypeKey] = useState('');
+  const [overrideExists, setOverrideExists] = useState(false);
   const [version, setVersion] = useState<number | null>(null);
   const versionRef = useRef<number | null>(null);
   const [source, setSource] = useState<HomepageOpen['source']>('empty');
@@ -282,7 +285,11 @@ export function BuilderWorkspace({
     setPreviewing(true);
     message('Đang tạo bản Preview từ nháp...');
     try {
-      const result = await api.previewHomepage(snapshot, csrfToken, controller.signal);
+      const result = targetRole === 'homepage'
+
+        ? await api.previewHomepage(snapshot, csrfToken, controller.signal)
+
+        : await api.previewOverride(targetRole, snapshot, csrfToken, scopeTypeKey.trim() || null, null, controller.signal);
       if (current !== previewSeq.current || revisionRef.current !== snapshotRevision
           || ownerRef.current !== accountId) return;
       const prepared = await preparePreviewMarkup(result.html, controller.signal);
@@ -314,15 +321,29 @@ export function BuilderWorkspace({
     const accountId = user.id;
     message('Đang lưu snapshot (If-Match "v' + snapshotVersion + '")...');
     try {
-      const result = await api.saveHomepage(snapshot, snapshotVersion, csrfToken);
-      if (ownerRef.current !== accountId) return;
-      versionRef.current = result.version;
-      setVersion(result.version);
-      setSource(result.source);
-      setSavedRevision(snapshotRevision);
-      if (snapshotRevision === revisionRef.current) {
-        invalidatePreview();
-        setDiagnostics(result.diagnostics);
+      if (targetRole === 'homepage') {
+        const result = await api.saveHomepage(snapshot, snapshotVersion, csrfToken);
+        if (ownerRef.current !== accountId) return;
+        versionRef.current = result.version;
+        setVersion(result.version);
+        setSource(result.source);
+        setSavedRevision(snapshotRevision);
+        if (snapshotRevision === revisionRef.current) {
+          invalidatePreview();
+          setDiagnostics(result.diagnostics);
+        }
+      } else {
+        const result = await api.saveOverride(targetRole, snapshot, snapshotVersion, csrfToken, scopeTypeKey.trim() || null, null);
+        if (ownerRef.current !== accountId) return;
+        versionRef.current = result.version;
+        setVersion(result.version);
+        setOverrideExists(true);
+        setSource('layout');
+        setSavedRevision(snapshotRevision);
+        if (snapshotRevision === revisionRef.current) {
+          invalidatePreview();
+          setDiagnostics(result.diagnostics);
+        }
       }
       message(snapshotRevision === revisionRef.current
         ? 'Đã lưu và cập nhật website công khai.'
@@ -342,30 +363,66 @@ export function BuilderWorkspace({
     }
   };
 
-  const reload = async () => {
+  const loadRoleTarget = async (nextRole: 'homepage' | OverrideRole, nextTypeKey: string, confirmDiscard = true) => {
     if (!user || !csrfToken) return;
-    if (revision !== savedRevision && !window.confirm('Bỏ toàn bộ bản nháp hiện tại và tải phiên bản trên server?')) return;
+    if (confirmDiscard && revision !== savedRevision && !window.confirm('B? to?n b? b?n nh?p hi?n t?i v? t?i phi?n b?n tr?n server?')) return;
     const accountId = user.id;
     setLoading(true);
     try {
-      const opened = await api.getHomepage();
-      if (ownerRef.current !== accountId) return;
-      invalidatePreview();
-      draftRef.current = opened.document;
-      setDraft(opened.document);
-      versionRef.current = opened.version;
-      setVersion(opened.version);
-      setSource(opened.source);
-      revisionRef.current = 0;
-      setRevision(0);
-      setSavedRevision(0);
-      setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
-      setConflict(false);
-      message('Đã tải bản server mới (ETag "v' + opened.version + '").');
+      if (nextRole === 'homepage') {
+        const opened = await api.getHomepage();
+        if (ownerRef.current !== accountId) return;
+        invalidatePreview();
+        draftRef.current = opened.document;
+        setDraft(opened.document);
+        versionRef.current = opened.version;
+        setVersion(opened.version);
+        setOverrideExists(false);
+        setSource(opened.source);
+        revisionRef.current = 0;
+        setRevision(0);
+        setSavedRevision(0);
+        setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
+        setConflict(false);
+        message('?? t?i homepage (ETag "v' + opened.version + '").');
+      } else {
+        const opened = await api.getOverride(nextRole, nextTypeKey.trim() || null, null);
+        if (ownerRef.current !== accountId) return;
+        invalidatePreview();
+        draftRef.current = opened.document;
+        setDraft(opened.document);
+        versionRef.current = opened.version;
+        setVersion(opened.version);
+        setOverrideExists(opened.exists);
+        setSource(opened.exists ? 'layout' : 'empty');
+        revisionRef.current = 0;
+        setRevision(0);
+        setSavedRevision(0);
+        setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
+        setConflict(false);
+        message('?? t?i override ' + nextRole + (opened.exists ? ' (ETag "v' + opened.version + '")' : ' (ch?a t?o)') + '.');
+      }
     } catch (cause) {
-      onApiError(cause, 'Không thể tải lại homepage.');
+      onApiError(cause, 'Kh?ng th? t?i l?i template.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const reload = () => loadRoleTarget(targetRole, scopeTypeKey, true);
+
+  const resetRoleOverride = async () => {
+    if (targetRole === 'homepage' || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
+    if (!window.confirm('X?c nh?n reset override "' + targetRole + '" v? m?c ??nh c?a theme?')) return;
+    setSaving(true);
+    try {
+      await api.resetOverride(targetRole, versionRef.current, csrfToken, scopeTypeKey.trim() || null, null);
+      await loadRoleTarget(targetRole, scopeTypeKey, false);
+      message('?? reset override "' + targetRole + '" v? m?c ??nh.');
+    } catch (cause) {
+      onApiError(cause, 'Kh?ng th? reset override.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -376,13 +433,57 @@ export function BuilderWorkspace({
       <style>{'#builder-main:has(.builder-workspace){grid-template-columns:minmax(0,1fr)} #builder-main:has(.builder-workspace)>.editor-sidebar{padding:0;border:0;box-shadow:none;background:transparent;min-width:0}'}</style>
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
         <div>
-          <h2 className="!m-0 text-lg font-bold text-slate-900">Homepage Builder</h2>
+          <h2 className="!m-0 text-lg font-bold text-slate-900">
+            {targetRole === 'homepage' ? 'Homepage Builder' : 'Override: ' + targetRole}
+          </h2>
           <p className="mt-1 text-xs text-slate-500">
             Nguồn: {source} · ETag: {version === null ? 'Chưa tải' : '"v' + version + '"'}
             {dirty && <span className="ml-2 font-semibold text-amber-700">● Chưa lưu</span>}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <label htmlFor="builder-role-target" className="text-sm font-medium text-slate-600">Role</label>
+
+          <select id="builder-role-target" aria-label="Role Builder" className="text-sm"
+
+            value={targetRole} onChange={event => {
+
+              const next = event.target.value as 'homepage' | OverrideRole;
+
+              setTargetRole(next);
+
+              void loadRoleTarget(next, scopeTypeKey, true);
+
+            }}>
+
+            <option value="homepage">homepage</option>
+
+            <option value="page">page</option>
+
+            <option value="header">header</option>
+
+            <option value="footer">footer</option>
+
+            <option value="archive">archive</option>
+
+            <option value="single">single</option>
+
+            <option value="taxonomy_archive">taxonomy_archive</option>
+
+          </select>
+
+          {(targetRole === 'page' || targetRole === 'archive' || targetRole === 'single') && (
+
+            <input type="text" className="w-28 text-sm" placeholder="type_key"
+
+              aria-label="Scope type_key" value={scopeTypeKey}
+
+              onChange={event => setScopeTypeKey(event.target.value)}
+
+              onBlur={() => void loadRoleTarget(targetRole, scopeTypeKey, false)} />
+
+          )}
+
           <label htmlFor="builder-viewport" className="text-sm font-medium text-slate-600">Viewport</label>
           <select id="builder-viewport" aria-label="Viewport Builder" className="text-sm"
             value={viewport} onChange={event => setViewport(event.target.value as BuilderViewport)}>
@@ -396,7 +497,11 @@ export function BuilderWorkspace({
             disabled={!user || loading || previewing || !loadedRef.current}
             onClick={() => void preview()}>Xem trước</button>
           <button id="save" type="button" disabled={!user || loading || saving || !dirty}
-            onClick={() => void save()}> {saving ? 'Đang lưu…' : 'Lưu homepage'} </button>
+            onClick={() => void save()}> {saving ? 'Đang lưu…' : targetRole === 'homepage' ? 'Lưu homepage' : 'Lưu override'} </button>
+          {targetRole !== 'homepage' && overrideExists && (
+            <button type="button" className="btn-secondary" disabled={!user || loading || saving}
+              onClick={() => void resetRoleOverride()}>Reset mặc định</button>
+          )}
           <a href="/" target="_blank" rel="noopener noreferrer" className="rounded border border-slate-200 px-3 py-2 text-sm text-sky-700">
             Trang công khai
           </a>
@@ -453,7 +558,11 @@ export function BuilderWorkspace({
         </section>
         <div className="min-w-0">
           <BuilderInspector document={draft} selectedId={selectedId} registry={registry}
-            csrfToken={csrfToken} viewport={viewport} onChange={editField}
+            csrfToken={csrfToken} viewport={viewport}
+
+            allowRouteContext={targetRole === 'single' || targetRole === 'page'}
+
+            onChange={editField}
             onBindingChange={editBinding} onListChange={editList}
             onResponsiveChange={editResponsive} onError={onApiError} />
         </div>

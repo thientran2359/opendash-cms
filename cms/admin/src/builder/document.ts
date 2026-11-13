@@ -7,7 +7,10 @@ export interface BuilderElement {
 }
 /** ADR-0009: one typed source reference per eligible core element. */
 export type BindingTarget = 'text' | 'media_id' | 'alt' | 'label' | 'url';
-export type BindingSource = { kind: 'title' } | { kind: 'field'; key: string };
+export type BindingSource =
+  | { kind: 'title' }
+  | { kind: 'field'; key: string }
+  | { kind: 'route_context'; field_key: string };
 export interface ElementBinding {
   type_key: string;
   entry_slug: string;

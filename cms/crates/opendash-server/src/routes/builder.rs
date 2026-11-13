@@ -3,12 +3,12 @@ use std::{collections::BTreeMap, sync::Arc};
 use axum::{
     Json,
     body::Bytes,
-    extract::State,
+    extract::{Path, Query, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use opendash_core::builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -20,7 +20,7 @@ use crate::{
     page::{self as page_usecase, render_block, save_page},
     routes::public::rendered,
     storage::{
-        builder as builder_storage,
+        builder as builder_storage, overrides as overrides_storage,
         page::{insert_theme_block, list_theme_blocks},
     },
     theme::{Block, Fields, Theme},
@@ -268,6 +268,190 @@ pub async fn homepage_put(
             html: rendered.html,
             diagnostics: rendered.diagnostics,
         }),
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+pub struct OverrideScopeQuery {
+    pub type_key: Option<String>,
+    pub entry_id: Option<i64>,
+    pub preview_type_key: Option<String>,
+    pub preview_entry_slug: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct OverrideOpen {
+    pub exists: bool,
+    pub role: String,
+    pub scope_type_key: Option<String>,
+    pub scope_entry_id: Option<i64>,
+    pub document: BuilderDocument,
+    pub version: i64,
+    pub base_theme_id: Option<String>,
+    pub base_revision_id: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct OverrideSaved {
+    pub role: String,
+    pub scope_type_key: Option<String>,
+    pub scope_entry_id: Option<i64>,
+    pub document: BuilderDocument,
+    pub version: i64,
+    pub base_theme_id: Option<String>,
+    pub base_revision_id: Option<String>,
+    pub html: String,
+    pub diagnostics: Vec<page_usecase::BuilderDiagnostic>,
+}
+
+#[derive(Deserialize)]
+pub struct OverrideResetRequest {
+    pub confirm: bool,
+}
+
+fn parse_optional_builder_if_match(headers: &HeaderMap) -> ApiResult<Option<i64>> {
+    let Some(raw) = headers.get(header::IF_MATCH) else {
+        return Ok(None);
+    };
+    let value = raw
+        .to_str()
+        .map_err(|_| ApiError::bad_request("If-Match không hợp lệ."))?;
+    let Some(digits) = value
+        .strip_prefix("\"v")
+        .and_then(|tail| tail.strip_suffix('"'))
+    else {
+        return Err(ApiError::bad_request("If-Match phải có dạng \"vN\"."));
+    };
+    if digits == "0" {
+        return Ok(Some(0));
+    }
+    if digits.is_empty() || digits.starts_with('0') || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(ApiError::bad_request("If-Match không hợp lệ."));
+    }
+    digits
+        .parse::<i64>()
+        .ok()
+        .filter(|v| *v >= 1)
+        .map(Some)
+        .ok_or_else(|| ApiError::bad_request("If-Match không hợp lệ."))
+}
+
+pub async fn overrides_list(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    let items = overrides_storage::list_overrides(&db).await?;
+    Ok((builder_headers(None), Json(items)).into_response())
+}
+
+pub async fn override_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(role): Path<String>,
+    Query(query): Query<OverrideScopeQuery>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    let role = overrides_storage::OverrideRole::parse(&role)?;
+    let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
+    let existing = overrides_storage::get_override(&db, &scope).await?;
+    let (exists, document, version, base_theme_id, base_revision_id) = match existing {
+        Some(record) => (
+            true,
+            record.document,
+            record.version,
+            record.base_theme_id,
+            record.base_revision_id,
+        ),
+        None => (false, BuilderDocument::empty(), 0, None, None),
+    };
+    Ok((
+        builder_headers((version > 0).then_some(version)),
+        Json(OverrideOpen {
+            exists,
+            role: scope.role.as_str().to_string(),
+            scope_type_key: scope.scope_type_key,
+            scope_entry_id: scope.scope_entry_id,
+            document,
+            version,
+            base_theme_id,
+            base_revision_id,
+        }),
+    )
+        .into_response())
+}
+
+pub async fn override_preview(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(role): Path<String>,
+    Query(query): Query<OverrideScopeQuery>,
+    bytes: Bytes,
+) -> ApiResult<Response> {
+    require_session_with_csrf(&headers, &db).await?;
+    let role = overrides_storage::OverrideRole::parse(&role)?;
+    let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
+    let document = decode_document(&headers, &bytes)?;
+    let preview_entry = match (
+        query.preview_type_key.as_deref(),
+        query.preview_entry_slug.as_deref(),
+    ) {
+        (Some(tk), Some(slug)) => Some((tk, slug)),
+        _ => None,
+    };
+    let rendered =
+        overrides_storage::preview_override(&db, &scope, &document, preview_entry).await?;
+    Ok((builder_headers(None), Json(rendered)).into_response())
+}
+
+pub async fn override_put(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(role): Path<String>,
+    Query(query): Query<OverrideScopeQuery>,
+    bytes: Bytes,
+) -> ApiResult<Response> {
+    require_session_with_csrf(&headers, &db).await?;
+    let role = overrides_storage::OverrideRole::parse(&role)?;
+    let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
+    let expected_version = parse_optional_builder_if_match(&headers)?;
+    let document = decode_document(&headers, &bytes)?;
+    let (saved, rendered) =
+        overrides_storage::save_override_and_render(&db, &scope, &document, expected_version)
+            .await?;
+    Ok((
+        builder_headers(Some(saved.version)),
+        Json(OverrideSaved {
+            role: saved.role,
+            scope_type_key: saved.scope_type_key,
+            scope_entry_id: saved.scope_entry_id,
+            document: saved.document,
+            version: saved.version,
+            base_theme_id: saved.base_theme_id,
+            base_revision_id: saved.base_revision_id,
+            html: rendered.html,
+            diagnostics: rendered.diagnostics,
+        }),
+    )
+        .into_response())
+}
+
+pub async fn override_reset(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(role): Path<String>,
+    Query(query): Query<OverrideScopeQuery>,
+    Json(body): Json<OverrideResetRequest>,
+) -> ApiResult<Response> {
+    require_session_with_csrf(&headers, &db).await?;
+    let role = overrides_storage::OverrideRole::parse(&role)?;
+    let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
+    let expected_version = parse_builder_if_match(&headers)?;
+    overrides_storage::reset_override(&db, &scope, expected_version, body.confirm).await?;
+    Ok((
+        builder_headers(None),
+        Json(serde_json::json!({ "reset": true, "role": scope.role.as_str() })),
     )
         .into_response())
 }

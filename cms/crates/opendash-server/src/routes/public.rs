@@ -16,7 +16,7 @@ use crate::{
     page::{render_builder_with_lists, render_legacy_state},
     public_context::{CanonicalUrlBuilder, PublicRequestContext},
     routes::themes::ThemeStoreRoot,
-    storage::{builder, settings, theme as theme_storage},
+    storage::{builder, overrides, settings, theme as theme_storage},
     theme,
 };
 
@@ -66,16 +66,26 @@ pub async fn public_page(
         builder::read_public_resolved(&db, &parsed_list_pages(raw.as_deref())).await?;
     if let Some(document) = &state.saved {
         let mut html = render_builder_with_lists(&state, document, false, &bindings, &lists)?.html;
-        if let Some(v2) = &active_v2 {
-            let site = settings::get_general(&db).await?;
-            let theme_opts = settings::get_active_public_theme_options(&db).await?;
-            let site_ctx = SiteContext {
-                title: &site.site_title,
-                tagline: &site.tagline,
-            };
-            let header = v2.roles.get("header").and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
-            let footer = v2.roles.get("footer").and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
-            html = content_render::compose_public_document(header.as_deref(), &html, footer.as_deref());
+        let site = settings::get_general(&db).await?;
+        let theme_opts = settings::get_active_public_theme_options(&db).await?;
+        let site_ctx = SiteContext {
+            title: &site.site_title,
+            tagline: &site.tagline,
+        };
+        let (header, footer) = overrides::resolve_and_render_header_footer(
+            &db,
+            active_v2.as_ref(),
+            &site_ctx,
+            &theme_opts,
+            None,
+        )
+        .await?;
+        if header.is_some() || footer.is_some() {
+            html = content_render::compose_public_document(
+                header.as_deref(),
+                &html,
+                footer.as_deref(),
+            );
         }
         return Ok(rendered_layout(html));
     }
@@ -88,8 +98,14 @@ pub async fn public_page(
                 tagline: &site.tagline,
             };
             if let Ok(home_html) = theme::render_content(home_tpl, &serde_json::json!({ "site": site_ctx, "options": theme_opts })) {
-                let header = v2.roles.get("header").and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
-                let footer = v2.roles.get("footer").and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
+                let (header, footer) = overrides::resolve_and_render_header_footer(
+                    &db,
+                    Some(v2),
+                    &site_ctx,
+                    &theme_opts,
+                    None,
+                )
+                .await?;
                 let html = content_render::compose_public_document(header.as_deref(), &home_html, footer.as_deref());
                 return Ok(rendered_layout(html));
             }

@@ -20,7 +20,8 @@ use crate::{
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
         builder::{
-            builder, homepage_get, homepage_preview, homepage_put, install, page, preview,
+            builder, homepage_get, homepage_preview, homepage_put, install, override_get,
+            override_preview, override_put, override_reset, overrides_list, page, preview,
             registry, save, serve_asset,
         },
         content::{MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list},
@@ -128,6 +129,21 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/builder/homepage/preview",
             post(homepage_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route("/api/admin/builder/overrides", get(overrides_list))
+        .route(
+            "/api/admin/builder/overrides/{role}",
+            get(override_get)
+                .put(override_put)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/builder/overrides/{role}/preview",
+            post(override_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/builder/overrides/{role}/reset",
+            post(override_reset).layer(DefaultBodyLimit::max(4096)),
         )
         .route(
             "/api/admin/settings/general",
