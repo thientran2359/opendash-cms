@@ -41,7 +41,7 @@ use crate::{
         settings::{general_get, general_put, theme_options_get, theme_options_put, timezones_get},
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_list,
-            taxonomy_patch,
+            taxonomy_patch, taxonomy_eligibility_list,
         },
         themes::{ThemeStoreRoot, theme_activate, theme_asset, theme_install, theme_list},
         users::{
@@ -171,6 +171,10 @@ pub fn build_router_with_themes_root(
             axum::routing::patch(taxonomy_patch)
                 .delete(taxonomy_delete)
                 .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/taxonomy/eligibility/{content_type_key}",
+            get(taxonomy_eligibility_list),
         )
         .route(
             "/api/admin/themes",
