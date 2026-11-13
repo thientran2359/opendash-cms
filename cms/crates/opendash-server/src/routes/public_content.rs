@@ -118,6 +118,7 @@ pub async fn archive(
         .and_then(|v2| v2.roles.get("archive").map(String::as_str))
         .or(list_template.as_deref());
     let site = settings::get_general(&db).await?;
+    let theme_opts = settings::get_active_public_theme_options(&db).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
@@ -133,11 +134,11 @@ pub async fn archive(
     let header = active_v2
         .as_ref()
         .and_then(|v2| v2.roles.get("header"))
-        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
     let footer = active_v2
         .as_ref()
         .and_then(|v2| v2.roles.get("footer"))
-        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
     Ok(public_html(content_render::compose_public_document(
         header.as_deref(),
         &body_html,
@@ -184,6 +185,7 @@ pub async fn single(
         .and_then(|v2| v2.roles.get("single").map(String::as_str))
         .or(single_template.as_deref());
     let site = settings::get_general(&db).await?;
+    let theme_opts = settings::get_active_public_theme_options(&db).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
@@ -197,11 +199,11 @@ pub async fn single(
     let header = active_v2
         .as_ref()
         .and_then(|v2| v2.roles.get("header"))
-        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
     let footer = active_v2
         .as_ref()
         .and_then(|v2| v2.roles.get("footer"))
-        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
     Ok(public_html(content_render::compose_public_document(
         header.as_deref(),
         &body_html,
@@ -312,6 +314,7 @@ async fn taxonomy_archive(
         })
         .flatten();
     let site = settings::get_general(db).await?;
+    let theme_opts = settings::get_active_public_theme_options(db).await?;
     // Until S03 role composition, use the core archive template for mixed CPTs.
     // Site-owned content is resolved by its own actual schema above.
     let schema = ContentTypeDefinition {
@@ -341,11 +344,11 @@ async fn taxonomy_archive(
     let header = active_v2
         .as_ref()
         .and_then(|v2| v2.roles.get("header"))
-        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
     let footer = active_v2
         .as_ref()
         .and_then(|v2| v2.roles.get("footer"))
-        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
     Ok(public_html(content_render::compose_public_document(
         header.as_deref(),
         &body_html,

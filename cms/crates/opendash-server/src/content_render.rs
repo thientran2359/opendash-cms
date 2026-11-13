@@ -191,11 +191,16 @@ pub fn authenticated_preview_view(
     view
 }
 
-pub fn render_role_fragment(template: &str, site: &SiteContext<'_>) -> Option<String> {
+pub fn render_role_fragment_with_options(
+    template: &str,
+    site: &SiteContext<'_>,
+    options: &BTreeMap<String, Value>,
+) -> Option<String> {
     theme::render_content(
         template,
         &serde_json::json!({
             "site": site,
+            "options": options,
         }),
     )
     .ok()

@@ -1,8 +1,13 @@
 //! SITE-01 typed General Settings. SQL remains in storage.
 use std::sync::LazyLock;
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use opendash_core::id::valid_snake_key_with_limit;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{SqliteConnection, SqlitePool};
+
+use crate::{error::{ApiError, ApiResult}, storage::media::valid_media_id};
 
 pub const TZDB_VERSION: &str = "2026f";
 pub const MAX_SITE_TITLE_SCALARS: usize = 120;
@@ -114,6 +119,493 @@ pub async fn save_general(
         timezone: input.timezone,
         version: expected_version + 1,
     }))
+}
+
+pub const MAX_THEME_OPTIONS: usize = 64;
+pub const MAX_THEME_OPTION_STRING_CHARS: usize = 4096;
+pub const MAX_THEME_OPTION_CHOICES: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeOptionType {
+    String,
+    Number,
+    Boolean,
+    Select,
+    ImageRef,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeOptionChoice {
+    pub value: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThemeOptionDef {
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub option_type: ThemeOptionType,
+    pub default: serde_json::Value,
+    #[serde(default)]
+    pub public: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<ThemeOptionChoice>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThemeOptionsSnapshot {
+    pub theme_id: String,
+    pub version: i64,
+    pub schema: Vec<ThemeOptionDef>,
+    pub values: BTreeMap<String, serde_json::Value>,
+}
+
+pub enum ThemeOptionsOutcome {
+    Saved(ThemeOptionsSnapshot),
+    NotFound,
+    Stale,
+}
+
+fn valid_plain_string(s: &str, max_chars: usize) -> bool {
+    s.chars().count() <= max_chars
+        && !s
+            .chars()
+            .any(|c| c == '\0' || (c.is_control() && c != '\n' && c != '\t'))
+}
+
+pub fn validate_option_value(
+    def: &ThemeOptionDef,
+    value: &serde_json::Value,
+) -> Result<(), &'static str> {
+    match def.option_type {
+        ThemeOptionType::String => {
+            let s = value
+                .as_str()
+                .ok_or("Giá trị option kiểu string phải là chuỗi.")?;
+            if !valid_plain_string(s, MAX_THEME_OPTION_STRING_CHARS) {
+                return Err("Option string vượt quá 4,096 ký tự hoặc chứa ký tự điều khiển.");
+            }
+            Ok(())
+        }
+        ThemeOptionType::Number => {
+            let n = value
+                .as_f64()
+                .ok_or("Giá trị option kiểu number phải là số hữu hạn.")?;
+            if !n.is_finite() {
+                return Err("Option number phải là số hữu hạn.");
+            }
+            if let Some(min) = def.min
+                && n < min
+            {
+                return Err("Option number nhỏ hơn giá trị min.");
+            }
+            if let Some(max) = def.max
+                && n > max
+            {
+                return Err("Option number lớn hơn giá trị max.");
+            }
+            Ok(())
+        }
+        ThemeOptionType::Boolean => {
+            if !value.is_boolean() {
+                return Err("Option kiểu boolean phải là true hoặc false.");
+            }
+            Ok(())
+        }
+        ThemeOptionType::Select => {
+            let s = value
+                .as_str()
+                .ok_or("Option kiểu select phải là chuỗi lựa chọn.")?;
+            if !def.choices.iter().any(|c| c.value == s) {
+                return Err("Giá trị select không nằm trong danh sách choices.");
+            }
+            Ok(())
+        }
+        ThemeOptionType::ImageRef => match value {
+            serde_json::Value::Null => Ok(()),
+            serde_json::Value::String(id) if valid_media_id(id) => Ok(()),
+            _ => Err("Option image_ref phải là media_id hợp lệ hoặc null."),
+        },
+    }
+}
+
+pub fn parse_theme_options_schema(
+    manifest_json: &str,
+) -> Result<Vec<ThemeOptionDef>, &'static str> {
+    let manifest: serde_json::Value =
+        serde_json::from_str(manifest_json).map_err(|_| "theme.json không hợp lệ.")?;
+    let Some(raw_opts) = manifest.get("options") else {
+        return Ok(Vec::new());
+    };
+    if raw_opts.is_null() {
+        return Ok(Vec::new());
+    }
+    let defs: Vec<ThemeOptionDef> = serde_json::from_value(raw_opts.clone())
+        .map_err(|_| "Khai báo options trong theme.json không đúng cấu trúc.")?;
+    if defs.len() > MAX_THEME_OPTIONS {
+        return Err("Theme vượt quá giới hạn 64 options.");
+    }
+    let mut seen = BTreeSet::new();
+    for def in &defs {
+        if !valid_snake_key_with_limit(&def.key, 64) {
+            return Err("option_key phải là snake_case (1–64 ký tự).");
+        }
+        if !seen.insert(def.key.clone()) {
+            return Err("Trùng lặp option_key trong theme.json.");
+        }
+        if def.label.trim().is_empty() || !valid_plain_string(&def.label, 128) {
+            return Err("Nhãn option không hợp lệ.");
+        }
+        if let Some(min) = def.min
+            && !min.is_finite()
+        {
+            return Err("Giá trị min của option không hợp lệ.");
+        }
+        if let Some(max) = def.max
+            && !max.is_finite()
+        {
+            return Err("Giá trị max của option không hợp lệ.");
+        }
+        if let (Some(min), Some(max)) = (def.min, def.max)
+            && min > max
+        {
+            return Err("min không được lớn hơn max.");
+        }
+        if def.option_type == ThemeOptionType::Select {
+            if def.choices.is_empty() || def.choices.len() > MAX_THEME_OPTION_CHOICES {
+                return Err("Option select phải có 1–64 choices.");
+            }
+            let mut choice_vals = BTreeSet::new();
+            for c in &def.choices {
+                if c.value.trim().is_empty()
+                    || !valid_plain_string(&c.value, 128)
+                    || c.label.trim().is_empty()
+                    || !valid_plain_string(&c.label, 128)
+                    || !choice_vals.insert(c.value.as_str())
+                {
+                    return Err("Choice trong option select không hợp lệ hoặc bị trùng.");
+                }
+            }
+        }
+        validate_option_value(def, &def.default)?;
+    }
+    Ok(defs)
+}
+
+async fn latest_revision_manifest_in_conn(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+) -> ApiResult<Option<String>> {
+    // Prefer currently active revision if it belongs to this theme_id, else latest installed revision.
+    let active: Option<String> = sqlx::query_scalar(
+        "SELECT r.manifest_json
+         FROM theme_active_selection AS a
+         JOIN theme_revisions AS r ON r.revision_id = a.revision_id
+         WHERE a.id = 1 AND r.theme_id = ?",
+    )
+    .bind(theme_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if active.is_some() {
+        return Ok(active);
+    }
+    let latest: Option<String> = sqlx::query_scalar(
+        "SELECT manifest_json FROM theme_revisions
+         WHERE theme_id = ?
+         ORDER BY created_at DESC, rowid DESC
+         LIMIT 1",
+    )
+    .bind(theme_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(latest)
+}
+
+pub async fn get_theme_options_in_conn(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+) -> ApiResult<Option<ThemeOptionsSnapshot>> {
+    let Some(manifest_json) = latest_revision_manifest_in_conn(conn, theme_id).await? else {
+        return Ok(None);
+    };
+    let schema = parse_theme_options_schema(&manifest_json).map_err(ApiError::bad_request)?;
+    let version: i64 = sqlx::query_scalar(
+        "SELECT version FROM theme_option_versions WHERE theme_id = ?",
+    )
+    .bind(theme_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .unwrap_or(1);
+
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
+    )
+    .bind(theme_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut saved_map = BTreeMap::new();
+    for (k, v_json) in rows {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
+            saved_map.insert(k, v);
+        }
+    }
+
+    let mut values = BTreeMap::new();
+    for def in &schema {
+        let v = saved_map
+            .get(&def.key)
+            .cloned()
+            .unwrap_or_else(|| def.default.clone());
+        values.insert(def.key.clone(), v);
+    }
+
+    Ok(Some(ThemeOptionsSnapshot {
+        theme_id: theme_id.to_owned(),
+        version,
+        schema,
+        values,
+    }))
+}
+
+pub async fn get_theme_options(
+    db: &SqlitePool,
+    theme_id: &str,
+) -> ApiResult<Option<ThemeOptionsSnapshot>> {
+    let mut conn = db.acquire().await?;
+    get_theme_options_in_conn(&mut conn, theme_id).await
+}
+
+pub async fn put_theme_options_in_conn(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+    expected_version: i64,
+    submitted: BTreeMap<String, serde_json::Value>,
+) -> ApiResult<ThemeOptionsOutcome> {
+    let Some(manifest_json) = latest_revision_manifest_in_conn(conn, theme_id).await? else {
+        return Ok(ThemeOptionsOutcome::NotFound);
+    };
+    let schema = parse_theme_options_schema(&manifest_json).map_err(ApiError::bad_request)?;
+    let schema_map: BTreeMap<&str, &ThemeOptionDef> =
+        schema.iter().map(|d| (d.key.as_str(), d)).collect();
+
+    for (k, v) in &submitted {
+        let Some(def) = schema_map.get(k.as_str()) else {
+            return Err(ApiError::bad_request(
+                "Option key không tồn tại trong schema của theme.",
+            ));
+        };
+        validate_option_value(def, v).map_err(ApiError::bad_request)?;
+        if def.option_type == ThemeOptionType::ImageRef
+            && let Some(media_id) = v.as_str()
+        {
+            let exists: Option<i64> =
+                sqlx::query_scalar("SELECT 1 FROM media_assets WHERE id = ?")
+                    .bind(media_id)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+            if exists.is_none() {
+                return Err(ApiError::bad_request("media_id của image_ref không tồn tại."));
+            }
+        }
+    }
+
+    let current_ver: Option<i64> = sqlx::query_scalar(
+        "SELECT version FROM theme_option_versions WHERE theme_id = ?",
+    )
+    .bind(theme_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    match current_ver {
+        None => {
+            if expected_version != 1 {
+                return Ok(ThemeOptionsOutcome::Stale);
+            }
+            sqlx::query(
+                "INSERT INTO theme_option_versions (theme_id, version) VALUES (?, 2)",
+            )
+            .bind(theme_id)
+            .execute(&mut *conn)
+            .await?;
+        }
+        Some(ver) => {
+            if ver != expected_version {
+                return Ok(ThemeOptionsOutcome::Stale);
+            }
+            let res = sqlx::query(
+                "UPDATE theme_option_versions
+                 SET version = version + 1,
+                     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                 WHERE theme_id = ? AND version = ?",
+            )
+            .bind(theme_id)
+            .bind(expected_version)
+            .execute(&mut *conn)
+            .await?;
+            if res.rows_affected() != 1 {
+                return Ok(ThemeOptionsOutcome::Stale);
+            }
+        }
+    }
+
+    for (k, v) in &submitted {
+        let v_json = serde_json::to_string(v)?;
+        sqlx::query(
+            "INSERT INTO theme_option_values (theme_id, option_key, value_json, updated_at)
+             VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             ON CONFLICT(theme_id, option_key) DO UPDATE SET
+                 value_json = excluded.value_json,
+                 updated_at = excluded.updated_at",
+        )
+        .bind(theme_id)
+        .bind(k)
+        .bind(v_json)
+        .execute(&mut *conn)
+        .await?;
+
+        if let Some(def) = schema_map.get(k.as_str())
+            && def.option_type == ThemeOptionType::ImageRef
+        {
+            if let Some(media_id) = v.as_str() {
+                sqlx::query(
+                    "INSERT INTO theme_option_media_refs (theme_id, option_key, media_id)
+                     VALUES (?, ?, ?)
+                     ON CONFLICT(theme_id, option_key) DO UPDATE SET
+                         media_id = excluded.media_id",
+                )
+                .bind(theme_id)
+                .bind(k)
+                .bind(media_id)
+                .execute(&mut *conn)
+                .await?;
+            } else {
+                sqlx::query(
+                    "DELETE FROM theme_option_media_refs WHERE theme_id = ? AND option_key = ?",
+                )
+                .bind(theme_id)
+                .bind(k)
+                .execute(&mut *conn)
+                .await?;
+            }
+        }
+    }
+
+    let snapshot = get_theme_options_in_conn(conn, theme_id)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không đọc lại được theme options sau khi lưu."))?;
+    Ok(ThemeOptionsOutcome::Saved(snapshot))
+}
+
+pub async fn put_theme_options(
+    db: &SqlitePool,
+    theme_id: &str,
+    expected_version: i64,
+    submitted: BTreeMap<String, serde_json::Value>,
+) -> ApiResult<ThemeOptionsOutcome> {
+    let mut tx = db.begin().await?;
+    let outcome = put_theme_options_in_conn(&mut tx, theme_id, expected_version, submitted).await?;
+    if matches!(outcome, ThemeOptionsOutcome::Saved(_)) {
+        tx.commit().await?;
+    }
+    Ok(outcome)
+}
+
+pub async fn check_theme_options_compatibility(
+    db: &SqlitePool,
+    theme_id: &str,
+    new_manifest_json: &str,
+) -> ApiResult<()> {
+    let new_schema =
+        parse_theme_options_schema(new_manifest_json).map_err(ApiError::bad_request)?;
+    let new_map: BTreeMap<&str, &ThemeOptionDef> =
+        new_schema.iter().map(|d| (d.key.as_str(), d)).collect();
+
+    let saved_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
+    )
+    .bind(theme_id)
+    .fetch_all(db)
+    .await?;
+
+    for (key, value_json) in saved_rows {
+        let Some(new_def) = new_map.get(key.as_str()) else {
+            // Option removed in new revision: retained as dormant data.
+            continue;
+        };
+        let Ok(saved_val) = serde_json::from_str::<serde_json::Value>(&value_json) else {
+            return Err(ApiError::conflict(
+                "Dữ liệu theme option đã lưu không tương thích với revision mới.",
+            ));
+        };
+        if validate_option_value(new_def, &saved_val).is_err() {
+            return Err(ApiError::conflict(
+                "Schema option của revision mới không tương thích với giá trị đã lưu (409).",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Returns only `public: true` options for the currently active v2 theme revision.
+pub async fn get_active_public_theme_options(
+    db: &SqlitePool,
+) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+    let active: Option<(String, String)> = sqlx::query_as(
+        "SELECT r.theme_id, r.manifest_json
+         FROM theme_active_selection AS a
+         JOIN theme_revisions AS r ON r.revision_id = a.revision_id
+         WHERE a.id = 1 AND r.source_format = 'v2'",
+    )
+    .fetch_optional(db)
+    .await?;
+    let Some((theme_id, manifest_json)) = active else {
+        return Ok(BTreeMap::new());
+    };
+    let Ok(schema) = parse_theme_options_schema(&manifest_json) else {
+        return Ok(BTreeMap::new());
+    };
+    let saved_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
+    )
+    .bind(&theme_id)
+    .fetch_all(db)
+    .await?;
+    let mut saved_map = BTreeMap::new();
+    for (k, v_json) in saved_rows {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
+            saved_map.insert(k, v);
+        }
+    }
+    let mut out = BTreeMap::new();
+    for def in schema {
+        if !def.public {
+            continue;
+        }
+        let val = match def.option_type {
+            ThemeOptionType::ImageRef => {
+                // Unsaved default image_ref never auto-publicizes media.
+                match saved_map.get(&def.key).and_then(|v| v.as_str()) {
+                    Some(media_id) if valid_media_id(media_id) => {
+                        serde_json::Value::String(format!("/media/{media_id}/file"))
+                    }
+                    _ => serde_json::Value::Null,
+                }
+            }
+            _ => saved_map
+                .get(&def.key)
+                .cloned()
+                .unwrap_or(def.default),
+        };
+        out.insert(def.key, val);
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

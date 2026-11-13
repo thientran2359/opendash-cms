@@ -251,8 +251,23 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            SELECT 1 FROM builder_homepage_media AS bm
            JOIN builder_homepage AS b ON b.id = 1
            WHERE bm.media_id = ? AND b.document_json IS NOT NULL
+         ) OR EXISTS (
+           SELECT 1
+           FROM theme_option_media_refs AS tom
+           JOIN theme_revisions AS r ON r.theme_id = tom.theme_id
+           JOIN theme_active_selection AS a ON a.revision_id = r.revision_id AND a.id = 1
+           JOIN json_each(
+             CASE
+               WHEN json_type(r.manifest_json, '$.options') = 'array' THEN json_extract(r.manifest_json, '$.options')
+               ELSE '[]'
+             END
+           ) AS opt
+           WHERE tom.media_id = ?
+             AND json_extract(opt.value, '$.key') = tom.option_key
+             AND json_extract(opt.value, '$.public') = 1
          )"#,
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)
