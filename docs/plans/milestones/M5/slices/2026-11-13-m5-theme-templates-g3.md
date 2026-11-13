@@ -229,7 +229,7 @@ Không làm override CRUD/Preview/Save (`S03-T02`) hay adversarial browser a11y/
 `M5-S01-T02` G5 và `M5-S02-T01` G5 đã merge.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/Cargo.toml`, `cms/Cargo.lock`, `cms/crates/opendash-core/src/builder.rs`, `cms/crates/opendash-server/src/template_sec.rs` (mới), `cms/crates/opendash-server/src/main.rs` (khai báo module `mod template_sec;`), `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/content_render.rs`, `cms/crates/opendash-server/src/storage/builder_binding.rs`, tests `cms/crates/opendash-server/tests/m5_s03_t01_roles_csec.rs`.
+- **File được sửa/tạo độc quyền:** `cms/Cargo.toml`, `cms/Cargo.lock`, `cms/crates/opendash-core/src/builder.rs`, `cms/crates/opendash-server/src/template_sec.rs` (mới), `cms/crates/opendash-server/src/main.rs` (khai báo module `mod template_sec;`), `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/content_render.rs`, `cms/crates/opendash-server/src/storage/builder_binding.rs`, `cms/crates/opendash-server/src/routes/public.rs`, `cms/crates/opendash-server/src/routes/public_content.rs`, `cms/crates/opendash-server/src/storage/page.rs`, `cms/crates/opendash-server/src/storage/theme.rs`, `cms/crates/opendash-server/src/storage/builder.rs`, tests `cms/crates/opendash-server/tests/m5_s03_t01_roles_csec.rs`.
 - **Không sửa đồng thời:** `S03-T02` đợi task này G5.
 - **Contract/API:** `C-SEC` mandatory ở install/compile/render; không có raw HTML interpolation để lồng role; `RouteContext` không fallback sang entry khác khi missing/unpublished.
 
@@ -314,7 +314,7 @@ Bàn giao override schema, precedence và evidence cho `S06-T01`.
 - **Track:** Full-Track
 - **G2:** AGREED
 - **G3:** READY
-- **Trạng thái:** BACKLOG (chờ `M5-S01-T02` G5)
+- **Trạng thái:** READY (`M5-S01-T02` đã G5; tách file với `M5-S03-T01`)
 - **Nguồn quyết định:** [M5 Contract §4](../../../../contracts/M5_THEME_TEMPLATES.md#4-theme-options-and-site-01-menus-df); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
 
@@ -338,7 +338,7 @@ Không sửa General Settings M3; không hỗ trợ regex/secret/raw CSS options
 `M5-S01-T02` G5 đã merge.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/migrations/0017_theme_options.sql` (mới), `cms/crates/opendash-server/src/storage/settings.rs`, `cms/crates/opendash-server/src/routes/settings.rs`, `cms/crates/opendash-server/src/app.rs` (đăng ký route theme options), `cms/admin/src/` (Theme Options auto-form), tests `cms/crates/opendash-server/tests/m5_s04_t01_theme_options.rs`.
+- **File được sửa/tạo độc quyền:** `cms/migrations/0017_theme_options.sql` (mới), `cms/crates/opendash-server/src/storage/settings.rs`, `cms/crates/opendash-server/src/routes/settings.rs`, `cms/crates/opendash-server/src/app.rs` (đăng ký route theme options), `cms/crates/opendash-server/src/storage/public_content.rs` (`media_is_referenced` cho `image_ref` ACL), `cms/crates/opendash-server/src/routes/themes.rs` (kiểm tra tương thích option schema `409` khi activate), `cms/admin/src/` (Theme Options auto-form), tests `cms/crates/opendash-server/tests/m5_s04_t01_theme_options.rs`.
 - **Không sửa đồng thời:** `S09-T01` không chạm `settings.rs`; `S05-T01/02` đợi G5.
 - **Contract/API:** Admin-only (`Editor` → `403`); transactional saved-reference ACL cho `image_ref`; chỉ expose key có `public: true` vào template context.
 
@@ -423,7 +423,7 @@ Bàn giao `storage/menu.rs` transaction-aware API và `MenuViewModel` cho `S05-T
 - **Track:** Full-Track
 - **G2:** AGREED
 - **G3:** READY
-- **Trạng thái:** BACKLOG (chờ `M5-S01-T02` G5)
+- **Trạng thái:** BACKLOG (chờ M5-S01-T02 G5; đợi M5-S03-T01 bàn giao 	heme.rs)
 - **Nguồn quyết định:** [M5 Contract §5](../../../../contracts/M5_THEME_TEMPLATES.md#5-cnt-lifecycle-and-taxonomy-e); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Forge (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
 
