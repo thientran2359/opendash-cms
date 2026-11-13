@@ -343,7 +343,7 @@ pub async fn list_plugins(db_pool: &SqlitePool) -> Result<Vec<PluginSummary>, St
             } else {
                 PluginPermissions {
                     sqlite: vec![],
-                    http: vec![], content_read: vec![],
+                    http: vec![], content_read: vec![], content_write: vec![],
                 }
             };
 
@@ -386,7 +386,7 @@ pub async fn get_plugin(db_pool: &SqlitePool, id: &str) -> Result<Option<PluginS
     } else {
         PluginPermissions {
             sqlite: vec![],
-            http: vec![], content_read: vec![],
+            http: vec![], content_read: vec![], content_write: vec![],
         }
     };
 
@@ -619,4 +619,20 @@ pub async fn hook_subscriptions(
         }
     }
     Ok(ids)
+}
+
+pub async fn is_actor_role_active(
+    conn: &mut sqlx::SqliteConnection,
+    user_id: i64,
+    required_role: &str,
+) -> Result<bool, sqlx::Error> {
+    let role_opt: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(conn)
+        .await?;
+    Ok(match (role_opt.as_deref(), required_role) {
+        (Some("admin"), _) => true,
+        (Some("editor"), "editor") => true,
+        _ => false,
+    })
 }

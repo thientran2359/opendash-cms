@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().any(|a| a == "--plugin-worker")
         || std::env::var("OPENDASH_WORKER_CHILD").is_ok()
     {
-        crate::plugin::worker::run_worker_from_stdio();
+        let _ = std::thread::spawn(crate::plugin::worker::run_worker_from_stdio).join();
         return Ok(());
     }
 

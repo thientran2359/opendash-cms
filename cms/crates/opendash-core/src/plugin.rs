@@ -13,6 +13,24 @@ pub struct PluginPermissions {
     pub http: Vec<String>,
     #[serde(default)]
     pub content_read: Vec<String>,
+    #[serde(default)]
+    pub content_write: Vec<String>,
+}
+
+fn default_action_role() -> String {
+    "admin".into()
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PluginActionDeclaration {
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default = "default_action_role")]
+    pub required_role: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -37,6 +55,8 @@ pub struct PluginManifest {
     pub hooks: Vec<crate::hooks::HookEvent>,
     #[serde(default)]
     pub hook_priority: i32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<PluginActionDeclaration>,
     #[serde(default, skip_serializing_if = "crate::content::CntDeclarations::is_empty")]
     pub declarations: crate::content::CntDeclarations,
 }
@@ -138,6 +158,32 @@ impl PluginManifest {
                 return Err("Chỉ hỗ trợ scheme http hoặc https.");
             }
         }
+        let mut seen_actions = std::collections::HashSet::new();
+        for action in &self.actions {
+            if !crate::id::valid_package_id(&action.id) && !crate::id::valid_snake_key(&action.id) {
+                return Err("Action id trong manifest không hợp lệ.");
+            }
+
+            if !seen_actions.insert(action.id.as_str()) {
+                return Err("Action id trong manifest bị trùng lặp.");
+            }
+            if action.required_role != "admin" && action.required_role != "editor" {
+                return Err("Action required_role chỉ hỗ trợ 'admin' hoặc 'editor'.");
+            }
+            let mut has_kv_write = false;
+            let mut has_content_write = false;
+            for cap in &action.capabilities {
+                match cap.as_str() {
+                    "kv_read" | "content_read" | "http" => {}
+                    "kv_write" => has_kv_write = true,
+                    "content_write" => has_content_write = true,
+                    _ => return Err("Action capability không nằm trong allowlist V1."),
+                }
+            }
+            if has_kv_write && has_content_write {
+                return Err("Action V1 không được kết hợp cả kv_write và content_write.");
+            }
+        }
         self.declarations.validate()?;
         Ok(())
     }
@@ -151,6 +197,17 @@ impl PluginManifest {
 
     pub fn has_sqlite_perm(&self, perm: &str) -> bool {
         self.permissions.sqlite.iter().any(|p| p == perm)
+    }
+
+    pub fn can_write_content_type(&self, type_key: &str) -> bool {
+        self.permissions
+            .content_write
+            .iter()
+            .any(|k| k == "*" || k == type_key)
+    }
+
+    pub fn action(&self, id: &str) -> Option<&PluginActionDeclaration> {
+        self.actions.iter().find(|a| a.id == id)
     }
 
     pub fn is_http_allowed(&self, target_url: &str) -> bool {

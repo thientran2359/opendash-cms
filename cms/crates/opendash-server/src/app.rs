@@ -34,7 +34,7 @@ use crate::{
         import::{import_dry_run, import_execute},
         plugin::{
             MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES, plugin_disable, plugin_enable,
-            plugin_install, plugin_list, plugin_run,
+            plugin_action, plugin_install, plugin_list, plugin_run,
         },
         public::public_page,
         public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
@@ -260,6 +260,10 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/plugins/{id}/run",
             post(plugin_run).layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/plugins/{id}/actions/{action}",
+            post(plugin_action).layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
         )
         .route("/api/admin/plugins/{id}/disable", post(plugin_disable))
         .route("/api/admin/plugins/{id}/enable", post(plugin_enable))
