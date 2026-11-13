@@ -49,14 +49,14 @@
 - **Người triển khai / review:** Forge (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
 
 ### Tổng quan và giá trị
-M3 hiện chỉ kích hoạt một block ID trong `0011_theme_activation.sql`. M5 cần package identity bất biến qua update/restart, immutable revisions lưu trên `<site_root>/themes/revisions/<revision_digest>/` theo giao thức `A-DURABILITY`, và một singleton active pointer có CAS để rollback không mất liên kết hay dữ liệu site.
+M3 hiện chỉ kích hoạt một block ID trong `0011_theme_activation.sql`. M5 cần package identity bất biến qua update/restart, immutable revisions lưu trên `{site_root}/themes/revisions/{revision_digest}/` theo giao thức `A-DURABILITY`, và một singleton active pointer có CAS để rollback không mất liên kết hay dữ liệu site.
 
 ### Mục tiêu và hành vi quan sát được
 Trên bản copy DB M3 (cả trường hợp NULL và explicit active block), migration `0015` giữ nguyên trạng thái legacy; một `theme_id` có thể chứa nhiều immutable revisions, chuyển active/rollback nguyên tử với CAS `412`/`428`, và khởi động lại cho kết quả nhất quán.
 
 ### Phạm vi công việc
 - Forward migration `cms/migrations/0015_theme_packages_revisions.sql`: thêm bảng `theme_packages`, `theme_revisions`, `theme_legacy_mappings`, `theme_active_selection` (singleton `id = 1`, `revision_id NULLABLE`, monotonic `version`). Ánh xạ từng legacy full block ID sang identity legacy riêng (không suy owner từ prefix, không sửa `0011`).
-- Định nghĩa DTOs (`ThemePackageRecord`, `ThemeRevisionRecord`, `ActiveThemeSelection`, `RevisionDurabilityState`) và giao thức `A-DURABILITY` trong `storage/theme.rs` + helper filesystem staging (`themes/.staging/<run_uuid>/` → `sync_all()` + drop handles trên Windows → rename vào `themes/revisions/<revision_digest>/` + `.complete` marker + `sync_all()`, rồi mới commit `BEGIN IMMEDIATE` SQLite; startup quarantine `.staging/*` mồ côi).
+- Định nghĩa DTOs (`ThemePackageRecord`, `ThemeRevisionRecord`, `ActiveThemeSelection`, `RevisionDurabilityState`) và giao thức `A-DURABILITY` trong `storage/theme.rs` + helper filesystem staging (`themes/.staging/{run_uuid}/` → `sync_all()` + drop handles trên Windows → rename vào `themes/revisions/{revision_digest}/` + `.complete` marker + `sync_all()`, rồi mới commit `BEGIN IMMEDIATE` SQLite; startup quarantine `.staging/*` mồ côi).
 - Typed storage API cho `S01-T02`: idempotent digest reuse, `409` khi trùng `(theme_id, version)` khác digest, `412` stale version, `428` thiếu precondition, diagnostics khi thiếu `.complete` hoặc mismatch digest trên đĩa.
 
 ### Ngoài phạm vi
@@ -112,7 +112,7 @@ Upload ZIP v2 tạo immutable revision ở trạng thái chưa kích hoạt; act
 - Mở rộng `cms/crates/opendash-server/src/package.rs` với helper v2 path policy (relative ASCII, cấm `..`/backslash/drive/symlink/case-insensitive collision, kiểm byte thực đọc cho quota 8 MiB ZIP / 32 MiB decoded / 256 files / 256 KiB text / 8 MiB raster / 100:1 ratio) **mà giữ nguyên 100% hành vi plugin và ZIP v1 64 KiB**.
 - Cập nhật `src/theme.rs` và `src/routes/themes.rs`: parse manifest v2 (`theme_id` kebab 1–64, `version`, templates/roles, optional `options`/`menus`/`sample`/`declarations`), gọi `S01-T01` `A-DURABILITY` staging & SQLite commit.
 - **Chặn vòng phụ thuộc `S01-T02` ↔ `S10-T01`:** Ở `S01-T02`, nếu revision chứa `declarations` (CPT/fields/taxonomy), **từ chối kích hoạt** (`409` / `422` `unsupported_declarations_pending_cnt_bridge`) cho tới khi `S10-T01` tích hợp đăng ký nguyên tử.
-- Thêm route phục vụ asset revision-scoped `/theme/{revision_digest}/{*path}` với `X-Content-Type-Options: nosniff`, kiểm `.complete` + MIME allowlist + no-traversal, không lộ file ngoài `themes/revisions/<digest>/`.
+- Thêm route phục vụ asset revision-scoped `/theme/{revision_digest}/{*path}` với `X-Content-Type-Options: nosniff`, kiểm `.complete` + MIME allowlist + no-traversal, không lộ file ngoài `themes/revisions/{digest}/`.
 
 ### Ngoài phạm vi
 Không triển khai MiniJinja rendering (`S03-T01`), Theme Options UI (`S04-T01`), CNT declarations (`S10-T01`), hay sample import (`S05`).
@@ -218,7 +218,7 @@ Public routes dựng trang qua role phù hợp trên active revision (giữ nguy
 
 ### Phạm vi công việc
 - Bổ sung feature `unstable_machinery` cho `minijinja = "=3.0.5"` trong `cms/Cargo.toml` (giữ nguyên version `=3.0.5`, đồng bộ `cms/Cargo.lock`).
-- Tạo `cms/crates/opendash-server/src/template_sec.rs` thực thi đầy đủ `C-SEC`: `Environment::empty()`, unconditional `AutoEscape::Html`, `UndefinedBehavior::Strict`, `set_fuel(Some(10_000))`, `set_recursion_limit(16)`, output cap `512 KiB`, AST allowlist (`Stmt` & `Expr`, chặn `Call`/`Macro`/`Include`/`Extends`/`Import`/`AutoEscape`/`FilterBlock`/dunder), contextual HTML/URL/CSS validator (cấm `script`, `svg`, `on*`, `style="{{...}}"`, `@import`, `expression(`, URL động ngoài typed fields), gắn vào **cả** install-time (`theme.rs`) lẫn compile/render (`content_render.rs`, `page.rs`). Áp dụng cùng validator cho legacy v1 (`block.html`, `content-list.html`, `content-single.html`).
+- Tạo `cms/crates/opendash-server/src/template_sec.rs` thực thi đầy đủ `C-SEC`: `Environment::empty()`, unconditional `AutoEscape::Html`, `UndefinedBehavior::Strict`, `set_fuel(Some(10_000))`, `set_recursion_limit(16)`, output cap `512 KiB`, AST allowlist (`Stmt` & `Expr`, chặn `Call`/`Macro`/`Include`/`Extends`/`Import`/`AutoEscape`/`FilterBlock`/dunder), contextual HTML/URL/CSS validator (cấm `script`, `svg`, `on*`, `style="{{ expr }}"`, `@import`, `expression(`, URL động ngoài typed fields), gắn vào **cả** install-time (`theme.rs`) lẫn compile/render (`content_render.rs`, `page.rs`). Áp dụng cùng validator cho legacy v1 (`block.html`, `content-list.html`, `content-single.html`).
 - Cập nhật `cms/crates/opendash-core/src/builder.rs` thêm `BindingSource::RouteContext { field_key: String }` (allowlist `title`, `slug`, `url`, `cover_url`, hoặc valid field key của scoped CPT; giữ nguyên `FixedEntry` 100%; từ chối `RouteContext` trên role khác `single`/`page`).
 - Ghép `header + body + footer` một lần trong core (`page.rs` / `content_render.rs`), giữ nguyên public CSP và fallback core an toàn.
 
@@ -238,7 +238,7 @@ Giữ `cms/Cargo.lock` đồng bộ (`cargo test --manifest-path cms/Cargo.toml 
 
 ### Nghiệm thu
 - [ ] `header`/`footer`/`home`/`page`/`single`/`archive`/`taxonomy_archive` chọn đúng role và fallback core an toàn khi thiếu hoặc invalid (không 500, không lộ host path).
-- [ ] `C-SEC` chặn thành công `Call`, `Macro`, `Include`, `safe` filter, `<script>`, `<svg>`, `on*`, `style="{{...}}"`, `javascript:` href, CSS `@import` / `</style>`, fuel exhaustion (>10,000), recursion (>16), output (>512 KiB).
+- [ ] `C-SEC` chặn thành công `Call`, `Macro`, `Include`, `safe` filter, thẻ `script`/`svg`, `on*`, `style="{{ expr }}"`, `javascript:` href, CSS `@import` hoặc đóng thẻ `style`, fuel exhaustion (>10,000), recursion (>16), output (>512 KiB).
 - [ ] Legacy v1 non-conforming fallback sang core renderer an toàn; Builder homepage M4 không bị theme mới ghi đè.
 - [ ] `BindingSource::RouteContext` resolve đúng field của current entry trên `single`/`page`, omit an toàn khi unpublished/non-entry, và giữ nguyên 100% `FixedEntry`.
 
@@ -402,7 +402,7 @@ SQLite transactions trong `storage/menu.rs`; dùng `CanonicalUrlBuilder` thay v�
 ### Nghiệm thu
 - [ ] Menu/item IDs, hierarchy và thứ tự giữ nguyên qua restart và theme switch `A → B → A`.
 - [ ] Entry/term đổi slug → menu render URL canonical mới; unpublished/deleted target bị ẩn khỏi public (có diagnostic Admin) mà không xóa row.
-- [ ] Cycle, depth > 8, > 200 items, cross-menu parent, duplicate sibling position, unsafe URL (`javascript:`, `//...`, userinfo) và stale `412` bị từ chối nguyên tử.
+- [ ] Cycle, depth > 8, > 200 items, cross-menu parent, duplicate sibling position, unsafe URL (`javascript:`, `//host`, userinfo) và stale `412` bị từ chối nguyên tử.
 - [ ] Public header/footer render được slot menu qua `MenuViewModel`.
 
 ### Kiểm thử, rủi ro và rollback
@@ -543,9 +543,9 @@ Execute tạo đúng các nhóm đã chọn (Post/Page luôn `draft`); retry cù
 ### Phạm vi công việc
 - Hiện thực giao thức `G-RECOVERY` 3 pha trong `storage/import.rs` & `routes/import.rs`:
   - **Phase 1 (`staged`):** Transaction ngắn kiểm preconditions/`plan_digest`/`expected_versions` (`412` nếu stale) và ghi `import_runs(state='staged')`.
-  - **Phase 2 (`files_verified`):** Decode/re-encode raster images, tính SHA-256 `media_id`; tái sử dụng không ghi đè nếu đã có file khớp digest (`already_existed = true`); nếu chưa có thì ghi `uploads/.staging/<run_id>/`, `sync_all()`, drop handles (Windows), rename nguyên tử vào `uploads/media/`, cập nhật `import_runs(state='files_verified')`.
+  - **Phase 2 (`files_verified`):** Decode/re-encode raster images, tính SHA-256 `media_id`; tái sử dụng không ghi đè nếu đã có file khớp digest (`already_existed = true`); nếu chưa có thì ghi `uploads/.staging/{run_id}/`, `sync_all()`, drop handles (Windows), rename nguyên tử vào `uploads/media/`, cập nhật `import_runs(state='files_verified')`.
   - **Phase 3 (`committed`):** Một transaction `BEGIN IMMEDIATE` duy nhất gọi các transaction-aware API (`&mut SqliteConnection` của `media`, `content`, `settings`, `menu`) để ghi domain rows + `import_provenance` + `import_runs(state='committed')`.
-- Hiện thực startup recovery hook (`app.rs` / `storage/import.rs`): chuyển các run `staged`/`files_verified` mồ côi sang `quarantined`, xóa `uploads/.staging/<run_id>/`, chỉ xóa `<media_id>.*` khi `already_existed == false` và `media_assets` có 0 row cho `media_id`.
+- Hiện thực startup recovery hook (`app.rs` / `storage/import.rs`): chuyển các run `staged`/`files_verified` mồ côi sang `quarantined`, xóa `uploads/.staging/{run_id}/`, chỉ xóa `{media_id}.*` khi `already_existed == false` và `media_assets` có 0 row cho `media_id`.
 - Admin UI trigger dry-run & execute + hiển thị outcome/conflicts (`cms/admin/`).
 
 ### Ngoài phạm vi
@@ -652,7 +652,7 @@ Thiếu/hỏng package, `.complete` hoặc role vẫn render core fallback sạc
 ### Phạm vi công việc
 - Gia cố precedence fallback trong `page.rs`, `content_render.rs`, `theme.rs` khi file revision trên đĩa bị mất/hỏng sau khi activate (tự động fallback core renderer, phát diagnostic Admin an toàn, không dùng HTML của theme inactive).
 - Xây dựng bộ test đối kháng mở rộng (`m5_s07_t01_security_fallback.rs`): forged filters, nested/recursive includes, fuel bomb, oversized output >512 KiB, SVG/MathML/script/event-handler/CSS breakout/`@import`, draft & private media ACL leak qua Theme Options hoặc `RouteContext`, CSRF/Origin/CAS matrix.
-- Kiểm tra public accessibility smoke trên trình duyệt (landmarks `<header>`/`<main>`/`<nav>`/`<footer>`, heading hierarchy, keyboard Tab navigation qua menu & pagination, 0 console errors).
+- Kiểm tra public accessibility smoke trên trình duyệt (landmarks landmark `header`/`main`/`nav`/`footer`, heading hierarchy, keyboard Tab navigation qua menu & pagination, 0 console errors).
 
 ### Ngoài phạm vi
 Không xây template marketplace hay tính năng SEO M7; không thay test thực thi bằng checklist.
