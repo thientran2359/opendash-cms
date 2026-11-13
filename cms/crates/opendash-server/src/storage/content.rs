@@ -279,7 +279,110 @@ pub async fn sync_theme_declarations_in_tx(
     .execute(&mut *conn)
     .await?;
 
-    // 2. Register or evolve declared content types for `theme_id`
+    let neutral = opendash_core::content::CntDeclarations {
+        content_types: declarations
+            .content_types
+            .iter()
+            .map(|ct| opendash_core::content::ContentTypeDeclaration {
+                key: ct.key.clone(),
+                label: ct.label.clone(),
+                fields: ct.fields.clone(),
+                taxonomies: ct.taxonomies.clone(),
+            })
+            .collect(),
+        taxonomy_eligibility: declarations
+            .taxonomy_eligibility
+            .iter()
+            .map(|e| opendash_core::content::TaxonomyEligibilityDeclaration {
+                content_type: e.content_type.clone(),
+                taxonomies: e.taxonomies.clone(),
+            })
+            .collect(),
+    };
+    sync_owner_cnt_declarations_in_tx(conn, "theme", theme_id, &neutral, false).await
+}
+
+/// Synchronizes a plugin's CNT declarations (`content_types` and `taxonomy_eligibility`)
+/// inside an active SQLite write transaction without touching theme or other plugin declarations.
+pub async fn sync_plugin_cnt_declarations_in_tx(
+    conn: &mut SqliteConnection,
+    plugin_id: &str,
+    declarations: &opendash_core::content::CntDeclarations,
+) -> ApiResult<()> {
+    if declarations.is_empty() {
+        let has_cnt: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_types')",
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        if !has_cnt {
+            return Ok(());
+        }
+    }
+    sync_owner_cnt_declarations_in_tx(conn, "plugin", plugin_id, declarations, true).await
+}
+
+/// Updates `provider_status` for all CNT declarations owned by a plugin without deleting schema or entries.
+pub async fn set_plugin_cnt_provider_status_in_tx(
+    conn: &mut SqliteConnection,
+    plugin_id: &str,
+    active: bool,
+) -> ApiResult<()> {
+    let has_cnt: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_types')",
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    if !has_cnt {
+        return Ok(());
+    }
+    if active {
+        sqlx::query(
+            "UPDATE content_types
+             SET provider_status = 'active', updated_at = datetime('now')
+             WHERE owner_kind = 'plugin' AND owner_id = ? AND declaration_state = 'declared'",
+        )
+        .bind(plugin_id)
+        .execute(&mut *conn)
+        .await?;
+
+        sqlx::query(
+            "UPDATE content_type_taxonomy_eligibility
+             SET provider_status = 'active', updated_at = datetime('now')
+             WHERE owner_kind = 'plugin' AND owner_id = ? AND declaration_state = 'declared'",
+        )
+        .bind(plugin_id)
+        .execute(&mut *conn)
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE content_types
+             SET provider_status = 'provider_inactive', updated_at = datetime('now')
+             WHERE owner_kind = 'plugin' AND owner_id = ?",
+        )
+        .bind(plugin_id)
+        .execute(&mut *conn)
+        .await?;
+
+        sqlx::query(
+            "UPDATE content_type_taxonomy_eligibility
+             SET provider_status = 'provider_inactive', updated_at = datetime('now')
+             WHERE owner_kind = 'plugin' AND owner_id = ?",
+        )
+        .bind(plugin_id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
+async fn sync_owner_cnt_declarations_in_tx(
+    conn: &mut SqliteConnection,
+    owner_kind_str: &str,
+    owner_id_str: &str,
+    declarations: &opendash_core::content::CntDeclarations,
+    incompat_as_conflict: bool,
+) -> ApiResult<()> {
     let mut declared_ct_keys: HashSet<String> = HashSet::new();
     let mut declared_eligibility: HashSet<(String, String)> = HashSet::new();
 
@@ -303,8 +406,8 @@ pub async fn sync_theme_declarations_in_tx(
         .await?;
 
         match existing {
-            Some((raw_def, owner_kind, owner_id)) => {
-                if owner_kind != "theme" || owner_id.as_deref() != Some(theme_id) {
+            Some((raw_def, okind, oid)) => {
+                if okind != owner_kind_str || oid.as_deref() != Some(owner_id_str) {
                     return Err(ApiError::conflict(
                         "Khóa loại nội dung thuộc chủ sở hữu khác (409).",
                     ));
@@ -318,7 +421,13 @@ pub async fn sync_theme_declarations_in_tx(
                 .fetch_one(&mut *conn)
                 .await?;
                 check_content_type_compatibility(&existing_def, &incoming, has_entries).map_err(
-                    |msg| ApiError(StatusCode::UNPROCESSABLE_ENTITY, msg.into()),
+                    |msg| {
+                        if incompat_as_conflict {
+                            ApiError::conflict(msg)
+                        } else {
+                            ApiError(StatusCode::UNPROCESSABLE_ENTITY, msg.into())
+                        }
+                    },
                 )?;
                 sqlx::query(
                     "UPDATE content_types
@@ -333,11 +442,12 @@ pub async fn sync_theme_declarations_in_tx(
             None => {
                 sqlx::query(
                     "INSERT INTO content_types (key, definition_json, owner_kind, owner_id, provider_status, declaration_state)
-                     VALUES (?, ?, 'theme', ?, 'active', 'declared')",
+                     VALUES (?, ?, ?, ?, 'active', 'declared')",
                 )
                 .bind(&ct.key)
                 .bind(&incoming_json)
-                .bind(theme_id)
+                .bind(owner_kind_str)
+                .bind(owner_id_str)
                 .execute(&mut *conn)
                 .await?;
             }
@@ -349,11 +459,12 @@ pub async fn sync_theme_declarations_in_tx(
         }
     }
 
-    // 3. Withdraw omitted CPT declarations previously owned by this theme (never deleting schema/entries)
+    // Withdraw omitted CPT declarations previously owned by this owner (never deleting schema/entries)
     let owned_keys: Vec<String> = sqlx::query_scalar(
-        "SELECT key FROM content_types WHERE owner_kind = 'theme' AND owner_id = ?",
+        "SELECT key FROM content_types WHERE owner_kind = ? AND owner_id = ?",
     )
-    .bind(theme_id)
+    .bind(owner_kind_str)
+    .bind(owner_id_str)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -370,7 +481,7 @@ pub async fn sync_theme_declarations_in_tx(
         }
     }
 
-    // 4. Merge explicit taxonomy_eligibility declarations and persist
+    // Merge explicit taxonomy_eligibility declarations and persist
     for elig in &declarations.taxonomy_eligibility {
         for tax in &elig.taxonomies {
             declared_eligibility.insert((elig.content_type.clone(), tax.clone()));
@@ -394,7 +505,8 @@ pub async fn sync_theme_declarations_in_tx(
                 .fetch_optional(&mut *conn)
                 .await?;
         match ct_owner {
-            Some((okind, oid)) if okind == "theme" && oid.as_deref() == Some(theme_id) => {}
+            Some((okind, oid))
+                if okind == owner_kind_str && oid.as_deref() == Some(owner_id_str) => {}
             Some(_) => {
                 return Err(ApiError::conflict(
                     "Không thể khai báo taxonomy eligibility cho loại nội dung thuộc chủ sở hữu khác (409).",
@@ -418,7 +530,7 @@ pub async fn sync_theme_declarations_in_tx(
 
         match existing_elig {
             Some((okind, oid)) => {
-                if okind != "theme" || oid.as_deref() != Some(theme_id) {
+                if okind != owner_kind_str || oid.as_deref() != Some(owner_id_str) {
                     return Err(ApiError::conflict(
                         "Taxonomy eligibility thuộc chủ sở hữu khác (409).",
                     ));
@@ -437,24 +549,26 @@ pub async fn sync_theme_declarations_in_tx(
                 sqlx::query(
                     "INSERT INTO content_type_taxonomy_eligibility
                      (content_type_key, taxonomy_kind, owner_kind, owner_id, provider_status, declaration_state)
-                     VALUES (?, ?, 'theme', ?, 'active', 'declared')",
+                     VALUES (?, ?, ?, ?, 'active', 'declared')",
                 )
                 .bind(ct_key)
                 .bind(tax_kind)
-                .bind(theme_id)
+                .bind(owner_kind_str)
+                .bind(owner_id_str)
                 .execute(&mut *conn)
                 .await?;
             }
         }
     }
 
-    // Withdraw omitted taxonomy_eligibility rows owned by this theme (retaining entry_terms)
+    // Withdraw omitted taxonomy_eligibility rows owned by this owner (retaining entry_terms)
     let owned_eligs: Vec<(String, String)> = sqlx::query_as(
         "SELECT content_type_key, taxonomy_kind
          FROM content_type_taxonomy_eligibility
-         WHERE owner_kind = 'theme' AND owner_id = ?",
+         WHERE owner_kind = ? AND owner_id = ?",
     )
-    .bind(theme_id)
+    .bind(owner_kind_str)
+    .bind(owner_id_str)
     .fetch_all(&mut *conn)
     .await?;
 

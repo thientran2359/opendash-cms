@@ -1,3 +1,13 @@
+fn map_cnt_err(err: crate::error::ApiError) -> PluginStorageError {
+    if err.0 == axum::http::StatusCode::CONFLICT {
+        PluginStorageError::Conflict(err.1.into_owned())
+    } else if err.0 == axum::http::StatusCode::BAD_REQUEST {
+        PluginStorageError::BadRequest(err.1.into_owned())
+    } else {
+        PluginStorageError::Internal(err.1.into_owned())
+    }
+}
+
 use std::{
     fs,
     io::Write,
@@ -263,6 +273,14 @@ pub async fn install_plugin_revision(
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi cập nhật active_revision_id: {e}")))?;
 
+    crate::storage::content::sync_plugin_cnt_declarations_in_tx(
+        &mut tx,
+        &manifest.id,
+        &manifest.declarations,
+    )
+    .await
+    .map_err(map_cnt_err)?;
+
     tx.commit()
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi commit cài đặt plugin: {e}")))?;
@@ -446,6 +464,10 @@ pub async fn set_plugin_enabled_cas(
     .execute(&mut *tx)
     .await
     .map_err(|e| PluginStorageError::Internal(format!("Lỗi cập nhật trạng thái plugin: {e}")))?;
+
+    crate::storage::content::set_plugin_cnt_provider_status_in_tx(&mut tx, id, enabled)
+        .await
+        .map_err(map_cnt_err)?;
 
     let next_cas: i64 = sqlx::query_scalar("SELECT cas_version FROM plugins WHERE id = ?")
         .bind(id)

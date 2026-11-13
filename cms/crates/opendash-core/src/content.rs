@@ -119,6 +119,71 @@ impl ContentTypeDefinition {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CntDeclarations {
+    #[serde(default)]
+    pub content_types: Vec<ContentTypeDeclaration>,
+    #[serde(default)]
+    pub taxonomy_eligibility: Vec<TaxonomyEligibilityDeclaration>,
+}
+
+impl CntDeclarations {
+    pub fn is_empty(&self) -> bool {
+        self.content_types.is_empty() && self.taxonomy_eligibility.is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), &'static str> {
+        let mut seen_keys = HashSet::new();
+        for ct in &self.content_types {
+            if !seen_keys.insert(ct.key.as_str()) {
+                return Err("Khóa content_type bị trùng lặp trong declarations.");
+            }
+            let def = ContentTypeDefinition {
+                key: ct.key.clone(),
+                label: ct.label.clone(),
+                fields: ct.fields.clone(),
+            };
+            def.validate()?;
+            for tax in &ct.taxonomies {
+                if tax != "category" && tax != "tag" {
+                    return Err("Chỉ hỗ trợ taxonomy eligibility cho category hoặc tag lõi.");
+                }
+            }
+        }
+        for elig in &self.taxonomy_eligibility {
+            if !valid_content_type_key(&elig.content_type) {
+                return Err("Khóa loại nội dung trong taxonomy_eligibility không hợp lệ.");
+            }
+            for tax in &elig.taxonomies {
+                if tax != "category" && tax != "tag" {
+                    return Err("Chỉ hỗ trợ taxonomy eligibility cho category hoặc tag lõi.");
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentTypeDeclaration {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub fields: Vec<ContentFieldDefinition>,
+    #[serde(default)]
+    pub taxonomies: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyEligibilityDeclaration {
+    pub content_type: String,
+    #[serde(default)]
+    pub taxonomies: Vec<String>,
+}
+
 fn valid_label(value: &str) -> bool {
     !value.trim().is_empty() && value.chars().count() <= 100 && !value.chars().any(char::is_control)
 }
