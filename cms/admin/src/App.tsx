@@ -341,6 +341,11 @@ export const App: React.FC = () => {
         onEnablePlugin={handleEnablePlugin}
         onPluginInputChange={setPluginInputJson}
         onRunPlugin={handleRunPlugin}
+        csrfToken={csrfToken}
+        onUnauthorized={() => {
+          setUser(null);
+          setCsrfToken(null);
+        }}
       />}
       contentContent={
         <ContentWorkspace
