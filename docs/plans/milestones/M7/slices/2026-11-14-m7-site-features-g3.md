@@ -1025,4 +1025,3 @@ Không đổi applied migration; dùng site snapshot để rollback dữ liệu 
 #### Bàn giao và review
 
 Receipt theo mục chung; evidence đúng file ownership ở trên. Giữ capability/Primary Acceptance, mã task và dependency khi xuất Issue. Chỉ đóng milestone sau review actual Issues/Project/CI/common-source G5, cập nhật TASK_INDEX bằng PR.
-

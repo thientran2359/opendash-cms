@@ -34,4 +34,3 @@ Mọi task có coordinator Atlas, owner dự kiến trong G3; Issue/Project chư
 ## G5 — Bằng chứng và rollback
 
 Chưa có M7 runtime evidence. Integration/negative/native browser ở Primary Acceptance Slice; cross-domain S08 chạy cùng immutable SHA Windows+macOS, snapshot restore matching old binary. Evidence ghi exact commands/hash/OS/PASS/FAIL/NOT_RUN; security/data hoặc required case NOT_RUN chặn G5. Không sửa applied migration hoặc dùng Git revert để phục hồi DB.
-
