@@ -166,6 +166,28 @@ impl PluginRuntime {
         correlation_id: String,
         allow_loopback: bool,
     ) -> Result<Value, PluginError> {
+        self.run_plugin_with_generation(
+            wasm_bytes,
+            manifest,
+            input,
+            db_pool,
+            correlation_id,
+            allow_loopback,
+            None,
+        )
+        .await
+    }
+
+    pub async fn run_plugin_with_generation(
+        &self,
+        wasm_bytes: Vec<u8>,
+        manifest: PluginManifest,
+        input: Value,
+        db_pool: SqlitePool,
+        correlation_id: String,
+        allow_loopback: bool,
+        expected_generation: Option<i64>,
+    ) -> Result<Value, PluginError> {
         let cancellation_token = Arc::new(AtomicBool::new(false));
 
         // Fail-fast concurrency control to prevent RAM exhaustion
@@ -488,6 +510,32 @@ impl PluginRuntime {
                 return Err(PluginError::Internal(format!(
                     "Không mở được transaction: {e}"
                 )));
+            }
+
+            if let Some(expected_gen) = expected_generation {
+                match crate::storage::plugin::is_plugin_generation_active(
+                    conn,
+                    &plugin_id,
+                    expected_gen,
+                )
+                .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = plugin_kv::rollback(conn).await;
+                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        guard.cleanup();
+                        return Err(PluginError::Disabled);
+                    }
+                    Err(e) => {
+                        let _ = plugin_kv::rollback(conn).await;
+                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        guard.cleanup();
+                        return Err(PluginError::Internal(format!(
+                            "Lỗi kiểm tra generation plugin: {e}"
+                        )));
+                    }
+                }
             }
 
             for (key, val) in staged_writes {
