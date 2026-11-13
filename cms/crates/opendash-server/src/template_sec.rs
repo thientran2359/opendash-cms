@@ -102,6 +102,8 @@ pub fn restricted_environment() -> Environment<'static> {
     env.add_filter("unique", minijinja::filters::unique);
     env.add_filter("title", minijinja::filters::title);
     env.add_filter("capitalize", minijinja::filters::capitalize);
+    env.add_test("defined", minijinja::tests::is_defined);
+    env.add_test("undefined", minijinja::tests::is_undefined);
     env
 }
 

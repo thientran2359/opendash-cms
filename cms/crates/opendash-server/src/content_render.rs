@@ -196,11 +196,21 @@ pub fn render_role_fragment_with_options(
     site: &SiteContext<'_>,
     options: &BTreeMap<String, Value>,
 ) -> Option<String> {
+    render_role_fragment_with_context(template, site, options, &BTreeMap::new())
+}
+
+pub fn render_role_fragment_with_context(
+    template: &str,
+    site: &SiteContext<'_>,
+    options: &BTreeMap<String, Value>,
+    menus: &BTreeMap<String, crate::storage::menu::MenuViewModel>,
+) -> Option<String> {
     theme::render_content(
         template,
         &serde_json::json!({
             "site": site,
             "options": options,
+            "menus": menus,
         }),
     )
     .ok()

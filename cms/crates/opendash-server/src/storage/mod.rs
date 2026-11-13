@@ -5,6 +5,7 @@ pub mod content;
 pub mod dashboard;
 pub mod entries;
 pub mod media;
+pub mod menu;
 pub mod overrides;
 pub mod page;
 pub mod plugin;
