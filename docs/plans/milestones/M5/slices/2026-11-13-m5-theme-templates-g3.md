@@ -43,7 +43,7 @@
 - **Capability:** THM-01.2
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** READY (không có M5 predecessor; tách file với `S02-T01`)
 - **Nguồn quyết định:** [M5 Contract §1 & A-DURABILITY](../../../../contracts/M5_THEME_TEMPLATES.md#1-package-identity-revisions-and-selection-a); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md); migration `0011_theme_activation.sql`.
 - **Người triển khai / review:** Forge (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -97,7 +97,7 @@ Bàn giao `storage/theme.rs` typed APIs, DTOs và G5 SHA cho `M5-S01-T02`.
 - **Capability:** THM-01.2
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S01-T01` G5)
 - **Nguồn quyết định:** [M5 Contract §1 & A-DURABILITY](../../../../contracts/M5_THEME_TEMPLATES.md#1-package-identity-revisions-and-selection-a); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Forge (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -152,7 +152,7 @@ Bàn giao `src/theme.rs` manifest v2 parser/revision reader và `/theme/` asset 
 - **Capability:** CNT-04.2
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** READY (không có M5 predecessor; file tách biệt `S01-T01`)
 - **Nguồn quyết định:** [M5 Contract §2](../../../../contracts/M5_THEME_TEMPLATES.md#2-public-url-and-requestcontext-b); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -205,7 +205,7 @@ Bàn giao `PublicRequestContext` và `CanonicalUrlBuilder` cho `S03-T01` và `S0
 - **Capability:** THM-02.1
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S01-T02` và `M5-S02-T01` G5)
 - **Nguồn quyết định:** [M5 Contract §3 & C-SEC](../../../../contracts/M5_THEME_TEMPLATES.md#3-templates-and-overrides-ch); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Forge (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -259,7 +259,7 @@ Bàn giao `template_sec.rs`, role composition contract và `BindingSource::Route
 - **Capability:** THM-02.1
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S03-T01` G5)
 - **Nguồn quyết định:** [M5 Contract §3](../../../../contracts/M5_THEME_TEMPLATES.md#3-templates-and-overrides-ch); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Forge (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -313,7 +313,7 @@ Bàn giao override schema, precedence và evidence cho `S06-T01`.
 - **Capability:** SITE-01.2
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S01-T02` G5)
 - **Nguồn quyết định:** [M5 Contract §4](../../../../contracts/M5_THEME_TEMPLATES.md#4-theme-options-and-site-01-menus-df); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -369,7 +369,7 @@ Bàn giao `storage/settings.rs` transaction-aware Theme Options API và public w
 - **Capability:** SITE-01.3
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S02-T01` G5)
 - **Nguồn quyết định:** [M5 Contract §4](../../../../contracts/M5_THEME_TEMPLATES.md#4-theme-options-and-site-01-menus-df); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -422,7 +422,7 @@ Bàn giao `storage/menu.rs` transaction-aware API và `MenuViewModel` cho `S05-T
 - **Capability:** THM-01.3
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S01-T02` G5)
 - **Nguồn quyết định:** [M5 Contract §5](../../../../contracts/M5_THEME_TEMPLATES.md#5-cnt-lifecycle-and-taxonomy-e); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Forge (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -476,7 +476,7 @@ Bàn giao CNT theme lifecycle/declaration API và fixture `A → B` cho `S05-T01
 - **Capability:** THM-03.1
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S01-T02`, `M5-S04-T01`, `M5-S09-T01`, `M5-S10-T01` G5)
 - **Nguồn quyết định:** [M5 Contract §6 & G-RECOVERY](../../../../contracts/M5_THEME_TEMPLATES.md#6-selective-import-and-provenance-g); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -529,7 +529,7 @@ Bàn giao schema `0020`, `ImportPlan` DTO và `storage/import.rs` cho `S05-T02`.
 - **Capability:** THM-03.1
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S05-T01` G5)
 - **Nguồn quyết định:** [M5 Contract §6 & G-RECOVERY](../../../../contracts/M5_THEME_TEMPLATES.md#g-recovery--g2-agreed-multi-object-import-journal--recovery); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -585,7 +585,7 @@ Bàn giao idempotent import fixture, journal recovery evidence và commit SHA ch
 - **Capability:** THM-03.2
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S03-T02`, `M5-S05-T02`, `M5-S10-T01` G5)
 - **Nguồn quyết định:** [M5 Contract §5 & §7](../../../../contracts/M5_THEME_TEMPLATES.md#5-cnt-lifecycle-and-taxonomy-e); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Forge (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -638,7 +638,7 @@ Bàn giao preservation fixture `A1 → B → A2` và evidence SHA cho `S07-T01` 
 - **Capability:** THM-02.2
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S06-T01` G5)
 - **Nguồn quyết định:** [M5 Contract §3, C-SEC & §7](../../../../contracts/M5_THEME_TEMPLATES.md#c-sec--g2-agreed-minijinja-305-safe-subset--contextual-validator); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
@@ -690,7 +690,7 @@ Bàn giao failure matrix, negative corpus và a11y evidence cho `S08-T01`.
 - **Capability:** THM-02.1
 - **Track:** Full-Track
 - **G2:** AGREED
-- **G3:** READY (sau khi PR này merge)
+- **G3:** READY
 - **Trạng thái:** BACKLOG (chờ `M5-S07-T01` và toàn bộ M5 predecessors G5)
 - **Nguồn quyết định:** [M5 Contract §7](../../../../contracts/M5_THEME_TEMPLATES.md#7-ownership-sequencing-and-release-fixture-h); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Forge (accountable implementer & Windows G5) + Harbor (independent native macOS G5) / Coordinator Atlas/Nova.
