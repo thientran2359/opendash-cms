@@ -10,3 +10,7 @@ Use ../templates/RESEARCH.md; promote only accepted conclusions into docs/.
 - [M3-P07 — built-in Post/Page G1 source audit + G2 proposal](m3-p07-built-in-post-page-g1-g2.md) — `main@dfdcae2`, Core CPT seed, migration/owner conflict, draft-public/media security dependencies; **G2 PROPOSED, peer-review pending**.
 - [Muse Orchestrator POC — CoS Windows](muse-cos-win-orchestrator-poc.md) — kiến trúc remote dispatch, ranh giới quyền, phân giai đoạn và các quyết định chưa chốt (**PROPOSED**).
 - [Muse → CoS Windows POC test matrix](muse-cos-win-poc-test-matrix.md) — điều kiện PASS/FAIL/BLOCKED/NOT_RUN cho từng gate (**chưa chạy test runtime**).
+
+## M7 research promoted by design PR (2026-11-14)
+
+- [M7 G1 source inventory](2026-11-14-m7-site-features-g1.md): all8 candidates, actual source/alternatives; authority after merge is ADR-0014 and M7 contract/G3. Runtime NOT_RUN.
