@@ -4,6 +4,7 @@ pub mod builder_binding;
 pub mod content;
 pub mod dashboard;
 pub mod entries;
+pub mod import;
 pub mod media;
 pub mod menu;
 pub mod overrides;
