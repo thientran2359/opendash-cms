@@ -153,7 +153,7 @@ Bàn giao `src/theme.rs` manifest v2 parser/revision reader và `/theme/` asset 
 - **Track:** Full-Track
 - **G2:** AGREED
 - **G3:** READY
-- **Trạng thái:** BACKLOG (chờ `M5-S01-T02` G5 để bàn giao `app.rs` single-writer)
+- **Trạng thái:** READY (`M5-S01-T02` đã G5 tại `main@c3abcd4`)
 - **Nguồn quyết định:** [M5 Contract §2](../../../../contracts/M5_THEME_TEMPLATES.md#2-public-url-and-requestcontext-b); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
 
@@ -175,7 +175,7 @@ Không cho theme khai báo route; không làm redirect/alias cũ hay SEO sitemap
 `M5-S01-T02` G5 đã merge lên `main` (bàn giao `cms/crates/opendash-server/src/app.rs` single-writer; dựa trên M3 public routes và M4 taxonomy `0012`/`0014` đã có trên `main@1869057`).
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/crates/opendash-server/src/public_context.rs` (mới), `cms/crates/opendash-server/src/lib.rs` (khai báo module), `cms/crates/opendash-server/src/app.rs`, `cms/crates/opendash-server/src/routes/public.rs`, `cms/crates/opendash-server/src/routes/public_content.rs`, `cms/crates/opendash-server/src/storage/public_content.rs`, `cms/crates/opendash-server/src/content_render.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/storage/builder_binding.rs`, tests `cms/crates/opendash-server/tests/m5_s02_t01_public_context.rs`.
+- **File được sửa/tạo độc quyền:** `cms/crates/opendash-server/src/public_context.rs` (mới), `cms/crates/opendash-server/src/main.rs` (khai báo module `mod public_context;`), `cms/crates/opendash-server/src/app.rs`, `cms/crates/opendash-server/src/routes/public.rs`, `cms/crates/opendash-server/src/routes/public_content.rs`, `cms/crates/opendash-server/src/storage/public_content.rs`, `cms/crates/opendash-server/src/content_render.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/storage/builder_binding.rs`, tests `cms/crates/opendash-server/tests/m5_s02_t01_public_context.rs`.
 - **Không sửa đồng thời:** `S03-T01` và `S09-T01` đợi task này G5 trước khi chạm `content_render.rs`, `page.rs`, `app.rs`.
 - **Contract/API:** Old slug `404`; bad query `400`; draft/missing/wrong-kind `404`; `PublicRequestContext` không chứa session/token/private path.
 
@@ -229,7 +229,7 @@ Không làm override CRUD/Preview/Save (`S03-T02`) hay adversarial browser a11y/
 `M5-S01-T02` G5 và `M5-S02-T01` G5 đã merge.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/Cargo.toml`, `cms/Cargo.lock`, `cms/crates/opendash-core/src/builder.rs`, `cms/crates/opendash-server/src/template_sec.rs` (mới), `cms/crates/opendash-server/src/lib.rs`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/content_render.rs`, `cms/crates/opendash-server/src/storage/builder_binding.rs`, tests `cms/crates/opendash-server/tests/m5_s03_t01_roles_csec.rs`.
+- **File được sửa/tạo độc quyền:** `cms/Cargo.toml`, `cms/Cargo.lock`, `cms/crates/opendash-core/src/builder.rs`, `cms/crates/opendash-server/src/template_sec.rs` (mới), `cms/crates/opendash-server/src/main.rs` (khai báo module `mod template_sec;`), `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/content_render.rs`, `cms/crates/opendash-server/src/storage/builder_binding.rs`, tests `cms/crates/opendash-server/tests/m5_s03_t01_roles_csec.rs`.
 - **Không sửa đồng thời:** `S03-T02` đợi task này G5.
 - **Contract/API:** `C-SEC` mandatory ở install/compile/render; không có raw HTML interpolation để lồng role; `RouteContext` không fallback sang entry khác khi missing/unpublished.
 
@@ -283,7 +283,7 @@ Không viết lại Builder engine; không làm menu Builder M7; không tự đ�
 `M5-S03-T01` G5 đã merge.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/migrations/0016_template_overrides.sql` (mới), `cms/crates/opendash-server/src/storage/overrides.rs` (mới), `cms/crates/opendash-server/src/storage/mod.rs`, `cms/crates/opendash-server/src/routes/builder.rs` (hoặc route override mới gắn vào `routes/mod.rs`), `cms/crates/opendash-server/src/page.rs`, `cms/admin/src/` (Builder role selector), tests `cms/crates/opendash-server/tests/m5_s03_t02_overrides.rs`.
+- **File được sửa/tạo độc quyền:** `cms/migrations/0016_template_overrides.sql` (mới), `cms/crates/opendash-server/src/storage/overrides.rs` (mới), `cms/crates/opendash-server/src/storage/mod.rs`, `cms/crates/opendash-server/src/routes/builder.rs` (hoặc route override mới gắn vào `routes/mod.rs`), `cms/crates/opendash-server/src/app.rs` (đăng ký route overrides/preview/save), `cms/crates/opendash-server/src/page.rs`, `cms/admin/src/` (Builder role selector), tests `cms/crates/opendash-server/tests/m5_s03_t02_overrides.rs`.
 - **Không sửa đồng thời:** `S06-T01` đợi task này G5.
 - **Contract/API:** Preview never writes; post/page draft Save không tự publish; Builder role override Save cập nhật public rendering ngay mà không publish draft entry.
 
@@ -338,7 +338,7 @@ Không sửa General Settings M3; không hỗ trợ regex/secret/raw CSS options
 `M5-S01-T02` G5 đã merge.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/migrations/0017_theme_options.sql` (mới), `cms/crates/opendash-server/src/storage/settings.rs`, `cms/crates/opendash-server/src/routes/settings.rs`, `cms/admin/src/` (Theme Options auto-form), tests `cms/crates/opendash-server/tests/m5_s04_t01_theme_options.rs`.
+- **File được sửa/tạo độc quyền:** `cms/migrations/0017_theme_options.sql` (mới), `cms/crates/opendash-server/src/storage/settings.rs`, `cms/crates/opendash-server/src/routes/settings.rs`, `cms/crates/opendash-server/src/app.rs` (đăng ký route theme options), `cms/admin/src/` (Theme Options auto-form), tests `cms/crates/opendash-server/tests/m5_s04_t01_theme_options.rs`.
 - **Không sửa đồng thời:** `S09-T01` không chạm `settings.rs`; `S05-T01/02` đợi G5.
 - **Contract/API:** Admin-only (`Editor` → `403`); transactional saved-reference ACL cho `image_ref`; chỉ expose key có `public: true` vào template context.
 
@@ -446,7 +446,7 @@ Không làm M6 plugin ABI bridge; không cho phép custom taxonomy kind mới ng
 `M5-S01-T02` G5 đã merge.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/migrations/0019_theme_cnt_declarations.sql` (mới), `cms/crates/opendash-core/src/registry.rs`, `cms/crates/opendash-server/src/storage/content.rs`, `cms/crates/opendash-server/src/theme.rs` (tích hợp activation hook), tests `cms/crates/opendash-server/tests/m5_s10_t01_theme_cnt_declarations.rs`.
+- **File được sửa/tạo độc quyền:** `cms/migrations/0019_theme_cnt_declarations.sql` (mới), `cms/crates/opendash-core/src/registry.rs`, `cms/crates/opendash-server/src/storage/content.rs`, `cms/crates/opendash-server/src/theme.rs` & `cms/crates/opendash-server/src/routes/themes.rs` (tích hợp activation bridge, gỡ chặn `unsupported_declarations_pending_cnt_bridge`), tests `cms/crates/opendash-server/tests/m5_s10_t01_theme_cnt_declarations.rs`.
 - **Không sửa đồng thời:** `S06-T01` đợi task này G5.
 - **Contract/API:** Không SQL/IO trong `opendash-core`; collision `409` kể cả inactive/withdrawn; `in-memory registry` refresh chỉ sau commit; core `category`/`tag` sở hữu terms.
 
@@ -499,7 +499,7 @@ Không ghi domain rows hoặc media files khi dry-run; thực thi 3 pha thuộc 
 `M5-S01-T02`, `M5-S04-T01`, `M5-S09-T01`, `M5-S10-T01` đều phải G5 trước khi triển khai.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/migrations/0020_theme_import_journal.sql` (mới), `cms/crates/opendash-server/src/storage/import.rs` (mới), `cms/crates/opendash-server/src/storage/mod.rs`, `cms/crates/opendash-server/src/routes/import.rs` (mới) + `routes/mod.rs`, tests `cms/crates/opendash-server/tests/m5_s05_t01_import_dry_run.rs`.
+- **File được sửa/tạo độc quyền:** `cms/migrations/0020_theme_import_journal.sql` (mới), `cms/crates/opendash-server/src/storage/import.rs` (mới), `cms/crates/opendash-server/src/storage/mod.rs`, `cms/crates/opendash-server/src/routes/import.rs` (mới) + `routes/mod.rs` + `cms/crates/opendash-server/src/app.rs`, tests `cms/crates/opendash-server/tests/m5_s05_t01_import_dry_run.rs`.
 - **Không sửa đồng thời:** `S05-T02` đợi task này G5.
 - **Contract/API:** Dry-run 100% DB/FS read-only; logical provenance không chứa `revision_id`; mặc định conflict = `skip`.
 
@@ -555,7 +555,7 @@ Không ghi đè nội dung/menu/option user đã chỉnh; không auto-publish Po
 `M5-S05-T01` G5 đã merge.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/crates/opendash-server/src/storage/import.rs`, `cms/crates/opendash-server/src/routes/import.rs`, `cms/crates/opendash-server/src/app.rs` (gắn startup recovery hook), `cms/admin/src/` (Import UI), tests `cms/crates/opendash-server/tests/m5_s05_t02_import_execute.rs`.
+- **File được sửa/tạo độc quyền:** `cms/crates/opendash-server/src/storage/import.rs`, `cms/crates/opendash-server/src/routes/import.rs`, `cms/crates/opendash-server/src/app.rs` (đăng ký route execute), `cms/crates/opendash-server/src/main.rs` (gắn startup recovery hook), `cms/admin/src/` (Import UI), tests `cms/crates/opendash-server/tests/m5_s05_t02_import_execute.rs`.
 - **Không sửa đồng thời:** Không tự sửa nội bộ `settings.rs`/`menu.rs`/`content.rs` (chỉ gọi transaction-aware APIs đã bàn giao); `S06-T01` đợi task này G5.
 - **Contract/API:** Bất biến `G-RECOVERY`: không có visible row nào trỏ tới media chưa durable; stale plan trả `412`; media import mặc định private trừ khi có saved public ref hợp lệ.
 
