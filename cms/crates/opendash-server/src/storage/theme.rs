@@ -650,6 +650,12 @@ pub async fn activate_revision(
         return Ok(RevisionActivationOutcome::NotFound);
     };
     let revision = row_to_revision(row)?;
+    let declarations = if revision.source_format == ThemeSourceFormat::V2 {
+        crate::theme::parse_theme_declarations(&revision.manifest_json)
+            .map_err(|msg| ApiError(axum::http::StatusCode::UNPROCESSABLE_ENTITY, msg.into()))?
+    } else {
+        crate::theme::ThemeDeclarations::default()
+    };
     let durability = verify_revision_durability(themes_root, &revision);
     if durability != RevisionDurabilityStatus::Valid {
         return Ok(RevisionActivationOutcome::CorruptRevision(durability));
@@ -657,6 +663,13 @@ pub async fn activate_revision(
 
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    if let Err(err) =
+        crate::storage::content::sync_theme_declarations_in_tx(&mut conn, &revision.theme_id, &declarations)
+            .await
+    {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+        return Err(err);
+    }
     let res = sqlx::query(
         "UPDATE theme_active_selection
          SET revision_id = ?, version = version + 1
