@@ -231,7 +231,7 @@ mod tests {
             permissions: PluginPermissions {
                 sqlite: vec!["kv_write".into()],
                 http: vec![], content_read: vec![],
-            content_write: vec![],
+            network: vec![], content_write: vec![],
             },
         };
 
@@ -445,7 +445,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![target_url.clone()],
                 content_read: vec![],
-            content_write: vec![],
+            network: vec![], content_write: vec![],
             },
         };
 
@@ -1001,7 +1001,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![origin.clone()],
                 content_read: vec![],
-            content_write: vec![],
+            network: vec![], content_write: vec![],
             },
         };
 
@@ -1153,7 +1153,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![origin.clone()],
                 content_read: vec![],
-            content_write: vec![],
+            network: vec![], content_write: vec![],
             },
         };
 

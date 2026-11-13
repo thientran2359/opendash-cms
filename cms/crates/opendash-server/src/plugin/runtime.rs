@@ -790,6 +790,7 @@ fn execute_wasm_sync(
         input_bytes,
         output_bytes: None,
         host_calls_count: 0,
+        http_calls_count: 0,
         db_pool: Some(db_pool.clone()),
         kv_ipc: None,
         _correlation_id: correlation_id,

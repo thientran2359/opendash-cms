@@ -1,6 +1,5 @@
 use std::{
     collections::BTreeMap,
-    net::IpAddr,
     sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
 };
@@ -24,6 +23,7 @@ pub struct HostContext {
     pub input_bytes: Vec<u8>,
     pub output_bytes: Option<Vec<u8>>,
     pub host_calls_count: usize,
+    pub http_calls_count: usize,
     pub db_pool: Option<SqlitePool>,
     pub kv_ipc: Option<Arc<dyn Fn(&str) -> Result<HostOperationResponse, String> + Send + Sync>>,
     pub _correlation_id: String,
@@ -349,32 +349,8 @@ fn handle_kv_set(ctx: &mut HostContext, key: &str, value: Value) -> HostOperatio
     }
 }
 
-pub fn is_forbidden_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => {
-            v4.is_loopback()
-                || v4.is_private()
-                || v4.is_link_local()
-                || v4.is_broadcast()
-                || v4.is_documentation()
-                || v4.is_unspecified()
-                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
-                || v4.octets()[0] >= 224
-        }
-        IpAddr::V6(v6) => {
-            v6.is_loopback()
-                || v6.is_unspecified()
-                || if let Some(v4_mapped) = v6.to_ipv4_mapped() {
-                    is_forbidden_ip(IpAddr::V4(v4_mapped))
-                } else {
-                    false
-                }
-                || (v6.segments()[0] & 0xfe00) == 0xfc00
-                || (v6.segments()[0] & 0xffc0) == 0xfe80
-                || (v6.segments()[0] & 0xff00) == 0xff00
-        }
-    }
-}
+#[allow(unused_imports)]
+pub use super::egress::is_forbidden_ip;
 
 fn handle_http_request(
     ctx: &mut HostContext,
@@ -386,182 +362,100 @@ fn handle_http_request(
     if ctx.is_cancelled() {
         return HostOperationResponse::err("Quá thời gian thực thi (deadline exceeded).");
     }
-
-    // 1. Check manifest allowlist
-    if !ctx.manifest.is_http_allowed(target_url) {
+    if ctx.http_calls_count >= super::egress::MAX_HTTP_CALLS_PER_INVOCATION {
         return HostOperationResponse::err(
-            "permission_denied: URL không nằm trong allowlist HTTP của manifest.",
+            "quota_exceeded: Vượt quá giới hạn 10 HTTP requests mỗi lần chạy.",
         );
     }
+    ctx.http_calls_count += 1;
 
-    let parsed_url = match url::Url::parse(target_url) {
-        Ok(u) => u,
-        Err(_) => return HostOperationResponse::err("URL không hợp lệ."),
-    };
-
-    if parsed_url.scheme() != "http" && parsed_url.scheme() != "https" {
-        return HostOperationResponse::err("Chỉ hỗ trợ scheme http hoặc https.");
+    match super::egress::execute_scoped_http_request(
+        &ctx.manifest,
+        method,
+        target_url,
+        headers,
+        body,
+        ctx.allow_loopback,
+        ctx.deadline,
+    ) {
+        Ok(resp) => HostOperationResponse {
+            ok: true,
+            error: None,
+            found: None,
+            value: None,
+            status: Some(resp.status),
+            headers: Some(resp.headers),
+            body: Some(resp.body),
+        },
+        Err(err) => HostOperationResponse::err(err),
     }
+}
 
-    let Some(raw_host) = parsed_url.host_str() else {
-        return HostOperationResponse::err("URL không chứa host hợp lệ.");
-    };
-    let clean_host = raw_host.trim_start_matches('[').trim_end_matches(']');
-    let port = parsed_url.port_or_known_default().unwrap_or(80);
+#[cfg(test)]
+mod egress_quota_tests {
+    use super::*;
+    use opendash_core::plugin::{NetworkScopeGrant, PluginPermissions};
 
-    // 2. Resolve DNS & verify target IP
-    let target_socket_addr = if let Ok(ip) = clean_host.parse::<IpAddr>() {
-        if is_forbidden_ip(ip) && !(ctx.allow_loopback && ip.is_loopback()) {
-            return HostOperationResponse::err(
-                "permission_denied: Không được phép truy cập mạng loopback hoặc private network.",
-            );
-        }
-        std::net::SocketAddr::new(ip, port)
-    } else if clean_host.eq_ignore_ascii_case("localhost") {
-        if !ctx.allow_loopback {
-            return HostOperationResponse::err(
-                "permission_denied: Không được phép truy cập mạng loopback hoặc private network.",
-            );
-        }
-        std::net::SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), port)
-    } else {
-        let remaining = ctx.deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return HostOperationResponse::err("Quá thời gian thực thi (deadline exceeded).");
-        }
-        let dns_timeout = std::cmp::min(Duration::from_secs(1), remaining);
-        let lookup = format!("{}:{}", clean_host, port);
-        let lookup_res = if let Ok(h) = tokio::runtime::Handle::try_current() {
-            h.block_on(async { tokio::time::timeout(dns_timeout, tokio::net::lookup_host(&lookup)).await })
-        } else if let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() {
-            rt.block_on(async { tokio::time::timeout(dns_timeout, tokio::net::lookup_host(&lookup)).await })
-        } else {
-            return HostOperationResponse::err("Lỗi DNS: không khởi tạo được runtime.");
+    #[test]
+    fn http_sub_quota_blocks_11th_call_per_invocation() {
+        let manifest = PluginManifest {
+            id: "quota-test".into(),
+            version: "1.0.0".into(),
+            api_version: 1,
+            manifest_schema: 2,
+            min_host_version: None,
+            name: "Quota Test".into(),
+            description: "Quota test".into(),
+            entrypoint: "plugin.wasm".into(),
+            permissions: PluginPermissions {
+                sqlite: vec![],
+                http: vec![],
+                network: vec![NetworkScopeGrant {
+                    scheme: "http".into(),
+                    host: "127.0.0.1".into(),
+                    port: Some(1),
+                    methods: vec!["GET".into()],
+                    path_prefix: Some("/".into()),
+                }],
+                content_read: vec![],
+                content_write: vec![],
+            },
+            hooks: vec![],
+            hook_priority: 0,
+            actions: vec![],
+            declarations: Default::default(),
         };
-        #[cfg(any())]
-        let _unused = tokio::runtime::Handle::current().block_on(async {
-            tokio::time::timeout(dns_timeout, tokio::net::lookup_host(lookup)).await
-        });
-        let addrs_iter = match lookup_res {
-            Ok(Ok(addrs)) => addrs,
-            Ok(Err(_)) => {
-                return HostOperationResponse::err("Lỗi DNS: không thể phân giải tên miền.");
-            }
-            Err(_) => {
-                return HostOperationResponse::err("Lỗi DNS: quá thời gian phân giải tên miền.");
-            }
+        let mut ctx = HostContext {
+            plugin_id: manifest.id.clone(),
+            manifest,
+            input_bytes: vec![],
+            output_bytes: None,
+            host_calls_count: 0,
+            http_calls_count: super::super::egress::MAX_HTTP_CALLS_PER_INVOCATION,
+            db_pool: None,
+            kv_ipc: None,
+            _correlation_id: "quota".into(),
+            allow_loopback: true,
+            limits: Default::default(),
+            staged_kv_writes: Default::default(),
+            cancellation_token: Arc::new(AtomicBool::new(false)),
+            deadline: Instant::now() + Duration::from_secs(5),
+            execution_mode: opendash_core::hooks::HookExecutionMode::Standard,
+            staged_content_command: None,
+            action_capabilities: None,
         };
-        let addrs_vec: Vec<std::net::SocketAddr> = addrs_iter.collect();
-        if addrs_vec.is_empty() {
-            return HostOperationResponse::err("Lỗi DNS: không tìm thấy địa chỉ IP.");
-        }
-        for addr in &addrs_vec {
-            let ip = addr.ip();
-            if is_forbidden_ip(ip) && !(ctx.allow_loopback && ip.is_loopback()) {
-                return HostOperationResponse::err(
-                    "permission_denied: Tên miền phân giải về địa chỉ loopback hoặc private network bị cấm.",
-                );
-            }
-        }
-        addrs_vec[0]
-    };
-
-    let remaining = ctx.deadline.saturating_duration_since(Instant::now());
-    if remaining.is_zero() {
-        return HostOperationResponse::err("Quá thời gian thực thi (deadline exceeded).");
-    }
-    let http_timeout = std::cmp::min(HTTP_TIMEOUT, remaining);
-
-    let method_upper = method.to_ascii_uppercase();
-    if method_upper != "GET" && method_upper != "POST" {
-        return HostOperationResponse::err("Chỉ hỗ trợ method GET hoặc POST.");
-    }
-
-    // 3. Build blocking client with strict timeout, pinned IP, NO environment proxy, and NO redirect
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(http_timeout)
-        .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
-        .resolve(clean_host, target_socket_addr)
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => {
-            return HostOperationResponse::err("Không thể khởi tạo HTTP client.");
-        }
-    };
-
-    let mut req_builder = match method_upper.as_str() {
-        "GET" => client.get(parsed_url),
-        "POST" => client.post(parsed_url),
-        _ => unreachable!(),
-    };
-
-    if headers.len() > 50 {
-        return HostOperationResponse::err("Số lượng header HTTP vượt quá 50.");
-    }
-    for (k, v) in headers {
-        if k.len() > 128 || v.len() > 4096 {
-            return HostOperationResponse::err("Header key hoặc value vượt quá giới hạn độ dài.");
-        }
-        req_builder = req_builder.header(k, v);
-    }
-
-    if let Some(b) = body {
-        if b.len() > MAX_HTTP_BODY_BYTES {
-            return HostOperationResponse::err("Body request HTTP vượt quá giới hạn 1 MB.");
-        }
-        req_builder = req_builder.body(b);
-    }
-
-    match req_builder.send() {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let mut resp_headers = BTreeMap::new();
-            for (k, v) in resp.headers() {
-                if let Ok(val_str) = v.to_str() {
-                    resp_headers.insert(k.as_str().to_string(), val_str.to_string());
-                }
-            }
-
-            // Stream bounded read: take MAX_HTTP_BODY_BYTES + 1
-            let mut body_buf = Vec::new();
-            let mut reader = std::io::Read::take(resp, (MAX_HTTP_BODY_BYTES + 1) as u64);
-            if std::io::Read::read_to_end(&mut reader, &mut body_buf).is_err() {
-                return HostOperationResponse::err("Lỗi khi đọc response HTTP.");
-            }
-
-            if body_buf.len() > MAX_HTTP_BODY_BYTES {
-                return HostOperationResponse::err("Response HTTP vượt quá giới hạn 1 MB.");
-            }
-
-            let resp_text = match String::from_utf8(body_buf) {
-                Ok(t) => t,
-                Err(_) => {
-                    return HostOperationResponse::err("Response HTTP không phải UTF-8 hợp lệ.");
-                }
-            };
-
-            HostOperationResponse {
-                ok: true,
-                error: None,
-                found: None,
-                value: None,
-                status: Some(status),
-                headers: Some(resp_headers),
-                body: Some(resp_text),
-            }
-        }
-        Err(e) => {
-            if e.is_timeout() {
-                HostOperationResponse::err("Lỗi kết nối HTTP: Quá thời gian chờ (timeout).")
-            } else if e.is_redirect() {
-                HostOperationResponse::err(
-                    "Lỗi kết nối HTTP: Bị chặn chuyển hướng (redirect policy).",
-                )
-            } else {
-                HostOperationResponse::err("Lỗi kết nối HTTP: Không thể hoàn thành yêu cầu.")
-            }
-        }
+        let res = handle_http_request(
+            &mut ctx,
+            "GET",
+            "http://127.0.0.1:1/",
+            BTreeMap::new(),
+            None,
+        );
+        assert!(!res.ok);
+        assert!(
+            res.error.as_deref().unwrap_or("").contains("quota_exceeded"),
+            "expected quota_exceeded, got {:?}",
+            res.error
+        );
     }
 }

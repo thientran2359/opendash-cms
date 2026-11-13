@@ -1,3 +1,4 @@
+pub mod egress;
 pub mod host_ops;
 pub mod manager;
 pub mod package;
