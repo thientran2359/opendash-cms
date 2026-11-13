@@ -188,6 +188,33 @@ impl PluginRuntime {
         allow_loopback: bool,
         expected_generation: Option<i64>,
     ) -> Result<Value, PluginError> {
+        self.run_plugin_with_mode(
+            wasm_bytes,
+            manifest,
+            input,
+            db_pool,
+            correlation_id,
+            allow_loopback,
+            expected_generation,
+            opendash_core::hooks::HookExecutionMode::Standard,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_plugin_with_mode(
+        &self,
+        wasm_bytes: Vec<u8>,
+        manifest: PluginManifest,
+        input: Value,
+        db_pool: SqlitePool,
+        correlation_id: String,
+        allow_loopback: bool,
+        expected_generation: Option<i64>,
+        execution_mode: opendash_core::hooks::HookExecutionMode,
+        timeout_override: Option<Duration>,
+    ) -> Result<Value, PluginError> {
         let cancellation_token = Arc::new(AtomicBool::new(false));
 
         // Fail-fast concurrency control to prevent RAM exhaustion
@@ -197,8 +224,9 @@ impl PluginRuntime {
         };
 
         let start = Instant::now();
-        let deadline = start + INVOCATION_DEADLINE;
-        let remaining = INVOCATION_DEADLINE;
+        let effective_budget = timeout_override.unwrap_or(INVOCATION_DEADLINE).min(INVOCATION_DEADLINE);
+        let deadline = start + effective_budget;
+        let remaining = effective_budget;
 
         // In production and tests, always run in isolated worker process (no in-process fallback)
         let current_exe = std::env::current_exe().map_err(|e| {
@@ -273,6 +301,7 @@ impl PluginRuntime {
                         allow_loopback,
                         correlation_id,
                         deadline_ms: remaining.as_millis() as u64,
+                        execution_mode,
                     };
                     let req_json = serde_json::to_vec(&req)
                         .map_err(|e| PluginError::Internal(format!("Lỗi serialize request: {e}")))?;
@@ -446,6 +475,12 @@ impl PluginRuntime {
         };
 
         if !staged_writes.is_empty() {
+            if execution_mode != opendash_core::hooks::HookExecutionMode::Standard {
+                guard.cleanup();
+                return Err(PluginError::InvalidOutput(
+                    "Ghi KV bị cấm trong save hook.".into(),
+                ));
+            }
             if cancellation_token.load(Ordering::Relaxed) || Instant::now() >= deadline {
                 guard.cleanup();
                 return Err(PluginError::Timeout);
@@ -676,6 +711,7 @@ fn execute_wasm_sync(
         staged_kv_writes: Default::default(),
         cancellation_token,
         deadline,
+        execution_mode: opendash_core::hooks::HookExecutionMode::Standard,
     };
 
     let mut store = Store::new(engine, host_ctx);

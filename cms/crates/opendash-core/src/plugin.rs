@@ -11,6 +11,8 @@ pub struct PluginPermissions {
     pub sqlite: Vec<String>,
     #[serde(default)]
     pub http: Vec<String>,
+    #[serde(default)]
+    pub content_read: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -33,6 +35,8 @@ pub struct PluginManifest {
     /// Optional lifecycle subscriptions; manual invocation input remains unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hooks: Vec<crate::hooks::HookEvent>,
+    #[serde(default)]
+    pub hook_priority: i32,
     #[serde(default, skip_serializing_if = "crate::content::CntDeclarations::is_empty")]
     pub declarations: crate::content::CntDeclarations,
 }
@@ -103,13 +107,24 @@ impl PluginManifest {
         if self.entrypoint != "plugin.wasm" {
             return Err("Entrypoint phải là 'plugin.wasm'.");
         }
-        if self.hooks.len() > 1
-            || self
-                .hooks
-                .iter()
-                .any(|event| *event != crate::hooks::HookEvent::PageAfterSave)
-        {
-            return Err("Only one page/after_save subscription is supported.");
+        let mut seen_hooks = std::collections::HashSet::new();
+        for event in &self.hooks {
+            if !matches!(
+                event,
+                crate::hooks::HookEvent::PageAfterSave
+                    | crate::hooks::HookEvent::ContentBeforeSave
+                    | crate::hooks::HookEvent::ContentAfterSave
+            ) {
+                return Err("Sự kiện hook không được hỗ trợ để đăng ký.");
+            }
+            if !seen_hooks.insert(event.as_str()) {
+                return Err("Danh sách hooks không được chứa sự kiện trùng lặp.");
+            }
+        }
+        for ct_perm in &self.permissions.content_read {
+            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+                return Err("Quyền content_read không hợp lệ.");
+            }
         }
         for perm in &self.permissions.sqlite {
             if perm != "kv_read" && perm != "kv_write" {
@@ -125,6 +140,13 @@ impl PluginManifest {
         }
         self.declarations.validate()?;
         Ok(())
+    }
+
+    pub fn can_read_content_type(&self, type_key: &str) -> bool {
+        self.permissions
+            .content_read
+            .iter()
+            .any(|k| k == "*" || k == type_key)
     }
 
     pub fn has_sqlite_perm(&self, perm: &str) -> bool {
@@ -214,9 +236,12 @@ mod hook_tests {
                 .len(),
             1
         );
+        value["hooks"] = serde_json::json!(["content/before_save", "content/after_save"]);
+        assert!(PluginManifest::from_json_str(&value.to_string()).is_ok());
+
         for invalid in [
             serde_json::json!(["page/after_save", "page/after_save"]),
-            serde_json::json!(["content/before_save"]),
+            serde_json::json!(["plugin/manual_run"]),
             serde_json::json!(["page_after_save"]),
         ] {
             value["hooks"] = invalid;

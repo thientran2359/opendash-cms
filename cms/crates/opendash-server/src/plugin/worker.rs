@@ -23,6 +23,8 @@ pub struct WorkerInvocationRequest {
     pub allow_loopback: bool,
     pub correlation_id: String,
     pub deadline_ms: u64,
+    #[serde(default)]
+    pub execution_mode: opendash_core::hooks::HookExecutionMode,
 }
 
 pub fn run_worker_from_stdio() {
@@ -132,6 +134,7 @@ pub fn run_worker_from_stdio() {
         staged_kv_writes: Default::default(),
         cancellation_token,
         deadline,
+        execution_mode: req.execution_mode,
     };
 
     let mut store = Store::new(&engine, host_ctx);

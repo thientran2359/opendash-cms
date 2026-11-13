@@ -42,6 +42,15 @@ struct Handler {
     priority: i32,
     callback: Callback,
 }
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContentBeforeSaveVeto {
+    pub code: String,
+    pub message: String,
+    pub field_errors: std::collections::BTreeMap<String, String>,
+}
+
+const CONTENT_HOOK_PHASE_BUDGET: Duration = Duration::from_secs(5);
+
 #[derive(Debug)]
 pub struct HookOutcome {
     pub handler_id: String,
@@ -221,6 +230,206 @@ impl HookDispatcher {
             });
         }
         DispatchReport { envelope, outcomes }
+    }
+
+
+    pub async fn dispatch_content_before_save(
+        &self,
+        type_key: &str,
+        payload: Value,
+    ) -> Result<(), ContentBeforeSaveVeto> {
+        if IN_DISPATCH.try_with(|v| *v).unwrap_or(false) {
+            return Err(ContentBeforeSaveVeto {
+                code: "nested_dispatch".into(),
+                message: "Không cho phép gọi lồng nhau trong content/before_save.".into(),
+                field_errors: Default::default(),
+            });
+        }
+        let envelope = Self::envelope(HookEvent::ContentBeforeSave, payload);
+        IN_DISPATCH
+            .scope(true, async {
+                let started = Instant::now();
+                let subs = match tokio::time::timeout(
+                    Duration::from_secs(1),
+                    self.plugin_manager
+                        .content_hook_subscriptions(HookEvent::ContentBeforeSave, type_key),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => s,
+                    _ => {
+                        return Err(ContentBeforeSaveVeto {
+                            code: "hook_discovery_failed".into(),
+                            message: "Không thể tra cứu plugin content/before_save.".into(),
+                            field_errors: Default::default(),
+                        });
+                    }
+                };
+
+                for (index, (_prio, plugin_id)) in subs.into_iter().enumerate() {
+                    if index >= MAX_HANDLERS || started.elapsed() >= CONTENT_HOOK_PHASE_BUDGET {
+                        return Err(ContentBeforeSaveVeto {
+                            code: "hook_budget_exceeded".into(),
+                            message: "Vượt quá giới hạn xử lý content/before_save.".into(),
+                            field_errors: Default::default(),
+                        });
+                    }
+                    let remaining = CONTENT_HOOK_PHASE_BUDGET.saturating_sub(started.elapsed());
+                    let env_val = serde_json::to_value(&envelope).expect("JSON envelope");
+                    let out = match self
+                        .plugin_manager
+                        .run_plugin_with_mode(
+                            &plugin_id,
+                            env_val,
+                            envelope.correlation_id.clone(),
+                            opendash_core::hooks::HookExecutionMode::ContentBeforeSave,
+                            Some(remaining),
+                        )
+                        .await
+                    {
+                        Ok(run_resp) => run_resp.data.unwrap_or(Value::Null),
+                        Err((_status, resp)) => {
+                            let err_msg = opendash_core::hooks::sanitize_plain_text(
+                                resp.error.as_deref().unwrap_or("Plugin hook failed"),
+                                256,
+                            );
+                            self.plugin_manager
+                                .record_hook_failure(&plugin_id, &envelope.correlation_id, &err_msg)
+                                .await;
+                            return Err(ContentBeforeSaveVeto {
+                                code: resp.code.unwrap_or_else(|| "hook_failed".into()),
+                                message: err_msg,
+                                field_errors: Default::default(),
+                            });
+                        }
+                    };
+
+                    let decision: opendash_core::hooks::ContentBeforeSaveDecision =
+                        match serde_json::from_value(out) {
+                            Ok(d) => d,
+                            Err(_) => {
+                                let msg = "Đầu ra content/before_save không hợp lệ.";
+                                self.plugin_manager
+                                    .record_hook_failure(&plugin_id, &envelope.correlation_id, msg)
+                                    .await;
+                                return Err(ContentBeforeSaveVeto {
+                                    code: "invalid_hook_output".into(),
+                                    message: msg.into(),
+                                    field_errors: Default::default(),
+                                });
+                            }
+                        };
+
+                    match decision {
+                        opendash_core::hooks::ContentBeforeSaveDecision::Allow => {}
+                        opendash_core::hooks::ContentBeforeSaveDecision::Veto {
+                            code,
+                            message,
+                            field_errors,
+                        } => {
+                            let clean_code = opendash_core::hooks::sanitize_plain_text(&code, 64);
+                            let clean_msg =
+                                opendash_core::hooks::sanitize_plain_text(&message, 256);
+                            let clean_fields = field_errors
+                                .into_iter()
+                                .take(32)
+                                .map(|(k, v)| {
+                                    (
+                                        opendash_core::hooks::sanitize_plain_text(&k, 64),
+                                        opendash_core::hooks::sanitize_plain_text(&v, 256),
+                                    )
+                                })
+                                .collect();
+                            return Err(ContentBeforeSaveVeto {
+                                code: if clean_code.is_empty() {
+                                    "vetoed".into()
+                                } else {
+                                    clean_code
+                                },
+                                message: clean_msg,
+                                field_errors: clean_fields,
+                            });
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .await
+    }
+
+    pub async fn dispatch_content_after_save(
+        &self,
+        type_key: &str,
+        payload: Value,
+    ) -> DispatchReport {
+        let envelope = Self::envelope(HookEvent::ContentAfterSave, payload);
+        if IN_DISPATCH.try_with(|v| *v).unwrap_or(false) {
+            return DispatchReport {
+                envelope,
+                outcomes: vec![HookOutcome {
+                    handler_id: "dispatcher".into(),
+                    error: Some("Nested lifecycle dispatch".into()),
+                }],
+            };
+        }
+        IN_DISPATCH
+            .scope(true, async {
+                let started = Instant::now();
+                let mut outcomes = Vec::new();
+                let subs = match tokio::time::timeout(
+                    Duration::from_secs(1),
+                    self.plugin_manager
+                        .content_hook_subscriptions(HookEvent::ContentAfterSave, type_key),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => s,
+                    failure => {
+                        let error = format!("Subscription discovery failed: {failure:?}");
+                        outcomes.push(HookOutcome {
+                            handler_id: "dispatcher".into(),
+                            error: Some(error),
+                        });
+                        return DispatchReport { envelope, outcomes };
+                    }
+                };
+                for (index, (_prio, plugin_id)) in subs.into_iter().enumerate() {
+                    let result = if index >= MAX_HANDLERS
+                        || started.elapsed() >= CONTENT_HOOK_PHASE_BUDGET
+                    {
+                        Err("ContentAfterSave phase budget exceeded".to_string())
+                    } else {
+                        let remaining = CONTENT_HOOK_PHASE_BUDGET.saturating_sub(started.elapsed());
+                        let env_val = serde_json::to_value(&envelope).expect("JSON envelope");
+                        self.plugin_manager
+                            .run_plugin_with_mode(
+                                &plugin_id,
+                                env_val,
+                                envelope.correlation_id.clone(),
+                                opendash_core::hooks::HookExecutionMode::ContentAfterSave,
+                                Some(remaining),
+                            )
+                            .await
+                            .map(|_| ())
+                            .map_err(|(_, resp)| {
+                                resp.error
+                                    .unwrap_or_else(|| "ContentAfterSave hook failed".into())
+                            })
+                    };
+                    if let Err(ref err) = result {
+                        eprintln!("{} plugin/{}: {err}", envelope.correlation_id, plugin_id);
+                        self.plugin_manager
+                            .record_hook_failure(&plugin_id, &envelope.correlation_id, err)
+                            .await;
+                    }
+                    outcomes.push(HookOutcome {
+                        handler_id: format!("plugin/{plugin_id}"),
+                        error: result.err(),
+                    });
+                }
+                DispatchReport { envelope, outcomes }
+            })
+            .await
     }
 
     pub async fn dispatch_plugin_run(

@@ -10,7 +10,6 @@ use axum::{
 };
 use opendash_core::{
     content::{ContentEntryInput, valid_content_type_key},
-    hooks::HookEvent,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -154,15 +153,26 @@ pub async fn entry_create(
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
     media_storage::require_existing_references(&db, &schema, &input).await?;
-    hooks.emit(
-        HookEvent::ContentBeforeSave,
-        json!({ "type_key": &type_key, "operation": "create" }),
-    );
-    let entry = entry_storage::create_entry(&db, &actor, &type_key, &input).await?;
-    hooks.emit(
-        HookEvent::ContentAfterSave,
-        json!({ "type_key": &type_key, "id": entry.id, "operation": "create", "version": entry.version }),
-    );
+    let candidate = json!({
+        "operation": "create",
+        "type_key": &type_key,
+        "entry_id": serde_json::Value::Null,
+        "expected_version": serde_json::Value::Null,
+        "title": &input.title,
+        "slug": &input.slug,
+        "candidate_values": &input.values,
+        "term_ids": &input.term_ids,
+    });
+    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
+    }
+    let entry = entry_storage::create_entry(&db, &actor, &type_key, &schema, &input).await?;
+    let _ = hooks
+        .dispatch_content_after_save(
+            &type_key,
+            json!({ "type_key": &type_key, "id": entry.id, "operation": "create", "version": entry.version }),
+        )
+        .await;
     Ok((
         StatusCode::CREATED,
         [
@@ -191,15 +201,27 @@ pub async fn entry_update(
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
     media_storage::require_existing_references(&db, &schema, &input).await?;
-    hooks.emit(
-        HookEvent::ContentBeforeSave,
-        json!({ "type_key": &type_key, "id": id, "operation": "update" }),
-    );
-    let entry = entry_storage::update_entry(&db, &actor, &type_key, id, version, &input).await?;
-    hooks.emit(
-        HookEvent::ContentAfterSave,
-        json!({ "type_key": &type_key, "id": entry.id, "operation": "update", "version": entry.version }),
-    );
+    let candidate = json!({
+        "operation": "update",
+        "type_key": &type_key,
+        "entry_id": id,
+        "expected_version": version,
+        "title": &input.title,
+        "slug": &input.slug,
+        "candidate_values": &input.values,
+        "term_ids": &input.term_ids,
+    });
+    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
+    }
+    let entry =
+        entry_storage::update_entry(&db, &actor, &type_key, &schema, id, version, &input).await?;
+    let _ = hooks
+        .dispatch_content_after_save(
+            &type_key,
+            json!({ "type_key": &type_key, "id": entry.id, "operation": "update", "version": entry.version }),
+        )
+        .await;
     Ok(([(header::ETAG, etag(entry.version))], Json(entry)).into_response())
 }
 

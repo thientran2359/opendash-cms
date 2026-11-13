@@ -93,6 +93,44 @@ pub async fn require_existing_references(
     Ok(())
 }
 
+
+pub async fn require_existing_references_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    schema: &ContentTypeDefinition,
+    input: &ContentEntryInput,
+) -> ApiResult<()> {
+    for field in &schema.fields {
+        let Some(value) = input.values.get(&field.key) else {
+            continue;
+        };
+        let ids: Vec<&str> = match field.field_type {
+            ContentFieldType::Image => value.as_str().into_iter().collect(),
+            ContentFieldType::Gallery => value.as_array().map_or_else(Vec::new, |values| {
+                values.iter().filter_map(|value| value.as_str()).collect()
+            }),
+            _ => continue,
+        };
+        for id in ids {
+            if !valid_media_id(id) {
+                return Err(ApiError::bad_request(
+                    "Ảnh tham chiếu chưa có trong Media Library. Hãy chọn ảnh đã upload.",
+                ));
+            }
+            let exists: Option<i64> =
+                sqlx::query_scalar("SELECT 1 FROM media_assets WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+            if exists.is_none() {
+                return Err(ApiError::bad_request(
+                    "Ảnh tham chiếu chưa có trong Media Library. Hãy chọn ảnh đã upload.",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn valid_media_id(id: &str) -> bool {
     id.len() == 64
         && id
