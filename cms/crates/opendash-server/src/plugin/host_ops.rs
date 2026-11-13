@@ -32,6 +32,7 @@ pub struct HostContext {
     pub staged_kv_writes: BTreeMap<String, Value>,
     pub cancellation_token: Arc<AtomicBool>,
     pub deadline: Instant,
+    pub execution_mode: opendash_core::hooks::HookExecutionMode,
 }
 
 impl HostContext {
@@ -108,7 +109,12 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
 
     match req {
         HostOperationRequest::KvGet { key } => handle_kv_get(ctx, &key),
-        HostOperationRequest::KvSet { key, value } => handle_kv_set(ctx, &key, value),
+        HostOperationRequest::KvSet { key, value } => {
+            if ctx.execution_mode != opendash_core::hooks::HookExecutionMode::Standard {
+                return HostOperationResponse::err("Ghi KV bị cấm trong save hook.");
+            }
+            handle_kv_set(ctx, &key, value)
+        }
         HostOperationRequest::HttpRequest {
             method,
             url,

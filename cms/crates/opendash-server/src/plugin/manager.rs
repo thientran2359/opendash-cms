@@ -166,6 +166,14 @@ impl PluginManager {
         plugin_storage::hook_subscriptions(&self.db_pool, event).await
     }
 
+    pub async fn content_hook_subscriptions(
+        &self,
+        event: opendash_core::hooks::HookEvent,
+        type_key: &str,
+    ) -> Result<Vec<(i32, String)>, String> {
+        plugin_storage::content_hook_subscriptions(&self.db_pool, event, type_key).await
+    }
+
     pub async fn record_hook_failure(&self, id: &str, correlation_id: &str, message: &str) {
         plugin_storage::record_plugin_execution_result(
             &self.db_pool,
@@ -183,6 +191,24 @@ impl PluginManager {
         id: &str,
         input: Value,
         correlation_id: String,
+    ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
+        self.run_plugin_with_mode(
+            id,
+            input,
+            correlation_id,
+            opendash_core::hooks::HookExecutionMode::Standard,
+            None,
+        )
+        .await
+    }
+
+    pub async fn run_plugin_with_mode(
+        &self,
+        id: &str,
+        input: Value,
+        correlation_id: String,
+        execution_mode: opendash_core::hooks::HookExecutionMode,
+        timeout_override: Option<std::time::Duration>,
     ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
         let row_opt = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
             .await
@@ -255,7 +281,7 @@ impl PluginManager {
 
         let run_res = self
             .runtime
-            .run_plugin_with_generation(
+            .run_plugin_with_mode(
                 wasm_blob,
                 manifest,
                 input,
@@ -263,6 +289,8 @@ impl PluginManager {
                 correlation_id.clone(),
                 self.allow_loopback,
                 Some(revision_generation),
+                execution_mode,
+                timeout_override,
             )
             .await;
 

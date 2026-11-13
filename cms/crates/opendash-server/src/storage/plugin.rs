@@ -343,7 +343,7 @@ pub async fn list_plugins(db_pool: &SqlitePool) -> Result<Vec<PluginSummary>, St
             } else {
                 PluginPermissions {
                     sqlite: vec![],
-                    http: vec![],
+                    http: vec![], content_read: vec![],
                 }
             };
 
@@ -386,7 +386,7 @@ pub async fn get_plugin(db_pool: &SqlitePool, id: &str) -> Result<Option<PluginS
     } else {
         PluginPermissions {
             sqlite: vec![],
-            http: vec![],
+            http: vec![], content_read: vec![],
         }
     };
 
@@ -570,6 +570,35 @@ pub async fn record_plugin_execution_result(
     ) {
         eprintln!("Plugin log unavailable: {id} {correlation_id} {level}: {message}");
     }
+}
+
+
+pub async fn content_hook_subscriptions(
+    db: &SqlitePool,
+    event: opendash_core::hooks::HookEvent,
+    type_key: &str,
+) -> Result<Vec<(i32, String)>, String> {
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, manifest_json FROM plugins WHERE enabled = 1 ORDER BY id")
+            .fetch_all(db)
+            .await
+            .map_err(|e| e.to_string())?;
+    let mut subs = Vec::new();
+    for (id, json) in rows {
+        match PluginManifest::from_json_str(&json) {
+            Ok(manifest)
+                if manifest.id == id
+                    && manifest.hooks.contains(&event)
+                    && manifest.can_read_content_type(type_key) =>
+            {
+                subs.push((manifest.hook_priority, id));
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("Invalid subscription manifest {id}: {error}"),
+        }
+    }
+    subs.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    Ok(subs)
 }
 
 pub async fn hook_subscriptions(

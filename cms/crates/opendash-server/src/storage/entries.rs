@@ -452,9 +452,11 @@ pub async fn create_entry(
     db: &SqlitePool,
     actor: &SessionContext,
     type_key: &str,
+    schema: &opendash_core::content::ContentTypeDefinition,
     input: &ContentEntryInput,
 ) -> ApiResult<ContentEntryRecord> {
     let mut tx = begin_entry_write(db, actor).await?;
+    crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, ids).await?;
     }
@@ -496,12 +498,14 @@ pub async fn update_entry(
     db: &SqlitePool,
     actor: &SessionContext,
     type_key: &str,
+    schema: &opendash_core::content::ContentTypeDefinition,
     id: i64,
     expected_version: i64,
     input: &ContentEntryInput,
 ) -> ApiResult<ContentEntryRecord> {
     let mut tx = begin_entry_write(db, actor).await?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
+    crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, ids).await?;
     }
