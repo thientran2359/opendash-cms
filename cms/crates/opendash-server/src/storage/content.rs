@@ -589,7 +589,7 @@ async fn sync_owner_cnt_declarations_in_tx(
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ContentTypeTaxonomyEligibilityRow {
     pub content_type_key: String,
     pub taxonomy_kind: String,

@@ -186,6 +186,23 @@ pub async fn taxonomy_delete(
         .into_response())
 }
 
+pub async fn taxonomy_eligibility_list(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(content_type_key): Path<String>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    let rows =
+        crate::storage::content::list_content_type_taxonomy_eligibility(&db, &content_type_key)
+            .await?;
+    Ok((
+        StatusCode::OK,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(rows),
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
