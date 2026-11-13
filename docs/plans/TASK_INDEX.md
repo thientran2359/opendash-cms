@@ -119,16 +119,29 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 
 | Mã candidate / task | Công việc | Trạng thái | GitHub Issue / PR |
 | --- | --- | --- | --- |
-| [M5-P01](milestones/M5/TASK_PLAN.md) | Mở rộng theme registry/activation M3: template ownership, update/version và package lifecycle | Chưa G3 | — |
-| [M5-P02](milestones/M5/TASK_PLAN.md) | URL policy nâng cao + RequestContext cho CPT/post/page/taxonomy | Chưa G3 | — |
-| [M5-P03](milestones/M5/TASK_PLAN.md) | Template composition page/header/footer/archive/single | Chưa G3 | — |
-| [M5-P04](milestones/M5/TASK_PLAN.md) | Theme Options mở rộng Settings core M3 qua declarations | Chưa G3 | — |
-| [M5-P05](milestones/M5/TASK_PLAN.md) | Import mẫu theo lựa chọn: page/menu/media/settings | Chưa G3 | — |
-| [M5-P06](milestones/M5/TASK_PLAN.md) | Đổi/cập nhật theme bảo toàn layout và CPT/fields/taxonomy/entries | Chưa G3 | — |
-| [M5-P07](milestones/M5/TASK_PLAN.md) | Missing-provider fallback và public accessibility/security | Chưa G3 | — |
-| [M5-P08](milestones/M5/TASK_PLAN.md) | E2E public delivery, sample menu import và theme preservation | Chưa G3 | — |
-| [M5-P09](milestones/M5/TASK_PLAN.md) | SITE-01 menu storage tối thiểu phục vụ import M5: menu/entry refs, ordering, origin và data ownership | Chưa G3 | — |
-| [M5-P10](milestones/M5/TASK_PLAN.md) | Theme ZIP declarations CPT/fields/taxonomy qua canonical domain registry (không dùng plugin bridge) | Chưa G3 | — |
+| [M5-P01](milestones/M5/TASK_PLAN.md) | Mở rộng theme registry/activation M3: template ownership, update/version và package lifecycle | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #145](https://github.com/thientran2359/opendash-cms/issues/145) · [Issue #146](https://github.com/thientran2359/opendash-cms/issues/146) |
+| [M5-S01-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Forge · Registry theme package, immutable revisions và A-DURABILITY staging | **G3 READY · Project #3 Ready** | [Issue #145](https://github.com/thientran2359/opendash-cms/issues/145) |
+| [M5-S01-T02](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Forge · ZIP v2 validation, staging install, activation/rollback và `/theme/` asset route | G3 READY · Project #3 Backlog (chờ S01-T01) | [Issue #146](https://github.com/thientran2359/opendash-cms/issues/146) |
+| [M5-P02](milestones/M5/TASK_PLAN.md) | URL policy nâng cao + RequestContext cho CPT/post/page/taxonomy | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #147](https://github.com/thientran2359/opendash-cms/issues/147) |
+| [M5-S02-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Harbor · Public RequestContext, URL resolver, canonical builders và consumers | **G3 READY · Project #3 Ready** | [Issue #147](https://github.com/thientran2359/opendash-cms/issues/147) |
+| [M5-P03](milestones/M5/TASK_PLAN.md) | Template composition page/header/footer/archive/single | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #148](https://github.com/thientran2359/opendash-cms/issues/148) · [Issue #149](https://github.com/thientran2359/opendash-cms/issues/149) |
+| [M5-S03-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Forge · Template roles, C-SEC MiniJinja safe subset và `BindingSource::RouteContext` | G3 READY · Project #3 Backlog (chờ S01-T02, S02-T01) | [Issue #148](https://github.com/thientran2359/opendash-cms/issues/148) |
+| [M5-S03-T02](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Forge · Site-owned template overrides và Preview/Save có CAS | G3 READY · Project #3 Backlog (chờ S03-T01) | [Issue #149](https://github.com/thientran2359/opendash-cms/issues/149) |
+| [M5-P04](milestones/M5/TASK_PLAN.md) | Theme Options mở rộng Settings core M3 qua declarations | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #150](https://github.com/thientran2359/opendash-cms/issues/150) |
+| [M5-S04-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Harbor · Typed Theme Options qua SITE-01 Settings core và media ACL | G3 READY · Project #3 Backlog (chờ S01-T02) | [Issue #150](https://github.com/thientran2359/opendash-cms/issues/150) |
+| [M5-P05](milestones/M5/TASK_PLAN.md) | Import mẫu theo lựa chọn: page/menu/media/settings | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #153](https://github.com/thientran2359/opendash-cms/issues/153) · [Issue #154](https://github.com/thientran2359/opendash-cms/issues/154) |
+| [M5-S05-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Harbor · Selective sample import dry-run và logical provenance plan | G3 READY · Project #3 Backlog (chờ S01-T02, S04-T01, S09-T01, S10-T01) | [Issue #153](https://github.com/thientran2359/opendash-cms/issues/153) |
+| [M5-S05-T02](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Harbor · Selective import execute: G-RECOVERY 3-phase journal và crash recovery | G3 READY · Project #3 Backlog (chờ S05-T01) | [Issue #154](https://github.com/thientran2359/opendash-cms/issues/154) |
+| [M5-P06](milestones/M5/TASK_PLAN.md) | Đổi/cập nhật theme bảo toàn layout và CPT/fields/taxonomy/entries | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #155](https://github.com/thientran2359/opendash-cms/issues/155) |
+| [M5-S06-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Forge · Theme switch/update bảo toàn schema, entries, layout, options và menu | G3 READY · Project #3 Backlog (chờ S03-T02, S05-T02, S10-T01) | [Issue #155](https://github.com/thientran2359/opendash-cms/issues/155) |
+| [M5-P07](milestones/M5/TASK_PLAN.md) | Missing-provider fallback và public accessibility/security | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #156](https://github.com/thientran2359/opendash-cms/issues/156) |
+| [M5-S07-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Harbor · Missing-provider fallback, adversarial C-SEC regression và public accessibility | G3 READY · Project #3 Backlog (chờ S06-T01) | [Issue #156](https://github.com/thientran2359/opendash-cms/issues/156) |
+| [M5-P08](milestones/M5/TASK_PLAN.md) | E2E public delivery, sample menu import và theme preservation | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #157](https://github.com/thientran2359/opendash-cms/issues/157) |
+| [M5-S08-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Forge (Win) + Harbor (Mac) · E2E public delivery, selected sample import và preservation đa OS | G3 READY · Project #3 Backlog (chờ S07-T01 và toàn bộ predecessors) | [Issue #157](https://github.com/thientran2359/opendash-cms/issues/157) |
+| [M5-P09](milestones/M5/TASK_PLAN.md) | SITE-01 menu storage tối thiểu phục vụ import M5: menu/entry refs, ordering, origin và data ownership | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #151](https://github.com/thientran2359/opendash-cms/issues/151) |
+| [M5-S09-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Harbor · Menu model SITE-01: stable IDs, ordering, slot rendering và canonical refs | G3 READY · Project #3 Backlog (chờ S02-T01) | [Issue #151](https://github.com/thientran2359/opendash-cms/issues/151) |
+| [M5-P10](milestones/M5/TASK_PLAN.md) | Theme ZIP declarations CPT/fields/taxonomy qua canonical domain registry (không dùng plugin bridge) | G3 đã merge (`6967c6b`), có Issue triển khai | [Issue #152](https://github.com/thientran2359/opendash-cms/issues/152) |
+| [M5-S10-T01](milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md) | Forge · Theme CPT/fields/taxonomy declarations qua canonical CNT registries | G3 READY · Project #3 Backlog (chờ S01-T02) | [Issue #152](https://github.com/thientran2359/opendash-cms/issues/152) |
 
 ## [M6 — Plugin Extensions](https://github.com/thientran2359/opendash-cms/milestone/7) (8)
 
