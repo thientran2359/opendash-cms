@@ -363,6 +363,32 @@ pub fn render_builder_with_lists(
                                 }
                             }
                         }
+                        ElementContent::Known(KnownElement::PluginBlock(props)) => {
+                            match state.themes.get(&props.block_id).map(|d| d.template.as_str()) {
+                                Some(template_src) => {
+                                    let rendered = render_plugin_block_csec(
+                                        &props.block_id,
+                                        template_src,
+                                        &props.values,
+                                    )?;
+                                    Some(format!(
+                                        "<div class=\"builder-plugin-block\" data-block-id=\"{}\">{}</div>",
+                                        escape_html(&props.block_id),
+                                        rendered
+                                    ))
+                                }
+                                None => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "plugin_block_unavailable",
+                                    });
+                                    Some(format!(
+                                        "<div class=\"builder-block-unavailable\" data-block-id=\"{}\"></div>",
+                                        escape_html(&props.block_id)
+                                    ))
+                                }
+                            }
+                        }
                         ElementContent::Known(KnownElement::Legacy(props)) => {
                             match state.themes.get(&props.block_id) {
                                 None => {
@@ -744,5 +770,134 @@ mod tests {
             layout_hook_payload(&empty, 3),
             json!({"block_type": "core/layout", "layout_version": 3})
         );
+    }
+}
+
+pub fn render_plugin_block_csec(
+    block_id: &str,
+    template_source: &str,
+    values: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> ApiResult<String> {
+    crate::template_sec::validate_template_csec(block_id, template_source)
+        .map_err(ApiError::bad_request)?;
+    let mut ctx_map = std::collections::BTreeMap::new();
+    for (k, v) in values {
+        ctx_map.insert(k.clone(), crate::template_sec::json_to_safe_value(v));
+    }
+    let ctx = minijinja::Value::from(ctx_map);
+    crate::template_sec::render_csec(block_id, template_source, ctx)
+        .map_err(ApiError::bad_request)
+}
+
+#[cfg(test)]
+mod m6_s05_tests {
+    use std::collections::BTreeMap;
+    use super::*;
+    use opendash_core::builder::{
+        BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps,
+        RowNode, SectionNode,
+    };
+
+    #[test]
+    fn plugin_block_csec_escapes_values_blocks_xss_and_falls_back_safely() {
+        // 1. C-SEC rejects dangerous template constructs
+        assert!(render_plugin_block_csec(
+            "acme-plugin/hero",
+            "<script>alert(1)</script>",
+            &BTreeMap::new()
+        )
+        .is_err());
+
+        // 2. C-SEC auto-escapes prop values
+        let mut vals = BTreeMap::new();
+        vals.insert(
+            "title".into(),
+            serde_json::Value::String("<script>xss()</script>Hello".into()),
+        );
+        let ok_html = render_plugin_block_csec(
+            "acme-plugin/hero",
+            "<div class=\"card\">{{ title }}</div>",
+            &vals,
+        )
+        .expect("safe C-SEC template renders");
+        assert!(!ok_html.contains("<script>"));
+        assert!(ok_html.contains("&lt;script&gt;xss()"));
+        assert!(ok_html.contains("Hello"));
+
+        // 3. Builder render with active plugin block vs disabled plugin block fallback
+        let doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-1".into(),
+                responsive: None,
+                children: vec![RowNode {
+                    id: "row-1".into(),
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "col-1".into(),
+                        responsive: None,
+                        children: vec![ElementNode {
+                            id: "el-1".into(),
+                            content: ElementContent::Known(KnownElement::PluginBlock(
+                                PluginBlockProps {
+                                    block_id: "acme-plugin/hero".into(),
+                                    values: vals,
+                                },
+                            )),
+                        }],
+                    }],
+                }],
+            }],
+        };
+
+        let mut active_state = HomeState {
+            active_id: None,
+            active_alias: None,
+            active_template: None,
+            themes: BTreeMap::new(),
+            saved: Some(doc.clone()),
+            legacy: None,
+            version: 1,
+        };
+        crate::storage::builder::register_plugin_block_template(
+            &mut active_state,
+            "acme-plugin/hero",
+            "<section class=\"hero\">{{ title }}</section>",
+        )
+        .expect("register plugin block template");
+
+        let rendered_active = render_builder_with_lists(
+            &active_state,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("active render");
+        assert!(rendered_active.html.contains("data-block-id=\"acme-plugin/hero\""));
+        assert!(rendered_active.html.contains("&lt;script&gt;xss()"));
+        assert!(rendered_active.html.contains("Hello"));
+        assert!(rendered_active.diagnostics.is_empty());
+
+        // Disabled plugin: block absent from state.themes -> safe fallback without error
+        let disabled_state = HomeState {
+            active_id: None,
+            active_alias: None,
+            active_template: None,
+            themes: BTreeMap::new(),
+            saved: Some(doc.clone()),
+            legacy: None,
+            version: 1,
+        };
+        let rendered_disabled = render_builder_with_lists(
+            &disabled_state,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("disabled fallback render must not fail");
+        assert!(rendered_disabled.html.contains("builder-block-unavailable"));
+        assert_eq!(rendered_disabled.diagnostics[0].code, "plugin_block_unavailable");
     }
 }

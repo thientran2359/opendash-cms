@@ -203,6 +203,16 @@ pub enum KnownElement {
     List(ListProps),
     #[serde(rename = "legacy/block")]
     Legacy(LegacyBlockProps),
+    #[serde(rename = "plugin/block")]
+    PluginBlock(PluginBlockProps),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginBlockProps {
+    pub block_id: String,
+    #[serde(default)]
+    pub values: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -306,7 +316,7 @@ impl KnownElement {
             Self::Text(p) => p.binding.as_ref(),
             Self::Image(p) => p.binding.as_ref(),
             Self::Button(p) => p.binding.as_ref(),
-            Self::Legacy(_) | Self::List(_) => None,
+            Self::Legacy(_) | Self::List(_) | Self::PluginBlock(_) => None,
         }
     }
 }
@@ -544,6 +554,18 @@ fn validate_known(
             block
                 .validate_against_fields(&descriptor.descriptor.fields)
                 .map_err(|_| "Legacy field map does not match descriptor")?;
+        }
+        KnownElement::PluginBlock(props) => {
+            if !valid_namespaced_block_id(&props.block_id) {
+                return Err("Invalid plugin block id");
+            }
+            if props.values.len() > 64 {
+                return Err("Plugin block props exceed limit");
+            }
+            let descriptor = catalog.get(&props.block_id).ok_or("Unknown plugin block descriptor")?;
+            if descriptor.status != ProviderStatus::Active {
+                return Err("Plugin block provider is not active");
+            }
         }
         KnownElement::List(props) => {
             if !valid_content_type_key(&props.type_key)

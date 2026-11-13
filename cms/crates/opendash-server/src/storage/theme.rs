@@ -1012,3 +1012,87 @@ mod tests {
 #[cfg(test)]
 #[path = "theme_tests.rs"]
 mod theme_tests;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnerTemplateSelection {
+    pub owner_kind: String,
+    pub owner_id: String,
+    pub role: String,
+    pub scope_type_key: Option<String>,
+    pub template_selection_key: Option<String>,
+    pub ast_json: String,
+    pub version: i64,
+}
+
+pub async fn upsert_owner_template_selection_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    owner_kind: &str,
+    owner_id: &str,
+    role: &str,
+    scope_type_key: Option<&str>,
+    template_selection_key: Option<&str>,
+    ast_json: &str,
+) -> ApiResult<OwnerTemplateSelection> {
+    if owner_kind != "theme" && owner_kind != "plugin" {
+        return Err(ApiError::bad_request("owner_kind phải là 'theme' hoặc 'plugin'."));
+    }
+    sqlx::query(
+        "INSERT INTO template_overrides (role, scope_type_key, scope_entry_id, ast_json, version, base_theme_id, owner_kind, owner_id, template_selection_key)
+         VALUES (?, ?, NULL, ?, 1, ?, ?, ?, ?)
+         ON CONFLICT(role, COALESCE(scope_type_key, ''), COALESCE(CAST(scope_entry_id AS TEXT), '')) DO UPDATE SET
+             ast_json = excluded.ast_json,
+             version = template_overrides.version + 1,
+             owner_kind = excluded.owner_kind,
+             owner_id = excluded.owner_id,
+             template_selection_key = excluded.template_selection_key,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+    )
+    .bind(role)
+    .bind(scope_type_key)
+    .bind(ast_json)
+    .bind(owner_id)
+    .bind(owner_kind)
+    .bind(owner_id)
+    .bind(template_selection_key)
+    .execute(&mut *conn)
+    .await?;
+
+    get_owner_template_selection_in_conn(conn, owner_kind, owner_id, role, scope_type_key)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không đọc lại được template selection vừa lưu."))
+}
+
+pub async fn get_owner_template_selection_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    owner_kind: &str,
+    owner_id: &str,
+    role: &str,
+    scope_type_key: Option<&str>,
+) -> ApiResult<Option<OwnerTemplateSelection>> {
+    let row: Option<(String, String, String, Option<String>, Option<String>, String, i64)> =
+        sqlx::query_as(
+            "SELECT owner_kind, owner_id, role, scope_type_key, template_selection_key, ast_json, version
+             FROM template_overrides
+             WHERE owner_kind = ? AND owner_id = ? AND role = ? AND COALESCE(scope_type_key, '') = COALESCE(?, '') AND scope_entry_id IS NULL",
+        )
+        .bind(owner_kind)
+        .bind(owner_id)
+        .bind(role)
+        .bind(scope_type_key)
+        .fetch_optional(&mut *conn)
+        .await?;
+
+    Ok(row.map(
+        |(owner_kind, owner_id, role, scope_type_key, template_selection_key, ast_json, version)| {
+            OwnerTemplateSelection {
+                owner_kind,
+                owner_id,
+                role,
+                scope_type_key,
+                template_selection_key,
+                ast_json,
+                version,
+            }
+        },
+    ))
+}

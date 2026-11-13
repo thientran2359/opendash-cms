@@ -463,3 +463,20 @@ mod tests {
         );
     }
 }
+
+pub fn register_plugin_block_template(
+    state: &mut HomeState,
+    block_id: &str,
+    template_csec: &str,
+) -> ApiResult<()> {
+    crate::template_sec::validate_template_csec(block_id, template_csec)
+        .map_err(ApiError::bad_request)?;
+    state.themes.insert(
+        block_id.to_owned(),
+        ThemeDefinition {
+            fields: Fields::default(),
+            template: template_csec.to_owned(),
+        },
+    );
+    Ok(())
+}
