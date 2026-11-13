@@ -24,6 +24,7 @@ pub const MAX_PLUGIN_JSON_BYTES: usize = 1024 * 1024; // 1 MiB
 pub async fn plugin_install(
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
+    State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<Response> {
@@ -40,6 +41,7 @@ pub async fn plugin_install(
         .install_plugin_checked(&bytes)
         .await
         .map_err(map_plugin_storage_err)?;
+    *content_registry.write().await = crate::storage::content::load_content_type_catalog(&db).await?;
     Ok((StatusCode::CREATED, Json(summary)).into_response())
 }
 
@@ -92,6 +94,7 @@ pub async fn plugin_run(
 pub async fn plugin_disable(
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
+    State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
@@ -102,12 +105,14 @@ pub async fn plugin_disable(
         .disable_plugin_cas(&id, expected_cas)
         .await
         .map_err(map_plugin_storage_err)?;
+    *content_registry.write().await = crate::storage::content::load_content_type_catalog(&db).await?;
     Ok(Json(serde_json::json!({ "message": "Đã vô hiệu hóa plugin.", "cas_version": next_cas })).into_response())
 }
 
 pub async fn plugin_enable(
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
+    State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
@@ -118,6 +123,7 @@ pub async fn plugin_enable(
         .enable_plugin_cas(&id, expected_cas)
         .await
         .map_err(map_plugin_storage_err)?;
+    *content_registry.write().await = crate::storage::content::load_content_type_catalog(&db).await?;
     Ok(Json(serde_json::json!({ "message": "Đã kích hoạt plugin.", "cas_version": next_cas })).into_response())
 }
 

@@ -33,6 +33,8 @@ pub struct PluginManifest {
     /// Optional lifecycle subscriptions; manual invocation input remains unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hooks: Vec<crate::hooks::HookEvent>,
+    #[serde(default, skip_serializing_if = "crate::content::CntDeclarations::is_empty")]
+    pub declarations: crate::content::CntDeclarations,
 }
 
 pub const CURRENT_HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -121,6 +123,7 @@ impl PluginManifest {
                 return Err("Chỉ hỗ trợ scheme http hoặc https.");
             }
         }
+        self.declarations.validate()?;
         Ok(())
     }
 
