@@ -8,3 +8,11 @@ Mỗi Living Module Brief trình bày scope/G0, research G1, **thiết kế G2 �
 - [CNT-05 — Media Library](CNT-05-media.md): upload, thumbnail, picker và media public theo tham chiếu có bằng chứng M3.5/M3.6 macOS; video/delete/recovery/backup và parity còn mở; **PARTIAL**. G2 P16 chốt bổ sung ACL draft media trong [ADR-0004](../../decisions/ADR-0004-m3-post-page-publication-boundary.md).
 
 Các module khác tra tại [Module Catalog](../MODULE_CATALOG_V1.md). Không tạo brief trống chỉ để đủ số module. [M3 milestone và các slice đang thực hiện](../milestones/M3/README.md), [snapshot M3](../M3_STATUS_2026-11-09.md), [quy trình planning](../PLANNING_WORKFLOW.md) và [verification](../../verification/README.md) là các nguồn bổ trợ, **không thay thế trạng thái task GitHub**.
+
+## M7 living briefs — 2026-11-14
+
+- [SITE-01 settings/navigation](SITE-01-settings-navigation.md)
+- [SITE-02 canonical URL/SEO/sitemap](SITE-02-seo.md)
+- [SITE-03 contact/submissions/SMTP](SITE-03-contact.md)
+
+G2/G3 documentation is effective on merged design PR; implementation/G5 M7 NOT_STARTED/NOT_RUN.

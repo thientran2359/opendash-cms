@@ -121,3 +121,7 @@ Kết quả phải có hồ sơ kiểm chứng theo capability, đặc biệt ch
 ## Ngoài phạm vi V1
 
 Theo PRD: thương mại điện tử, AI dựng trang từ ảnh, **workflow duyệt bài/xuất bản nhiều bước (ngoài draft/published tối thiểu M3)**, revision history, repeater/relation, reusable blocks tùy ý, advanced visitor filters, UI plugin tùy ý, scheduled tasks/backup, website đa ngữ và chuyển ngôn ngữ Admin. Các yêu cầu này chỉ mở ở roadmap sau V1 khi chủ dự án quyết định.
+
+## Cập nhật M7 planning — 14/11/2026
+
+[ADR-0014](../decisions/ADR-0014-m7-site-features.md), [M7 contract](../contracts/M7_SITE_FEATURES.md) và [G3 toàn bộ14 task/8 candidate](milestones/M7/slices/2026-11-14-m7-site-features-g3.md) chốt thiết kế khi PR merge. Phần M7 Proposed trong bảng lịch sử bên dưới được thay bằng G2 AGREED/G3 READY cho documentation; implementation NOT_STARTED/runtime NOT_RUN. M5#157/M6#188 G5 và Project Ready từng task vẫn bắt buộc. Không sửa trạng thái milestone M3–M6 từ bản planning này.

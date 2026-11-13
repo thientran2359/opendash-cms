@@ -30,3 +30,5 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [Skill review/merge thủ công của Atlas/Nova (2026-11-10)](2026-11-10-review-merge-skill.md) — kiểm thử quy trình, artifact guard và checker theo báo cáo; **không phải CMS HTTP/browser/Windows–Linux E2E**, không suy đã merge từ trạng thái local ghi trong báo cáo.
 - [Adapter Atlas → CoS Windows: W01 ACL và PONG thực tế (2026-11-12)](2026-11-12-cos-dispatch-w01-pong.md) — chứng cứ gửi chat trên Forge và giới hạn token rotation/production Issue pickup.
 - [Kiểm chứng M5 G5 trên Windows (2026-11-13)](2026-11-13-m5-g5-windows.md) — kiểm chứng build, full workspace tests và cross-module E2E `M5-S08-T01` trên Windows; phần macOS bản địa (`2026-11-13-m5-g5-macos.md`) chờ Harbor.
+
+- [M7 planning G1/G2/G3 — 14/11/2026](2026-11-14-m7-planning.md): docs/source validation only, full14-task coverage; M7 runtime/native/browser NOT_RUN.
