@@ -1,17 +1,19 @@
 //! Admin-only SITE-01 API, with ETag/CAS and no-store responses.
 use axum::{
     Json,
-    extract::{State, rejection::JsonRejection},
+    extract::{Path, State, rejection::JsonRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use std::collections::BTreeMap;
+use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::{
     auth::{require_admin, require_admin_with_csrf},
     error::{ApiError, ApiResult},
-    storage::settings::{self, GeneralSettings, GeneralSettingsInput, SaveOutcome},
+    storage::settings::{self, GeneralSettings, GeneralSettingsInput, SaveOutcome, ThemeOptionsOutcome, ThemeOptionsSnapshot},
 };
 
 fn no_store_headers(version: Option<i64>) -> HeaderMap {
@@ -92,6 +94,49 @@ pub async fn general_put(
         )),
         SaveOutcome::InvalidTimezone => Err(ApiError::bad_request(
             "Múi giờ không có trong danh mục IANA tzdb 2026f.",
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeOptionsPutInput {
+    pub values: BTreeMap<String, serde_json::Value>,
+}
+
+fn theme_options_response(snapshot: ThemeOptionsSnapshot) -> Response {
+    (no_store_headers(Some(snapshot.version)), Json(snapshot)).into_response()
+}
+
+pub async fn theme_options_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(theme_id): Path<String>,
+) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let Some(snapshot) = settings::get_theme_options(&db, &theme_id).await? else {
+        return Err(ApiError::not_found("Không tìm thấy theme."));
+    };
+    Ok(theme_options_response(snapshot))
+}
+
+pub async fn theme_options_put(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(theme_id): Path<String>,
+    input: Result<Json<ThemeOptionsPutInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) =
+        input.map_err(|_| ApiError::bad_request("Dữ liệu theme options không hợp lệ."))?;
+    match settings::put_theme_options(&db, &theme_id, version, input.values)
+        .await?
+    {
+        ThemeOptionsOutcome::Saved(saved) => Ok(theme_options_response(saved)),
+        ThemeOptionsOutcome::NotFound => Err(ApiError::not_found("Không tìm thấy theme.")),
+        ThemeOptionsOutcome::Stale => Err(ApiError::precondition_failed(
+            "Theme options đã thay đổi ở phiên khác. Tải lại trước khi lưu.",
         )),
     }
 }

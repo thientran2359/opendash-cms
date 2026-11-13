@@ -155,6 +155,8 @@ pub async fn theme_install(
 
     if is_v2_theme_zip(&bytes).map_err(map_v2_zip_error)? {
         let pkg = parse_theme_zip_v2(&bytes).map_err(map_v2_zip_error)?;
+        crate::storage::settings::parse_theme_options_schema(&pkg.manifest_json)
+            .map_err(ApiError::bad_request)?;
         let run_uuid = next_run_uuid();
         let provenance_json = serde_json::json!({
             "source": "admin_upload",
@@ -228,6 +230,12 @@ pub async fn theme_activate(
                     "unsupported_declarations_pending_cnt_bridge: Theme chứa declarations (CPT/fields/taxonomy) chưa thể kích hoạt trước M5-S10-T01.".into(),
                 ));
             }
+            crate::storage::settings::check_theme_options_compatibility(
+                &db,
+                &rev.theme_id,
+                &rev.manifest_json,
+            )
+            .await?;
             match theme::activate_revision(&db, &themes_root.0, &revision_id, Some(version))
                 .await?
             {

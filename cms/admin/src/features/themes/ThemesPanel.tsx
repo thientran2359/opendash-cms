@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { activateTheme, getThemes, installTheme, type ThemesSummary } from '../../api/themes.ts';
+import { ThemeOptionsForm } from './ThemeOptionsForm.tsx';
 
 interface Props {
   csrfToken: string | null;
@@ -129,6 +130,9 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
               </li>
             ))}
           </ul>
+          {data.active_id && (
+            <ThemeOptionsForm themeId={data.active_id} csrfToken={csrfToken} onApiError={onApiError} />
+          )}
         </>
       )}
     </section>

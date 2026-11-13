@@ -36,7 +36,7 @@ use crate::{
         },
         public::public_page,
         public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
-        settings::{general_get, general_put, timezones_get},
+        settings::{general_get, general_put, theme_options_get, theme_options_put, timezones_get},
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_list,
             taxonomy_patch,
@@ -157,6 +157,12 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/themes/active",
             axum::routing::put(theme_activate).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/themes/{theme_id}/options",
+            get(theme_options_get)
+                .put(theme_options_put)
+                .layer(DefaultBodyLimit::max(256 * 1024)),
         )
         .route(
             "/api/admin/users",
