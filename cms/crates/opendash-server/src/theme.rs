@@ -308,6 +308,78 @@ pub fn manifest_has_declarations(manifest_json: &str) -> bool {
         && !matches!(decl, serde_json::Value::Array(a) if a.is_empty())
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeDeclarations {
+    #[serde(default)]
+    pub content_types: Vec<ThemeContentTypeDeclaration>,
+    #[serde(default)]
+    pub taxonomy_eligibility: Vec<ThemeTaxonomyEligibilityDeclaration>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeContentTypeDeclaration {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub fields: Vec<opendash_core::content::ContentFieldDefinition>,
+    #[serde(default)]
+    pub taxonomies: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeTaxonomyEligibilityDeclaration {
+    pub content_type: String,
+    #[serde(default)]
+    pub taxonomies: Vec<String>,
+}
+
+/// Parses and validates `declarations` from a v2 theme manifest.
+/// Rejects unknown fields, invalid CPT/field schemas, duplicate keys, and any
+/// taxonomy kind outside Core `category` / `tag`.
+pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations, &'static str> {
+    let val: serde_json::Value = serde_json::from_str(manifest_json)
+        .map_err(|_| "Manifest theme v2 không hợp lệ.")?;
+    let Some(raw_decl) = val.get("declarations").cloned() else {
+        return Ok(ThemeDeclarations::default());
+    };
+    if raw_decl.is_null() {
+        return Ok(ThemeDeclarations::default());
+    }
+    let parsed: ThemeDeclarations = serde_json::from_value(raw_decl)
+        .map_err(|_| "Khai báo declarations trong theme.json không đúng định dạng.")?;
+    let mut seen_keys = std::collections::HashSet::new();
+    for ct in &parsed.content_types {
+        if !seen_keys.insert(ct.key.as_str()) {
+            return Err("Khóa content_type bị trùng lặp trong declarations.");
+        }
+        let def = opendash_core::content::ContentTypeDefinition {
+            key: ct.key.clone(),
+            label: ct.label.clone(),
+            fields: ct.fields.clone(),
+        };
+        def.validate()?;
+        for tax in &ct.taxonomies {
+            if tax != "category" && tax != "tag" {
+                return Err("Theme chỉ được khai báo taxonomy eligibility cho category hoặc tag lõi.");
+            }
+        }
+    }
+    for elig in &parsed.taxonomy_eligibility {
+        if !opendash_core::content::valid_content_type_key(&elig.content_type) {
+            return Err("Khóa content_type trong taxonomy_eligibility không hợp lệ.");
+        }
+        for tax in &elig.taxonomies {
+            if tax != "category" && tax != "tag" {
+                return Err("Theme chỉ được khai báo taxonomy eligibility cho category hoặc tag lõi.");
+            }
+        }
+    }
+    Ok(parsed)
+}
+
 pub fn theme_asset_mime(rel_path: &str) -> Option<&'static str> {
     let ext = rel_path
         .rsplit_once('.')

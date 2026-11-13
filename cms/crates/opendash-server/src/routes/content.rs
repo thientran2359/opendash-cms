@@ -1,11 +1,16 @@
 //! Admin API to create/list CPT definitions. Entry editing follows in M3.3.
 
+use std::sync::Arc;
+
 use axum::{
     Json,
     extract::State,
     http::{HeaderMap, StatusCode},
 };
-use opendash_core::{content::ContentTypeDefinition, registry::OwnedDescriptor};
+use opendash_core::{
+    content::ContentTypeDefinition,
+    registry::{OwnedDescriptor, RegistryCatalog},
+};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -26,11 +31,13 @@ pub async fn content_type_list(
 
 pub async fn content_type_create(
     State(db): State<SqlitePool>,
+    State(content_registry): State<Arc<tokio::sync::RwLock<RegistryCatalog<ContentTypeDefinition>>>>,
     headers: HeaderMap,
     Json(definition): Json<ContentTypeDefinition>,
 ) -> ApiResult<(StatusCode, Json<OwnedDescriptor<ContentTypeDefinition>>)> {
     require_admin_with_csrf(&headers, &db).await?;
     definition.validate().map_err(ApiError::bad_request)?;
     let result = content_storage::insert_user_content_type(&db, &definition).await?;
+    *content_registry.write().await = content_storage::load_content_type_catalog(&db).await?;
     Ok((StatusCode::CREATED, Json(result)))
 }

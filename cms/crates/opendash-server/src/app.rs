@@ -57,6 +57,7 @@ pub struct AppState {
     pub plugin_manager: Arc<PluginManager>,
     pub hooks: Arc<HookDispatcher>,
     pub media_store: Arc<MediaStore>,
+    pub content_registry: Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -80,6 +81,12 @@ impl axum::extract::FromRef<AppState> for Arc<HookDispatcher> {
 impl axum::extract::FromRef<AppState> for Arc<MediaStore> {
     fn from_ref(state: &AppState) -> Self {
         state.media_store.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>> {
+    fn from_ref(state: &AppState) -> Self {
+        state.content_registry.clone()
     }
 }
 

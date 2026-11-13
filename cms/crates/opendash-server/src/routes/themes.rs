@@ -3,7 +3,10 @@
 use std::{
     fs,
     path::PathBuf,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -30,7 +33,7 @@ use crate::{
         },
     },
     theme::{
-        Theme, is_v2_theme_zip, manifest_has_declarations, parse_theme_zip_v2, theme_asset_mime,
+        Theme, is_v2_theme_zip, parse_theme_zip_v2, theme_asset_mime,
     },
 };
 
@@ -205,6 +208,9 @@ pub async fn theme_activate(
     State(db): State<SqlitePool>,
     Extension(themes_root): Extension<ThemeStoreRoot>,
     request_headers: HeaderMap,
+    State(content_registry): State<
+        Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>,
+    >,
     input: Result<Json<ActivateInput>, JsonRejection>,
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&request_headers, &db).await?;
@@ -224,12 +230,6 @@ pub async fn theme_activate(
             let rev = find_revision_by_id(&db, &revision_id)
                 .await?
                 .ok_or_else(|| ApiError::not_found("Revision theme chưa được cài đặt."))?;
-            if manifest_has_declarations(&rev.manifest_json) {
-                return Err(ApiError(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "unsupported_declarations_pending_cnt_bridge: Theme chứa declarations (CPT/fields/taxonomy) chưa thể kích hoạt trước M5-S10-T01.".into(),
-                ));
-            }
             crate::storage::settings::check_theme_options_compatibility(
                 &db,
                 &rev.theme_id,
@@ -240,6 +240,8 @@ pub async fn theme_activate(
                 .await?
             {
                 RevisionActivationOutcome::Activated(selection) => {
+                    *content_registry.write().await =
+                        crate::storage::content::load_content_type_catalog(&db).await?;
                     Ok((headers(Some(selection.version)), Json(selection)).into_response())
                 }
                 RevisionActivationOutcome::NotFound => {

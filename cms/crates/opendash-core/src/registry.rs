@@ -27,13 +27,29 @@ pub enum ProviderStatus {
     /// The owning theme was switched or the owning plugin was disabled.
     /// Schema and existing content remain preserved and editable.
     ProviderInactive,
+    /// The provider package/revision is no longer present on disk/registry.
+    Missing,
+    /// The provider package/revision failed validation or integrity checks.
+    Invalid,
 }
 
-/// Wraps a registered descriptor with its owner and provider lifecycle status.
+/// Whether the owning provider still declares this resource in its current revision,
+/// or withdrew the declaration while retaining site-owned schema and data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DeclarationState {
+    #[default]
+    Declared,
+    Withdrawn,
+}
+
+/// Wraps a registered descriptor with its owner, provider availability, and declaration state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OwnedDescriptor<T> {
     pub owner: ResourceOwner,
     pub status: ProviderStatus,
+    #[serde(default)]
+    pub declaration_state: DeclarationState,
     pub descriptor: T,
 }
 
@@ -94,10 +110,73 @@ impl<T> RegistryCatalog<T> {
             OwnedDescriptor {
                 owner,
                 status: ProviderStatus::Active,
+                declaration_state: DeclarationState::Declared,
                 descriptor,
             },
         );
         Ok(())
+    }
+
+    /// Inserts or replaces an entry hydrated directly from persistent storage.
+    pub fn insert_loaded(&mut self, key: impl Into<String>, entry: OwnedDescriptor<T>) {
+        self.entries.insert(key.into(), entry);
+    }
+
+    /// Explicitly declares or re-declares a resource for `owner` without
+    /// altering another owner's claim (even if inactive or withdrawn).
+    pub fn redeclare(
+        &mut self,
+        key: impl Into<String>,
+        owner: ResourceOwner,
+        status: ProviderStatus,
+        descriptor: T,
+    ) -> Result<(), RegistryError> {
+        let key = key.into();
+        if let Some(existing) = self.entries.get(&key) {
+            if existing.owner != owner {
+                return Err(RegistryError::OwnerConflict);
+            }
+        }
+        self.entries.insert(
+            key,
+            OwnedDescriptor {
+                owner,
+                status,
+                declaration_state: DeclarationState::Declared,
+                descriptor,
+            },
+        );
+        Ok(())
+    }
+
+    /// Marks an owned resource as `Withdrawn` while retaining its descriptor and data.
+    pub fn withdraw(&mut self, key: &str, owner: &ResourceOwner) -> Result<(), RegistryError> {
+        let entry = self.entries.get_mut(key).ok_or(RegistryError::NotFound)?;
+        if &entry.owner != owner {
+            return Err(RegistryError::OwnerConflict);
+        }
+        entry.declaration_state = DeclarationState::Withdrawn;
+        Ok(())
+    }
+
+    /// Marks all entries owned by `target_owner` whose keys are not in `active_keys`
+    /// as `DeclarationState::Withdrawn`, retaining their descriptors.
+    pub fn withdraw_owner_except(
+        &mut self,
+        target_owner: &ResourceOwner,
+        active_keys: &[&str],
+    ) -> usize {
+        let mut count = 0;
+        for (key, entry) in self.entries.iter_mut() {
+            if &entry.owner == target_owner
+                && !active_keys.contains(&key.as_str())
+                && entry.declaration_state != DeclarationState::Withdrawn
+            {
+                entry.declaration_state = DeclarationState::Withdrawn;
+                count += 1;
+            }
+        }
+        count
     }
 
     /// Updates provider metadata only; never implicitly activates a provider.
@@ -232,6 +311,52 @@ mod tests {
         assert_eq!(
             catalog.get("portfolio").unwrap().status,
             ProviderStatus::Active
+        );
+    }
+
+    #[test]
+    fn declaration_state_is_independent_from_provider_status() {
+        let mut catalog = RegistryCatalog::new();
+        let theme_owner = ResourceOwner::Theme("theme-a".into());
+        catalog
+            .redeclare(
+                "portfolio",
+                theme_owner.clone(),
+                ProviderStatus::Active,
+                "v1",
+            )
+            .unwrap();
+        catalog
+            .redeclare("event", theme_owner.clone(), ProviderStatus::Active, "v1")
+            .unwrap();
+
+        // Omitting `event` withdraws it without losing ownership or descriptor
+        assert_eq!(catalog.withdraw_owner_except(&theme_owner, &["portfolio"]), 1);
+        let event = catalog.get("event").unwrap();
+        assert_eq!(event.declaration_state, DeclarationState::Withdrawn);
+        assert_eq!(event.status, ProviderStatus::Active);
+
+        // Bulk activate_owner does NOT un-withdraw `event`
+        catalog.deactivate_owner(&theme_owner);
+        catalog.activate_owner(&theme_owner);
+        assert_eq!(
+            catalog.get("event").unwrap().declaration_state,
+            DeclarationState::Withdrawn
+        );
+        assert_eq!(
+            catalog.get("event").unwrap().status,
+            ProviderStatus::Active
+        );
+
+        // Other owner still cannot claim a withdrawn resource
+        assert_eq!(
+            catalog.redeclare(
+                "event",
+                ResourceOwner::Theme("theme-b".into()),
+                ProviderStatus::Active,
+                "hijack"
+            ),
+            Err(RegistryError::OwnerConflict)
         );
     }
 }

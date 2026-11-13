@@ -38,11 +38,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(false);
     let plugin_manager = Arc::new(PluginManager::new(db.clone(), allow_loopback));
     let hooks = Arc::new(HookDispatcher::new(plugin_manager.clone()));
+    let content_registry = Arc::new(tokio::sync::RwLock::new(
+        storage::content::load_content_type_catalog(&db)
+            .await
+            .map_err(|e| format!("{}: {}", e.0, e.1))?,
+    ));
     let state = AppState {
         db: db.clone(),
         plugin_manager,
         hooks,
         media_store: Arc::new(MediaStore::new(paths.uploads_dir())),
+        content_registry,
     };
 
     let port = env::var("OPENDASH_PORT")
