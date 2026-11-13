@@ -85,3 +85,85 @@ export function saveThemeOptions(
     defaultErrorMessage: 'Không thể lưu tùy chọn theme.',
   });
 }
+
+export type SampleGroup = 'pages' | 'menus' | 'media' | 'settings';
+
+export interface ImportPlanItem {
+  resource_kind: SampleGroup;
+  object_key: string;
+  logical_target: string;
+  action: 'create' | 'skip' | 'missing_dependency';
+  reason: string | null;
+  publication_implication: string;
+  dependencies: string[];
+}
+
+export interface UnselectedDependency {
+  required_group: SampleGroup;
+  object_key: string;
+  referenced_by_group: SampleGroup;
+  referenced_by_object: string;
+}
+
+export interface ImportPlan {
+  theme_id: string;
+  revision_id: string;
+  revision_digest: string;
+  sample_key: string;
+  selected_groups: SampleGroup[];
+  items: ImportPlanItem[];
+  unselected_dependencies: UnselectedDependency[];
+  expected_versions: {
+    theme_selection_version: number;
+    theme_options_version: number;
+    menu_versions: Record<string, number>;
+  };
+  requires_public_ack: boolean;
+  publication_implications: string[];
+  plan_digest: string;
+}
+
+export interface ImportExecutionOutcome {
+  run_id: string;
+  theme_id: string;
+  revision_id: string;
+  sample_key: string;
+  plan_digest: string;
+  created: Array<{ resource_kind: SampleGroup; object_key: string; target_id: string; status: string; reason: string | null }>;
+  skipped: Array<{ resource_kind: SampleGroup; object_key: string; target_id: string; status: string; reason: string | null }>;
+}
+
+export function dryRunSampleImport(
+  themeId: string,
+  groups: SampleGroup[],
+  csrfToken: string,
+): Promise<ImportPlan> {
+  return requestJson(`/api/themes/${encodeURIComponent(themeId)}/import/dry-run`, {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify({ groups }),
+    defaultErrorMessage: 'Không thể xem trước kế hoạch nhập dữ liệu mẫu.',
+  });
+}
+
+export function executeSampleImport(
+  themeId: string,
+  plan: ImportPlan,
+  acknowledgePublicChanges: boolean,
+  csrfToken: string,
+): Promise<ImportExecutionOutcome> {
+  return requestJson(`/api/themes/${encodeURIComponent(themeId)}/import/execute`, {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      groups: plan.selected_groups,
+      revision_id: plan.revision_id,
+      plan_digest: plan.plan_digest,
+      expected_versions: plan.expected_versions,
+      acknowledge_public_changes: acknowledgePublicChanges,
+    }),
+    defaultErrorMessage: 'Không thể thực thi nhập dữ liệu mẫu.',
+  });
+}

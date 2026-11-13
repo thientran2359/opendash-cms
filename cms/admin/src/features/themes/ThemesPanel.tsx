@@ -1,6 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
-import { activateTheme, getThemes, installTheme, type ThemesSummary } from '../../api/themes.ts';
+import {
+  activateTheme,
+  dryRunSampleImport,
+  executeSampleImport,
+  getThemes,
+  installTheme,
+  type ImportExecutionOutcome,
+  type ImportPlan,
+  type SampleGroup,
+  type ThemesSummary,
+} from '../../api/themes.ts';
 import { ThemeOptionsForm } from './ThemeOptionsForm.tsx';
 
 interface Props {
@@ -13,6 +23,10 @@ interface Props {
 export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalled, onActivated }) => {
   const [data, setData] = useState<ThemesSummary | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sampleGroups, setSampleGroups] = useState<SampleGroup[]>(['pages', 'menus', 'media', 'settings']);
+  const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
+  const [ackPublic, setAckPublic] = useState(false);
+  const [importOutcome, setImportOutcome] = useState<ImportExecutionOutcome | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -130,6 +144,83 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
               </li>
             ))}
           </ul>
+          {data.active_id && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3" data-testid="sample-import-box">
+              <h3 className="text-base font-semibold text-slate-900">Nhập dữ liệu mẫu có chọn lọc</h3>
+              <div className="flex flex-wrap gap-3 text-sm">
+                {(['pages', 'menus', 'media', 'settings'] as SampleGroup[]).map(g => (
+                  <label key={g} className="inline-flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={sampleGroups.includes(g)}
+                      onChange={e => {
+                        setImportPlan(null);
+                        setImportOutcome(null);
+                        setSampleGroups(prev => e.target.checked ? [...prev, g] : prev.filter(x => x !== g));
+                      }}
+                    />
+                    <span>{g}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={!csrfToken || busy || sampleGroups.length === 0}
+                  onClick={() => {
+                    if (!data.active_id || !csrfToken) return;
+                    setBusy(true);
+                    setError('');
+                    setImportOutcome(null);
+                    void dryRunSampleImport(data.active_id, sampleGroups, csrfToken)
+                      .then(plan => { setImportPlan(plan); setAckPublic(false); })
+                      .catch(cause => setError(cause instanceof Error ? cause.message : 'Dry-run thất bại.'))
+                      .finally(() => setBusy(false));
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium"
+                >
+                  Xem trước (Dry-run)
+                </button>
+                {importPlan && (
+                  <button
+                    type="button"
+                    disabled={!csrfToken || busy || (importPlan.requires_public_ack && !ackPublic)}
+                    onClick={() => {
+                      if (!data.active_id || !csrfToken) return;
+                      setBusy(true);
+                      setError('');
+                      void executeSampleImport(data.active_id, importPlan, ackPublic, csrfToken)
+                        .then(out => { setImportOutcome(out); setImportPlan(null); })
+                        .catch(cause => setError(cause instanceof Error ? cause.message : 'Execute thất bại.'))
+                        .finally(() => setBusy(false));
+                    }}
+                    className="rounded-lg bg-sky-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    Thực thi nhập mẫu
+                  </button>
+                )}
+              </div>
+              {importPlan && (
+                <div className="space-y-2 text-xs text-slate-700">
+                  <p>Plan digest: <code>{importPlan.plan_digest.slice(0, 12)}</code> · {importPlan.items.length} mục</p>
+                  {importPlan.unselected_dependencies.length > 0 && (
+                    <p className="text-amber-800">Thiếu nhóm phụ thuộc: {importPlan.unselected_dependencies.map(d => `${d.required_group}:${d.object_key}`).join(', ')}</p>
+                  )}
+                  {importPlan.requires_public_ack && (
+                    <label className="flex items-center gap-2 text-amber-900">
+                      <input type="checkbox" checked={ackPublic} onChange={e => setAckPublic(e.target.checked)} />
+                      <span>Tôi xác nhận thay đổi menu/options có hiệu lực công khai.</span>
+                    </label>
+                  )}
+                </div>
+              )}
+              {importOutcome && (
+                <p role="status" className="text-sm text-emerald-800">
+                  Đã nhập: {importOutcome.created.length} · Bỏ qua: {importOutcome.skipped.length}
+                </p>
+              )}
+            </div>
+          )}
           {data.active_id && (
             <ThemeOptionsForm themeId={data.active_id} csrfToken={csrfToken} onApiError={onApiError} />
           )}
