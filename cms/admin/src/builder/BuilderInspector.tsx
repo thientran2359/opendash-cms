@@ -11,6 +11,7 @@ interface Props {
   registry: Record<string, Record<string, string>>;
   csrfToken: string | null;
   viewport: BuilderViewport;
+  allowRouteContext?: boolean;
   onChange: (id: string, key: string, value: string | number) => void;
   onBindingChange: (id: string, binding: ElementBinding | null) => void;
   onListChange: (id: string, config: ListProps) => void;
@@ -18,7 +19,7 @@ interface Props {
   onError: (error: unknown, fallback: string) => void;
 }
 
-export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, onChange, onBindingChange, onListChange, onResponsiveChange, onError }: Props) {
+export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, allowRouteContext, onChange, onBindingChange, onListChange, onResponsiveChange, onError }: Props) {
   const [showPicker, setShowPicker] = useState(false);
   const item = locate(document, selectedId);
   if (!item) return (
@@ -167,7 +168,7 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
         </form>
       )}
       {element && !locked && ['core/heading', 'core/text', 'core/image', 'core/button'].includes(element.type) && (
-        <BuilderBindingFields key={element.id} element={element} onBindingChange={onBindingChange} onError={onError} />
+        <BuilderBindingFields key={element.id} element={element} allowRouteContext={allowRouteContext} onBindingChange={onBindingChange} onError={onError} />
       )}
       {element?.type === 'core/list' && !locked && (
         <BuilderListFields key={element.id} element={element} onChange={onListChange} onError={onError} />

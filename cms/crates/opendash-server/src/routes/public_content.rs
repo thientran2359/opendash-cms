@@ -23,6 +23,7 @@ use crate::{
     routes::themes::ThemeStoreRoot,
     storage::{
         content::load_content_type_definition, entries::EntryFilters, media,
+        overrides::{self, OverrideRole},
         page::active_content_templates, public_content, settings, theme as theme_storage,
     },
 };
@@ -123,22 +124,25 @@ pub async fn archive(
         title: &site.site_title,
         tagline: &site.tagline,
     };
-    let body_html = content_render::render_archive_with_site(
-        &schema,
-        &entries,
-        previous.as_deref(),
-        next.as_deref(),
-        selected,
+    let body_html = match overrides::resolve_effective_override(&db, OverrideRole::Archive, Some(&type_key), None).await? {
+        Some(record) => overrides::render_override_for_public(&db, &record, None).await?.html,
+        None => content_render::render_archive_with_site(
+            &schema,
+            &entries,
+            previous.as_deref(),
+            next.as_deref(),
+            selected,
+            &site_ctx,
+        )?,
+    };
+    let (header, footer) = overrides::resolve_and_render_header_footer(
+        &db,
+        active_v2.as_ref(),
         &site_ctx,
-    )?;
-    let header = active_v2
-        .as_ref()
-        .and_then(|v2| v2.roles.get("header"))
-        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
-    let footer = active_v2
-        .as_ref()
-        .and_then(|v2| v2.roles.get("footer"))
-        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
+        &theme_opts,
+        Some(&type_key),
+    )
+    .await?;
     Ok(public_html(content_render::compose_public_document(
         header.as_deref(),
         &body_html,
@@ -179,10 +183,16 @@ pub async fn single(
         Some(Extension(root)) => theme_storage::load_active_v2_role_templates(&db, &root.0).await?,
         None => None,
     };
+    let role = if type_key == "page" { OverrideRole::Page } else { OverrideRole::Single };
     let (_, single_template) = active_content_templates(&db).await?;
     let selected = active_v2
         .as_ref()
-        .and_then(|v2| v2.roles.get("single").map(String::as_str))
+        .and_then(|v2| {
+            v2.roles
+                .get(role.as_str())
+                .or_else(|| if role == OverrideRole::Page { v2.roles.get("single") } else { None })
+                .map(String::as_str)
+        })
         .or(single_template.as_deref());
     let site = settings::get_general(&db).await?;
     let theme_opts = settings::get_active_public_theme_options(&db).await?;
@@ -190,20 +200,23 @@ pub async fn single(
         title: &site.site_title,
         tagline: &site.tagline,
     };
-    let body_html = content_render::render_single_with_site(
-        &schema,
-        &entry_view(entry, &schema),
-        selected,
+    let body_html = match overrides::resolve_effective_override(&db, role, Some(&type_key), Some(entry.id)).await? {
+        Some(record) => overrides::render_override_for_public(&db, &record, Some((&type_key, &slug))).await?.html,
+        None => content_render::render_single_with_site(
+            &schema,
+            &entry_view(entry, &schema),
+            selected,
+            &site_ctx,
+        )?,
+    };
+    let (header, footer) = overrides::resolve_and_render_header_footer(
+        &db,
+        active_v2.as_ref(),
         &site_ctx,
-    )?;
-    let header = active_v2
-        .as_ref()
-        .and_then(|v2| v2.roles.get("header"))
-        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
-    let footer = active_v2
-        .as_ref()
-        .and_then(|v2| v2.roles.get("footer"))
-        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
+        &theme_opts,
+        Some(&type_key),
+    )
+    .await?;
     Ok(public_html(content_render::compose_public_document(
         header.as_deref(),
         &body_html,
@@ -333,22 +346,25 @@ async fn taxonomy_archive(
         title: &site.site_title,
         tagline: &site.tagline,
     };
-    let body_html = content_render::render_archive_with_site(
-        &schema,
-        &entries,
-        previous.as_deref(),
-        next.as_deref(),
-        selected,
+    let body_html = match overrides::resolve_effective_override(db, OverrideRole::TaxonomyArchive, None, None).await? {
+        Some(record) => overrides::render_override_for_public(db, &record, None).await?.html,
+        None => content_render::render_archive_with_site(
+            &schema,
+            &entries,
+            previous.as_deref(),
+            next.as_deref(),
+            selected,
+            &site_ctx,
+        )?,
+    };
+    let (header, footer) = overrides::resolve_and_render_header_footer(
+        db,
+        active_v2.as_ref(),
         &site_ctx,
-    )?;
-    let header = active_v2
-        .as_ref()
-        .and_then(|v2| v2.roles.get("header"))
-        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
-    let footer = active_v2
-        .as_ref()
-        .and_then(|v2| v2.roles.get("footer"))
-        .and_then(|t| content_render::render_role_fragment_with_options(t, &site_ctx, &theme_opts));
+        &theme_opts,
+        None,
+    )
+    .await?;
     Ok(public_html(content_render::compose_public_document(
         header.as_deref(),
         &body_html,

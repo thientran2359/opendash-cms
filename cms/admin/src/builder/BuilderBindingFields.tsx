@@ -31,6 +31,7 @@ const PAGE_SIZE = 50;
 
 interface Props {
   element: BuilderElement;
+  allowRouteContext?: boolean;
   onBindingChange: (id: string, binding: ElementBinding | null) => void;
   onError: (error: unknown, fallback: string) => void;
 }
@@ -45,7 +46,9 @@ function readBinding(element: BuilderElement): ElementBinding | null {
 }
 
 function sourceValue(source: BindingSource): string {
-  return source.kind === 'title' ? 'title' : 'field:' + source.key;
+  if (source.kind === 'title') return 'title';
+  if (source.kind === 'route_context') return 'route_context:' + source.field_key;
+  return 'field:' + source.key;
 }
 
 function allowed(element: BuilderElement, target: BindingTarget, fieldType: ContentFieldType): boolean {
@@ -53,7 +56,7 @@ function allowed(element: BuilderElement, target: BindingTarget, fieldType: Cont
   return COMPATIBLE[target].includes(fieldType);
 }
 
-export function BuilderBindingFields({ element, onBindingChange, onError }: Props) {
+export function BuilderBindingFields({ element, allowRouteContext = false, onBindingChange, onError }: Props) {
   const existing = readBinding(element);
   const signature = JSON.stringify(existing);
   const targets = TARGETS[element.type as ElementType];
@@ -133,9 +136,11 @@ export function BuilderBindingFields({ element, onBindingChange, onError }: Prop
   // static media_id when media_id is not the bound target.
   const imageAltNeedsMedia = element.type === 'core/image' && target === 'alt'
     && (typeof element.props.media_id !== 'string' || element.props.media_id.trim() === '');
-  const valid = !!typeActive && !!selectedEntry && !!entrySlug && sourceAllowed
+  const isRouteContext = sourceKey.startsWith('route_context:');
+  const validRouteContext = allowRouteContext && isRouteContext && !imageAltNeedsMedia && !typesBusy && !lookupError;
+  const valid = validRouteContext || (!!typeActive && !!selectedEntry && !!entrySlug && sourceAllowed
     && (selectionChecked || existing?.entry_slug === entrySlug && existing.type_key === typeKey)
-    && !imageAltNeedsMedia && !entriesBusy && !typesBusy && !lookupError;
+    && !imageAltNeedsMedia && !entriesBusy && !typesBusy && !lookupError);
 
   const chooseEntry = (slug: string) => {
     setEntrySlug(slug);
