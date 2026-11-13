@@ -128,6 +128,7 @@ pub fn run_worker_from_stdio() {
         input_bytes,
         output_bytes: None,
         host_calls_count: 0,
+        http_calls_count: 0,
         db_pool: None,
         kv_ipc: Some(kv_ipc),
         _correlation_id: req.correlation_id,

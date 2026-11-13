@@ -6,11 +6,48 @@ pub use crate::id::{
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct NetworkScopeGrant {
+    #[serde(default = "default_https_scheme")]
+    pub scheme: String,
+    pub host: String,
+    #[serde(default)]
+    pub port: Option<u16>,
+    #[serde(default = "default_network_methods")]
+    pub methods: Vec<String>,
+    #[serde(default)]
+    pub path_prefix: Option<String>,
+}
+
+impl NetworkScopeGrant {
+    pub fn effective_port(&self) -> Option<u16> {
+        if let Some(p) = self.port {
+            return Some(p);
+        }
+        match self.scheme.to_ascii_lowercase().as_str() {
+            "https" => Some(443),
+            "http" => Some(80),
+            _ => None,
+        }
+    }
+}
+
+fn default_https_scheme() -> String {
+    "https".into()
+}
+
+fn default_network_methods() -> Vec<String> {
+    vec!["GET".into()]
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct PluginPermissions {
     #[serde(default)]
     pub sqlite: Vec<String>,
     #[serde(default)]
     pub http: Vec<String>,
+    #[serde(default)]
+    pub network: Vec<NetworkScopeGrant>,
     #[serde(default)]
     pub content_read: Vec<String>,
     #[serde(default)]
@@ -151,6 +188,45 @@ impl PluginManifest {
                 return Err("Quyền SQLite không hợp lệ (chỉ hỗ trợ 'kv_read' và 'kv_write').");
             }
         }
+        for grant in &self.permissions.network {
+            let scheme = grant.scheme.to_ascii_lowercase();
+            if scheme != "http" && scheme != "https" {
+                return Err("Network scope scheme chỉ hỗ trợ http hoặc https.");
+            }
+            let host = grant.host.trim();
+            if host.is_empty()
+                || host.contains('/')
+                || host.contains('?')
+                || host.contains('#')
+                || host.contains('@')
+                || host.chars().any(|c| c.is_whitespace())
+            {
+                return Err("Network scope host không hợp lệ.");
+            }
+            if grant.port == Some(0) {
+                return Err("Network scope port phải lớn hơn 0.");
+            }
+            if grant.methods.is_empty() {
+                return Err("Network scope methods không được rỗng.");
+            }
+            for m in &grant.methods {
+                let upper = m.to_ascii_uppercase();
+                if !matches!(upper.as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD") {
+                    return Err("Network scope method không được hỗ trợ.");
+                }
+            }
+            if let Some(prefix) = &grant.path_prefix {
+                if !prefix.starts_with('/')
+                    || prefix.contains('?')
+                    || prefix.contains('#')
+                    || prefix.contains('%')
+                    || prefix.contains('\\')
+                    || prefix.contains("..")
+                {
+                    return Err("Network scope path_prefix không hợp lệ.");
+                }
+            }
+        }
         for url_str in &self.permissions.http {
             let parsed =
                 url::Url::parse(url_str).map_err(|_| "URL trong quyền HTTP không hợp lệ.")?;
@@ -208,6 +284,88 @@ impl PluginManifest {
 
     pub fn action(&self, id: &str) -> Option<&PluginActionDeclaration> {
         self.actions.iter().find(|a| a.id == id)
+    }
+
+    pub fn is_http_allowed_with_method(&self, method: &str, target_url: &str) -> bool {
+        let Ok(target) = url::Url::parse(target_url) else {
+            return false;
+        };
+        if !target.username().is_empty() || target.password().is_some() || target.fragment().is_some() {
+            return false;
+        }
+        let lower_url = target_url.to_ascii_lowercase();
+        let path_and_query = match lower_url.split_once("://") {
+            Some((_, rest)) => rest.split_once('/').map(|(_, p)| p).unwrap_or(""),
+            None => return false,
+        };
+        if path_and_query.contains("%2e")
+            || path_and_query.contains("%2f")
+            || path_and_query.contains("%5c")
+            || path_and_query.contains('\\')
+            || target.path().split('/').any(|seg| seg == "." || seg == "..")
+        {
+            return false;
+        }
+        let method_upper = method.to_ascii_uppercase();
+        let target_scheme = target.scheme().to_ascii_lowercase();
+        let Some(target_host_raw) = target.host_str() else {
+            return false;
+        };
+        let target_host = target_host_raw
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .to_ascii_lowercase();
+        let target_port = target.port_or_known_default();
+
+        for grant in &self.permissions.network {
+            let grant_scheme = grant.scheme.to_ascii_lowercase();
+            let grant_host = grant
+                .host
+                .trim()
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .to_ascii_lowercase();
+            if target_scheme != grant_scheme || target_host != grant_host {
+                continue;
+            }
+            if target_port != grant.effective_port() {
+                continue;
+            }
+            if !grant
+                .methods
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case(&method_upper))
+            {
+                continue;
+            }
+            if let Some(prefix) = &grant.path_prefix {
+                if prefix != "/" {
+                    let trimmed = prefix.trim_end_matches('/');
+                    let path = target.path();
+                    let matches_prefix = if prefix.ends_with('/') {
+                        path.starts_with(prefix)
+                    } else {
+                        path == trimmed || path.starts_with(&format!("{trimmed}/"))
+                    };
+                    if !matches_prefix {
+                        continue;
+                    }
+                }
+            }
+            return true;
+        }
+
+        for allowed in &self.permissions.http {
+            if let Ok(allowed_parsed) = url::Url::parse(allowed) {
+                if target.scheme() == allowed_parsed.scheme()
+                    && target.host_str() == allowed_parsed.host_str()
+                    && target.port_or_known_default() == allowed_parsed.port_or_known_default()
+                {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     pub fn is_http_allowed(&self, target_url: &str) -> bool {
