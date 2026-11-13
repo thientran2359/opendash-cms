@@ -4,6 +4,7 @@ pub mod content;
 pub mod dashboard;
 pub mod entries;
 pub mod health;
+pub mod import;
 pub mod media;
 pub mod plugin;
 pub mod public;

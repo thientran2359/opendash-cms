@@ -31,6 +31,7 @@ use crate::{
             entry_preview, entry_publication, entry_update,
         },
         media::{media_list, media_original, media_thumbnail, media_upload},
+        import::import_dry_run,
         plugin::{
             MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES, plugin_disable, plugin_enable,
             plugin_install, plugin_list, plugin_run,
@@ -186,6 +187,10 @@ pub fn build_router_with_themes_root(
             get(theme_options_get)
                 .put(theme_options_put)
                 .layer(DefaultBodyLimit::max(256 * 1024)),
+        )
+        .route(
+            "/api/themes/{theme_id}/import/dry-run",
+            post(import_dry_run).layer(DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
             "/api/admin/users",

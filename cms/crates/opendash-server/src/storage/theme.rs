@@ -372,6 +372,22 @@ fn row_to_revision(row: RevisionRow) -> ApiResult<ThemeRevisionRecord> {
     })
 }
 
+pub async fn find_revision_by_id(
+    db: &SqlitePool,
+    revision_id: &str,
+) -> ApiResult<Option<ThemeRevisionRecord>> {
+    let row: Option<RevisionRow> = sqlx::query_as(
+        "SELECT revision_id, theme_id, version, revision_digest, source_format,
+                manifest_json, file_digests_json, legacy_block_id, provenance_json, created_at
+         FROM theme_revisions
+         WHERE revision_id = ?",
+    )
+    .bind(revision_id)
+    .fetch_optional(db)
+    .await?;
+    row.map(row_to_revision).transpose()
+}
+
 async fn find_revision_by_digest(
     conn: &mut sqlx::SqliteConnection,
     digest: &str,
