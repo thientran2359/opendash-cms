@@ -198,6 +198,24 @@ python3 cms/scripts/public_content_smoke.py --binary cms/target/debug/opendash
 
 Chưa có active theme registry riêng, taxonomy, chỉnh archive/single bằng Builder hay preview entry chưa lưu. Xem [kế hoạch M3.6](docs/plans/milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md) và [báo cáo kiểm chứng](docs/verification/2026-11-09-m3-6-public-content-rendering.md).
 
+## Atlas → CoS: adapter theo yêu cầu
+
+Từ root, kiểm tra kết nối chỉ đọc (không tạo chat):
+
+```powershell
+python .agents/scripts/cos_dispatch.py probe forge
+python .agents/scripts/cos_dispatch.py probe harbor
+python -m unittest discover -s .agents/scripts -p test_cos_dispatch.py -q
+```
+
+Issue triển khai dùng `send-issue` theo gate GitHub/G3/Project trong
+[skill atlas-task-dispatch](.agents/skills/atlas-task-dispatch/SKILL.md).
+Sửa PR tài liệu của chính tác giả dùng `check-pr`, `send-pr`, `status-pr` với
+head/base SHA và review Atlas đã ký; không cấp quyền triển khai hoặc thay Project.
+Không gửi nếu probe/owner/review/agent slot chưa đạt, không gửi lại sau timeout.
+Xem [kiểm chứng bản sửa](docs/verification/2026-11-13-cos-pr-dispatch.md).
+Adapter giữ token trên từng host và không có watcher; tích hợp Muse là phạm vi riêng.
+
 ## CodeGraph cho Codex, Antigravity và Chat On Steroids
 
 CodeGraph 0.21.0 lập chỉ mục cú pháp và quan hệ gọi hàm trên mã Rust/TypeScript của OpenDash để các AI agent có thể tra cứu `symbol_search`, `get_call_graph`, `analyze_impact` và `get_edit_context` trước khi sửa code. Chỉ mục riêng cho từng workspace lưu ngoài Git tại `~/.codegraph/`; các tài liệu sản phẩm, kiến trúc và contract được nạp thêm để tra cứu thiết kế. Xem [bằng chứng, cách kết nối MCP và giới hạn](docs/verification/2026-11-07-codegraph-setup.md).
