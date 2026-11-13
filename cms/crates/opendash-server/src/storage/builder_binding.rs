@@ -11,7 +11,9 @@ use opendash_core::{
 use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
-use crate::{error::ApiResult, storage::media::valid_media_id};
+use crate::{
+    error::ApiResult, public_context::CanonicalUrlBuilder, storage::media::valid_media_id,
+};
 
 #[derive(Debug, Clone)]
 pub enum BindingResult {
@@ -184,6 +186,11 @@ fn extract(
     }
     if binding.target == BindingTarget::Url && !opendash_core::builder::valid_button_url(&text) {
         return BindingResult::UrlRejected;
+    }
+    if binding.target == BindingTarget::Url {
+        return CanonicalUrlBuilder::normalize_internal_link(&text)
+            .map(BindingResult::Value)
+            .unwrap_or(BindingResult::UrlRejected);
     }
     BindingResult::Value(text)
 }

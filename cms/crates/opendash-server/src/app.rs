@@ -35,7 +35,7 @@ use crate::{
             plugin_install, plugin_list, plugin_run,
         },
         public::public_page,
-        public_content::{archive, media_file, media_thumb, single},
+        public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
         settings::{general_get, general_put, timezones_get},
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_list,
@@ -102,6 +102,8 @@ pub fn build_router_with_themes_root(
         .route("/", get(public_page))
         .route("/content/{type_key}", get(archive))
         .route("/content/{type_key}/{slug}", get(single))
+        .route("/taxonomy/category/{slug}", get(category_archive))
+        .route("/taxonomy/tag/{slug}", get(tag_archive))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))

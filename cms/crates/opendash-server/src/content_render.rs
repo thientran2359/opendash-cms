@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::{
     error::{ApiError, ApiResult},
+    public_context::CanonicalUrlBuilder,
     storage::{entries::ContentEntryRecord, media::valid_media_id},
     theme,
 };
@@ -25,8 +26,8 @@ nav{display:flex;gap:1rem;margin-top:2rem}
 <header><strong>{{ site.title }}</strong>{% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}</header>
 <h1>{{ content_type.label }}</h1>
 {% for entry in entries %}
-<article><h2><a href="{{ entry.url }}">{{ entry.title }}</a></h2>
-{% if entry.cover_url %}<a href="{{ entry.url }}"><img src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy"></a>{% endif %}
+<article><h2>{% if entry.url %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</h2>
+{% if entry.cover_url %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}<img src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy">{% if entry.url %}</a>{% endif %}{% endif %}
 </article>
 {% else %}<p>Chưa có nội dung.</p>{% endfor %}
 <nav>{% if previous_url %}<a href="{{ previous_url }}">← Trang trước</a>{% endif %}
@@ -71,7 +72,7 @@ pub struct EntryView {
     pub id: i64,
     pub title: String,
     pub slug: String,
-    pub url: String,
+    pub url: Option<String>,
     pub updated_at: String,
     pub values: BTreeMap<String, Value>,
     pub fields: Vec<FieldView>,
@@ -153,7 +154,7 @@ pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) ->
             gallery_urls,
         });
     }
-    let url = format!("/content/{}/{}", schema.key, record.slug);
+    let url = CanonicalUrlBuilder::entry_from_id(record.id, &schema.key, &record.slug);
     EntryView {
         id: record.id,
         title: record.title,
@@ -183,10 +184,10 @@ pub fn authenticated_preview_view(
             .map(|url| admin_media(url))
             .collect();
     }
-    view.url = format!(
+    view.url = Some(format!(
         "/api/admin/content-types/{}/entries/{}/preview",
         schema.key, view.id
-    );
+    ));
     view
 }
 
@@ -230,7 +231,7 @@ pub fn render_single_with_site(
         &serde_json::json!({
             "content_type": schema,
             "entry": entry,
-            "archive_url": format!("/content/{}", schema.key),
+            "archive_url": CanonicalUrlBuilder::archive(&schema.key).unwrap_or_default(),
             "site": site,
         }),
     )
