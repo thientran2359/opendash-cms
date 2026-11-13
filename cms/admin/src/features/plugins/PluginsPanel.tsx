@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { PluginSummary } from '../../types.ts';
 import { getPlugins } from '../../api/plugins.ts';
 import { ZipUploadField } from '../../components/FormPrimitives.tsx';
+import { DeclarativePluginUi } from './DeclarativePluginUi.tsx';
 
 interface PluginsPanelProps {
   plugins: PluginSummary[];
@@ -15,6 +16,8 @@ interface PluginsPanelProps {
   onEnablePlugin: (id: string) => void;
   onPluginInputChange: (json: string) => void;
   onRunPlugin: () => void;
+  csrfToken?: string | null;
+  onUnauthorized?: () => void;
 }
 
 function permissionDetails(plugin: PluginSummary): string[] {
@@ -45,6 +48,8 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   onEnablePlugin,
   onPluginInputChange,
   onRunPlugin,
+  csrfToken,
+  onUnauthorized,
 }) => {
   const [visiblePlugins, setVisiblePlugins] = useState<PluginSummary[]>(plugins);
   const [loading, setLoading] = useState(true);
@@ -273,6 +278,13 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           </div>
         )}
       </section>
+      {selected && selected.enabled && (
+        <DeclarativePluginUi
+          pluginId={selected.id}
+          csrfToken={csrfToken ?? null}
+          onUnauthorized={onUnauthorized ?? (() => {})}
+        />
+      )}
     </div>
   );
 };
