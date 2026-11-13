@@ -462,19 +462,20 @@ pub async fn resolve_and_render_header_footer(
     theme_opts: &BTreeMap<String, serde_json::Value>,
     type_key: Option<&str>,
 ) -> ApiResult<(Option<String>, Option<String>)> {
+    let menus = crate::storage::menu::resolve_active_slot_menus(db).await?;
     let header = match resolve_effective_override(db, OverrideRole::Header, type_key, None).await?
     {
         Some(record) => Some(render_override_for_public(db, &record, None).await?.html),
         None => active_v2
             .and_then(|v2| v2.roles.get("header"))
-            .and_then(|t| content_render::render_role_fragment_with_options(t, site_ctx, theme_opts)),
+            .and_then(|t| content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)),
     };
     let footer = match resolve_effective_override(db, OverrideRole::Footer, type_key, None).await?
     {
         Some(record) => Some(render_override_for_public(db, &record, None).await?.html),
         None => active_v2
             .and_then(|v2| v2.roles.get("footer"))
-            .and_then(|t| content_render::render_role_fragment_with_options(t, site_ctx, theme_opts)),
+            .and_then(|t| content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)),
     };
     Ok((header, footer))
 }
