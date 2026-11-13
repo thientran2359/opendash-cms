@@ -4,6 +4,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
+    Extension,
     extract::{OriginalUri, Path, RawQuery, State},
     http::{StatusCode, header},
     response::{Html, IntoResponse, Response},
@@ -19,9 +20,10 @@ use crate::{
         ARCHIVE_SIZE, CanonicalUrlBuilder, MAX_ARCHIVE_PAGE, PublicQuery, PublicRequestContext,
         QueryScope, TaxonomyKind, parse_query, validate_single_query,
     },
+    routes::themes::ThemeStoreRoot,
     storage::{
         content::load_content_type_definition, entries::EntryFilters, media,
-        page::active_content_templates, public_content, settings,
+        page::active_content_templates, public_content, settings, theme as theme_storage,
     },
 };
 
@@ -36,7 +38,7 @@ fn check_type_key(type_key: &str) -> ApiResult<()> {
 fn public_html(html: String) -> Response {
     (
         [
-            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::REFERRER_POLICY, "no-referrer"),
             (header::CACHE_CONTROL, "no-store"),
@@ -48,6 +50,7 @@ fn public_html(html: String) -> Response {
 
 pub async fn archive(
     State(db): State<SqlitePool>,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
     Path(type_key): Path<String>,
     OriginalUri(uri): OriginalUri,
     RawQuery(raw): RawQuery,
@@ -105,24 +108,46 @@ pub async fn archive(
             )
         })
         .flatten();
+    let active_v2 = match themes_root {
+        Some(Extension(root)) => theme_storage::load_active_v2_role_templates(&db, &root.0).await?,
+        None => None,
+    };
     let (list_template, _) = active_content_templates(&db).await?;
+    let selected = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("archive").map(String::as_str))
+        .or(list_template.as_deref());
     let site = settings::get_general(&db).await?;
-    let html = content_render::render_archive_with_site(
+    let site_ctx = SiteContext {
+        title: &site.site_title,
+        tagline: &site.tagline,
+    };
+    let body_html = content_render::render_archive_with_site(
         &schema,
         &entries,
         previous.as_deref(),
         next.as_deref(),
-        list_template.as_deref(),
-        &SiteContext {
-            title: &site.site_title,
-            tagline: &site.tagline,
-        },
+        selected,
+        &site_ctx,
     )?;
-    Ok(public_html(html))
+    let header = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("header"))
+        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+    let footer = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("footer"))
+        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+    Ok(public_html(content_render::compose_public_document(
+        header.as_deref(),
+        &body_html,
+        footer.as_deref(),
+    )))
 }
 
 pub async fn single(
     State(db): State<SqlitePool>,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
     Path((type_key, slug)): Path<(String, String)>,
     OriginalUri(uri): OriginalUri,
     RawQuery(raw): RawQuery,
@@ -149,28 +174,51 @@ pub async fn single(
         slug: slug.clone(),
         canonical_path,
     };
+    let active_v2 = match themes_root {
+        Some(Extension(root)) => theme_storage::load_active_v2_role_templates(&db, &root.0).await?,
+        None => None,
+    };
     let (_, single_template) = active_content_templates(&db).await?;
+    let selected = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("single").map(String::as_str))
+        .or(single_template.as_deref());
     let site = settings::get_general(&db).await?;
-    let html = content_render::render_single_with_site(
+    let site_ctx = SiteContext {
+        title: &site.site_title,
+        tagline: &site.tagline,
+    };
+    let body_html = content_render::render_single_with_site(
         &schema,
         &entry_view(entry, &schema),
-        single_template.as_deref(),
-        &SiteContext {
-            title: &site.site_title,
-            tagline: &site.tagline,
-        },
+        selected,
+        &site_ctx,
     )?;
-    Ok(public_html(html))
+    let header = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("header"))
+        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+    let footer = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("footer"))
+        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+    Ok(public_html(content_render::compose_public_document(
+        header.as_deref(),
+        &body_html,
+        footer.as_deref(),
+    )))
 }
 
 pub async fn category_archive(
     State(db): State<SqlitePool>,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
     Path(slug): Path<String>,
     OriginalUri(uri): OriginalUri,
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
     taxonomy_archive(
         &db,
+        themes_root.map(|Extension(r)| r),
         TaxonomyKind::Category,
         &slug,
         uri.path(),
@@ -181,15 +229,25 @@ pub async fn category_archive(
 
 pub async fn tag_archive(
     State(db): State<SqlitePool>,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
     Path(slug): Path<String>,
     OriginalUri(uri): OriginalUri,
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
-    taxonomy_archive(&db, TaxonomyKind::Tag, &slug, uri.path(), raw.as_deref()).await
+    taxonomy_archive(
+        &db,
+        themes_root.map(|Extension(r)| r),
+        TaxonomyKind::Tag,
+        &slug,
+        uri.path(),
+        raw.as_deref(),
+    )
+    .await
 }
 
 async fn taxonomy_archive(
     db: &SqlitePool,
+    themes_root: Option<ThemeStoreRoot>,
     kind: TaxonomyKind,
     slug: &str,
     request_path: &str,
@@ -261,18 +319,38 @@ async fn taxonomy_archive(
         label: term.name,
         fields: Vec::new(),
     };
-    let html = content_render::render_archive_with_site(
+    let active_v2 = match themes_root {
+        Some(root) => theme_storage::load_active_v2_role_templates(db, &root.0).await?,
+        None => None,
+    };
+    let selected = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("taxonomy_archive").map(String::as_str));
+    let site_ctx = SiteContext {
+        title: &site.site_title,
+        tagline: &site.tagline,
+    };
+    let body_html = content_render::render_archive_with_site(
         &schema,
         &entries,
         previous.as_deref(),
         next.as_deref(),
-        None,
-        &SiteContext {
-            title: &site.site_title,
-            tagline: &site.tagline,
-        },
+        selected,
+        &site_ctx,
     )?;
-    Ok(public_html(html))
+    let header = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("header"))
+        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+    let footer = active_v2
+        .as_ref()
+        .and_then(|v2| v2.roles.get("footer"))
+        .and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+    Ok(public_html(content_render::compose_public_document(
+        header.as_deref(),
+        &body_html,
+        footer.as_deref(),
+    )))
 }
 
 async fn media_response(

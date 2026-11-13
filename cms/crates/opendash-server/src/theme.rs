@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use minijinja::{AutoEscape, Environment, UndefinedBehavior};
 pub use opendash_core::theme::{Block, BlockDescriptor, Fields};
 use serde::{Deserialize, Serialize};
 
@@ -106,12 +105,12 @@ impl Theme {
         };
 
         let template = template.ok_or("Thiếu block.html.")?;
-        if template.trim().is_empty() || environment().template_from_str(&template).is_err() {
+        if template.trim().is_empty() || crate::template_sec::restricted_environment().template_from_str(&template).is_err() {
             return Err("Template block không hợp lệ.");
         }
         for optional in [&content_list_template, &content_single_template] {
             if let Some(template) = optional {
-                if template.trim().is_empty() || environment().template_from_str(template).is_err()
+                if template.trim().is_empty() || crate::template_sec::restricted_environment().template_from_str(template).is_err()
                 {
                     return Err("Template CPT không hợp lệ.");
                 }
@@ -129,54 +128,17 @@ impl Theme {
 
 pub fn render(template: &str, fields: &Fields, block: &Block) -> Result<String, &'static str> {
     block.validate_against_fields(fields)?;
-    let env = environment();
-    env.template_from_str(template)
-        .and_then(|template| template.render(minijinja::context!(values => &block.values)))
+    let context = minijinja::context!(values => &block.values);
+    crate::template_sec::render_csec("block", template, context)
         .map_err(|_| "Không render được template block.")
 }
 
-/// Shared MiniJinja HTML auto-escaping and fuel budget for theme CPT templates
-/// and the built-in fallback, matching the Builder's rendering rules.
+/// Shared MiniJinja C-SEC HTML auto-escaping and fuel budget for theme CPT
+/// templates and the built-in fallback, matching the Builder's rendering rules.
 pub fn render_content(template: &str, data: &serde_json::Value) -> Result<String, &'static str> {
-    let env = environment();
-    env.template_from_str(template)
-        .and_then(|t| t.render(json_to_template_value(data)))
+    let context = crate::template_sec::json_to_safe_value(data);
+    crate::template_sec::render_csec("content", template, context)
         .map_err(|_| "Không thể render template nội dung.")
-}
-
-/// Convert only ordinary JSON scalars/arrays/objects into the restricted
-/// MiniJinja Value context, never into a marked-safe HTML string.
-fn json_to_template_value(value: &serde_json::Value) -> minijinja::Value {
-    use minijinja::Value;
-    match value {
-        serde_json::Value::Null => Value::from(()),
-        serde_json::Value::Bool(v) => Value::from(*v),
-        serde_json::Value::Number(v) => {
-            if let Some(i) = v.as_i64() {
-                Value::from(i)
-            } else if let Some(u) = v.as_u64() {
-                Value::from(u)
-            } else {
-                Value::from(v.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::String(v) => Value::from(v.clone()),
-        serde_json::Value::Array(v) => {
-            Value::from(v.iter().map(json_to_template_value).collect::<Vec<_>>())
-        }
-        serde_json::Value::Object(v) => Value::from_pairs(
-            v.iter()
-                .map(|(key, value)| (key.clone(), json_to_template_value(value))),
-        ),
-    }
-}
-
-fn environment() -> Environment<'static> {
-    let mut env = Environment::new();
-    env.set_auto_escape_callback(|_| AutoEscape::Html);
-    env.set_undefined_behavior(UndefinedBehavior::Strict);
-    env.set_fuel(Some(10_000));
-    env
 }
 
 const ALLOWED_V2_ROLES: &[&str] = &[
@@ -297,7 +259,6 @@ pub fn parse_theme_zip_v2(bytes: &[u8]) -> Result<ThemeV2Package, V2ZipError> {
         return Err(V2ZipError::BadRequest("Phiên bản theme v2 không hợp lệ."));
     }
 
-    let env = environment();
     for (role, tpl_path) in &manifest.templates {
         if !ALLOWED_V2_ROLES.contains(&role.as_str()) {
             return Err(V2ZipError::BadRequest(
@@ -310,10 +271,21 @@ pub fn parse_theme_zip_v2(bytes: &[u8]) -> Result<ThemeV2Package, V2ZipError> {
         ))?;
         let tpl_src = std::str::from_utf8(tpl_bytes)
             .map_err(|_| V2ZipError::BadRequest("Template phải là UTF-8 hợp lệ."))?;
-        if tpl_src.trim().is_empty() || env.template_from_str(tpl_src).is_err() {
+        if tpl_src.trim().is_empty() {
             return Err(V2ZipError::BadRequest(
                 "Cú pháp template MiniJinja không hợp lệ.",
             ));
+        }
+        crate::template_sec::validate_template_csec(role, tpl_src)
+            .map_err(V2ZipError::BadRequest)?;
+    }
+
+    for (rel_path, content) in &files {
+        if rel_path.to_ascii_lowercase().ends_with(".css") {
+            let css_src = std::str::from_utf8(content)
+                .map_err(|_| V2ZipError::BadRequest("File CSS phải là UTF-8 hợp lệ."))?;
+            crate::template_sec::validate_safe_css(css_src)
+                .map_err(V2ZipError::BadRequest)?;
         }
     }
 

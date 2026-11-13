@@ -273,7 +273,9 @@ fn default_list_size() -> u8 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElementBinding {
+    #[serde(default)]
     pub type_key: String,
+    #[serde(default)]
     pub entry_slug: String,
     pub source: BindingSource,
     pub target: BindingTarget,
@@ -284,6 +286,7 @@ pub struct ElementBinding {
 pub enum BindingSource {
     Title,
     Field { key: String },
+    RouteContext { field_key: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -558,17 +561,84 @@ fn validate_known(
 
 fn valid_binding(binding: Option<&ElementBinding>, targets: &[BindingTarget]) -> bool {
     let Some(binding) = binding else { return true };
-    if !targets.contains(&binding.target)
-        || !valid_content_type_key(&binding.type_key)
-        || !valid_kebab_segment_with_limit(&binding.entry_slug, 64)
-    {
+    if !targets.contains(&binding.target) {
         return false;
     }
+    let fixed_entry_valid = || {
+        valid_content_type_key(&binding.type_key)
+            && valid_kebab_segment_with_limit(&binding.entry_slug, 64)
+    };
     match &binding.source {
         BindingSource::Title => {
-            !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
+            fixed_entry_valid()
+                && !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
         }
-        BindingSource::Field { key } => valid_snake_key(key),
+        BindingSource::Field { key } => fixed_entry_valid() && valid_snake_key(key),
+        BindingSource::RouteContext { field_key } => {
+            let valid_key = matches!(field_key.as_str(), "title" | "slug" | "url" | "cover_url")
+                || valid_snake_key(field_key);
+            let target_ok = match field_key.as_str() {
+                "title" | "slug" => {
+                    !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
+                }
+                "url" => matches!(
+                    binding.target,
+                    BindingTarget::Url | BindingTarget::Text | BindingTarget::Label
+                ),
+                "cover_url" => matches!(
+                    binding.target,
+                    BindingTarget::Url | BindingTarget::MediaId | BindingTarget::Text
+                ),
+                _ => true,
+            };
+            let scope_ok = (binding.type_key.is_empty()
+                || valid_content_type_key(&binding.type_key))
+                && (binding.entry_slug.is_empty()
+                    || valid_kebab_segment_with_limit(&binding.entry_slug, 64));
+            valid_key && target_ok && scope_ok
+        }
+    }
+}
+
+impl BuilderDocument {
+    /// RouteContext bindings are valid only on `single` or `page` role overrides,
+    /// and custom field keys must belong to the scoped CPT when provided.
+    pub fn validate_route_context_for_role(
+        &self,
+        role: Option<&str>,
+        scoped_cpt_fields: Option<&[String]>,
+    ) -> Result<(), BuilderError> {
+        let role_allows_route_context = matches!(role, Some("single") | Some("page"));
+        for section in &self.sections {
+            for row in &section.children {
+                for column in &row.children {
+                    for element in &column.children {
+                        let ElementContent::Known(known) = &element.content else {
+                            continue;
+                        };
+                        let Some(binding) = known.binding() else {
+                            continue;
+                        };
+                        if let BindingSource::RouteContext { field_key } = &binding.source {
+                            if !role_allows_route_context {
+                                return Err(BuilderError::Invalid(
+                                    "RouteContext binding is only valid on single/page role overrides",
+                                ));
+                            }
+                            if !matches!(field_key.as_str(), "title" | "slug" | "url" | "cover_url")
+                                && let Some(allowed) = scoped_cpt_fields
+                                && !allowed.iter().any(|k| k == field_key)
+                            {
+                                return Err(BuilderError::Invalid(
+                                    "RouteContext field_key is not in scoped CPT fields",
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1175,5 +1245,67 @@ mod tests {
                 .validate_for_save(&registry(), None)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn route_context_allowed_only_on_single_or_page_and_checks_fields() {
+        let raw = json!({
+            "schema_version": 1,
+            "sections": [{
+                "id": "sec-1",
+                "children": [{
+                    "id": "row-1",
+                    "children": [{
+                        "id": "col-1",
+                        "children": [{
+                            "id": "heading-1",
+                            "type": "core/heading",
+                            "props": {
+                                "text": "Fallback",
+                                "level": 1,
+                                "binding": {
+                                    "target": "text",
+                                    "source": { "kind": "route_context", "field_key": "title" }
+                                }
+                            }
+                        }]
+                    }]
+                }]
+            }]
+        });
+        let doc = BuilderDocument::from_json(raw.to_string().as_bytes()).unwrap();
+        doc.validate_for_save(&registry(), None).unwrap();
+        assert!(doc.validate_route_context_for_role(Some("single"), None).is_ok());
+        assert!(doc.validate_route_context_for_role(Some("page"), None).is_ok());
+        assert!(doc.validate_route_context_for_role(Some("home"), None).is_err());
+        assert!(doc.validate_route_context_for_role(Some("archive"), None).is_err());
+        assert!(doc.validate_route_context_for_role(Some("single"), Some(&[])).is_ok());
+
+        let custom_field = json!({
+            "schema_version": 1,
+            "sections": [{
+                "id": "sec-1",
+                "children": [{
+                    "id": "row-1",
+                    "children": [{
+                        "id": "col-1",
+                        "children": [{
+                            "id": "text-1",
+                            "type": "core/text",
+                            "props": {
+                                "text": "Fallback",
+                                "binding": {
+                                    "target": "text",
+                                    "source": { "kind": "route_context", "field_key": "summary" }
+                                }
+                            }
+                        }]
+                    }]
+                }]
+            }]
+        });
+        let custom_doc = BuilderDocument::from_json(custom_field.to_string().as_bytes()).unwrap();
+        assert!(custom_doc.validate_route_context_for_role(Some("single"), Some(&["summary".to_string()])).is_ok());
+        assert!(custom_doc.validate_route_context_for_role(Some("single"), Some(&["other".to_string()])).is_err());
     }
 }

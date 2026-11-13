@@ -191,6 +191,45 @@ pub fn authenticated_preview_view(
     view
 }
 
+pub fn render_role_fragment(template: &str, site: &SiteContext<'_>) -> Option<String> {
+    theme::render_content(
+        template,
+        &serde_json::json!({
+            "site": site,
+        }),
+    )
+    .ok()
+}
+
+/// Composes optional header and footer fragments with the body HTML once in
+/// core, never via raw HTML interpolation inside MiniJinja templates.
+pub fn compose_public_document(
+    header_html: Option<&str>,
+    body_html: &str,
+    footer_html: Option<&str>,
+) -> String {
+    let header = header_html.unwrap_or("");
+    let footer = footer_html.unwrap_or("");
+    if header.is_empty() && footer.is_empty() {
+        return body_html.to_string();
+    }
+    if let Some(body_open) = body_html.find("<body>") {
+        let insert_start = body_open + "<body>".len();
+        if let Some(body_close) = body_html.rfind("</body>") {
+            let mut out = String::with_capacity(body_html.len() + header.len() + footer.len());
+            out.push_str(&body_html[..insert_start]);
+            out.push_str(header);
+            out.push_str(&body_html[insert_start..body_close]);
+            out.push_str(footer);
+            out.push_str(&body_html[body_close..]);
+            return out;
+        }
+    }
+    format!(
+        "<!doctype html><html lang=\"vi\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body>{header}{body_html}{footer}</body></html>"
+    )
+}
+
 pub fn render_archive_with_site(
     schema: &ContentTypeDefinition,
     entries: &[EntryView],
@@ -199,17 +238,19 @@ pub fn render_archive_with_site(
     selected_template: Option<&str>,
     site: &SiteContext<'_>,
 ) -> ApiResult<String> {
-    theme::render_content(
-        selected_template.unwrap_or(DEFAULT_ARCHIVE),
-        &serde_json::json!({
-            "content_type": schema,
-            "entries": entries,
-            "previous_url": previous_url,
-            "next_url": next_url,
-            "site": site,
-        }),
-    )
-    .map_err(ApiError::internal)
+    let data = serde_json::json!({
+        "content_type": schema,
+        "entries": entries,
+        "previous_url": previous_url,
+        "next_url": next_url,
+        "site": site,
+    });
+    if let Some(custom) = selected_template {
+        if let Ok(html) = theme::render_content(custom, &data) {
+            return Ok(html);
+        }
+    }
+    theme::render_content(DEFAULT_ARCHIVE, &data).map_err(ApiError::internal)
 }
 
 pub fn render_single(
@@ -226,16 +267,18 @@ pub fn render_single_with_site(
     selected_template: Option<&str>,
     site: &SiteContext<'_>,
 ) -> ApiResult<String> {
-    theme::render_content(
-        selected_template.unwrap_or(DEFAULT_SINGLE),
-        &serde_json::json!({
-            "content_type": schema,
-            "entry": entry,
-            "archive_url": CanonicalUrlBuilder::archive(&schema.key).unwrap_or_default(),
-            "site": site,
-        }),
-    )
-    .map_err(ApiError::internal)
+    let data = serde_json::json!({
+        "content_type": schema,
+        "entry": entry,
+        "archive_url": CanonicalUrlBuilder::archive(&schema.key).unwrap_or_default(),
+        "site": site,
+    });
+    if let Some(custom) = selected_template {
+        if let Ok(html) = theme::render_content(custom, &data) {
+            return Ok(html);
+        }
+    }
+    theme::render_content(DEFAULT_SINGLE, &data).map_err(ApiError::internal)
 }
 
 #[cfg(test)]
