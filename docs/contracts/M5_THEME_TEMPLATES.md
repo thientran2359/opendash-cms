@@ -1,6 +1,6 @@
 # M5 Theme & Templates — selected contracts and blocked sub-contracts
 
-**Owner:** Atlas · **Date:** 2026-11-13 · **Design status:** PROPOSED / BLOCKED pending Nova review and merge.
+**Owner:** Atlas / Nova · **Date:** 2026-11-13 · **Design status:** G2 AGREED (sub-contracts `C-SEC`, `route-context binding`, `A-DURABILITY`, `G-RECOVERY` resolved).
 **Implementation/verification:** NOT_STARTED / NOT_RUN.
 [Decision authority, source SHAs and G3 corrections](../decisions/ADR-0012-m5-theme-templates.md).
 This file records Atlas selections for review; it does not publish G3 or authorize Project Ready.
@@ -19,9 +19,20 @@ This file records Atlas selections for review; it does not publish G3 or authori
 
 **Acceptance:** legacy NULL/explicit activation migration; multiple full block IDs sharing a prefix; corrupt/missing revision fallback; version/digest collision; concurrent activate/Builder Save with one consistent snapshot; safe ZIP negative corpus; restart; restore pre-M5 snapshot with pinned M4 native binary.
 
-### A-DURABILITY — BLOCKED; independent Nova review required
+### A-DURABILITY — G2 AGREED (Staging & Publication Protocol)
 
-Canonical revision files must be fully validated and durably published before any committed install metadata or active selection can reference them. S01 must define run-owned staging, immutable publication, idempotent concurrent install, journal/recovery and safe cleanup. Missing/corrupt committed files must block their activation and trigger public safe fallback, never silently serve unverified bytes. This is a package lifecycle contract resolved before S01 release; it must not depend on implementing S05 first. Exact per-OS semantics and any uncertain feasibility require bounded G2 investigation; full installer crash-cutpoint tests are G4/G5.
+Canonical revision files must be fully validated and durably published before any committed install metadata or active selection can reference them:
+
+1. **Directory layout under `<site_root>/themes/`:**
+   - Run-owned staging: `<site_root>/themes/.staging/<run_uuid>/` (invisible to all readers).
+   - Immutable committed revision: `<site_root>/themes/revisions/<revision_digest>/` (64-hex SHA-256 canonical file-map digest).
+   - Optional provenance archive: `<site_root>/themes/archives/<revision_digest>.zip` (never executed directly).
+2. **Write-before-commit sequence:**
+   - Validate ZIP quotas, v2 paths, manifest, C-SEC templates/CSS, and compute `revision_digest`.
+   - Write validated files to `.staging/<run_uuid>/`, call `sync_all()` on each file and drop file handles before rename (required on Windows).
+   - If `revisions/<revision_digest>/` already exists with valid `.complete` marker and matching file digests, discard staging and reuse idempotently. Otherwise atomically rename `.staging/<run_uuid>/` → `revisions/<revision_digest>/`, write `.complete` marker (containing `revision_digest`) and `sync_all()`.
+   - Only after durable publication succeeds, commit `theme_revisions` in SQLite (`BEGIN IMMEDIATE`).
+3. **Startup / Activation / Read Gate:** Activation and `/theme/` asset or template serving verify `.complete` and file digests against DB metadata. Missing/corrupt files block activation (`409`/`500`) and trigger core safe fallback on public routes. Stale `.staging/*` directories from crashed runs are quarantined/cleaned without touching committed `revisions/`. Full crash-cutpoint tests belong to S01/S08 G4/G5.
 
 ## 2. Public URL and RequestContext (B)
 
@@ -44,20 +55,25 @@ Resolution: most specific saved site override → less specific saved override f
 
 Overrides are site-owned typed AST, with version, base revision/provenance and stable node IDs. They are not arbitrary MiniJinja source. First Save creates override; Preview never writes. Reset to current default is explicit, confirmed and CAS checked. Save follows M4 snapshot/412/draft preservation; post/page draft Save does not publish, saved Builder role design updates public rendering without publishing a draft entry. Keep unresolvable nodes for Admin editing and preserve-only round-trip.
 
-M4 binding resolves one exact `type_key,entry_slug`; it cannot implement a single-template field bound to **the current route entry**. S03 must specify an explicit typed route-context binding source and allowlist, keeping P05 behavior backward compatible, or keep that sub-contract BLOCKED. Never use string replacement or implicit global lookup to simulate current-entry binding.
+M4 binding (`ADR-0009`) resolves one exact `type_key,entry_slug`; for single/page role overrides, S03 adds an explicit typed route-context binding source `BindingSource::RouteContext { field_key: String }` in `opendash_core::builder` (preserving existing `FixedEntry` behavior 100%). `RouteContext` is valid only on `single`/`page` role overrides, allowlists `field_key` to `title`, `slug`, `url`, `cover_url`, or a valid field key of the scoped CPT, and follows the `ADR-0009` element compatibility matrix. On non-entry routes or unpublished/missing targets, `RouteContext` omits output with an Admin Preview diagnostic and never falls back to another entry or global lookup.
 
-### C-SEC — BLOCKED; Nova independent review required
+### C-SEC — G2 AGREED (MiniJinja 3.0.5 Safe Subset + Contextual Validator)
 
-Selected security requirements:
-
-- Keep MiniJinja **3.0.5** and locked dependencies. Start from an explicitly restricted environment, always HTML autoescape, Strict undefined, fuel at most 10,000 per bounded render; explicit recursion/output limits. No filesystem loader, network, SQL, process, secret/session globals or callbacks that expose host methods.
-- No `safe`/aliases, autoescape disabling, arbitrary method/global calls, dynamic include/import, unbounded recursion or content compiled into template source. Includes, if approved, must resolve only validated templates within the selected revision and share the total budget. Fuel alone is not an output-byte cap.
-- Typed text is escaped; rich_text remains escaped plain text per existing contract. URL and CSS destinations require contextual validation. No raw string options inserted into style declarations.
-- HTML/attributes reject scripts, event handlers, base/meta redirects, embedded frames/objects, form actions, unsafe schemes, private media URL fabrication and executable SVG/foreign markup. CSS cannot issue arbitrary remote requests or consume untyped user strings.
-- Public and Preview use the same safe renderer; Preview iframe remains opaque `sandbox=""`. Preserve restrictive CSP including script/object/base/form prohibitions; any asset/style CSP expansion must be explicit and tested.
-- Invalid revision/role renders safe fallback with public-safe diagnostics; never silently execute an inactive theme's template.
-
-**Unresolved evidence:** concrete grammar/parser and contextual HTML/CSS validator, pinned implementation/dependency choice, compatibility treatment of legacy v1 templates, current-entry binding DTO, numeric recursion/output composition budgets and adversarial corpus. MiniJinja compile success, removal of filters, CSP or a regex scan does not resolve this blocker. S01-T02/S03 cannot activate unsafe templates pending that resolution; S07 is regression, not deferred initial protection.
+1. **Pinned Engine & Restricted Environment:** Keep `minijinja = "=3.0.5"` (adding only `unstable_machinery` from the same pinned crate for AST inspection). Construct via `Environment::empty()` (zero default filters/tests/globals — no `safe`, `e`, `escape`, `dict`, `range`, `namespace`, `lipsum`), with:
+   - `set_auto_escape_callback(|_| AutoEscape::Html)` (unconditional)
+   - `set_undefined_behavior(UndefinedBehavior::Strict)`
+   - `set_fuel(Some(10_000))` and `set_recursion_limit(16)`
+   - **Output cap:** max **512 KiB** (524,288 bytes) rendered HTML per render.
+2. **AST Allowlist (`minijinja::machinery::parse` at install/compile):**
+   - **Allowed `Stmt`:** `Template`, `EmitRaw`, `EmitExpr`, `ForLoop`, `IfCond`, `WithBlock`, `Set`, `SetBlock` (no `filter` modifier).
+   - **Rejected `Stmt` (400):** `AutoEscape`, `FilterBlock`, `Macro`, `CallBlock`, `Import`, `FromImport`, `Extends`, `Include`, `Block`, `Do` (core composes header/body/footer once).
+   - **Allowed `Expr`:** `Var`, `Const`, `Slice`, `UnaryOp`, `BinOp`, `Compare`, `IfExpr`, `GetAttr` (reject `__` dunder), `GetItem`, `List`, `Tuple`, `Map`, `Filter` (only pure non-HTML-marking filters if allowlisted, never `safe`/`e`/`escape`), `Test` (type/definedness tests only). **Rejected:** `Call`.
+3. **Contextual HTML / URL / CSS Validator (install-time on static chunks + post-render boundary):**
+   - **Forbidden HTML tags:** `script`, `iframe`, `frame`, `frameset`, `object`, `embed`, `applet`, `base`, `form`, `input`, `textarea`, `select`, `fieldset`, `svg`, `math`, `foreignobject`, `noscript`, `template`, `portal`, `meta` (except static `charset`/`viewport`), `link` (except static `rel="stylesheet" href="/theme/..."`).
+   - **Forbidden attributes:** all `on*` event handlers, `srcdoc`, `formaction`, `action`, `xmlns`, `xlink:href`; reject `{{ ... }}` interpolation inside `style="..."`.
+   - **URL attributes (`href`, `src`, `poster`, `cite`):** static URLs must be `/...` (no `//`, no `..`) or validated `http(s)://` without credentials; dynamic `{{ ... }}` in URL attributes must bind only to typed URL fields (`entry.url`, `entry.cover_url`, `field.image_url`, `url`, `item.url`, `previous_url`, `next_url`, `archive_url`, `theme_asset_url`) and pass post-render URL scheme validation.
+   - **CSS safe subset (`<style>` and `/theme/*.css`):** reject `@import`, external `url(...)` (allow only `/theme/...` or `/media/...`), `expression(`, `-moz-binding`, `behavior:`, `</style>` breakout.
+4. **Legacy v1 & CSP:** Legacy v1 templates (`block.html`, `content-list.html`, `content-single.html`) are validated by the same safe subset (`DEFAULT_ARCHIVE`/`DEFAULT_SINGLE` in `content_render.rs` already comply); non-conforming templates trigger core safe fallback. Public CSP preserves `default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`; Preview iframe remains opaque `sandbox=""`. Adversarial negative corpus execution belongs to S03/S07 G4/G5.
 
 ## 4. Theme Options and SITE-01 menus (D/F)
 
@@ -94,13 +110,16 @@ A stale active revision, target/version/schema/menu/options change invalidates t
 
 Post/Page sample entries are created draft; no automatic Publish. Existing CPT Save semantics are preserved; any sample CPT entry that would become public must have an explicit publication acknowledgement in the reviewed plan/confirmation contract or remain unsupported. Imported media stays private unless a separate authorized public reference is committed; imported menu/setting/home design changes with immediate public effect require explicit plan acknowledgement, never silent application.
 
-### G-RECOVERY — BLOCKED; Nova independent review required
+### G-RECOVERY — G2 AGREED (Multi-Object Import Journal & Recovery)
 
-Selected invariant: no committed visible entry/menu/option/provenance may reference unfinished media. Prepare bounded files first under a run-owned staging namespace, verify bytes/digests, keep a durable journal, then atomically commit DB/domain objects and completed outcome. A process crash before commit may leave quarantined files; it must not expose partial selected objects or delete user/shared media.
+Selected invariant: no committed visible entry/menu/option/provenance may reference unfinished media.
 
-**Missing contract/evidence:** exact journal states/transitions and durable writes, original+thumbnail publication ordering, concurrent upload/reference locks, safe shared-file reuse, crash rollback/retry and cleanup eligibility, startup/read gate before serving damaged committed references, and Windows/macOS flush/rename guarantees. Existing `write_once` is not an import journal. DB pool helpers that start independent transactions cannot be composed into all-or-nothing import.
-
-G2 must settle that state machine, ownership and visibility contract, with pinned API/OS documentation and bounded prototype evidence where feasibility is uncertain. It does not require the full import implementation to exist before G3 publication. Required G4/G5 implementation proof includes cutpoints before/after each journal write, original/thumbnail finalization and DB commit, retry across revision changes, concurrent shared references, disk full/permission failure/corruption and recovery restart. Compare stable DB IDs/fingerprints and media hashes; no mutation of pre-existing user data. A successful process-kill experiment is not proof against all power loss.
+1. **Durable Journal (`import_runs` table):** Records `run_id`, `theme_id`, `sample_key`, `revision_id`, `plan_digest`, `state` (`staged` | `files_verified` | `committed` | `failed` | `quarantined`), `media_manifest_json` (`{ media_id, extension, sha256, already_existed }`), `outcome_json`, timestamps.
+2. **Three-Phase Execution:**
+   - **Phase 1 (`staged`):** Short SQLite transaction verifies preconditions/CAS and inserts `import_runs(state='staged')`.
+   - **Phase 2 (`files_verified`):** Decode/re-encode raster images, compute SHA-256 `media_id`. If `<site_root>/uploads/media/<media_id>.<ext>` and `.thumb.png` already exist with matching SHA-256, mark `already_existed = true` (reuse without overwrite). Otherwise write to `<site_root>/uploads/.staging/<run_id>/`, `sync_all()`, drop handles (Windows), atomically rename (`create_new` + rename) to `uploads/media/`, then update `import_runs(state='files_verified')`.
+   - **Phase 3 (`committed`):** Single `BEGIN IMMEDIATE` SQLite transaction using **transaction-aware storage APIs** (`&mut SqliteConnection` for media, CNT, options, menus, entries, provenance) re-checks preconditions/CAS, inserts all domain rows + `import_provenance`, and updates `import_runs(state='committed', outcome_json=...)`.
+3. **Crash Recovery & Cleanup:** On startup, any `staged`/`files_verified` run from a crashed process transitions to `quarantined` (no domain objects committed). `uploads/.staging/<run_id>/` is always safe to delete; `<media_id>.*` files from a `quarantined` run may be deleted **only if** `already_existed == false` and `media_assets` has 0 rows for `media_id` (preserving all pre-existing/shared media). Media serving verifies both DB ACL and readable file bytes. Full cutpoint tests (before/after each phase, concurrent identical uploads, disk-full/permission failure, A1→A2 retry) belong to S05-T02 G4/G5.
 
 ## 7. Ownership, sequencing and release fixture (H)
 
@@ -115,8 +134,8 @@ G2 must settle that state machine, ownership and visibility contract, with pinne
 
 ## Release gates and validation
 
-C-SEC, route-context binding, A-DURABILITY and G-RECOVERY are **BLOCKED sub-contracts**, not security/data risk acceptance. Nova reviews independently; Forge supplies missing contract details and bounded feasibility evidence where needed before overall G2 is released. Full implementation/native security and recovery acceptance remains G4/G5. No unsupported template/upload implementation becomes eligible merely because other selections are recorded.
+`C-SEC`, `route-context binding`, `A-DURABILITY`, and `G-RECOVERY` are now **G2 AGREED** in this contract. Full implementation, adversarial security corpus, crash-cutpoint and native browser acceptance remain **G4/G5** gates in their respective tasks.
 
-PR #135 remains **G3 DRAFT / NOT RELEASED**. Follow the owner-directed promotion order in ADR-0012, with merged authority, all task coverage, exact ownership/dependencies and immutable source. Do not create implementation Issues or change Project Ready/Done from this document.
+PR #135 remains **G3 DRAFT / NOT RELEASED**. Forge may now update the 13 G3 task briefs in PR #135 against this G2 contract and `ADR-0012` for review/merge before issuing implementation `Ready` tasks.
 
 This docs-only change must pass planning checker, self-test, artifact guard and diff check. M5 runtime/security/migration/crash/browser tests are NOT_RUN and not replaced by documentation checks.

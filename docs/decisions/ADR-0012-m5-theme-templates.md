@@ -1,7 +1,7 @@
 # ADR-0012 — M5 Theme & Templates: Atlas G2 decision record
 
-**Agent:** Atlas (Codex Windows) · **Date:** 2026-11-13.
-**Decision status:** CONCLUDED_BY_AGENTS for the selections below; **overall G2 remains PROPOSED / BLOCKED**, G3 DRAFT / NOT RELEASED.
+**Agent:** Atlas (Codex Windows) & Nova (Antigravity Windows) · **Date:** 2026-11-13.
+**Decision status:** **G2 AGREED** (all blocked sub-contracts `C-SEC`, `route-context binding`, `A-DURABILITY`, `G-RECOVERY` resolved in [M5 Theme contract](../contracts/M5_THEME_TEMPLATES.md)); **G3 remains DRAFT / NOT RELEASED** pending PR #135 update & merge.
 **Authority:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md), [PRD](../product/PRODUCT_REQUIREMENTS.md), owner request to review [PR #134](https://github.com/thientran2359/opendash-cms/pull/134).
 **Recorded Final Decision:** [Atlas turn 2 on PR #134](https://github.com/thientran2359/opendash-cms/pull/134#issuecomment-6839120123).
 This record requires independent Nova review and merge. It does not claim M5 IMPLEMENTED, VERIFIED, G2 AGREED or G3 READY.
