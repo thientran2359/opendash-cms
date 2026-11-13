@@ -11,6 +11,7 @@ mod plugin;
 mod public_context;
 mod routes;
 mod storage;
+mod template_sec;
 mod theme;
 
 use std::{env, net::Ipv4Addr, sync::Arc};

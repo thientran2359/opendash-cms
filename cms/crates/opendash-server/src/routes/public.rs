@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use axum::{
+    Extension,
     extract::{RawQuery, State},
     http::header,
     response::{Html, IntoResponse, Response},
@@ -10,10 +11,13 @@ use sqlx::SqlitePool;
 use opendash_core::id::valid_package_id;
 
 use crate::{
+    content_render::{self, SiteContext},
     error::ApiResult,
     page::{render_builder_with_lists, render_legacy_state},
     public_context::{CanonicalUrlBuilder, PublicRequestContext},
-    storage::builder,
+    routes::themes::ThemeStoreRoot,
+    storage::{builder, settings, theme as theme_storage},
+    theme,
 };
 
 /// Malformed, repeated or unknown list-page parameters cannot become SQL or
@@ -46,19 +50,48 @@ fn parsed_list_pages(raw: Option<&str>) -> BTreeMap<String, i64> {
 
 pub async fn public_page(
     State(db): State<SqlitePool>,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
     let _context = PublicRequestContext::Home {
         canonical_path: CanonicalUrlBuilder::home().to_owned(),
+    };
+    let active_v2 = match themes_root {
+        Some(Extension(root)) => theme_storage::load_active_v2_role_templates(&db, &root.0).await?,
+        None => None,
     };
     // One SQLite read snapshot for source, document, active theme and block
     // templates. Do not split them across old / and new Builder reads.
     let (state, bindings, lists) =
         builder::read_public_resolved(&db, &parsed_list_pages(raw.as_deref())).await?;
     if let Some(document) = &state.saved {
-        return Ok(rendered_layout(
-            render_builder_with_lists(&state, document, false, &bindings, &lists)?.html,
-        ));
+        let mut html = render_builder_with_lists(&state, document, false, &bindings, &lists)?.html;
+        if let Some(v2) = &active_v2 {
+            let site = settings::get_general(&db).await?;
+            let site_ctx = SiteContext {
+                title: &site.site_title,
+                tagline: &site.tagline,
+            };
+            let header = v2.roles.get("header").and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+            let footer = v2.roles.get("footer").and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+            html = content_render::compose_public_document(header.as_deref(), &html, footer.as_deref());
+        }
+        return Ok(rendered_layout(html));
+    }
+    if let Some(v2) = &active_v2 {
+        if let Some(home_tpl) = v2.roles.get("home") {
+            let site = settings::get_general(&db).await?;
+            let site_ctx = SiteContext {
+                title: &site.site_title,
+                tagline: &site.tagline,
+            };
+            if let Ok(home_html) = theme::render_content(home_tpl, &serde_json::json!({ "site": site_ctx })) {
+                let header = v2.roles.get("header").and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+                let footer = v2.roles.get("footer").and_then(|t| content_render::render_role_fragment(t, &site_ctx));
+                let html = content_render::compose_public_document(header.as_deref(), &home_html, footer.as_deref());
+                return Ok(rendered_layout(html));
+            }
+        }
     }
     let html = match render_legacy_state(&state)? {
         Some(snapshot) => snapshot.html,
@@ -88,7 +121,7 @@ mod list_query_tests {
 pub fn rendered_layout(html: String) -> Response {
     (
         [
-            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::REFERRER_POLICY, "no-referrer"),
             (header::CACHE_CONTROL, "no-store"),

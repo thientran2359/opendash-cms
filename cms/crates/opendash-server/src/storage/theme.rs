@@ -685,6 +685,59 @@ pub async fn activate_revision(
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ActiveV2RoleTemplates {
+    pub revision_digest: String,
+    pub roles: BTreeMap<String, String>,
+}
+
+pub async fn load_active_v2_role_templates(
+    db: &SqlitePool,
+    themes_root: &Path,
+) -> ApiResult<Option<ActiveV2RoleTemplates>> {
+    let selection = get_active_selection(db).await?;
+    let Some(revision_id) = selection.revision_id else {
+        return Ok(None);
+    };
+    let row: Option<RevisionRow> = sqlx::query_as(
+        "SELECT revision_id, theme_id, version, revision_digest, source_format,
+                manifest_json, file_digests_json, legacy_block_id, provenance_json, created_at
+         FROM theme_revisions
+         WHERE revision_id = ?",
+    )
+    .bind(revision_id)
+    .fetch_optional(db)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let revision = row_to_revision(row)?;
+    if revision.source_format != ThemeSourceFormat::V2 {
+        return Ok(None);
+    }
+    if verify_revision_durability(themes_root, &revision) != RevisionDurabilityStatus::Valid {
+        return Ok(None);
+    }
+    let Ok(manifest) = serde_json::from_str::<crate::theme::ThemeV2Manifest>(&revision.manifest_json) else {
+        return Ok(None);
+    };
+    let rev_dir = themes_root.join("revisions").join(&revision.revision_digest);
+    let mut roles = BTreeMap::new();
+    for (role, rel_path) in manifest.templates {
+        let Ok(safe_rel) = crate::package::validate_v2_relative_path(&rel_path) else {
+            continue;
+        };
+        let full_path = rev_dir.join(&safe_rel);
+        if let Ok(content) = std::fs::read_to_string(&full_path) {
+            roles.insert(role, content);
+        }
+    }
+    Ok(Some(ActiveV2RoleTemplates {
+        revision_digest: revision.revision_digest,
+        roles,
+    }))
+}
+
 /// Source block ID is never overwritten or silently translated. NULL active
 /// means the original legacy template. Explicit unsupported means blank page.
 pub fn select_template(
