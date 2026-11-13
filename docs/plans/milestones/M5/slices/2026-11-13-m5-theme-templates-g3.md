@@ -19,7 +19,7 @@
 | --- | --- | --- | --- | --- |
 | M5-P01 | M5-S01-T01 | Forge | `0015` | G2-A / A-DURABILITY (`main@1869057`) — **có thể Ready ngay** |
 | M5-P01 | M5-S01-T02 | Forge | — | M5-S01-T01 G5 |
-| M5-P02 | M5-S02-T01 | Harbor | — | G2-B (`main@1869057`, M4 G5) — **có thể Ready ngay** (file tách biệt S01-T01) |
+| M5-P02 | M5-S02-T01 | Harbor | — | M5-S01-T02 G5 (bàn giao `app.rs` single-writer; dựa trên `main@1869057`, M4 G5) |
 | M5-P03 | M5-S03-T01 | Forge | — | M5-S01-T02 G5, M5-S02-T01 G5 |
 | M5-P03 | M5-S03-T02 | Forge | `0016` | M5-S03-T01 G5 |
 | M5-P04 | M5-S04-T01 | Harbor | `0017` | M5-S01-T02 G5 |
@@ -112,7 +112,7 @@ Upload ZIP v2 tạo immutable revision ở trạng thái chưa kích hoạt; act
 - Mở rộng `cms/crates/opendash-server/src/package.rs` với helper v2 path policy (relative ASCII, cấm `..`/backslash/drive/symlink/case-insensitive collision, kiểm byte thực đọc cho quota 8 MiB ZIP / 32 MiB decoded / 256 files / 256 KiB text / 8 MiB raster / 100:1 ratio) **mà giữ nguyên 100% hành vi plugin và ZIP v1 64 KiB**.
 - Cập nhật `src/theme.rs` và `src/routes/themes.rs`: parse manifest v2 (`theme_id` kebab 1–64, `version`, templates/roles, optional `options`/`menus`/`sample`/`declarations`), gọi `S01-T01` `A-DURABILITY` staging & SQLite commit.
 - **Chặn vòng phụ thuộc `S01-T02` ↔ `S10-T01`:** Ở `S01-T02`, nếu revision chứa `declarations` (CPT/fields/taxonomy), **từ chối kích hoạt** (`409` / `422` `unsupported_declarations_pending_cnt_bridge`) cho tới khi `S10-T01` tích hợp đăng ký nguyên tử.
-- Thêm route phục vụ asset revision-scoped `/theme/{revision_digest}/{*path}` với `X-Content-Type-Options: nosniff`, kiểm `.complete` + MIME allowlist + no-traversal, không lộ file ngoài `themes/revisions/{digest}/`.
+- Cập nhật `cms/crates/opendash-server/src/app.rs`: nâng body limit `POST /api/admin/themes` lên 8 MiB (giữ nguyên limit v1/plugin) và đăng ký route phục vụ asset revision-scoped `GET /theme/{revision_digest}/{*path}` với `X-Content-Type-Options: nosniff`, kiểm `.complete` + MIME allowlist + no-traversal, không lộ file ngoài `themes/revisions/{digest}/`.
 
 ### Ngoài phạm vi
 Không triển khai MiniJinja rendering (`S03-T01`), Theme Options UI (`S04-T01`), CNT declarations (`S10-T01`), hay sample import (`S05`).
@@ -121,8 +121,8 @@ Không triển khai MiniJinja rendering (`S03-T01`), Theme Options UI (`S04-T01`
 `M5-S01-T01` G5 đã merge lên `main`.
 
 ### Kỹ thuật và file ownership
-- **File được sửa/tạo độc quyền:** `cms/crates/opendash-server/src/package.rs`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/routes/themes.rs`, `cms/crates/opendash-server/src/routes/mod.rs` (gắn `/theme/`), tests `cms/crates/opendash-server/tests/m5_s01_t02_zip_v2.rs`.
-- **Không sửa đồng thời:** `S03-T01` và `S10-T01` đợi handoff `src/theme.rs` sau khi task này G5.
+- **File được sửa/tạo độc quyền:** `cms/crates/opendash-server/src/package.rs`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/routes/themes.rs`, `cms/crates/opendash-server/src/routes/mod.rs`, `cms/crates/opendash-server/src/app.rs` (đăng ký `/theme/{revision_digest}/{*path}` và nâng body limit `POST /api/admin/themes` lên 8 MiB, giữ nguyên limit v1/plugin), tests `cms/crates/opendash-server/tests/m5_s01_t02_zip_v2.rs`.
+- **Không sửa đồng thời:** `S02-T01`, `S03-T01` và `S10-T01` đợi handoff `src/app.rs` / `src/theme.rs` sau khi task này G5.
 - **Contract/API:** Install ≠ activate; `401`/`403` RBAC/CSRF/Origin, `412` stale `If-Match`, `413` quota, `428` missing `If-Match`.
 
 ### Cách triển khai theo contract
@@ -153,7 +153,7 @@ Bàn giao `src/theme.rs` manifest v2 parser/revision reader và `/theme/` asset 
 - **Track:** Full-Track
 - **G2:** AGREED
 - **G3:** READY
-- **Trạng thái:** READY (không có M5 predecessor; file tách biệt `S01-T01`)
+- **Trạng thái:** BACKLOG (chờ `M5-S01-T02` G5 để bàn giao `app.rs` single-writer)
 - **Nguồn quyết định:** [M5 Contract §2](../../../../contracts/M5_THEME_TEMPLATES.md#2-public-url-and-requestcontext-b); [ADR-0012](../../../../decisions/ADR-0012-m5-theme-templates.md).
 - **Người triển khai / review:** Harbor (dự kiến) / Review độc lập hoặc self-review theo ADR-0010.
 
@@ -172,7 +172,7 @@ HTTP public routes phải do core giải quyết độc lập với theme, cung 
 Không cho theme khai báo route; không làm redirect/alias cũ hay SEO sitemap M7; không làm MiniJinja role composition (`S03-T01`) hay menu model (`S09-T01`).
 
 ### Phụ thuộc và điều kiện chặn
-Không phụ thuộc task M5 khác (dựa trên M3 public routes và M4 taxonomy `0012`/`0014` đã có trên `main@1869057`).
+`M5-S01-T02` G5 đã merge lên `main` (bàn giao `cms/crates/opendash-server/src/app.rs` single-writer; dựa trên M3 public routes và M4 taxonomy `0012`/`0014` đã có trên `main@1869057`).
 
 ### Kỹ thuật và file ownership
 - **File được sửa/tạo độc quyền:** `cms/crates/opendash-server/src/public_context.rs` (mới), `cms/crates/opendash-server/src/lib.rs` (khai báo module), `cms/crates/opendash-server/src/app.rs`, `cms/crates/opendash-server/src/routes/public.rs`, `cms/crates/opendash-server/src/routes/public_content.rs`, `cms/crates/opendash-server/src/storage/public_content.rs`, `cms/crates/opendash-server/src/content_render.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/storage/builder_binding.rs`, tests `cms/crates/opendash-server/tests/m5_s02_t01_public_context.rs`.
