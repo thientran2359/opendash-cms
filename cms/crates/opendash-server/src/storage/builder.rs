@@ -247,9 +247,10 @@ async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<HomeState> 
         Option<String>,
         Option<String>,
     ) = sqlx::query_as(
-        "SELECT a.block_id, t.compatible_block_id, t.template
-         FROM site_active_theme a
-         LEFT JOIN theme_blocks t ON t.id = a.block_id
+        "SELECT r.legacy_block_id, t.compatible_block_id, t.template
+         FROM theme_active_selection a
+         LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
+         LEFT JOIN theme_blocks t ON t.id = r.legacy_block_id
          WHERE a.id = 1",
     )
     .fetch_one(&mut **tx)
