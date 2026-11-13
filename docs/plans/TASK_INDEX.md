@@ -147,14 +147,24 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 
 | Mã candidate / task | Công việc | Trạng thái | GitHub Issue / PR |
 | --- | --- | --- | --- |
-| [M6-P01](milestones/M6/TASK_PLAN.md) | Hoàn thiện event/actions ContentBefore/AfterSave, server APIs | Chưa G3 | — |
-| [M6-P02](milestones/M6/TASK_PLAN.md) | Khai báo và thực thi external service calls theo quyền | Chưa G3 | — |
-| [M6-P03](milestones/M6/TASK_PLAN.md) | Mở rộng declarative registration bridge cho blocks/templates/settings | Chưa G3 | — |
-| [M6-P04](milestones/M6/TASK_PLAN.md) | Taxonomy declaration tích hợp với plugin lifecycle | Chưa G3 | — |
-| [M6-P05](milestones/M6/TASK_PLAN.md) | Declarative Admin UI từ schema: form/table/list/tabs/button | Chưa G3 | — |
-| [M6-P06](milestones/M6/TASK_PLAN.md) | Sandbox, permission và failure isolation regression | Chưa G3 | — |
-| [M6-P07](milestones/M6/TASK_PLAN.md) | E2E Plugin ZIP xuyên Content/Theme/Builder | Chưa G3 | — |
-| [M6-P08](milestones/M6/TASK_PLAN.md) | C từ #15: plugin CPT/field provider bridge vào canonical core schema | Chưa G3 | — |
+| [M6-P01](milestones/M6/TASK_PLAN.md) | Hoàn thiện event/actions ContentBefore/AfterSave, server APIs | G3 đã merge (`c7f338c`), có Issue triển khai | [Issue #182](https://github.com/thientran2359/opendash-cms/issues/182) · [Issue #183](https://github.com/thientran2359/opendash-cms/issues/183) |
+| [M6-S03-T01](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Forge · `ContentBeforeSave` validator/veto & `ContentAfterSave` | G3 READY · Project #3 Backlog (chờ S01-T01, S02-T02) | [Issue #182](https://github.com/thientran2359/opendash-cms/issues/182) |
+| [M6-S03-T02](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Forge · Standalone `host_call` actions, RBAC/generation fencing & lease cleanup | G3 READY · Project #3 Backlog (chờ S03-T01) | [Issue #183](https://github.com/thientran2359/opendash-cms/issues/183) |
+| [M6-P02](milestones/M6/TASK_PLAN.md) | Khai báo và thực thi external service calls theo quyền | G3 đã merge (`c7f338c`), có Issue triển khai | [Issue #184](https://github.com/thientran2359/opendash-cms/issues/184) |
+| [M6-S04-T01](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Forge · Scoped external egress v2, pinned DNS & chunked cap | G3 READY · Project #3 Backlog (chờ S01-T01, handoff `host_ops.rs`) | [Issue #184](https://github.com/thientran2359/opendash-cms/issues/184) |
+| [M6-P03](milestones/M6/TASK_PLAN.md) | Mở rộng declarative registration bridge cho blocks/templates/settings | G3 đã merge (`c7f338c`), có Issue triển khai | [Issue #185](https://github.com/thientran2359/opendash-cms/issues/185) |
+| [M6-S05-T01](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Harbor · Domain owner-neutral blocks, templates & settings (`0024`) | G3 READY · Project #3 Backlog (chờ S01-T01, S02-T01) | [Issue #185](https://github.com/thientran2359/opendash-cms/issues/185) |
+| [M6-P04](milestones/M6/TASK_PLAN.md) | Taxonomy declaration tích hợp với plugin lifecycle | G3 đã merge (`c7f338c`), có Issue triển khai | [Issue #181](https://github.com/thientran2359/opendash-cms/issues/181) |
+| [M6-S02-T02](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Harbor · Taxonomy declaration & eligibility lifecycle | G3 READY · Project #3 Backlog (chờ S02-T01) | [Issue #181](https://github.com/thientran2359/opendash-cms/issues/181) |
+| [M6-P05](milestones/M6/TASK_PLAN.md) | Declarative Admin UI từ schema: form/table/list/tabs/button | G3 đã merge (`c7f338c`), có Issue triển khai | [Issue #186](https://github.com/thientran2359/opendash-cms/issues/186) |
+| [M6-S06-T01](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Harbor · Declarative Admin UI schema v1 & guarded actions | G3 READY · Project #3 Backlog (chờ S03-T02, S05-T01) | [Issue #186](https://github.com/thientran2359/opendash-cms/issues/186) |
+| [M6-P06](milestones/M6/TASK_PLAN.md) | Sandbox, permission và failure isolation regression | G3 đã merge (`c7f338c`), có Issue triển khai | [Issue #187](https://github.com/thientran2359/opendash-cms/issues/187) |
+| [M6-S07-T01](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Nova / Forge · Sandbox, SSRF, permission & failure isolation adversarial regression | G3 READY · Project #3 Backlog (chờ S03-T02, S04-T01, S06-T01) | [Issue #187](https://github.com/thientran2359/opendash-cms/issues/187) |
+| [M6-P07](milestones/M6/TASK_PLAN.md) | E2E Plugin ZIP xuyên Content/Theme/Builder | G3 đã merge (`c7f338c`), có Issue triển khai | [Issue #188](https://github.com/thientran2359/opendash-cms/issues/188) |
+| [M6-S08-T01](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Forge (Win) + Harbor (Mac) · E2E Plugin ZIP & G5 đa OS | G3 READY · Project #3 Backlog (chờ S07-T01 & toàn bộ predecessors) | [Issue #188](https://github.com/thientran2359/opendash-cms/issues/188) |
+| [M6-P08](milestones/M6/TASK_PLAN.md) | C từ #15: plugin CPT/field provider bridge vào canonical core schema | G3 đã merge (`c7f338c`), có Issue triển khai | [Issue #179](https://github.com/thientran2359/opendash-cms/issues/179) · [Issue #180](https://github.com/thientran2359/opendash-cms/issues/180) |
+| [M6-S01-T01](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Forge · Plugin package revisions, `revision_generation`/CAS và staging durability (`0022`) | **G3 READY · Project #3 Ready** | [Issue #179](https://github.com/thientran2359/opendash-cms/issues/179) |
+| [M6-S02-T01](milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md) | Harbor · Owner-neutral CNT bridge & plugin CPT/field declarations (`0023`) | G3 READY · Project #3 Backlog (chờ S01-T01) | [Issue #180](https://github.com/thientran2359/opendash-cms/issues/180) |
 
 ## [M7 — Site Features](https://github.com/thientran2359/opendash-cms/milestone/8) (8)
 
