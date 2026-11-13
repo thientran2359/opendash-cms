@@ -35,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     storage::import::recover_orphaned_import_runs(&db, &paths.uploads_dir())
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
+    let _ = storage::plugin::ensure_plugins_layout_and_quarantine_stale(&paths.plugins_dir());
 
     let allow_loopback = env::var("OPENDASH_PLUGIN_ALLOW_LOOPBACK")
         .map(|v| v == "1" || v == "true")

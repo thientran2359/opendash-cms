@@ -19,6 +19,10 @@ pub struct PluginManifest {
     pub id: String,
     pub version: String,
     pub api_version: u32,
+    #[serde(default = "default_manifest_schema")]
+    pub manifest_schema: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_host_version: Option<String>,
     pub name: String,
     #[serde(default)]
     pub description: String,
@@ -29,6 +33,31 @@ pub struct PluginManifest {
     /// Optional lifecycle subscriptions; manual invocation input remains unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hooks: Vec<crate::hooks::HookEvent>,
+}
+
+pub const CURRENT_HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn default_manifest_schema() -> u32 {
+    1
+}
+
+fn parse_core_semver(v: &str) -> Option<(u64, u64, u64)> {
+    let core = v.split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse::<u64>().ok()?;
+    let minor = parts.next()?.parse::<u64>().ok()?;
+    let patch = parts.next()?.parse::<u64>().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+pub fn host_satisfies_min_version(host: &str, min: &str) -> bool {
+    match (parse_core_semver(host), parse_core_semver(min)) {
+        (Some(h), Some(m)) => h >= m,
+        _ => false,
+    }
 }
 
 fn default_entrypoint() -> String {
@@ -46,6 +75,18 @@ impl PluginManifest {
     pub fn validate(&self) -> Result<(), &'static str> {
         if self.api_version != PLUGIN_ABI_VERSION {
             return Err("Chỉ hỗ trợ api_version 1.");
+        }
+        if self.manifest_schema != 1 && self.manifest_schema != 2 {
+            return Err("manifest_schema không được hỗ trợ (chỉ hỗ trợ 1 hoặc 2).");
+        }
+        if let Some(min_ver) = &self.min_host_version {
+            if !validate_semver(min_ver) {
+                return Err("min_host_version không đúng định dạng SemVer 2.0.0.");
+            }
+            if !host_satisfies_min_version(CURRENT_HOST_VERSION, min_ver) {
+                return Err("Phiên bản host hiện tại thấp hơn min_host_version yêu cầu.");
+            }
+
         }
         if !validate_semver(&self.version) {
             return Err("Phiên bản plugin không đúng định dạng SemVer 2.0.0.");

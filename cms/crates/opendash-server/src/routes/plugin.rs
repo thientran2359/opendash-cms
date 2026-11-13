@@ -37,9 +37,9 @@ pub async fn plugin_install(
     }
 
     let summary = plugins
-        .install_plugin(&bytes)
+        .install_plugin_checked(&bytes)
         .await
-        .map_err(ApiError::bad_request)?;
+        .map_err(map_plugin_storage_err)?;
     Ok((StatusCode::CREATED, Json(summary)).into_response())
 }
 
@@ -97,11 +97,12 @@ pub async fn plugin_disable(
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
 
-    plugins
-        .disable_plugin(&id)
+    let expected_cas = parse_optional_if_match(&headers)?;
+    let next_cas = plugins
+        .disable_plugin_cas(&id, expected_cas)
         .await
-        .map_err(ApiError::bad_request)?;
-    Ok(Json(serde_json::json!({ "message": "Đã vô hiệu hóa plugin." })).into_response())
+        .map_err(map_plugin_storage_err)?;
+    Ok(Json(serde_json::json!({ "message": "Đã vô hiệu hóa plugin.", "cas_version": next_cas })).into_response())
 }
 
 pub async fn plugin_enable(
@@ -112,9 +113,37 @@ pub async fn plugin_enable(
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
 
-    plugins
-        .enable_plugin(&id)
+    let expected_cas = parse_optional_if_match(&headers)?;
+    let next_cas = plugins
+        .enable_plugin_cas(&id, expected_cas)
         .await
-        .map_err(ApiError::bad_request)?;
-    Ok(Json(serde_json::json!({ "message": "Đã kích hoạt plugin." })).into_response())
+        .map_err(map_plugin_storage_err)?;
+    Ok(Json(serde_json::json!({ "message": "Đã kích hoạt plugin.", "cas_version": next_cas })).into_response())
+}
+
+fn parse_optional_if_match(headers: &HeaderMap) -> ApiResult<Option<i64>> {
+    let Some(raw) = headers.get(header::IF_MATCH) else {
+        return Ok(None);
+    };
+    let s = raw
+        .to_str()
+        .map_err(|_| ApiError::bad_request("Header If-Match không hợp lệ."))?
+        .trim()
+        .trim_matches('"');
+    let parsed = s
+        .parse::<i64>()
+        .map_err(|_| ApiError::bad_request("Header If-Match phải là số nguyên."))?;
+    Ok(Some(parsed))
+}
+
+fn map_plugin_storage_err(err: crate::storage::plugin::PluginStorageError) -> ApiError {
+    use crate::storage::plugin::PluginStorageError;
+    match err {
+        PluginStorageError::BadRequest(m) => ApiError::bad_request(m),
+        PluginStorageError::NotFound(m) => ApiError::not_found(m),
+        PluginStorageError::Conflict(m) => ApiError::conflict(m),
+        PluginStorageError::PreconditionRequired(m) => ApiError::precondition_required(m),
+        PluginStorageError::PreconditionFailed(m) => ApiError::precondition_failed(m),
+        PluginStorageError::Internal(m) => ApiError::internal(m),
+    }
 }

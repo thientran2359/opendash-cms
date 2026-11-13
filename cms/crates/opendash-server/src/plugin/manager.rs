@@ -22,6 +22,12 @@ pub struct PluginSummary {
     pub last_error: Option<String>,
     pub installed_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub active_revision_id: Option<i64>,
+    #[serde(default)]
+    pub revision_generation: i64,
+    #[serde(default)]
+    pub cas_version: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -37,15 +43,33 @@ pub struct PluginManager {
     db_pool: SqlitePool,
     runtime: PluginRuntime,
     allow_loopback: bool,
+    plugins_root: std::path::PathBuf,
 }
 
 impl PluginManager {
     pub fn new(db_pool: SqlitePool, allow_loopback: bool) -> Self {
+        let plugins_root = crate::paths::SitePaths::from_env()
+            .map(|p| p.plugins_dir())
+            .unwrap_or_else(|_| std::env::temp_dir().join("opendash_plugins_default"));
+        Self::with_plugins_root(db_pool, allow_loopback, plugins_root)
+    }
+
+    pub fn with_plugins_root(
+        db_pool: SqlitePool,
+        allow_loopback: bool,
+        plugins_root: std::path::PathBuf,
+    ) -> Self {
+        // Layout dirs created lazily; startup quarantine runs once in main.rs.
         Self {
             db_pool,
             runtime: PluginRuntime::new(),
             allow_loopback,
+            plugins_root,
         }
+    }
+
+    pub fn plugins_root(&self) -> &std::path::Path {
+        &self.plugins_root
     }
 
     pub fn runtime(&self) -> &PluginRuntime {
@@ -57,14 +81,25 @@ impl PluginManager {
     }
 
     pub async fn install_plugin(&self, zip_bytes: &[u8]) -> Result<PluginSummary, String> {
-        let package =
-            PluginPackage::from_zip(zip_bytes, self.runtime.engine()).map_err(|e| e.to_string())?;
+        self.install_plugin_checked(zip_bytes)
+            .await
+            .map_err(|e| e.to_string())
+    }
 
-        let manifest_json = serde_json::to_string(&package.manifest)
-            .map_err(|e| format!("Lỗi serialize manifest: {e}"))?;
+    pub async fn install_plugin_checked(
+        &self,
+        zip_bytes: &[u8],
+    ) -> Result<PluginSummary, plugin_storage::PluginStorageError> {
+        let package = PluginPackage::from_zip(zip_bytes, self.runtime.engine())
+            .map_err(|e| plugin_storage::PluginStorageError::BadRequest(e.to_string()))?;
 
-        plugin_storage::upsert_plugin(
+        let manifest_json = serde_json::to_string(&package.manifest).map_err(|e| {
+            plugin_storage::PluginStorageError::Internal(format!("Lỗi serialize manifest: {e}"))
+        })?;
+
+        plugin_storage::install_plugin_revision(
             &self.db_pool,
+            &self.plugins_root,
             &package.manifest,
             &manifest_json,
             &package.wasm_bytes,
@@ -72,8 +107,29 @@ impl PluginManager {
         .await?;
 
         self.get_plugin(&package.manifest.id)
-            .await?
-            .ok_or_else(|| "Không tìm thấy plugin vừa cài đặt.".to_string())
+            .await
+            .map_err(plugin_storage::PluginStorageError::Internal)?
+            .ok_or_else(|| {
+                plugin_storage::PluginStorageError::Internal(
+                    "Không tìm thấy plugin vừa cài đặt.".to_string(),
+                )
+            })
+    }
+
+    pub async fn disable_plugin_cas(
+        &self,
+        id: &str,
+        expected_cas_version: Option<i64>,
+    ) -> Result<i64, plugin_storage::PluginStorageError> {
+        plugin_storage::set_plugin_enabled_cas(&self.db_pool, id, false, expected_cas_version).await
+    }
+
+    pub async fn enable_plugin_cas(
+        &self,
+        id: &str,
+        expected_cas_version: Option<i64>,
+    ) -> Result<i64, plugin_storage::PluginStorageError> {
+        plugin_storage::set_plugin_enabled_cas(&self.db_pool, id, true, expected_cas_version).await
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginSummary>, String> {
@@ -128,7 +184,7 @@ impl PluginManager {
         input: Value,
         correlation_id: String,
     ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
-        let row_opt = plugin_storage::load_plugin_executable(&self.db_pool, id)
+        let row_opt = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
             .await
             .map_err(|e| {
                 (
@@ -143,7 +199,7 @@ impl PluginManager {
                 )
             })?;
 
-        let Some((wasm_blob, manifest_json, enabled)) = row_opt else {
+        let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) = row_opt else {
             return Err((
                 StatusCode::NOT_FOUND,
                 PluginRunResponse {
@@ -182,15 +238,31 @@ impl PluginManager {
             )
         })?;
 
+        if let Some(digest) = &revision_digest_opt {
+            if let Err(err) = plugin_storage::verify_plugin_revision_durability(&self.plugins_root, digest) {
+                return Err((
+                    StatusCode::CONFLICT,
+                    PluginRunResponse {
+                        success: false,
+                        data: None,
+                        error: Some(err),
+                        code: Some("corrupt_revision".into()),
+                        correlation_id,
+                    },
+                ));
+            }
+        }
+
         let run_res = self
             .runtime
-            .run_plugin(
+            .run_plugin_with_generation(
                 wasm_blob,
                 manifest,
                 input,
                 self.db_pool.clone(),
                 correlation_id.clone(),
                 self.allow_loopback,
+                Some(revision_generation),
             )
             .await;
 
