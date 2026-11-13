@@ -3,6 +3,7 @@
 import argparse
 import io
 import json
+import os
 import tempfile
 import unittest
 import uuid
@@ -29,6 +30,214 @@ class DispatchTests(unittest.TestCase):
         self.secure.start()
         self.addCleanup(self.secure.stop)
         self.request_id = str(uuid.uuid4())
+
+    def pr_fixture(self):
+        return {
+            "number": 135, "state": "open", "merged": False, "draft": True,
+            "changed_files": 1, "body": "**Agent:** Forge.",
+            "user": {"login": "thientran2359"},
+            "head": {"ref": "docs/forge-m5-g3-draft", "sha": "a" * 40,
+                     "repo": {"full_name": adapter.REPOSITORY}},
+            "base": {"ref": "main", "sha": "b" * 40,
+                     "repo": {"full_name": adapter.REPOSITORY}},
+        }
+
+    def github_fixture(self, method_path):
+        if "/reviews/" in method_path:
+            return {"id": 123, "state": "COMMENTED", "commit_id": "a" * 40,
+                    "user": {"login": "thientran2359"},
+                    "body": "**Atlas (Codex Windows) — CHANGES_REQUESTED / AWAITING_AUTHOR**"}
+        if "/files?" in method_path:
+            return [{"filename": "docs/plans/milestones/M5/slices/draft.md", "status": "added"}]
+        return self.pr_fixture()
+
+    def test_pr_preflight_accepts_only_pinned_owned_docs_and_signed_feedback(self):
+        with mock.patch.object(adapter, "github_json", side_effect=self.github_fixture):
+            result = adapter.check_pr("forge", 135, "a" * 40, "b" * 40, 123)
+        self.assertEqual(result["head_branch"], "docs/forge-m5-g3-draft")
+        self.assertTrue(result["eligible"])
+
+    def test_pr_preflight_rejects_owner_fork_head_base_and_closed_state(self):
+        changes = [
+            {"state": "closed"}, {"merged": True}, {"body": "**Agent:** Harbor"},
+            {"head": {"ref": "docs/harbor-test", "sha": "a" * 40,
+                      "repo": {"full_name": adapter.REPOSITORY}}},
+            {"head": {"ref": "docs/forge-test", "sha": "c" * 40,
+                      "repo": {"full_name": adapter.REPOSITORY}}},
+            {"head": {"ref": "docs/forge-test", "sha": "a" * 40,
+                      "repo": {"full_name": "attacker/fork"}}},
+            {"base": {"ref": "main", "sha": "c" * 40,
+                      "repo": {"full_name": adapter.REPOSITORY}}},
+            {"base": {"ref": "other", "sha": "b" * 40,
+                      "repo": {"full_name": adapter.REPOSITORY}}},
+        ]
+        for change in changes:
+            with self.subTest(change=change):
+                data = self.pr_fixture()
+                data.update(change)
+                with mock.patch.object(adapter, "github_json", return_value=data):
+                    with self.assertRaises(adapter.Blocked):
+                        adapter.check_pr("forge", 135, "a" * 40, "b" * 40, 123)
+
+    def test_pr_preflight_rejects_code_or_incomplete_file_list(self):
+        for files in ([], [{"filename": "cms/src/main.rs", "status": "modified"}],
+                      [{"filename": "docs/../cms/code.md", "status": "added"}],
+                      [{"filename": "docs/spec.md", "status": "renamed",
+                        "previous_filename": "cms/source.rs"}]):
+            def fixture(path):
+                return files if "/files?" in path else self.github_fixture(path)
+            with self.subTest(files=files), mock.patch.object(adapter, "github_json", side_effect=fixture):
+                with self.assertRaises(adapter.Blocked):
+                    adapter.check_pr("forge", 135, "a" * 40, "b" * 40, 123)
+
+    def test_pr_preflight_rejects_stale_or_unsigned_review(self):
+        for review in ({"id": 123, "state": "COMMENTED", "commit_id": "c" * 40,
+                        "user": {"login": "thientran2359"},
+                        "body": "**Atlas (Codex Windows) — CHANGES_REQUESTED**"},
+                       {"id": 123, "state": "COMMENTED", "commit_id": "a" * 40,
+                        "user": {"login": "thientran2359"},
+                        "body": "Please change files"}):
+            def fixture(path):
+                return review if "/reviews/" in path else self.github_fixture(path)
+            with self.subTest(review=review), mock.patch.object(adapter, "github_json", side_effect=fixture):
+                with self.assertRaisesRegex(adapter.Blocked, "PR_ACTIONABLE_ATLAS_REVIEW_REQUIRED"):
+                    adapter.check_pr("forge", 135, "a" * 40, "b" * 40, 123)
+
+    def test_pr_security_failure_reads_no_github_or_receipt(self):
+        with mock.patch.object(adapter, "security_check", return_value=(False, "UNTRUSTED_WRITER")), \
+             mock.patch.object(adapter, "github_json") as github, \
+             mock.patch.object(adapter, "call_api") as api:
+            with self.assertRaisesRegex(adapter.Blocked, "HOST_NOT_AUTHORIZED"):
+                adapter.send_pr("forge", self.request_id, 135, "a" * 40, "b" * 40, 123)
+        github.assert_not_called()
+        api.assert_not_called()
+        self.assertFalse(adapter.receipt_file("forge", self.request_id).exists())
+
+    def test_pr_status_reports_unknown_for_lock_without_receipt(self):
+        lock = adapter.pr_lock_file("forge", 135)
+        lock.parent.mkdir(parents=True)
+        lock.write_text(json.dumps({"target": "forge", "pr": 135, "mode": "pr",
+                                    "request_id": self.request_id, "head_sha": "a" * 40,
+                                    "review_id": 123}), encoding="utf-8")
+        with mock.patch.object(adapter, "load_config", return_value={}), \
+             mock.patch.object(adapter, "call_api") as api:
+            result = adapter.status_pr("forge", 135, "a" * 40, 123)
+        self.assertEqual(result["outcome"], "UNKNOWN")
+        self.assertEqual(result["reason"], "INCOMPLETE_RECEIPT_REQUIRES_RECONCILE")
+        api.assert_not_called()
+
+    def test_pr_rejects_foreign_account_forging_agent_or_atlas_signature(self):
+        for foreign_resource in ("pr", "review"):
+            def fixture(path):
+                resource = self.github_fixture(path)
+                if (foreign_resource == "pr" and not ("/reviews/" in path or "/files?" in path)) or (
+                        foreign_resource == "review" and "/reviews/" in path):
+                    resource["user"] = {"login": "untrusted-contributor"}
+                return resource
+            with self.subTest(resource=foreign_resource), \
+                 mock.patch.object(adapter, "github_json", side_effect=fixture):
+                with self.assertRaisesRegex(adapter.Blocked, "ACCOUNT"):
+                    adapter.check_pr("forge", 135, "a" * 40, "b" * 40, 123)
+
+    def test_pr_send_has_fixed_prompt_and_durable_duplicate_lock(self):
+        with mock.patch.object(adapter, "probe", return_value={"can_send": True}), \
+             mock.patch.object(adapter, "load_config", return_value={"project_id": str(uuid.uuid4())}), \
+             mock.patch.object(adapter, "github_json", side_effect=self.github_fixture), \
+             mock.patch.object(adapter, "call_api", return_value=(202, {})) as api:
+            first = adapter.send_pr("forge", self.request_id, 135, "a" * 40, "b" * 40, 123)
+            again = adapter.send_pr("forge", self.request_id, 135, "a" * 40, "b" * 40, 123)
+            self.assertTrue(again["duplicate"])
+            with self.assertRaisesRegex(adapter.Blocked, "PR_ALREADY_DISPATCHED"):
+                adapter.send_pr("forge", str(uuid.uuid4()), 135, "a" * 40, "b" * 40, 123)
+        self.assertEqual(first["outcome"], "ACCEPTED")
+        self.assertEqual(api.call_count, 1)
+        prompt = api.call_args.args[2]["text"]
+        self.assertIn("PR #135", prompt)
+        self.assertIn("Do not", prompt)
+        self.assertNotIn("github-task-pickup", prompt)
+
+    def test_pr_stale_check_before_reservation_creates_no_receipt(self):
+        with mock.patch.object(adapter, "check_pr", side_effect=adapter.Blocked("STALE_PR_HEAD")), \
+             mock.patch.object(adapter, "probe", return_value={"can_send": True}), \
+             mock.patch.object(adapter, "call_api") as api:
+            with self.assertRaisesRegex(adapter.Blocked, "STALE_PR_HEAD"):
+                adapter.send_pr("forge", self.request_id, 135, "a" * 40, "b" * 40, 123)
+        api.assert_not_called()
+        self.assertFalse(adapter.receipt_file("forge", self.request_id).exists())
+
+    def test_pr_race_after_reservation_never_posts_or_unlocks(self):
+        with mock.patch.object(adapter, "check_pr", side_effect=[{"eligible": True},
+                              adapter.Blocked("STALE_PR_HEAD")]), \
+             mock.patch.object(adapter, "probe", return_value={"can_send": True}), \
+             mock.patch.object(adapter, "load_config", return_value={"project_id": str(uuid.uuid4())}), \
+             mock.patch.object(adapter, "call_api") as api:
+            result = adapter.send_pr("forge", self.request_id, 135, "a" * 40, "b" * 40, 123)
+        self.assertEqual(result["outcome"], "UNKNOWN")
+        api.assert_not_called()
+        self.assertTrue(adapter.pr_lock_file("forge", 135).exists())
+
+    def test_pr_ambiguous_send_is_not_retried_and_status_reports_drift(self):
+        with mock.patch.object(adapter, "check_pr", return_value={"eligible": True}), \
+             mock.patch.object(adapter, "probe", return_value={"can_send": True}), \
+             mock.patch.object(adapter, "load_config", return_value={"project_id": str(uuid.uuid4())}), \
+             mock.patch.object(adapter, "call_api", side_effect=adapter.Blocked("OFFLINE")) as api:
+            first = adapter.send_pr("forge", self.request_id, 135, "a" * 40, "b" * 40, 123)
+            again = adapter.send_pr("forge", self.request_id, 135, "a" * 40, "b" * 40, 123)
+            result = adapter.status_pr("forge", 135, "c" * 40, 456)
+        self.assertEqual(first["outcome"], "UNKNOWN")
+        self.assertTrue(again["duplicate"])
+        self.assertTrue(result["head_sha_changed_since_dispatch"])
+        self.assertTrue(result["review_changed_since_dispatch"])
+        self.assertEqual(sum(call.args[0] == "POST" for call in api.call_args_list), 1)
+
+    def test_windows_acl_subprocess_has_private_trusted_module_environment(self):
+        system = Path(self.temp.name) / "Windows"
+        home = system / "System32/WindowsPowerShell/v1.0"
+        (home / "Modules").mkdir(parents=True)
+        (home / "powershell.exe").touch()
+        with mock.patch.dict(os.environ, {"SystemRoot": str(system), "PSModulePath": "UNTRUSTED"}), \
+             mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(
+                 returncode=0, stdout='{"unexpectedReadGrants":0}', stderr="")) as run:
+            self.assertEqual(adapter.windows_acl_safe(), (True, "OK"))
+            self.assertEqual(os.environ["PSModulePath"], "UNTRUSTED")
+        self.assertEqual(run.call_args.args[0][0], str(home / "powershell.exe"))
+        self.assertEqual(run.call_args.kwargs["env"]["PSModulePath"], str(home / "Modules"))
+
+    def test_windows_acl_malformed_or_nonzero_result_never_passes(self):
+        for output in ('{"unexpectedReadGrants":-1}', '{"unexpectedReadGrants":false}',
+                       '{"unexpectedReadGrants":"0"}', '{"unexpectedReadGrants":null}'):
+            with self.subTest(output=output), \
+                 mock.patch.object(adapter, "windows_powershell_environment", return_value=("powershell.exe", {})), \
+                 mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(
+                     returncode=0, stdout=output, stderr="")):
+                with self.assertRaisesRegex(adapter.Blocked, "WINDOWS_ACL_CHECK_FAILED"):
+                    adapter.windows_acl_safe()
+
+    def test_windows_acl_module_error_fails_closed_with_terminating_script(self):
+        import base64
+        with mock.patch.object(adapter, "windows_powershell_environment", return_value=("powershell.exe", {})), \
+             mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(
+                 returncode=1, stdout='{"unexpectedReadGrants":0}', stderr="module error")) as run:
+            with self.assertRaisesRegex(adapter.Blocked, "WINDOWS_ACL_CHECK_FAILED"):
+                adapter.windows_acl_safe()
+        encoded = run.call_args.args[0][-1]
+        script = base64.b64decode(encoded).decode("utf-16-le")
+        self.assertIn("$ErrorActionPreference = 'Stop'", script)
+        self.assertIn("Import-Module Microsoft.PowerShell.Security -ErrorAction Stop", script)
+
+    def test_remote_pr_arguments_and_unicode_source_use_utf8(self):
+        args = argparse.Namespace(command="send-pr", target="harbor", ssh_host="atlas@10.0.0.2",
+                                  request_id=self.request_id, pr=135, head_sha="a" * 40,
+                                  base_sha="b" * 40, review_id=123)
+        with mock.patch.object(adapter.subprocess, "run", return_value=mock.Mock(
+                returncode=0, stdout='{"outcome":"ACCEPTED"}', stderr="")) as run:
+            adapter.run_remote(args)
+        self.assertEqual(run.call_args.kwargs.get("encoding"), "utf-8")
+        command = run.call_args.args[0][-1]
+        self.assertIn("--pr 135", command)
+        self.assertIn("--review-id 123", command)
+        self.assertIn("--head-sha " + "a" * 40, command)
+        self.assertNotIn("token", command)
 
     def test_one_post_even_if_same_dispatch_is_repeated(self):
         with mock.patch.object(adapter, "probe", return_value={"can_send": True}), \
