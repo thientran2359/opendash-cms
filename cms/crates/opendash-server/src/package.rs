@@ -3,9 +3,25 @@
 //! Centralizes ZIP archive opening, entry path traversal checks, symlink/directory
 //! rejection, and bounded reading for Theme and Plugin ZIP packages.
 
-use std::io::{Cursor, Read};
+use std::{
+    collections::{BTreeMap, HashSet},
+    io::{Cursor, Read},
+};
 
 use zip::{ZipArchive, read::ZipFile};
+
+pub const V2_MAX_ZIP_BYTES: usize = 8 * 1024 * 1024;
+pub const V2_MAX_DECODED_BYTES: usize = 32 * 1024 * 1024;
+pub const V2_MAX_FILES: usize = 256;
+pub const V2_MAX_TEXT_BYTES: usize = 256 * 1024;
+pub const V2_MAX_RASTER_BYTES: usize = 8 * 1024 * 1024;
+pub const V2_MAX_EXPANSION_RATIO: u64 = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum V2ZipError {
+    PayloadTooLarge(&'static str),
+    BadRequest(&'static str),
+}
 
 /// Opens a ZIP archive from raw bytes after verifying the compressed size ceiling.
 pub fn open_bounded_zip<'a>(
@@ -78,6 +94,152 @@ pub fn is_valid_zip_content_type(
         }
         None => !strict_only_application_zip,
     }
+}
+
+/// Validates a relative ASCII path for v2 theme packages:
+/// no empty/dot/dot-dot segments, backslashes, drive letters/colons, control chars, or leading/trailing slashes.
+pub fn validate_v2_relative_path(raw: &str) -> Result<String, &'static str> {
+    if raw.is_empty()
+        || !raw.is_ascii()
+        || raw.starts_with('/')
+        || raw.ends_with('/')
+        || raw.contains('\\')
+        || raw.contains(':')
+        || raw.bytes().any(|b| b < 0x20 || b == 0x7f)
+    {
+        return Err("Đường dẫn trong ZIP v2 không hợp lệ.");
+    }
+    for segment in raw.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err("Đường dẫn trong ZIP v2 chứa segment không an toàn.");
+        }
+    }
+    Ok(raw.to_string())
+}
+
+/// Reads and validates all entries of a v2 theme ZIP archive enforcing size,
+/// file count, expansion ratio, zero-compressed-size bomb, symlink, and case-collision limits.
+pub fn read_v2_zip_entries<F>(
+    bytes: &[u8],
+    entry_cap: F,
+) -> Result<BTreeMap<String, Vec<u8>>, V2ZipError>
+where
+    F: Fn(&str) -> Result<usize, &'static str>,
+{
+    let mut archive = open_bounded_zip(
+        bytes,
+        V2_MAX_ZIP_BYTES,
+        "Gói theme ZIP v2 vượt quá giới hạn 8 MiB.",
+        "Gói theme ZIP không hợp lệ.",
+    )
+    .map_err(|msg| {
+        if bytes.len() > V2_MAX_ZIP_BYTES {
+            V2ZipError::PayloadTooLarge(msg)
+        } else {
+            V2ZipError::BadRequest(msg)
+        }
+    })?;
+
+    let mut files = BTreeMap::new();
+    let mut seen_lower = HashSet::new();
+    let mut total_decoded: usize = 0;
+
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|_| V2ZipError::BadRequest("Không đọc được mục trong ZIP."))?;
+
+        if let Some(mode) = entry.unix_mode()
+            && (mode & 0o170000) == 0o120000
+        {
+            return Err(V2ZipError::BadRequest("ZIP không được chứa symlink."));
+        }
+
+        let name = entry
+            .name()
+            .map_err(|_| V2ZipError::BadRequest("Đường dẫn ZIP không hợp lệ."))?
+            .to_string();
+
+        if entry.is_dir() {
+            let trimmed = name.trim_end_matches('/');
+            if !trimmed.is_empty() {
+                validate_v2_relative_path(trimmed).map_err(V2ZipError::BadRequest)?;
+            }
+            if entry.size() > 0 {
+                return Err(V2ZipError::BadRequest(
+                    "Mục thư mục trong ZIP không được chứa dữ liệu.",
+                ));
+            }
+            continue;
+        }
+
+        let rel_path = validate_v2_relative_path(&name).map_err(V2ZipError::BadRequest)?;
+        if files.len() >= V2_MAX_FILES {
+            return Err(V2ZipError::PayloadTooLarge(
+                "Gói theme ZIP v2 vượt quá giới hạn 256 file.",
+            ));
+        }
+
+        let lower = rel_path.to_ascii_lowercase();
+        if !seen_lower.insert(lower) {
+            return Err(V2ZipError::BadRequest(
+                "ZIP v2 chứa đường dẫn trùng lặp hoặc xung đột chữ hoa/thường.",
+            ));
+        }
+
+        let max_for_entry = entry_cap(&rel_path).map_err(V2ZipError::BadRequest)?;
+        let remaining_total = V2_MAX_DECODED_BYTES.saturating_sub(total_decoded);
+        let read_cap = max_for_entry.min(remaining_total);
+
+        if entry.size() > max_for_entry as u64 {
+            return Err(V2ZipError::PayloadTooLarge(
+                "File trong ZIP v2 vượt quá giới hạn kích thước cho phép.",
+            ));
+        }
+        if entry.size() > remaining_total as u64 {
+            return Err(V2ZipError::PayloadTooLarge(
+                "Tổng dung lượng giải nén ZIP v2 vượt quá 32 MiB.",
+            ));
+        }
+
+        let compressed_size = entry.compressed_size();
+        let data = read_bounded_entry(
+            &mut entry,
+            read_cap,
+            "Không thể đọc nội dung file trong ZIP v2.",
+        )
+        .map_err(V2ZipError::BadRequest)?;
+
+        if data.len() > max_for_entry {
+            return Err(V2ZipError::PayloadTooLarge(
+                "File giải nén trong ZIP v2 vượt quá giới hạn kích thước.",
+            ));
+        }
+        if data.len() > remaining_total {
+            return Err(V2ZipError::PayloadTooLarge(
+                "Tổng dung lượng giải nén ZIP v2 vượt quá 32 MiB.",
+            ));
+        }
+
+        let actual_len = data.len() as u64;
+        if (compressed_size == 0 && actual_len > 0)
+            || (compressed_size > 0
+                && actual_len > compressed_size.saturating_mul(V2_MAX_EXPANSION_RATIO))
+        {
+            return Err(V2ZipError::BadRequest(
+                "ZIP v2 bị từ chối do tỷ lệ giải nén bất thường (zip bomb).",
+            ));
+        }
+
+        total_decoded = total_decoded
+            .checked_add(data.len())
+            .ok_or(V2ZipError::PayloadTooLarge(
+                "Tổng dung lượng giải nén ZIP v2 vượt quá 32 MiB.",
+            ))?;
+        files.insert(rel_path, data);
+    }
+
+    Ok(files)
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use axum::{
-    Router,
+    Extension, Router,
     extract::{DefaultBodyLimit, Request},
     http::{StatusCode, header},
     middleware::{self, Next},
@@ -15,6 +15,7 @@ use sqlx::SqlitePool;
 use crate::{
     hooks::HookDispatcher,
     media::{MAX_MEDIA_BYTES, MediaStore},
+    package::V2_MAX_ZIP_BYTES,
     plugin::PluginManager,
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
@@ -40,7 +41,7 @@ use crate::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_list,
             taxonomy_patch,
         },
-        themes::{theme_activate, theme_install, theme_list},
+        themes::{ThemeStoreRoot, theme_activate, theme_asset, theme_install, theme_list},
         users::{
             max_users_json_bytes, user_create, user_delete, user_list, user_patch,
             user_reset_password,
@@ -86,12 +87,24 @@ impl axum::extract::FromRef<AppState> for Arc<MediaStore> {
 pub struct AdminAssets;
 
 pub fn build_router(state: AppState, expected_host: String) -> Router {
+    let themes_root = crate::paths::SitePaths::from_env()
+        .map(|p| p.themes_dir())
+        .unwrap_or_else(|_| PathBuf::from("themes"));
+    build_router_with_themes_root(state, expected_host, themes_root)
+}
+
+pub fn build_router_with_themes_root(
+    state: AppState,
+    expected_host: String,
+    themes_root: PathBuf,
+) -> Router {
     Router::new()
         .route("/", get(public_page))
         .route("/content/{type_key}", get(archive))
         .route("/content/{type_key}/{slug}", get(single))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
+        .route("/theme/{revision_digest}/{*path}", get(theme_asset))
         .route("/api/health", get(crate::routes::health::status))
         .route("/admin", get(builder))
         .route("/admin/", get(builder))
@@ -137,7 +150,7 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
             "/api/admin/themes",
             get(theme_list)
                 .post(theme_install)
-                .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES)),
+                .layer(DefaultBodyLimit::max(V2_MAX_ZIP_BYTES)),
         )
         .route(
             "/api/admin/themes/active",
@@ -261,5 +274,6 @@ pub fn build_router(state: AppState, expected_host: String) -> Router {
                 }
             }
         }))
+        .layer(Extension(ThemeStoreRoot(themes_root)))
         .with_state(state)
 }
