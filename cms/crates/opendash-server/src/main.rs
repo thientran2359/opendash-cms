@@ -32,6 +32,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let paths = paths::SitePaths::from_env()?;
     let db = storage::init_db(paths.db_path()).await?;
+    storage::import::recover_orphaned_import_runs(&db, &paths.uploads_dir())
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
 
     let allow_loopback = env::var("OPENDASH_PLUGIN_ALLOW_LOOPBACK")
         .map(|v| v == "1" || v == "true")

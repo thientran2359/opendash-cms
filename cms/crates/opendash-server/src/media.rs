@@ -130,6 +130,13 @@ impl MediaStore {
         }
     }
 
+    pub fn uploads_root(&self) -> PathBuf {
+        self.root
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.root.clone())
+    }
+
     fn path(&self, id: &str, extension: &str, thumbnail: bool) -> ApiResult<PathBuf> {
         if !valid_media_id(id) || !matches!(extension, "png" | "jpg" | "webp") {
             return Err(ApiError::bad_request("Mã ảnh không hợp lệ."));
