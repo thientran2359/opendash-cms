@@ -38,7 +38,10 @@ use crate::{
         },
         public::public_page,
         public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
-        settings::{general_get, general_put, theme_options_get, theme_options_put, timezones_get},
+        settings::{
+            general_get, general_put, public_get, public_put, theme_options_get,
+            theme_options_put, timezones_get,
+        },
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_list,
             taxonomy_patch, taxonomy_eligibility_list,
@@ -157,6 +160,12 @@ pub fn build_router_with_themes_root(
             "/api/admin/settings/general",
             get(general_get)
                 .put(general_put)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/settings/public",
+            get(public_get)
+                .put(public_put)
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/settings/timezones", get(timezones_get))
