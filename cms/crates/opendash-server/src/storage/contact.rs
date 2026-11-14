@@ -78,6 +78,7 @@ pub struct ContactSubmissionDetail {
     pub values: BTreeMap<String, serde_json::Value>,
     pub reply_to_email: Option<String>,
     pub notification_state: String,
+    pub notification_attempts: Vec<crate::storage::smtp::NotificationAttemptPublic>,
     pub created_at: String,
 }
 
@@ -108,6 +109,7 @@ impl TryFrom<ContactSubmissionRow> for ContactSubmissionDetail {
             values,
             reply_to_email: row.reply_to_email,
             notification_state: row.notification_state,
+            notification_attempts: Vec::new(),
             created_at: row.created_at,
         })
     }
@@ -348,17 +350,32 @@ pub async fn get_submission(db: &SqlitePool, id: i64) -> ApiResult<ContactSubmis
     let Some(row) = row else {
         return Err(ApiError::not_found("Không tìm thấy lượt gửi liên hệ."));
     };
-    ContactSubmissionDetail::try_from(row)
+    let mut detail = ContactSubmissionDetail::try_from(row)?;
+    detail.notification_attempts = crate::storage::smtp::list_attempts_for_submission(db, id).await?;
+    Ok(detail)
 }
 
 pub async fn delete_submission(db: &SqlitePool, id: i64) -> ApiResult<()> {
+    let mut tx = db.begin().await?;
+    let sending: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM contact_notification_attempts WHERE submission_id = ?1 AND state = 'sending' LIMIT 1",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if sending.is_some() {
+        return Err(ApiError::conflict(
+            "Không thể xóa lượt gửi khi đang gửi thông báo SMTP.",
+        ));
+    }
     let res = sqlx::query("DELETE FROM contact_submissions WHERE id = ?1")
         .bind(id)
-        .execute(db)
+        .execute(&mut *tx)
         .await?;
     if res.rows_affected() == 0 {
         return Err(ApiError::not_found("Không tìm thấy lượt gửi liên hệ."));
     }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -483,7 +500,7 @@ pub async fn record_submission_in_tx(
     values_json: &str,
     reply_to_email: Option<&str>,
     now_secs: i64,
-) -> ApiResult<(i64, bool)> {
+) -> ApiResult<(i64, bool, Option<i64>)> {
     sqlx::query("DELETE FROM contact_submission_dedup WHERE expires_at <= ?1")
         .bind(now_secs)
         .execute(&mut *conn)
@@ -502,7 +519,7 @@ pub async fn record_submission_in_tx(
 
     if let Some((prev_hash, prev_sub_id)) = existing {
         if prev_hash == payload_hash {
-            return Ok((prev_sub_id, true));
+            return Ok((prev_sub_id, true, None));
         }
         return Err(ApiError::conflict(
             "Yêu cầu trùng lặp với nội dung khác.",
@@ -535,5 +552,8 @@ pub async fn record_submission_in_tx(
     .execute(&mut *conn)
     .await?;
 
-    Ok((submission_id, false))
+    let initial_attempt_id =
+        crate::storage::smtp::create_initial_attempt_in_conn(&mut *conn, submission_id).await?;
+
+    Ok((submission_id, false, initial_attempt_id))
 }

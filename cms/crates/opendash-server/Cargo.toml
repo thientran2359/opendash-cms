@@ -12,6 +12,7 @@ opendash-core = { path = "../opendash-core" }
 argon2 = { workspace = true }
 axum = { workspace = true }
 image = { workspace = true }
+lettre = { workspace = true }
 minijinja = { workspace = true }
 mime_guess = { workspace = true }
 serde = { workspace = true }
@@ -26,5 +27,12 @@ rust-embed = { workspace = true }
 wasmi = { workspace = true }
 zip = { workspace = true }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_Threading"] }
+
 [dev-dependencies]
 wat = { workspace = true }
+rustls = { version = "=0.23.46", default-features = false }
+tokio-rustls = { version = "=0.26.6", default-features = false }
+rustls-pemfile = "=2.2.0"
+rustls-pki-types = "=1.15.1"

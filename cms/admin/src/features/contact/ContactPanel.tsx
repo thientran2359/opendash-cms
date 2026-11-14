@@ -13,6 +13,7 @@ import {
   type ContactSubmissionDetail,
   type ContactSubmissionSummary,
 } from '../../api/contact.ts';
+import { notifyContactSubmission } from '../../api/smtp.ts';
 
 interface Props {
   csrfToken: string | null;
@@ -35,6 +36,7 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
   const [replyToField, setReplyToField] = useState<string>('email');
   const [submissions, setSubmissions] = useState<ContactSubmissionSummary[]>([]);
   const [selectedSub, setSelectedSub] = useState<ContactSubmissionDetail | null>(null);
+  const [ackDupRisk, setAckDupRisk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
 
@@ -402,6 +404,59 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
                   </div>
                 ))}
               </dl>
+              {selectedSub.notification_attempts.length > 0 && (
+                <div className="mt-3 border-t border-slate-200 pt-2">
+                  <p className="text-xs font-semibold text-slate-700">Lịch sử gửi thông báo SMTP</p>
+                  <ul className="mt-1 space-y-1 text-xs text-slate-600">
+                    {selectedSub.notification_attempts.map((att) => (
+                      <li key={att.id}>
+                        Lần #{att.attempt_number}: <strong>{att.state}</strong>
+                        {att.diagnostic_code ? ` (${att.diagnostic_code})` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                  {(() => {
+                    const latest = selectedSub.notification_attempts[selectedSub.notification_attempts.length - 1];
+                    const canRetry = latest && latest.state !== 'sent' && latest.state !== 'sending' && latest.attempt_number < 3;
+                    if (!canRetry) return null;
+                    return (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {latest.state === 'unknown' && (
+                          <label className="flex items-center gap-1.5 text-xs text-amber-800">
+                            <input
+                              type="checkbox"
+                              checked={ackDupRisk}
+                              onChange={(e) => setAckDupRisk(e.target.checked)}
+                            />
+                            Xác nhận rủi ro gửi trùng (unknown)
+                          </label>
+                        )}
+                        <button
+                          type="button"
+                          disabled={busy || (latest.state === 'unknown' && !ackDupRisk)}
+                          onClick={async () => {
+                            setBusy(true);
+                            try {
+                              await notifyContactSubmission(csrfToken, selectedSub.id, latest.version, ackDupRisk);
+                              const refreshed = await getContactSubmission(selectedSub.id);
+                              setSelectedSub(refreshed);
+                              setAckDupRisk(false);
+                              await loadAll();
+                            } catch (err) {
+                              onApiError(err);
+                            } finally {
+                              setBusy(false);
+                            }
+                          }}
+                          className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                        >
+                          Gửi lại thông báo SMTP
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -1,4 +1,5 @@
 import { requestJson } from './client.ts';
+import type { NotificationAttemptPublic } from './smtp.ts';
 
 export type ContactFieldKind = 'text' | 'email' | 'textarea' | 'select' | 'checkbox';
 
@@ -50,6 +51,7 @@ export interface ContactSubmissionDetail {
   values: Record<string, string | boolean>;
   reply_to_email: string | null;
   notification_state: string;
+  notification_attempts: NotificationAttemptPublic[];
   created_at: string;
 }
 
