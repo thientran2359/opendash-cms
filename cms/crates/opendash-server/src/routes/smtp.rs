@@ -73,6 +73,7 @@ pub async fn get_smtp_settings(
 }
 
 pub async fn put_smtp_settings(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Extension(secrets): Extension<SecretStore>,
     headers: HeaderMap,
@@ -168,6 +169,7 @@ pub async fn put_smtp_settings(
 }
 
 pub async fn test_smtp_settings(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Extension(smtp_service): Extension<SmtpService>,
     headers: HeaderMap,
@@ -178,6 +180,7 @@ pub async fn test_smtp_settings(
 }
 
 pub async fn notify_submission(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Extension(smtp_service): Extension<SmtpService>,
     headers: HeaderMap,

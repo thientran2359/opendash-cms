@@ -89,6 +89,7 @@ pub async fn menus_list(
 }
 
 pub async fn menus_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     input: Result<Json<CreateMenuBody>, JsonRejection>,
@@ -112,6 +113,7 @@ pub async fn menus_get(
 }
 
 pub async fn menus_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -126,6 +128,7 @@ pub async fn menus_put(
 }
 
 pub async fn menus_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -164,6 +167,7 @@ pub async fn menu_slots_get(
 }
 
 pub async fn menu_slots_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(theme_id): Path<String>,

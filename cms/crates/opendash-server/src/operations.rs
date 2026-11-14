@@ -321,6 +321,40 @@ pub struct MutationLease {
     inner: Arc<CoordinatorInner>,
 }
 
+impl Clone for MutationLease {
+    fn clone(&self) -> Self {
+        let mut guard = self
+            .inner
+            .state
+            .lock()
+            .expect("coordinator admission mutex poisoned");
+        guard.active_writers += 1;
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
+/// Axum extractor that acquires a `MutationLease` from `SiteCoordinator` in `AppState`
+/// before any body buffering or storage/filesystem writes occur.
+pub struct AdmittedMutation(pub MutationLease);
+
+impl<S> axum::extract::FromRequestParts<S> for AdmittedMutation
+where
+    Arc<SiteCoordinator>: axum::extract::FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = MutationAdmissionError;
+
+    async fn from_request_parts(
+        _parts: &mut axum::http::request::Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let coordinator = <Arc<SiteCoordinator> as axum::extract::FromRef<S>>::from_ref(state);
+        coordinator.admit_mutation().map(Self)
+    }
+}
+
 impl Drop for MutationLease {
     fn drop(&mut self) {
         let mut guard = self
@@ -495,6 +529,36 @@ mod tests {
         drop(lease);
         let _lease2 = coord.admit_mutation().expect("admit after timeout");
         drop(_lease2);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn cloned_lease_blocks_maintenance_until_background_task_finishes() {
+        let (root, paths) = temp_site_paths("bg-lease");
+        let coord = SiteCoordinator::acquire(paths).expect("acquire");
+
+        let http_lease = coord.admit_mutation().expect("admit http handler");
+        let bg_lease = http_lease.clone();
+        let bg_done = Arc::new(AtomicBool::new(false));
+        let bg_done_flag = Arc::clone(&bg_done);
+
+        let bg_handle = tokio::spawn(async move {
+            let _lease = bg_lease;
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            bg_done_flag.store(true, Ordering::SeqCst);
+        });
+
+        // HTTP handler returns and drops its lease while background task still runs
+        drop(http_lease);
+        assert_eq!(coord.active_writers(), 1);
+
+        let ctx = coord
+            .begin_maintenance(OperationKind::Backup, Duration::from_secs(5))
+            .await
+            .expect("maintenance enters after bg finishes");
+        assert!(bg_done.load(Ordering::SeqCst));
+        drop(ctx);
+        bg_handle.await.expect("join bg task");
         let _ = std::fs::remove_dir_all(root);
     }
 

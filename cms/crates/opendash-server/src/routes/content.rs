@@ -30,6 +30,7 @@ pub async fn content_type_list(
 }
 
 pub async fn content_type_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(content_registry): State<Arc<tokio::sync::RwLock<RegistryCatalog<ContentTypeDefinition>>>>,
     headers: HeaderMap,

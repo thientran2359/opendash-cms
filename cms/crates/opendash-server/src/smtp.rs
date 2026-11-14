@@ -224,9 +224,10 @@ impl SmtpService {
         }
     }
 
-    pub fn spawn_initial_attempt(&self, attempt_id: i64) {
+    pub fn spawn_initial_attempt(&self, attempt_id: i64, lease: crate::operations::MutationLease) {
         let svc = self.clone();
         tokio::spawn(async move {
+            let _lease = lease;
             if let Ok(Some(attempt)) = smtp_store::claim_pending_attempt(&svc.db, attempt_id).await {
                 let _ = svc.execute_claimed_attempt(attempt).await;
             }

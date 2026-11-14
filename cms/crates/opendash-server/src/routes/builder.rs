@@ -78,6 +78,7 @@ pub async fn registry(
 }
 
 pub async fn install(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     bytes: Bytes,
@@ -113,6 +114,7 @@ pub async fn preview(
 }
 
 pub async fn save(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -238,6 +240,7 @@ pub async fn homepage_preview(
 }
 
 pub async fn homepage_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -407,6 +410,7 @@ pub async fn override_preview(
 }
 
 pub async fn override_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(role): Path<String>,
@@ -439,6 +443,7 @@ pub async fn override_put(
 }
 
 pub async fn override_reset(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(role): Path<String>,

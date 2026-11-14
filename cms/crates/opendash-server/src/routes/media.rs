@@ -78,6 +78,7 @@ fn display_filename(headers: &HeaderMap, extension: &str) -> String {
 }
 
 pub async fn media_upload(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
     headers: HeaderMap,
@@ -117,6 +118,7 @@ impl Drop for StagingCleanupGuard {
 }
 
 pub async fn media_video_upload(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
     headers: HeaderMap,

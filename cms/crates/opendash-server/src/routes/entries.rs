@@ -141,6 +141,7 @@ pub async fn entry_get(
 }
 
 pub async fn entry_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -188,6 +189,7 @@ pub async fn entry_create(
 }
 
 pub async fn entry_update(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -226,6 +228,7 @@ pub async fn entry_update(
 }
 
 pub async fn entry_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
@@ -240,6 +243,7 @@ pub async fn entry_delete(
 /// Publish/Unpublish is a separate, authenticated optimistic-CAS operation.
 /// Ordinary PUT/Save deliberately never alters the current status.
 pub async fn entry_publication(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,

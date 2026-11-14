@@ -22,6 +22,7 @@ pub const MAX_PLUGIN_ZIP_BYTES: usize = 5 * 1024 * 1024; // 5 MiB
 pub const MAX_PLUGIN_JSON_BYTES: usize = 1024 * 1024; // 1 MiB
 
 pub async fn plugin_install(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
     State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
@@ -56,6 +57,7 @@ pub async fn plugin_list(
 }
 
 pub async fn plugin_run(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -92,6 +94,7 @@ pub async fn plugin_run(
 }
 
 pub async fn plugin_action(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
     State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
@@ -146,6 +149,7 @@ pub async fn plugin_action(
 }
 
 pub async fn plugin_disable(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
     State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
@@ -164,6 +168,7 @@ pub async fn plugin_disable(
 }
 
 pub async fn plugin_enable(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
     State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,

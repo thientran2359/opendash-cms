@@ -22,6 +22,7 @@ use crate::{
 };
 
 pub async fn import_dry_run(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Path(theme_id): Path<String>,
     request_headers: HeaderMap,
@@ -37,6 +38,7 @@ pub async fn import_dry_run(
 }
 
 pub async fn import_execute(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(media_store): State<Arc<MediaStore>>,
     Extension(themes_root): Extension<ThemeStoreRoot>,

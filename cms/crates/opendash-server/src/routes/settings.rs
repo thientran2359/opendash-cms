@@ -79,6 +79,7 @@ pub async fn timezones_get(
 }
 
 pub async fn general_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     input: Result<Json<GeneralSettingsInput>, JsonRejection>,
@@ -112,6 +113,7 @@ pub async fn public_get(State(db): State<SqlitePool>, headers: HeaderMap) -> Api
 }
 
 pub async fn public_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     input: Result<Json<PublicSiteSettingsInput>, JsonRejection>,
@@ -162,6 +164,7 @@ pub async fn theme_options_get(
 }
 
 pub async fn theme_options_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(theme_id): Path<String>,

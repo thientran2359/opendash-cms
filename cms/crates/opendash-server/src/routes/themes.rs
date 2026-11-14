@@ -143,6 +143,7 @@ pub async fn theme_list(
 }
 
 pub async fn theme_install(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Extension(themes_root): Extension<ThemeStoreRoot>,
     request_headers: HeaderMap,
@@ -205,6 +206,7 @@ pub async fn theme_install(
 }
 
 pub async fn theme_activate(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Extension(themes_root): Extension<ThemeStoreRoot>,
     request_headers: HeaderMap,
