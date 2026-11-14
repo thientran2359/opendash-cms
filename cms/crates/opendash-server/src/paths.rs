@@ -98,6 +98,166 @@ impl SitePaths {
     pub fn staging_dir(&self) -> PathBuf {
         self.site_root.join("runtime").join("staging")
     }
+
+    pub fn runtime_dir(&self) -> PathBuf {
+        self.site_root.join("runtime")
+    }
+
+    pub fn site_lock_path(&self) -> PathBuf {
+        self.runtime_dir().join("site.lock")
+    }
+
+    pub fn db_lock_path(&self) -> PathBuf {
+        let parent = self
+            .db_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let file_name = self
+            .db_path
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("opendash.sqlite"));
+        let mut lock_name = file_name.to_os_string();
+        lock_name.push(".opendash.lock");
+        parent.join(lock_name)
+    }
+
+    /// Returns canonical lock paths sorted deterministically to prevent lock-order inversion.
+    pub fn ordered_lock_paths(&self) -> Vec<PathBuf> {
+        let mut paths = vec![self.site_lock_path(), self.db_lock_path()];
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    #[allow(dead_code)]
+    pub fn from_parts(site_root: PathBuf, db_path: PathBuf) -> Self {
+        Self { site_root, db_path }
+    }
+
+    /// Resolves relative paths against cwd, rejects symlinks/reparse points on roots and ancestors,
+    /// ensures runtime/db parent directories exist, and canonicalizes `site_root` and `db_path` parent.
+    pub fn canonicalize_for_runtime(&self) -> io::Result<Self> {
+        let cwd = std::env::current_dir()?;
+        let abs_site_root = if self.site_root.is_absolute() {
+            self.site_root.clone()
+        } else {
+            cwd.join(&self.site_root)
+        };
+        let abs_db_path = if self.db_path.is_absolute() {
+            self.db_path.clone()
+        } else {
+            cwd.join(&self.db_path)
+        };
+
+        reject_reparse_or_symlink_ancestors(&abs_site_root)?;
+        reject_reparse_or_symlink_ancestors(&abs_db_path)?;
+
+        fs::create_dir_all(&abs_site_root)?;
+        reject_reparse_or_symlink_entry(&abs_site_root)?;
+
+        let canonical_site_root = fs::canonicalize(&abs_site_root)?;
+        let runtime_dir = canonical_site_root.join("runtime");
+        fs::create_dir_all(&runtime_dir)?;
+        reject_reparse_or_symlink_entry(&runtime_dir)?;
+
+        let db_file_name = abs_db_path
+            .file_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "db_path must have a file name"))?
+            .to_os_string();
+        let db_parent = abs_db_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "db_path must have a parent directory"))?;
+
+        fs::create_dir_all(db_parent)?;
+        reject_reparse_or_symlink_entry(db_parent)?;
+        let canonical_db_parent = fs::canonicalize(db_parent)?;
+        let canonical_db_path = canonical_db_parent.join(db_file_name);
+
+        if let Ok(meta) = fs::symlink_metadata(&canonical_db_path) {
+            if is_symlink_or_reparse(&meta) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "symlink or reparse point not allowed at db_path: {}",
+                        canonical_db_path.display()
+                    ),
+                ));
+            }
+            if meta.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("db_path points to a directory: {}", canonical_db_path.display()),
+                ));
+            }
+        }
+
+        Ok(Self {
+            site_root: canonical_site_root,
+            db_path: canonical_db_path,
+        })
+    }
+}
+
+fn is_symlink_or_reparse(meta: &fs::Metadata) -> bool {
+    if meta.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+            return true;
+        }
+    }
+    false
+}
+
+fn reject_reparse_or_symlink_entry(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) => {
+            if is_symlink_or_reparse(&meta) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("symlink or reparse point not allowed: {}", path.display()),
+                ));
+            }
+            Ok(())
+        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
+    }
+}
+
+fn reject_reparse_or_symlink_ancestors(path: &Path) -> io::Result<()> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component);
+        if matches!(
+            component,
+            std::path::Component::Prefix(_) | std::path::Component::RootDir
+        ) {
+            continue;
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(meta) => {
+                if is_symlink_or_reparse(&meta) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!(
+                            "symlink or reparse point not allowed in path: {}",
+                            current.display()
+                        ),
+                    ));
+                }
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => break,
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }
 
 /// Lists installed package directories (such as `themes/<id>` or `plugins/<id>`),
@@ -228,6 +388,26 @@ mod tests {
             paths.db_path(),
             install.path().join("database/opendash.sqlite")
         );
+    }
+
+    #[test]
+    fn canonicalize_for_runtime_normalizes_paths_and_orders_locks() {
+        let temp = TempTestDir::new("canon");
+        let nested_root = temp.path().join("site").join(".").join("instance");
+        let ext_db = temp.path().join("external").join("custom.sqlite");
+        let raw = SitePaths::from_parts(nested_root, ext_db);
+
+        let canon = raw.canonicalize_for_runtime().expect("canonicalize runtime paths");
+        assert!(canon.runtime_dir().exists());
+        assert_eq!(canon.site_lock_path(), canon.runtime_dir().join("site.lock"));
+        assert!(canon
+            .db_lock_path()
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n == "custom.sqlite.opendash.lock"));
+        let ordered = canon.ordered_lock_paths();
+        assert_eq!(ordered.len(), 2);
+        assert!(ordered[0] < ordered[1]);
     }
 
     #[test]

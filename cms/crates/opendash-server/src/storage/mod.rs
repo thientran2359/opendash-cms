@@ -7,6 +7,7 @@ pub mod entries;
 pub mod import;
 pub mod media;
 pub mod menu;
+pub mod operations;
 pub mod overrides;
 pub mod page;
 pub mod plugin;
