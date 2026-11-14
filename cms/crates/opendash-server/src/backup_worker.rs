@@ -128,6 +128,7 @@ pub fn run_operations_worker_from_stdio() -> i32 {
         "snapshot" => run_snapshot_worker_from_stdio(),
         "archive" => run_archive_worker_from_stdio(),
         "verify" => run_verify_worker_from_stdio(),
+        "restore" => run_restore_worker_from_stdio(),
         _ => {
             let resp = SnapshotWorkerResponse {
                 ok: false,
@@ -360,6 +361,128 @@ fn run_verify_worker_from_stdio() -> i32 {
                 payload_dir: None,
                 file_count: None,
                 schema_version: None,
+                error: Some(err.1.to_string()),
+            };
+            let _ = serde_json::to_writer(io::stdout(), &resp);
+            1
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestoreWorkerRequest {
+    pub input_path: PathBuf,
+    pub private_dir: PathBuf,
+    pub generated_target: PathBuf,
+    pub source_site_root: PathBuf,
+    pub source_db_path: PathBuf,
+    pub job_id: String,
+    pub passphrase: String,
+    pub failpoint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestoreWorkerResponse {
+    pub ok: bool,
+    pub target_root: Option<PathBuf>,
+    pub schema_version: Option<i64>,
+    pub db_sha256: Option<String>,
+    pub file_count: Option<usize>,
+    pub error: Option<String>,
+}
+
+fn run_restore_worker_from_stdio() -> i32 {
+    let Ok(req_line) = read_worker_line() else {
+        let resp = RestoreWorkerResponse {
+            ok: false,
+            target_root: None,
+            schema_version: None,
+            db_sha256: None,
+            file_count: None,
+            error: Some("invalid_worker_request_size".to_string()),
+        };
+        let _ = serde_json::to_writer(io::stdout(), &resp);
+        return 2;
+    };
+    let req: RestoreWorkerRequest = match serde_json::from_str(req_line.trim_end()) {
+        Ok(r) => r,
+        Err(_) => {
+            let resp = RestoreWorkerResponse {
+                ok: false,
+                target_root: None,
+                schema_version: None,
+                db_sha256: None,
+                file_count: None,
+                error: Some("invalid_worker_request_json".to_string()),
+            };
+            let _ = serde_json::to_writer(io::stdout(), &resp);
+            return 2;
+        }
+    };
+    let done = spawn_stdin_lifeline();
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(err) => {
+            done.store(true, Ordering::SeqCst);
+            let resp = RestoreWorkerResponse {
+                ok: false,
+                target_root: None,
+                schema_version: None,
+                db_sha256: None,
+                file_count: None,
+                error: Some(format!("runtime_init_failed: {err}")),
+            };
+            let _ = serde_json::to_writer(io::stdout(), &resp);
+            return 2;
+        }
+    };
+
+    let failpoint = match req.failpoint.as_deref() {
+        Some("after_extract") => Some(crate::restore::RestoreFailpoint::AfterExtract),
+        Some("after_db_sanitize") => Some(crate::restore::RestoreFailpoint::AfterDbSanitize),
+        Some("after_ready_marker") => Some(crate::restore::RestoreFailpoint::AfterReadyMarker),
+        _ => None,
+    };
+
+    let secret = age::secrecy::SecretString::from(req.passphrase);
+    let res = rt.block_on(async {
+        let validated = crate::backup_archive::decrypt_and_validate_archive(
+            &req.input_path,
+            &secret,
+            &req.private_dir,
+        )?;
+        let policy = crate::restore::RestorePolicy {
+            job_id: req.job_id,
+            source_site_root: req.source_site_root,
+            source_db_path: req.source_db_path,
+            failpoint,
+        };
+        crate::restore::restore_to_new_root(&validated, &policy, &req.generated_target).await
+    });
+    done.store(true, Ordering::SeqCst);
+    match res {
+        Ok(r) => {
+            let resp = RestoreWorkerResponse {
+                ok: true,
+                target_root: Some(r.target_root),
+                schema_version: Some(r.schema_version),
+                db_sha256: Some(r.db_sha256),
+                file_count: Some(r.file_count),
+                error: None,
+            };
+            let _ = serde_json::to_writer(io::stdout(), &resp);
+            0
+        }
+        Err(err) => {
+            let resp = RestoreWorkerResponse {
+                ok: false,
+                target_root: None,
+                schema_version: None,
+                db_sha256: None,
+                file_count: None,
                 error: Some(err.1.to_string()),
             };
             let _ = serde_json::to_writer(io::stdout(), &resp);

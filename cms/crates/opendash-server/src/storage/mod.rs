@@ -11,6 +11,7 @@ pub mod media_lifecycle;
 pub mod media_refs;
 pub mod menu;
 pub mod operations;
+pub mod restore;
 pub mod overrides;
 pub mod page;
 pub mod plugin;
