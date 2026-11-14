@@ -17,6 +17,8 @@ mod page;
 mod paths;
 mod plugin;
 mod public_context;
+#[allow(dead_code)]
+mod restore;
 mod routes;
 mod secrets;
 mod seo;
