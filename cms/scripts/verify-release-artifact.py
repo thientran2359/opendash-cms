@@ -73,7 +73,9 @@ def verify_bundle(bundle_dir: pathlib.Path, check_native_linux: bool = True) -> 
 
     if check_native_linux and platform.system() == "Linux":
         file_out = subprocess.check_output(["file", str(binary_path)], text=True)
-        if "ELF 64-bit" not in file_out or "statically linked" not in file_out:
+        if "ELF 64-bit" not in file_out or (
+            "statically linked" not in file_out and "static-pie linked" not in file_out
+        ):
             raise AssertionError(f"Expected static ELF64 binary, got: {file_out.strip()}")
 
         ldd_proc = subprocess.run(["ldd", str(binary_path)], capture_output=True, text=True)
