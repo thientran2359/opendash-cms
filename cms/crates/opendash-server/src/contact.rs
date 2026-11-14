@@ -29,6 +29,7 @@ pub struct Receipt {
     pub submission_id: Option<i64>,
     pub deduplicated: bool,
     pub honeypot_triggered: bool,
+    pub initial_attempt_id: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -120,6 +121,7 @@ pub async fn submit(
             submission_id: None,
             deduplicated: false,
             honeypot_triggered: true,
+            initial_attempt_id: None,
         }));
     }
 
@@ -151,7 +153,7 @@ pub async fn submit(
     let payload_hash = format!("{:x}", hasher.finalize());
 
     let mut tx = db.begin().await?;
-    let (submission_id, deduplicated) = store::record_submission_in_tx(
+    let (submission_id, deduplicated, initial_attempt_id) = store::record_submission_in_tx(
         &mut tx,
         form.id,
         form.version,
@@ -170,5 +172,6 @@ pub async fn submit(
         submission_id: Some(submission_id),
         deduplicated,
         honeypot_triggered: false,
+        initial_attempt_id,
     }))
 }

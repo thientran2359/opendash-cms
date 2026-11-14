@@ -15,6 +15,7 @@ pub mod public_content;
 pub mod seo;
 pub mod settings;
 pub mod sitemap;
+pub mod smtp;
 pub mod taxonomy;
 pub mod theme;
 

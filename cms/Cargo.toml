@@ -9,6 +9,7 @@ members = [
 argon2 = { version = "=0.5.3", features = ["std"] }
 axum = "=0.8.9"
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
+lettre = { version = "=0.11.23", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
 minijinja = { version = "=3.0.5", features = ["fuel", "unstable_machinery"] }
 mime_guess = "=2.0.5"
 serde = { version = "1", features = ["derive"] }

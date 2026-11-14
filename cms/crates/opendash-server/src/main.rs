@@ -12,7 +12,9 @@ mod paths;
 mod plugin;
 mod public_context;
 mod routes;
+mod secrets;
 mod seo;
+mod smtp;
 mod storage;
 mod template_sec;
 mod theme;
@@ -36,6 +38,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = paths::SitePaths::from_env()?;
     let db = storage::init_db(paths.db_path()).await?;
     storage::import::recover_orphaned_import_runs(&db, &paths.uploads_dir())
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
+    storage::smtp::recover_inflight_notifications(&db)
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
     let _ = storage::plugin::ensure_plugins_layout_and_quarantine_stale(&paths.plugins_dir());

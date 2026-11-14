@@ -209,6 +209,7 @@ pub async fn public_submit(
     State(db): State<SqlitePool>,
     Extension(limiter): Extension<ContactAdmissionLimiter>,
     Extension(ExpectedListenerOrigin(listener_origin)): Extension<ExpectedListenerOrigin>,
+    Extension(smtp_service): Extension<crate::smtp::SmtpService>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     Path(form_id): Path<i64>,
     headers: HeaderMap,
@@ -294,15 +295,20 @@ pub async fn public_submit(
     .await?;
 
     match outcome {
-        SubmitOutcome::Accepted(_) => Ok((
-            StatusCode::SEE_OTHER,
-            [
-                (header::LOCATION, "/api/public/contact/received"),
-                (header::CACHE_CONTROL, "no-store"),
-            ],
-            "",
-        )
-            .into_response()),
+        SubmitOutcome::Accepted(receipt) => {
+            if let Some(attempt_id) = receipt.initial_attempt_id {
+                smtp_service.spawn_initial_attempt(attempt_id);
+            }
+            Ok((
+                StatusCode::SEE_OTHER,
+                [
+                    (header::LOCATION, "/api/public/contact/received"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                "",
+            )
+                .into_response())
+        }
         SubmitOutcome::RateLimited { retry_after_secs } => Ok((
             StatusCode::TOO_MANY_REQUESTS,
             [

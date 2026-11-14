@@ -17,3 +17,4 @@ pub mod taxonomy;
 pub mod themes;
 pub mod users;
 pub mod contact;
+pub mod smtp;

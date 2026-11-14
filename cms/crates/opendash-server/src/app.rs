@@ -114,6 +114,12 @@ pub fn build_router_with_themes_root(
     expected_host: String,
     themes_root: PathBuf,
 ) -> Router {
+    let smtp_secrets_dir = crate::paths::SitePaths::from_env()
+        .map(|p| p.smtp_secrets_dir())
+        .unwrap_or_else(|_| PathBuf::from("database/secrets/smtp"));
+    let secret_store = crate::secrets::SecretStore::new(smtp_secrets_dir);
+    let smtp_service = crate::smtp::SmtpService::new(state.db.clone(), secret_store.clone());
+
     Router::new()
         .route("/", get(public_page))
         .route("/content/{type_key}", get(archive))
@@ -353,12 +359,29 @@ pub fn build_router_with_themes_root(
         .route("/api/admin/plugins/{id}/ui-schema", get(plugin_ui_schema))
         .route("/api/admin/plugins/{id}/disable", post(plugin_disable))
         .route("/api/admin/plugins/{id}/enable", post(plugin_enable))
+        .route(
+            "/api/admin/settings/smtp",
+            get(crate::routes::smtp::get_smtp_settings)
+                .put(crate::routes::smtp::put_smtp_settings)
+                .layer(DefaultBodyLimit::max(crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/settings/smtp/test",
+            post(crate::routes::smtp::test_smtp_settings),
+        )
+        .route(
+            "/api/admin/contact/submissions/{id}/notify",
+            post(crate::routes::smtp::notify_submission)
+                .layer(DefaultBodyLimit::max(crate::routes::smtp::MAX_SMTP_SETTINGS_JSON_BYTES)),
+        )
         .route("/registry", get(registry))
         .route("/page", get(page))
         .route("/theme", post(install))
         .route("/preview", post(preview))
         .route("/save", post(save))
         .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES))
+        .layer(axum::Extension(secret_store))
+        .layer(axum::Extension(smtp_service))
         .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
         .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
             "http://{expected_host}"
