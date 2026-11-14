@@ -129,3 +129,75 @@ export function purgeQuarantine(csrfToken: string): Promise<PurgeQuarantineResul
     defaultErrorMessage: 'Không thể dọn vùng cách ly.',
   });
 }
+
+export interface BackupArtifactView {
+  id: string;
+  filename: string;
+  size_bytes: number;
+  sha256: string;
+  schema_version: number;
+  file_count: number;
+  created_at: string;
+  version: number;
+}
+
+export interface BackupListResponse {
+  artifacts: BackupArtifactView[];
+  jobs: OperationJob[];
+  max_artifacts: number;
+  max_receipts: number;
+  active_artifact_count: number;
+}
+
+export function listBackups(limit = 20): Promise<BackupListResponse> {
+  return requestJson<BackupListResponse>(`/api/admin/operations/backups?limit=${limit}`, {
+    method: 'GET',
+    defaultErrorMessage: 'Không tải được danh sách bản sao lưu.',
+  });
+}
+
+export function createBackup(
+  csrfToken: string,
+  input: { passphrase: string; confirm_passphrase: string; request_id: string; reason?: string },
+): Promise<OperationJob> {
+  return requestJson<OperationJob>('/api/admin/operations/backups', {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể khởi tạo tác vụ sao lưu.',
+  });
+}
+
+export function getOperationJob(id: string): Promise<OperationJob> {
+  return requestJson<OperationJob>(`/api/admin/operations/jobs/${encodeURIComponent(id)}`, {
+    method: 'GET',
+    defaultErrorMessage: 'Không tải được trạng thái tác vụ.',
+  });
+}
+
+export function cancelOperationJob(
+  csrfToken: string,
+  id: string,
+  expectedVersion?: number,
+): Promise<OperationJob> {
+  return requestJson<OperationJob>(`/api/admin/operations/jobs/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify(expectedVersion != null ? { expected_version: expectedVersion } : {}),
+    defaultErrorMessage: 'Không thể hủy tác vụ.',
+  });
+}
+
+export function deleteBackupArtifact(csrfToken: string, id: string): Promise<OperationJob> {
+  return requestJson<OperationJob>(`/api/admin/operations/backups/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    csrfToken,
+    defaultErrorMessage: 'Không thể xóa bản sao lưu.',
+  });
+}
+
+export function getBackupDownloadUrl(id: string): string {
+  return `/api/admin/operations/backups/${encodeURIComponent(id)}/file`;
+}

@@ -356,6 +356,65 @@ pub async fn bump_maintenance_generation(
     get_maintenance_generation(db).await
 }
 
+pub async fn list_backup_jobs(db: &SqlitePool, limit: i64) -> ApiResult<Vec<OperationJob>> {
+    let clamped = limit.clamp(1, MAX_RETAINED_OPERATION_RECEIPTS);
+    let rows = sqlx::query(
+        r#"
+        SELECT id, kind, state, version, actor_user_id, reason, summary_json,
+               error_code, error_message, requested_at, started_at, finished_at, updated_at
+        FROM operation_jobs
+        WHERE kind = 'backup'
+        ORDER BY requested_at DESC, rowid DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(clamped)
+    .fetch_all(db)
+    .await?;
+
+    rows.iter().map(map_job_row).collect()
+}
+
+pub async fn mark_backup_artifact_deleted_cas(
+    db: &SqlitePool,
+    id: &str,
+    expected_version: i64,
+    updated_summary_json: &str,
+) -> ApiResult<OperationJob> {
+    let result = sqlx::query(
+        r#"
+        UPDATE operation_jobs
+        SET summary_json = ?,
+            version = version + 1,
+            updated_at = datetime('now')
+        WHERE id = ? AND kind = 'backup' AND state = 'succeeded' AND version = ?
+        "#,
+    )
+    .bind(updated_summary_json)
+    .bind(id)
+    .bind(expected_version)
+    .execute(db)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản bản sao lưu đã thay đổi hoặc không thể xóa (CAS mismatch).",
+        ));
+    }
+
+    get_job(db, id)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không đọc lại được tác vụ sau khi xóa artifact."))
+}
+
+pub async fn is_active_admin_user(db: &SqlitePool, user_id: i64) -> ApiResult<bool> {
+    let role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(db)
+        .await?;
+    Ok(role.as_deref() == Some("admin"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

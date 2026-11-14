@@ -1,8 +1,6 @@
 mod app;
 mod auth;
-#[allow(dead_code)]
 mod backup;
-#[allow(dead_code)]
 mod backup_archive;
 mod backup_worker;
 mod contact;
@@ -91,7 +89,11 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         },
         content_registry,
         coordinator,
+        backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
     };
+    storage::operations::mark_interrupted_on_startup(&db)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
     media_lifecycle::recover_pending_delete_jobs_on_startup(&db, &state.media_store)
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
