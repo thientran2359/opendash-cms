@@ -1239,6 +1239,7 @@ pub async fn execute_sample_import_with_cutpoint(
                     .bind(menu_id)
                     .execute(&mut *conn)
                     .await?;
+                    crate::storage::menu::bump_slot_version_in_tx(&mut conn, theme_id).await?;
                 }
                 let target_hash = sha256_hex(menu.menu_key.as_bytes());
                 sqlx::query(

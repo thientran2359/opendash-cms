@@ -31,6 +31,10 @@ use crate::{
             entry_preview, entry_publication, entry_update,
         },
         media::{media_list, media_original, media_thumbnail, media_upload},
+        menu::{
+            MAX_MENU_JSON_BYTES, menu_slots_get, menu_slots_put, menus_create, menus_delete,
+            menus_get, menus_list, menus_preview, menus_put,
+        },
         import::{import_dry_run, import_execute},
         plugin::{
             MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES, plugin_disable, plugin_enable,
@@ -169,6 +173,29 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/settings/timezones", get(timezones_get))
+        .route(
+            "/api/admin/menus",
+            get(menus_list)
+                .post(menus_create)
+                .layer(DefaultBodyLimit::max(MAX_MENU_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/menus/{id}",
+            get(menus_get)
+                .put(menus_put)
+                .delete(menus_delete)
+                .layer(DefaultBodyLimit::max(MAX_MENU_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/menus/{id}/preview",
+            post(menus_preview).layer(DefaultBodyLimit::max(MAX_MENU_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/menu-slots/{theme_id}",
+            get(menu_slots_get)
+                .put(menu_slots_put)
+                .layer(DefaultBodyLimit::max(MAX_MENU_JSON_BYTES)),
+        )
         .route(
             "/api/admin/taxonomy/terms",
             get(taxonomy_list)
