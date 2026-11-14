@@ -58,3 +58,4 @@ pub async fn check_db_ready(db: &SqlitePool) -> Result<(), sqlx::Error> {
         .await?;
     Ok(())
 }
+pub mod contact;

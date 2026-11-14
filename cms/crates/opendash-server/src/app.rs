@@ -124,6 +124,34 @@ pub fn build_router_with_themes_root(
         .route("/media/{id}/thumbnail", get(media_thumb))
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))
         .route("/api/health", get(crate::routes::health::status))
+        .route("/api/public/contact/received", get(crate::routes::contact::public_received))
+        .route(
+            "/api/public/contact/{id}",
+            post(crate::routes::contact::public_submit)
+                .layer(DefaultBodyLimit::max(crate::routes::contact::MAX_PUBLIC_CONTACT_FORM_BYTES)),
+        )
+        .route(
+            "/api/admin/contact/forms",
+            get(crate::routes::contact::admin_list_forms)
+                .post(crate::routes::contact::admin_create_form)
+                .layer(DefaultBodyLimit::max(crate::routes::contact::MAX_ADMIN_FORM_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/contact/forms/{id}",
+            get(crate::routes::contact::admin_get_form)
+                .put(crate::routes::contact::admin_update_form)
+                .delete(crate::routes::contact::admin_delete_form)
+                .layer(DefaultBodyLimit::max(crate::routes::contact::MAX_ADMIN_FORM_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/contact/submissions",
+            get(crate::routes::contact::admin_list_submissions),
+        )
+        .route(
+            "/api/admin/contact/submissions/{id}",
+            get(crate::routes::contact::admin_get_submission)
+                .delete(crate::routes::contact::admin_delete_submission),
+        )
         .route("/robots.txt", get(crate::routes::sitemap::robots_txt))
         .route("/sitemap.xml", get(crate::routes::sitemap::sitemap_index))
         .route("/sitemaps/{part}", get(crate::routes::sitemap::sitemap_part))
@@ -331,6 +359,10 @@ pub fn build_router_with_themes_root(
         .route("/preview", post(preview))
         .route("/save", post(save))
         .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES))
+        .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
+        .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
+            "http://{expected_host}"
+        ))))
         .layer(middleware::from_fn(move |request: Request, next: Next| {
             let valid_host = request
                 .headers()
@@ -347,7 +379,9 @@ pub fn build_router_with_themes_root(
             );
 
             let mut origin_valid = true;
-            if is_mutation {
+            let is_public_contact_submit = *request.method() == axum::http::Method::POST
+                && request.uri().path().starts_with("/api/public/contact/");
+            if is_mutation && !is_public_contact_submit {
                 let expected_origin = format!("http://{expected_host}");
 
                 if let Some(origin) = request
