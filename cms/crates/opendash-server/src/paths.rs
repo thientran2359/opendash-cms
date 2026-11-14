@@ -92,6 +92,31 @@ impl SitePaths {
         self.site_root.join("backups")
     }
 
+    #[allow(dead_code)]
+    pub fn backups_staging_dir(&self) -> PathBuf {
+        self.backups_dir().join(".staging")
+    }
+
+    #[allow(dead_code)]
+    pub fn backups_artifacts_dir(&self) -> PathBuf {
+        self.backups_dir().join("artifacts")
+    }
+
+    #[allow(dead_code)]
+    pub fn backups_restored_dir(&self) -> PathBuf {
+        self.backups_dir().join("restored")
+    }
+
+    #[allow(dead_code)]
+    pub fn config_dir(&self) -> PathBuf {
+        self.site_root.join("config")
+    }
+
+    #[allow(dead_code)]
+    pub fn site_config_path(&self) -> PathBuf {
+        self.config_dir().join("site.json")
+    }
+
     /// Same-volume staging directory inside `site_root` for ZIP extraction
     /// and atomic swap operations on Windows and Linux.
     #[allow(dead_code)]

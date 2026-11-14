@@ -170,7 +170,7 @@ impl SecretStore {
     }
 }
 
-fn ensure_no_reparse_or_symlink(path: &Path) -> ApiResult<()> {
+pub fn ensure_no_reparse_or_symlink(path: &Path) -> ApiResult<()> {
     match fs::symlink_metadata(path) {
         Ok(meta) => {
             if meta.file_type().is_symlink() {
@@ -191,6 +191,18 @@ fn ensure_no_reparse_or_symlink(path: &Path) -> ApiResult<()> {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(_) => Err(ApiError::internal("Không thể kiểm tra metadata kho bí mật.")),
     }
+}
+
+pub fn ensure_private_directory_tree(dir: &Path) -> ApiResult<()> {
+    ensure_no_reparse_or_symlink(dir)?;
+    fs::create_dir_all(dir).map_err(|_| ApiError::internal("Không thể tạo thư mục riêng tư."))?;
+    ensure_no_reparse_or_symlink(dir)?;
+    platform::apply_and_verify_dir_acl(dir)?;
+    Ok(())
+}
+
+pub fn create_private_file(path: &Path) -> ApiResult<File> {
+    create_protected_empty_file(path)
 }
 
 fn create_protected_empty_file(path: &Path) -> ApiResult<File> {
