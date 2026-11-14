@@ -242,6 +242,165 @@ where
     Ok(files)
 }
 
+pub const BACKUP_MAX_ZIP_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+pub const BACKUP_MAX_CD_BYTES: u32 = 16 * 1024 * 1024;
+pub const BACKUP_MAX_ENTRIES: usize = 20_001;
+pub const BACKUP_MAX_ENTRY_NAME_BYTES: usize = 13;
+
+/// Preflights a file-backed backup ZIP32 archive before calling `ZipArchive::new`.
+/// Rejects ZIP64, oversized central directory, comments, extra fields, non-Store
+/// compression, encrypted entries, excessive entry counts, and overlapping offsets.
+pub fn preflight_and_open_backup_zip(
+    file: std::fs::File,
+) -> Result<ZipArchive<std::io::BufReader<std::fs::File>>, &'static str> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut reader = std::io::BufReader::new(file);
+    let file_len = reader
+        .seek(SeekFrom::End(0))
+        .map_err(|_| "Không xác định được kích thước tệp backup ZIP.")?;
+    if file_len < 22 || file_len > BACKUP_MAX_ZIP_BYTES {
+        return Err("Kích thước tệp backup ZIP nằm ngoài giới hạn hợp lệ.");
+    }
+
+    let eocd_offset = file_len - 22;
+    reader
+        .seek(SeekFrom::Start(eocd_offset))
+        .map_err(|_| "Không đọc được EOCD của backup ZIP.")?;
+    let mut eocd = [0u8; 22];
+    reader
+        .read_exact(&mut eocd)
+        .map_err(|_| "Không đọc đủ EOCD của backup ZIP.")?;
+
+    if &eocd[0..4] != b"PK\x05\x06" {
+        return Err("Backup ZIP thiếu ZIP32 EOCD hợp lệ hoặc chứa comment cuối tệp.");
+    }
+    let disk_num = u16::from_le_bytes([eocd[4], eocd[5]]);
+    let cd_disk = u16::from_le_bytes([eocd[6], eocd[7]]);
+    let entries_disk = u16::from_le_bytes([eocd[8], eocd[9]]);
+    let entries_total = u16::from_le_bytes([eocd[10], eocd[11]]);
+    let cd_size = u32::from_le_bytes([eocd[12], eocd[13], eocd[14], eocd[15]]);
+    let cd_offset = u32::from_le_bytes([eocd[16], eocd[17], eocd[18], eocd[19]]);
+    let comment_len = u16::from_le_bytes([eocd[20], eocd[21]]);
+
+    if disk_num != 0
+        || cd_disk != 0
+        || entries_disk != entries_total
+        || entries_total == u16::MAX
+        || entries_total == 0
+        || (entries_total as usize) > BACKUP_MAX_ENTRIES
+        || cd_size == u32::MAX
+        || cd_offset == u32::MAX
+        || cd_size > BACKUP_MAX_CD_BYTES
+        || comment_len != 0
+    {
+        return Err("Header ZIP32 EOCD của backup không hợp lệ hoặc vượt ngưỡng.");
+    }
+
+    if (cd_offset as u64)
+        .checked_add(cd_size as u64)
+        .is_none_or(|end| end != eocd_offset)
+    {
+        return Err("Offset/kích thước Central Directory của backup ZIP không khớp.");
+    }
+
+    if eocd_offset >= 20 {
+        let mut loc_sig = [0u8; 4];
+        reader
+            .seek(SeekFrom::Start(eocd_offset - 20))
+            .map_err(|_| "Không kiểm tra được ZIP64 locator.")?;
+        reader
+            .read_exact(&mut loc_sig)
+            .map_err(|_| "Không đọc được ZIP64 locator.")?;
+        if &loc_sig == b"PK\x06\x07" {
+            return Err("Backup ZIP64 không được hỗ trợ trong format v1.");
+        }
+    }
+
+    reader
+        .seek(SeekFrom::Start(cd_offset as u64))
+        .map_err(|_| "Không seek được tới Central Directory của backup ZIP.")?;
+    let mut cd_buf = vec![0u8; cd_size as usize];
+    reader
+        .read_exact(&mut cd_buf)
+        .map_err(|_| "Không đọc trọn vẹn Central Directory của backup ZIP.")?;
+
+    let mut pos = 0usize;
+    let mut spans: Vec<(u64, u64)> = Vec::with_capacity(entries_total as usize);
+    for _ in 0..entries_total {
+        if pos + 46 > cd_buf.len() {
+            return Err("Central Directory backup ZIP bị cắt cụt.");
+        }
+        let hdr = &cd_buf[pos..pos + 46];
+        if &hdr[0..4] != b"PK\x01\x02" {
+            return Err("Entry Central Directory backup ZIP sai chữ ký.");
+        }
+        let flags = u16::from_le_bytes([hdr[8], hdr[9]]);
+        let method = u16::from_le_bytes([hdr[10], hdr[11]]);
+        let comp_size = u32::from_le_bytes([hdr[20], hdr[21], hdr[22], hdr[23]]);
+        let uncomp_size = u32::from_le_bytes([hdr[24], hdr[25], hdr[26], hdr[27]]);
+        let name_len = u16::from_le_bytes([hdr[28], hdr[29]]) as usize;
+        let extra_len = u16::from_le_bytes([hdr[30], hdr[31]]) as usize;
+        let entry_comment_len = u16::from_le_bytes([hdr[32], hdr[33]]) as usize;
+        let disk_start = u16::from_le_bytes([hdr[34], hdr[35]]);
+        let local_offset = u32::from_le_bytes([hdr[42], hdr[43], hdr[44], hdr[45]]);
+
+        if (flags & 0x0001) != 0
+            || method != 0
+            || comp_size == u32::MAX
+            || uncomp_size == u32::MAX
+            || comp_size != uncomp_size
+            || name_len == 0
+            || name_len > BACKUP_MAX_ENTRY_NAME_BYTES
+            || extra_len != 0
+            || entry_comment_len != 0
+            || disk_start != 0
+            || local_offset == u32::MAX
+        {
+            return Err("Entry backup ZIP vi phạm profile Store/ZIP32.");
+        }
+
+        let name_start = pos + 46;
+        let name_end = name_start + name_len;
+        if name_end > cd_buf.len() {
+            return Err("Tên entry backup ZIP vượt quá Central Directory.");
+        }
+        let name_bytes = &cd_buf[name_start..name_end];
+        if !name_bytes.iter().all(|b| b.is_ascii() && !b.is_ascii_control())
+            || name_bytes.contains(&b'/')
+            || name_bytes.contains(&b'\\')
+        {
+            return Err("Tên entry backup ZIP không hợp lệ.");
+        }
+
+        let span_start = local_offset as u64;
+        let span_len = 30u64 + (name_len as u64) + (comp_size as u64);
+        let span_end = span_start
+            .checked_add(span_len)
+            .ok_or("Offset entry backup ZIP bị tràn số.")?;
+        if span_end > (cd_offset as u64) {
+            return Err("Payload entry backup ZIP vượt quá vùng dữ liệu trước Central Directory.");
+        }
+        spans.push((span_start, span_end));
+        pos = name_end;
+    }
+    if pos != cd_buf.len() {
+        return Err("Central Directory backup ZIP có dữ liệu dư thừa.");
+    }
+
+    spans.sort_unstable_by_key(|s| s.0);
+    for w in spans.windows(2) {
+        if w[0].1 > w[1].0 {
+            return Err("Các entry trong backup ZIP có vùng byte chồng chéo.");
+        }
+    }
+
+    reader
+        .seek(SeekFrom::Start(0))
+        .map_err(|_| "Không tua lại được backup ZIP.")?;
+    ZipArchive::new(reader).map_err(|_| "Không mở được backup ZIP sau preflight.")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

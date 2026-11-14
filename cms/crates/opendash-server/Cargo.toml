@@ -9,6 +9,7 @@ path = "src/main.rs"
 
 [dependencies]
 opendash-core = { path = "../opendash-core" }
+age = { workspace = true }
 argon2 = { workspace = true }
 axum = { workspace = true }
 http-body = { workspace = true }
