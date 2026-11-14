@@ -6,6 +6,7 @@ mod document;
 mod error;
 mod hooks;
 mod media;
+mod media_video;
 mod package;
 mod page;
 mod paths;
@@ -59,7 +60,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db: db.clone(),
         plugin_manager,
         hooks,
-        media_store: Arc::new(MediaStore::new(paths.uploads_dir())),
+        media_store: {
+            let store = Arc::new(MediaStore::new(paths.uploads_dir()));
+            store.cleanup_staging().await;
+            store
+        },
         content_registry,
     };
 

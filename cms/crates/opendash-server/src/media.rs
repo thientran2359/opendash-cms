@@ -36,6 +36,10 @@ pub struct DecodedMedia {
 impl DecodedMedia {
     pub fn metadata(&self, filename: String) -> MediaAsset {
         MediaAsset {
+            kind: "image".to_string(),
+            duration_ms: None,
+            video_codec: None,
+            audio_codec: None,
             id: self.id.clone(),
             filename,
             mime_type: self.mime_type.into(),
@@ -43,8 +47,8 @@ impl DecodedMedia {
             byte_size: self.original.len() as i64,
             width: self.width as i64,
             height: self.height as i64,
-            thumb_width: self.thumb_width as i64,
-            thumb_height: self.thumb_height as i64,
+            thumb_width: Some(self.thumb_width as i64),
+            thumb_height: Some(self.thumb_height as i64),
             created_at: String::new(), // SQLite supplies timestamp.
         }
     }
@@ -138,7 +142,12 @@ impl MediaStore {
     }
 
     fn path(&self, id: &str, extension: &str, thumbnail: bool) -> ApiResult<PathBuf> {
-        if !valid_media_id(id) || !matches!(extension, "png" | "jpg" | "webp") {
+        let allowed_ext = if thumbnail {
+            matches!(extension, "png" | "jpg" | "webp")
+        } else {
+            matches!(extension, "png" | "jpg" | "webp" | "mp4")
+        };
+        if !valid_media_id(id) || !allowed_ext {
             return Err(ApiError::bad_request("Mã ảnh không hợp lệ."));
         }
         let file = if thumbnail {
@@ -166,7 +175,56 @@ impl MediaStore {
             .await
             .map_err(|_| ApiError::internal("Không đọc được file ảnh đã lưu."))
     }
+
+    pub fn staging_dir(&self) -> PathBuf {
+        self.root.join(".staging")
+    }
+
+    pub async fn cleanup_staging(&self) {
+        let dir = self.staging_dir();
+        if let Ok(mut entries) = fs::read_dir(&dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let _ = fs::remove_file(entry.path()).await;
+            }
+        }
+    }
+
+    pub async fn create_video_staging_path(&self) -> ApiResult<PathBuf> {
+        static NEXT_STAGING: AtomicU64 = AtomicU64::new(0);
+        let dir = self.staging_dir();
+        fs::create_dir_all(&dir)
+            .await
+            .map_err(|_| ApiError::internal("Không tạo được thư mục tạm cho video."))?;
+        let seq = NEXT_STAGING.fetch_add(1, Ordering::Relaxed);
+        Ok(dir.join(format!("video-{}-{seq}.part", std::process::id())))
+    }
+
+    pub async fn persist_video_from_staging(
+        &self,
+        staging: &std::path::Path,
+        id: &str,
+    ) -> ApiResult<()> {
+        let target = self.path(id, "mp4", false)?;
+        if fs::try_exists(&target).await.unwrap_or(false) {
+            let _ = fs::remove_file(staging).await;
+            return Ok(());
+        }
+        fs::create_dir_all(target.parent().expect("media path has parent"))
+            .await
+            .map_err(|_| ApiError::internal("Không tạo được thư mục Media Library."))?;
+        if let Err(error) = fs::rename(staging, &target).await {
+            let _ = fs::remove_file(staging).await;
+            if error.kind() == std::io::ErrorKind::AlreadyExists
+                && fs::try_exists(&target).await.unwrap_or(false)
+            {
+                return Ok(());
+            }
+            return Err(ApiError::internal("Không lưu được file video an toàn."));
+        }
+        Ok(())
+    }
 }
+
 
 async fn write_once(path: &std::path::Path, bytes: &[u8]) -> ApiResult<()> {
     use tokio::io::AsyncWriteExt;

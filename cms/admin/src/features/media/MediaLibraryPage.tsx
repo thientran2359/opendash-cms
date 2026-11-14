@@ -153,7 +153,7 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
                     onClick={() => setSelectedId(asset.id)} aria-pressed={selectedId === asset.id}
                     aria-label={`Xem chi tiết ảnh ${asset.filename}`} disabled={uploading}>
                     <span className="od-media-thumb"><img src={mediaThumbnailUrl(asset.id)} alt=""
-                      width={asset.thumb_width} height={asset.thumb_height} loading="lazy" /></span>
+                      width={asset.thumb_width ?? undefined} height={asset.thumb_height ?? undefined} loading="lazy" /></span>
                     <span className="od-media-card-body"><strong title={asset.filename}>{asset.filename}</strong>
                       <small>{asset.width} × {asset.height} · {formatMediaBytes(asset.byte_size)}</small></span>
                   </button>

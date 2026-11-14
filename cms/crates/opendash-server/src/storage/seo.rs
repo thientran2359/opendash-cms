@@ -519,7 +519,7 @@ async fn verify_og_media_exists_in_tx(
         return Ok(());
     };
     let exists: Option<String> =
-        sqlx::query_scalar("SELECT id FROM media_assets WHERE id = ?")
+        sqlx::query_scalar("SELECT id FROM media_assets WHERE id = ? AND kind = 'image'")
             .bind(mid)
             .fetch_optional(&mut *conn)
             .await?;
