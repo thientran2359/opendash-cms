@@ -246,6 +246,25 @@ impl BackupRuntimeRegistry {
             .remove(job_id);
     }
 
+    pub async fn cancel_and_drain_all(&self, timeout: Duration) {
+        {
+            let map = self.active_cancels.lock().expect("cancel mutex");
+            for flag in map.values() {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let handles: Vec<(String, tokio::task::JoinHandle<()>)> = {
+            let mut guard = self.active_handles.lock().await;
+            guard.drain().collect()
+        };
+        let _ = tokio::time::timeout(timeout, async move {
+            for (_id, h) in handles {
+                let _ = h.await;
+            }
+        })
+        .await;
+    }
+
     pub fn acquire_download_lease(
         self: &std::sync::Arc<Self>,
         job_id: &str,

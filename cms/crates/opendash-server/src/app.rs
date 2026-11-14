@@ -73,6 +73,7 @@ pub struct AppState {
     pub coordinator: Arc<crate::operations::SiteCoordinator>,
     pub backup_registry: Arc<crate::backup::BackupRuntimeRegistry>,
     pub recovery: crate::config::RecoveryState,
+    pub runtime_config: crate::config::RuntimeConfigV1,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -133,6 +134,9 @@ pub fn build_router_with_themes_root(
     let secret_store = crate::secrets::SecretStore::new(smtp_secrets_dir);
     let smtp_service = crate::smtp::SmtpService::with_recovery_state(state.db.clone(), secret_store.clone(), state.recovery.clone());
     let recovery_for_mw = state.recovery.clone();
+    let trusted_host = state.runtime_config.trusted_host();
+    let trusted_origin = state.runtime_config.trusted_origin_normalized().map(str::to_string);
+    let trusted_is_https = state.runtime_config.trusted_origin_is_https();
 
     Router::new()
         .route("/", get(public_page))
@@ -467,17 +471,37 @@ pub fn build_router_with_themes_root(
         .layer(axum::Extension(secret_store))
         .layer(axum::Extension(smtp_service))
         .layer(axum::Extension(state.recovery.clone()))
+        .layer(axum::Extension(state.runtime_config.clone()))
         .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
         .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
             "http://{expected_host}"
         ))))
         .layer(middleware::from_fn(move |request: Request, next: Next| {
-            let valid_host = request
+            let host_vals: Vec<&str> = request
                 .headers()
-                .get(header::HOST)
-                .and_then(|h| h.to_str().ok())
-                == Some(expected_host.as_str());
-
+                .get_all(header::HOST)
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .collect();
+            let valid_host = host_vals.len() == 1
+                && request.headers().get_all(header::HOST).iter().count() == 1
+                && {
+                    let raw = host_vals[0];
+                    let clean = !raw.is_empty()
+                        && !raw.chars().any(|c| c.is_control() || c.is_whitespace())
+                        && !raw.contains('@')
+                        && !raw.contains('/');
+                    let normalized = if trusted_is_https {
+                        raw.strip_suffix(":443").unwrap_or(raw)
+                    } else {
+                        raw.strip_suffix(":80").unwrap_or(raw)
+                    };
+                    clean
+                        && (raw == expected_host.as_str()
+                            || trusted_host
+                                .as_deref()
+                                .is_some_and(|th| normalized == th || raw == th))
+                };
             let is_mutation = matches!(
                 *request.method(),
                 axum::http::Method::POST
@@ -486,20 +510,25 @@ pub fn build_router_with_themes_root(
                     | axum::http::Method::PATCH
             );
 
-            let mut origin_valid = true;
+            let mut origin_valid = request.headers().get_all(header::ORIGIN).iter().count() <= 1;
             let is_public_contact_submit = *request.method() == axum::http::Method::POST
                 && request.uri().path().starts_with("/api/public/contact/");
-            if is_mutation && !is_public_contact_submit {
+            if origin_valid && is_mutation && !is_public_contact_submit {
                 let expected_origin = format!("http://{expected_host}");
-
-                if let Some(origin) = request
-                    .headers()
-                    .get(header::ORIGIN)
-                    .and_then(|h| h.to_str().ok())
-                {
-                    if origin != expected_origin {
+                let origin_hdr = request.headers().get(header::ORIGIN).and_then(|h| h.to_str().ok());
+                if let Some(origin) = origin_hdr {
+                    let clean = !origin.is_empty()
+                        && !origin.eq_ignore_ascii_case("null")
+                        && !origin.chars().any(|c| c.is_control() || c.is_whitespace())
+                        && !origin.contains('@');
+                    let allowed = origin == expected_origin
+                        || trusted_origin.as_deref().is_some_and(|to| origin == to);
+                    if !clean || !allowed {
                         origin_valid = false;
                     }
+                } else if trusted_origin.is_some() {
+                    // Remote/proxy deployment: mandatory Origin header on mutations (no missing-header or Referer loophole).
+                    origin_valid = false;
                 } else if let Some(referer) = request
                     .headers()
                     .get(header::REFERER)
@@ -511,7 +540,6 @@ pub fn build_router_with_themes_root(
                     }
                 }
             }
-
             async move {
                 if !valid_host {
                     StatusCode::BAD_REQUEST.into_response()

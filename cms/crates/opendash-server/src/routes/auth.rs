@@ -30,6 +30,7 @@ pub async fn auth_setup(
 
 pub async fn auth_login(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    runtime_cfg: Option<axum::Extension<crate::config::RuntimeConfigV1>>,
     State(db): State<SqlitePool>,
     Json(input): Json<AuthInput>,
 ) -> ApiResult<Response> {
@@ -59,7 +60,9 @@ pub async fn auth_login(
         return Err(invalid_creds());
     }
 
-    let cookie_header = auth::session_cookie_header(&session_token);
+    let secure_cookie =
+        runtime_cfg.is_some_and(|axum::Extension(cfg)| cfg.trusted_origin_is_https());
+    let cookie_header = auth::session_cookie_header_with_secure(&session_token, secure_cookie);
     let body = Json(AuthResponse {
         user: AuthUser { id, username, role },
         csrf_token,
@@ -81,11 +84,14 @@ pub async fn auth_me(
 
 pub async fn auth_logout(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    runtime_cfg: Option<axum::Extension<crate::config::RuntimeConfigV1>>,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
     let session = require_session_with_csrf(&headers, &db).await?;
     auth::delete_session(&db, &session.token_hash).await?;
-    let clear_cookie = auth::clear_session_cookie_header();
+    let secure_cookie =
+        runtime_cfg.is_some_and(|axum::Extension(cfg)| cfg.trusted_origin_is_https());
+    let clear_cookie = auth::clear_session_cookie_header_with_secure(secure_cookie);
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, clear_cookie)]).into_response())
 }

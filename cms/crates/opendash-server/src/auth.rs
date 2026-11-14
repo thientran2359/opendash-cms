@@ -176,6 +176,18 @@ pub fn current_time_secs() -> i64 {
         .as_secs() as i64
 }
 
+pub fn session_cookie_header_with_secure(token: &str, secure: bool) -> String {
+    let sec = if secure { "; Secure" } else { "" };
+    format!(
+        "{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_DURATION_SECS}{sec}"
+    )
+}
+
+pub fn clear_session_cookie_header_with_secure(secure: bool) -> String {
+    let sec = if secure { "; Secure" } else { "" };
+    format!("{SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{sec}")
+}
+
 pub fn session_cookie_header(token: &str) -> String {
     format!(
         "{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_DURATION_SECS}"

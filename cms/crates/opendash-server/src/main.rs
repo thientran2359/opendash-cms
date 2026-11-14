@@ -28,7 +28,7 @@ mod storage;
 mod template_sec;
 mod theme;
 
-use std::{env, net::Ipv4Addr, sync::Arc};
+use std::{env, sync::Arc};
 
 use app::{AppState, build_router};
 use hooks::HookDispatcher;
@@ -37,6 +37,13 @@ use plugin::PluginManager;
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().any(|a| a == "--check-config") {
+        let paths = paths::SitePaths::from_env()?;
+        let cfg = config::RuntimeConfigV1::load(&paths).map_err(|e| format!("{}: {}", e.0, e.1))?;
+        println!("{}", cfg.redacted_summary_json());
+        return Ok(());
+    }
+
     if std::env::args().any(|a| a == "--operations-worker") {
         let code = crate::backup_worker::run_operations_worker_from_stdio();
         std::process::exit(code);
@@ -99,6 +106,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         coordinator,
         backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
         recovery,
+        runtime_config: runtime_cfg.clone(),
     };
     storage::operations::mark_interrupted_on_startup(&db)
         .await
@@ -112,7 +120,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = env::var("OPENDASH_PORT")
         .unwrap_or_else(|_| "18766".into())
         .parse::<u16>();
-    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
+    let listen_ip: std::net::IpAddr = runtime_cfg.portable.listen_ip.parse()?;
+    let state_for_shutdown = state.clone();
+    let listener = tokio::net::TcpListener::bind((listen_ip, port)).await?;
     let address = listener.local_addr()?;
     let app = build_router(state, address.to_string());
 
@@ -121,6 +131,39 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await?;
+
+    state_for_shutdown
+        .backup_registry
+        .cancel_and_drain_all(std::time::Duration::from_secs(30))
+        .await;
+    state_for_shutdown.db.close().await;
+    drop(state_for_shutdown);
     Ok(())
+}
+
+static SHUTDOWN_REQUESTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn handle_termination_signal(_sig: std::ffi::c_int) {
+    SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+async fn shutdown_signal() {
+    unsafe extern "C" {
+        fn signal(
+            sig: std::ffi::c_int,
+            handler: extern "C" fn(std::ffi::c_int),
+        ) -> usize;
+    }
+    const SIGINT: std::ffi::c_int = 2;
+    const SIGTERM: std::ffi::c_int = 15;
+    unsafe {
+        let _ = signal(SIGINT, handle_termination_signal);
+        let _ = signal(SIGTERM, handle_termination_signal);
+    }
+    while !SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 }
