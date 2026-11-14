@@ -1,5 +1,6 @@
 mod app;
 mod auth;
+mod contact;
 mod content_render;
 mod document;
 mod error;
@@ -65,6 +66,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = build_router(state, address.to_string());
 
     println!("OpenDash: http://{address}/builder");
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
