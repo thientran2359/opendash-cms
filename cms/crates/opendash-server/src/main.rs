@@ -1,5 +1,8 @@
 mod app;
 mod auth;
+#[allow(dead_code)]
+mod backup;
+mod backup_worker;
 mod contact;
 mod content_render;
 mod document;
@@ -29,8 +32,13 @@ use hooks::HookDispatcher;
 use media::MediaStore;
 use plugin::PluginManager;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().any(|a| a == "--operations-worker") {
+        let code = crate::backup_worker::run_operations_worker_from_stdio();
+        std::process::exit(code);
+    }
+
     if std::env::args().any(|a| a == "--plugin-worker")
         || std::env::var("OPENDASH_WORKER_CHILD").is_ok()
     {
@@ -38,6 +46,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = paths::SitePaths::from_env()?;
     let coordinator = Arc::new(operations::SiteCoordinator::acquire(paths)?);
     let paths = coordinator.paths().clone();

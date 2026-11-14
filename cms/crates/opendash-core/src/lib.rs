@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod builder;
 pub mod contact;
 pub mod content;

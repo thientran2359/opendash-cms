@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod backup;
 pub mod builder;
 pub mod builder_binding;
 pub mod content;
