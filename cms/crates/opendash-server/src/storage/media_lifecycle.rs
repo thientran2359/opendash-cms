@@ -315,3 +315,22 @@ pub async fn list_pending_delete_jobs(db: &SqlitePool) -> ApiResult<Vec<MediaDel
 
     rows.iter().map(map_delete_job_row).collect()
 }
+
+pub async fn list_all_delete_jobs(db: &SqlitePool) -> ApiResult<Vec<MediaDeleteJob>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT job_id, media_id, generation, expected_version, phase,
+               original_rel_path, thumbnail_rel_path,
+               quarantine_original_rel_path, quarantine_thumbnail_rel_path,
+               original_moved, thumbnail_moved, error_code,
+               created_at, updated_at, completed_at
+        FROM media_delete_jobs
+        ORDER BY created_at DESC, job_id DESC
+        LIMIT 200
+        "#,
+    )
+    .fetch_all(db)
+    .await?;
+
+    rows.iter().map(map_delete_job_row).collect()
+}
