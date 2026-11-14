@@ -505,6 +505,7 @@ pub async fn create_entry_with_fence(
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, ids).await?;
@@ -571,6 +572,14 @@ pub async fn update_entry_with_fence(
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
+    let old_slug: String = sqlx::query_scalar(
+        "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, ids).await?;
@@ -603,6 +612,7 @@ pub async fn update_entry_with_fence(
             if let Some(ids) = &input.term_ids {
                 replace_term_ids(&mut tx, id, ids).await?;
             }
+            crate::storage::seo::record_slug_change_redirect_in_tx(&mut tx, id, type_key, &old_slug, &input.slug).await?;
             let row: EntryRow = sqlx::query_as(
                 "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",

@@ -13,7 +13,7 @@ use opendash_core::{content::ContentTypeDefinition, id::valid_kebab_segment_with
 use sqlx::SqlitePool;
 
 use crate::{
-    content_render::{self, SiteContext, entry_view},
+    content_render::{self, SiteContext, entry_view_with_url},
     error::{ApiError, ApiResult},
     media::MediaStore,
     public_context::{
@@ -83,9 +83,13 @@ pub async fn archive(
         public_content::list_published(&db, &type_key, ARCHIVE_SIZE + 1, offset, filters).await?;
     let has_more = records.len() > ARCHIVE_SIZE as usize;
     records.truncate(ARCHIVE_SIZE as usize);
+    let entry_urls = crate::storage::seo::resolve_public_entry_paths_by_ids(&db, &records).await?;
     let entries: Vec<_> = records
         .into_iter()
-        .map(|record| entry_view(record, &schema))
+        .map(|record| {
+            let u = entry_urls.get(&record.id).cloned();
+            entry_view_with_url(record, &schema, u)
+        })
         .collect();
     let previous = (page > 1)
         .then(|| {
@@ -167,17 +171,55 @@ pub async fn single(
     if uri.path() != canonical_path {
         return Err(ApiError::not_found("Đường dẫn nội dung không hợp lệ."));
     }
+    if let Some(custom_path) =
+        crate::storage::seo::custom_path_for_published_slug(&db, &type_key, &slug).await?
+    {
+        return Ok((
+            StatusCode::MOVED_PERMANENTLY,
+            [(axum::http::header::LOCATION, custom_path)],
+            "",
+        )
+            .into_response());
+    }
+    let entry = match public_content::get_by_slug(&db, &type_key, &slug).await? {
+        Some(entry) => entry,
+        None => {
+            if let crate::storage::seo::PublicRouteResolution::Redirect { location } =
+                crate::storage::seo::resolve_custom_or_redirect_path(&db, uri.path()).await?
+            {
+                return Ok((
+                    StatusCode::MOVED_PERMANENTLY,
+                    [(axum::http::header::LOCATION, location)],
+                    "",
+                )
+                    .into_response());
+            }
+            return Err(ApiError::not_found("Không tìm thấy nội dung."));
+        }
+    };
+    render_single_entry_response(&db, themes_root, entry, Some(canonical_path)).await
+}
+
+pub(crate) async fn render_single_entry_response(
+    db: &SqlitePool,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
+    entry: crate::storage::entries::ContentEntryRecord,
+    canonical_path_override: Option<String>,
+) -> ApiResult<Response> {
+    let db = db.clone();
+    let type_key = entry.content_type_key.clone();
+    let slug = entry.slug.clone();
     let schema = load_content_type_definition(&db, &type_key)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
-    let entry = public_content::get_by_slug(&db, &type_key, &slug)
-        .await?
+    let canonical_path = canonical_path_override
+        .or_else(|| CanonicalUrlBuilder::entry_from_id(entry.id, &type_key, &slug))
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
     let _context = PublicRequestContext::Single {
         entry_id: entry.id,
         type_key: type_key.clone(),
         slug: slug.clone(),
-        canonical_path,
+        canonical_path: canonical_path.clone(),
     };
     let active_v2 = match themes_root {
         Some(Extension(root)) => theme_storage::load_active_v2_role_templates(&db, &root.0).await?,
@@ -204,7 +246,7 @@ pub async fn single(
         Some(record) => overrides::render_override_for_public(&db, &record, Some((&type_key, &slug))).await?.html,
         None => content_render::render_single_with_site(
             &schema,
-            &entry_view(entry, &schema),
+            &entry_view_with_url(entry, &schema, Some(canonical_path)),
             selected,
             &site_ctx,
         )?,
@@ -288,6 +330,7 @@ async fn taxonomy_archive(
         canonical_path: CanonicalUrlBuilder::taxonomy_page(kind, &term.slug, query)
             .unwrap_or_default(),
     };
+    let entry_urls = crate::storage::seo::resolve_public_entry_paths_by_ids(db, &page.entries).await?;
     let mut schemas = BTreeMap::new();
     let mut entries = Vec::new();
     for record in page.entries {
@@ -299,7 +342,8 @@ async fn taxonomy_archive(
             schemas.insert(type_key.clone(), schema);
         }
         if let Some(schema) = schemas.get(&type_key) {
-            entries.push(entry_view(record, schema));
+            let u = entry_urls.get(&record.id).cloned();
+            entries.push(entry_view_with_url(record, schema, u));
         }
     }
     let previous = (query.page > 1)

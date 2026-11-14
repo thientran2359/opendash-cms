@@ -86,13 +86,15 @@ pub async fn insert_user_content_type(
         return Err(ApiError::conflict("post/page là khóa Core được bảo vệ."));
     }
     let definition_json = serde_json::to_string(definition)?;
+    let mut tx = db.begin().await?;
+    crate::storage::seo::check_cpt_root_claim_in_tx(&mut tx, &definition.key).await?;
     let result = sqlx::query(
         "INSERT INTO content_types (key, definition_json, owner_kind, owner_id, provider_status, declaration_state)
          VALUES (?, ?, 'user', NULL, 'active', 'declared')",
     )
     .bind(&definition.key)
     .bind(&definition_json)
-    .execute(db)
+    .execute(&mut *tx)
     .await;
 
     match result {
@@ -101,6 +103,7 @@ pub async fn insert_user_content_type(
         }
         other => {
             other?;
+            tx.commit().await?;
             Ok(OwnedDescriptor {
                 owner: ResourceOwner::User,
                 status: ProviderStatus::Active,

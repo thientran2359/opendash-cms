@@ -10,6 +10,7 @@ mod paths;
 mod plugin;
 mod public_context;
 mod routes;
+mod seo;
 mod storage;
 mod template_sec;
 mod theme;

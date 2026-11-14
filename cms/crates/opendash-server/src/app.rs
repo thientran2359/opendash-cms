@@ -280,6 +280,12 @@ pub fn build_router_with_themes_root(
             get(entry_preview),
         )
         .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/route",
+            get(crate::routes::seo::get_entry_route)
+                .put(crate::routes::seo::put_entry_route)
+                .layer(DefaultBodyLimit::max(crate::routes::seo::MAX_ROUTE_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/media",
             get(media_list)
                 .post(media_upload)
@@ -359,6 +365,7 @@ pub fn build_router_with_themes_root(
                 }
             }
         }))
+        .fallback(crate::routes::seo::public_fallback)
         .layer(Extension(ThemeStoreRoot(themes_root)))
         .with_state(state)
 }

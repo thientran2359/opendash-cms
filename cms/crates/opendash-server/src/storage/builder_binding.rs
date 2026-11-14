@@ -24,7 +24,7 @@ pub enum BindingResult {
 }
 
 pub type BindingResults = BTreeMap<String, BindingResult>;
-type SourceRow = (String, String, String);
+type SourceRow = (String, String, String, Option<String>);
 
 pub async fn resolve(
     db: &SqlitePool,
@@ -84,9 +84,10 @@ pub async fn resolve_in_tx_with_route(
                         // An entry's values NEVER leave storage on the public path until
                         // the published predicate and active provider check both hold.
                         let source: Option<SourceRow> = sqlx::query_as(
-                            "SELECT t.definition_json, e.title, e.values_json
+                            "SELECT t.definition_json, e.title, e.values_json, p.path
                                FROM content_entries e JOIN content_types t
                                  ON t.key = e.content_type_key
+                                 LEFT JOIN entry_public_paths p ON p.entry_id = e.id
                               WHERE e.content_type_key = ? AND e.slug = ?
                                 AND t.provider_status = 'active'
                                 AND (? = 1 OR e.publication_status = 'published')",
@@ -127,7 +128,7 @@ pub async fn resolve_in_tx_with_route(
 
 fn extract(
     binding: &ElementBinding,
-    (definition, title, values): &SourceRow,
+    (definition, title, values, _custom_path): &SourceRow,
     heading: bool,
 ) -> BindingResult {
     let Ok(schema) = serde_json::from_str::<ContentTypeDefinition>(definition) else {
@@ -162,7 +163,7 @@ fn extract_route_context(
     field_key: &str,
     type_key: &str,
     slug: &str,
-    (definition, title, values): &SourceRow,
+    (definition, title, values, custom_path): &SourceRow,
     heading: bool,
 ) -> BindingResult {
     let Ok(schema) = serde_json::from_str::<ContentTypeDefinition>(definition) else {
@@ -188,7 +189,7 @@ fn extract_route_context(
             slug.to_string()
         }
         "url" => {
-            let Some(u) = CanonicalUrlBuilder::entry(type_key, slug) else {
+            let Some(u) = custom_path.clone().or_else(|| CanonicalUrlBuilder::entry(type_key, slug)) else {
                 return BindingResult::Unavailable;
             };
             u

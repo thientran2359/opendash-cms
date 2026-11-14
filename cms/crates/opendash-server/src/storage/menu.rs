@@ -714,18 +714,7 @@ pub async fn list_slot_assignments_in_tx(
 }
 
 async fn resolve_entry_url_in_tx(conn: &mut SqliteConnection, entry_id: i64) -> ApiResult<Option<String>> {
-    let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT e.content_type_key, e.slug
-           FROM content_entries e
-           JOIN content_types t ON t.key = e.content_type_key
-          WHERE e.id = ?
-            AND e.publication_status = 'published'
-            AND t.provider_status = 'active'",
-    )
-    .bind(entry_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    Ok(row.and_then(|(type_key, slug)| CanonicalUrlBuilder::entry_from_id(entry_id, &type_key, &slug)))
+    crate::storage::seo::resolve_public_entry_path_in_tx(conn, entry_id).await
 }
 
 async fn resolve_term_url_in_tx(conn: &mut SqliteConnection, term_id: i64) -> ApiResult<Option<String>> {
