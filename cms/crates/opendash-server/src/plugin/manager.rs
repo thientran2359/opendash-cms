@@ -58,6 +58,7 @@ pub struct PluginManager {
     active_action_leases: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     allow_loopback: bool,
     plugins_root: std::path::PathBuf,
+    recovery: crate::config::RecoveryState,
 }
 
 impl PluginManager {
@@ -80,7 +81,13 @@ impl PluginManager {
             active_action_leases: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
             allow_loopback,
             plugins_root,
+            recovery: crate::config::RecoveryState::new(false),
         }
+    }
+
+    pub fn with_recovery_state(mut self, recovery: crate::config::RecoveryState) -> Self {
+        self.recovery = recovery;
+        self
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -112,6 +119,13 @@ impl PluginManager {
         };
 
         let _lease_guard = {
+            if self.recovery.is_safe_mode() {
+                return Err(mk_err(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "safe_mode",
+                    "Hệ thống đang ở safe mode sau khi khôi phục; plugin bị tạm khóa.".into(),
+                ));
+            }
             let mut leases = self
                 .active_action_leases
                 .lock()
@@ -133,6 +147,20 @@ impl PluginManager {
             .await
             .map_err(|e| mk_err(StatusCode::INTERNAL_SERVER_ERROR, "db_error", format!("Lỗi cơ sở dữ liệu: {e}")))?;
 
+        if self.recovery.is_safe_mode() {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                PluginRunResponse {
+                    success: false,
+                    data: None,
+                    error: Some(
+                        "Hệ thống đang ở safe mode sau khi khôi phục; plugin bị tạm khóa.".into(),
+                    ),
+                    code: Some("safe_mode".into()),
+                    correlation_id,
+                },
+            ));
+        }
         let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) = row_opt else {
             return Err(mk_err(StatusCode::NOT_FOUND, "not_found", "Plugin không tồn tại.".into()));
         };
@@ -529,6 +557,20 @@ impl PluginManager {
                 )
             })?;
 
+        if self.recovery.is_safe_mode() {
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                PluginRunResponse {
+                    success: false,
+                    data: None,
+                    error: Some(
+                        "Hệ thống đang ở safe mode sau khi khôi phục; plugin bị tạm khóa.".into(),
+                    ),
+                    code: Some("safe_mode".into()),
+                    correlation_id,
+                },
+            ));
+        }
         let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) = row_opt else {
             return Err((
                 StatusCode::NOT_FOUND,

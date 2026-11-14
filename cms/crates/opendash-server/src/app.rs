@@ -72,6 +72,7 @@ pub struct AppState {
     pub content_registry: Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>,
     pub coordinator: Arc<crate::operations::SiteCoordinator>,
     pub backup_registry: Arc<crate::backup::BackupRuntimeRegistry>,
+    pub recovery: crate::config::RecoveryState,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -130,7 +131,8 @@ pub fn build_router_with_themes_root(
         .map(|p| p.smtp_secrets_dir())
         .unwrap_or_else(|_| PathBuf::from("database/secrets/smtp"));
     let secret_store = crate::secrets::SecretStore::new(smtp_secrets_dir);
-    let smtp_service = crate::smtp::SmtpService::new(state.db.clone(), secret_store.clone());
+    let smtp_service = crate::smtp::SmtpService::with_recovery_state(state.db.clone(), secret_store.clone(), state.recovery.clone());
+    let recovery_for_mw = state.recovery.clone();
 
     Router::new()
         .route("/", get(public_page))
@@ -305,6 +307,25 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
         )
         .route(
+            "/api/admin/operations/restore-uploads",
+            post(crate::routes::operations::upload_restore_archive)
+                .layer(DefaultBodyLimit::disable()),
+        )
+        .route(
+            "/api/admin/operations/restores",
+            post(crate::routes::operations::create_restore)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/operations/recovery/status",
+            get(crate::routes::operations::get_recovery_status),
+        )
+        .route(
+            "/api/admin/operations/recovery/activate",
+            post(crate::routes::operations::activate_recovery)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/themes",
             get(theme_list)
                 .post(theme_install)
@@ -445,6 +466,7 @@ pub fn build_router_with_themes_root(
         .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES))
         .layer(axum::Extension(secret_store))
         .layer(axum::Extension(smtp_service))
+        .layer(axum::Extension(state.recovery.clone()))
         .layer(axum::Extension(crate::contact::ContactAdmissionLimiter::new()))
         .layer(axum::Extension(crate::routes::contact::ExpectedListenerOrigin(format!(
             "http://{expected_host}"
@@ -501,6 +523,20 @@ pub fn build_router_with_themes_root(
             }
         }))
         .fallback(crate::routes::seo::public_fallback)
+        .layer(middleware::from_fn(move |request: Request, next: Next| {
+            let recovery = recovery_for_mw.clone();
+            let path = request.uri().path().to_string();
+            async move {
+                let mut resp = next.run(request).await;
+                if recovery.is_safe_mode() && !path.starts_with("/api/admin/") {
+                    resp.headers_mut().insert(
+                        header::HeaderName::from_static("x-robots-tag"),
+                        header::HeaderValue::from_static("noindex, nofollow"),
+                    );
+                }
+                resp
+            }
+        }))
         .layer(Extension(ThemeStoreRoot(themes_root)))
         .with_state(state)
 }

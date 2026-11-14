@@ -198,15 +198,25 @@ pub struct SmtpService {
     secrets: SecretStore,
     permits: Arc<Semaphore>,
     sender: Arc<dyn SmtpSender>,
+    recovery: crate::config::RecoveryState,
 }
 
 impl SmtpService {
     pub fn new(db: SqlitePool, secrets: SecretStore) -> Self {
+        Self::with_recovery_state(db, secrets, crate::config::RecoveryState::new(false))
+    }
+
+    pub fn with_recovery_state(
+        db: SqlitePool,
+        secrets: SecretStore,
+        recovery: crate::config::RecoveryState,
+    ) -> Self {
         Self {
             db,
             secrets,
             permits: Arc::new(Semaphore::new(SMTP_MAX_CONCURRENT_SENDS)),
             sender: Arc::new(LettreSmtpSender::new()),
+            recovery,
         }
     }
 
@@ -221,6 +231,7 @@ impl SmtpService {
             secrets,
             permits: Arc::new(Semaphore::new(SMTP_MAX_CONCURRENT_SENDS)),
             sender,
+            recovery: crate::config::RecoveryState::new(false),
         }
     }
 
@@ -238,6 +249,10 @@ impl SmtpService {
         &self,
         attempt: NotificationAttemptFull,
     ) -> ApiResult<NotificationAttemptPublic> {
+        if self.recovery.is_safe_mode() {
+            return smtp_store::finish_attempt(&self.db, attempt.id, "failed", Some("safe_mode"))
+                .await;
+        }
         let req = match self.prepare_submission_mail(&attempt).await {
             Ok(req) => req,
             Err(code) => {
@@ -358,6 +373,11 @@ impl SmtpService {
     }
 
     pub async fn send_test_email(&self) -> ApiResult<()> {
+        if self.recovery.is_safe_mode() {
+            return Err(ApiError::service_unavailable(
+                "Hệ thống đang ở safe mode sau khi khôi phục; SMTP đang bị tắt.",
+            ));
+        }
         let settings = smtp_store::get_smtp_settings(&self.db).await?;
         let host = validate_smtp_host(&settings.host)?;
         let from = validate_mailbox(&settings.from_address, "from_address")?;
