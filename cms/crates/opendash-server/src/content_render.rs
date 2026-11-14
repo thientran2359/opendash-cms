@@ -98,6 +98,14 @@ fn media_url(value: &Value) -> Option<String> {
 }
 
 pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) -> EntryView {
+    entry_view_with_url(record, schema, None)
+}
+
+pub fn entry_view_with_url(
+    record: ContentEntryRecord,
+    schema: &ContentTypeDefinition,
+    url: Option<String>,
+) -> EntryView {
     let mut cover_url = None;
     let mut fields = Vec::with_capacity(schema.fields.len());
     for definition in &schema.fields {
@@ -154,7 +162,7 @@ pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) ->
             gallery_urls,
         });
     }
-    let url = CanonicalUrlBuilder::entry_from_id(record.id, &schema.key, &record.slug);
+    let url = url.or_else(|| CanonicalUrlBuilder::entry_from_id(record.id, &schema.key, &record.slug));
     EntryView {
         id: record.id,
         title: record.title,

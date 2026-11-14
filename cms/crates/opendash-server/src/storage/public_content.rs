@@ -21,6 +21,21 @@ pub async fn get_by_slug(
     .bind(slug)
     .fetch_optional(db)
     .await?;
+    let res = row.map(decode_row).transpose()?;
+    Ok(res)
+}
+
+pub async fn get_published_by_id(
+    db: &SqlitePool,
+    id: i64,
+) -> ApiResult<Option<ContentEntryRecord>> {
+    let row: Option<(i64, String, String, String, String, String, i64, String, String)> = sqlx::query_as(
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+         FROM content_entries WHERE id = ? AND publication_status = 'published'",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
     row.map(decode_row).transpose()
 }
 
@@ -42,14 +57,8 @@ pub async fn list_published(
 /// Resolve stable site-owned IDs to their current public URL. Draft/deleted
 /// entries must never fall through to an older slug or another content type.
 pub async fn canonical_entry_by_id(db: &SqlitePool, id: i64) -> ApiResult<Option<String>> {
-    let row: Option<(String, String)> = sqlx::query_as(
-        "SELECT content_type_key, slug FROM content_entries
-          WHERE id = ? AND publication_status = 'published'",
-    )
-    .bind(id)
-    .fetch_optional(db)
-    .await?;
-    Ok(row.and_then(|(type_key, slug)| CanonicalUrlBuilder::entry_from_id(id, &type_key, &slug)))
+    let mut conn = db.acquire().await?;
+    crate::storage::seo::resolve_public_entry_path_in_tx(&mut conn, id).await
 }
 
 pub async fn canonical_term_by_id(db: &SqlitePool, id: i64) -> ApiResult<Option<String>> {

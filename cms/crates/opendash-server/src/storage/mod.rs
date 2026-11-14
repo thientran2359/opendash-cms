@@ -12,6 +12,7 @@ pub mod page;
 pub mod plugin;
 pub mod plugin_kv;
 pub mod public_content;
+pub mod seo;
 pub mod settings;
 pub mod taxonomy;
 pub mod theme;
