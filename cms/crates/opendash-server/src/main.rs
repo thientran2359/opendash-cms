@@ -2,6 +2,8 @@ mod app;
 mod auth;
 #[allow(dead_code)]
 mod backup;
+#[allow(dead_code)]
+mod backup_archive;
 mod backup_worker;
 mod contact;
 mod content_render;
