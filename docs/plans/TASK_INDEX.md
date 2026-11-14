@@ -202,14 +202,14 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 
 | Mã candidate / task | Công việc | Trạng thái | GitHub Issue / PR |
 | --- | --- | --- | --- |
-| [M8-P01](milestones/M8/TASK_PLAN.md) | Canonical backup manifest và snapshot consistency | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
-| [M8-P02](milestones/M8/TASK_PLAN.md) | Backup thủ công từ Admin và kiểm tra artifact | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
-| [M8-P03](milestones/M8/TASK_PLAN.md) | Restore nguyên tử, upgrade/migration và recovery | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
-| [M8-P04](milestones/M8/TASK_PLAN.md) | Linux VPS single-binary packaging/install/upgrade | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
-| [M8-P05](milestones/M8/TASK_PLAN.md) | Security/reliability/performance smoke trên Linux | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
-| [M8-P06](milestones/M8/TASK_PLAN.md) | Full V1 E2E và backup→restore→re-edit | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
-| [M8-P07](milestones/M8/TASK_PLAN.md) | Hướng dẫn vận hành và release acceptance | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
-| [M8-P08](milestones/M8/TASK_PLAN.md) | D từ #15 (lifecycle): media delete theo reference policy, reconcile/GC và backup boundary | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
+| [M8-P01](milestones/M8/TASK_PLAN.md) | Canonical backup manifest và snapshot consistency | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#231](https://github.com/thientran2359/opendash-cms/issues/231) · [#232](https://github.com/thientran2359/opendash-cms/issues/232) · [#235](https://github.com/thientran2359/opendash-cms/issues/235) |
+| [M8-P02](milestones/M8/TASK_PLAN.md) | Backup thủ công từ Admin và kiểm tra artifact | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#236](https://github.com/thientran2359/opendash-cms/issues/236) · [#237](https://github.com/thientran2359/opendash-cms/issues/237) |
+| [M8-P03](milestones/M8/TASK_PLAN.md) | Restore nguyên tử, upgrade/migration và recovery | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#238](https://github.com/thientran2359/opendash-cms/issues/238) · [#239](https://github.com/thientran2359/opendash-cms/issues/239) |
+| [M8-P04](milestones/M8/TASK_PLAN.md) | Linux VPS single-binary packaging/install/upgrade | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#240](https://github.com/thientran2359/opendash-cms/issues/240) · [#241](https://github.com/thientran2359/opendash-cms/issues/241) |
+| [M8-P05](milestones/M8/TASK_PLAN.md) | Security/reliability/performance smoke trên Linux | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#242](https://github.com/thientran2359/opendash-cms/issues/242) |
+| [M8-P06](milestones/M8/TASK_PLAN.md) | Full V1 E2E và backup→restore→re-edit | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#243](https://github.com/thientran2359/opendash-cms/issues/243) · [#244](https://github.com/thientran2359/opendash-cms/issues/244) · [#245](https://github.com/thientran2359/opendash-cms/issues/245) · [#246](https://github.com/thientran2359/opendash-cms/issues/246) |
+| [M8-P07](milestones/M8/TASK_PLAN.md) | Hướng dẫn vận hành và release acceptance | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#247](https://github.com/thientran2359/opendash-cms/issues/247) · [#248](https://github.com/thientran2359/opendash-cms/issues/248) |
+| [M8-P08](milestones/M8/TASK_PLAN.md) | D từ #15 (lifecycle): media delete theo reference policy, reconcile/GC và backup boundary | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#233](https://github.com/thientran2359/opendash-cms/issues/233) · [#234](https://github.com/thientran2359/opendash-cms/issues/234) |
 
 ## Task thực tế không thuộc 9 milestone CMS
 
@@ -218,3 +218,30 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 | P1-W01 | Khảo sát CoS Windows — Local Control API và Project/worktree | Issue **Open**; hồ sơ quy trình ghi **BLOCKED_SECURITY** (chưa xác minh Project Status trong bảng) | [#6](https://github.com/thientran2359/opendash-cms/issues/6) |
 
 **M8 planning snapshot — 14/11/2026:** [ADR-0015](../decisions/ADR-0015-m8-operations-release.md) + [contract](../contracts/M8_OPERATIONS_RELEASE.md) + [18-task G3](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md) cover all8 candidates and later/native/closure tasks. Proposed owners are not active assignments; M8 implementation NOT_STARTED/native tests NOT_RUN. Project Ready needs evidence and ownership, final V1 needs Linux/deferred Mac/license.
+
+## M8 Issues / Ready snapshot — 14/11/2026
+
+Published all18 Issues in GitHub Milestone#9 / Project#3 from immutable G3 `4ec2429f72fe47d540575323bd1e835ff855a097`. Nova owns #231–#245, Harbor deferred macOS #246, Atlas runbooks/release audit #247/#248. Owner is operational responsibility, not active task claim. GitHub Project remains authoritative.
+
+**Ready review:** M7#213 completed/Project Done; Windows evidence source `a633ad84d2f03023eba66305cc884f288df2ad28` is on main and product diff to G3 source is empty for crates/Admin/migrations/Cargo. No open Nova PR or active implementation Issue at review. #231 has no M8 predecessor; scope/schema0032/files are exclusive. Atlas moved #231 Backlog→Ready; Nova still verifies local clean/free branch and live Project before pickup. No other task passed its predecessor gate; no bulk Ready/Done or dispatch.
+
+| Task | Owner | Project snapshot | Issue |
+| --- | --- | --- | --- |
+| M8-S01-T01 | Nova | Ready | [#231](https://github.com/thientran2359/opendash-cms/issues/231) |
+| M8-S01-T02 | Nova | Backlog | [#232](https://github.com/thientran2359/opendash-cms/issues/232) |
+| M8-S02-T01 | Nova | Backlog | [#233](https://github.com/thientran2359/opendash-cms/issues/233) |
+| M8-S02-T02 | Nova | Backlog | [#234](https://github.com/thientran2359/opendash-cms/issues/234) |
+| M8-S03-T01 | Nova | Backlog | [#235](https://github.com/thientran2359/opendash-cms/issues/235) |
+| M8-S04-T01 | Nova | Backlog | [#236](https://github.com/thientran2359/opendash-cms/issues/236) |
+| M8-S04-T02 | Nova | Backlog | [#237](https://github.com/thientran2359/opendash-cms/issues/237) |
+| M8-S05-T01 | Nova | Backlog | [#238](https://github.com/thientran2359/opendash-cms/issues/238) |
+| M8-S05-T02 | Nova | Backlog | [#239](https://github.com/thientran2359/opendash-cms/issues/239) |
+| M8-S06-T01 | Nova | Backlog | [#240](https://github.com/thientran2359/opendash-cms/issues/240) |
+| M8-S06-T02 | Nova | Backlog | [#241](https://github.com/thientran2359/opendash-cms/issues/241) |
+| M8-S07-T01 | Nova | Backlog | [#242](https://github.com/thientran2359/opendash-cms/issues/242) |
+| M8-S08-T01 | Nova | Backlog | [#243](https://github.com/thientran2359/opendash-cms/issues/243) |
+| M8-S08-T02 | Nova | Backlog | [#244](https://github.com/thientran2359/opendash-cms/issues/244) |
+| M8-S08-T03 | Nova | Backlog | [#245](https://github.com/thientran2359/opendash-cms/issues/245) |
+| M8-S08-T04 | Harbor (macOS deferred) | Backlog | [#246](https://github.com/thientran2359/opendash-cms/issues/246) |
+| M8-S09-T01 | Atlas | Backlog | [#247](https://github.com/thientran2359/opendash-cms/issues/247) |
+| M8-S09-T02 | Atlas | Backlog | [#248](https://github.com/thientran2359/opendash-cms/issues/248) |

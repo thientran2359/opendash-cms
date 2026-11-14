@@ -16,3 +16,11 @@
 G2/G3 có hiệu lực sau design PR merge; implementation NOT_STARTED, runtime/native/performance NOT_RUN. Không tự tạo Project Ready hoặc chiếm task Nova đang làm. Development có thể dựa trên M7 Windows acceptance #213; final V1 vẫn cần Linux thực, deferred macOS, M7 full closure và owner license/release authorization.
 
 [Planning validation receipt](../../../verification/2026-11-14-m8-planning.md) records actual checks, internal review and runtime limits.
+
+## Implementation Issues — snapshot 14/11/2026
+
+- Nova: **#231–#245**; first [M8-S01-T01 #231](https://github.com/thientran2359/opendash-cms/issues/231) is **Ready** after Atlas gate review.
+- [#246 native macOS](https://github.com/thientran2359/opendash-cms/issues/246): Harbor, Backlog/deferred.
+- [#247 runbooks](https://github.com/thientran2359/opendash-cms/issues/247), [#248 release audit](https://github.com/thientran2359/opendash-cms/issues/248): Atlas, Backlog.
+
+All18 Issues carry immutable G3 source `4ec2429f72fe47d540575323bd1e835ff855a097`, scope/files/acceptance/linked dependencies. [Task index](../../TASK_INDEX.md) maps every candidate/task/Issue; [Project#3](https://github.com/users/thientran2359/projects/3) is live authority. Remaining17 Issues stay Backlog until actual predecessor/platform/license gates are satisfied. Nova can advance eligible successors after acceptance/seam handoff under ADR-0010, one active task per branch; no automatic dispatch or public release.
