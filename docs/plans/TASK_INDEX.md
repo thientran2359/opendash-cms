@@ -170,14 +170,33 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 
 | Mã candidate / task | Công việc | Trạng thái | GitHub Issue / PR |
 | --- | --- | --- | --- |
-| [M7-P01](milestones/M7/TASK_PLAN.md) | Mở rộng Site Settings UI/engine core M3, phân quyền | Chưa G3 | — |
-| [M7-P02](milestones/M7/TASK_PLAN.md) | Menu/navigation CRUD và binding theme trên model M5, không tạo persistence riêng | Chưa G3 | — |
-| [M7-P03](milestones/M7/TASK_PLAN.md) | SEO fields: URL/redirect/canonical/title/description/OG/robots | Chưa G3 | — |
-| [M7-P04](milestones/M7/TASK_PLAN.md) | Sitemap tự động và invalidation | Chưa G3 | — |
-| [M7-P05](milestones/M7/TASK_PLAN.md) | Builder contact form schema/validation/submission persistence | Chưa G3 | — |
-| [M7-P06](milestones/M7/TASK_PLAN.md) | SMTP settings + thông báo/giám sát khi gửi lỗi | Chưa G3 | — |
-| [M7-P07](milestones/M7/TASK_PLAN.md) | E2E Site Features + video / security | Chưa G3 | — |
-| [M7-P08](milestones/M7/TASK_PLAN.md) | D từ #15 (video): media video V1 có metadata/serving/limits an toàn | Chưa G3 | — |
+| [M7-P01](milestones/M7/TASK_PLAN.md) | Mở rộng Site Settings UI/engine core M3, phân quyền | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | [#202](https://github.com/thientran2359/opendash-cms/issues/202) |
+| [M7-P02](milestones/M7/TASK_PLAN.md) | Menu/navigation CRUD và binding theme trên model M5, không tạo persistence riêng | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | [#203](https://github.com/thientran2359/opendash-cms/issues/203) |
+| [M7-P03](milestones/M7/TASK_PLAN.md) | SEO fields: URL/redirect/canonical/title/description/OG/robots | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | [#204](https://github.com/thientran2359/opendash-cms/issues/204) · [#205](https://github.com/thientran2359/opendash-cms/issues/205) |
+| [M7-P04](milestones/M7/TASK_PLAN.md) | Sitemap tự động và invalidation | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | [#206](https://github.com/thientran2359/opendash-cms/issues/206) |
+| [M7-P05](milestones/M7/TASK_PLAN.md) | Builder contact form schema/validation/submission persistence | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | [#207](https://github.com/thientran2359/opendash-cms/issues/207) · [#208](https://github.com/thientran2359/opendash-cms/issues/208) |
+| [M7-P06](milestones/M7/TASK_PLAN.md) | SMTP settings + thông báo/giám sát khi gửi lỗi | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | [#209](https://github.com/thientran2359/opendash-cms/issues/209) |
+| [M7-P07](milestones/M7/TASK_PLAN.md) | E2E Site Features + video / security | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | [#212](https://github.com/thientran2359/opendash-cms/issues/212) · [#213](https://github.com/thientran2359/opendash-cms/issues/213) · [#214](https://github.com/thientran2359/opendash-cms/issues/214) · [#215](https://github.com/thientran2359/opendash-cms/issues/215) |
+| [M7-P08](milestones/M7/TASK_PLAN.md) | D từ #15 (video): media video V1 có metadata/serving/limits an toàn | [G3 đủ đặc tả](milestones/M7/slices/2026-11-14-m7-site-features-g3.md); thực thi chờ Windows development gate; macOS deferred | [#210](https://github.com/thientran2359/opendash-cms/issues/210) · [#211](https://github.com/thientran2359/opendash-cms/issues/211) |
+
+**Issue publication snapshot — 14/11/2026:** G3 nguồn `ff7145ba245b70efe6ca206e147a7b2ad6886aa2`; 14 Issues đã phát hành vào Milestone #8 và Project #3, tất cả Backlog khi kiểm tra. Owner chỉ định bên dưới theo yêu cầu chủ dự án, thay owner dự kiến trong G3; không đồng nghĩa active task/pickup. Project live là nguồn thực thi. Windows entry gate M5/M6 vẫn thiếu browser/M5 rollback evidence; macOS deferred theo ADR-0014.
+
+| G3 task | Owner | Project snapshot | Issue |
+| --- | --- | --- | --- |
+| M7-S01-T01 | Nova | Backlog | [#202](https://github.com/thientran2359/opendash-cms/issues/202) |
+| M7-S02-T01 | Nova | Backlog | [#203](https://github.com/thientran2359/opendash-cms/issues/203) |
+| M7-S03-T01 | Nova | Backlog | [#204](https://github.com/thientran2359/opendash-cms/issues/204) |
+| M7-S03-T02 | Nova | Backlog | [#205](https://github.com/thientran2359/opendash-cms/issues/205) |
+| M7-S04-T01 | Nova | Backlog | [#206](https://github.com/thientran2359/opendash-cms/issues/206) |
+| M7-S05-T01 | Nova | Backlog | [#207](https://github.com/thientran2359/opendash-cms/issues/207) |
+| M7-S05-T02 | Nova | Backlog | [#208](https://github.com/thientran2359/opendash-cms/issues/208) |
+| M7-S06-T01 | Nova | Backlog | [#209](https://github.com/thientran2359/opendash-cms/issues/209) |
+| M7-S07-T01 | Nova | Backlog | [#210](https://github.com/thientran2359/opendash-cms/issues/210) |
+| M7-S07-T02 | Nova | Backlog | [#211](https://github.com/thientran2359/opendash-cms/issues/211) |
+| M7-S08-T01 | Nova | Backlog | [#212](https://github.com/thientran2359/opendash-cms/issues/212) |
+| M7-S08-T02 | Nova | Backlog | [#213](https://github.com/thientran2359/opendash-cms/issues/213) |
+| M7-S08-T03 | Harbor (macOS deferred) | Backlog | [#214](https://github.com/thientran2359/opendash-cms/issues/214) |
+| M7-S08-T04 | Atlas | Backlog | [#215](https://github.com/thientran2359/opendash-cms/issues/215) |
 
 ## [M8 — Operations & Release](https://github.com/thientran2359/opendash-cms/milestone/9) (8)
 

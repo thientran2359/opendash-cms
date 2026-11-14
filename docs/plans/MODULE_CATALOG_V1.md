@@ -97,3 +97,9 @@
 - [M2.5 verification](../verification/2026-11-07-m2-5-core-kernel.md): xác nhận cả 8 mục M2.5 theo commit `da79304` trên Windows; Content hooks và CPT persistence thuộc M3.
 - [CORE_FOUNDATION](../contracts/CORE_FOUNDATION.md), [PLUGIN_ABI](../contracts/PLUGIN_ABI.md) và [CMS_ARCHITECTURE](../architecture/CMS_ARCHITECTURE.md): ranh giới phải đối chiếu khi quyết định thiết kế chi tiết.
 - [Thảo luận planning](../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md): xác nhận 27 ID và ranh giới module. **G0 `post`/`page` built-in M3 đã được chủ dự án chốt 10/11/2026**, nhưng schema/migration vẫn cần G2; plugin CPT manifest và media lifecycle là vấn đề G2 về sau.
+
+## M7 source-backed design update — 14/11/2026
+
+SITE-01/02/03 và video CNT-05 có [G1](../../.agents/research/2026-11-14-m7-site-features-g1.md), [ADR-0014](../decisions/ADR-0014-m7-site-features.md), [contract](../contracts/M7_SITE_FEATURES.md), [full G3](milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Living briefs: [SITE-01](modules/SITE-01-settings-navigation.md), [SITE-02](modules/SITE-02-seo.md), [SITE-03](modules/SITE-03-contact.md), [CNT-05](modules/CNT-05-media.md). Earlier Planned cells are historical implementation summaries, not absence of current G2/G3. Design agreed on merge; M7 implementation NOT_STARTED/G5 NOT_RUN; no dependency waiver or Project Ready implied.
+
+**Owner sequencing update 14/11/2026:** [ADR-0014 macOS deferral](../decisions/ADR-0014-m7-site-features.md#owner-directed-macos-deferral--2026-11-14) permits M7 Windows development after the Windows entry checklist passes. macOS NOT_RUN stays explicit and blocks final multi-OS/V1 release, not implementation pickup.

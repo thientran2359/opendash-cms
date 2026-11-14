@@ -14,3 +14,7 @@
 | M7-P08 | **D từ #15 (video):** media video V1 có metadata/serving/limits an toàn | CNT-05 (SITE-02) | M3 raster library/ACL + P03 nếu video URL/OG; Full-Track G2 codec/MIME/Range/size/privacy | Upload và serve video đúng quyền/Range/size, invalid codec/MIME/range bị chặn, restart/refs không rò dữ liệu; chưa hard-delete/reconcile (M8) |
 
 **Ranh giới:** M8 chịu trách nhiệm backup/restore và Linux release. M7 không bao gồm đa ngữ, analytics, form nâng cao/repeater, SEO AI hoặc revision (ngoài phạm vi V1).
+
+## G1–G3 đã chuẩn bị cho toàn milestone (2026-11-14)
+
+[G1 inventory](../../../../.agents/research/2026-11-14-m7-site-features-g1.md) · [ADR-0014](../../../decisions/ADR-0014-m7-site-features.md) · [Contract](../../../contracts/M7_SITE_FEATURES.md) · [G3 đủ14 task](slices/2026-11-14-m7-site-features-g3.md). G2/G3 có hiệu lực sau merge design PR; mọi candidate ở bảng trên đã có task/Primary Acceptance/owner/dependency/acceptance, không candidate nào bị bỏ. Project Ready vẫn chờ M5/M6 Windows development gate và từng seam bàn giao (macOS NOT_RUN hoãn theo ADR-0014). Implementation NOT_STARTED, runtime/native/browser NOT_RUN. Không phát hành Issue hoặc dispatch từ lượt planning này.
