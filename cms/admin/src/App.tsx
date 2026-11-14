@@ -12,6 +12,7 @@ import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
 import { MediaRoute } from './shell/MediaRoute.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
+import { MenusPanel } from './features/menus/MenusPanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 
 export const App: React.FC = () => {
@@ -314,10 +315,13 @@ export const App: React.FC = () => {
         onDirtyChange={setBuilderDirty} onApiError={handleApiError}
       />}
       previewContent={null}
-      themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
-        onInstalled={() => setThemeRevision(value => value + 1)}
-        onActivated={() => setThemeRevision(value => value + 1)}
-      />}
+      themesContent={<>
+        <ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
+          onInstalled={() => setThemeRevision(value => value + 1)}
+          onActivated={() => setThemeRevision(value => value + 1)}
+        />
+        <MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />
+      </>}
       settingsContent={<>
         <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
         <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>

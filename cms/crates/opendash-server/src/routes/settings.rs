@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-fn no_store_headers(version: Option<i64>) -> HeaderMap {
+pub(crate) fn no_store_headers(version: Option<i64>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if let Some(version) = version {
@@ -34,7 +34,7 @@ fn settings_response(settings: GeneralSettings) -> Response {
     (no_store_headers(Some(settings.version)), Json(settings)).into_response()
 }
 
-fn parse_if_match(headers: &HeaderMap) -> ApiResult<i64> {
+pub(crate) fn parse_if_match(headers: &HeaderMap) -> ApiResult<i64> {
     let value = headers
         .get(header::IF_MATCH)
         .ok_or_else(|| ApiError::precondition_required("Cần If-Match để lưu cài đặt."))?

@@ -295,6 +295,124 @@ enum NodeKey {
     Index(usize),
 }
 
+struct ValidatedMenuPlan {
+    parent_idx: Vec<Option<usize>>,
+    order: Vec<usize>,
+}
+
+fn validate_menu_items_plan(
+    existing_ids: &BTreeSet<i64>,
+    items: &[MenuItemInput],
+) -> ApiResult<ValidatedMenuPlan> {
+    if items.len() > MAX_MENU_ITEMS {
+        return Err(ApiError::bad_request("Menu vượt quá giới hạn 200 items."));
+    }
+    let mut keys: Vec<NodeKey> = Vec::with_capacity(items.len());
+    let mut key_to_idx: BTreeMap<NodeKey, usize> = BTreeMap::new();
+    for (idx, item) in items.iter().enumerate() {
+        validate_label(&item.label)?;
+        if item.position < 0 {
+            return Err(ApiError::bad_request("Vị trí menu item không hợp lệ."));
+        }
+        match item.target_kind {
+            MenuTargetKind::Entry => {
+                if item.target_entry_id.is_none_or(|id| id <= 0) {
+                    return Err(ApiError::bad_request("Menu item entry thiếu target_entry_id."));
+                }
+            }
+            MenuTargetKind::Term => {
+                if item.target_term_id.is_none_or(|id| id <= 0) {
+                    return Err(ApiError::bad_request("Menu item term thiếu target_term_id."));
+                }
+            }
+            MenuTargetKind::External => {
+                let raw = item
+                    .external_url
+                    .as_deref()
+                    .ok_or_else(|| ApiError::bad_request("Menu item external thiếu external_url."))?;
+                validate_external_url(raw)?;
+            }
+        }
+        let key = if let Some(id) = item.id {
+            if !existing_ids.contains(&id) {
+                return Err(ApiError::bad_request(
+                    "Menu item id không thuộc menu hiện tại.",
+                ));
+            }
+            NodeKey::Existing(id)
+        } else if let Some(ref ck) = item.client_key {
+            NodeKey::Client(ck.clone())
+        } else {
+            NodeKey::Index(idx)
+        };
+        if key_to_idx.insert(key.clone(), idx).is_some() {
+            return Err(ApiError::bad_request("Trùng key menu item trong batch."));
+        }
+        keys.push(key);
+    }
+
+    let mut parent_idx: Vec<Option<usize>> = vec![None; items.len()];
+    let mut sibling_positions: BTreeSet<(Option<usize>, i64)> = BTreeSet::new();
+    for (idx, item) in items.iter().enumerate() {
+        let p_idx = if let Some(pid) = item.parent_id {
+            let found = key_to_idx.get(&NodeKey::Existing(pid)).copied().ok_or_else(|| {
+                ApiError::bad_request("parent_id không thuộc cùng menu hoặc không tồn tại.")
+            })?;
+            Some(found)
+        } else if let Some(ref pck) = item.parent_client_key {
+            let found = key_to_idx.get(&NodeKey::Client(pck.clone())).copied().ok_or_else(|| {
+                ApiError::bad_request("parent_client_key không tồn tại trong menu.")
+            })?;
+            Some(found)
+        } else {
+            None
+        };
+        if !sibling_positions.insert((p_idx, item.position)) {
+            return Err(ApiError::bad_request(
+                "Trùng position trong cùng cấp menu.",
+            ));
+        }
+        parent_idx[idx] = p_idx;
+    }
+
+    for start in 0..items.len() {
+        let mut depth = 1usize;
+        let mut cur = parent_idx[start];
+        let mut seen = BTreeSet::new();
+        seen.insert(start);
+        while let Some(p) = cur {
+            if !seen.insert(p) {
+                return Err(ApiError::bad_request("Phát hiện vòng lặp (cycle) trong menu."));
+            }
+            depth += 1;
+            if depth > MAX_MENU_DEPTH {
+                return Err(ApiError::bad_request(
+                    "Độ sâu menu vượt quá giới hạn 8 cấp.",
+                ));
+            }
+            cur = parent_idx[p];
+        }
+    }
+
+    let mut order = Vec::with_capacity(items.len());
+    let mut placed = vec![false; items.len()];
+    while order.len() < items.len() {
+        let mut progressed = false;
+        for idx in 0..items.len() {
+            if !placed[idx] && parent_idx[idx].is_none_or(|p| placed[p]) {
+                placed[idx] = true;
+                order.push(idx);
+                progressed = true;
+            }
+        }
+        if !progressed {
+            return Err(ApiError::bad_request("Không thể sắp xếp cây menu."));
+        }
+    }
+
+    Ok(ValidatedMenuPlan { parent_idx, order })
+}
+
 pub async fn replace_menu_items_in_tx(
     conn: &mut SqliteConnection,
     menu_id: i64,
@@ -518,6 +636,34 @@ pub async fn replace_menu_items_in_tx(
         .ok_or_else(|| ApiError::internal("Không đọc lại được menu sau khi cập nhật."))
 }
 
+pub async fn get_slot_version_in_tx(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+) -> ApiResult<i64> {
+    let ver: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM site_menu_slot_versions WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(ver.unwrap_or(1))
+}
+
+pub async fn bump_slot_version_in_tx(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+) -> ApiResult<i64> {
+    let ver: i64 = sqlx::query_scalar(
+        "INSERT INTO site_menu_slot_versions (theme_id, version)
+         VALUES (?, 2)
+         ON CONFLICT(theme_id) DO UPDATE SET version = version + 1
+         RETURNING version",
+    )
+    .bind(theme_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(ver)
+}
+
 pub async fn assign_menu_slot_in_tx(
     conn: &mut SqliteConnection,
     theme_id: &str,
@@ -550,6 +696,7 @@ pub async fn assign_menu_slot_in_tx(
             .execute(&mut *conn)
             .await?;
     }
+    bump_slot_version_in_tx(conn, theme_id).await?;
     Ok(())
 }
 
@@ -737,6 +884,500 @@ pub async fn resolve_active_slot_menus(
     }
     tx.commit().await?;
     Ok(out)
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MenuListPage {
+    pub items: Vec<MenuRecord>,
+    pub total: i64,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MenuSlotsSnapshot {
+    pub theme_id: String,
+    pub version: i64,
+    pub is_active: bool,
+    pub available_slots: Vec<String>,
+    pub assignments: BTreeMap<String, i64>,
+}
+
+pub async fn list_menus(db: &SqlitePool, limit: i64, offset: i64) -> ApiResult<MenuListPage> {
+    if !(1..=100).contains(&limit) {
+        return Err(ApiError::bad_request("limit phải trong khoảng 1..=100."));
+    }
+    if offset < 0 {
+        return Err(ApiError::bad_request("offset không hợp lệ."));
+    }
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM site_menus")
+        .fetch_one(db)
+        .await?;
+    let rows: Vec<(i64, String, String, i64, Option<String>, String)> = sqlx::query_as(
+        "SELECT id, menu_key, title, version, origin_provenance, updated_at
+           FROM site_menus
+          ORDER BY id ASC
+          LIMIT ? OFFSET ?",
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(db)
+    .await?;
+    let items = rows
+        .into_iter()
+        .map(|r| MenuRecord {
+            id: r.0,
+            menu_key: r.1,
+            title: r.2,
+            version: r.3,
+            origin_provenance: r.4,
+            updated_at: r.5,
+        })
+        .collect();
+    Ok(MenuListPage {
+        items,
+        total,
+        limit,
+        offset,
+    })
+}
+
+pub async fn get_menu(db: &SqlitePool, menu_id: i64) -> ApiResult<Option<MenuWithItems>> {
+    let mut tx = db.begin().await?;
+    let res = get_menu_in_tx(&mut tx, menu_id).await?;
+    tx.commit().await?;
+    Ok(res)
+}
+
+pub async fn create_menu_admin(
+    db: &SqlitePool,
+    menu_key: &str,
+    title: &str,
+) -> ApiResult<MenuWithItems> {
+    let mut conn = db.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    let res = async {
+        let menu = create_menu_in_tx(
+            &mut conn,
+            &CreateMenuInput {
+                menu_key: menu_key.to_owned(),
+                title: title.to_owned(),
+                origin_provenance: None,
+            },
+        )
+        .await?;
+        Ok::<_, ApiError>(MenuWithItems {
+            menu,
+            items: Vec::new(),
+        })
+    }
+    .await;
+    match res {
+        Ok(out) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(out)
+        }
+        Err(err) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(err)
+        }
+    }
+}
+
+pub async fn update_menu_with_title(
+    db: &SqlitePool,
+    menu_id: i64,
+    expected_version: i64,
+    title: &str,
+    items: &[MenuItemInput],
+) -> ApiResult<MenuWithItems> {
+    let clean_title = validate_label(title)?;
+    let mut conn = db.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    let res = async {
+        let _ = replace_menu_items_in_tx(&mut conn, menu_id, expected_version, items).await?;
+        sqlx::query("UPDATE site_menus SET title = ? WHERE id = ?")
+            .bind(&clean_title)
+            .bind(menu_id)
+            .execute(&mut *conn)
+            .await?;
+        get_menu_in_tx(&mut conn, menu_id)
+            .await?
+            .ok_or_else(|| ApiError::internal("Không đọc lại được menu sau khi cập nhật."))
+    }
+    .await;
+    match res {
+        Ok(out) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(out)
+        }
+        Err(err) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(err)
+        }
+    }
+}
+
+pub async fn delete_menu(db: &SqlitePool, menu_id: i64, expected_version: i64) -> ApiResult<()> {
+    let mut conn = db.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    let res = async {
+        let menu = get_menu_record_in_tx(&mut conn, menu_id)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Không tìm thấy menu."))?;
+        if menu.version != expected_version {
+            return Err(ApiError::precondition_failed(
+                "Menu đã được cập nhật ở phiên bản khác.",
+            ));
+        }
+        let affected_themes: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT theme_id FROM site_menu_slot_assignments WHERE menu_id = ?",
+        )
+        .bind(menu_id)
+        .fetch_all(&mut *conn)
+        .await?;
+        let deleted = sqlx::query("DELETE FROM site_menus WHERE id = ? AND version = ?")
+            .bind(menu_id)
+            .bind(expected_version)
+            .execute(&mut *conn)
+            .await?;
+        if deleted.rows_affected() == 0 {
+            return Err(ApiError::precondition_failed(
+                "Menu đã thay đổi đồng thời.",
+            ));
+        }
+        for theme_id in affected_themes {
+            bump_slot_version_in_tx(&mut conn, &theme_id).await?;
+        }
+        Ok::<_, ApiError>(())
+    }
+    .await;
+    match res {
+        Ok(()) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(())
+        }
+        Err(err) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(err)
+        }
+    }
+}
+
+/// Read-only preview of an unsaved menu tree using the canonical view projection.
+pub async fn preview_menu(
+    db: &SqlitePool,
+    menu_id: i64,
+    title_override: Option<&str>,
+    items: &[MenuItemInput],
+) -> ApiResult<Option<MenuViewModel>> {
+    let mut tx = db.begin().await?;
+    let Some(menu) = get_menu_record_in_tx(&mut tx, menu_id).await? else {
+        tx.commit().await?;
+        return Ok(None);
+    };
+    let preview_title = match title_override {
+        Some(raw) => validate_label(raw)?,
+        None => menu.title.clone(),
+    };
+    let existing_ids: BTreeSet<i64> =
+        sqlx::query_scalar::<_, i64>("SELECT id FROM site_menu_items WHERE menu_id = ?")
+            .bind(menu_id)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .collect();
+    let plan = validate_menu_items_plan(&existing_ids, items)?;
+
+    let mut synthetic_ids: Vec<i64> = Vec::with_capacity(items.len());
+    for (idx, item) in items.iter().enumerate() {
+        synthetic_ids.push(item.id.unwrap_or(-((idx as i64) + 1)));
+    }
+
+    let mut diagnostics = Vec::new();
+    let mut resolved_items: BTreeMap<i64, (Option<i64>, i64, String, String)> = BTreeMap::new();
+    let mut children_map: BTreeMap<Option<i64>, Vec<i64>> = BTreeMap::new();
+
+    // Sort by (parent_id, position, synthetic_id) matching DB order.
+    let mut ordered_indices: Vec<usize> = (0..items.len()).collect();
+    ordered_indices.sort_by_key(|&idx| {
+        let p_id = plan.parent_idx[idx].map(|p| synthetic_ids[p]);
+        (p_id.unwrap_or(0), items[idx].position, synthetic_ids[idx])
+    });
+
+    for idx in ordered_indices {
+        let item = &items[idx];
+        let sid = synthetic_ids[idx];
+        let parent_sid = plan.parent_idx[idx].map(|p| synthetic_ids[p]);
+        let url_opt = match item.target_kind {
+            MenuTargetKind::Entry => match item.target_entry_id {
+                Some(eid) => match resolve_entry_url_in_tx(&mut tx, eid).await? {
+                    Some(url) => Some(url),
+                    None => {
+                        diagnostics.push(MenuDiagnostic {
+                            item_id: sid,
+                            code: "menu_target_entry_unavailable",
+                            message: format!("Entry #{eid} chưa publish hoặc đã bị xóa."),
+                        });
+                        None
+                    }
+                },
+                None => None,
+            },
+            MenuTargetKind::Term => match item.target_term_id {
+                Some(tid) => match resolve_term_url_in_tx(&mut tx, tid).await? {
+                    Some(url) => Some(url),
+                    None => {
+                        diagnostics.push(MenuDiagnostic {
+                            item_id: sid,
+                            code: "menu_target_term_unavailable",
+                            message: format!("Term #{tid} không còn tồn tại."),
+                        });
+                        None
+                    }
+                },
+                None => None,
+            },
+            MenuTargetKind::External => item
+                .external_url
+                .as_deref()
+                .and_then(|raw| validate_external_url(raw).ok()),
+        };
+        if let Some(url) = url_opt {
+            let label = validate_label(&item.label)?;
+            resolved_items.insert(sid, (parent_sid, item.position, label, url));
+            children_map.entry(parent_sid).or_default().push(sid);
+        }
+    }
+
+    fn build_preview_tree(
+        parent: Option<i64>,
+        resolved: &BTreeMap<i64, (Option<i64>, i64, String, String)>,
+        children_map: &BTreeMap<Option<i64>, Vec<i64>>,
+        depth: usize,
+    ) -> Vec<MenuItemView> {
+        if depth > MAX_MENU_DEPTH {
+            return Vec::new();
+        }
+        let Some(ids) = children_map.get(&parent) else {
+            return Vec::new();
+        };
+        let mut out = Vec::with_capacity(ids.len());
+        for &id in ids {
+            if let Some((_, _, label, url)) = resolved.get(&id) {
+                let children = build_preview_tree(Some(id), resolved, children_map, depth + 1);
+                out.push(MenuItemView {
+                    id,
+                    label: label.clone(),
+                    url: url.clone(),
+                    children,
+                });
+            }
+        }
+        out
+    }
+
+    let tree = build_preview_tree(None, &resolved_items, &children_map, 1);
+    tx.commit().await?;
+    Ok(Some(MenuViewModel {
+        menu_id: menu.id,
+        menu_key: menu.menu_key,
+        title: preview_title,
+        items: tree,
+        diagnostics,
+    }))
+}
+
+pub fn extract_declared_menu_slots(manifest_json: &str) -> Vec<String> {
+    let Ok(manifest) = serde_json::from_str::<crate::theme::ThemeV2Manifest>(manifest_json) else {
+        return Vec::new();
+    };
+    let Some(menus_val) = manifest.menus else {
+        return Vec::new();
+    };
+    let mut slots = BTreeSet::new();
+    let collect_arr = |arr: &[serde_json::Value], out: &mut BTreeSet<String>| {
+        for item in arr {
+            if let Some(s) = item.as_str() {
+                if validate_menu_key(s).is_ok() {
+                    out.insert(s.to_owned());
+                }
+            } else if let Some(obj) = item.as_object() {
+                if let Some(s) = obj.get("key").or_else(|| obj.get("slot_key")).and_then(|v| v.as_str()) {
+                    if validate_menu_key(s).is_ok() {
+                        out.insert(s.to_owned());
+                    }
+                }
+            }
+        }
+    };
+    if let Some(arr) = menus_val.as_array() {
+        collect_arr(arr, &mut slots);
+    } else if let Some(obj) = menus_val.as_object() {
+        if let Some(arr) = obj.get("slots").and_then(|v| v.as_array()) {
+            collect_arr(arr, &mut slots);
+        } else {
+            for k in obj.keys() {
+                if validate_menu_key(k).is_ok() {
+                    slots.insert(k.clone());
+                }
+            }
+        }
+    }
+    slots.into_iter().collect()
+}
+
+pub async fn get_menu_slots(db: &SqlitePool, theme_id: &str) -> ApiResult<Option<MenuSlotsSnapshot>> {
+    let mut tx = db.begin().await?;
+    let active: Option<(String, String)> = sqlx::query_as(
+        "SELECT r.theme_id, r.manifest_json
+           FROM theme_active_selection a
+           JOIN theme_revisions r ON r.revision_id = a.revision_id
+          WHERE a.id = 1",
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let (is_active, manifest_json) = if let Some((active_id, active_manifest)) = active
+        && active_id == theme_id
+    {
+        (true, active_manifest)
+    } else {
+        let rev_manifest: Option<String> = sqlx::query_scalar(
+            "SELECT manifest_json
+               FROM theme_revisions
+              WHERE theme_id = ?
+              ORDER BY revision_id DESC
+              LIMIT 1",
+        )
+        .bind(theme_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(manifest) = rev_manifest else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+        (false, manifest)
+    };
+
+    let available_slots = extract_declared_menu_slots(&manifest_json);
+    let version = get_slot_version_in_tx(&mut tx, theme_id).await?;
+    let assignments = list_slot_assignments_in_tx(&mut tx, theme_id).await?;
+    tx.commit().await?;
+    Ok(Some(MenuSlotsSnapshot {
+        theme_id: theme_id.to_owned(),
+        version,
+        is_active,
+        available_slots,
+        assignments,
+    }))
+}
+
+pub async fn put_menu_slots(
+    db: &SqlitePool,
+    theme_id: &str,
+    expected_version: i64,
+    assignments: &BTreeMap<String, Option<i64>>,
+) -> ApiResult<MenuSlotsSnapshot> {
+    let mut conn = db.acquire().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    let res = async {
+        let theme_exists: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM theme_revisions WHERE theme_id = ? LIMIT 1",
+        )
+        .bind(theme_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+        if theme_exists.is_none() {
+            return Err(ApiError::not_found("Không tìm thấy theme."));
+        }
+
+        let active: Option<(String, String)> = sqlx::query_as(
+            "SELECT r.theme_id, r.manifest_json
+               FROM theme_active_selection a
+               JOIN theme_revisions r ON r.revision_id = a.revision_id
+              WHERE a.id = 1",
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        let Some((active_id, active_manifest)) = active else {
+            return Err(ApiError::conflict("Chưa có theme nào đang kích hoạt."));
+        };
+        if active_id != theme_id {
+            return Err(ApiError::conflict(
+                "Theme không phải revision đang kích hoạt.",
+            ));
+        }
+
+        let available_slots = extract_declared_menu_slots(&active_manifest);
+        for slot_key in assignments.keys() {
+            validate_menu_key(slot_key)?;
+            if !available_slots.contains(slot_key) {
+                return Err(ApiError::conflict(
+                    "Slot menu không tồn tại trong revision đang kích hoạt.",
+                ));
+            }
+        }
+
+        let current_ver = get_slot_version_in_tx(&mut conn, theme_id).await?;
+        if current_ver != expected_version {
+            return Err(ApiError::precondition_failed(
+                "Slot menu đã thay đổi ở phiên bản khác.",
+            ));
+        }
+
+        for (slot_key, menu_id) in assignments {
+            if let Some(mid) = menu_id {
+                let exists: Option<i64> =
+                    sqlx::query_scalar("SELECT id FROM site_menus WHERE id = ?")
+                        .bind(mid)
+                        .fetch_optional(&mut *conn)
+                        .await?;
+                if exists.is_none() {
+                    return Err(ApiError::not_found("Không tìm thấy menu để gắn slot."));
+                }
+                sqlx::query(
+                    "INSERT INTO site_menu_slot_assignments (theme_id, slot_key, menu_id)
+                     VALUES (?, ?, ?)
+                     ON CONFLICT(theme_id, slot_key) DO UPDATE SET menu_id = excluded.menu_id",
+                )
+                .bind(theme_id)
+                .bind(slot_key)
+                .bind(mid)
+                .execute(&mut *conn)
+                .await?;
+            } else {
+                sqlx::query(
+                    "DELETE FROM site_menu_slot_assignments WHERE theme_id = ? AND slot_key = ?",
+                )
+                .bind(theme_id)
+                .bind(slot_key)
+                .execute(&mut *conn)
+                .await?;
+            }
+        }
+
+        let new_ver = bump_slot_version_in_tx(&mut conn, theme_id).await?;
+        let updated_assignments = list_slot_assignments_in_tx(&mut conn, theme_id).await?;
+        Ok::<_, ApiError>(MenuSlotsSnapshot {
+            theme_id: theme_id.to_owned(),
+            version: new_ver,
+            is_active: true,
+            available_slots,
+            assignments: updated_assignments,
+        })
+    }
+    .await;
+    match res {
+        Ok(out) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(out)
+        }
+        Err(err) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(err)
+        }
+    }
 }
 
 #[cfg(test)]

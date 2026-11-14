@@ -12,3 +12,10 @@ export {
 export type {
   TaxonomyKind, TaxonomyTerm, TaxonomyTermPage, TaxonomyTermInput, TaxonomyTermChanges,
 } from './taxonomy.ts';
+export {
+  listMenus, createMenu, getMenu, updateMenu, deleteMenu, previewMenu, getMenuSlots, putMenuSlots,
+} from './menus.ts';
+export type {
+  MenuTargetKind, MenuRecord, MenuItemRecord, MenuWithItems, MenuListPage,
+  MenuItemInput, MenuDiagnostic, MenuItemView, MenuViewModel, MenuSlotsSnapshot,
+} from './menus.ts';
