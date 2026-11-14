@@ -4,6 +4,7 @@ import type { BuilderDocument, BuilderElement, BuilderViewport, ElementBinding, 
 import { effectiveResponsive, isElement, isLockedElement, locate, nodeTitle, RESPONSIVE_FIELDS, VIEWPORT_LABELS } from './document.ts';
 import { BuilderBindingFields } from './BuilderBindingFields.tsx';
 import { BuilderListFields } from './BuilderListFields.tsx';
+import { BuilderContactFormFields } from './BuilderContactFormFields.tsx';
 
 interface Props {
   document: BuilderDocument;
@@ -141,7 +142,7 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
       {!element && <p className="text-sm text-slate-500">
         Các thay đổi responsive chỉ ghi vào document khi bấm Lưu. Thêm hoặc đổi thứ tự node từ Tree.
       </p>}
-      {element && !locked && element.type !== 'core/list' && (
+      {element && !locked && element.type !== 'core/list' && element.type !== 'core/contact_form' && (
         <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label="Thuộc tính phần tử">
           {fields.map(field => (
             <label key={field.key} className="block text-sm font-medium text-slate-700">
@@ -172,6 +173,9 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
       )}
       {element?.type === 'core/list' && !locked && (
         <BuilderListFields key={element.id} element={element} onChange={onListChange} onError={onError} />
+      )}
+      {element?.type === 'core/contact_form' && !locked && (
+        <BuilderContactFormFields key={element.id} element={element} onChange={onChange} onError={onError} />
       )}
       {binding != null && (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-900">

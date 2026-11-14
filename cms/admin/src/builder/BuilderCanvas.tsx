@@ -22,6 +22,10 @@ function ElementContent({ element, registry }: { element: BuilderElement; regist
     </div>;
   }
   switch (element.type) {
+    case 'core/contact_form':
+      return <div className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+        Form liên hệ #{String(element.props.form_id ?? 1)} · Nút: {String(element.props.submit_label ?? 'Gửi liên hệ')}
+      </div>;
     case 'core/list':
       return <div className="rounded border border-sky-300 bg-sky-50 p-3 text-sm text-sky-900">
         Danh sách {String(element.props.type_key ?? '')} · {String(element.props.page_size ?? 6)} mục/trang

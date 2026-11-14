@@ -154,12 +154,15 @@ pub async fn archive(
         false,
     )
     .await?;
-    Ok(public_html(content_render::compose_document_with_seo(
-        header.as_deref(),
-        &body_html,
-        footer.as_deref(),
-        &seo_view,
-    )?))
+    Ok(crate::routes::public::rendered_layout_with_form_csp(
+        content_render::compose_document_with_seo(
+            header.as_deref(),
+            &body_html,
+            footer.as_deref(),
+            &seo_view,
+        )?,
+        false,
+    ))
 }
 
 pub async fn single(
@@ -255,14 +258,20 @@ pub(crate) async fn render_single_entry_response(
         title: &site.site_title,
         tagline: &site.tagline,
     };
-    let body_html = match overrides::resolve_effective_override(&db, role, Some(&type_key), Some(entry.id)).await? {
-        Some(record) => overrides::render_override_for_public(&db, &record, Some((&type_key, &slug))).await?.html,
-        None => content_render::render_single_with_site(
-            &schema,
-            &entry_view_with_url(entry, &schema, Some(canonical_path)),
-            selected,
-            &site_ctx,
-        )?,
+    let (body_html, allow_form_self) = match overrides::resolve_effective_override(&db, role, Some(&type_key), Some(entry.id)).await? {
+        Some(record) => {
+            let rendered = overrides::render_override_for_public(&db, &record, Some((&type_key, &slug))).await?;
+            (rendered.html, rendered.has_active_contact_form)
+        }
+        None => (
+            content_render::render_single_with_site(
+                &schema,
+                &entry_view_with_url(entry, &schema, Some(canonical_path)),
+                selected,
+                &site_ctx,
+            )?,
+            false,
+        ),
     };
     let (header, footer) = overrides::resolve_and_render_header_footer(
         &db,
@@ -279,12 +288,15 @@ pub(crate) async fn render_single_entry_response(
         &canonical_path_for_seo,
     )
     .await?;
-    Ok(public_html(content_render::compose_document_with_seo(
-        header.as_deref(),
-        &body_html,
-        footer.as_deref(),
-        &seo_view,
-    )?))
+    Ok(crate::routes::public::rendered_layout_with_form_csp(
+        content_render::compose_document_with_seo(
+            header.as_deref(),
+            &body_html,
+            footer.as_deref(),
+            &seo_view,
+        )?,
+        allow_form_self,
+    ))
 }
 
 pub async fn category_archive(
@@ -437,12 +449,15 @@ async fn taxonomy_archive(
         false,
     )
     .await?;
-    Ok(public_html(content_render::compose_document_with_seo(
-        header.as_deref(),
-        &body_html,
-        footer.as_deref(),
-        &seo_view,
-    )?))
+    Ok(crate::routes::public::rendered_layout_with_form_csp(
+        content_render::compose_document_with_seo(
+            header.as_deref(),
+            &body_html,
+            footer.as_deref(),
+            &seo_view,
+        )?,
+        false,
+    ))
 }
 
 async fn media_response(

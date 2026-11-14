@@ -201,6 +201,8 @@ pub enum KnownElement {
     Button(ButtonProps),
     #[serde(rename = "core/list")]
     List(ListProps),
+    #[serde(rename = "core/contact_form")]
+    ContactForm(ContactFormProps),
     #[serde(rename = "legacy/block")]
     Legacy(LegacyBlockProps),
     #[serde(rename = "plugin/block")]
@@ -279,7 +281,18 @@ fn default_list_size() -> u8 {
     6
 }
 
-/// An allowlisted, exact-entry field reference. No arbitrary queries or JSON paths.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContactFormProps {
+    pub form_id: i64,
+    #[serde(default = "default_submit_label")]
+    pub submit_label: String,
+}
+
+fn default_submit_label() -> String {
+    "Gửi liên hệ".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElementBinding {
@@ -316,7 +329,7 @@ impl KnownElement {
             Self::Text(p) => p.binding.as_ref(),
             Self::Image(p) => p.binding.as_ref(),
             Self::Button(p) => p.binding.as_ref(),
-            Self::Legacy(_) | Self::List(_) | Self::PluginBlock(_) => None,
+            Self::Legacy(_) | Self::List(_) | Self::ContactForm(_) | Self::PluginBlock(_) => None,
         }
     }
 }
@@ -565,6 +578,16 @@ fn validate_known(
             let descriptor = catalog.get(&props.block_id).ok_or("Unknown plugin block descriptor")?;
             if descriptor.status != ProviderStatus::Active {
                 return Err("Plugin block provider is not active");
+            }
+        }
+        KnownElement::ContactForm(props) => {
+            let label = props.submit_label.trim();
+            if props.form_id <= 0
+                || label.is_empty()
+                || props.submit_label.chars().count() > 80
+                || props.submit_label.chars().any(char::is_control)
+            {
+                return Err("Invalid Builder contact form configuration");
             }
         }
         KnownElement::List(props) => {

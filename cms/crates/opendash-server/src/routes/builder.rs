@@ -231,8 +231,9 @@ pub async fn homepage_preview(
     current.validate(&document)?;
     builder_storage::check_preview_images(&db, &document).await?;
     let (bindings, lists) = builder_storage::resolve_preview(&db, &document).await?;
+    let forms = crate::storage::builder::resolve_contact_forms(&db, &document).await?;
     let rendered =
-        page_usecase::render_builder_with_lists(&current, &document, true, &bindings, &lists)?;
+        page_usecase::render_builder_with_lists_and_forms(&current, &document, true, &bindings, &lists, &forms)?;
     Ok((builder_headers(None), Json(rendered)).into_response())
 }
 

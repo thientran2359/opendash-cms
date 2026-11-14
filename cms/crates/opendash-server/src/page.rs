@@ -34,8 +34,13 @@ pub struct BuilderDiagnostic {
     pub code: &'static str,
 }
 
+pub type ContactFormResults =
+    std::collections::BTreeMap<String, Option<crate::storage::contact::ContactFormRecord>>;
+
 #[derive(Debug, Serialize)]
 pub struct RenderedLayout {
+    #[serde(skip_serializing)]
+    pub has_active_contact_form: bool,
     pub html: String,
     pub diagnostics: Vec<BuilderDiagnostic>,
 }
@@ -189,11 +194,30 @@ pub fn render_builder_with_lists(
     bindings: &BindingResults,
     lists: &ListResults,
 ) -> ApiResult<RenderedLayout> {
+    render_builder_with_lists_and_forms(
+        state,
+        document,
+        is_preview,
+        bindings,
+        lists,
+        &ContactFormResults::new(),
+    )
+}
+
+pub fn render_builder_with_lists_and_forms(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
+    lists: &ListResults,
+    forms: &ContactFormResults,
+) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
     let mut html = builder_responsive_css(document);
     html.push_str("<main data-builder-version=\"1\">");
     let mut diagnostics = Vec::new();
+    let mut has_active_contact_form = false;
     for section in &document.sections {
         html.push_str(&format!(
             "<section data-node-id=\"{}\">",
@@ -363,6 +387,29 @@ pub fn render_builder_with_lists(
                                 }
                             }
                         }
+                        ElementContent::Known(KnownElement::ContactForm(props)) => {
+                            match forms.get(&element.id).and_then(|opt| opt.as_ref()) {
+                                Some(form) if form.status == "active" => {
+                                    let rendered = render_contact_form_html(
+                                        &element.id,
+                                        form,
+                                        &props.submit_label,
+                                        is_preview,
+                                    );
+                                    if !is_preview {
+                                        has_active_contact_form = true;
+                                    }
+                                    Some(rendered)
+                                }
+                                _ => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "contact_form_unavailable",
+                                    });
+                                    Some("<p class=\"builder-contact-unavailable\">Biểu mẫu liên hệ hiện không khả dụng.</p>".to_string())
+                                }
+                            }
+                        }
                         ElementContent::Known(KnownElement::PluginBlock(props)) => {
                             match state.themes.get(&props.block_id).map(|d| d.template.as_str()) {
                                 Some(template_src) => {
@@ -462,7 +509,94 @@ pub fn render_builder_with_lists(
         html.push_str("</section>");
     }
     html.push_str("</main>");
-    Ok(RenderedLayout { html, diagnostics })
+    Ok(RenderedLayout {
+        html,
+        diagnostics,
+        has_active_contact_form,
+    })
+}
+
+fn render_contact_form_html(
+    node_id: &str,
+    form: &crate::storage::contact::ContactFormRecord,
+    submit_label: &str,
+    is_preview: bool,
+) -> String {
+    use opendash_core::contact::FormKind;
+    let mut out = String::new();
+    if is_preview {
+        out.push_str("<div class=\"builder-contact-form builder-contact-preview\"><fieldset disabled>");
+    } else {
+        let nonce = crate::auth::generate_random_token();
+        out.push_str(&format!(
+            "<form class=\"builder-contact-form\" method=\"post\" action=\"/api/public/contact/{}\">",
+            form.id
+        ));
+        out.push_str(&format!(
+            "<input type=\"hidden\" name=\"form_version\" value=\"{}\">",
+            form.version
+        ));
+        out.push_str(&format!(
+            "<input type=\"hidden\" name=\"nonce\" value=\"{nonce}\">"
+        ));
+        out.push_str("<div class=\"opendash-hp\" hidden><label>Để trống<input type=\"text\" name=\"honeypot\" tabindex=\"-1\" autocomplete=\"off\"></label></div>");
+    }
+
+    for field in &form.schema.fields {
+        let input_id = format!("cf_{}_{}", escape_html(node_id), escape_html(&field.key));
+        let field_name = escape_html(&field.key);
+        let label = escape_html(&field.label);
+        let req_attr = if field.required { " required" } else { "" };
+        out.push_str("<div class=\"builder-contact-field\">");
+        match field.kind {
+            FormKind::Checkbox => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\"><input id=\"{input_id}\" type=\"checkbox\" name=\"{field_name}\" value=\"true\"{req_attr}> {label}</label>"
+                ));
+            }
+            FormKind::Textarea => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\">{label}</label><textarea id=\"{input_id}\" name=\"{field_name}\" maxlength=\"4000\"{req_attr}></textarea>"
+                ));
+            }
+            FormKind::Select => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\">{label}</label><select id=\"{input_id}\" name=\"{field_name}\"{req_attr}>"
+                ));
+                if !field.required {
+                    out.push_str("<option value=\"\">-- Chọn --</option>");
+                }
+                if let Some(options) = &field.options {
+                    for opt in options {
+                        let eopt = escape_html(opt);
+                        out.push_str(&format!("<option value=\"{eopt}\">{eopt}</option>"));
+                    }
+                }
+                out.push_str("</select>");
+            }
+            FormKind::Email => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\">{label}</label><input id=\"{input_id}\" type=\"email\" name=\"{field_name}\" maxlength=\"254\"{req_attr}>"
+                ));
+            }
+            FormKind::Text => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\">{label}</label><input id=\"{input_id}\" type=\"text\" name=\"{field_name}\" maxlength=\"254\"{req_attr}>"
+                ));
+            }
+        }
+        out.push_str("</div>");
+    }
+
+    let btn_label = escape_html(submit_label.trim());
+    if is_preview {
+        out.push_str(&format!(
+            "<button type=\"button\" disabled>{btn_label}</button></fieldset></div>"
+        ));
+    } else {
+        out.push_str(&format!("<button type=\"submit\">{btn_label}</button></form>"));
+    }
+    out
 }
 
 /// Canonical link: only currently resolved node IDs with valid nondefault pages
