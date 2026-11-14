@@ -406,7 +406,7 @@ pub async fn put_theme_options_in_conn(
             && let Some(media_id) = v.as_str()
         {
             let exists: Option<i64> =
-                sqlx::query_scalar("SELECT 1 FROM media_assets WHERE id = ?")
+                sqlx::query_scalar("SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image'")
                     .bind(media_id)
                     .fetch_optional(&mut *conn)
                     .await?;

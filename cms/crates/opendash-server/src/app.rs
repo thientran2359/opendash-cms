@@ -15,6 +15,7 @@ use sqlx::SqlitePool;
 use crate::{
     hooks::HookDispatcher,
     media::{MAX_MEDIA_BYTES, MediaStore},
+    media_video::MAX_VIDEO_BYTES,
     package::V2_MAX_ZIP_BYTES,
     plugin::PluginManager,
     routes::{
@@ -30,7 +31,7 @@ use crate::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
             entry_preview, entry_publication, entry_update,
         },
-        media::{media_list, media_original, media_thumbnail, media_upload},
+        media::{media_list, media_original, media_thumbnail, media_upload, media_video_upload},
         menu::{
             MAX_MENU_JSON_BYTES, menu_slots_get, menu_slots_put, menus_create, menus_delete,
             menus_get, menus_list, menus_preview, menus_put,
@@ -333,6 +334,10 @@ pub fn build_router_with_themes_root(
             get(crate::routes::seo::get_home_seo)
                 .put(crate::routes::seo::put_home_seo)
                 .layer(DefaultBodyLimit::max(crate::routes::seo::MAX_SEO_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/media/video",
+            post(media_video_upload).layer(DefaultBodyLimit::max(MAX_VIDEO_BYTES)),
         )
         .route(
             "/api/admin/media",

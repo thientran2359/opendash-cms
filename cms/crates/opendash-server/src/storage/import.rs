@@ -1036,8 +1036,8 @@ pub async fn execute_sample_import_with_cutpoint(
                 byte_size: asset.byte_size,
                 width: asset.width,
                 height: asset.height,
-                thumb_width: asset.thumb_width,
-                thumb_height: asset.thumb_height,
+                thumb_width: asset.thumb_width.unwrap_or(0),
+                thumb_height: asset.thumb_height.unwrap_or(0),
             });
         }
     }

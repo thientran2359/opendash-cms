@@ -50,6 +50,10 @@ impl ApiError {
         Self(StatusCode::UNPROCESSABLE_ENTITY, message.into())
     }
 
+    pub fn too_many_requests(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::TOO_MANY_REQUESTS, message.into())
+    }
+
     pub fn service_unavailable(message: impl Into<Cow<'static, str>>) -> Self {
         Self(StatusCode::SERVICE_UNAVAILABLE, message.into())
     }

@@ -188,8 +188,8 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
                     src={mediaThumbnailUrl(asset.id)}
                     alt={asset.filename}
                     loading="lazy"
-                    width={asset.thumb_width}
-                    height={asset.thumb_height}
+                    width={asset.thumb_width ?? undefined}
+                    height={asset.thumb_height ?? undefined}
                   />
                   <span className="media-filename">{asset.filename}</span>
                   <small>{asset.width} × {asset.height} · {(asset.byte_size / 1024).toFixed(0)} KiB</small>
