@@ -216,6 +216,7 @@ pub async fn public_submit(
     Extension(ExpectedListenerOrigin(listener_origin)): Extension<ExpectedListenerOrigin>,
     Extension(smtp_service): Extension<crate::smtp::SmtpService>,
     recovery: Option<Extension<crate::config::RecoveryState>>,
+    runtime_cfg: Option<Extension<crate::config::RuntimeConfigV1>>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     Path(form_id): Path<i64>,
     headers: HeaderMap,
@@ -229,7 +230,16 @@ pub async fn public_submit(
         )
             .into_response());
     }
-    if !check_strict_contact_origin(&headers, &db, &listener_origin).await? {
+    let trusted_origin_match = runtime_cfg
+        .as_ref()
+        .and_then(|Extension(cfg)| cfg.trusted_origin_normalized().map(str::to_string))
+        .is_some_and(|trusted| {
+            headers
+                .get(header::ORIGIN)
+                .and_then(|v| v.to_str().ok())
+                .is_some_and(|o| o == trusted)
+        });
+    if !trusted_origin_match && !check_strict_contact_origin(&headers, &db, &listener_origin).await? {
         return Ok((
             StatusCode::FORBIDDEN,
             [(header::CACHE_CONTROL, "no-store")],

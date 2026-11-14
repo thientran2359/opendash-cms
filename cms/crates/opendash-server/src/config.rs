@@ -153,3 +153,37 @@ pub fn build_recovery_state_for_root(site_root: &Path, db_path: &Path) -> Recove
         Err(_) => RecoveryState::new(false),
     }
 }
+
+
+impl RuntimeConfigV1 {
+    pub fn trusted_origin_normalized(&self) -> Option<&str> {
+        self.portable.trusted_public_origin.as_deref()
+    }
+
+    pub fn trusted_origin_is_https(&self) -> bool {
+        self.trusted_origin_normalized()
+            .is_some_and(|o| o.starts_with("https://"))
+    }
+
+    pub fn trusted_host(&self) -> Option<String> {
+        let origin = self.trusted_origin_normalized()?;
+        let rest = origin
+            .strip_prefix("https://")
+            .or_else(|| origin.strip_prefix("http://"))?;
+        if rest.is_empty() || rest.contains('/') || rest.contains('@') {
+            return None;
+        }
+        Some(rest.to_string())
+    }
+
+    pub fn redacted_summary_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "version": self.portable.version,
+            "listen_ip": self.portable.listen_ip,
+            "port": self.portable.port,
+            "trusted_public_origin": self.portable.trusted_public_origin,
+            "log_level": self.portable.log_level,
+            "recovery_safe_mode": self.portable.recovery_safe_mode,
+        })
+    }
+}
