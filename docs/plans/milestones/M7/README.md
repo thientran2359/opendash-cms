@@ -13,6 +13,6 @@
 - [G3: 14 task / đủ8 candidate](slices/2026-11-14-m7-site-features-g3.md), kể cả dependency/native G5/closure
 - Living briefs: [SITE-01](../../modules/SITE-01-settings-navigation.md), [SITE-02](../../modules/SITE-02-seo.md), [SITE-03](../../modules/SITE-03-contact.md), [CNT-05 video](../../modules/CNT-05-media.md)
 
-**Status:** G2 AGREED/G3 READY hiệu lực trên main sau merge PR design; implementation NOT_STARTED, verification NOT_RUN. Không đồng nghĩa Project Ready: M5#157 và M6#188 cần G5 thật trước pickup M7. Chưa tạo implementation Issue/dispatch trong lượt chuẩn bị.
+**Status:** G2 AGREED/G3 READY hiệu lực trên main sau merge PR design; implementation NOT_STARTED, verification NOT_RUN. Không đồng nghĩa Project Ready: M5/M6 Windows development gate cần PASS trước pickup M7; macOS NOT_RUN được hoãn đến release theo ADR-0014. Chưa tạo implementation Issue/dispatch trong lượt chuẩn bị.
 
 [Planning validation receipt](../../../verification/2026-11-14-m7-planning.md) records actual checks and limits; does not establish runtime G5.
