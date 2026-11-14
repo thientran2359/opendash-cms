@@ -203,3 +203,144 @@ pub fn validate_seo_input(input: &SeoMetadataInput) -> ApiResult<SeoMetadataInpu
         noindex: input.noindex,
     })
 }
+
+const SITEMAP_MAX_LOC_BYTES: usize = 2047;
+const SITEMAP_MAX_PART_BYTES: usize = 50 * 1024 * 1024;
+
+fn escape_xml(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn format_sitemap_lastmod(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.len() < 10 {
+        return None;
+    }
+    let date = &trimmed[..10];
+    let bytes = date.as_bytes();
+    if !(bytes[0..4].iter().all(u8::is_ascii_digit)
+        && bytes[4] == b'-'
+        && bytes[5..7].iter().all(u8::is_ascii_digit)
+        && bytes[7] == b'-'
+        && bytes[8..10].iter().all(u8::is_ascii_digit))
+    {
+        return None;
+    }
+    if trimmed.len() == 10 {
+        return Some(trimmed.to_string());
+    }
+    let sep = trimmed.as_bytes()[10];
+    if (sep == b' ' || sep == b'T') && trimmed.len() >= 19 {
+        let time = &trimmed[11..19];
+        let tb = time.as_bytes();
+        if tb[0..2].iter().all(u8::is_ascii_digit)
+            && tb[2] == b':'
+            && tb[3..5].iter().all(u8::is_ascii_digit)
+            && tb[5] == b':'
+            && tb[6..8].iter().all(u8::is_ascii_digit)
+        {
+            return Some(format!("{date}T{time}Z"));
+        }
+    }
+    Some(date.to_string())
+}
+
+pub fn render_robots_txt(settings: &crate::storage::settings::PublicSiteSettings) -> String {
+    if !settings.indexing_enabled {
+        return "User-agent: *\nDisallow: /\n".to_string();
+    }
+    let mut out = String::from(
+        "User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /builder\nDisallow: /api\nDisallow: /auth\n",
+    );
+    if let Some(origin) = settings.public_origin.as_deref() {
+        let trimmed = origin.trim_end_matches('/');
+        if !trimmed.is_empty() {
+            out.push_str(&format!("Sitemap: {trimmed}/sitemap.xml\n"));
+        }
+    }
+    out
+}
+
+pub fn render_sitemap_index(
+    settings: &crate::storage::settings::PublicSiteSettings,
+    parts: usize,
+) -> String {
+    let mut out = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<sitemapindex xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+    );
+    if settings.indexing_enabled {
+        if let Some(origin) = settings.public_origin.as_deref() {
+            let base = origin.trim_end_matches('/');
+            for page in 1..=parts {
+                let loc = escape_xml(&format!("{base}/sitemaps/{page}.xml"));
+                out.push_str(&format!("  <sitemap><loc>{loc}</loc></sitemap>\n"));
+            }
+        }
+    }
+    out.push_str("</sitemapindex>\n");
+    out
+}
+
+pub fn render_sitemap_part(
+    settings: &crate::storage::settings::PublicSiteSettings,
+    routes: &crate::storage::sitemap::SitemapRouteList,
+) -> crate::error::ApiResult<String> {
+    let origin = settings
+        .public_origin
+        .as_deref()
+        .map(|s| s.trim_end_matches('/'))
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            crate::error::ApiError::service_unavailable(
+                "Chưa cấu hình public_origin để tạo sitemap.",
+            )
+        })?;
+    let mut out = String::from(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+    );
+    for route in &routes.routes {
+        let path = if route.path.starts_with('/') {
+            route.path.as_str()
+        } else {
+            "/"
+        };
+        let loc = if path == "/" {
+            format!("{origin}/")
+        } else {
+            format!("{origin}{path}")
+        };
+        if loc.len() > SITEMAP_MAX_LOC_BYTES {
+            return Err(crate::error::ApiError::unprocessable(
+                "URL trong sitemap vượt quá giới hạn 2048 byte.",
+            ));
+        }
+        let escaped_loc = escape_xml(&loc);
+        out.push_str("  <url><loc>");
+        out.push_str(&escaped_loc);
+        out.push_str("</loc>");
+        if let Some(lastmod) = route.lastmod.as_deref().and_then(format_sitemap_lastmod) {
+            out.push_str("<lastmod>");
+            out.push_str(&escape_xml(&lastmod));
+            out.push_str("</lastmod>");
+        }
+        out.push_str("</url>\n");
+    }
+    out.push_str("</urlset>\n");
+    if out.len() > SITEMAP_MAX_PART_BYTES {
+        return Err(crate::error::ApiError::service_unavailable(
+            "Phần sitemap vượt quá giới hạn 50 MiB.",
+        ));
+    }
+    Ok(out)
+}
