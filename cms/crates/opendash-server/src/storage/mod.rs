@@ -6,6 +6,8 @@ pub mod dashboard;
 pub mod entries;
 pub mod import;
 pub mod media;
+pub mod media_lifecycle;
+pub mod media_refs;
 pub mod menu;
 pub mod operations;
 pub mod overrides;

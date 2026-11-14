@@ -31,7 +31,10 @@ use crate::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
             entry_preview, entry_publication, entry_update,
         },
-        media::{media_list, media_original, media_thumbnail, media_upload, media_video_upload},
+        media::{
+            media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
+            media_video_upload,
+        },
         menu::{
             MAX_MENU_JSON_BYTES, menu_slots_get, menu_slots_put, menus_create, menus_delete,
             menus_get, menus_list, menus_preview, menus_put,
@@ -351,6 +354,10 @@ pub fn build_router_with_themes_root(
             get(media_list)
                 .post(media_upload)
                 .layer(DefaultBodyLimit::max(MAX_MEDIA_BYTES)),
+        )
+        .route(
+            "/api/admin/media/{id}",
+            get(media_get).delete(media_delete),
         )
         .route("/api/admin/media/{id}/file", get(media_original))
         .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))

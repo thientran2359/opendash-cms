@@ -6,6 +6,7 @@ mod document;
 mod error;
 mod hooks;
 mod media;
+mod media_lifecycle;
 mod media_video;
 mod operations;
 mod package;
@@ -74,6 +75,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         content_registry,
         coordinator,
     };
+    media_lifecycle::recover_pending_delete_jobs_on_startup(&db, &state.media_store)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
 
     let port = env::var("OPENDASH_PORT")
         .unwrap_or_else(|_| "18766".into())

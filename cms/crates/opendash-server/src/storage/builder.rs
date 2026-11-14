@@ -428,7 +428,7 @@ pub async fn validate_media_refs_in_tx(
             return Err(ApiError::bad_request("Invalid Builder media ID"));
         }
         let exists: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image')",
+            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')",
         )
         .bind(id)
         .fetch_one(&mut *conn)
@@ -444,7 +444,7 @@ pub async fn validate_media_refs_in_tx(
             return Err(ApiError::bad_request("Invalid Builder video ID"));
         }
         let exists: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'video')",
+            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'video' AND lifecycle_state = 'active')",
         )
         .bind(id)
         .fetch_one(&mut *conn)
@@ -466,7 +466,7 @@ pub async fn check_preview_images(db: &SqlitePool, document: &BuilderDocument) -
             return Err(ApiError::bad_request("Invalid Builder media ID"));
         }
         let exists: i64 =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image')")
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')")
                 .bind(id)
                 .fetch_one(db)
                 .await?;
@@ -517,7 +517,7 @@ where
             return Err(ApiError::bad_request("Invalid Builder media ID"));
         }
         let exists: i64 =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image')")
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')")
                 .bind(id)
                 .fetch_one(&mut *tx)
                 .await?;

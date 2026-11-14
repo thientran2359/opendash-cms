@@ -16,6 +16,8 @@ export interface ApiRequestOptions {
   signal?: AbortSignal;
   /** M3 optimistic edit version, serialized as If-Match: "vN". */
   ifMatchVersion?: number;
+  /** Explicit If-Match header value (e.g. "gv1-v1" for media lifecycle). */
+  ifMatch?: string;
   /** Encoded display name for raw binary media uploads (never a server path). */
   uploadFilename?: string;
   defaultErrorMessage: string;
@@ -27,6 +29,7 @@ function buildRequestHeaders(
   contentType?: string,
   ifMatchVersion?: number,
   uploadFilename?: string,
+  ifMatch?: string,
 ): Record<string, string> {
   const headers: Record<string, string> = {};
   if (contentType) {
@@ -35,7 +38,9 @@ function buildRequestHeaders(
   if (csrfToken) {
     headers['X-CSRF-Token'] = csrfToken;
   }
-  if (ifMatchVersion !== undefined) {
+  if (ifMatch !== undefined) {
+    headers['If-Match'] = ifMatch;
+  } else if (ifMatchVersion !== undefined) {
     headers['If-Match'] = `"v${ifMatchVersion}"`;
   }
   if (uploadFilename) {
@@ -56,7 +61,7 @@ export async function requestText(url: string, options: ApiRequestOptions): Prom
   const res = await fetch(url, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename),
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename, options.ifMatch),
     body: options.body,
     signal: options.signal,
   });
@@ -69,7 +74,7 @@ export async function requestBlob(url: string, options: ApiRequestOptions): Prom
   const res = await fetch(url, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename),
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename, options.ifMatch),
     body: options.body,
     signal: options.signal,
     cache: 'no-store',
@@ -85,7 +90,7 @@ export async function requestBuilderHtml(
   const res = await fetch(url, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename),
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename, options.ifMatch),
     body: options.body,
     signal: options.signal,
   });
@@ -98,7 +103,7 @@ export async function requestJson<T>(url: string, options: ApiRequestOptions): P
   const res = await fetch(url, {
     method: options.method ?? 'GET',
     credentials: 'same-origin',
-    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename),
+    headers: buildRequestHeaders(options.csrfToken, options.contentType, options.ifMatchVersion, options.uploadFilename, options.ifMatch),
     body: options.body,
     signal: options.signal,
   });

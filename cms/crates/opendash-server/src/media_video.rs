@@ -52,6 +52,9 @@ impl ValidatedVideo {
             duration_ms: Some(self.duration_ms),
             video_codec: Some(self.video_codec.clone()),
             audio_codec: self.audio_codec.clone(),
+            lifecycle_state: "active".to_string(),
+            generation: 1,
+            version: 1,
             created_at: String::new(),
         }
     }

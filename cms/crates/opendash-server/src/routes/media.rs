@@ -15,7 +15,7 @@ use sqlx::SqlitePool;
 use tokio::{io::AsyncWriteExt, sync::Semaphore};
 
 use crate::{
-    auth::{require_session, require_session_with_csrf},
+    auth::{require_admin, require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     media::{MAX_MEDIA_BYTES, MediaStore, decode_image},
     media_video::{MAX_VIDEO_BYTES, inspect_mp4},
@@ -228,7 +228,7 @@ async fn image_response(
     }
     if !thumb && asset.kind == "video" {
         let path = store.canonical_path(id, &asset.extension)?;
-        return crate::media::stream_authorized_video(method, headers, &asset, &path, true).await;
+        return crate::media::stream_authorized_video(method, headers, &asset, &path, store, true).await;
     }
     let bytes = store.read(id, &asset.extension, thumb).await?;
     let mime = if thumb {
@@ -247,6 +247,76 @@ async fn image_response(
             ),
         ],
         bytes,
+    )
+        .into_response())
+}
+
+pub async fn media_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let asset = media_storage::find(&db, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy media."))?;
+    let etag = format!("\"{}\"", asset.metadata_etag());
+    Ok((
+        StatusCode::OK,
+        [
+            (header::ETAG, etag.as_str()),
+            (header::CACHE_CONTROL, "private, no-store"),
+        ],
+        Json(asset),
+    )
+        .into_response())
+}
+
+pub async fn media_delete(
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(store): State<Arc<MediaStore>>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let (expected_gen, expected_ver) = crate::media_lifecycle::parse_media_if_match(&headers)?;
+
+    let mut tx = db.begin().await?;
+    let job = match crate::media_lifecycle::tombstone_media_in_tx(
+        &mut tx,
+        &id,
+        expected_gen,
+        expected_ver,
+    )
+    .await
+    {
+        Ok(job) => job,
+        Err(crate::media_lifecycle::TombstoneError::Referenced(pins)) => {
+            return Ok((
+                StatusCode::CONFLICT,
+                [(header::CACHE_CONTROL, "no-store")],
+                Json(serde_json::json!({
+                    "error": "Media đang được sử dụng; không thể xóa.",
+                    "pins": pins
+                })),
+            )
+                .into_response());
+        }
+        Err(crate::media_lifecycle::TombstoneError::Api(err)) => return Err(err),
+    };
+    tx.commit().await?;
+
+    let final_job = crate::media_lifecycle::execute_delete_job(&db, &store, job, &lease).await?;
+    let status = if final_job.phase == crate::media_lifecycle::MediaDeletePhase::Finalized {
+        StatusCode::OK
+    } else {
+        StatusCode::ACCEPTED
+    };
+    Ok((
+        status,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(final_job),
     )
         .into_response())
 }

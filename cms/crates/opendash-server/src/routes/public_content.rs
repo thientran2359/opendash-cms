@@ -479,7 +479,7 @@ async fn media_response(
     }
     if !thumbnail && asset.kind == "video" {
         let path = store.canonical_path(id, &asset.extension)?;
-        return crate::media::stream_authorized_video(method, headers, &asset, &path, false).await;
+        return crate::media::stream_authorized_video(method, headers, &asset, &path, store, false).await;
     }
     let bytes = store.read(id, &asset.extension, thumbnail).await?;
     let mime = if thumbnail {
