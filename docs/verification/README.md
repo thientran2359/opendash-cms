@@ -32,3 +32,5 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [Kiểm chứng M5 G5 trên Windows (2026-11-13)](2026-11-13-m5-g5-windows.md) — kiểm chứng build, full workspace tests và cross-module E2E `M5-S08-T01` trên Windows; phần macOS bản địa (`2026-11-13-m5-g5-macos.md`) chờ Harbor.
 
 - [M7 planning G1/G2/G3 — 14/11/2026](2026-11-14-m7-planning.md): docs/source validation only, full14-task coverage; M7 runtime/native/browser NOT_RUN.
+
+- [M8 G1/G2/G3 planning — 14/11/2026](2026-11-14-m8-planning.md): all18 tasks/8 candidates specified, source/docs checks only; M8 native/runtime NOT_RUN.

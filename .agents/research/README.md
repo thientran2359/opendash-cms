@@ -14,3 +14,7 @@ Use ../templates/RESEARCH.md; promote only accepted conclusions into docs/.
 ## M7 research promoted by design PR (2026-11-14)
 
 - [M7 G1 source inventory](2026-11-14-m7-site-features-g1.md): all8 candidates, actual source/alternatives; authority after merge is ADR-0014 and M7 contract/G3. Runtime NOT_RUN.
+
+## M8 source research — 14/11/2026
+
+- [M8 operations/release G1](2026-11-14-m8-operations-release-g1.md): all8 candidates, actual M7 source, official library/SQLite references and alternatives. Promoted authority is ADR-0015/contract/full G3 after PR merge; runtime NOT_RUN.

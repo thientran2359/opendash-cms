@@ -125,3 +125,7 @@ Theo PRD: thương mại điện tử, AI dựng trang từ ảnh, **workflow du
 ## Cập nhật M7 planning — 14/11/2026
 
 [ADR-0014](../decisions/ADR-0014-m7-site-features.md), [M7 contract](../contracts/M7_SITE_FEATURES.md) và [G3 toàn bộ14 task/8 candidate](milestones/M7/slices/2026-11-14-m7-site-features-g3.md) chốt thiết kế khi PR merge. Phần M7 Proposed trong bảng lịch sử bên dưới được thay bằng G2 AGREED/G3 READY cho documentation; implementation NOT_STARTED/runtime NOT_RUN. M5/M6 Windows development gate và Project Ready từng task vẫn bắt buộc; macOS hoãn theo ADR-0014, chưa multi-OS VERIFIED. Không sửa trạng thái milestone M3–M6 từ bản planning này.
+
+## M8 planning update — 14/11/2026
+
+[ADR-0015](../decisions/ADR-0015-m8-operations-release.md), [contract](../contracts/M8_OPERATIONS_RELEASE.md) and [full18-task G3](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md) supersede historical M8 Proposed/Planned design labels on merge. Implementation NOT_STARTED/native/Linux/performance NOT_RUN. OPS-01/OPS-02 and CNT-05 lifecycle retain scope; no evidence or release gate waived. Ready documentation is distinct from Project Ready; license choice remains owner-controlled before publication.
