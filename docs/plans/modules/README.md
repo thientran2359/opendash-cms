@@ -16,3 +16,10 @@ Các module khác tra tại [Module Catalog](../MODULE_CATALOG_V1.md). Không t�
 - [SITE-03 contact/submissions/SMTP](SITE-03-contact.md)
 
 G2/G3 documentation is effective on merged design PR; implementation/G5 M7 NOT_STARTED/NOT_RUN.
+
+## M8 living briefs — 14/11/2026
+
+- [OPS-01 backup/restore](OPS-01-backup-restore.md)
+- [OPS-02 Linux/release](OPS-02-linux-release.md)
+
+Complete G1/G2/G3 on merged design; no M8 runtime/native evidence yet.

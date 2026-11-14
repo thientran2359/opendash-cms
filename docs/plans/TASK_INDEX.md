@@ -202,17 +202,19 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 
 | Mã candidate / task | Công việc | Trạng thái | GitHub Issue / PR |
 | --- | --- | --- | --- |
-| [M8-P01](milestones/M8/TASK_PLAN.md) | Canonical backup manifest và snapshot consistency | Chưa G3 | — |
-| [M8-P02](milestones/M8/TASK_PLAN.md) | Backup thủ công từ Admin và kiểm tra artifact | Chưa G3 | — |
-| [M8-P03](milestones/M8/TASK_PLAN.md) | Restore nguyên tử, upgrade/migration và recovery | Chưa G3 | — |
-| [M8-P04](milestones/M8/TASK_PLAN.md) | Linux VPS single-binary packaging/install/upgrade | Chưa G3 | — |
-| [M8-P05](milestones/M8/TASK_PLAN.md) | Security/reliability/performance smoke trên Linux | Chưa G3 | — |
-| [M8-P06](milestones/M8/TASK_PLAN.md) | Full V1 E2E và backup→restore→re-edit | Chưa G3 | — |
-| [M8-P07](milestones/M8/TASK_PLAN.md) | Hướng dẫn vận hành và release acceptance | Chưa G3 | — |
-| [M8-P08](milestones/M8/TASK_PLAN.md) | D từ #15 (lifecycle): media delete theo reference policy, reconcile/GC và backup boundary | Chưa G3 | — |
+| [M8-P01](milestones/M8/TASK_PLAN.md) | Canonical backup manifest và snapshot consistency | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
+| [M8-P02](milestones/M8/TASK_PLAN.md) | Backup thủ công từ Admin và kiểm tra artifact | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
+| [M8-P03](milestones/M8/TASK_PLAN.md) | Restore nguyên tử, upgrade/migration và recovery | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
+| [M8-P04](milestones/M8/TASK_PLAN.md) | Linux VPS single-binary packaging/install/upgrade | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
+| [M8-P05](milestones/M8/TASK_PLAN.md) | Security/reliability/performance smoke trên Linux | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
+| [M8-P06](milestones/M8/TASK_PLAN.md) | Full V1 E2E và backup→restore→re-edit | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
+| [M8-P07](milestones/M8/TASK_PLAN.md) | Hướng dẫn vận hành và release acceptance | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
+| [M8-P08](milestones/M8/TASK_PLAN.md) | D từ #15 (lifecycle): media delete theo reference policy, reconcile/GC và backup boundary | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); chưa phát hành Issue/Project Ready | — |
 
 ## Task thực tế không thuộc 9 milestone CMS
 
 | GitHub task | Công việc | Trạng thái ghi nhận | GitHub Issue |
 | --- | --- | --- | --- |
 | P1-W01 | Khảo sát CoS Windows — Local Control API và Project/worktree | Issue **Open**; hồ sơ quy trình ghi **BLOCKED_SECURITY** (chưa xác minh Project Status trong bảng) | [#6](https://github.com/thientran2359/opendash-cms/issues/6) |
+
+**M8 planning snapshot — 14/11/2026:** [ADR-0015](../decisions/ADR-0015-m8-operations-release.md) + [contract](../contracts/M8_OPERATIONS_RELEASE.md) + [18-task G3](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md) cover all8 candidates and later/native/closure tasks. Proposed owners are not active assignments; M8 implementation NOT_STARTED/native tests NOT_RUN. Project Ready needs evidence and ownership, final V1 needs Linux/deferred Mac/license.
