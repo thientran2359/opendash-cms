@@ -61,6 +61,39 @@ pub enum ResolvedList {
 pub type ListResults = BTreeMap<String, ResolvedList>;
 
 /// Use the same SQLite snapshot as the saved document/field bindings.
+pub async fn resolve_contact_forms_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+) -> ApiResult<crate::page::ContactFormResults> {
+    let mut results = crate::page::ContactFormResults::new();
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::ContactForm(props)) = &element.content
+                    {
+                        let rec =
+                            crate::storage::contact::get_form_in_conn(&mut *tx, props.form_id)
+                                .await?;
+                        results.insert(element.id.clone(), rec);
+                    }
+                }
+            }
+        }
+    }
+    Ok(results)
+}
+
+pub async fn resolve_contact_forms(
+    db: &SqlitePool,
+    document: &BuilderDocument,
+) -> ApiResult<crate::page::ContactFormResults> {
+    let mut tx = db.begin().await?;
+    let res = resolve_contact_forms_in_tx(&mut tx, document).await?;
+    tx.commit().await?;
+    Ok(res)
+}
+
 pub async fn resolve_lists_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     document: &BuilderDocument,

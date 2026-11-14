@@ -14,7 +14,10 @@ use crate::{
     error::{ApiError, ApiResult},
     page::{self, RenderedLayout},
     storage::{
-        builder::{self, HomeState, ListResults, check_preview_images, resolve_lists_in_tx},
+        builder::{
+            self, HomeState, ListResults, check_preview_images, resolve_contact_forms_in_tx,
+            resolve_lists_in_tx,
+        },
         builder_binding::{self, BindingResults},
         theme::ActiveV2RoleTemplates,
     },
@@ -301,8 +304,9 @@ pub async fn preview_override(
         .map(|(t, s)| (t.as_str(), s.as_str()));
     let bindings = builder_binding::resolve_in_tx_with_route(&mut tx, document, true, route_ref).await?;
     let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
+    let forms = resolve_contact_forms_in_tx(&mut tx, document).await?;
     tx.commit().await?;
-    page::render_builder_with_lists(&state, document, true, &bindings, &lists)
+    page::render_builder_with_lists_and_forms(&state, document, true, &bindings, &lists, &forms)
 }
 
 pub async fn save_override_and_render(
@@ -400,7 +404,8 @@ pub async fn save_override_and_render(
         .ok_or_else(|| ApiError::internal("Không đọc lại được template override vừa lưu."))?;
     let bindings = builder_binding::resolve_in_tx_with_route(&mut tx, document, false, None).await?;
     let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
-    let rendered = page::render_builder_with_lists(&state, document, false, &bindings, &lists)?;
+    let forms = resolve_contact_forms_in_tx(&mut tx, document).await?;
+    let rendered = page::render_builder_with_lists_and_forms(&state, document, false, &bindings, &lists, &forms)?;
     tx.commit().await?;
     Ok((saved, rendered))
 }
@@ -451,8 +456,9 @@ pub async fn render_override_for_public(
             .await?;
     let lists: ListResults =
         resolve_lists_in_tx(&mut tx, &record.document, &BTreeMap::new()).await?;
+    let forms = resolve_contact_forms_in_tx(&mut tx, &record.document).await?;
     tx.commit().await?;
-    page::render_builder_with_lists(&state, &record.document, false, &bindings, &lists)
+    page::render_builder_with_lists_and_forms(&state, &record.document, false, &bindings, &lists, &forms)
 }
 
 pub async fn resolve_and_render_header_footer(

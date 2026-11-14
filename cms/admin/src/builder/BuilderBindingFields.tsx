@@ -26,6 +26,7 @@ const TARGETS: Record<ElementType, readonly { key: BindingTarget; label: string 
     { key: 'url', label: 'Đường dẫn (url)' },
   ],
   'core/list': [],
+  'core/contact_form': [],
 };
 const PAGE_SIZE = 50;
 

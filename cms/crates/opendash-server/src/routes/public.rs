@@ -13,7 +13,7 @@ use opendash_core::id::valid_package_id;
 use crate::{
     content_render::{self, SiteContext},
     error::ApiResult,
-    page::{render_builder_with_lists, render_legacy_state},
+    page::{render_builder_with_lists_and_forms, render_legacy_state},
     public_context::{CanonicalUrlBuilder, PublicRequestContext},
     routes::themes::ThemeStoreRoot,
     storage::{builder, overrides, settings, theme as theme_storage},
@@ -65,7 +65,11 @@ pub async fn public_page(
     let (state, bindings, lists) =
         builder::read_public_resolved(&db, &parsed_list_pages(raw.as_deref())).await?;
     if let Some(document) = &state.saved {
-        let mut html = render_builder_with_lists(&state, document, false, &bindings, &lists)?.html;
+        let forms = builder::resolve_contact_forms(&db, document).await?;
+        let rendered_layout_res =
+            render_builder_with_lists_and_forms(&state, document, false, &bindings, &lists, &forms)?;
+        let allow_form_self = rendered_layout_res.has_active_contact_form;
+        let mut html = rendered_layout_res.html;
         let site = settings::get_general(&db).await?;
         let theme_opts = settings::get_active_public_theme_options(&db).await?;
         let site_ctx = SiteContext {
@@ -87,7 +91,7 @@ pub async fn public_page(
             footer.as_deref(),
             &seo_view,
         )?;
-        return Ok(rendered_layout(html));
+        return Ok(rendered_layout_with_form_csp(html, allow_form_self));
     }
     if let Some(v2) = &active_v2 {
         if let Some(home_tpl) = v2.roles.get("home") {
@@ -108,7 +112,7 @@ pub async fn public_page(
                 .await?;
                 let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
                 let html = content_render::compose_document_with_seo(header.as_deref(), &home_html, footer.as_deref(), &seo_view)?;
-                return Ok(rendered_layout(html));
+                return Ok(rendered_layout_with_form_csp(html, false));
             }
         }
     }
@@ -139,17 +143,31 @@ mod list_query_tests {
     }
 }
 
-pub fn rendered_layout(html: String) -> Response {
+pub fn rendered_layout_with_form_csp(html: String, allow_form_self: bool) -> Response {
+    let csp = if allow_form_self {
+        "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    } else {
+        "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    };
+    let referrer_policy = if allow_form_self {
+        "same-origin"
+    } else {
+        "no-referrer"
+    };
     (
         [
-            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+            (header::CONTENT_SECURITY_POLICY, csp),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-            (header::REFERRER_POLICY, "no-referrer"),
+            (header::REFERRER_POLICY, referrer_policy),
             (header::CACHE_CONTROL, "no-store"),
         ],
         Html(html),
     )
         .into_response()
+}
+
+pub fn rendered_layout(html: String) -> Response {
+    rendered_layout_with_form_csp(html, false)
 }
 
 pub fn rendered(html: String) -> Response {

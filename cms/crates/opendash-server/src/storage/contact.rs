@@ -145,19 +145,26 @@ pub async fn list_forms(db: &SqlitePool) -> ApiResult<Vec<ContactFormRecord>> {
     rows.into_iter().map(ContactFormRecord::try_from).collect()
 }
 
-pub async fn get_form(db: &SqlitePool, id: i64) -> ApiResult<ContactFormRecord> {
+pub async fn get_form_in_conn(
+    conn: &mut SqliteConnection,
+    id: i64,
+) -> ApiResult<Option<ContactFormRecord>> {
     let row: Option<ContactFormRow> = sqlx::query_as(
         "SELECT id, slug, title, status, schema_json, version, created_at, updated_at
            FROM contact_forms
           WHERE id = ?1",
     )
     .bind(id)
-    .fetch_optional(db)
+    .fetch_optional(&mut *conn)
     .await?;
-    let Some(row) = row else {
-        return Err(ApiError::not_found("Không tìm thấy form liên hệ."));
-    };
-    ContactFormRecord::try_from(row)
+    row.map(ContactFormRecord::try_from).transpose()
+}
+
+pub async fn get_form(db: &SqlitePool, id: i64) -> ApiResult<ContactFormRecord> {
+    let mut conn = db.acquire().await?;
+    get_form_in_conn(&mut conn, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy form liên hệ."))
 }
 
 pub async fn create_form(

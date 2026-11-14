@@ -25,3 +25,4 @@ export {
 export type {
   EntryRouteSnapshot, SeoMetadataInput, EntrySeoSnapshot, HomeSeoSnapshot,
 } from './seo.ts';
+export * from './contact.ts';

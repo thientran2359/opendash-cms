@@ -43,8 +43,8 @@ export interface BuilderSection extends ResponsiveContainer { id: string; childr
 export interface BuilderDocument { schema_version: number; sections: BuilderSection[] }
 export type BuilderNode = BuilderSection | BuilderRow | BuilderColumn | BuilderElement;
 export type NodeKind = 'section' | 'row' | 'column' | 'element';
-export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/button' | 'core/list';
-export const ELEMENT_TYPES: ElementType[] = ['core/heading', 'core/text', 'core/image', 'core/button', 'core/list'];
+export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/button' | 'core/list' | 'core/contact_form';
+export const ELEMENT_TYPES: ElementType[] = ['core/heading', 'core/text', 'core/image', 'core/button', 'core/list', 'core/contact_form'];
 export const EMPTY_DOCUMENT: BuilderDocument = { schema_version: 1, sections: [] };
 export interface NodeLocation {
   node: BuilderNode;
@@ -162,7 +162,7 @@ export function nodeTitle(location: NodeLocation): string {
   const element = location.node as BuilderElement;
   return ({
     'core/heading': 'Tiêu đề', 'core/text': 'Văn bản',
-    'core/image': 'Hình ảnh', 'core/button': 'Nút', 'core/list': 'Danh sách',
+    'core/image': 'Hình ảnh', 'core/button': 'Nút', 'core/list': 'Danh sách', 'core/contact_form': 'Form liên hệ',
     'legacy/block': 'Block theme',
   } as Record<string, string>)[element.type] || 'Block chưa nhận diện';
 }
@@ -186,6 +186,7 @@ export function isLockedElement(element: BuilderElement, registry: Record<string
     case 'core/text': return typeof props.text !== 'string';
     case 'core/image': return typeof props.media_id !== 'string' || typeof props.alt !== 'string';
     case 'core/button': return typeof props.label !== 'string' || typeof props.url !== 'string';
+    case 'core/contact_form': return typeof props.form_id !== 'number' || props.form_id <= 0 || typeof props.submit_label !== 'string' || !props.submit_label.trim();
     case 'core/list': return typeof props.type_key !== 'string'
       || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
       || (props.category_id !== undefined && (!Number.isSafeInteger(props.category_id) || Number(props.category_id) <= 0))
@@ -271,6 +272,7 @@ export function appendNode(
     'core/image': { media_id: '', alt: '' },
     'core/button': { label: 'Nút mới', url: '/' },
     'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
+    'core/contact_form': { form_id: 1, submit_label: 'Gửi liên hệ' },
   };
   const node: BuilderNode = kind === 'element' ? { id, type: elementType, props: { ...defaults[elementType] } }
     : { id, children: [] };
