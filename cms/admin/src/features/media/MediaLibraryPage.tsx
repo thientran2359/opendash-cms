@@ -1,7 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { AuthUser } from '../../types.ts';
-import { listMedia, mediaOriginalUrl, mediaThumbnailUrl, uploadMedia, uploadVideo } from '../../api/media.ts';
-import type { MediaAsset, MediaKind } from '../../api/media.ts';
+import {
+  deleteMedia,
+  listMedia,
+  MediaDeleteConflictError,
+  mediaOriginalUrl,
+  mediaThumbnailUrl,
+  uploadMedia,
+  uploadVideo,
+} from '../../api/media.ts';
+import type { MediaAsset, MediaKind, MediaPinSummary } from '../../api/media.ts';
 import { MediaUploadValidationError, validateImageUpload, validateVideoUpload } from './library/fileValidation.ts';
 import { formatMediaBytes, formatMediaDate } from './library/format.ts';
 import './media-library.css';
@@ -27,6 +35,11 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
   const [uploadError, setUploadError] = useState('');
   const [notice, setNotice] = useState('');
   const [uploadProgress, setUploadProgress] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteDiagnostics, setDeleteDiagnostics] = useState<{
+    message: string;
+    pins: MediaPinSummary | null;
+  } | null>(null);
   const errorHandler = useRef(onApiError);
   errorHandler.current = onApiError;
 
@@ -236,6 +249,66 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
                 <dt>Đã tải lên</dt><dd>{formatMediaDate(selected.created_at)}</dd>
               </dl>
               <a href={mediaOriginalUrl(selected.id)} target="_blank" rel="noopener noreferrer" className="od-media-original-link">Mở ảnh gốc trong tab mới</a>
+              {user?.role === 'admin' && csrfToken && (
+                <div className="od-media-delete-panel">
+                  <button
+                    type="button"
+                    className="od-media-secondary"
+                    disabled={deletingId === selected.id || uploading}
+                    onClick={async () => {
+                      setDeletingId(selected.id);
+                      setDeleteDiagnostics(null);
+                      setNotice('');
+                      try {
+                        const job = await deleteMedia(
+                          selected.id,
+                          selected.generation,
+                          selected.version,
+                          csrfToken,
+                        );
+                        setNotice(
+                          job.phase === 'finalized'
+                            ? `Đã chuyển media vào quarantine (${job.job_id.slice(0, 8)}…).`
+                            : `Tác vụ xóa đang chờ hoàn tất (${job.phase}, job ${job.job_id.slice(0, 8)}…).`,
+                        );
+                        setSelectedId(null);
+                        refresh();
+                      } catch (cause) {
+                        if (cause instanceof MediaDeleteConflictError) {
+                          setDeleteDiagnostics({
+                            message: cause.message,
+                            pins: cause.pins,
+                          });
+                        } else {
+                          setDeleteDiagnostics({
+                            message: cause instanceof Error ? cause.message : 'Không thể xóa media.',
+                            pins: null,
+                          });
+                          errorHandler.current(cause, 'Không thể xóa media.');
+                        }
+                      } finally {
+                        setDeletingId(null);
+                      }
+                    }}
+                  >
+                    {deletingId === selected.id ? 'Đang xóa…' : 'Xóa media (Quarantine)'}
+                  </button>
+                  {deleteDiagnostics && (
+                    <div className="od-media-notice od-media-error" role="alert">
+                      <p>{deleteDiagnostics.message}</p>
+                      {deleteDiagnostics.pins && deleteDiagnostics.pins.pins.length > 0 && (
+                        <ul>
+                          {deleteDiagnostics.pins.pins.map((pin, idx) => (
+                            <li key={`${pin.source_kind}-${pin.entity_id}-${idx}`}>
+                              {pin.source_kind}: {pin.entity_id}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <p className="od-media-help">Ảnh gốc yêu cầu phiên đăng nhập. Không có URL công khai cho ảnh nháp.</p>
             </>
           ) : (

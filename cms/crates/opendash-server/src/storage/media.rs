@@ -21,13 +21,36 @@ pub struct MediaAsset {
     pub duration_ms: Option<i64>,
     pub video_codec: Option<String>,
     pub audio_codec: Option<String>,
+    pub lifecycle_state: String,
+    pub generation: i64,
+    pub version: i64,
     pub created_at: String,
+}
+
+impl MediaAsset {
+    pub fn metadata_etag(&self) -> String {
+        format!("gv{}-v{}", self.generation, self.version)
+    }
 }
 
 pub async fn find(db: &SqlitePool, id: &str) -> ApiResult<Option<MediaAsset>> {
     Ok(sqlx::query_as::<_, MediaAsset>(
         "SELECT id, kind, filename, mime_type, extension, byte_size, width, height,
-                thumb_width, thumb_height, duration_ms, video_codec, audio_codec, created_at
+                thumb_width, thumb_height, duration_ms, video_codec, audio_codec,
+                lifecycle_state, generation, version, created_at
+         FROM media_assets WHERE id = ? AND lifecycle_state = 'active'",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?)
+}
+
+#[allow(dead_code)]
+pub async fn find_any_state(db: &SqlitePool, id: &str) -> ApiResult<Option<MediaAsset>> {
+    Ok(sqlx::query_as::<_, MediaAsset>(
+        "SELECT id, kind, filename, mime_type, extension, byte_size, width, height,
+                thumb_width, thumb_height, duration_ms, video_codec, audio_codec,
+                lifecycle_state, generation, version, created_at
          FROM media_assets WHERE id = ?",
     )
     .bind(id)
@@ -48,9 +71,10 @@ pub async fn list_filtered(
     if let Some(kind) = kind {
         Ok(sqlx::query_as::<_, MediaAsset>(
             "SELECT id, kind, filename, mime_type, extension, byte_size, width, height,
-                    thumb_width, thumb_height, duration_ms, video_codec, audio_codec, created_at
+                    thumb_width, thumb_height, duration_ms, video_codec, audio_codec,
+                    lifecycle_state, generation, version, created_at
              FROM media_assets
-             WHERE kind = ?
+             WHERE kind = ? AND lifecycle_state = 'active'
              ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
         )
         .bind(kind)
@@ -61,8 +85,10 @@ pub async fn list_filtered(
     } else {
         Ok(sqlx::query_as::<_, MediaAsset>(
             "SELECT id, kind, filename, mime_type, extension, byte_size, width, height,
-                    thumb_width, thumb_height, duration_ms, video_codec, audio_codec, created_at
+                    thumb_width, thumb_height, duration_ms, video_codec, audio_codec,
+                    lifecycle_state, generation, version, created_at
              FROM media_assets
+             WHERE lifecycle_state = 'active'
              ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
         )
         .bind(limit)
@@ -73,11 +99,53 @@ pub async fn list_filtered(
 }
 
 pub async fn save(db: &SqlitePool, asset: &MediaAsset) -> ApiResult<MediaAsset> {
+    let mut tx = db.begin().await?;
+    let existing_state: Option<String> =
+        sqlx::query_scalar("SELECT lifecycle_state FROM media_assets WHERE id = ?")
+            .bind(&asset.id)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+    if let Some(state) = existing_state {
+        if state != "active" {
+            return Err(ApiError::conflict(
+                "Media đang trong quá trình xóa; không thể upload lại cho đến khi hoàn tất.",
+            ));
+        }
+        tx.commit().await?;
+        return find(db, &asset.id)
+            .await?
+            .ok_or_else(|| ApiError::internal("Không thể tải media vừa lưu."));
+    }
+
+    let pending_delete: Option<String> = sqlx::query_scalar(
+        "SELECT job_id FROM media_delete_jobs WHERE media_id = ? AND phase != 'finalized'",
+    )
+    .bind(&asset.id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if pending_delete.is_some() {
+        return Err(ApiError::conflict(
+            "Media đang chờ hoàn tất xóa; không thể upload lại cho đến khi finalized.",
+        ));
+    }
+
+    let generation: i64 = sqlx::query_scalar(
+        "INSERT INTO media_generations (media_id, next_generation)
+         VALUES (?, 2)
+         ON CONFLICT(media_id) DO UPDATE SET next_generation = next_generation + 1
+         RETURNING next_generation - 1",
+    )
+    .bind(&asset.id)
+    .fetch_one(&mut *tx)
+    .await?;
+
     sqlx::query(
         "INSERT INTO media_assets
          (id, kind, filename, mime_type, extension, byte_size, width, height,
-          thumb_width, thumb_height, duration_ms, video_codec, audio_codec)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+          thumb_width, thumb_height, duration_ms, video_codec, audio_codec,
+          lifecycle_state, generation, version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, 1)",
     )
     .bind(&asset.id)
     .bind(&asset.kind)
@@ -92,8 +160,11 @@ pub async fn save(db: &SqlitePool, asset: &MediaAsset) -> ApiResult<MediaAsset> 
     .bind(asset.duration_ms)
     .bind(&asset.video_codec)
     .bind(&asset.audio_codec)
-    .execute(db)
+    .bind(generation)
+    .execute(&mut *tx)
     .await?;
+    tx.commit().await?;
+
     find(db, &asset.id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải media vừa lưu."))
@@ -155,15 +226,24 @@ pub async fn require_existing_references_in_tx(
                 "Ảnh tham chiếu chưa có trong Media Library. Hãy chọn ảnh đã upload.",
             ));
         }
-        let exists: Option<i64> =
-            sqlx::query_scalar("SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image'")
-                .bind(id)
-                .fetch_optional(&mut *conn)
-                .await?;
-        if exists.is_none() {
-            return Err(ApiError::bad_request(
-                "Ảnh tham chiếu chưa có trong Media Library. Hãy chọn ảnh đã upload.",
-            ));
+        let state: Option<String> = sqlx::query_scalar(
+            "SELECT lifecycle_state FROM media_assets WHERE id = ? AND kind = 'image'",
+        )
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await?;
+        match state.as_deref() {
+            Some("active") => {}
+            Some(_) => {
+                return Err(ApiError::conflict(
+                    "Ảnh tham chiếu đang trong quá trình xóa; không thể tạo tham chiếu mới.",
+                ));
+            }
+            None => {
+                return Err(ApiError::bad_request(
+                    "Ảnh tham chiếu chưa có trong Media Library. Hãy chọn ảnh đã upload.",
+                ));
+            }
         }
     }
     Ok(())

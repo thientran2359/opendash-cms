@@ -237,7 +237,13 @@ async fn upgrade_from_0031_preserves_data_and_startup_marks_inflight_jobs_interr
         let entry = entry.expect("dir entry");
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        if name_str.ends_with(".sql") && !name_str.starts_with("0032_") {
+        if name_str.ends_with(".sql")
+            && name_str
+                .split('_')
+                .next()
+                .and_then(|v| v.parse::<i64>().ok())
+                .is_some_and(|v| v <= 31)
+        {
             fs::copy(entry.path(), mig_tmp.join(&name)).expect("copy migration");
         }
     }

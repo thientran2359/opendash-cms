@@ -49,6 +49,9 @@ impl DecodedMedia {
             height: self.height as i64,
             thumb_width: Some(self.thumb_width as i64),
             thumb_height: Some(self.thumb_height as i64),
+            lifecycle_state: "active".to_string(),
+            generation: 1,
+            version: 1,
             created_at: String::new(), // SQLite supplies timestamp.
         }
     }
@@ -122,17 +125,128 @@ pub fn decode_image(bytes: Vec<u8>, declared_type: &str) -> ApiResult<DecodedMed
     })
 }
 
+#[derive(Debug, Default)]
+struct MediaReadState {
+    active_readers: std::collections::HashMap<String, usize>,
+    deleting: std::collections::HashSet<String>,
+}
+
+#[derive(Debug, Default)]
+pub struct MediaReadGate {
+    state: std::sync::Mutex<MediaReadState>,
+    notify: tokio::sync::Notify,
+}
+
+pub struct MediaReadLease {
+    gate: std::sync::Arc<MediaReadGate>,
+    media_id: String,
+}
+
+impl Drop for MediaReadLease {
+    fn drop(&mut self) {
+        let mut guard = self.gate.state.lock().expect("media read gate poisoned");
+        if let Some(count) = guard.active_readers.get_mut(&self.media_id) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                guard.active_readers.remove(&self.media_id);
+                self.gate.notify.notify_waiters();
+            }
+        }
+    }
+}
+
+pub struct MediaDeleteGateGuard {
+    gate: std::sync::Arc<MediaReadGate>,
+    media_id: String,
+}
+
+impl Drop for MediaDeleteGateGuard {
+    fn drop(&mut self) {
+        let mut guard = self.gate.state.lock().expect("media read gate poisoned");
+        guard.deleting.remove(&self.media_id);
+        self.gate.notify.notify_waiters();
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MediaStore {
     root: PathBuf,
+    read_gate: std::sync::Arc<MediaReadGate>,
 }
 
 impl MediaStore {
     pub fn new(root: PathBuf) -> Self {
         Self {
             root: root.join("media"),
+            read_gate: std::sync::Arc::new(MediaReadGate::default()),
         }
     }
+
+    pub fn acquire_read_lease(&self, id: &str) -> ApiResult<MediaReadLease> {
+        let mut guard = self
+            .read_gate
+            .state
+            .lock()
+            .expect("media read gate poisoned");
+        if guard.deleting.contains(id) {
+            return Err(ApiError::not_found("Không tìm thấy media."));
+        }
+        *guard.active_readers.entry(id.to_string()).or_insert(0) += 1;
+        Ok(MediaReadLease {
+            gate: std::sync::Arc::clone(&self.read_gate),
+            media_id: id.to_string(),
+        })
+    }
+
+    pub async fn begin_delete_drain(
+        &self,
+        id: &str,
+        timeout: std::time::Duration,
+    ) -> Result<MediaDeleteGateGuard, MediaDeleteGateGuard> {
+        let effective = timeout.min(std::time::Duration::from_secs(5));
+        let deadline = std::time::Instant::now() + effective;
+        {
+            let mut guard = self
+                .read_gate
+                .state
+                .lock()
+                .expect("media read gate poisoned");
+            guard.deleting.insert(id.to_string());
+        }
+        let gate_guard = MediaDeleteGateGuard {
+            gate: std::sync::Arc::clone(&self.read_gate),
+            media_id: id.to_string(),
+        };
+
+        loop {
+            let notified = self.read_gate.notify.notified();
+            {
+                let guard = self
+                    .read_gate
+                    .state
+                    .lock()
+                    .expect("media read gate poisoned");
+                if guard.active_readers.get(id).copied().unwrap_or(0) == 0 {
+                    return Ok(gate_guard);
+                }
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Err(gate_guard);
+            }
+            let _ = tokio::time::timeout(deadline.saturating_duration_since(now), notified).await;
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn media_root(&self) -> &std::path::Path {
+        &self.root
+    }
+
+    pub fn quarantine_job_dir(&self, job_id: &str) -> PathBuf {
+        self.uploads_root().join(".quarantine").join(job_id)
+    }
+
 
     pub fn uploads_root(&self) -> PathBuf {
         self.root
@@ -170,6 +284,7 @@ impl MediaStore {
     }
 
     pub async fn read(&self, id: &str, ext: &str, thumb: bool) -> ApiResult<Vec<u8>> {
+        let _lease = self.acquire_read_lease(id)?;
         let path = self.path(id, ext, thumb)?;
         fs::read(path)
             .await
@@ -233,6 +348,7 @@ impl MediaStore {
 struct RangeFileBody {
     file: fs::File,
     remaining: u64,
+    _read_lease: MediaReadLease,
 }
 
 impl axum::body::HttpBody for RangeFileBody {
@@ -326,6 +442,7 @@ pub async fn stream_authorized_video(
     headers: &axum::http::HeaderMap,
     asset: &MediaAsset,
     path: &std::path::Path,
+    media_store: &MediaStore,
     is_admin: bool,
 ) -> ApiResult<axum::response::Response> {
     use axum::{
@@ -335,6 +452,7 @@ pub async fn stream_authorized_video(
     };
     use tokio::io::AsyncSeekExt;
 
+    let read_lease = media_store.acquire_read_lease(&asset.id)?;
     let mut file = fs::File::open(path)
         .await
         .map_err(|_| ApiError::not_found("Không tìm thấy file video."))?;
@@ -436,6 +554,7 @@ pub async fn stream_authorized_video(
                     Body::new(RangeFileBody {
                         file,
                         remaining: len,
+                        _read_lease: read_lease,
                     }),
                 )
                     .into_response());
@@ -461,6 +580,7 @@ pub async fn stream_authorized_video(
         Body::new(RangeFileBody {
             file,
             remaining: file_size,
+            _read_lease: read_lease,
         }),
     )
         .into_response())
