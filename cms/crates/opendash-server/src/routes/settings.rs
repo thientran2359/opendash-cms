@@ -13,7 +13,10 @@ use sqlx::SqlitePool;
 use crate::{
     auth::{require_admin, require_admin_with_csrf},
     error::{ApiError, ApiResult},
-    storage::settings::{self, GeneralSettings, GeneralSettingsInput, SaveOutcome, ThemeOptionsOutcome, ThemeOptionsSnapshot},
+    storage::settings::{
+        self, GeneralSettings, GeneralSettingsInput, PublicSaveOutcome, PublicSiteSettings,
+        PublicSiteSettingsInput, SaveOutcome, ThemeOptionsOutcome, ThemeOptionsSnapshot,
+    },
 };
 
 fn no_store_headers(version: Option<i64>) -> HeaderMap {
@@ -94,6 +97,44 @@ pub async fn general_put(
         )),
         SaveOutcome::InvalidTimezone => Err(ApiError::bad_request(
             "Múi giờ không có trong danh mục IANA tzdb 2026f.",
+        )),
+    }
+}
+
+fn public_settings_response(settings: PublicSiteSettings) -> Response {
+    (no_store_headers(Some(settings.version)), Json(settings)).into_response()
+}
+
+pub async fn public_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let current = settings::get_public(&db).await?;
+    Ok(public_settings_response(current))
+}
+
+pub async fn public_put(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    input: Result<Json<PublicSiteSettingsInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) = input.map_err(|err| {
+        if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError(StatusCode::PAYLOAD_TOO_LARGE, "Dữ liệu cài đặt công khai vượt quá 4 KiB.".into())
+        } else {
+            ApiError::bad_request("Dữ liệu cài đặt công khai không hợp lệ.")
+        }
+    })?;
+    let input = input
+        .validate()
+        .map_err(|msg| ApiError(StatusCode::UNPROCESSABLE_ENTITY, msg.into()))?;
+    match settings::save_public(&db, input, version)
+        .await
+        .map_err(map_storage_error)?
+    {
+        PublicSaveOutcome::Saved(saved) => Ok(public_settings_response(saved)),
+        PublicSaveOutcome::Stale => Err(ApiError::precondition_failed(
+            "Cài đặt công khai đã thay đổi ở một tab khác. Form chưa lưu vẫn được giữ lại.",
         )),
     }
 }

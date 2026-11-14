@@ -786,3 +786,137 @@ pub async fn put_owner_settings_in_conn(
     let snapshot = get_owner_settings_in_conn(conn, owner_kind, owner_id, schema).await?;
     Ok(ThemeOptionsOutcome::Saved(snapshot))
 }
+
+pub const MAX_CONTENT_LANGUAGE_BYTES: usize = 35;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, sqlx::FromRow)]
+pub struct PublicSiteSettings {
+    pub public_origin: Option<String>,
+    pub content_language: String,
+    pub indexing_enabled: bool,
+    pub version: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicSiteSettingsInput {
+    pub public_origin: Option<String>,
+    pub content_language: String,
+    pub indexing_enabled: bool,
+}
+
+pub fn valid_content_language(value: &str) -> bool {
+    if value.is_empty() || value.len() > MAX_CONTENT_LANGUAGE_BYTES {
+        return false;
+    }
+    let mut parts = value.split('-');
+    let Some(primary) = parts.next() else {
+        return false;
+    };
+    if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return false;
+    }
+    parts.all(|sub| (1..=8).contains(&sub.len()) && sub.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+pub fn normalize_public_origin(raw: Option<String>) -> Result<Option<String>, &'static str> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    if raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("Public origin không được chứa khoảng trắng hoặc ký tự điều khiển.");
+    }
+    if raw.contains('?') || raw.contains('#') {
+        return Err("Public origin không được chứa query hoặc fragment.");
+    }
+    let parsed = url::Url::parse(&raw).map_err(|_| "Public origin phải là URL HTTP(S) hợp lệ.")?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("Public origin chỉ hỗ trợ giao thức http hoặc https.");
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Public origin không được chứa thông tin đăng nhập.");
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("Public origin không được chứa query hoặc fragment.");
+    }
+    if parsed.path() != "/" {
+        return Err("Public origin không được chứa đường dẫn con.");
+    }
+    if parsed.host_str().is_none_or(str::is_empty) || !parsed.origin().is_tuple() {
+        return Err("Public origin phải có tên miền hợp lệ.");
+    }
+    Ok(Some(parsed.origin().ascii_serialization()))
+}
+
+impl PublicSiteSettingsInput {
+    pub fn validate(mut self) -> Result<Self, &'static str> {
+        self.public_origin = normalize_public_origin(self.public_origin)?;
+        if !valid_content_language(&self.content_language) {
+            return Err(
+                "Ngôn ngữ nội dung phải là mã BCP47 ASCII hợp lệ (tối đa 35 bytes, ví dụ vi hoặc en-US).",
+            );
+        }
+        Ok(self)
+    }
+}
+
+/// Pure URL projection from configured `public_origin` and site-relative path.
+/// Never infers an origin from request headers.
+pub fn absolute_public_url(settings: &PublicSiteSettings, path: &str) -> Option<String> {
+    let origin = settings.public_origin.as_deref()?;
+    if path.is_empty() || path == "/" {
+        return Some(format!("{origin}/"));
+    }
+    if path.starts_with('/') {
+        Some(format!("{origin}{path}"))
+    } else {
+        Some(format!("{origin}/{path}"))
+    }
+}
+
+pub async fn get_public(db: &SqlitePool) -> Result<PublicSiteSettings, sqlx::Error> {
+    sqlx::query_as::<_, PublicSiteSettings>(
+        "SELECT public_origin, content_language, indexing_enabled, version
+         FROM site_public_settings
+         WHERE id = 1",
+    )
+    .fetch_one(db)
+    .await
+}
+
+pub enum PublicSaveOutcome {
+    Saved(PublicSiteSettings),
+    Stale,
+}
+
+pub async fn save_public(
+    db: &SqlitePool,
+    input: PublicSiteSettingsInput,
+    expected_version: i64,
+) -> Result<PublicSaveOutcome, sqlx::Error> {
+    let mut tx = db.begin().await?;
+    let updated = sqlx::query(
+        "UPDATE site_public_settings
+         SET public_origin = ?, content_language = ?, indexing_enabled = ?, version = version + 1
+         WHERE id = 1 AND version = ?",
+    )
+    .bind(input.public_origin.as_deref())
+    .bind(&input.content_language)
+    .bind(input.indexing_enabled)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Ok(PublicSaveOutcome::Stale);
+    }
+    tx.commit().await?;
+    Ok(PublicSaveOutcome::Saved(PublicSiteSettings {
+        public_origin: input.public_origin,
+        content_language: input.content_language,
+        indexing_enabled: input.indexing_enabled,
+        version: expected_version + 1,
+    }))
+}
