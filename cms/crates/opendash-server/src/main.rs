@@ -7,6 +7,7 @@ mod error;
 mod hooks;
 mod media;
 mod media_video;
+mod operations;
 mod package;
 mod page;
 mod paths;
@@ -37,11 +38,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let paths = paths::SitePaths::from_env()?;
+    let coordinator = Arc::new(operations::SiteCoordinator::acquire(paths)?);
+    let paths = coordinator.paths().clone();
     let db = storage::init_db(paths.db_path()).await?;
     storage::import::recover_orphaned_import_runs(&db, &paths.uploads_dir())
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
     storage::smtp::recover_inflight_notifications(&db)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
+    storage::operations::mark_interrupted_on_startup(&db)
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
     let _ = storage::plugin::ensure_plugins_layout_and_quarantine_stale(&paths.plugins_dir());
@@ -66,6 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             store
         },
         content_registry,
+        coordinator,
     };
 
     let port = env::var("OPENDASH_PORT")
