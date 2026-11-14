@@ -274,8 +274,22 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            WHERE tom.media_id = ?
              AND json_extract(opt.value, '$.key') = tom.option_key
              AND json_extract(opt.value, '$.public') = 1
+         ) OR EXISTS (
+           SELECT 1
+           FROM seo_public_media_refs AS sm
+           JOIN content_entries AS e ON sm.source_kind = 'entry_seo' AND e.id = sm.source_id
+           JOIN content_types AS t ON t.key = e.content_type_key
+           WHERE sm.media_id = ?
+             AND e.publication_status = 'published'
+             AND t.provider_status = 'active'
+         ) OR EXISTS (
+           SELECT 1
+           FROM seo_public_media_refs AS sm
+           WHERE sm.source_kind = 'home_seo' AND sm.source_id = 1 AND sm.media_id = ?
          )"#,
     )
+    .bind(id)
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)

@@ -19,3 +19,9 @@ export type {
   MenuTargetKind, MenuRecord, MenuItemRecord, MenuWithItems, MenuListPage,
   MenuItemInput, MenuDiagnostic, MenuItemView, MenuViewModel, MenuSlotsSnapshot,
 } from './menus.ts';
+export {
+  getEntryRoute, putEntryRoute, getEntrySeo, putEntrySeo, getHomeSeo, putHomeSeo,
+} from './seo.ts';
+export type {
+  EntryRouteSnapshot, SeoMetadataInput, EntrySeoSnapshot, HomeSeoSnapshot,
+} from './seo.ts';

@@ -46,6 +46,10 @@ impl ApiError {
         Self(StatusCode::INTERNAL_SERVER_ERROR, message.into())
     }
 
+    pub fn unprocessable(message: impl Into<Cow<'static, str>>) -> Self {
+        Self(StatusCode::UNPROCESSABLE_ENTITY, message.into())
+    }
+
     pub fn service_unavailable(message: impl Into<Cow<'static, str>>) -> Self {
         Self(StatusCode::SERVICE_UNAVAILABLE, message.into())
     }

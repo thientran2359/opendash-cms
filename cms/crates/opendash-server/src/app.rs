@@ -286,6 +286,18 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(crate::routes::seo::MAX_ROUTE_JSON_BYTES)),
         )
         .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/seo",
+            get(crate::routes::seo::get_entry_seo)
+                .put(crate::routes::seo::put_entry_seo)
+                .layer(DefaultBodyLimit::max(crate::routes::seo::MAX_SEO_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/seo/home",
+            get(crate::routes::seo::get_home_seo)
+                .put(crate::routes::seo::put_home_seo)
+                .layer(DefaultBodyLimit::max(crate::routes::seo::MAX_SEO_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/media",
             get(media_list)
                 .post(media_upload)

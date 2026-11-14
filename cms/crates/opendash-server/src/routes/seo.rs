@@ -10,7 +10,7 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::{Role, require_session, require_session_with_csrf},
+    auth::{Role, require_admin, require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     routes::{
         public_content::render_single_entry_response,
@@ -18,7 +18,10 @@ use crate::{
         themes::ThemeStoreRoot,
     },
     storage::seo::{self, EntryRouteSnapshot, PublicRouteResolution},
+    content_render,
 };
+
+pub const MAX_SEO_JSON_BYTES: usize = 16 * 1024;
 
 pub const MAX_ROUTE_JSON_BYTES: usize = 8192;
 
@@ -94,6 +97,67 @@ pub async fn public_fallback(
             "",
         )
             .into_response()),
-        PublicRouteResolution::NotFound => Ok(StatusCode::NOT_FOUND.into_response()),
+        PublicRouteResolution::NotFound => Ok((
+            StatusCode::NOT_FOUND,
+            axum::response::Html(
+                content_render::compose_document_with_seo(
+                    None,
+                    "<main><h1>404 — Không tìm thấy trang</h1></main>",
+                    None,
+                    &crate::seo::SeoView::for_noindex_page("vi", "404 — Không tìm thấy trang"),
+                )?,
+            ),
+        )
+            .into_response()),
     }
+}
+
+pub async fn get_entry_seo(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+) -> ApiResult<impl IntoResponse> {
+    let session = require_session(&headers, &db).await?;
+    require_editor_or_admin(session.user.role)?;
+    if !valid_content_type_key(&type_key) {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    }
+    let snapshot = seo::get_entry_seo(&db, &type_key, id).await?;
+    Ok((no_store_headers(Some(snapshot.entry_version)), Json(snapshot)))
+}
+
+pub async fn put_entry_seo(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    Json(input): Json<crate::seo::SeoMetadataInput>,
+) -> ApiResult<impl IntoResponse> {
+    let session = require_session_with_csrf(&headers, &db).await?;
+    require_editor_or_admin(session.user.role)?;
+    if !valid_content_type_key(&type_key) {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    }
+    let expected_version = parse_if_match(&headers)?;
+    let snapshot = seo::put_entry_seo(&db, &type_key, id, expected_version, input).await?;
+    Ok((no_store_headers(Some(snapshot.entry_version)), Json(snapshot)))
+}
+
+pub async fn get_home_seo(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    require_admin(&headers, &db).await?;
+    let snapshot = seo::get_home_seo(&db).await?;
+    Ok((no_store_headers(Some(snapshot.version)), Json(snapshot)))
+}
+
+pub async fn put_home_seo(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Json(input): Json<crate::seo::SeoMetadataInput>,
+) -> ApiResult<impl IntoResponse> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let expected_version = parse_if_match(&headers)?;
+    let snapshot = seo::put_home_seo(&db, expected_version, input).await?;
+    Ok((no_store_headers(Some(snapshot.version)), Json(snapshot)))
 }
