@@ -71,6 +71,7 @@ pub struct AppState {
     pub media_store: Arc<MediaStore>,
     pub content_registry: Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>,
     pub coordinator: Arc<crate::operations::SiteCoordinator>,
+    pub backup_registry: Arc<crate::backup::BackupRuntimeRegistry>,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -277,6 +278,30 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/operations/quarantine/purge",
             post(crate::routes::operations::quarantine_purge)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/operations/backups",
+            get(crate::routes::operations::list_backups)
+                .post(crate::routes::operations::create_backup)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/operations/backups/{id}",
+            axum::routing::delete(crate::routes::operations::delete_backup_artifact),
+        )
+        .route(
+            "/api/admin/operations/backups/{id}/file",
+            get(crate::routes::operations::download_backup_file)
+                .head(crate::routes::operations::download_backup_file),
+        )
+        .route(
+            "/api/admin/operations/jobs/{id}",
+            get(crate::routes::operations::get_operation_job),
+        )
+        .route(
+            "/api/admin/operations/jobs/{id}/cancel",
+            post(crate::routes::operations::cancel_operation_job)
                 .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
         )
         .route(
