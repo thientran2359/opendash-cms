@@ -1,8 +1,10 @@
 //! Transactional media reachability & pin inventory (M8-S02-T01).
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{Row, SqliteConnection};
+use sqlx::{Row, SqliteConnection, SqlitePool};
 
 use crate::error::{ApiError, ApiResult};
 
@@ -284,4 +286,121 @@ pub async fn ensure_media_active_in_tx(
         )));
     }
     Ok(generation)
+}
+
+#[derive(Debug, Clone)]
+pub struct MediaInventoryRow {
+    pub id: String,
+    pub kind: String,
+    pub extension: String,
+    pub lifecycle_state: String,
+}
+
+fn extract_64hex_tokens(text: &str, out: &mut HashSet<String>) {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_hexdigit() {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_hexdigit() {
+                i += 1;
+            }
+            if i - start == 64 {
+                out.insert(text[start..i].to_ascii_lowercase());
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
+pub async fn load_media_inventory_bounded(
+    db: &SqlitePool,
+    max_records: usize,
+) -> ApiResult<Vec<MediaInventoryRow>> {
+    let limit = (max_records + 1) as i64;
+    let rows = sqlx::query(
+        "SELECT id, kind, extension, lifecycle_state FROM media_assets ORDER BY id ASC LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+
+    if rows.len() > max_records {
+        return Err(ApiError::conflict(
+            "Số bản ghi media vượt giới hạn reconcile (tối đa 10.000 bản ghi).",
+        ));
+    }
+
+    let mut out = Vec::with_capacity(rows.len());
+    for row in rows {
+        out.push(MediaInventoryRow {
+            id: row.try_get("id")?,
+            kind: row.try_get("kind")?,
+            extension: row.try_get("extension")?,
+            lifecycle_state: row.try_get("lifecycle_state")?,
+        });
+    }
+    Ok(out)
+}
+
+pub async fn count_reconcile_records_bounded(
+    db: &SqlitePool,
+    max_records: usize,
+) -> ApiResult<usize> {
+    let media_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media_assets")
+        .fetch_one(db)
+        .await?;
+    let delete_job_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media_delete_jobs")
+        .fetch_one(db)
+        .await?;
+    let attempt_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM contact_notification_attempts")
+            .fetch_one(db)
+            .await?;
+    let total = media_count + delete_job_count + attempt_count;
+    if total as usize > max_records {
+        return Err(ApiError::conflict(
+            "Tổng số bản ghi cần đối soát vượt giới hạn reconcile (tối đa 10.000 bản ghi).",
+        ));
+    }
+    Ok(total as usize)
+}
+
+pub async fn collect_referenced_secret_refs(db: &SqlitePool) -> ApiResult<HashSet<String>> {
+    let mut refs = HashSet::new();
+
+    let settings_rows =
+        sqlx::query("SELECT secret_ref FROM site_smtp_settings WHERE secret_ref IS NOT NULL")
+            .fetch_all(db)
+            .await?;
+    for row in settings_rows {
+        let raw: String = row.try_get("secret_ref")?;
+        extract_64hex_tokens(&raw, &mut refs);
+    }
+
+    let attempt_rows =
+        sqlx::query("SELECT transport_snapshot_json FROM contact_notification_attempts")
+            .fetch_all(db)
+            .await?;
+    for row in attempt_rows {
+        let raw: String = row.try_get("transport_snapshot_json")?;
+        extract_64hex_tokens(&raw, &mut refs);
+    }
+
+    Ok(refs)
+}
+
+pub async fn is_media_unreferenced(db: &SqlitePool, media_id: &str) -> ApiResult<bool> {
+    let mut conn = db.acquire().await?;
+    let active_row: Option<(String,)> =
+        sqlx::query_as("SELECT lifecycle_state FROM media_assets WHERE id = ?")
+            .bind(media_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if active_row.is_some() {
+        return Ok(false);
+    }
+    let pins = collect_pins_in_tx(&mut *conn, media_id).await?;
+    Ok(!pins.is_referenced())
 }

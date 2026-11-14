@@ -261,6 +261,25 @@ pub fn build_router_with_themes_root(
             get(taxonomy_eligibility_list),
         )
         .route(
+            "/api/admin/operations/diagnostics",
+            get(crate::routes::operations::diagnostics),
+        )
+        .route(
+            "/api/admin/operations/reconcile/plan",
+            post(crate::routes::operations::reconcile_plan)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/operations/reconcile/apply",
+            post(crate::routes::operations::reconcile_apply)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/operations/quarantine/purge",
+            post(crate::routes::operations::quarantine_purge)
+                .layer(DefaultBodyLimit::max(crate::routes::operations::MAX_OPERATIONS_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/themes",
             get(theme_list)
                 .post(theme_install)

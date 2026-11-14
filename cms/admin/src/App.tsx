@@ -16,6 +16,7 @@ import { MenusPanel } from './features/menus/MenusPanel.tsx';
 import { SeoPanel } from './features/seo/SeoPanel.tsx';
 import { ContactPanel } from './features/contact/ContactPanel.tsx';
 import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
+import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 
 export const App: React.FC = () => {
@@ -330,6 +331,7 @@ export const App: React.FC = () => {
         <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
         <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
         <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cấu hình SMTP.')} />
+        <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
         <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
       </>}
       usersContent={accountContextRole === 'admin' && <UsersPanel

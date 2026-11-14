@@ -198,6 +198,15 @@ impl MediaStore {
         })
     }
 
+    pub fn has_active_reader(&self, id: &str) -> bool {
+        let guard = self
+            .read_gate
+            .state
+            .lock()
+            .expect("media read gate poisoned");
+        guard.active_readers.get(id).copied().unwrap_or(0) > 0
+    }
+
     pub async fn begin_delete_drain(
         &self,
         id: &str,

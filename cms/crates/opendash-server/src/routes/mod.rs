@@ -7,6 +7,7 @@ pub mod health;
 pub mod import;
 pub mod media;
 pub mod menu;
+pub mod operations;
 pub mod plugin;
 pub mod public;
 pub mod public_content;
