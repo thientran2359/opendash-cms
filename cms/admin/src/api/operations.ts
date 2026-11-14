@@ -201,3 +201,78 @@ export function deleteBackupArtifact(csrfToken: string, id: string): Promise<Ope
 export function getBackupDownloadUrl(id: string): string {
   return `/api/admin/operations/backups/${encodeURIComponent(id)}/file`;
 }
+
+
+export interface RestoreUploadResult {
+  upload_id: string;
+  size_bytes: number;
+  sha256: string;
+}
+
+export interface RecoveryStatus {
+  safe_mode: boolean;
+  smtp_enabled: boolean;
+  ready_marker: {
+    version: number;
+    job_id: string;
+    schema_version: number;
+    db_sha256: string;
+    file_count: number;
+    recovery_safe_mode: boolean;
+  } | null;
+  site_root: string;
+  expected_generation: string | null;
+}
+
+export interface ActivateRecoveryResult {
+  activated: boolean;
+  safe_mode: boolean;
+  generation: string;
+  smtp_enabled: boolean;
+}
+
+export function uploadRestoreArchive(
+  csrfToken: string,
+  file: File,
+): Promise<RestoreUploadResult> {
+  return requestJson<RestoreUploadResult>('/api/admin/operations/restore-uploads', {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/octet-stream',
+    body: file,
+    defaultErrorMessage: 'Không thể tải lên gói backup.',
+  });
+}
+
+export function createRestoreJob(
+  csrfToken: string,
+  input: { upload_id: string; passphrase: string; request_id: string; reason?: string },
+): Promise<OperationJob> {
+  return requestJson<OperationJob>('/api/admin/operations/restores', {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể khởi chạy tác vụ khôi phục.',
+  });
+}
+
+export function getRecoveryStatus(): Promise<RecoveryStatus> {
+  return requestJson<RecoveryStatus>('/api/admin/operations/recovery/status', {
+    method: 'GET',
+    defaultErrorMessage: 'Không tải được trạng thái safe mode.',
+  });
+}
+
+export function activateRecovery(
+  csrfToken: string,
+  input: { password: string; expected_generation: string },
+): Promise<ActivateRecoveryResult> {
+  return requestJson<ActivateRecoveryResult>('/api/admin/operations/recovery/activate', {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể kích hoạt site sau khôi phục.',
+  });
+}

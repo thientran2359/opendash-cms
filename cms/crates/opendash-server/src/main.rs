@@ -3,6 +3,7 @@ mod auth;
 mod backup;
 mod backup_archive;
 mod backup_worker;
+mod config;
 mod contact;
 mod content_render;
 mod document;
@@ -58,6 +59,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let paths = paths::SitePaths::from_env()?;
     let coordinator = Arc::new(operations::SiteCoordinator::acquire(paths)?);
     let paths = coordinator.paths().clone();
+    let runtime_cfg =
+        config::RuntimeConfigV1::load(&paths).map_err(|e| format!("{}: {}", e.0, e.1))?;
+    let recovery = config::RecoveryState::new(runtime_cfg.portable.recovery_safe_mode);
     let db = storage::init_db(paths.db_path()).await?;
     storage::import::recover_orphaned_import_runs(&db, &paths.uploads_dir())
         .await
@@ -73,7 +77,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let allow_loopback = env::var("OPENDASH_PLUGIN_ALLOW_LOOPBACK")
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
-    let plugin_manager = Arc::new(PluginManager::new(db.clone(), allow_loopback));
+    let plugin_manager = Arc::new(
+        PluginManager::new(db.clone(), allow_loopback).with_recovery_state(recovery.clone()),
+    );
     let hooks = Arc::new(HookDispatcher::new(plugin_manager.clone()));
     let content_registry = Arc::new(tokio::sync::RwLock::new(
         storage::content::load_content_type_catalog(&db)
@@ -92,6 +98,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         content_registry,
         coordinator,
         backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
+        recovery,
     };
     storage::operations::mark_interrupted_on_startup(&db)
         .await
@@ -100,9 +107,11 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
 
-    let port = env::var("OPENDASH_PORT")
+    let port = runtime_cfg.portable.port;
+    /* OPENDASH_PORT precedence handled in RuntimeConfigV1::load */
+    let _ = env::var("OPENDASH_PORT")
         .unwrap_or_else(|_| "18766".into())
-        .parse::<u16>()?;
+        .parse::<u16>();
     let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await?;
     let address = listener.local_addr()?;
     let app = build_router(state, address.to_string());

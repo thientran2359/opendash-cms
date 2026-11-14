@@ -608,3 +608,439 @@ pub async fn delete_backup_artifact(
 
     Ok((StatusCode::OK, Json(updated_job)))
 }
+
+
+#[derive(Debug, serde::Serialize)]
+pub struct RestoreUploadResponse {
+    pub upload_id: String,
+    pub size_bytes: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateRestoreRequest {
+    pub upload_id: String,
+    pub passphrase: String,
+    pub request_id: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, Deserialize)]
+pub struct RestoreSummaryMetadata {
+    pub upload_id: String,
+    pub request_id: String,
+    pub target_root: String,
+    pub schema_version: i64,
+    pub db_sha256: String,
+    pub file_count: usize,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RecoveryStatusResponse {
+    pub safe_mode: bool,
+    pub smtp_enabled: bool,
+    pub ready_marker: Option<crate::restore::RestoreReadyMarker>,
+    pub site_root: String,
+    pub expected_generation: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ActivateRecoveryRequest {
+    pub password: String,
+    pub expected_generation: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ActivateRecoveryResponse {
+    pub activated: bool,
+    pub safe_mode: bool,
+    pub generation: String,
+    pub smtp_enabled: bool,
+}
+
+pub async fn upload_restore_archive(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    mut body: axum::body::Body,
+) -> ApiResult<impl IntoResponse> {
+    use std::io::Write;
+    use sha2::{Digest, Sha256};
+
+    require_admin_with_csrf(&headers, &state.db).await?;
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if !content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .eq_ignore_ascii_case("application/octet-stream")
+    {
+        return Err(ApiError(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Chỉ chấp nhận application/octet-stream cho gói restore.".into(),
+        ));
+    }
+
+    if let Some(len) = headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        && len > crate::backup_archive::MAX_ENCRYPTED_ARCHIVE_BYTES
+    {
+        return Err(ApiError(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Kích thước gói backup vượt quá giới hạn cho phép.".into(),
+        ));
+    }
+
+    let upload_id = crate::auth::generate_random_token();
+    let uploads_dir = state
+        .coordinator
+        .paths()
+        .backups_staging_dir()
+        .join("restore-uploads");
+    crate::secrets::ensure_private_directory_tree(&uploads_dir)?;
+
+    let part_path = uploads_dir.join(format!(".{upload_id}.part"));
+    let final_path = uploads_dir.join(format!("{upload_id}.odbackup.age"));
+    let mut file = crate::secrets::create_private_file(&part_path)?;
+    let mut hasher = Sha256::new();
+    let mut total_bytes: u64 = 0;
+
+    loop {
+        let frame_opt = std::future::poll_fn(|cx| {
+            <axum::body::Body as http_body::Body>::poll_frame(std::pin::Pin::new(&mut body), cx)
+        })
+        .await;
+        match frame_opt {
+            Some(Ok(frame)) => {
+                if let Ok(data) = frame.into_data() {
+                    let next_total = total_bytes.saturating_add(data.len() as u64);
+                    if next_total > crate::backup_archive::MAX_ENCRYPTED_ARCHIVE_BYTES {
+                        drop(file);
+                        let _ = std::fs::remove_file(&part_path);
+                        return Err(ApiError(
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            "Kích thước gói backup vượt quá giới hạn cho phép.".into(),
+                        ));
+                    }
+                    for chunk in data.chunks(64 * 1024) {
+                        if file.write_all(chunk).is_err() {
+                            drop(file);
+                            let _ = std::fs::remove_file(&part_path);
+                            return Err(ApiError::internal("Không ghi được tệp upload restore."));
+                        }
+                        hasher.update(chunk);
+                    }
+                    total_bytes = next_total;
+                }
+            }
+            Some(Err(_)) => {
+                drop(file);
+                let _ = std::fs::remove_file(&part_path);
+                return Err(ApiError::bad_request("Luồng upload bị gián đoạn."));
+            }
+            None => break,
+        }
+    }
+
+    if total_bytes == 0 {
+        drop(file);
+        let _ = std::fs::remove_file(&part_path);
+        return Err(ApiError::bad_request("Tệp backup rỗng."));
+    }
+    if file.sync_all().is_err() {
+        drop(file);
+        let _ = std::fs::remove_file(&part_path);
+        return Err(ApiError::internal("Không đồng bộ được tệp upload restore."));
+    }
+    drop(file);
+    std::fs::rename(&part_path, &final_path).map_err(|_| {
+        let _ = std::fs::remove_file(&part_path);
+        ApiError::internal("Không hoàn tất được tệp upload restore.")
+    })?;
+
+    let sha256: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    Ok((
+        StatusCode::CREATED,
+        Json(RestoreUploadResponse {
+            upload_id,
+            size_bytes: total_bytes,
+            sha256,
+        }),
+    ))
+}
+
+async fn spawn_restore_worker_process(
+    req: crate::backup_worker::RestoreWorkerRequest,
+    wall_timeout: std::time::Duration,
+) -> ApiResult<crate::backup_worker::RestoreWorkerResponse> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let req_bytes = serde_json::to_vec(&req)
+        .map_err(|_| ApiError::internal("Không tuần tự hóa được yêu cầu restore worker."))?;
+    let exe = std::env::current_exe()
+        .map_err(|_| ApiError::internal("Không xác định được đường dẫn thực thi."))?;
+
+    let mut child = Command::new(exe)
+        .arg("--operations-worker")
+        .arg("restore")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| ApiError::internal("Không khởi chạy được restore worker."))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| ApiError::internal("Không mở được stdin restore worker."))?;
+    stdin
+        .write_all(&req_bytes)
+        .and_then(|_| stdin.write_all(b"\n"))
+        .and_then(|_| stdin.flush())
+        .map_err(|_| ApiError::internal("Không gửi được yêu cầu tới restore worker."))?;
+
+    let output = tokio::task::spawn_blocking(move || {
+        let start = std::time::Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    drop(stdin);
+                    return child
+                        .wait_with_output()
+                        .map_err(|_| ApiError::internal("Không đọc được kết quả restore worker."));
+                }
+                Ok(None) => {
+                    if start.elapsed() >= wall_timeout {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        drop(stdin);
+                        return Err(ApiError::service_unavailable(
+                            "Tác vụ restore vượt quá thời gian cho phép.",
+                        ));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    drop(stdin);
+                    return Err(ApiError::internal("Lỗi theo dõi tiến trình restore worker."));
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|_| ApiError::internal("Lỗi đồng bộ restore worker."))??;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().last().unwrap_or("");
+    let resp: crate::backup_worker::RestoreWorkerResponse = serde_json::from_str(line)
+        .map_err(|_| ApiError::bad_request("Restore worker trả về phản hồi không hợp lệ."))?;
+    if !resp.ok {
+        return Err(ApiError::bad_request(
+            resp.error
+                .unwrap_or_else(|| "Restore thất bại hoặc sai passphrase.".into()),
+        ));
+    }
+    Ok(resp)
+}
+
+pub async fn create_restore(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateRestoreRequest>,
+) -> ApiResult<impl IntoResponse> {
+    let admin = require_admin_with_csrf(&headers, &state.db).await?;
+    if !crate::storage::operations::is_valid_job_id(&req.upload_id) {
+        return Err(ApiError::bad_request("upload_id phải là 64 ký tự hex."));
+    }
+    if req.passphrase.is_empty() {
+        return Err(ApiError::bad_request("Passphrase không được để trống."));
+    }
+    let request_id = match req.request_id {
+        Some(raw) => {
+            if !crate::storage::operations::is_valid_job_id(&raw) {
+                return Err(ApiError::bad_request("request_id phải là 64 ký tự hex."));
+            }
+            raw
+        }
+        None => crate::auth::generate_random_token(),
+    };
+
+    let paths = state.coordinator.paths().clone();
+    let upload_path = paths
+        .backups_staging_dir()
+        .join("restore-uploads")
+        .join(format!("{}.odbackup.age", req.upload_id));
+    crate::secrets::ensure_no_reparse_or_symlink(&upload_path)?;
+    if !upload_path.is_file() {
+        return Err(ApiError::not_found("Không tìm thấy gói backup đã tải lên."));
+    }
+
+    let job_id = crate::auth::generate_random_token();
+    let job = crate::storage::operations::create_job(
+        &state.db,
+        crate::storage::operations::JobCreateInput {
+            id: job_id.clone(),
+            kind: OperationKind::Restore,
+            actor_user_id: Some(admin.user.id.to_string()),
+            reason: req.reason,
+        },
+    )
+    .await?;
+
+    let running_job = crate::storage::operations::transition_job_cas(
+        &state.db,
+        &job_id,
+        crate::storage::operations::JobTransitionInput {
+            expected_version: job.version,
+            next_state: crate::storage::operations::OperationState::Running,
+            summary_json: None,
+            error_code: None,
+            error_message: None,
+        },
+    )
+    .await?;
+
+    let target_root = paths.backups_restored_dir().join(&job_id);
+    let private_dir = paths.backups_staging_dir().join(format!("restore-{job_id}"));
+    let db_clone = state.db.clone();
+    let reg_clone = std::sync::Arc::clone(&state.backup_registry);
+    let job_id_clone = job_id.clone();
+    let upload_id_clone = req.upload_id.clone();
+    let running_version = running_job.version;
+
+    let worker_req = crate::backup_worker::RestoreWorkerRequest {
+        input_path: upload_path.clone(),
+        private_dir: private_dir.clone(),
+        generated_target: target_root.clone(),
+        source_site_root: paths.site_root().to_path_buf(),
+        source_db_path: paths.db_path().to_path_buf(),
+        job_id: job_id.clone(),
+        passphrase: req.passphrase,
+        failpoint: None,
+    };
+
+    let handle = tokio::spawn(async move {
+        let res = spawn_restore_worker_process(worker_req, std::time::Duration::from_secs(300)).await;
+        let _ = std::fs::remove_dir_all(&private_dir);
+        let _ = std::fs::remove_file(&upload_path);
+        match res {
+            Ok(resp) => {
+                let summary = RestoreSummaryMetadata {
+                    upload_id: upload_id_clone,
+                    request_id,
+                    target_root: resp
+                        .target_root
+                        .unwrap_or(target_root)
+                        .to_string_lossy()
+                        .into_owned(),
+                    schema_version: resp.schema_version.unwrap_or(0),
+                    db_sha256: resp.db_sha256.unwrap_or_default(),
+                    file_count: resp.file_count.unwrap_or(0),
+                };
+                let _ = crate::storage::operations::transition_job_cas(
+                    &db_clone,
+                    &job_id_clone,
+                    crate::storage::operations::JobTransitionInput {
+                        expected_version: running_version,
+                        next_state: crate::storage::operations::OperationState::Succeeded,
+                        summary_json: Some(serde_json::to_string(&summary).unwrap_or_default()),
+                        error_code: None,
+                        error_message: None,
+                    },
+                )
+                .await;
+            }
+            Err(err) => {
+                let _ = crate::storage::operations::transition_job_cas(
+                    &db_clone,
+                    &job_id_clone,
+                    crate::storage::operations::JobTransitionInput {
+                        expected_version: running_version,
+                        next_state: crate::storage::operations::OperationState::Failed,
+                        summary_json: None,
+                        error_code: Some("restore_failed".into()),
+                        error_message: Some(err.1.into_owned()),
+                    },
+                )
+                .await;
+            }
+        }
+        reg_clone.clear_job(&job_id_clone);
+    });
+    state
+        .backup_registry
+        .register_task_handle(&job_id, handle)
+        .await;
+
+    Ok((StatusCode::ACCEPTED, Json(running_job)))
+}
+
+pub async fn get_recovery_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> ApiResult<impl IntoResponse> {
+    require_admin(&headers, &state.db).await?;
+    let paths = state.coordinator.paths();
+    let ready_marker = crate::config::load_ready_marker(paths)?;
+    let smtp = crate::storage::smtp::get_smtp_settings(&state.db).await?;
+    let expected_generation = ready_marker.as_ref().map(|m| m.job_id.clone());
+
+    Ok((
+        StatusCode::OK,
+        Json(RecoveryStatusResponse {
+            safe_mode: state.recovery.is_safe_mode(),
+            smtp_enabled: smtp.enabled,
+            ready_marker,
+            site_root: paths.site_root().to_string_lossy().into_owned(),
+            expected_generation,
+        }),
+    ))
+}
+
+pub async fn activate_recovery(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ActivateRecoveryRequest>,
+) -> ApiResult<impl IntoResponse> {
+    let admin = require_admin_with_csrf(&headers, &state.db).await?;
+    let paths = state.coordinator.paths();
+    let marker = crate::config::load_ready_marker(paths)?.ok_or_else(|| {
+        ApiError::precondition_failed("Không tìm thấy READY.json trong site root để kích hoạt.")
+    })?;
+    if marker.job_id != req.expected_generation {
+        return Err(ApiError::precondition_failed(
+            "Generation READY.json không khớp (CAS mismatch).",
+        ));
+    }
+
+    let user_row = crate::storage::auth::find_user_by_username(&state.db, &admin.user.username)
+        .await?
+        .ok_or_else(|| ApiError::unauthorized("Không tìm thấy tài khoản Admin hiện tại."))?;
+    if !crate::auth::verify_password(&req.password, &user_row.2) {
+        return Err(ApiError::unauthorized("Mật khẩu Admin không chính xác."));
+    }
+
+    crate::config::persist_clear_safe_mode(paths)?;
+    state.recovery.set_safe_mode(false);
+    let smtp = crate::storage::smtp::get_smtp_settings(&state.db).await?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ActivateRecoveryResponse {
+            activated: true,
+            safe_mode: false,
+            generation: marker.job_id,
+            smtp_enabled: smtp.enabled,
+        }),
+    ))
+}

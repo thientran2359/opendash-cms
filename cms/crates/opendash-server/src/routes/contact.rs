@@ -215,11 +215,20 @@ pub async fn public_submit(
     Extension(limiter): Extension<ContactAdmissionLimiter>,
     Extension(ExpectedListenerOrigin(listener_origin)): Extension<ExpectedListenerOrigin>,
     Extension(smtp_service): Extension<crate::smtp::SmtpService>,
+    recovery: Option<Extension<crate::config::RecoveryState>>,
     connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     Path(form_id): Path<i64>,
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult<Response> {
+    if recovery.as_ref().is_some_and(|Extension(r)| r.is_safe_mode()) {
+        return Ok((
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CACHE_CONTROL, "no-store")],
+            "Hệ thống đang ở safe mode sau khi khôi phục; tạm ngừng tiếp nhận liên hệ.",
+        )
+            .into_response());
+    }
     if !check_strict_contact_origin(&headers, &db, &listener_origin).await? {
         return Ok((
             StatusCode::FORBIDDEN,
