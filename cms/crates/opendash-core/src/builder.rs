@@ -197,6 +197,8 @@ pub enum KnownElement {
     Text(TextProps),
     #[serde(rename = "core/image")]
     Image(ImageProps),
+    #[serde(rename = "core/video")]
+    Video(VideoProps),
     #[serde(rename = "core/button")]
     Button(ButtonProps),
     #[serde(rename = "core/list")]
@@ -281,6 +283,22 @@ fn default_list_size() -> u8 {
     6
 }
 
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VideoProps {
+    pub media_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster_image_id: Option<String>,
+    #[serde(default = "default_true")]
+    pub controls: bool,
+    #[serde(default)]
+    pub muted: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContactFormProps {
@@ -329,7 +347,11 @@ impl KnownElement {
             Self::Text(p) => p.binding.as_ref(),
             Self::Image(p) => p.binding.as_ref(),
             Self::Button(p) => p.binding.as_ref(),
-            Self::Legacy(_) | Self::List(_) | Self::ContactForm(_) | Self::PluginBlock(_) => None,
+            Self::Legacy(_)
+            | Self::List(_)
+            | Self::ContactForm(_)
+            | Self::Video(_)
+            | Self::PluginBlock(_) => None,
         }
     }
 }
@@ -578,6 +600,16 @@ fn validate_known(
             let descriptor = catalog.get(&props.block_id).ok_or("Unknown plugin block descriptor")?;
             if descriptor.status != ProviderStatus::Active {
                 return Err("Plugin block provider is not active");
+            }
+        }
+        KnownElement::Video(props) => {
+            if !valid_media_id(&props.media_id) {
+                return Err("Invalid Video media ID");
+            }
+            if let Some(poster) = props.poster_image_id.as_deref()
+                && !valid_media_id(poster)
+            {
+                return Err("Invalid Video poster image ID");
             }
         }
         KnownElement::ContactForm(props) => {

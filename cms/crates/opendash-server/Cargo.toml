@@ -11,6 +11,7 @@ path = "src/main.rs"
 opendash-core = { path = "../opendash-core" }
 argon2 = { workspace = true }
 axum = { workspace = true }
+http-body = { workspace = true }
 image = { workspace = true }
 lettre = { workspace = true }
 minijinja = { workspace = true }
