@@ -877,14 +877,21 @@ pub fn absolute_public_url(settings: &PublicSiteSettings, path: &str) -> Option<
     }
 }
 
-pub async fn get_public(db: &SqlitePool) -> Result<PublicSiteSettings, sqlx::Error> {
+pub async fn get_public_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+) -> Result<PublicSiteSettings, sqlx::Error> {
     sqlx::query_as::<_, PublicSiteSettings>(
         "SELECT public_origin, content_language, indexing_enabled, version
          FROM site_public_settings
          WHERE id = 1",
     )
-    .fetch_one(db)
+    .fetch_one(&mut *conn)
     .await
+}
+
+pub async fn get_public(db: &SqlitePool) -> Result<PublicSiteSettings, sqlx::Error> {
+    let mut conn = db.acquire().await?;
+    get_public_in_conn(&mut conn).await
 }
 
 pub enum PublicSaveOutcome {
