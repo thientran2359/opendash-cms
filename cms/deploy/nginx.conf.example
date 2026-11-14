@@ -1,0 +1,33 @@
+# OpenDash Reverse Proxy Example (Nginx TLS termination -> loopback upstream)
+# Set trusted_public_origin = "https://cms.example.com" in /var/lib/opendash/config/site.json.
+# OpenDash does NOT trust Forwarded / X-Forwarded-* headers for auth or origin checks.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name cms.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name cms.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/cms.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/cms.example.com/privkey.pem;
+
+    # Allow encrypted restore archive uploads up to 4 GiB + 2 MiB
+    client_max_body_size 4100m;
+
+    location / {
+        proxy_pass http://127.0.0.1:18766;
+        proxy_http_version 1.1;
+
+        # Preserve exact configured public Host and browser Origin
+        proxy_set_header Host $host;
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}
