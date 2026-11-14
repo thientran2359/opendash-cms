@@ -1,0 +1,32 @@
+[Unit]
+Description=OpenDash CMS Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opendash
+Group=opendash
+WorkingDirectory=/var/lib/opendash
+EnvironmentFile=/etc/opendash/opendash.env
+ExecStartPre=/usr/local/lib/opendash/current/opendash --check-config
+ExecStart=/usr/local/lib/opendash/current/opendash
+KillSignal=SIGTERM
+TimeoutStopSec=35s
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/opendash
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

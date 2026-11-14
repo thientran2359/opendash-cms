@@ -1,0 +1,60 @@
+name: OpenDash Linux Release Validation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'cms/rust-toolchain.toml'
+      - 'cms/scripts/build-release-linux.sh'
+      - 'cms/scripts/verify-release-artifact.py'
+      - 'cms/deploy/**'
+      - '.github/workflows/release-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  linux-musl-bundle:
+    name: release-validation-ubuntu-24.04
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install musl-tools and file
+        run: sudo apt-get update && sudo apt-get install -y musl-tools file
+
+      - name: Setup Node 22.16.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+
+      - name: Setup Rust 1.99.1 + musl target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.1'
+          targets: x86_64-unknown-linux-musl
+
+      - name: Build Linux musl release bundle
+        run: bash cms/scripts/build-release-linux.sh
+
+      - name: Verify release bundle and static ELF
+        run: |
+          python3 cms/scripts/verify-release-artifact.py --self-test
+          python3 cms/scripts/verify-release-artifact.py cms/target/release-bundle
+
+      - name: Smoke test native binary startup on clean site root
+        run: |
+          TMP_SITE="$(mktemp -d)"
+          PORT=18799
+          OPENDASH_SITE_ROOT="$TMP_SITE" OPENDASH_PORT="$PORT" cms/target/release-bundle/opendash &
+          PID=$!
+          trap 'kill -TERM "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; rm -rf "$TMP_SITE"' EXIT
+          for i in $(seq 1 40); do
+            if curl -fsS "http://127.0.0.1:$PORT/api/health" | grep -q '"status":"ok"'; then
+              echo "Native musl binary healthy"
+              exit 0
+            fi
+            sleep 0.25
+          done
+          exit 1
