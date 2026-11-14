@@ -634,6 +634,7 @@ pub async fn delete_entry(
     id: i64,
     expected_version: i64,
 ) -> ApiResult<()> {
+    let mut tx = db.begin().await?;
     let result = sqlx::query(
         "DELETE FROM content_entries
          WHERE content_type_key = ? AND id = ? AND version = ?",
@@ -641,11 +642,16 @@ pub async fn delete_entry(
     .bind(type_key)
     .bind(id)
     .bind(expected_version)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Err(missing_or_stale(db, type_key, id).await?);
     }
+    sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -657,6 +663,7 @@ pub async fn set_publication_status(
     expected_version: i64,
     status: &str,
 ) -> ApiResult<ContentEntryRecord> {
+    let mut tx = db.begin().await?;
     let result = sqlx::query(
         "UPDATE content_entries
          SET publication_status = ?, version = version + 1, updated_at = datetime('now')
@@ -667,11 +674,13 @@ pub async fn set_publication_status(
     .bind(type_key)
     .bind(id)
     .bind(expected_version)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Err(missing_or_stale(db, type_key, id).await?);
     }
+    crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
+    tx.commit().await?;
     get_entry(db, type_key, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))

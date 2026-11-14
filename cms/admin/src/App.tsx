@@ -13,6 +13,7 @@ import { MediaRoute } from './shell/MediaRoute.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
 import { MenusPanel } from './features/menus/MenusPanel.tsx';
+import { SeoPanel } from './features/seo/SeoPanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 
 export const App: React.FC = () => {
@@ -324,6 +325,7 @@ export const App: React.FC = () => {
       </>}
       settingsContent={<>
         <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
         <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
       </>}
       usersContent={accountContextRole === 'admin' && <UsersPanel

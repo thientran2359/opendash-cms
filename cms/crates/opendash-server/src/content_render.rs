@@ -224,33 +224,115 @@ pub fn render_role_fragment_with_context(
     .ok()
 }
 
-/// Composes optional header and footer fragments with the body HTML once in
-/// core, never via raw HTML interpolation inside MiniJinja templates.
-pub fn compose_public_document(
-    header_html: Option<&str>,
-    body_html: &str,
-    footer_html: Option<&str>,
-) -> String {
-    let header = header_html.unwrap_or("");
-    let footer = footer_html.unwrap_or("");
-    if header.is_empty() && footer.is_empty() {
-        return body_html.to_string();
-    }
-    if let Some(body_open) = body_html.find("<body>") {
-        let insert_start = body_open + "<body>".len();
-        if let Some(body_close) = body_html.rfind("</body>") {
-            let mut out = String::with_capacity(body_html.len() + header.len() + footer.len());
-            out.push_str(&body_html[..insert_start]);
-            out.push_str(header);
-            out.push_str(&body_html[insert_start..body_close]);
-            out.push_str(footer);
-            out.push_str(&body_html[body_close..]);
-            return out;
+fn escape_html_attr(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#x27;"),
+            _ => out.push(ch),
         }
     }
-    format!(
-        "<!doctype html><html lang=\"vi\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body>{header}{body_html}{footer}</body></html>"
-    )
+    out
+}
+
+/// Normalizes header/body/footer through the bounded document normalizer and emits
+/// a single trusted `<head>` from `SeoView`. Replaces legacy literal composition.
+pub fn compose_document_with_seo(
+    header_html: Option<&str>,
+    rendered_layout: &str,
+    footer_html: Option<&str>,
+    seo: &crate::seo::SeoView,
+) -> ApiResult<String> {
+    let mut styles = Vec::new();
+    let mut body_attrs_str = String::new();
+    let body_fragment = match crate::document::normalize_public_document(rendered_layout) {
+        Ok(parts) => {
+            for (k, v) in parts.body_attributes {
+                body_attrs_str.push(' ');
+                body_attrs_str.push_str(&k);
+                body_attrs_str.push_str("=\"");
+                body_attrs_str.push_str(&escape_html_attr(&v));
+                body_attrs_str.push('"');
+            }
+            styles.extend(parts.authorized_styles);
+            parts.body_fragment
+        }
+        Err(diag) => {
+            format!(
+                "<main data-doc-diagnostic=\"{}\"><p>Nội dung mẫu không hợp lệ.</p><pre>{}</pre></main>",
+                escape_html_attr(diag.code),
+                escape_html_attr(rendered_layout),
+            )
+        }
+    };
+    let normalize_slot = |slot: Option<&str>, styles: &mut Vec<String>| -> String {
+        let Some(raw) = slot.filter(|s| !s.is_empty()) else {
+            return String::new();
+        };
+        match crate::document::normalize_public_document(raw) {
+            Ok(parts) => {
+                styles.extend(parts.authorized_styles);
+                parts.body_fragment
+            }
+            Err(_) => String::new(),
+        }
+    };
+    let header = normalize_slot(header_html, &mut styles);
+    let footer = normalize_slot(footer_html, &mut styles);
+
+    let mut head = String::from(
+        "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+    );
+    head.push_str(&format!("<title>{}</title>", escape_html_attr(&seo.title)));
+    head.push_str(&format!(
+        "<meta name=\"robots\" content=\"{}\">",
+        escape_html_attr(&seo.robots)
+    ));
+    if let Some(desc) = &seo.description {
+        head.push_str(&format!(
+            "<meta name=\"description\" content=\"{}\">",
+            escape_html_attr(desc)
+        ));
+    }
+    if let Some(canonical) = &seo.canonical_url {
+        head.push_str(&format!(
+            "<link rel=\"canonical\" href=\"{}\">",
+            escape_html_attr(canonical)
+        ));
+    }
+    head.push_str(&format!(
+        "<meta property=\"og:title\" content=\"{}\">",
+        escape_html_attr(&seo.og_title)
+    ));
+    if let Some(og_desc) = &seo.og_description {
+        head.push_str(&format!(
+            "<meta property=\"og:description\" content=\"{}\">",
+            escape_html_attr(og_desc)
+        ));
+    }
+    if let Some(og_url) = &seo.og_url {
+        head.push_str(&format!(
+            "<meta property=\"og:url\" content=\"{}\">",
+            escape_html_attr(og_url)
+        ));
+    }
+    if let Some(og_img) = &seo.og_image_url {
+        head.push_str(&format!(
+            "<meta property=\"og:image\" content=\"{}\">",
+            escape_html_attr(og_img)
+        ));
+    }
+    for style in styles {
+        head.push_str(&style);
+    }
+    Ok(format!(
+        "<!doctype html><html lang=\"{}\"><head>{head}</head><body{body_attrs_str}>{header}{body_fragment}{footer}</body></html>",
+        escape_html_attr(&seo.lang)
+    ))
 }
 
 pub fn render_archive_with_site(

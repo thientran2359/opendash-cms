@@ -277,13 +277,16 @@ pub async fn entry_preview(
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
     let view = content_render::authenticated_preview_view(entry, &schema);
     let (_, selected_template) = active_content_templates(&db).await?;
-    let html = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    let raw_html = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    let pub_settings = crate::storage::settings::get_public(&db).await?;
+    let seo_view = crate::seo::SeoView::for_noindex_page(&pub_settings.content_language, &view.title);
+    let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
     Ok((
         [
             (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::REFERRER_POLICY, "no-referrer"),
-            (header::CACHE_CONTROL, "no-store"),
+            (header::CACHE_CONTROL, "private, no-store"),
         ],
         Html(html),
     )

@@ -147,11 +147,19 @@ pub async fn archive(
         Some(&type_key),
     )
     .await?;
-    Ok(public_html(content_render::compose_public_document(
+    let seo_view = crate::storage::seo::build_simple_seo_view(
+        &db,
+        &schema.label,
+        CanonicalUrlBuilder::archive(&type_key).as_deref(),
+        false,
+    )
+    .await?;
+    Ok(public_html(content_render::compose_document_with_seo(
         header.as_deref(),
         &body_html,
         footer.as_deref(),
-    )))
+        &seo_view,
+    )?))
 }
 
 pub async fn single(
@@ -209,9 +217,14 @@ pub(crate) async fn render_single_entry_response(
     let db = db.clone();
     let type_key = entry.content_type_key.clone();
     let slug = entry.slug.clone();
+    let entry_id_for_seo = entry.id;
+    let entry_title_for_seo = entry.title.clone();
     let schema = load_content_type_definition(&db, &type_key)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let canonical_path_for_seo = canonical_path_override.clone()
+        .or_else(|| CanonicalUrlBuilder::entry_from_id(entry_id_for_seo, &type_key, &slug))
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
     let canonical_path = canonical_path_override
         .or_else(|| CanonicalUrlBuilder::entry_from_id(entry.id, &type_key, &slug))
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
@@ -259,11 +272,19 @@ pub(crate) async fn render_single_entry_response(
         Some(&type_key),
     )
     .await?;
-    Ok(public_html(content_render::compose_public_document(
+    let seo_view = crate::storage::seo::build_entry_seo_view(
+        &db,
+        entry_id_for_seo,
+        &entry_title_for_seo,
+        &canonical_path_for_seo,
+    )
+    .await?;
+    Ok(public_html(content_render::compose_document_with_seo(
         header.as_deref(),
         &body_html,
         footer.as_deref(),
-    )))
+        &seo_view,
+    )?))
 }
 
 pub async fn category_archive(
@@ -409,11 +430,19 @@ async fn taxonomy_archive(
         None,
     )
     .await?;
-    Ok(public_html(content_render::compose_public_document(
+    let seo_view = crate::storage::seo::build_simple_seo_view(
+        db,
+        &schema.label,
+        CanonicalUrlBuilder::taxonomy(kind, slug).as_deref(),
+        false,
+    )
+    .await?;
+    Ok(public_html(content_render::compose_document_with_seo(
         header.as_deref(),
         &body_html,
         footer.as_deref(),
-    )))
+        &seo_view,
+    )?))
 }
 
 async fn media_response(

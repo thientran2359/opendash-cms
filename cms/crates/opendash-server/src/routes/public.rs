@@ -80,13 +80,13 @@ pub async fn public_page(
             None,
         )
         .await?;
-        if header.is_some() || footer.is_some() {
-            html = content_render::compose_public_document(
-                header.as_deref(),
-                &html,
-                footer.as_deref(),
-            );
-        }
+        let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
+        html = content_render::compose_document_with_seo(
+            header.as_deref(),
+            &html,
+            footer.as_deref(),
+            &seo_view,
+        )?;
         return Ok(rendered_layout(html));
     }
     if let Some(v2) = &active_v2 {
@@ -106,16 +106,19 @@ pub async fn public_page(
                     None,
                 )
                 .await?;
-                let html = content_render::compose_public_document(header.as_deref(), &home_html, footer.as_deref());
+                let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
+                let html = content_render::compose_document_with_seo(header.as_deref(), &home_html, footer.as_deref(), &seo_view)?;
                 return Ok(rendered_layout(html));
             }
         }
     }
-    let html = match render_legacy_state(&state)? {
+    let raw_html = match render_legacy_state(&state)? {
         Some(snapshot) => snapshot.html,
         None => "<p>Chưa lưu block.</p>".into(),
     };
-    Ok(rendered(html))
+    let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
+    let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
+    Ok(rendered_layout(html))
 }
 
 #[cfg(test)]
