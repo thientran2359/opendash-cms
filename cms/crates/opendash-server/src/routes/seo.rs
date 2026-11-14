@@ -54,6 +54,7 @@ pub async fn get_entry_route(
 }
 
 pub async fn put_entry_route(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
@@ -127,6 +128,7 @@ pub async fn get_entry_seo(
 }
 
 pub async fn put_entry_seo(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
@@ -152,6 +154,7 @@ pub async fn get_home_seo(
 }
 
 pub async fn put_home_seo(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Json(input): Json<crate::seo::SeoMetadataInput>,

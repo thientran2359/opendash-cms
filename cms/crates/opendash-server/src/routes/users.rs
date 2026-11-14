@@ -121,6 +121,7 @@ pub async fn user_list(
 }
 
 pub async fn user_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     payload: Result<Json<NewUser>, JsonRejection>,
@@ -139,6 +140,7 @@ pub async fn user_create(
 }
 
 pub async fn user_patch(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -161,6 +163,7 @@ pub async fn user_patch(
 }
 
 pub async fn user_reset_password(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -177,6 +180,7 @@ pub async fn user_reset_password(
 }
 
 pub async fn user_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,

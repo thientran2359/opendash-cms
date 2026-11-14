@@ -79,6 +79,7 @@ pub async fn admin_get_form(
 }
 
 pub async fn admin_create_form(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     payload: Result<Json<FormUpsertBody>, JsonRejection>,
@@ -91,6 +92,7 @@ pub async fn admin_create_form(
 }
 
 pub async fn admin_update_form(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -113,6 +115,7 @@ pub async fn admin_update_form(
 }
 
 pub async fn admin_delete_form(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -149,6 +152,7 @@ pub async fn admin_get_submission(
 }
 
 pub async fn admin_delete_submission(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -206,6 +210,7 @@ async fn check_strict_contact_origin(
 }
 
 pub async fn public_submit(
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Extension(limiter): Extension<ContactAdmissionLimiter>,
     Extension(ExpectedListenerOrigin(listener_origin)): Extension<ExpectedListenerOrigin>,
@@ -297,7 +302,7 @@ pub async fn public_submit(
     match outcome {
         SubmitOutcome::Accepted(receipt) => {
             if let Some(attempt_id) = receipt.initial_attempt_id {
-                smtp_service.spawn_initial_attempt(attempt_id);
+                smtp_service.spawn_initial_attempt(attempt_id, lease.clone());
             }
             Ok((
                 StatusCode::SEE_OTHER,

@@ -124,6 +124,7 @@ pub async fn taxonomy_list(
 }
 
 pub async fn taxonomy_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     payload: Result<Json<NewTaxonomyTerm>, JsonRejection>,
@@ -143,6 +144,7 @@ pub async fn taxonomy_create(
 }
 
 pub async fn taxonomy_patch(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -171,6 +173,7 @@ pub async fn taxonomy_patch(
 }
 
 pub async fn taxonomy_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,

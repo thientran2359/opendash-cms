@@ -16,6 +16,7 @@ use crate::{
 };
 
 pub async fn auth_setup(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Json(input): Json<AuthInput>,
 ) -> ApiResult<StatusCode> {
@@ -28,6 +29,7 @@ pub async fn auth_setup(
 }
 
 pub async fn auth_login(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Json(input): Json<AuthInput>,
 ) -> ApiResult<Response> {
@@ -77,7 +79,11 @@ pub async fn auth_me(
     }))
 }
 
-pub async fn auth_logout(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
+pub async fn auth_logout(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
     let session = require_session_with_csrf(&headers, &db).await?;
     auth::delete_session(&db, &session.token_hash).await?;
     let clear_cookie = auth::clear_session_cookie_header();
