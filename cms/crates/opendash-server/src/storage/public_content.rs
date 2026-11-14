@@ -286,8 +286,41 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            SELECT 1
            FROM seo_public_media_refs AS sm
            WHERE sm.source_kind = 'home_seo' AND sm.source_id = 1 AND sm.media_id = ?
+         ) OR EXISTS (
+           SELECT 1 FROM builder_homepage_video_refs AS bv
+           JOIN builder_homepage AS b ON b.id = 1
+           WHERE bv.media_id = ? AND b.document_json IS NOT NULL
+         ) OR EXISTS (
+           SELECT 1
+           FROM template_override_media_refs AS tom
+           JOIN template_overrides AS ov ON ov.id = tom.override_id
+           WHERE tom.media_id = ?
+             AND (
+               (ov.scope_type_key IS NULL AND ov.scope_entry_id IS NULL)
+               OR (
+                 ov.scope_type_key IS NOT NULL
+                 AND ov.scope_entry_id IS NULL
+                 AND EXISTS (
+                   SELECT 1 FROM content_types AS t
+                   WHERE t.key = ov.scope_type_key AND t.provider_status = 'active'
+                 )
+               )
+               OR (
+                 ov.scope_entry_id IS NOT NULL
+                 AND EXISTS (
+                   SELECT 1
+                   FROM content_entries AS e
+                   JOIN content_types AS t ON t.key = e.content_type_key
+                   WHERE e.id = ov.scope_entry_id
+                     AND e.publication_status = 'published'
+                     AND t.provider_status = 'active'
+                 )
+               )
+             )
          )"#,
     )
+    .bind(id)
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)

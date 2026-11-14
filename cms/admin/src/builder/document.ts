@@ -43,8 +43,8 @@ export interface BuilderSection extends ResponsiveContainer { id: string; childr
 export interface BuilderDocument { schema_version: number; sections: BuilderSection[] }
 export type BuilderNode = BuilderSection | BuilderRow | BuilderColumn | BuilderElement;
 export type NodeKind = 'section' | 'row' | 'column' | 'element';
-export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/button' | 'core/list' | 'core/contact_form';
-export const ELEMENT_TYPES: ElementType[] = ['core/heading', 'core/text', 'core/image', 'core/button', 'core/list', 'core/contact_form'];
+export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/video' | 'core/button' | 'core/list' | 'core/contact_form';
+export const ELEMENT_TYPES: ElementType[] = ['core/heading', 'core/text', 'core/image', 'core/video', 'core/button', 'core/list', 'core/contact_form'];
 export const EMPTY_DOCUMENT: BuilderDocument = { schema_version: 1, sections: [] };
 export interface NodeLocation {
   node: BuilderNode;
@@ -162,7 +162,7 @@ export function nodeTitle(location: NodeLocation): string {
   const element = location.node as BuilderElement;
   return ({
     'core/heading': 'Tiêu đề', 'core/text': 'Văn bản',
-    'core/image': 'Hình ảnh', 'core/button': 'Nút', 'core/list': 'Danh sách', 'core/contact_form': 'Form liên hệ',
+    'core/image': 'Hình ảnh', 'core/video': 'Video', 'core/button': 'Nút', 'core/list': 'Danh sách', 'core/contact_form': 'Form liên hệ',
     'legacy/block': 'Block theme',
   } as Record<string, string>)[element.type] || 'Block chưa nhận diện';
 }
@@ -185,6 +185,7 @@ export function isLockedElement(element: BuilderElement, registry: Record<string
       || Number(props.level) > 6 || typeof props.text !== 'string';
     case 'core/text': return typeof props.text !== 'string';
     case 'core/image': return typeof props.media_id !== 'string' || typeof props.alt !== 'string';
+    case 'core/video': return typeof props.media_id !== 'string';
     case 'core/button': return typeof props.label !== 'string' || typeof props.url !== 'string';
     case 'core/contact_form': return typeof props.form_id !== 'number' || props.form_id <= 0 || typeof props.submit_label !== 'string' || !props.submit_label.trim();
     case 'core/list': return typeof props.type_key !== 'string'
@@ -270,6 +271,7 @@ export function appendNode(
     'core/heading': { level: 2, text: 'Tiêu đề mới' },
     'core/text': { text: 'Nội dung mới' },
     'core/image': { media_id: '', alt: '' },
+    'core/video': { media_id: '', controls: true, muted: false },
     'core/button': { label: 'Nút mới', url: '/' },
     'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
     'core/contact_form': { form_id: 1, submit_label: 'Gửi liên hệ' },
@@ -319,7 +321,7 @@ export function moveNode(document: BuilderDocument, id: string, direction: -1 | 
 }
 
 export function setNodeField(
-  document: BuilderDocument, id: string, field: string, value: string | number,
+  document: BuilderDocument, id: string, field: string, value: string | number | boolean | undefined,
 ): BuilderDocument | null {
   const next = clone(document);
   const location = locate(next, id);
@@ -330,7 +332,13 @@ export function setNodeField(
     if (!object(values)) return null;
     element.props = { ...element.props, values: { ...values, [field]: value } };
   } else {
-    element.props = { ...element.props, [field]: value };
+    if (value === undefined) {
+      const rest = { ...element.props };
+      delete rest[field];
+      element.props = rest;
+    } else {
+      element.props = { ...element.props, [field]: value };
+    }
   }
   return next;
 }

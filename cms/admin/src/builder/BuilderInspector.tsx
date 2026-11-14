@@ -13,7 +13,7 @@ interface Props {
   csrfToken: string | null;
   viewport: BuilderViewport;
   allowRouteContext?: boolean;
-  onChange: (id: string, key: string, value: string | number) => void;
+  onChange: (id: string, key: string, value: string | number | boolean | undefined) => void;
   onBindingChange: (id: string, binding: ElementBinding | null) => void;
   onListChange: (id: string, config: ListProps) => void;
   onResponsiveChange: (id: string, viewport: BuilderViewport, field: ResponsiveField, value: number | ResponsiveAlign | null) => void;
@@ -21,7 +21,7 @@ interface Props {
 }
 
 export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, allowRouteContext, onChange, onBindingChange, onListChange, onResponsiveChange, onError }: Props) {
-  const [showPicker, setShowPicker] = useState(false);
+  const [showPicker, setShowPicker] = useState<'image' | 'video' | 'poster' | null>(null);
   const item = locate(document, selectedId);
   if (!item) return (
     <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="Inspector">
@@ -142,7 +142,7 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
       {!element && <p className="text-sm text-slate-500">
         Các thay đổi responsive chỉ ghi vào document khi bấm Lưu. Thêm hoặc đổi thứ tự node từ Tree.
       </p>}
-      {element && !locked && element.type !== 'core/list' && element.type !== 'core/contact_form' && (
+      {element && !locked && element.type !== 'core/list' && element.type !== 'core/contact_form' && element.type !== 'core/video' && (
         <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label="Thuộc tính phần tử">
           {fields.map(field => (
             <label key={field.key} className="block text-sm font-medium text-slate-700">
@@ -163,7 +163,7 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
           ))}
           {element.type === 'core/image' && (
             <button type="button" className="btn-secondary w-full"
-              onClick={() => setShowPicker(true)}>Chọn ảnh trong thư viện</button>
+              onClick={() => setShowPicker('image')}>Chọn ảnh trong thư viện</button>
           )}
           {fields.length === 0 && <p className="text-xs text-slate-500">Block không có field có thể chỉnh.</p>}
         </form>
@@ -173,6 +173,41 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
       )}
       {element?.type === 'core/list' && !locked && (
         <BuilderListFields key={element.id} element={element} onChange={onListChange} onError={onError} />
+      )}
+      {element?.type === 'core/video' && !locked && (
+        <div className="space-y-3" aria-label="Thuộc tính video">
+          <div className="space-y-1">
+            <span className="block text-sm font-medium text-slate-700">Video MP4</span>
+            <p className="break-all text-xs text-slate-600">{staticValue(element, 'media_id') || 'Chưa chọn video'}</p>
+            <button type="button" className="btn-secondary w-full" onClick={() => setShowPicker('video')}>
+              Chọn video MP4 trong thư viện
+            </button>
+          </div>
+          <div className="space-y-1">
+            <span className="block text-sm font-medium text-slate-700">Ảnh poster (tùy chọn)</span>
+            <p className="break-all text-xs text-slate-600">{staticValue(element, 'poster_image_id') || 'Không dùng poster'}</p>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary flex-1" onClick={() => setShowPicker('poster')}>
+                Chọn ảnh poster
+              </button>
+              {staticValue(element, 'poster_image_id') && (
+                <button type="button" className="btn-secondary" onClick={() => onChange(element.id, 'poster_image_id', undefined)}>
+                  Xóa
+                </button>
+              )}
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={element.props.controls !== false}
+              onChange={event => onChange(element.id, 'controls', event.target.checked)} />
+            <span>Hiển thị thanh điều khiển (controls)</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={element.props.muted === true}
+              onChange={event => onChange(element.id, 'muted', event.target.checked)} />
+            <span>Tắt tiếng mặc định (muted)</span>
+          </label>
+        </div>
       )}
       {element?.type === 'core/contact_form' && !locked && (
         <BuilderContactFormFields key={element.id} element={element} onChange={onChange} onError={onError} />
@@ -184,14 +219,34 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
           <pre className="mt-2 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(binding, null, 2)}</pre>
         </div>
       )}
-      {showPicker && element?.type === 'core/image' && (
-        <MediaPicker mode="image" csrfToken={csrfToken}
+      {showPicker === 'image' && element?.type === 'core/image' && (
+        <MediaPicker mode="image" acceptKind="image" csrfToken={csrfToken}
           selectedIds={staticValue(element, 'media_id') ? [staticValue(element, 'media_id')] : []}
           onApply={ids => {
             if (ids[0]) onChange(element.id, 'media_id', ids[0]);
-            setShowPicker(false);
+            setShowPicker(null);
           }}
-          onClose={() => setShowPicker(false)}
+          onClose={() => setShowPicker(null)}
+          onError={onError} />
+      )}
+      {showPicker === 'video' && element?.type === 'core/video' && (
+        <MediaPicker mode="image" acceptKind="video" csrfToken={csrfToken}
+          selectedIds={staticValue(element, 'media_id') ? [staticValue(element, 'media_id')] : []}
+          onApply={ids => {
+            if (ids[0]) onChange(element.id, 'media_id', ids[0]);
+            setShowPicker(null);
+          }}
+          onClose={() => setShowPicker(null)}
+          onError={onError} />
+      )}
+      {showPicker === 'poster' && element?.type === 'core/video' && (
+        <MediaPicker mode="image" acceptKind="image" csrfToken={csrfToken}
+          selectedIds={staticValue(element, 'poster_image_id') ? [staticValue(element, 'poster_image_id')] : []}
+          onApply={ids => {
+            if (ids[0]) onChange(element.id, 'poster_image_id', ids[0]);
+            setShowPicker(null);
+          }}
+          onClose={() => setShowPicker(null)}
           onError={onError} />
       )}
     </section>

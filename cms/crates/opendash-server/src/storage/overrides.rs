@@ -347,6 +347,7 @@ pub async fn save_override_and_render(
     document
         .validate_route_context_for_role(Some(scope.role.as_str()), scoped_fields.as_deref())
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    builder::validate_media_refs_in_tx(&mut tx, document).await?;
 
     let ast_json = serde_json::to_string(document)?;
     let active_theme: Option<(Option<String>, Option<String>)> = sqlx::query_as(
@@ -402,6 +403,40 @@ pub async fn save_override_and_render(
     let saved = get_override_in_tx(&mut tx, scope)
         .await?
         .ok_or_else(|| ApiError::internal("Không đọc lại được template override vừa lưu."))?;
+    sqlx::query("DELETE FROM template_override_media_refs WHERE override_id = ?")
+        .bind(saved.id)
+        .execute(&mut *tx)
+        .await?;
+    for id in builder::image_ids(document) {
+        sqlx::query(
+            "INSERT INTO template_override_media_refs (override_id, media_id, ref_role)
+             VALUES (?, ?, 'image')",
+        )
+        .bind(saved.id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    for id in builder::video_ids(document) {
+        sqlx::query(
+            "INSERT INTO template_override_media_refs (override_id, media_id, ref_role)
+             VALUES (?, ?, 'video')",
+        )
+        .bind(saved.id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    for id in builder::poster_image_ids(document) {
+        sqlx::query(
+            "INSERT INTO template_override_media_refs (override_id, media_id, ref_role)
+             VALUES (?, ?, 'poster')",
+        )
+        .bind(saved.id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
     let bindings = builder_binding::resolve_in_tx_with_route(&mut tx, document, false, None).await?;
     let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(&mut tx, document).await?;

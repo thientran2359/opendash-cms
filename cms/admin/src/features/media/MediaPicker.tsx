@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { listMedia, mediaThumbnailUrl, uploadMedia, MediaAsset } from '../../api/media.ts';
+import { listMedia, mediaThumbnailUrl, uploadMedia, uploadVideo, MediaAsset, MediaKind } from '../../api/media.ts';
 
 type PickerMode = 'browse' | 'image' | 'gallery';
 
 interface MediaPickerProps {
   mode: PickerMode;
+  acceptKind?: MediaKind;
   selectedIds: string[];
   csrfToken: string | null;
   onApply: (ids: string[]) => void;
@@ -15,7 +16,7 @@ interface MediaPickerProps {
 const PAGE_SIZE = 48;
 
 export const MediaPicker: React.FC<MediaPickerProps> = ({
-  mode, selectedIds, csrfToken, onApply, onClose, onError,
+  mode, acceptKind = 'image', selectedIds, csrfToken, onApply, onClose, onError,
 }) => {
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [picked, setPicked] = useState<string[]>(selectedIds);
@@ -37,7 +38,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    listMedia(PAGE_SIZE, offset)
+    listMedia(PAGE_SIZE, offset, acceptKind)
       .then(list => { if (active) setAssets(list); })
       .catch(cause => {
         if (active) {
@@ -47,11 +48,11 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [offset]);
+  }, [offset, acceptKind]);
 
   const refresh = async () => {
     try {
-      const list = await listMedia(PAGE_SIZE, offset);
+      const list = await listMedia(PAGE_SIZE, offset, acceptKind);
       setAssets(list);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Không thể tải thư viện.');
@@ -69,17 +70,26 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
     const uploaded: MediaAsset[] = [];
     try {
       for (const file of files) {
-        if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-          throw new Error('Chỉ chấp nhận JPEG, PNG và WebP.');
+        if (acceptKind === 'video') {
+          if (file.type !== 'video/mp4' && !file.name.toLowerCase().endsWith('.mp4')) {
+            throw new Error('Chỉ chấp nhận video MP4.');
+          }
+          if (file.size === 0 || file.size > 100 * 1024 * 1024) {
+            throw new Error('File video phải từ 1 byte đến 100 MiB.');
+          }
+          uploaded.push(await uploadVideo(file, csrfToken));
+        } else {
+          if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+            throw new Error('Chỉ chấp nhận JPEG, PNG và WebP.');
+          }
+          if (file.size === 0 || file.size > 8 * 1024 * 1024) {
+            throw new Error('File ảnh phải từ 1 byte đến 8 MiB.');
+          }
+          uploaded.push(await uploadMedia(file, csrfToken));
         }
-        if (file.size === 0 || file.size > 8 * 1024 * 1024) {
-          throw new Error('File ảnh phải từ 1 byte đến 8 MiB.');
-        }
-        const item = await uploadMedia(file, csrfToken);
-        uploaded.push(item);
       }
       setOffset(0);
-      const refreshed = await listMedia(PAGE_SIZE, 0);
+      const refreshed = await listMedia(PAGE_SIZE, 0, acceptKind);
       setAssets(refreshed);
       setNotice(`Đã upload ${uploaded.length} ảnh.`);
       if (mode === 'image' && uploaded.length === 1) setPicked([uploaded[0].id]);
@@ -184,13 +194,17 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
                   disabled={mode === 'browse' || busy}
                   title={asset.filename}
                 >
-                  <img
-                    src={mediaThumbnailUrl(asset.id)}
-                    alt={asset.filename}
-                    loading="lazy"
-                    width={asset.thumb_width ?? undefined}
-                    height={asset.thumb_height ?? undefined}
-                  />
+                  {asset.kind === 'video' ? (
+                    <div className="media-video-placeholder">MP4 · {((asset.duration_ms ?? 0) / 1000).toFixed(1)}s</div>
+                  ) : (
+                    <img
+                      src={mediaThumbnailUrl(asset.id)}
+                      alt={asset.filename}
+                      loading="lazy"
+                      width={asset.thumb_width ?? undefined}
+                      height={asset.thumb_height ?? undefined}
+                    />
+                  )}
                   <span className="media-filename">{asset.filename}</span>
                   <small>{asset.width} × {asset.height} · {(asset.byte_size / 1024).toFixed(0)} KiB</small>
                   {mode !== 'browse' && <strong>{selected ? '✓ Đã chọn' : 'Chọn ảnh'}</strong>}

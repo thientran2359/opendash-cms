@@ -307,6 +307,30 @@ pub fn render_builder_with_lists_and_forms(
                                 alt = escape_html(&props.alt)
                             ))
                         }
+                        ElementContent::Known(KnownElement::Video(props)) => {
+                            let path = if is_preview {
+                                "/api/admin/media"
+                            } else {
+                                "/media"
+                            };
+                            let mut attrs = format!(
+                                "src=\"{path}/{id}/file\" preload=\"metadata\" playsinline",
+                                id = escape_html(&props.media_id),
+                            );
+                            if let Some(poster) = props.poster_image_id.as_deref() {
+                                attrs.push_str(&format!(
+                                    " poster=\"{path}/{poster}/file\"",
+                                    poster = escape_html(poster)
+                                ));
+                            }
+                            if props.controls {
+                                attrs.push_str(" controls");
+                            }
+                            if props.muted {
+                                attrs.push_str(" muted");
+                            }
+                            Some(format!("<video {attrs}></video>"))
+                        }
                         ElementContent::Known(KnownElement::Button(props)) => Some(format!(
                             "<a href=\"{}\" rel=\"noopener noreferrer\">{}</a>",
                             escape_html(&props.url),

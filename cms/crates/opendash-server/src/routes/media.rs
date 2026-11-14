@@ -6,7 +6,7 @@ use axum::{
     Json,
     body::{Body, Bytes, HttpBody},
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -209,6 +209,7 @@ pub async fn media_video_upload(
 async fn image_response(
     db: &SqlitePool,
     store: &MediaStore,
+    method: &Method,
     headers: &HeaderMap,
     id: &str,
     thumb: bool,
@@ -222,6 +223,10 @@ async fn image_response(
         .ok_or_else(|| ApiError::not_found("Media không tồn tại."))?;
     if thumb && asset.kind == "video" {
         return Err(ApiError::not_found("Video không có thumbnail."));
+    }
+    if !thumb && asset.kind == "video" {
+        let path = store.canonical_path(id, &asset.extension)?;
+        return crate::media::stream_authorized_video(method, headers, &asset, &path, true).await;
     }
     let bytes = store.read(id, &asset.extension, thumb).await?;
     let mime = if thumb {
@@ -247,19 +252,21 @@ async fn image_response(
 pub async fn media_original(
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
+    method: Method,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
-    image_response(&db, &store, &headers, &id, false).await
+    image_response(&db, &store, &method, &headers, &id, false).await
 }
 
 pub async fn media_thumbnail(
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
+    method: Method,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
-    image_response(&db, &store, &headers, &id, true).await
+    image_response(&db, &store, &method, &headers, &id, true).await
 }
 
 #[cfg(test)]

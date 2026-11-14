@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use axum::{
     Extension,
     extract::{OriginalUri, Path, RawQuery, State},
-    http::{StatusCode, header},
+    http::{HeaderMap, Method, StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
 use opendash_core::{content::ContentTypeDefinition, id::valid_kebab_segment_with_limit};
@@ -461,6 +461,8 @@ async fn taxonomy_archive(
 }
 
 async fn media_response(
+    method: &Method,
+    headers: &HeaderMap,
     db: &SqlitePool,
     store: &MediaStore,
     id: &str,
@@ -472,6 +474,13 @@ async fn media_response(
     let asset = media::find(db, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Ảnh công khai không tồn tại."))?;
+    if thumbnail && asset.kind == "video" {
+        return Err(ApiError::not_found("Video không có thumbnail."));
+    }
+    if !thumbnail && asset.kind == "video" {
+        let path = store.canonical_path(id, &asset.extension)?;
+        return crate::media::stream_authorized_video(method, headers, &asset, &path, false).await;
+    }
     let bytes = store.read(id, &asset.extension, thumbnail).await?;
     let mime = if thumbnail {
         "image/png"
@@ -496,17 +505,21 @@ async fn media_response(
 }
 
 pub async fn media_file(
+    method: Method,
+    headers: HeaderMap,
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
-    media_response(&db, &store, &id, false).await
+    media_response(&method, &headers, &db, &store, &id, false).await
 }
 
 pub async fn media_thumb(
+    method: Method,
+    headers: HeaderMap,
     State(db): State<SqlitePool>,
     State(store): State<Arc<MediaStore>>,
     Path(id): Path<String>,
 ) -> ApiResult<Response> {
-    media_response(&db, &store, &id, true).await
+    media_response(&method, &headers, &db, &store, &id, true).await
 }

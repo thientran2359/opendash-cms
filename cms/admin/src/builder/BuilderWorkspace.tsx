@@ -245,7 +245,7 @@ export function BuilderWorkspace({
     const next = removeNode(draftRef.current, id);
     changeDraft(next, entry.parentId, id);
   };
-  const editField = (id: string, field: string, value: string | number) => {
+  const editField = (id: string, field: string, value: string | number | boolean | undefined) => {
     const entry = locate(draftRef.current, id);
     if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
     changeDraft(setNodeField(draftRef.current, id, field, value), id);
