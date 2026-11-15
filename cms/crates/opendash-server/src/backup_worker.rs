@@ -765,7 +765,7 @@ async fn execute_snapshot_worker(req: &SnapshotWorkerRequest) -> ApiResult<PathB
         if rev.source_format == "v2" {
             let rev_dir = paths
                 .themes_dir()
-                .join(&rev.theme_id)
+                .join("revisions")
                 .join(&rev.revision_digest);
             if !rev_dir.exists() {
                 return Err(ApiError::conflict(format!(
@@ -775,7 +775,7 @@ async fn execute_snapshot_worker(req: &SnapshotWorkerRequest) -> ApiResult<PathB
             }
             collect_dir_files_recursive(
                 &rev_dir,
-                &format!("themes/{}/{}", rev.theme_id, rev.revision_digest),
+                &format!("themes/revisions/{}", rev.revision_digest),
                 BackupFileKind::ThemePackageFile,
                 &mut planned,
             )?;
