@@ -111,6 +111,7 @@ struct ActiveMaintenance {
 struct AdmissionState {
     active_writers: usize,
     maintenance: Option<ActiveMaintenance>,
+    shutting_down: bool,
 }
 
 struct CoordinatorInner {
@@ -194,6 +195,11 @@ impl SiteCoordinator {
             .state
             .lock()
             .expect("coordinator admission mutex poisoned");
+        if guard.shutting_down {
+            return Err(MutationAdmissionError::MaintenanceActive {
+                kind: OperationKind::Reconcile,
+            });
+        }
         if let Some(maint) = guard.maintenance {
             return Err(MutationAdmissionError::MaintenanceActive { kind: maint.kind });
         }
@@ -312,6 +318,51 @@ impl SiteCoordinator {
                     active_writers: writers,
                 });
             }
+        }
+    }
+}
+
+impl SiteCoordinator {
+    /// Blocks all new mutations and waits up to `timeout` for active `MutationLease`s
+    /// (including background SMTP tasks) to complete before shutdown closes storage/locks.
+    pub async fn drain_for_shutdown(&self, timeout: Duration) -> Result<(), usize> {
+        let deadline = Instant::now() + timeout;
+        {
+            let mut guard = self
+                .inner
+                .state
+                .lock()
+                .expect("coordinator admission mutex poisoned");
+            guard.shutting_down = true;
+            if guard.active_writers == 0 {
+                return Ok(());
+            }
+        }
+
+        loop {
+            let notified = self.inner.notify.notified();
+            {
+                let guard = self
+                    .inner
+                    .state
+                    .lock()
+                    .expect("coordinator admission mutex poisoned");
+                if guard.active_writers == 0 {
+                    return Ok(());
+                }
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                let writers = self
+                    .inner
+                    .state
+                    .lock()
+                    .expect("coordinator admission mutex poisoned")
+                    .active_writers;
+                return if writers == 0 { Ok(()) } else { Err(writers) };
+            }
+            let wait_for = deadline.saturating_duration_since(now);
+            let _ = tokio::time::timeout(wait_for, notified).await;
         }
     }
 }
@@ -574,5 +625,39 @@ mod tests {
         signal.cancel();
         let outcome = handle.await.expect("join cancelled task");
         assert_eq!(outcome, "cancelled-cleanly");
+    }
+
+    #[tokio::test]
+    async fn drain_for_shutdown_blocks_new_mutations_waits_for_active_writer_and_reports_timeout() {
+        let (root, paths) = temp_site_paths("shutdown-drain");
+        let coord = SiteCoordinator::acquire(paths).expect("acquire");
+
+        let lease = coord.admit_mutation().expect("admit active writer");
+        let coord_clone = coord.clone();
+        let drain_task = tokio::spawn(async move {
+            coord_clone
+                .drain_for_shutdown(Duration::from_millis(50))
+                .await
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        // New mutations are blocked once shutdown drain begins
+        assert!(coord.admit_mutation().is_err());
+        // Timeout reports active writer count instead of silently succeeding
+        assert_eq!(drain_task.await.expect("join drain"), Err(1));
+
+        // Dropping the lease allows subsequent drain_for_shutdown to succeed cleanly
+        let coord_clone2 = coord.clone();
+        let release_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            drop(lease);
+        });
+        assert_eq!(
+            coord_clone2
+                .drain_for_shutdown(Duration::from_secs(2))
+                .await,
+            Ok(())
+        );
+        release_task.await.expect("join release");
+        let _ = std::fs::remove_dir_all(root);
     }
 }

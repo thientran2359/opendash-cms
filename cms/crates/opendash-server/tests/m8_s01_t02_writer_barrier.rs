@@ -160,6 +160,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
             &["taxonomy_create", "taxonomy_patch", "taxonomy_delete"],
         ),
         ("themes.rs", &["theme_install", "theme_activate"]),
+        ("operations.rs", &["upload_restore_archive", "activate_recovery"]),
         (
             "users.rs",
             &[

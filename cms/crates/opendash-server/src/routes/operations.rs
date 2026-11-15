@@ -663,7 +663,23 @@ pub struct ActivateRecoveryResponse {
 pub async fn upload_restore_archive(
     State(state): State<AppState>,
     headers: HeaderMap,
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    body: axum::body::Body,
+) -> ApiResult<impl IntoResponse> {
+    upload_restore_archive_with_timeout(
+        state,
+        headers,
+        body,
+        std::time::Duration::from_secs(300),
+    )
+    .await
+}
+
+pub async fn upload_restore_archive_with_timeout(
+    state: AppState,
+    headers: HeaderMap,
     mut body: axum::body::Body,
+    upload_timeout: std::time::Duration,
 ) -> ApiResult<impl IntoResponse> {
     use std::io::Write;
     use sha2::{Digest, Sha256};
@@ -712,11 +728,26 @@ pub async fn upload_restore_archive(
     let mut hasher = Sha256::new();
     let mut total_bytes: u64 = 0;
 
+    let upload_deadline = tokio::time::Instant::now() + upload_timeout;
     loop {
-        let frame_opt = std::future::poll_fn(|cx| {
-            <axum::body::Body as http_body::Body>::poll_frame(std::pin::Pin::new(&mut body), cx)
-        })
+        let frame_res = tokio::time::timeout_at(
+            upload_deadline,
+            std::future::poll_fn(|cx| {
+                <axum::body::Body as http_body::Body>::poll_frame(std::pin::Pin::new(&mut body), cx)
+            }),
+        )
         .await;
+        let frame_opt = match frame_res {
+            Ok(opt) => opt,
+            Err(_) => {
+                drop(file);
+                let _ = std::fs::remove_file(&part_path);
+                return Err(ApiError(
+                    StatusCode::REQUEST_TIMEOUT,
+                    "Quá thời gian tải lên gói restore.".into(),
+                ));
+            }
+        };
         match frame_opt {
             Some(Ok(frame)) => {
                 if let Ok(data) = frame.into_data() {
@@ -779,6 +810,7 @@ pub async fn upload_restore_archive(
 async fn spawn_restore_worker_process(
     req: crate::backup_worker::RestoreWorkerRequest,
     wall_timeout: std::time::Duration,
+    cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> ApiResult<crate::backup_worker::RestoreWorkerResponse> {
     use std::io::Write;
     use std::process::{Command, Stdio};
@@ -810,6 +842,12 @@ async fn spawn_restore_worker_process(
     let output = tokio::task::spawn_blocking(move || {
         let start = std::time::Instant::now();
         loop {
+            if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = child.kill();
+                let _ = child.wait();
+                drop(stdin);
+                return Err(ApiError::conflict("Tác vụ restore đã bị hủy bởi Admin."));
+            }
             match child.try_wait() {
                 Ok(Some(_)) => {
                     drop(stdin);
@@ -929,11 +967,33 @@ pub async fn create_restore(
         failpoint: None,
     };
 
+    let cancel_flag = state.backup_registry.register_cancel_flag(&job_id);
+    let cancel_flag_task = std::sync::Arc::clone(&cancel_flag);
     let handle = tokio::spawn(async move {
-        let res = spawn_restore_worker_process(worker_req, std::time::Duration::from_secs(300)).await;
+        let res = spawn_restore_worker_process(
+            worker_req,
+            std::time::Duration::from_secs(300),
+            std::sync::Arc::clone(&cancel_flag_task),
+        )
+        .await;
         let _ = std::fs::remove_dir_all(&private_dir);
         let _ = std::fs::remove_file(&upload_path);
-        match res {
+        if cancel_flag_task.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = std::fs::remove_dir_all(&target_root);
+            let _ = crate::storage::operations::transition_job_cas(
+                &db_clone,
+                &job_id_clone,
+                crate::storage::operations::JobTransitionInput {
+                    expected_version: running_version,
+                    next_state: crate::storage::operations::OperationState::Cancelled,
+                    summary_json: None,
+                    error_code: Some("cancelled_by_admin".into()),
+                    error_message: Some("Tác vụ đã bị hủy bởi Admin.".into()),
+                },
+            )
+            .await;
+        } else {
+            match res {
             Ok(resp) => {
                 let summary = RestoreSummaryMetadata {
                     upload_id: upload_id_clone,
@@ -974,6 +1034,7 @@ pub async fn create_restore(
                 )
                 .await;
             }
+            }
         }
         reg_clone.clear_job(&job_id_clone);
     });
@@ -1010,6 +1071,7 @@ pub async fn get_recovery_status(
 pub async fn activate_recovery(
     State(state): State<AppState>,
     headers: HeaderMap,
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     Json(req): Json<ActivateRecoveryRequest>,
 ) -> ApiResult<impl IntoResponse> {
     let admin = require_admin_with_csrf(&headers, &state.db).await?;
@@ -1043,4 +1105,241 @@ pub async fn activate_recovery(
             smtp_enabled: smtp.enabled,
         }),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    async fn test_app_state(label: &str, safe_mode: bool) -> (std::path::PathBuf, AppState) {
+        let root = std::env::temp_dir().join(format!(
+            "opendash-ops-unit-{label}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let site_root = root.join("site");
+        let db_path = root.join("cms.sqlite");
+        std::fs::create_dir_all(&site_root).expect("site_root");
+
+        let paths = crate::paths::SitePaths::from_parts(site_root, db_path);
+        std::fs::create_dir_all(paths.uploads_dir()).expect("uploads dir");
+        std::fs::create_dir_all(paths.plugins_dir()).expect("plugins dir");
+        std::fs::create_dir_all(paths.runtime_dir()).expect("runtime dir");
+        let coordinator = Arc::new(
+            crate::operations::SiteCoordinator::acquire(paths.clone()).expect("acquire coord"),
+        );
+        let db = crate::storage::init_db(paths.db_path())
+            .await
+            .expect("init_db");
+        let runtime_config =
+            crate::config::RuntimeConfigV1::load(&paths).expect("load runtime config");
+        let recovery = crate::config::RecoveryState::new(safe_mode);
+        let plugin_manager = Arc::new(
+            crate::plugin::PluginManager::new(db.clone(), false)
+                .with_recovery_state(recovery.clone()),
+        );
+        let hooks = Arc::new(crate::hooks::HookDispatcher::new(plugin_manager.clone()));
+        let content_registry = Arc::new(tokio::sync::RwLock::new(
+            crate::storage::content::load_content_type_catalog(&db)
+                .await
+                .expect("load content catalog"),
+        ));
+
+        let state = AppState {
+            db,
+            plugin_manager,
+            hooks,
+            media_store: Arc::new(crate::media::MediaStore::new(paths.uploads_dir())),
+            content_registry,
+            coordinator,
+            backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
+            recovery,
+            runtime_config,
+        };
+        (root, state)
+    }
+
+    #[tokio::test]
+    async fn r1_activate_recovery_blocked_during_maintenance_returns_503_and_preserves_safe_mode() {
+        let (root, state) = test_app_state("r1-barrier", true).await;
+        let paths = state.coordinator.paths().clone();
+
+        // Write READY.json and config/site.json with recovery_safe_mode = true
+        let ready = crate::restore::RestoreReadyMarker {
+            version: 1,
+            job_id: "a".repeat(64),
+            schema_version: 1,
+            db_sha256: "b".repeat(64),
+            file_count: 1,
+            recovery_safe_mode: true,
+        };
+        std::fs::write(
+            paths.site_root().join("READY.json"),
+            serde_json::to_vec(&ready).expect("ready json"),
+        )
+        .expect("write READY.json");
+        std::fs::create_dir_all(paths.site_config_path().parent().unwrap()).expect("config dir");
+        let mut portable = opendash_core::backup::PortableRuntimeConfigV1::default();
+        portable.recovery_safe_mode = true;
+        std::fs::write(
+            paths.site_config_path(),
+            serde_json::to_vec(&portable).expect("site config"),
+        )
+        .expect("write site.json");
+
+        // Hold exclusive maintenance barrier
+        let maint = state
+            .coordinator
+            .begin_maintenance(OperationKind::Backup, Duration::from_secs(5))
+            .await
+            .expect("enter maintenance");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let router = crate::app::build_router(state.clone(), addr.to_string());
+        let srv = tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await;
+        });
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(format!("http://{addr}/api/admin/operations/recovery/activate"))
+            .json(&serde_json::json!({
+                "expected_generation": "a".repeat(64),
+                "password": "Password123!"
+            }))
+            .send()
+            .await
+            .expect("activate request");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(
+            resp.headers().get("retry-after").is_some(),
+            "503 response must include Retry-After header"
+        );
+
+        // Verify safe_mode and config/site.json were NOT modified
+        assert!(state.recovery.is_safe_mode());
+        let on_disk: opendash_core::backup::PortableRuntimeConfigV1 = serde_json::from_slice(
+            &std::fs::read(paths.site_config_path()).expect("read site.json"),
+        )
+        .expect("parse site.json");
+        assert!(on_disk.recovery_safe_mode);
+
+        drop(maint);
+        srv.abort();
+        state.db.close().await;
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    struct StalledBody;
+
+    impl http_body::Body for StalledBody {
+        type Data = axum::body::Bytes;
+        type Error = std::io::Error;
+
+        fn poll_frame(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    #[tokio::test]
+    async fn r3_upload_restore_archive_stalled_stream_times_out_and_cleans_part_file() {
+        let (root, state) = test_app_state("r3-upload-timeout", false).await;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let router = crate::app::build_router(state.clone(), addr.to_string());
+        let srv = tokio::spawn(async move {
+            let _ = axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            )
+            .await;
+        });
+
+        let client = reqwest::Client::new();
+        let setup = client
+            .post(format!("http://{addr}/auth/setup"))
+            .json(&serde_json::json!({ "username": "admin", "password": "Password123!" }))
+            .send()
+            .await
+            .expect("setup");
+        assert_eq!(setup.status(), StatusCode::CREATED);
+
+        let login = client
+            .post(format!("http://{addr}/auth/login"))
+            .json(&serde_json::json!({ "username": "admin", "password": "Password123!" }))
+            .send()
+            .await
+            .expect("login");
+        assert_eq!(login.status(), StatusCode::OK);
+        let cookie = login
+            .headers()
+            .get(reqwest::header::SET_COOKIE)
+            .expect("set-cookie")
+            .to_str()
+            .expect("cookie str")
+            .split(';')
+            .next()
+            .expect("cookie pair")
+            .to_string();
+        let login_json: serde_json::Value = login.json().await.expect("login json");
+        let csrf = login_json["csrf_token"]
+            .as_str()
+            .expect("csrf_token")
+            .to_string();
+        srv.abort();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::COOKIE, cookie.parse().unwrap());
+        headers.insert("X-CSRF-Token", csrf.parse().unwrap());
+        headers.insert(
+            axum::http::header::CONTENT_TYPE,
+            "application/octet-stream".parse().unwrap(),
+        );
+
+        let body = axum::body::Body::new(StalledBody);
+        let res = upload_restore_archive_with_timeout(
+            state.clone(),
+            headers,
+            body,
+            Duration::from_millis(50),
+        )
+        .await;
+        match res {
+            Err(err) => assert_eq!(err.0, StatusCode::REQUEST_TIMEOUT),
+            Ok(_) => panic!("stalled upload must time out"),
+        }
+
+        let uploads_dir = state
+            .coordinator
+            .paths()
+            .backups_staging_dir()
+            .join("restore-uploads");
+        let remaining: Vec<_> = std::fs::read_dir(&uploads_dir)
+            .expect("read uploads dir")
+            .collect();
+        assert!(
+            remaining.is_empty(),
+            "timed out upload must clean up .part file"
+        );
+
+        state.db.close().await;
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

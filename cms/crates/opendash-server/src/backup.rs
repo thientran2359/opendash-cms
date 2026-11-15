@@ -38,6 +38,30 @@ pub async fn create_snapshot_with_timeout(
     paths: &SitePaths,
     wall_timeout: Duration,
 ) -> ApiResult<SnapshotReceipt> {
+    create_snapshot_with_timeout_and_cancel(
+        db,
+        paths,
+        wall_timeout,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .await
+}
+
+pub async fn create_snapshot_with_cancel(
+    db: &SqlitePool,
+    paths: &SitePaths,
+    _maint: &ExclusiveOpsContext,
+    cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> ApiResult<SnapshotReceipt> {
+    create_snapshot_with_timeout_and_cancel(db, paths, MAX_SNAPSHOT_WALL_TIMEOUT, cancel_flag).await
+}
+
+async fn create_snapshot_with_timeout_and_cancel(
+    db: &SqlitePool,
+    paths: &SitePaths,
+    wall_timeout: Duration,
+    cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> ApiResult<SnapshotReceipt> {
     // Pre-check pending delete jobs before spawning worker.
     let _ = crate::storage::backup::collect_backup_inventory(db).await?;
 
@@ -93,6 +117,12 @@ pub async fn create_snapshot_with_timeout(
         let output = tokio::task::spawn_blocking(move || {
             let start = std::time::Instant::now();
             loop {
+                if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    drop(stdin);
+                    return Err(ApiError::conflict("Tác vụ backup đã bị hủy."));
+                }
                 match child.try_wait() {
                     Ok(Some(_status)) => {
                         drop(stdin);
@@ -246,7 +276,7 @@ impl BackupRuntimeRegistry {
             .remove(job_id);
     }
 
-    pub async fn cancel_and_drain_all(&self, timeout: Duration) {
+    pub async fn cancel_and_drain_all(&self, timeout: Duration) -> DrainReport {
         {
             let map = self.active_cancels.lock().expect("cancel mutex");
             for flag in map.values() {
@@ -257,12 +287,25 @@ impl BackupRuntimeRegistry {
             let mut guard = self.active_handles.lock().await;
             guard.drain().collect()
         };
-        let _ = tokio::time::timeout(timeout, async move {
-            for (_id, h) in handles {
-                let _ = h.await;
+        let deadline = tokio::time::Instant::now() + timeout;
+        let mut timed_out_jobs = Vec::new();
+        for (id, h) in handles {
+            if tokio::time::Instant::now() >= deadline {
+                if !h.is_finished() {
+                    timed_out_jobs.push(id);
+                } else {
+                    let _ = h.await;
+                }
+                continue;
             }
-        })
-        .await;
+            if tokio::time::timeout_at(deadline, h).await.is_err() {
+                timed_out_jobs.push(id);
+            }
+        }
+        DrainReport {
+            drained_cleanly: timed_out_jobs.is_empty(),
+            timed_out_jobs,
+        }
     }
 
     pub fn acquire_download_lease(
@@ -297,6 +340,12 @@ impl BackupRuntimeRegistry {
             let _ = tokio::time::timeout(remaining, notified).await;
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrainReport {
+    pub drained_cleanly: bool,
+    pub timed_out_jobs: Vec<String>,
 }
 
 pub fn utc_day_string() -> String {
@@ -435,7 +484,7 @@ pub async fn run_backup_job_background(
     let snapshot_res = if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
         Err(ApiError::conflict("Tác vụ backup đã bị hủy."))
     } else {
-        create_snapshot(&db, &paths, &maint).await
+        create_snapshot_with_cancel(&db, &paths, &maint, cancel_flag.clone()).await
     };
     // Release exclusive maintenance barrier immediately after immutable snapshot cut.
     drop(maint);
