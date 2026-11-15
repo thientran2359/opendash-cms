@@ -1,0 +1,25 @@
+<footer class="ms-footer">
+  <div class="ms-footer-inner">
+    <div>
+      <strong>{{ site.title }}</strong>
+      {% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}
+      {% if options.studio_address %}<p>Xưởng thiết kế: {{ options.studio_address }}</p>{% endif %}
+      {% if options.studio_hotline %}<p>Hotline: {{ options.studio_hotline }}</p>{% endif %}
+    </div>
+    <div>
+      <strong>Khám phá</strong>
+      <ul class="ms-footer-list">
+        {% if menus.footer %}
+          {% for item in menus.footer.items %}
+            <li><a href="{{ item.url }}">{{ item.label }}</a></li>
+          {% endfor %}
+        {% else %}
+          <li><a href="/content/dich_vu">Dịch vụ thiết kế</a></li>
+          <li><a href="/content/du_an">Hồ sơ dự án</a></li>
+          <li><a href="/content/post">Nhật ký kiến trúc</a></li>
+          <li><a href="/content/page/lien-he">Đặt lịch tư vấn</a></li>
+        {% endif %}
+      </ul>
+    </div>
+  </div>
+</footer>

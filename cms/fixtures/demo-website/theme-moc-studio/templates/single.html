@@ -1,0 +1,24 @@
+<main class="ms-main">
+  <nav><a href="{{ archive_url }}">← {{ content_type.label }}</a></nav>
+  <article class="builder-section">
+    <h1>{{ entry.title }}</h1>
+    <dl class="ms-meta-dl">
+      {% for field in entry.fields %}
+        {% if field.text or field.image_url or field.gallery_urls %}
+          <dt>{{ field.label }}</dt>
+          {% if field.image_url %}
+            <dd><img src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>
+          {% elif field.gallery_urls %}
+            <dd class="ms-gallery">
+              {% for url in field.gallery_urls %}
+                <img src="{{ url }}" alt="{{ field.label }}" loading="lazy">
+              {% endfor %}
+            </dd>
+          {% else %}
+            <dd>{{ field.text }}</dd>
+          {% endif %}
+        {% endif %}
+      {% endfor %}
+    </dl>
+  </article>
+</main>

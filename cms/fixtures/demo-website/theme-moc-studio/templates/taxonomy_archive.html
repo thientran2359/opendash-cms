@@ -1,0 +1,23 @@
+<main class="ms-main">
+  <h1>Chuyên mục: {{ content_type.label }}</h1>
+  <div class="ms-archive-grid">
+    {% for entry in entries %}
+      <article class="ms-card">
+        {% if entry.cover_url %}
+          {% if entry.url %}<a href="{{ entry.url }}">{% endif %}
+          <img class="ms-card-media" src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy">
+          {% if entry.url %}</a>{% endif %}
+        {% endif %}
+        <h2>
+          {% if entry.url %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}
+        </h2>
+      </article>
+    {% else %}
+      <p>Chưa có bài viết gắn thẻ hoặc danh mục này.</p>
+    {% endfor %}
+  </div>
+  <nav class="ms-pagination" aria-label="Phân trang">
+    <div>{% if previous_url %}<a href="{{ previous_url }}">← Trang trước</a>{% endif %}</div>
+    <div>{% if next_url %}<a href="{{ next_url }}">Trang sau →</a>{% endif %}</div>
+  </nav>
+</main>
