@@ -112,6 +112,12 @@ impl RuntimeConfigV1 {
         }
 
         portable.validate().map_err(ApiError::bad_request)?;
+        if let Some(ref raw) = portable.trusted_public_origin {
+            portable.trusted_public_origin = Some(
+                opendash_core::backup::canonicalize_trusted_origin(raw)
+                    .map_err(ApiError::bad_request)?,
+            );
+        }
         Ok(Self {
             portable,
             ready_marker,
@@ -156,8 +162,11 @@ pub fn build_recovery_state_for_root(site_root: &Path, db_path: &Path) -> Recove
 
 
 impl RuntimeConfigV1 {
-    pub fn trusted_origin_normalized(&self) -> Option<&str> {
-        self.portable.trusted_public_origin.as_deref()
+    pub fn trusted_origin_normalized(&self) -> Option<String> {
+        self.portable
+            .trusted_public_origin
+            .as_deref()
+            .and_then(|o| opendash_core::backup::canonicalize_trusted_origin(o).ok())
     }
 
     pub fn trusted_origin_is_https(&self) -> bool {
@@ -170,9 +179,6 @@ impl RuntimeConfigV1 {
         let rest = origin
             .strip_prefix("https://")
             .or_else(|| origin.strip_prefix("http://"))?;
-        if rest.is_empty() || rest.contains('/') || rest.contains('@') {
-            return None;
-        }
         Some(rest.to_string())
     }
 

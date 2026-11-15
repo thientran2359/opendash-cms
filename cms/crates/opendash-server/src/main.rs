@@ -127,19 +127,56 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let app = build_router(state, address.to_string());
 
     println!("OpenDash: http://{address}/builder");
-    axum::serve(
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_tx.send(true);
+    });
+    let mut shutdown_rx_for_serve = shutdown_rx.clone();
+    let serve_fut = std::future::IntoFuture::into_future(
+        axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    .with_graceful_shutdown(async move {
+        let _ = shutdown_rx_for_serve.wait_for(|v| *v).await;
+    }));
+    tokio::pin!(serve_fut);
+    let serve_res = tokio::select! {
+        res = &mut serve_fut => Some(res),
+        _ = shutdown_rx.wait_for(|v| *v) => None,
+    };
+    match serve_res {
+        Some(res) => res?,
+        None => {
+            if let Ok(res) = tokio::time::timeout(std::time::Duration::from_secs(10), &mut serve_fut).await {
+                res?;
+            } else {
+                eprintln!(
+                    "OpenDash shutdown: HTTP drain timed out after 10s; proceeding to task drain."
+                );
+            }
+        }
+    }
 
-    state_for_shutdown
+    let backup_drain = state_for_shutdown
         .backup_registry
         .cancel_and_drain_all(std::time::Duration::from_secs(30))
         .await;
+    let writer_drain = state_for_shutdown
+        .coordinator
+        .drain_for_shutdown(std::time::Duration::from_secs(15))
+        .await;
     state_for_shutdown.db.close().await;
     drop(state_for_shutdown);
+    if !backup_drain.drained_cleanly || writer_drain.is_err() {
+        return Err(format!(
+            "OpenDash shutdown incomplete: timed_out_jobs={:?}, remaining_writers={:?}",
+            backup_drain.timed_out_jobs,
+            writer_drain.err()
+        )
+        .into());
+    }
     Ok(())
 }
 

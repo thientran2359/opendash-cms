@@ -232,7 +232,7 @@ pub async fn public_submit(
     }
     let trusted_origin_match = runtime_cfg
         .as_ref()
-        .and_then(|Extension(cfg)| cfg.trusted_origin_normalized().map(str::to_string))
+        .and_then(|Extension(cfg)| cfg.trusted_origin_normalized())
         .is_some_and(|trusted| {
             headers
                 .get(header::ORIGIN)

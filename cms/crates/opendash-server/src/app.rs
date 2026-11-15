@@ -135,7 +135,7 @@ pub fn build_router_with_themes_root(
     let smtp_service = crate::smtp::SmtpService::with_recovery_state(state.db.clone(), secret_store.clone(), state.recovery.clone());
     let recovery_for_mw = state.recovery.clone();
     let trusted_host = state.runtime_config.trusted_host();
-    let trusted_origin = state.runtime_config.trusted_origin_normalized().map(str::to_string);
+    let trusted_origin = state.runtime_config.trusted_origin_normalized();
     let trusted_is_https = state.runtime_config.trusted_origin_is_https();
 
     Router::new()
@@ -500,7 +500,7 @@ pub fn build_router_with_themes_root(
                         && (raw == expected_host.as_str()
                             || trusted_host
                                 .as_deref()
-                                .is_some_and(|th| normalized == th || raw == th))
+                                .is_some_and(|th| normalized.eq_ignore_ascii_case(th) || raw.eq_ignore_ascii_case(th)))
                 };
             let is_mutation = matches!(
                 *request.method(),
@@ -515,14 +515,18 @@ pub fn build_router_with_themes_root(
                 && request.uri().path().starts_with("/api/public/contact/");
             if origin_valid && is_mutation && !is_public_contact_submit {
                 let expected_origin = format!("http://{expected_host}");
+                let origin_present = request.headers().contains_key(header::ORIGIN);
                 let origin_hdr = request.headers().get(header::ORIGIN).and_then(|h| h.to_str().ok());
+                if origin_present && origin_hdr.is_none() {
+                    origin_valid = false;
+                }
                 if let Some(origin) = origin_hdr {
                     let clean = !origin.is_empty()
                         && !origin.eq_ignore_ascii_case("null")
                         && !origin.chars().any(|c| c.is_control() || c.is_whitespace())
                         && !origin.contains('@');
                     let allowed = origin == expected_origin
-                        || trusted_origin.as_deref().is_some_and(|to| origin == to);
+                        || trusted_origin.as_deref().is_some_and(|to| origin.eq_ignore_ascii_case(to));
                     if !clean || !allowed {
                         origin_valid = false;
                     }

@@ -54,17 +54,43 @@ impl PortableRuntimeConfigV1 {
             return Err("log_level không hợp lệ.");
         }
         if let Some(origin) = &self.trusted_public_origin {
-            let parsed = url::Url::parse(origin)
-                .map_err(|_| "trusted_public_origin không phải URL hợp lệ.")?;
-            if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
-                return Err("trusted_public_origin phải dùng http/https và có host.");
-            }
-            if parsed.path() != "/" && !parsed.path().is_empty() {
-                return Err("trusted_public_origin không được chứa path.");
-            }
+            canonicalize_trusted_origin(origin)?;
         }
         Ok(())
     }
+}
+
+/// Parses and canonicalizes `trusted_public_origin` as `scheme://host[:non_default_port]`.
+/// Accepts an optional single trailing `/` (e.g. `https://cms.example.com/`), normalizes
+/// scheme/host casing and omits default `:80`/`:443` ports, and rejects credentials,
+/// non-root paths, query strings, and fragments.
+pub fn canonicalize_trusted_origin(raw: &str) -> Result<String, &'static str> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("trusted_public_origin không phải URL hợp lệ.");
+    }
+    let parsed = url::Url::parse(trimmed)
+        .map_err(|_| "trusted_public_origin không phải URL hợp lệ.")?;
+    if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
+        return Err("trusted_public_origin phải dùng http/https và có host.");
+    }
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("trusted_public_origin không được chứa thông tin xác thực.");
+    }
+    if parsed.path() != "/" && !parsed.path().is_empty() {
+        return Err("trusted_public_origin không được chứa path.");
+    }
+    if parsed.query().is_some() || parsed.fragment().is_some() {
+        return Err("trusted_public_origin không được chứa query hoặc fragment.");
+    }
+    let host = parsed
+        .host_str()
+        .ok_or("trusted_public_origin phải dùng http/https và có host.")?;
+    let authority = match parsed.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_string(),
+    };
+    Ok(format!("{}://{authority}", parsed.scheme()))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -362,5 +388,32 @@ mod tests {
         assert!(validate_logical_key(BackupFileKind::Db, "db/../main.sqlite").is_err());
         assert!(validate_logical_key(BackupFileKind::Db, "db/CON").is_err());
         assert!(validate_logical_key(BackupFileKind::MediaOriginal, "media/aa/CON.png").is_err());
+    }
+
+    #[test]
+    fn canonicalizes_trusted_origin_and_rejects_invalid_parts() {
+        assert_eq!(
+            canonicalize_trusted_origin("https://cms.example.com/").unwrap(),
+            "https://cms.example.com"
+        );
+        assert_eq!(
+            canonicalize_trusted_origin("HTTPS://CMS.Example.COM:443/").unwrap(),
+            "https://cms.example.com"
+        );
+        assert_eq!(
+            canonicalize_trusted_origin("http://cms.example.com:80").unwrap(),
+            "http://cms.example.com"
+        );
+        assert_eq!(
+            canonicalize_trusted_origin("https://cms.example.com:8443/").unwrap(),
+            "https://cms.example.com:8443"
+        );
+        assert!(canonicalize_trusted_origin("https://user:pass@cms.example.com").is_err());
+        assert!(canonicalize_trusted_origin("https://cms.example.com/admin").is_err());
+        assert!(canonicalize_trusted_origin("https://cms.example.com//").is_err());
+        assert!(canonicalize_trusted_origin("https://cms.example.com/?a=1").is_err());
+        assert!(canonicalize_trusted_origin("https://cms.example.com/#frag").is_err());
+        assert!(canonicalize_trusted_origin("ftp://cms.example.com").is_err());
+        assert!(canonicalize_trusted_origin("   ").is_err());
     }
 }
