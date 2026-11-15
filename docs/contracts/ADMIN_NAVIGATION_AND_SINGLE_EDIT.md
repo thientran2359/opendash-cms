@@ -1,7 +1,7 @@
 # Contract: Admin Navigation, CPT Schema Builder, Panel Registry & Composite Single Edit
 
 **Owner:** Nova (Draft Author) · **Reviewer / Coordinator:** Atlas · **Date:** 2026-11-16
-**Design status:** `DRAFT / G2 NEEDS_RESPONSE` (cập nhật xử lý `R1`–`R5` tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) và `270-R1`–`270-R6` tại [PR #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6902861188); **chưa `AGREED`** cho tới khi Atlas review head SHA mới và ghi Final Decision).
+**Design status:** `DRAFT / G2 NEEDS_RESPONSE` (cập nhật xử lý `R1`–`R5` tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) và `270-R1`–`270-R9` tại [PR #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903232709); **chưa `AGREED`** cho tới khi Atlas review head SHA mới và ghi Final Decision).
 **Decision authority:** [ADR-0016](../decisions/ADR-0016-admin-navigation-and-single-edit.md) · **Baseline:** `main@a52607c` (migration cao nhất hiện tại: `0033_media_lifecycle.sql`).
 **Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Chưa cấp ownership triển khai runtime hay `Project Ready`; bộ G3 phát hành sau khi contract được chốt và merge.
 
@@ -10,7 +10,7 @@
 
 ---
 
-## 1. Định danh có cấu trúc (`ScopedResourceId`), Ba trục quyền Field (`R2`), Quyền Media Public (`270-R2`) và Vòng đời Provider (`R1`, `R4`, `270-R1`)
+## 1. Định danh có cấu trúc (`ScopedResourceId`), Ba trục quyền Field (`R2`, `270-R7`), Quyền Media Public (`270-R2`) và Vòng đời Provider (`R1`, `R4`, `270-R1`)
 
 ### 1.1. Định danh `ScopedResourceId` (`opendash_core::id`)
 
@@ -29,9 +29,9 @@ pub struct ScopedResourceId {
   - `ResourceOwner::User` → `user:<local_key>` (do Admin tạo qua UI/API quản trị).
   - `ResourceOwner::Theme(pkg_id)` → `theme:<pkg_id>:<local_key>` (`pkg_id` theo `valid_package_id`, `local_key` theo `valid_snake_key`).
   - `ResourceOwner::Plugin(pkg_id)` → `plugin:<pkg_id>:<local_key>` (`pkg_id` theo `valid_package_id`, `local_key` theo `valid_snake_key`).
-  - Ngoài ra, trong `EditorLayoutConfigV1`, các panel chia nhỏ từ base CPT fields (layout-only slices) dùng tiền tố dành riêng `layout:<slice_key>` (`slice_key` theo `valid_snake_key`, xem Mục `3.2` — `270-R6`).
+  - **Định danh cục bộ cấp Layout (`layout:<slice_key>` — `270-R6`, `270-R9`):** Trong `EditorLayoutConfigV1`, các panel chia nhỏ từ base CPT fields (`BaseFieldSlicePanelConfig`) dùng định danh cục bộ theo từng `type_key` có dạng `layout:<slice_key>` (`slice_key` theo `valid_snake_key`). Đây là namespace dành riêng cho cấu hình bố cục cấp site; **không một User Field Group, Theme manifest hay Plugin manifest nào được phép khai báo hay chiếm dụng tiền tố `layout:`** (`422 reserved_panel_namespace`).
 
-### 1.2. Ba trục quyền độc lập của Custom Field (`FieldAccessPolicy` — `R2`) & Hợp các nguồn Media Public (`270-R2`)
+### 1.2. Ba trục quyền độc lập của Custom Field (`FieldAccessPolicy` — `R2`, `270-R7`) & Hợp các nguồn Media Public (`270-R2`)
 
 Mỗi custom field trong base CPT (`content_types.definition_json`) hoặc nhóm trường mở rộng (`content_field_groups.fields_json`) có 3 thuộc tính kiểm soát truy cập độc lập:
 
@@ -54,9 +54,17 @@ pub struct FieldAccessPolicy {
 1. **Bất biến giữa `min_view_role`, `min_edit_role` và `public_exposure`:**
    - **Rule ACL-1 (`min_edit_role >= min_view_role`):** Với thứ tự `Editor < Admin`, mọi khai báo field có `min_edit_role == Editor` nhưng `min_view_role == Admin` đều bị từ chối ngay khi đăng ký/cập nhật schema với `422 Unprocessable Entity` (`code: "invalid_field_acl"` — người nhập liệu không thể sửa một trường mà họ không có quyền nhìn thấy).
    - **Rule ACL-2 (`public_exposure == Public` đòi hỏi `min_view_role == Editor`):** Một trường giới hạn `min_view_role == Admin` không bao giờ được phép công khai ra ngoài public (`public_exposure == Public` kết hợp `min_view_role == Admin` bị từ chối với `422 invalid_field_acl`).
-2. **Giá trị mặc định & Tương thích ngược:**
-   - **Base CPT fields trong `content_types.definition_json`** (bao gồm cả các trường tạo trước migration này hoặc tạo qua `ContentFieldDefinition` không chỉ định `public_exposure`, cũng như `body` và `featured_image` của `builtin_definition("post" | "page")`): mặc định `(min_view_role = Editor, min_edit_role = Editor, public_exposure = Public)` để **không làm thay đổi bất kỳ dữ liệu public nào đang hiển thị** và giữ nguyên 100% tương thích với `preflight_builtin_key_collisions`.
-   - **Extension fields mới trong `content_field_groups.fields_json`:** mặc định `min_view_role = Editor`, `min_edit_role = Editor`, và **`public_exposure = Private`** trừ khi schema/manifest khai báo tường minh `"public_exposure": "public"`.
+2. **Tách Input DTO và Chuẩn hóa theo Ngữ cảnh (`FieldScopeKind`) để bảo toàn `missing` vs `explicit` (`270-R7`):**
+   - Để không bao giờ xảy ra lỗi deserialize trường mở rộng thiếu `public_exposure` thành `Public` (hoặc ngược lại ghi đè trường mở rộng khai báo `"public_exposure": "public"` thành `Private`), tầng nhận dữ liệu (cả HTTP API của User lẫn bộ đọc Manifest của Theme/Plugin) **bắt buộc dùng kiểu đầu vào `FieldDefinitionInput` có `public_exposure: Option<PublicExposure>`** trước khi chuyển sang kiểu lưu trữ chuẩn `ContentFieldDefinition` (xem code chuẩn hóa tại Mục `2.3`):
+     - **Trường hợp 1 — Base CPT fields (`FieldScopeKind::BaseCptField`, thuộc `content_types.definition_json.fields`):**
+       - Nếu input không gửi `public_exposure` (`None`) → chuẩn hóa thành **`PublicExposure::Public`**.
+       - Nếu input gửi tường minh `Some(Public)` hoặc `Some(Private)` → giữ nguyên giá trị tường minh đó.
+       - Các dòng `content_types.definition_json` đã lưu từ trước migration (bao gồm `body` và `featured_image` của `builtin_definition("post" | "page")`) khi đọc từ DB nếu thiếu khóa `public_exposure` cũng mặc định là `PublicExposure::Public`, bảo toàn 100% dữ liệu đang hiển thị và `preflight_builtin_key_collisions`.
+     - **Trường hợp 2 — Extension Group fields (`FieldScopeKind::ExtensionGroupField`, thuộc `content_field_groups.fields_json` qua User API hoặc Theme/Plugin manifest):**
+       - Nếu input không gửi `public_exposure` (`None`) → chuẩn hóa thành **`PublicExposure::Private`**.
+       - Nếu input gửi tường minh `"public_exposure": "public"` (`Some(Public)`) → giữ nguyên **`PublicExposure::Public`**.
+       - Nếu input gửi tường minh `"public_exposure": "private"` (`Some(Private)`) → giữ nguyên **`PublicExposure::Private`**.
+     - **Ghi xuống SQLite (Canonical Persistence):** Sau bước chuẩn hóa `into_canonical(scope)`, cấu trúc `ContentFieldDefinition` lưu xuống `content_types.definition_json` và `content_field_groups.fields_json` **luôn ghi tường minh trường `"public_exposure": "public"` hoặc `"private"`** để khi khởi động lại server (round-trip restart) hoặc truy vấn SQL không bao giờ phụ thuộc vào phỏng đoán ngữ cảnh.
 3. **Thực thi trên đường đọc Public, Template Binding và Preview (`R2`):**
    - **Public Routes & MiniJinja View Models** (`/`, `/content/{type_key}`, `/content/{type_key}/{slug}`, `/taxonomy/...`): chỉ nạp vào `entry.fields.<key>` các trường có `public_exposure == Public` của entry có `publication_status == "published"`. Các trường `public_exposure == Private` bị loại bỏ hoàn toàn trước khi truyền vào template engine.
    - **Builder Field Binding (`FixedEntry` và `RouteContext` theo ADR-0009 / M5):** chỉ cho phép bind tới các trường core được phép hoặc custom field có `public_exposure == Public`. Nếu một trường đổi từ `Public` sang `Private`, binding hiện hữu không render giá trị ra public HTML (trả chuỗi rỗng + cảnh báo trong Admin Preview).
@@ -86,7 +94,7 @@ Tuân thủ yêu cầu cốt lõi của [Product Requirements](../product/PRODUC
 
 ---
 
-## 2. Đối chiếu Baseline (`main@a52607c`) → Proposed Delta (`270-R4`), Schema Lưu trữ (`0034`), Bảo toàn Association (`270-R1`) và Kiểm tra tương thích (`R4`)
+## 2. Đối chiếu Baseline (`main@a52607c`) → Proposed Delta (`270-R4`), Schema Lưu trữ (`0034`), Bảo toàn Association (`270-R1`) và Kiểm tra tương thích (`R4`, `270-R8`)
 
 ### 2.1. Bảng ánh xạ chính xác từ Baseline (`main@a52607c`) sang Contract đề xuất (`270-R4`)
 
@@ -95,7 +103,7 @@ Không dùng tên bảng/kiểu dữ liệu giả định. Mọi thành phần t
 | Thành phần | Trạng thái tại Baseline (`main@a52607c`) | Thay đổi trong Contract này (`Migration 0034` / Code Delta) |
 | --- | --- | --- |
 | **Bảng `content_types`** (`0004_content_types.sql`, `0020`, `0023`) | **ĐÃ CÓ:** cột `key, definition_json, owner_kind, owner_id, provider_status, declaration_state, created_at, updated_at`. Các base fields của CPT lưu trong mảng JSON `definition_json.fields` (không có bảng `content_fields` riêng). | **ALTER (`0034`):** Thêm cột `version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1)` để phục vụ CAS (`ETag: "v<version>"`) khi Admin cập nhật CPT qua `PUT /api/admin/content-types/{type_key}`. |
-| **Builtin `post` & `page`** (`storage/content.rs:17-78`) | **ĐÃ CÓ:** `builtin_definition("post" \| "page")` chứa 2 field `body` (`RichText`) và `featured_image` (`Image`); hàm `preflight_builtin_key_collisions` kiểm tra `serde_json::from_str::<ContentTypeDefinition>(&raw) == builtin_definition(&key)`. | **GIỮ NGUYÊN 100%:** Các thuộc tính mở rộng thêm vào `ContentFieldDefinition` (`min_view_role`, `min_edit_role`, `public_exposure`, `default_value`, `declaration_state`) đều có `#[serde(default)]` khớp đúng giá trị mặc định của builtin (`Editor`, `Editor`, `Public`, `None`, `Declared`), đảm bảo `preflight_builtin_key_collisions` luôn PASS. |
+| **Builtin `post` & `page`** (`storage/content.rs:17-78`) | **ĐÃ CÓ:** `builtin_definition("post" \| "page")` chứa 2 field `body` (`RichText`) và `featured_image` (`Image`); hàm `preflight_builtin_key_collisions` kiểm tra `serde_json::from_str::<ContentTypeDefinition>(&raw) == builtin_definition(&key)`. | **GIỮ NGUYÊN 100%:** Các thuộc tính mở rộng thêm vào `ContentFieldDefinition` (`min_view_role`, `min_edit_role`, `public_exposure`, `default_value`, `declaration_state`) khi đọc các dòng builtin legacy trong `content_types` có `#[serde(default)]` khớp đúng giá trị của `builtin_definition` (`Editor`, `Editor`, `Public`, `None`, `Declared`), đảm bảo `preflight_builtin_key_collisions` luôn PASS. |
 | **Bảng `content_entries`** (`0005_content_entries.sql`, `0008_post_page_publication.sql`) | **ĐÃ CÓ:** cột `id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at`. Dùng chung cho cả `post`, `page` và mọi CPT (không có bảng `posts`/`pages` riêng). Với `post`/`page`, `body` và `featured_image` nằm trong `values_json`. | **GIỮ NGUYÊN 100%:** Giữ duy nhất vị trí chuẩn của `body` và `featured_image` bên trong `content_entries.values_json`. `CompositeEntrySaveInput` **không** tạo trường `body` hay `cover_image` trùng lặp ở cấp ngoài. |
 | **Bảng `entry_terms`** (`0014_entry_terms.sql`) | **ĐÃ CÓ:** cột `(entry_id, term_id)`. | **GIỮ NGUYÊN:** Cập nhật nguyên tử cùng `content_entries` trong giao dịch `CompositeEntrySaveInput`. |
 | **Bảng `entry_public_paths` & `entry_redirects`** (`0027_seo_routes.sql`) | **ĐÃ CÓ:** lưu custom path (`entry_public_paths(entry_id, path)`) và lịch sử redirect (`entry_redirects(source_path, entry_id, created_at)`). | **GIỮ NGUYÊN:** Tái sử dụng `validate_route_claim_in_tx` và logic cập nhật `entry_public_paths` / `entry_redirects` bên trong giao dịch `CompositeEntrySaveInput`. |
@@ -165,10 +173,80 @@ CREATE TABLE IF NOT EXISTS content_editor_layouts (
 );
 ```
 
-### 2.3. Mở rộng `ContentFieldDefinition` & Kiểu dữ liệu `EffectiveContentSchema` (`opendash_core::content`)
+### 2.3. Tách Input DTO (`FieldDefinitionInput`) và Persisted `ContentFieldDefinition` theo Ngữ cảnh (`270-R7`)
+
+Để giải quyết triệt để xung đột giữa mặc định `Public` của base CPT fields và mặc định `Private` của extension field groups mà vẫn giữ được khai báo `"public_exposure": "public"` tường minh trên extension field groups (`270-R7`), `opendash_core::content` tách rõ **Input Wire DTO (`FieldDefinitionInput`)** và **Canonical Persisted Struct (`ContentFieldDefinition`)**:
 
 ```rust
-/// Mở rộng tương thích ngược trên ContentFieldDefinition hiện có trong opendash_core::content
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldScopeKind {
+    /// Trường thuộc content_types.definition_json.fields (mặc định khi thiếu public_exposure -> Public)
+    BaseCptField,
+    /// Trường thuộc content_field_groups.fields_json qua User API hoặc Theme/Plugin manifest (mặc định khi thiếu public_exposure -> Private)
+    ExtensionGroupField,
+}
+
+/// Input DTO dùng cho mọi API nhận định nghĩa field (POST/PUT content-types, POST/PUT content-field-groups)
+/// và manifest gói (theme.json / plugin.json). Giữ nguyên Option để phân biệt missing (None) với explicit (Some).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldDefinitionInput {
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub field_type: ContentFieldType,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<SelectOption>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<serde_json::Value>,
+    #[serde(default)]
+    pub min_view_role: Option<Role>,
+    #[serde(default)]
+    pub min_edit_role: Option<Role>,
+    /// None khi JSON không gửi "public_exposure"; Some(Public | Private) khi JSON khai báo tường minh.
+    #[serde(default)]
+    pub public_exposure: Option<PublicExposure>,
+    #[serde(default)]
+    pub declaration_state: Option<DeclarationState>,
+}
+
+impl FieldDefinitionInput {
+    /// Chuẩn hóa theo ngữ cảnh (BaseCptField vs ExtensionGroupField) trước khi kiểm tra hợp lệ và lưu DB.
+    pub fn into_canonical(self, scope: FieldScopeKind) -> Result<ContentFieldDefinition, &'static str> {
+        let min_view_role = self.min_view_role.unwrap_or(Role::Editor);
+        let min_edit_role = self.min_edit_role.unwrap_or(Role::Editor);
+        if min_edit_role < min_view_role {
+            return Err("invalid_field_acl: min_edit_role không được thấp hơn min_view_role.");
+        }
+        let public_exposure = match (self.public_exposure, scope) {
+            (Some(explicit), _) => explicit,
+            (None, FieldScopeKind::BaseCptField) => PublicExposure::Public,
+            (None, FieldScopeKind::ExtensionGroupField) => PublicExposure::Private,
+        };
+        if public_exposure == PublicExposure::Public && min_view_role != Role::Editor {
+            return Err("invalid_field_acl: Trường có min_view_role = admin không được đặt public_exposure = public.");
+        }
+        let def = ContentFieldDefinition {
+            key: self.key,
+            label: self.label,
+            field_type: self.field_type,
+            required: self.required,
+            options: self.options,
+            default_value: self.default_value,
+            min_view_role,
+            min_edit_role,
+            public_exposure,
+            declaration_state: self.declaration_state.unwrap_or(DeclarationState::Declared),
+        };
+        def.validate()?;
+        Ok(def)
+    }
+}
+
+/// Kiểu chuẩn đã chuẩn hóa dùng để lưu trữ trong DB (luôn serialize tường minh public_exposure, min_view_role, min_edit_role, declaration_state).
+/// Các #[serde(default = ...)] chỉ phục vụ đọc tương thích ngược các dòng content_types.definition_json cũ đã lưu trước migration 0034.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentFieldDefinition {
@@ -186,8 +264,6 @@ pub struct ContentFieldDefinition {
     pub min_view_role: Role,
     #[serde(default = "Role::default_editor")]
     pub min_edit_role: Role,
-    /// Với base CPT fields (content_types.definition_json), mặc định khi thiếu trong JSON cũ là Public.
-    /// Với extension field groups (content_field_groups.fields_json), mặc định khi tạo mới là Private.
     #[serde(default = "PublicExposure::default_public")]
     pub public_exposure: PublicExposure,
     #[serde(default = "DeclarationState::default_declared")]
@@ -240,18 +316,24 @@ pub struct EffectiveContentSchema {
        - Để ngừng sử dụng một trường khi đã có dữ liệu mà không làm mất schema/media inventory, Admin gửi trường đó với `"declaration_state": "withdrawn"` (giữ nguyên `key`, `type`, `options`, `min_view_role`, `min_edit_role`, `public_exposure`).
    - **Đối với Re-declaration của Theme/Plugin:**
      - Khi bản cập nhật của Theme hoặc Plugin bỏ một `field.key` đã từng khai báo trong CPT hoặc trong `field_group` của chính gói đó, hàm đồng bộ trong `BEGIN IMMEDIATE` **tự động giữ lại định nghĩa cũ của `field.key` đó trong `definition_json` / `fields_json` với `declaration_state = 'withdrawn'`** (không bao giờ làm biến mất định nghĩa trường khỏi DB).
-4. **Hiệu lực của trạng thái `Withdrawn` (ở cấp Group, Target Association hoặc Field):**
-   - Một trường có `group.status == 'withdrawn'` HOẶC `target.association_state == 'withdrawn'` HOẶC `field.declaration_state == 'withdrawn'` có `effective_status = EffectiveFieldStatus::Withdrawn` trong `EffectiveContentSchema.effective_fields` của `type_key` đó:
+4. **Quy tắc tính `effective_status` và Hiệu lực của trạng thái `Withdrawn`:**
+   - Với mỗi trường trong `EffectiveContentSchema.effective_fields` của `type_key`:
+     - Nếu `base.declaration_state == Withdrawn` HOẶC `group.status == Withdrawn` HOẶC `target.association_state == Withdrawn` HOẶC `field.declaration_state == Withdrawn` → `effective_status = EffectiveFieldStatus::Withdrawn`.
+     - Ngược lại, nếu `base.status == ProviderInactive` HOẶC `group.status == ProviderInactive` → `effective_status = EffectiveFieldStatus::ProviderInactive`.
+     - Ngược lại → `effective_status = EffectiveFieldStatus::Active`.
+   - Trường có `effective_status == EffectiveFieldStatus::Withdrawn`:
      - **Giữ nguyên trong `EffectiveContentSchema`:** khóa `field.key` vẫn được bảo lưu trên `type_key` (không nhóm nào khác được phép tạo trùng tên khóa với kiểu dữ liệu khác).
      - **Giữ nguyên kiểm kê và thẩm quyền Media:** các trường `Image` / `Gallery` ở trạng thái `Withdrawn` vẫn được quét trong `public_content::media_is_referenced`, `media::require_existing_references_in_tx`, và `media_refs::collect_pins_in_tx`.
-     - **Giữ nguyên quản lý qua Core Standard Field Fallback Form:** các entry đang có dữ liệu của trường `Withdrawn` vẫn hiển thị và cho phép người có quyền (`min_view_role` / `min_edit_role`) xem/sửa/xóa giá trị bình thường kèm nhãn `(Đã rút khai báo)` trên UI; đối với trường `Withdrawn`, cờ `required` được nới thành không bắt buộc cho các entry mới chưa có giá trị của trường đó.
+     - **Giữ nguyên quản lý qua Core Standard Field Fallback Form:** các entry đang có dữ liệu của trường `Withdrawn` vẫn hiển thị và cho phép người có quyền (`min_view_role` / `min_edit_role`) xem/sửa/xóa giá trị bình thường kèm nhãn `(Đã rút khai báo)` trên UI; đối với trường `Withdrawn`, cờ bắt buộc hiệu lực (`effective_required`) bằng `false` cho các entry chưa có giá trị của trường đó.
+   - Trường có `effective_status == EffectiveFieldStatus::ProviderInactive` hoặc `EffectiveFieldStatus::Active` giữ nguyên `effective_required = field.definition.required`.
 
-### 2.5. Kiểm tra tương thích & Chống đụng độ `field_key` đối xứng trên cả 3 hướng (`R4`, `270-R1`)
+### 2.5. Kiểm tra tương thích & Bất biến Khả năng Tạo mới ở MỌI Transition (`R4`, `270-R1`, `270-R8`)
 
-Hàm kiểm tra thuần `verify_effective_schema_transition(old_effective, new_effective, has_existing_entries)` phải được gọi bên trong giao dịch `BEGIN IMMEDIATE` ở **cả 3 đường thay đổi schema**:
-1. Cập nhật Base CPT của User (`PUT /api/admin/content-types/{type_key}`).
+Hàm kiểm tra `verify_effective_schema_transition(old_effective, new_effective, current_layout, has_existing_entries)` phải được gọi bên trong giao dịch `BEGIN IMMEDIATE` ở **mọi đường thay đổi schema hoặc layout**:
+1. Tạo / cập nhật Base CPT của User (`POST /api/admin/content-types`, `PUT /api/admin/content-types/{type_key}`).
 2. Tạo mới / cập nhật / rút Field Group (`POST /api/admin/content-field-groups`, `PUT /api/admin/content-field-groups/{group_id}`, `DELETE /api/admin/content-field-groups/{group_id}`).
-3. Kích hoạt revision của Theme hoặc bật/cập nhật Plugin (`activate_theme_revision`, `enable_plugin_revision`).
+3. Lưu cấu hình bố cục (`PUT /api/admin/content-types/{type_key}/editor-layout`).
+4. Kích hoạt revision của Theme hoặc bật/cập nhật Plugin (`activate_theme_revision`, `enable_plugin_revision`).
 
 **Các bất biến bắt buộc trong `verify_effective_schema_transition`:**
 - **Rule COMPAT-1 (Chống đụng độ `field_key` toàn cục trên mỗi `type_key`):**
@@ -262,15 +344,25 @@ Hàm kiểm tra thuần `verify_effective_schema_transition(old_effective, new_e
   - Không được đổi `ContentFieldType` của một `field.key` đã tồn tại; không được xóa phương án `SelectOption` khi `has_existing_entries == true`; không được xóa hẳn `field.key` khi `has_existing_entries == true` (`409 Conflict`, `code: "incompatible_schema_change"` / `"cannot_remove_field_with_data"`).
 - **Rule COMPAT-3 (Quy tắc `default_value` & Cấm dùng `default_value` để lách Compatibility trên dữ liệu cũ — `R4`):**
   - **Kiểm tra hợp lệ của `default_value` ngay khi đăng ký schema:** Nếu một field khai báo `default_value: Some(val)`, `val` phải vượt qua `valid_field_value(field, val)` trong `opendash_core::content`. Các kiểu tham chiếu media (**`ContentFieldType::Image`**, **`ContentFieldType::Gallery`**) **bị cấm khai báo `default_value` tĩnh** trong schema (`422 Unprocessable Entity`, `code: "invalid_field_default"`).
-  - **Cấm biến field sang `required: true` khi đã có entry:** Khi `has_existing_entries == true` trên `type_key`, mọi thao tác thêm mới một field có `required: true` hoặc đổi một field đang `required: false` sang `required: true` đều **bị từ chối với `409 Conflict` (`code: "incompatible_schema_change"`) ngay cả khi có khai báo `default_value`** (không tự ý backfill ngầm lên các bản ghi cũ).
-- **Rule COMPAT-4 (Quy tắc thống nhất `N3` giữa `required`, `default_value`, `min_view_role`, `min_edit_role` và `EditorLayoutConfigV1` — `R4`):**
-  - `min_edit_role >= min_view_role` luôn đúng (`Rule ACL-1`, vi phạm trả `422 invalid_field_acl`).
-  - **Trường hợp 1 (`required: true`, `declaration_state == Declared` và `min_edit_role == Editor`):** Panel chứa trường này (dù là `BaseFieldsSlice`, `core:base_fields` hay `ContentFields`) **không được phép** đặt `enabled: false` trong `EditorLayoutConfigV1` và **không được phép** có `panel.min_view_role == Admin` hoặc `panel.min_edit_role == Admin` (`422 required_field_hidden_or_inaccessible`).
-  - **Trường hợp 2 (`required: true`, `declaration_state == Declared` và `min_edit_role == Admin` trên CPT được tạo mới যখন `has_existing_entries == false`):** Vì `Editor` được phép tạo mới entry nhưng không được sửa trường `Admin`-only này, trường đó **bắt buộc phải có `default_value` hợp lệ** để server tự động điền khi `POST` tạo mới (`422 admin_required_field_missing_default` nếu thiếu).
+  - **Cấm biến field sang `required: true` khi đã có entry:** Khi `has_existing_entries == true` trên `type_key`, mọi thao tác thêm mới một field có `effective_required == true` hoặc đổi một field đang `effective_required == false` sang `effective_required == true` đều **bị từ chối với `409 Conflict` (`code: "incompatible_schema_change"`) ngay cả khi có khai báo `default_value`** (không tự ý backfill ngầm lên các bản ghi cũ).
+- **Rule COMPAT-4 (Bất biến Khả năng Tạo mới của `Editor` trên MỌI Transition, độc lập với `has_existing_entries` — `R4`, `270-R8`):**
+  - Vì `Editor` luôn có quyền tạo mới entry trên mọi `type_key`, nên ở **mọi trạng thái sau transition (bất kể `has_existing_entries` là `true` hay `false`)**, với mọi trường `f` trong `new_effective.effective_fields` có `effective_required == true` (tức `f.definition.required == true` VÀ `f.effective_status != EffectiveFieldStatus::Withdrawn`, bao gồm cả `Active` lẫn `ProviderInactive`):
+    1. `f.definition.min_edit_role >= f.definition.min_view_role` luôn đúng (`Rule ACL-1`, vi phạm trả `422 invalid_field_acl`).
+    2. **Trường hợp A (`f.definition.min_edit_role == Role::Editor`):** Người biên tập (`Editor`) bắt buộc phải nhìn thấy và nhập được trường này trên màn hình Single Edit. Do đó, panel chứa trường `f` trong `current_layout` (dù là `BaseFieldsSlice`, `core:base_fields` hay `PanelKind::ContentFields`):
+       - **Không được phép** có `placement.enabled == false`,
+       - **Không được phép** có `panel.min_view_role == Role::Admin` hoặc `panel.min_edit_role == Role::Admin`.
+       - Mọi thao tác sửa schema/group, re-declaration gói hoặc sửa layout vi phạm điều kiện này bị từ chối với `422 Unprocessable Entity` (`code: "required_field_hidden_or_inaccessible"`).
+    3. **Trường hợp B (`f.definition.min_edit_role == Role::Admin` — kiểm tra vô điều kiện cả khi `has_existing_entries == false` LẪN khi `has_existing_entries == true` — `270-R8`):**
+       - Vì `Editor` không được phép gửi trường `f` khi tạo mới entry (`403 field_edit_forbidden`), trường `f` **bắt buộc phải có `f.definition.default_value == Some(val)` hợp lệ** để server tự động điền khi `Editor` gọi `POST` tạo mới entry!
+       - Do đó, bất kỳ transition nào dẫn tới trạng thái `(effective_required == true && min_edit_role == Role::Admin && default_value.is_none())` — bao gồm:
+         a) Tạo mới một trường `required: true, min_edit_role: Admin` mà không có `default_value`,
+         b) **Đổi `min_edit_role` từ `Editor` sang `Admin`** trên một trường `required: true` hiện hữu (dù `has_existing_entries == true` hay `false`) mà không đồng thời cung cấp `default_value` hợp lệ,
+         c) **Xóa `default_value` (`Some -> None`)** trên một trường `required: true, min_edit_role: Admin` hiện hữu (dù `has_existing_entries == true` hay `false`, qua User `PUT` hay Package re-declaration)
+       - đều bị **từ chối ngay lập tức với `422 Unprocessable Entity` (`code: "admin_required_field_missing_default"`)**!
 
 ---
 
-## 3. Panel Registry, Chia nhóm Base Fields (`base_field_panels` — `270-R6`), `EditorLayoutConfigV1` và Thứ tự đọc trên Mobile
+## 3. Panel Registry (`PanelDefinition` — `270-R9`), Chia nhóm Base Fields (`base_field_panels` — `270-R6`), `EditorLayoutConfigV1` và Đăng ký Declarative
 
 ### 3.1. Các vùng hiển thị (`EditorRegion`) & Thứ tự đọc thống nhất trên Mobile
 
@@ -292,19 +384,17 @@ pub enum EditorRegion {
   - Thống nhất tuyệt đối theo đúng ngữ nghĩa tên vùng (`main_top` nằm phía trên `main_primary`):
     **`header_bar → main_top → main_primary → main_bottom → sidebar`**.
 
-### 3.2. Định nghĩa `PanelDefinition`, Chia nhóm Base Fields (`BaseFieldSlicePanelConfig` — `270-R6`) và `EditorLayoutConfigV1`
-
-Để đảm bảo một CPT có sẵn nhiều base fields trong `content_types.definition_json.fields` có thể được Admin chia thành nhiều nhóm đặt ở các vùng khác nhau (ví dụ nhóm “Thông tin dự án” ở `main_bottom` và nhóm “Trạng thái dự án” ở `sidebar`) **mà không phải sửa `definition_json`, không đổi `field.key`, không đổi chủ sở hữu schema và không làm hỏng dữ liệu trong `values_json` hay binding của template** (`270-R6`), `EditorLayoutConfigV1` hỗ trợ khai báo `base_field_panels`:
+### 3.2. Định nghĩa `PanelDefinition` đầy đủ (`270-R9`), Chia nhóm Base Fields (`BaseFieldSlicePanelConfig` — `270-R6`) và `EditorLayoutConfigV1`
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PanelKind {
-    /// Panel lõi của hệ thống (title_slug, body_editor, publish_box, page_attributes, featured_image, taxonomies, seo, base_fields)
+    /// Panel lõi của hệ thống (header_bar, title_slug, body_editor, publish_box, page_attributes, featured_image, taxonomies, seo, base_fields)
     CoreBuiltIn {
         core_key: SnakeKey,
     },
-    /// Panel chia nhóm trình bày cho một tập con các base fields thuộc content_types.definition_json.fields (270-R6)
+    /// Panel chia nhóm trình bày cục bộ trong layout cho một tập con các base fields thuộc content_types.definition_json.fields (270-R6)
     BaseFieldsSlice {
         slice_key: SnakeKey, // panel_id tương ứng: "layout:<slice_key>"
         field_keys: Vec<SnakeKey>,
@@ -320,6 +410,25 @@ pub enum PanelKind {
         confirm_message: Option<String>,
         public_effect: bool,
     },
+}
+
+/// Cấu trúc PanelDefinition đầy đủ do Server tổng hợp và quản lý (270-R9).
+/// Các trường owner, panel_id, required_core và effective_status là server-owned, không bao giờ tin cậy trực tiếp từ client/manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PanelDefinition {
+    pub panel_id: String,                   // "core:<key>", "layout:<slice_key>", "user:<key>", "theme:<id>:<key>", "plugin:<id>:<key>"
+    pub owner: ResourceOwner,               // Server-owned: Core | User | Theme(id) | Plugin(id)
+    pub title: String,
+    pub kind: PanelKind,
+    pub applies_to: Vec<String>,            // Danh sách type_key áp dụng ('post', 'page', hoặc CPT key)
+    pub default_region: EditorRegion,       // Phải nằm trong allowed_regions (HeaderBar chỉ dành cho core:header_bar)
+    pub allowed_regions: Vec<EditorRegion>, // Tập vùng hợp lệ mà panel này được phép đặt vào
+    pub default_order: i32,                 // [-1000..=1000]
+    pub min_view_role: Role,
+    pub min_edit_role: Role,                // Bắt buộc min_edit_role >= min_view_role
+    pub collapsible: bool,
+    pub required_core: bool,                // Server-owned: chỉ true đối với core:header_bar, core:title_slug, core:publish_box
+    pub effective_status: EffectiveFieldStatus, // Active | ProviderInactive | Withdrawn
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -354,7 +463,7 @@ pub struct PanelPlacementConfig {
     #[serde(default)]
     pub collapsed_by_default: bool,
     #[serde(default)]
-    pub subgroups: Vec<LayoutFieldSubgroup>, // Áp dụng cho PanelKind::ContentFields hoặc core:base_fields
+    pub subgroups: Vec<LayoutFieldSubgroup>, // Chỉ áp dụng cho PanelKind::ContentFields, BaseFieldsSlice hoặc core:base_fields
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,41 +488,119 @@ pub struct EditorLayoutConfigV1 {
 }
 ```
 
-### 3.3. Quy tắc kiểm tra hợp lệ (`validate_editor_layout_config`), Phân hoạch Base Fields (`270-R6`) & Sắp xếp tất định
+### 3.3. Bảng Ma trận Allowlist `Owner × PanelKind × Namespace × AllowedRegions` & Quy tắc Kiểm tra / Merge Layout (`270-R6`, `270-R9`)
 
-Khi Admin lưu `PUT /api/admin/content-types/{type_key}/editor-layout` hoặc khi hệ thống dựng `EffectiveEditorConfigProjection`:
-1. **`schema_version`:** Phải bằng `1` (`422 unsupported_layout_schema_version`).
-2. **Quy tắc phân hoạch Base CPT Fields (`base_field_panels` + Fallback `core:base_fields` — `270-R6`):**
-   - Gọi `eligible_base_fields` là tập các trường trong `content_types.definition_json.fields` của `type_key` (với `post` và `page`, hai trường builtin `body` và `featured_image` luôn thuộc về `core:body_editor` và `core:featured_image`, không nằm trong `eligible_base_fields`).
-   - Với mỗi `slice` trong `base_field_panels`:
-     - `slice.panel_id` phải có dạng `"layout:<slice_key>"` với `<slice_key>` hợp lệ theo `valid_snake_key` và không trùng lặp (`422 invalid_or_duplicate_slice_panel_id`).
-     - `slice.field_keys` phải không rỗng và mọi `field_key` phải thuộc `eligible_base_fields` (`422 unknown_base_field_key`).
-     - **Bất biến xuất hiện đúng 1 lần (Disjoint Partition):** Một base `field_key` chỉ được xuất hiện tối đa **1 lần** trên toàn bộ `base_field_panels` (`422 duplicate_base_field_placement`).
-     - Mỗi `slice.panel_id` bắt buộc phải có đúng **1** `PanelPlacementConfig` trong `regions` (`main_top`, `main_primary`, `main_bottom`, hoặc `sidebar`) (`422 unplaced_base_field_slice`).
-   - **Panel Fallback tự động `core:base_fields` cho các Base Fields chưa gán vào Slice:**
-     - Gọi `unassigned_base_fields` là các trường trong `eligible_base_fields` chưa được liệt kê trong bất kỳ `base_field_panels` nào (giữ nguyên thứ tự khai báo trong `definition_json.fields`).
-     - Nếu `unassigned_base_fields` **không rỗng**: hệ thống tự động hiển thị panel `core:base_fields` chứa đúng `unassigned_base_fields` (nếu `regions` chưa có placement cho `core:base_fields`, tự động đặt ở cuối `main_primary` với `enabled = true`).
-     - Nếu `unassigned_base_fields` **rỗng** (tức 100% base fields đã được phân vào các `base_field_panels`, hoặc CPT không có base fields): `core:base_fields` không chứa trường nào và tự động ẩn khi render.
-   - Nhờ cơ chế này, **mỗi base field luôn có đúng 1 vị trí chỉnh sửa duy nhất (exactly-one editable placement)** trên màn hình Single Edit, cho phép chia base fields thành 2 hay nhiều nhóm ở `main_bottom`, `sidebar`, `main_top` mà không chạm tới `definition_json` hay `values_json`.
-3. **Bảo vệ vùng `HeaderBar`, Panel lõi bắt buộc & Quy tắc `N3` cho Required Fields:**
-   - Vùng `header_bar` luôn cố định chứa `core:header_bar`.
-   - Các panel lõi `core:title_slug` và `core:publish_box` không được phép đặt `enabled: false` (`422 required_core_panel_disabled`).
-   - Bất kỳ panel nào (`layout:<slice_key>`, `core:base_fields` khi có `unassigned_base_fields`, hoặc `PanelKind::ContentFields`) chứa ít nhất một trường có `required: true`, `declaration_state == Declared` và `min_edit_role == Editor` đều **không được phép** đặt `enabled: false` (`422 required_field_hidden_or_inaccessible`).
-4. **Chống trùng lặp `panel_id`, Kiểm tra `subgroups` & Tự động nối trường mới (Auto-append):**
-   - Mỗi `panel_id` chỉ được xuất hiện tối đa **1 lần** trong `EditorRegionsConfig` (`422 duplicate_panel_placement`).
-   - Trong mỗi panel có khai báo `subgroups` (`BaseFieldSlicePanelConfig` hoặc `PanelKind::ContentFields`), mọi `field_key` trong `subgroups` phải thuộc tập field của chính panel đó (`422 unknown_field_in_subgroup`) và không được lặp lại ở 2 subgroup (`422 duplicate_field_in_subgroups`). Các trường của panel chưa liệt kê trong `subgroups` được tự động nối vào cuối panel theo thứ tự khai báo.
-5. **Quy tắc sắp xếp tất định (Deterministic Ordering):**
-   - Trong mỗi vùng (`main_top`, `main_primary`, `main_bottom`, `sidebar`), các panel được sắp xếp theo khóa tăng dần:
-     `(placement.order ASC, owner_rank(panel) ASC, panel.panel_id.as_str() ASC)`
-     trong đó `owner_rank`: `Core = 0`, `LayoutSlice = 1`, `User = 2`, `Theme = 3`, `Plugin = 4`.
+1. **Ma trận Allowlist theo Nguồn Đăng ký (`270-R9`):**
+   Không một thực thể nào được đăng ký vượt ra ngoài dòng của mình trong bảng dưới đây (vi phạm trả `422 Unprocessable Entity`):
 
-### 3.4. Đường đăng ký Declarative qua Manifest của Theme (`theme.json` v2) và Plugin (`plugin.json` `manifest_schema: 2`)
+   | Nguồn đăng ký (`Owner`) | Tiền tố `panel_id` bắt buộc | `PanelKind` được phép | `allowed_regions` tối đa được phép | `required_core` |
+   | --- | --- | --- | --- | --- |
+   | **Core System** (`ResourceOwner::Core`) | `core:<core_key>` | `PanelKind::CoreBuiltIn` | `HeaderBar` (chỉ `core:header_bar`); `[MainTop, MainPrimary, MainBottom, Sidebar]` cho các panel core khác | `true` với `header_bar`, `title_slug`, `publish_box`; `false` với panel core khác |
+   | **Layout-Local Base Slice** (`EditorLayoutConfigV1.base_field_panels`) | `layout:<slice_key>` (cục bộ trong `type_key`) | `PanelKind::BaseFieldsSlice` | `[MainTop, MainPrimary, MainBottom, Sidebar]` (CẤM `HeaderBar`) | Luôn `false` (nhưng bị khóa bởi `Rule COMPAT-4` nếu chứa field `required: true`) |
+   | **User Field Group** (`ResourceOwner::User`) | `user:<local_key>` | `PanelKind::ContentFields` | `[MainTop, MainPrimary, MainBottom, Sidebar]` (CẤM `HeaderBar`) | Luôn `false` |
+   | **Theme Package** (`ResourceOwner::Theme(theme_id)`) | `theme:<theme_id>:<local_key>` | **Chỉ `PanelKind::ContentFields`** (CẤM `CoreBuiltIn`, `BaseFieldsSlice`, `Action`) | `[MainTop, MainPrimary, MainBottom, Sidebar]` (CẤM `HeaderBar`) | Luôn `false` |
+   | **Plugin Package** (`ResourceOwner::Plugin(plugin_id)`) | `plugin:<plugin_id>:<local_key>` | `PanelKind::ContentFields` (từ `field_groups`) **HOẶC** `PanelKind::Action` (từ `editor_panels`) (CẤM `CoreBuiltIn`, `BaseFieldsSlice`) | Với `ContentFields`: `[MainTop, MainPrimary, MainBottom, Sidebar]`; Với `Action`: **`[MainTop, MainBottom, Sidebar]`** (CẤM `HeaderBar` và `MainPrimary`) | Luôn `false` |
 
-Theme và Plugin đăng ký nhóm field và panel bằng JSON khai báo tĩnh trong manifest (không nạp JS/React/HTML tùy ý):
-- `owner` được server gán cố định từ danh tính gói (`ResourceOwner::Theme(theme_id)` hoặc `ResourceOwner::Plugin(plugin_id)`).
-- Mỗi `field_group` trong manifest có `target_types: Vec<String>` (1..=16 `type_key`) và `fields: Vec<ContentFieldDefinition>` (1..=64 fields), tự động tạo dòng trong `content_field_groups`, `content_field_group_targets`, và một `PanelDefinition` kiểu `PanelKind::ContentFields { field_group_id }`.
-- `editor_panels` kiểu `PanelKind::Action` chỉ hợp lệ trong `plugin.json` (`manifest_schema: 2`) và phải tham chiếu tới `action_id` đã khai báo trong `actions` của cùng `plugin.json`.
-- Hạn mức mỗi gói: tối đa `16` `field_groups`, tối đa `64` `fields` trong một group, tối đa `16` `editor_panels`.
+2. **Quy tắc kiểm tra hợp lệ (`validate_editor_layout_config` — `270-R6`, `270-R9`):**
+   Khi Admin lưu `PUT /api/admin/content-types/{type_key}/editor-layout` hoặc khi hệ thống dựng `EffectiveEditorConfigProjection`:
+   - **Rule LAY-1 (`schema_version` & Quotas):**
+     - `schema_version` phải bằng `1` (`422 unsupported_layout_schema_version`).
+     - Hạn mức trên mỗi `type_key`: tối đa `16` `base_field_panels`, tối đa `64` `PanelPlacementConfig` tổng cộng trên 4 vùng, tối đa `12` `subgroups` trong một panel, và tối đa `64` `field_keys` trong một panel (`422 layout_quota_exceeded`).
+   - **Rule LAY-2 (Phân hoạch Base CPT Fields `base_field_panels` + Fallback `core:base_fields` — `270-R6`):**
+     - Gọi `eligible_base_fields` là tập các trường trong `content_types.definition_json.fields` của `type_key` (trừ `body` và `featured_image` của `post`/`page` vốn luôn gắn với `core:body_editor` và `core:featured_image`).
+     - Với mỗi `slice` trong `base_field_panels`:
+       - `slice.panel_id` phải có dạng `"layout:<slice_key>"` với `<slice_key>` hợp lệ theo `valid_snake_key` và không trùng lặp (`422 invalid_or_duplicate_slice_panel_id`).
+       - `slice.field_keys` phải gồm `1..=64` khóa thuộc `eligible_base_fields` (`422 unknown_base_field_key`), và mỗi base `field_key` chỉ được xuất hiện tối đa **1 lần** trên toàn bộ `base_field_panels` (`422 duplicate_base_field_placement`).
+       - Mỗi `slice` tự động sinh ra một `PanelDefinition` tương ứng có `panel_id = slice.panel_id`, `kind = PanelKind::BaseFieldsSlice`, `allowed_regions = [MainTop, MainPrimary, MainBottom, Sidebar]`, `min_view_role = min(field.min_view_role)`, `min_edit_role = min(field.min_edit_role)`.
+       - Mỗi `slice.panel_id` bắt buộc phải có đúng **1** `PanelPlacementConfig` trong `regions` (`422 unplaced_base_field_slice`).
+     - **Fallback tự động `core:base_fields`:** Gọi `unassigned_base_fields` là các trường trong `eligible_base_fields` chưa được liệt kê trong bất kỳ `base_field_panels` nào. Nếu `unassigned_base_fields` không rỗng, panel `core:base_fields` tự động chứa đúng `unassigned_base_fields` theo thứ tự khai báo; nếu `unassigned_base_fields` rỗng thì `core:base_fields` tự động ẩn khi render.
+   - **Rule LAY-3 (Kiểm tra tham chiếu `panel_id`, Chống trùng lặp & Guard `allowed_regions` — `270-R9`):**
+     - Mỗi `panel_id` trong `EditorRegionsConfig` phải tham chiếu tới một `PanelDefinition` đang áp dụng cho `type_key` (`applies_to.contains(type_key)`) (`422 unknown_or_inapplicable_panel_id`).
+     - Mỗi `panel_id` chỉ được xuất hiện tối đa **1 lần** trên toàn bộ 4 danh sách vùng trong `EditorRegionsConfig` (`422 duplicate_panel_placement`).
+     - Vùng `region` đặt `panel_id` **bắt buộc phải nằm trong `panel_def.allowed_regions`** và `default_region` của mọi `PanelDefinition` cũng phải nằm trong `allowed_regions` (`422 invalid_panel_region`).
+   - **Rule LAY-4 (Bảo vệ Panel lõi & Required Fields `Rule COMPAT-4`):**
+     - Vùng `header_bar` luôn cố định chứa `core:header_bar`.
+     - Các panel có `required_core == true` (`core:title_slug`, `core:publish_box`) không được đặt `enabled: false` (`422 required_core_panel_disabled`).
+     - Áp dụng `Rule COMPAT-4` (Mục `2.5`): không được đặt `enabled: false` cho bất kỳ panel nào chứa trường `effective_required == true` và `min_edit_role == Editor` (`422 required_field_hidden_or_inaccessible`).
+   - **Rule LAY-5 (Kiểm tra `subgroups` & Tự động nối trường mới vào Panel):**
+     - Chỉ các panel thuộc `PanelKind::ContentFields`, `PanelKind::BaseFieldsSlice` hoặc `core:base_fields` mới được có `subgroups` không rỗng (`422 subgroups_not_allowed_on_panel_kind`).
+     - Mọi `field_key` trong `subgroups` phải thuộc tập field của chính panel đó (`422 unknown_field_in_subgroup`) và không được lặp lại ở 2 subgroup (`422 duplicate_field_in_subgroups`). Các trường của panel chưa liệt kê trong `subgroups` được tự động nối vào cuối panel theo thứ tự khai báo.
+   - **Rule LAY-6 (Tự động chèn Panel mới đăng ký chưa có trong `content_editor_layouts` & Sắp xếp tất định — `270-R9`):**
+     - Khi dựng cấu hình bố cục cho `type_key` (dù `content_editor_layouts` chưa có dòng nào cho `type_key` hay **đã có dòng lưu từ trước nhưng sau đó Admin tạo thêm User Field Group mới hoặc cài/nâng cấp Theme/Plugin có thêm `field_group` / `editor_panel` mới áp dụng cho `type_key`**):
+       1. Giữ nguyên 100% vị trí (`region`, `order`, `enabled`, `collapsed_by_default`, `subgroups`) của toàn bộ các `panel_id` đã có trong `content_editor_layouts`.
+       2. Với mỗi `panel_def` áp dụng cho `type_key` mà `panel_def.panel_id` **chưa xuất hiện** trong `EditorRegionsConfig` đã lưu: hệ thống **tự động nối (auto-append)** một `PanelPlacementConfig` mặc định vào vùng `panel_def.default_region` với `enabled = true`, `order = panel_def.default_order`, `collapsed_by_default = false`, `subgroups = []`.
+       3. Trong mỗi vùng (`main_top`, `main_primary`, `main_bottom`, `sidebar`), sắp xếp tất định các panel theo khóa tăng dần:
+          `(placement.order ASC, owner_rank(panel_def.owner) ASC, panel_def.panel_id.as_str() ASC)`
+          với `owner_rank`: `Core = 0`, `LayoutSlice = 1`, `User = 2`, `Theme = 3`, `Plugin = 4`.
+
+### 3.4. Wire Shape Đăng ký Declarative trong Manifest của Theme (`theme.json` v2) và Plugin (`plugin.json` `manifest_schema: 2`) (`270-R7`, `270-R9`)
+
+Theme và Plugin đăng ký nhóm field và panel bằng cấu trúc JSON tĩnh được kiểm tra nghiêm ngặt bằng `#[serde(deny_unknown_fields)]` (không nạp JS/React/HTML tùy ý, không cho phép khai báo `owner`, `panel_id` có tiền tố `core:`/`layout:`, hay `PanelKind::CoreBuiltIn`/`BaseFieldsSlice`):
+
+```rust
+/// Wire DTO cho mục `field_groups` trong cả `theme.json` (v2) và `plugin.json` (manifest_schema: 2).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestFieldGroupInput {
+    /// local_key theo valid_snake_key. Server tự sinh group_id = panel_id = "<theme|plugin>:<pkg_id>:<local_key>"
+    pub local_key: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// 1..=16 valid_content_type_key ('post', 'page', hoặc CPT key)
+    pub target_types: Vec<String>,
+    #[serde(default = "EditorRegion::default_main_bottom")]
+    pub default_region: EditorRegion, // Phải thuộc [MainTop, MainPrimary, MainBottom, Sidebar]; CẤM HeaderBar
+    #[serde(default = "default_panel_order_50")]
+    pub default_order: i32,           // [-1000..=1000]
+    #[serde(default = "default_true")]
+    pub collapsible: bool,
+    /// 1..=64 FieldDefinitionInput; mỗi field được chuẩn hóa qua into_canonical(FieldScopeKind::ExtensionGroupField) (270-R7)
+    pub fields: Vec<FieldDefinitionInput>,
+}
+
+/// Wire DTO cho mục `editor_panels` (Action Panels) — CHỈ hợp lệ trong `plugin.json` (manifest_schema: 2).
+/// Nếu `theme.json` chứa `editor_panels` hoặc khai báo kind khác Action -> từ chối 422 ngay khi validate manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManifestActionPanelInput {
+    /// local_key theo valid_snake_key. Server tự sinh panel_id = "plugin:<plugin_id>:<local_key>"
+    pub local_key: String,
+    pub title: String,
+    /// Phải khớp với một `id` trong mảng `actions` của cùng `plugin.json`
+    pub action_id: String,
+    pub button_label: String,
+    #[serde(default)]
+    pub confirm_message: Option<String>,
+    #[serde(default)]
+    pub public_effect: bool,
+    /// 1..=16 valid_content_type_key
+    pub applies_to: Vec<String>,
+    #[serde(default = "EditorRegion::default_sidebar")]
+    pub default_region: EditorRegion,       // Phải nằm trong allowed_regions
+    #[serde(default = "EditorRegion::default_action_allowed_regions")]
+    pub allowed_regions: Vec<EditorRegion>, // Tập con không rỗng của [MainTop, MainBottom, Sidebar]; CẤM HeaderBar và MainPrimary
+    #[serde(default = "default_panel_order_80")]
+    pub default_order: i32,                 // [-1000..=1000]
+    #[serde(default)]
+    pub min_view_role: Option<Role>,
+    #[serde(default)]
+    pub min_edit_role: Option<Role>,
+    #[serde(default = "default_true")]
+    pub collapsible: bool,
+}
+```
+
+- **Quy tắc kiểm tra Manifest khi cài đặt / kích hoạt gói (`270-R7`, `270-R9`):**
+  1. Hạn mức mỗi gói: tối đa `16` `field_groups`, tối đa `64` `fields` trong một group, tối đa `16` `editor_panels` (đối với plugin).
+  2. Không được trùng `local_key` giữa các `field_groups` và `editor_panels` trong cùng một gói (`422 duplicate_panel_id`).
+  3. Với mỗi `ManifestFieldGroupInput`:
+     - Chuẩn hóa từng phần tử trong `fields` bằng `field_input.into_canonical(FieldScopeKind::ExtensionGroupField)` (`270-R7`: thiếu `public_exposure` → `Private`; khai báo tường minh `"public"` → `Public`).
+     - Tự động tạo `PanelDefinition` tương ứng có `panel_id = group_id`, `owner = Theme(id) | Plugin(id)`, `kind = PanelKind::ContentFields { field_group_id }`, `applies_to = target_types`, `default_region` (thuộc `[MainTop, MainPrimary, MainBottom, Sidebar]`), `allowed_regions = vec![MainTop, MainPrimary, MainBottom, Sidebar]`, `min_view_role = min(fields.min_view_role)`, `min_edit_role = min(fields.min_edit_role)`, `required_core = false`.
+  4. Với mỗi `ManifestActionPanelInput` (chỉ trong `plugin.json` khi `manifest_schema == 2`):
+     - Kiểm tra `action_id` tồn tại trong `manifest.actions`.
+     - Kiểm tra `allowed_regions` không rỗng, chỉ chứa các phần tử thuộc `[MainTop, MainBottom, Sidebar]` (nếu chứa `HeaderBar` hoặc `MainPrimary` → từ chối `422 invalid_panel_region`), và `default_region` nằm trong `allowed_regions`.
+     - Kiểm tra `min_edit_role >= min_view_role` và `min_edit_role >= action_decl.required_role` (`422 invalid_panel_acl`).
 
 ---
 
@@ -426,14 +613,14 @@ Toàn bộ API mới sử dụng tiền tố chuẩn `/api/admin/content-types` 
 | Phương thức & Đường dẫn | Trạng thái | Quyền tối thiểu | CSRF / Origin | Precondition (`If-Match` / Token) | Mục đích & Hành vi chính |
 | --- | --- | --- | --- | --- | --- |
 | `GET /api/admin/content-types` | Đã có (mở rộng) | `Editor` | Không (GET) | Trả `version` (`ETag: "v<ver>"`) và `schema_token` cho từng CPT | Liệt kê CPT kèm `owner`, `status`, `declaration_state`, `version`, `schema_token`. |
-| `POST /api/admin/content-types` | Đã có | `Admin` | Bắt buộc | **Không yêu cầu `If-Match`** (tạo mới; trùng key trả `409`) | Tạo CPT mới thuộc `ResourceOwner::User` với `version = 1`. |
-| `PUT /api/admin/content-types/{type_key}` | **Mới** | `Admin` | Bắt buộc | `If-Match: "v<cpt_version>"` (`428` nếu thiếu, `412` nếu lệch) | Cập nhật CPT thuộc `ResourceOwner::User` trong `BEGIN IMMEDIATE` (chạy `verify_effective_schema_transition`, tăng `content_types.version = version + 1`). Từ chối `403` nếu CPT thuộc `Core`/`Theme`/`Plugin`. |
+| `POST /api/admin/content-types` | Đã có | `Admin` | Bắt buộc | **Không yêu cầu `If-Match`** (tạo mới; trùng key trả `409`) | Tạo CPT mới thuộc `ResourceOwner::User` với `version = 1` (chuẩn hóa fields qua `FieldScopeKind::BaseCptField` và kiểm tra `verify_effective_schema_transition`). |
+| `PUT /api/admin/content-types/{type_key}` | **Mới** | `Admin` | Bắt buộc | `If-Match: "v<cpt_version>"` (`428` nếu thiếu, `412` nếu lệch) | Cập nhật CPT thuộc `ResourceOwner::User` trong `BEGIN IMMEDIATE` (chuẩn hóa fields qua `FieldScopeKind::BaseCptField`, chạy `verify_effective_schema_transition`, tăng `content_types.version = version + 1`). Từ chối `403` nếu CPT thuộc `Core`/`Theme`/`Plugin`. |
 | `GET /api/admin/content-field-groups` | **Mới** | `Admin` | Không (GET) | Trả `version` từng group | Liệt kê toàn bộ `content_field_groups` kèm `targets` (`declared`/`withdrawn`). |
-| `POST /api/admin/content-field-groups` | **Mới** | `Admin` | Bắt buộc | **Không yêu cầu `If-Match`** (tạo mới; trùng ID/field_key trả `409`) | Tạo nhóm custom fields thuộc `ResourceOwner::User` với `version = 1`. |
-| `PUT /api/admin/content-field-groups/{group_id}` | **Mới** | `Admin` | Bắt buộc | `If-Match: "v<group_version>"` (`428` / `412`) | Cập nhật nhóm field thuộc `ResourceOwner::User` (áp dụng bảo toàn association `270-R1` và `verify_effective_schema_transition`). |
+| `POST /api/admin/content-field-groups` | **Mới** | `Admin` | Bắt buộc | **Không yêu cầu `If-Match`** (tạo mới; trùng ID/field_key trả `409`) | Tạo nhóm custom fields thuộc `ResourceOwner::User` với `version = 1` (chuẩn hóa fields qua `FieldScopeKind::ExtensionGroupField` — `270-R7`). |
+| `PUT /api/admin/content-field-groups/{group_id}` | **Mới** | `Admin` | Bắt buộc | `If-Match: "v<group_version>"` (`428` / `412`) | Cập nhật nhóm field thuộc `ResourceOwner::User` (chuẩn hóa fields qua `FieldScopeKind::ExtensionGroupField`, áp dụng bảo toàn association `270-R1` và `verify_effective_schema_transition` `270-R8`). |
 | `DELETE /api/admin/content-field-groups/{group_id}` | **Mới** | `Admin` | Bắt buộc | `If-Match: "v<group_version>"` (`428` / `412`) | **Rút nhóm field (`status = 'withdrawn'` và `association_state = 'withdrawn'`)**, giữ nguyên `fields_json`, khóa `field_key` và kiểm kê media (`R4`, `270-R1`). |
-| `GET /api/admin/content-types/{type_key}/editor-layout` | **Mới** | `Admin` | Không (GET) | Trả `ETag: "v<layout_version>"` (`"v0"` nếu chưa có override) | Đọc cấu hình raw `EditorLayoutConfigV1` và danh sách `PanelDefinition` cho màn hình quản trị bố cục. |
-| `PUT /api/admin/content-types/{type_key}/editor-layout` | **Mới** | `Admin` | Bắt buộc | `If-Match: "v<layout_version>"` (`"v0"` khi lưu override đầu tiên; `428` / `412`) | Lưu `EditorLayoutConfigV1` (kiểm tra `validate_editor_layout_config`, `base_field_panels` `270-R6` và `N3`). Tăng `layout_version`, giữ nguyên `schema_token`. |
+| `GET /api/admin/content-types/{type_key}/editor-layout` | **Mới** | `Admin` | Không (GET) | Trả `ETag: "v<layout_version>"` (`"v0"` nếu chưa có override) | Đọc cấu hình raw `EditorLayoutConfigV1` và danh sách `PanelDefinition` (đã auto-append panel mới theo `Rule LAY-6` — `270-R9`) cho màn hình quản trị bố cục. |
+| `PUT /api/admin/content-types/{type_key}/editor-layout` | **Mới** | `Admin` | Bắt buộc | `If-Match: "v<layout_version>"` (`"v0"` khi lưu override đầu tiên; `428` / `412`) | Lưu `EditorLayoutConfigV1` (kiểm tra `validate_editor_layout_config`, `base_field_panels` `270-R6`, `allowed_regions` `270-R9` và `Rule COMPAT-4` `270-R8`). Tăng `layout_version`, giữ nguyên `schema_token`. |
 | **`GET /api/admin/content-types/{type_key}/effective-editor-config`** | **Mới** | **`Editor` + `Admin`** | Không (GET) | Trả `schema_token` (`sha256:<64-hex>`) và `layout_token` (`v<ver>`) | **Projection cấu hình hiệu lực theo phiên của người gọi (`R3`):** chỉ trả các field và panel có `caller.role >= min_view_role`, gắn cờ `editable: caller.role >= min_edit_role` và `effective_status`. Dùng để dựng Single Edit và kiểm quyền khôi phục nháp (`R5`). |
 | `POST /api/admin/content-types/{type_key}/entries/composite` | **Mới** | `Editor` | Bắt buộc | Body bắt buộc có `expected_schema_token` (`428` nếu thiếu/rỗng, `409` nếu lệch); `expected_version` phải là `None` (`400` nếu gửi `Some`) | Tạo mới nguyên tử (`content_entries` + `entry_terms` + `entry_public_paths` + `entry_seo`) trong 1 giao dịch `BEGIN IMMEDIATE`. |
 | `PUT /api/admin/content-types/{type_key}/entries/{id}/composite` | **Mới** | `Editor` | Bắt buộc | Body bắt buộc có `expected_version` (`428` nếu thiếu, `412` nếu lệch) **và** `expected_schema_token` (`428` nếu thiếu/rỗng, `409` nếu lệch) | Cập nhật nguyên tử (patch/merge 3 trạng thái theo quyền + 1 lần tăng `version + 1`). |
@@ -548,7 +735,7 @@ pub struct CompositeEntrySaveInput {
 
 1. **Delta Manifest & Kiểu dữ liệu `PluginPermissions` (`opendash_core::plugin` — `270-R3`):**
    - Giữ nguyên `#[serde(deny_unknown_fields)]` trên `PluginPermissions` và `PluginActionDeclaration`.
-   - Bổ sung hai danh sách cấp quyền có phạm窄 (`ScopedFieldGrant`), **chỉ hợp lệ khi `manifest_schema == 2` và có khai báo `min_host_version` thỏa mãn host hiện tại** (nếu khai báo trong `manifest_schema == 1`, `PluginManifest::validate()` từ chối ngay khi cài/bật với `422`):
+   - Bổ sung hai danh sách cấp quyền có phạm vi hẹp (`ScopedFieldGrant`), **chỉ hợp lệ khi `manifest_schema == 2` và có khai báo `min_host_version` thỏa mãn host hiện tại** (nếu khai báo trong `manifest_schema == 1`, `PluginManifest::validate()` từ chối ngay khi cài/bật với `422`):
      ```rust
      #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
      #[serde(deny_unknown_fields)]
@@ -583,7 +770,7 @@ pub struct CompositeEntrySaveInput {
      }
      ```
    - **Quy tắc kiểm tra trong `PluginManifest::validate()`:**
-     - Nếu ` (!self.permissions.content_read_private.is_empty() || !self.permissions.content_write_private.is_empty()) && (self.manifest_schema != 2 || self.min_host_version.is_none())` → trả lỗi validate manifest.
+     - Nếu `(!self.permissions.content_read_private.is_empty() || !self.permissions.content_write_private.is_empty()) && (self.manifest_schema != 2 || self.min_host_version.is_none())` → trả lỗi validate manifest.
      - Mọi `grant` trong `content_read_private` phải có `valid_content_type_key(&grant.content_type)` (không chấp nhận `"*"`), `self.can_read_content_type(&grant.content_type) == true`, và `grant.field_keys` gồm `1..=64` khóa hợp lệ theo `valid_snake_key` không trùng lặp (không chấp nhận `"*"`).
      - Mọi `grant` trong `content_write_private` phải có `valid_content_type_key(&grant.content_type)`, `self.can_write_content_type(&grant.content_type) == true`, và `grant.field_keys` gồm `1..=64` khóa hợp lệ theo `valid_snake_key` không trùng lặp.
      - Mở rộng allowlist `PluginActionDeclaration.capabilities` (`plugin.rs:253-256`) thành: `"kv_read" | "content_read" | "content_read_private" | "http" | "kv_write" | "content_write" | "content_write_private"`. Nếu action khai báo `"content_read_private"`, action đó phải có `"content_read"` và `manifest.permissions.content_read_private` không rỗng; nếu khai báo `"content_write_private"`, action đó phải có `"content_write"` và `manifest.permissions.content_write_private` không rỗng. Quy tắc V1 cấm trộn `kv_write` và `content_write` trong cùng một action được giữ nguyên 100%.
@@ -645,7 +832,7 @@ pub struct CompositeEntrySaveInput {
        - Nếu `raw_val.is_null()` (`Clear`): gọi `merged_values.remove(&field_key)` (**xóa hẳn khóa khỏi `BTreeMap`, không lưu literal `null`**).
        - Nếu `!raw_val.is_null()` (`Set(raw_val)`): gọi `merged_values.insert(field_key, raw_val)`.
        - **Mọi khóa không xuất hiện trong `input.values` (`Omitted`) được giữ nguyên 100% như trong `existing_entry.values` — TUYỆT ĐỐI KHÔNG tự động chèn `default_value` khi `update` bất kể vai trò của `actor`** (`270-R5`).
-   - Kiểm tra toàn bộ `merged_values` với `effective_schema`: mọi trường có `required == true` và `effective_status != EffectiveFieldStatus::Withdrawn` phải tồn tại trong `merged_values` và vượt qua `valid_field_value`; kiểm tra media bằng `require_existing_references` trên `effective_schema`, kiểm tra cú pháp `term_ids`, `custom_path`, và `seo`.
+   - Kiểm tra toàn bộ `merged_values` với `effective_schema`: mọi trường có `effective_required == true` (tức `required == true` và `effective_status != EffectiveFieldStatus::Withdrawn`) phải tồn tại trong `merged_values` và vượt qua `valid_field_value`; kiểm tra media bằng `require_existing_references` trên `effective_schema`, kiểm tra cú pháp `term_ids`, `custom_path`, và `seo`.
 
 2. **Pha 2 — Chạy Wasm Hook `content/before_save` ngoài giao dịch SQLite (`R2`, `270-R3`):**
    - Gọi `hooks.dispatch_content_before_save` với `filtered_candidate_values` được lọc riêng cho từng plugin theo `plugin_can_read_field` (Mục `4.4`). Không giữ khóa SQLite trong suốt Pha 2.
@@ -721,14 +908,14 @@ Bảng dưới đây là **bộ tiêu chí nghiệm thu phủ toàn bộ phạm 
 
 | Mã AC | Slice mục tiêu | Nội dung kiểm chứng & Tiêu chí đạt (Pass Criteria) | Liên kết Review |
 | --- | --- | --- | --- |
-| **AC-01** | `S-SCHEMA` & `S-SAVE` | **Bảo toàn quản lý dữ liệu & media khi Provider Inactive / Group Withdrawn / Remove-Target / Remove-Field:** (a) CPT và Page có trường `Image` do Theme/Plugin khai báo → tắt plugin / đổi theme → `Editor`/`Admin` vẫn xem và sửa được giá trị trường `Image` cùng nội dung entry qua Core Standard Field Fallback Form; bật lại provider giữ nguyên dữ liệu và vị trí panel. (b) Nhóm field của User và của Package gắn `["page", "portfolio"]`, Page có lưu giá trị ảnh → `PUT` nhóm field của User đổi target thành `["portfolio"]` (hoặc thử xóa field ảnh khi đã có entry → bị chặn `409 cannot_remove_field_with_data`, phải dùng `declaration_state = 'withdrawn'`) và nâng cấp Package rút `"page"` / rút field ảnh → asociación/field trên Page chuyển sang `withdrawn`, chạy đối soát/purge media (`collect_pins_in_tx`) xác nhận ảnh trên Page **không bị coi là orphan hay bị xóa**, và mở lại Page vẫn xem/sửa được trường đó. | `R1`, `R4`, `270-R1` |
+| **AC-01** | `S-SCHEMA` & `S-SAVE` | **Bảo toàn quản lý dữ liệu & media khi Provider Inactive / Group Withdrawn / Remove-Target / Remove-Field:** (a) CPT và Page có trường `Image` do Theme/Plugin khai báo → tắt plugin / đổi theme → `Editor`/`Admin` vẫn xem và sửa được giá trị trường `Image` cùng nội dung entry qua Core Standard Field Fallback Form; bật lại provider giữ nguyên dữ liệu và vị trí panel. (b) Nhóm field của User và của Package gắn `["page", "portfolio"]`, Page có lưu giá trị ảnh → `PUT` nhóm field của User đổi target thành `["portfolio"]` (hoặc thử xóa field ảnh khi đã có entry → bị chặn `409 cannot_remove_field_with_data`, phải dùng `declaration_state = 'withdrawn'`) và nâng cấp Package rút `"page"` / rút field ảnh → association/field trên Page chuyển sang `withdrawn`, chạy đối soát/purge media (`collect_pins_in_tx`) xác nhận ảnh trên Page **không bị coi là orphan hay bị xóa**, và mở lại Page vẫn xem/sửa được trường đó. | `R1`, `R4`, `270-R1` |
 | **AC-02** | `S-SCHEMA` | **Kiểm tra tương thích & chống đụng độ `field_key` đối xứng trên 3 hướng:** Thử tạo/sửa base CPT (`PUT /api/admin/content-types/{key}` kèm `If-Match: "v<ver>"`), tạo/sửa field group, và kích hoạt gói có `field_key` trùng với nhóm đang `active`/`provider_inactive`/`withdrawn` (hoặc target `withdrawn`) → cả 3 hướng đều bị chặn `409 field_key_collision` trong `BEGIN IMMEDIATE`. Thử đổi field optional sang `required: true` (kể cả có `default_value`) khi đã có entry → bị chặn `409 incompatible_schema_change`. Kiểm tra `preflight_builtin_key_collisions` vẫn PASS 100% với `post`/`page`. | `R4`, `270-R1`, `270-R4` |
-| **AC-03** | `S-SCHEMA` & `S-LAYOUT` | **Kiểm tra bất biến `N3` & `default_value`:** (a) Khai báo `min_edit_role = Editor, min_view_role = Admin` → bị chặn `422 invalid_field_acl`; (b) Khai báo `default_value` cho trường `Image`/`Gallery` hoặc giá trị sai kiểu → bị chặn `422 invalid_field_default`; (c) Ẩn panel (`enabled: false` trên `base_field_panels`, `core:base_fields` hoặc `ContentFields`) chứa trường `required: true, min_edit_role = Editor` → bị chặn `422 required_field_hidden_or_inaccessible`; (d) Trường `required: true, min_edit_role = Admin` (khi CPT chưa có entry) thiếu `default_value` → bị chặn `422 admin_required_field_missing_default`. | `R2`, `R4`, `270-R6` |
-| **AC-04** | `S-LAYOUT` | **Chia nhóm Base Fields (`base_field_panels`) ở nhiều vùng, Subgroup & Thứ tự Mobile:** Dùng một CPT có sẵn các base fields trước migration trong `content_types.definition_json.fields` → cấu hình `EditorLayoutConfigV1` chia các base fields đó thành ít nhất 2 nhóm (`layout:project_info` đặt ở `main_bottom` và `layout:project_status` đặt ở `sidebar`) + thêm nhóm `content_field_groups` ở `main_top` → reload và bấm Lưu entry giữ nguyên thứ tự ổn định, giữ nguyên 100% khóa trong `definition_json`, giá trị trong `values_json` và binding của template; thêm base field mới chưa gán vào slice tự động hiển thị trong fallback `core:base_fields`; trên mobile (`< 1024px`) thứ tự DOM đúng `header_bar → main_top → main_primary → main_bottom → sidebar`. | `270-R6`, Turn 4 Completeness |
-| **AC-05** | `S-SAVE` | **Tách bạch `public_exposure` & Bảo toàn toàn bộ 7 nhánh nguồn Media Public:** (a) Ảnh chỉ gắn với trường `public_exposure = Private` (hoặc bài `draft`) → trang public và template binding không hiển thị, `GET /media/...` không đăng nhập trả `404`, nhưng `collect_pins_in_tx` vẫn giữ pin (`total_pins > 0`); (b) Ảnh dùng đồng thời ở cả trường `Private` và một nguồn `Public` → `GET /media/...` trả `200 OK`; (c) Ảnh dùng trong `theme_option_media_refs` (`public = 1`), `seo_public_media_refs` (`home_seo` và `entry_seo` published), `builder_homepage_media`, và `template_override_media_refs` (shared override) đều tiếp tục trả `200 OK` trên `GET /media/...`. | `R2`, `270-R2` |
+| **AC-03** | `S-SCHEMA` & `S-LAYOUT` | **Kiểm tra bất biến `Rule COMPAT-4` (`N3`) & `default_value` ở MỌI Transition (kể cả khi đã có entry — `270-R8`):** (a) Khai báo `min_edit_role = Editor, min_view_role = Admin` → bị chặn `422 invalid_field_acl`; (b) Khai báo `default_value` cho trường `Image`/`Gallery` hoặc giá trị sai kiểu → bị chặn `422 invalid_field_default`; (c) Ẩn panel (`enabled: false` trên `base_field_panels`, `core:base_fields` hoặc `ContentFields`) hoặc nâng quyền panel lên `Admin` khi chứa trường `effective_required == true, min_edit_role = Editor` → bị chặn `422 required_field_hidden_or_inaccessible`; (d) Trường `required: true, min_edit_role = Admin` khi tạo mới thiếu `default_value` → bị chặn `422 admin_required_field_missing_default`; **(e) CPT đã có entry (`has_existing_entries == true`), một trường đang `required: true, min_edit_role = Editor, default_value = None` → Admin gọi `PUT` (hoặc package re-declare) đổi `min_edit_role` sang `Admin` mà không kèm `default_value` hợp lệ → bị chặn `422 admin_required_field_missing_default`; khi cung cấp kèm `default_value` hợp lệ thì cập nhật thành công và `Editor` vẫn tạo được entry mới; (f) CPT đã có entry và trường đang `required: true, min_edit_role = Admin, default_value = Some("x")` → thử xóa `default_value` (`None`) → bị chặn `422 admin_required_field_missing_default`.** | `R2`, `R4`, `270-R6`, `270-R8` |
+| **AC-04** | `S-LAYOUT` | **Chia nhóm Base Fields (`base_field_panels`), Auto-append Panel mới khi nâng cấp gói, Guard `allowed_regions`/Kind & Thứ tự Mobile (`270-R6`, `270-R9`):** (a) Dùng CPT có sẵn base fields trước migration trong `content_types.definition_json.fields` → chia thành ít nhất 2 nhóm (`layout:project_info` ở `main_bottom`, `layout:project_status` ở `sidebar`) → reload và Lưu entry giữ nguyên khóa `definition_json`, `values_json` và template binding; base field chưa gán tự động vào `core:base_fields`; **(b) Khi `content_editor_layouts` đã có cấu hình lưu cho CPT, nâng cấp Theme/Plugin (hoặc tạo User Field Group mới) bổ sung thêm 1 `field_group` / `editor_panel` mới → panel mới tự động được nối (auto-append) vào `default_region` mà không làm mất vị trí đã tùy chỉnh của các panel cũ; (c) Manifest Theme/Plugin thử đăng ký `CoreBuiltIn`, `BaseFieldsSlice`, tiền tố `core:`/`layout:`, Theme thử đăng ký `Action`, hoặc đặt panel vào `HeaderBar` / vùng ngoài `allowed_regions` → bị từ chối `422`;** (d) Trên mobile (`< 1024px`) thứ tự DOM đúng `header_bar → main_top → main_primary → main_bottom → sidebar`. | `270-R6`, `270-R9` |
+| **AC-05** | `S-SAVE` & `S-SCHEMA` | **Chuẩn hóa `public_exposure` theo Ngữ cảnh (`270-R7`), Round-trip Restart & Bảo toàn 7 nhánh Media Public (`270-R2`):** **(a) Kiểm증 3 trường hợp chuẩn hóa `FieldDefinitionInput` (cả qua User API và Manifest) kèm khởi động lại server (restart round-trip) và kiểm tra ảnh `Image`: (1) Base CPT field không gửi `public_exposure` → lưu DB là `public`, `GET /media/...` trả `200 OK` cả trước và sau restart; (2) Extension field group không gửi `public_exposure` → lưu DB là `private`, trang public không lộ trường và `GET /media/...` trả `404` cả trước và sau restart (nhưng `collect_pins_in_tx` vẫn giữ `total_pins > 0`); (3) Extension field group khai báo tường minh `"public_exposure": "public"` → lưu DB là `public`, trang public hiển thị và `GET /media/...` trả `200 OK` cả trước và sau restart;** (b) Ảnh dùng đồng thời ở cả trường `Private` và nguồn `Public` → `GET /media/...` trả `200 OK`; (c) Ảnh dùng trong `theme_option_media_refs` (`public = 1`), `seo_public_media_refs` (`home_seo` và `entry_seo` published), `builder_homepage_media`, và `template_override_media_refs` (shared override) đều tiếp tục trả `200 OK`. | `R2`, `270-R2`, `270-R7` |
 | **AC-06** | `S-SAVE` | **Quyền Private của Plugin (`ScopedFieldGrant`), Tách `required_role` / `actor.role` & Chống Oracle:** (a) Plugin `manifest_schema: 1` khai báo `content_read_private` hoặc dùng wildcard `"*"` trong `ScopedFieldGrant` bị từ chối khi cài/bật; (b) Plugin chỉ có `content_read` cơ bản không nhận được trường `Private` của chủ sở hữu khác trong `content/before_save`, `content/after_save` và action context, trong khi plugin có `ScopedFieldGrant` hợp lệ nhận được đúng trường được cấp khi `actor.role >= min_view_role`; (c) Action có `required_role = "editor"` khi được `Admin` gọi vẫn giữ quyền `Admin` trên các trường `min_edit_role = Admin`, còn khi được `Editor` gọi thì bị chặn `403 field_edit_forbidden`; (d) Khi `Editor` gửi tường minh một `field_key` có `min_edit_role = Admin` trong `values` (dù giá trị trùng hay khác DB, hoặc `null`), server luôn trả `403 field_edit_forbidden` trước khi so sánh DB. | `R2`, `270-R3` |
 | **AC-07** | `S-SAVE` | **Giao dịch Lưu nguyên tử `CompositeEntrySaveInput`, `PatchField<T>` 3 trạng thái & `Omitted = Preserve`:** (a) Một lần bấm Lưu cập nhật `content_entries` (`values_json` chứa `body`/`featured_image`) + `entry_terms` + `entry_public_paths` + `entry_seo` trong một giao dịch `BEGIN IMMEDIATE` và chỉ tăng `version` thêm `+1`; gửi top-level `body` hoặc `cover_image` bị từ chối `400`; (b) Gửi `"custom_path": null` xóa dòng trong `entry_public_paths`; không gửi `custom_path` (`Omitted`) giữ nguyên `entry_public_paths`; (c) `Admin` xóa (`"field": null`) một trường tùy chọn có `default_value` → sau đó `Editor` cập nhật `title` và không gửi trường đó (`Omitted`) → trường đó vẫn vắng mặt trong `values_json` (không bị tự động chèn lại `default_value`). | `F4`, `R4`, `270-R4`, `270-R5` |
 | **AC-08** | `S-SAVE` | **Bắt buộc `expected_schema_token` (`428`) & Hàng rào Snapshot ở Pha 3:** (a) Gửi composite save không có trường `expected_schema_token` hoặc gửi chuỗi rỗng → trả đúng `428 Precondition Required` (`code: "missing_schema_token"`); gửi token cũ → `409 schema_version_conflict`; (b) Giả lập Admin đổi schema hoặc hạ quyền `Editor` đúng vào lúc Pha 2 (`content/before_save`) đang chạy → Pha 3 (`BEGIN IMMEDIATE`) phát hiện lệch snapshot và chặn ghi (`409` / `403`) trên cả composite lẫn legacy entry endpoint. | `R3`, `270-R5` |
 | **AC-09** | `S-NAV-UI` | **Menu `Cài đặt → Loại nội dung & Trường`, Deep-Link RBAC & Hồ sơ cá nhân:** (a) Khi có `0` CPT, `Admin` vẫn thấy `Cài đặt → Loại nội dung & Trường` (`#/settings/content-types`) và màn hình này không có bảng/form nhập entry; mỗi CPT mới tạo có menu nhập liệu riêng (`#/cpt/:typeKey`); (b) `Editor` gọi `GET /api/admin/content-types/{type_key}/effective-editor-config` thành công để dựng Single Edit nhưng bị chặn `403` ở các API/route quản trị raw schema/layout và Builder template toàn site; (c) Đổi mật khẩu tại `#/users/profile` bắt buộc `current_password`. | `F1`, `F7`, `R3` |
-| **AC-10** | `S-NAV-UI` & `S-SAVE` | **Tách bạch `PanelKind::Action` khỏi Lưu nội dung & Mở Builder an toàn:** Bấm Lưu nội dung không kích hoạt `plugin_action`; bấm nút trong Action Panel không tự lưu dữ liệu form chưa lưu. Trên màn hình Thêm mới CPT (`id === null`), nút mở Builder yêu cầu lưu/xuất bản trước chứ không tự động xuất bản ngầm. | `F6`, `F7` |
+| **AC-10** | `S-NAV-UI` & `S-SAVE` | **Tách bạch `PanelKind::Action` khỏi Lưu nội dung & Mở Builder an toàn:** Bấm Lưu nội dung không kích hoạt `plugin_action`; bấm nút trong Action Panel không tự lưu dữ liệu form chưa lưu. Trên màn hình Thêm mới CPT (`id === null`), nút mở Builder yêu cầu lưu/xuất bản trước chứ không tự động xuất bản ngầm. | `F6`, `F7`, `270-R9` |
 | **AC-11** | `S-RECOVERY` | **Quarantine `EditorDraftStore` khi `401` & Negative Case hạ quyền `Admin → Editor` cùng User:** User đang đăng nhập là `Admin`, sửa nháp chứa cả trường `Editor` và trường `Admin`-only → phiên hết hạn (`401`) khiến nháp chuyển sang `quarantined` và ẩn khỏi DOM → trong lúc đó tài khoản này bị hạ quyền xuống `Editor` (hoặc trường đó bị đổi sang `Admin`-only) → cùng user đăng nhập lại → hệ thống tải `effective-editor-config` mới, **xóa bỏ trường `Admin`-only khỏi bản nháp** trước khi khôi phục các trường `Editor` hợp lệ. | `R5` |
