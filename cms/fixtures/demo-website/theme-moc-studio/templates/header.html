@@ -1,0 +1,66 @@
+<style>
+:root{--ms-bg:#faf7f2;--ms-surface:#ffffff;--ms-surface-alt:#f3ede3;--ms-ink:#1f2421;--ms-muted:#5c635e;--ms-accent:#8c5a3c;--ms-accent-dark:#6f442b;--ms-border:#e4ddd1;--ms-radius:12px;--ms-max-w:1120px}
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--ms-bg);color:var(--ms-ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow-x:hidden}
+img,video{max-width:100%;height:auto;display:block;border-radius:var(--ms-radius)}
+a{color:var(--ms-accent);text-decoration:none}
+a:hover{color:var(--ms-accent-dark);text-decoration:underline}
+.ms-header{background:var(--ms-surface);border-bottom:1px solid var(--ms-border)}
+.ms-header-inner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;padding:1rem 1.25rem;max-width:var(--ms-max-w);margin:0 auto}
+.ms-brand{display:flex;flex-direction:column;gap:.15rem}
+.ms-eyebrow{font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--ms-accent);font-weight:700}
+.ms-site-title{font-family:Georgia,"Times New Roman",serif;font-size:1.35rem;font-weight:700;color:var(--ms-ink)}
+.ms-tagline{margin:0;font-size:.85rem;color:var(--ms-muted)}
+.ms-nav-list{display:flex;flex-wrap:wrap;list-style:none;margin:0;padding:0;gap:1.1rem}
+.ms-nav-list a{color:var(--ms-ink);font-weight:500;font-size:.95rem}
+.ms-main,main{width:100%;max-width:var(--ms-max-w);margin:0 auto;padding:2rem 1.25rem 3.5rem}
+h1,h2,h3{font-family:Georgia,"Times New Roman",serif;line-height:1.25;color:var(--ms-ink)}
+.builder-section{background:var(--ms-surface);border:1px solid var(--ms-border);border-radius:var(--ms-radius);padding:1.5rem;margin-bottom:1.5rem}
+.builder-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1.25rem}
+.builder-element-list ul,.ms-archive-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1.25rem;list-style:none;padding:0;margin:1rem 0 0}
+.ms-card,.builder-element-list li{background:var(--ms-surface);border:1px solid var(--ms-border);border-radius:var(--ms-radius);padding:1rem}
+.ms-card-media{width:100%;height:190px;object-fit:cover;margin-bottom:.75rem}
+.ms-meta-dl{display:grid;grid-template-columns:minmax(140px,220px) 1fr;gap:.6rem 1.25rem;background:var(--ms-surface);border:1px solid var(--ms-border);border-radius:var(--ms-radius);padding:1.25rem}
+.ms-meta-dl dt{font-weight:700;color:var(--ms-muted)}
+.ms-meta-dl dd{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.ms-gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem}
+.ms-gallery img{width:100%;height:150px;object-fit:cover}
+.ms-pagination{display:flex;justify-content:space-between;gap:1rem;margin-top:2rem;padding-top:1rem;border-top:1px solid var(--ms-border)}
+.ms-footer{background:var(--ms-ink);color:#e9e4dc;padding:2rem 1.25rem;margin-top:2rem}
+.ms-footer-inner{max-width:var(--ms-max-w);margin:0 auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.5rem}
+.ms-footer a{color:#f3d5bd}
+.ms-footer-list{list-style:none;margin:.5rem 0 0;padding:0;display:grid;gap:.4rem}
+.builder-button{display:inline-block;background:var(--ms-accent);color:#fff;padding:.65rem 1.2rem;border-radius:8px;font-weight:600}
+.builder-button:hover{background:var(--ms-accent-dark);color:#fff;text-decoration:none}
+form.builder-contact-form{display:grid;gap:.85rem;max-width:560px}
+form.builder-contact-form label{display:grid;gap:.35rem;font-weight:600}
+form.builder-contact-form input,form.builder-contact-form textarea,form.builder-contact-form select{padding:.55rem .75rem;border:1px solid var(--ms-border);border-radius:8px;font:inherit;width:100%}
+form.builder-contact-form input[type="checkbox"]{width:auto;display:inline-block;margin-right:.4rem}
+form.builder-contact-form button{justify-self:start;background:var(--ms-accent);color:#fff;border:0;padding:.65rem 1.25rem;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
+@media(max-width:640px){.ms-meta-dl{grid-template-columns:1fr}.builder-section{padding:1rem}}
+</style>
+<header class="ms-header">
+  <div class="ms-header-inner">
+    <div class="ms-brand">
+      {% if options.studio_eyebrow %}<span class="ms-eyebrow">{{ options.studio_eyebrow }}</span>{% endif %}
+      <a class="ms-site-title" href="/">{{ site.title }}</a>
+      {% if options.show_tagline and site.tagline %}<p class="ms-tagline">{{ site.tagline }}</p>{% endif %}
+    </div>
+    <nav aria-label="Điều hướng chính">
+      <ul class="ms-nav-list">
+        {% if menus.primary %}
+          {% for item in menus.primary.items %}
+            <li><a href="{{ item.url }}">{{ item.label }}</a></li>
+          {% endfor %}
+        {% else %}
+          <li><a href="/">Trang chủ</a></li>
+          <li><a href="/content/dich_vu">Dịch vụ</a></li>
+          <li><a href="/content/du_an">Dự án</a></li>
+          <li><a href="/content/post">Bài viết</a></li>
+          <li><a href="/content/page/gioi-thieu">Giới thiệu</a></li>
+          <li><a href="/content/page/lien-he">Liên hệ</a></li>
+        {% endif %}
+      </ul>
+    </nav>
+  </div>
+</header>

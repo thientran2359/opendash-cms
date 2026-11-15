@@ -1,0 +1,224 @@
+{
+  "site_title": "Mộc Studio — Thiết kế không gian sống",
+  "screenshot_count": 29,
+  "screenshots": [
+    {
+      "file": "pub-01-home-desktop.png",
+      "route": "/",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 184419
+    },
+    {
+      "file": "pub-02-home-tablet.png",
+      "route": "/",
+      "role": "Public",
+      "viewport": "768x1024",
+      "bytes": 175383
+    },
+    {
+      "file": "pub-03-home-mobile.png",
+      "route": "/",
+      "role": "Public",
+      "viewport": "390x844",
+      "bytes": 162437
+    },
+    {
+      "file": "pub-04-dich-vu-archive.png",
+      "route": "/content/dich_vu",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 112217
+    },
+    {
+      "file": "pub-05-dich-vu-single.png",
+      "route": "/content/dich_vu/thiet-ke-kien-truc-nha-pho",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 65496
+    },
+    {
+      "file": "pub-06-du-an-archive.png",
+      "route": "/content/du_an",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 133842
+    },
+    {
+      "file": "pub-07-du-an-single.png",
+      "route": "/content/du_an/nha-hien-nam-thao-dien",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 76530
+    },
+    {
+      "file": "pub-08-post-archive-p1.png",
+      "route": "/content/post",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 235369
+    },
+    {
+      "file": "pub-09-post-archive-p2.png",
+      "route": "/content/post?page=2",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 41939
+    },
+    {
+      "file": "pub-10-post-single.png",
+      "route": "/content/post/thong-gio-tu-nhien-trong-nha-pho-viet",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 70674
+    },
+    {
+      "file": "pub-11-taxonomy-category.png",
+      "route": "/taxonomy/category/kien-truc",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 106547
+    },
+    {
+      "file": "pub-12-taxonomy-tag.png",
+      "route": "/taxonomy/tag/go-tu-nhien",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 149134
+    },
+    {
+      "file": "pub-13-page-gioi-thieu.png",
+      "route": "/content/page/gioi-thieu",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 60164
+    },
+    {
+      "file": "pub-14-page-lien-he.png",
+      "route": "/content/page/lien-he",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 57794
+    },
+    {
+      "file": "err-01-public-404.png",
+      "route": "/duong-dan-khong-ton-tai",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 11713
+    },
+    {
+      "file": "err-02-draft-hidden-404.png",
+      "route": "/content/post/bai-nhap-chua-xuat-ban-noi-bo",
+      "role": "Public",
+      "viewport": "1440x900",
+      "bytes": 7202
+    },
+    {
+      "file": "adm-01-login.png",
+      "route": "/admin (login)",
+      "role": "Guest",
+      "viewport": "1440x900",
+      "bytes": 169784
+    },
+    {
+      "file": "adm-02-dashboard.png",
+      "route": "/admin#/dashboard",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 205442
+    },
+    {
+      "file": "adm-03-posts.png",
+      "route": "/admin#/posts",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 100366
+    },
+    {
+      "file": "adm-04-pages.png",
+      "route": "/admin#/pages",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 74670
+    },
+    {
+      "file": "adm-05-content-types.png",
+      "route": "/admin#/content",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 117145
+    },
+    {
+      "file": "adm-06-media.png",
+      "route": "/admin#/media",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 93102
+    },
+    {
+      "file": "adm-07-taxonomy.png",
+      "route": "/admin#/taxonomy",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 97890
+    },
+    {
+      "file": "adm-08-themes.png",
+      "route": "/admin#/themes",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 82314
+    },
+    {
+      "file": "adm-09-builder.png",
+      "route": "/admin#/builder",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 119057
+    },
+    {
+      "file": "adm-10-plugins.png",
+      "route": "/admin#/plugins",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 83493
+    },
+    {
+      "file": "adm-11-users.png",
+      "route": "/admin#/users",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 76785
+    },
+    {
+      "file": "adm-12-settings.png",
+      "route": "/admin#/settings",
+      "role": "Admin",
+      "viewport": "1440x900",
+      "bytes": 81635
+    },
+    {
+      "file": "adm-13-editor-rbac.png",
+      "route": "/admin#/posts",
+      "role": "Editor",
+      "viewport": "1440x900",
+      "bytes": 94054
+    }
+  ],
+  "checks": {
+    "public_routes_ok": true,
+    "responsive_no_overflow": true,
+    "broken_images": 0,
+    "console_errors": 0,
+    "page_errors": 0,
+    "video_range_206": true,
+    "contact_form_submit_and_inbox": true,
+    "draft_hidden_404": true,
+    "editor_rbac_403": true,
+    "referenced_delete_409": true,
+    "unsaved_preview_isolated": true,
+    "backup_restore_status": "failed",
+    "backup_restore_detail": "Phát hiện đối tượng lạ trong uploads/media."
+  }
+}
