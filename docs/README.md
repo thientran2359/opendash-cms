@@ -12,6 +12,8 @@ Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc
 
 ## Tra cứu theo mục đích
 
+Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và bố cục màn hình chỉnh sửa](product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) — menu/submenu, vùng đăng ký panel và vị trí nhóm custom fields; chưa là contract kỹ thuật hoặc G3.
+
 | Mục đích | Vị trí | Quy ước |
 | --- | --- | --- |
 | Phạm vi và hành vi sản phẩm | [`product/`](product/PRODUCT_REQUIREMENTS.md) | Đã xác nhận, thay đổi cần chỉ đạo của chủ dự án |

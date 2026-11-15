@@ -54,6 +54,17 @@ Chủ dự án chốt **phương án A** cho milestone M3: sản phẩm phải s
 
 Bán hàng, AI dựng trang từ ảnh, luồng **duyệt/phê duyệt xuất bản nhiều bước** (ngoài trạng thái draft/published tối thiểu M3), lịch sử và khôi phục phiên bản, repeater, quan hệ giữa nội dung, khối đồng bộ tùy ý, lọc nâng cao cho khách truy cập, giao diện plugin tùy ý, tác vụ định kỳ, sao lưu theo lịch, quản lý nội dung đa ngữ và chuyển ngôn ngữ Admin.
 
+## Bổ sung yêu cầu Admin — 15/11/2026
+
+Chủ dự án xác nhận ưu tiên hoàn thiện **Admin và điều hướng gần với cách sử dụng WordPress**: menu/submenu theo công việc, màn hình chỉnh sửa một nội dung có các vùng bố cục cố định và cơ chế đăng ký panel/nhóm custom fields vào vị trí mong muốn. Chi tiết yêu cầu tại [Admin Navigation & Edit Screen](ADMIN_NAVIGATION_AND_EDIT_SCREEN.md).
+
+- Mỗi màn hình có địa chỉ riêng; menu cha/submenu, breadcrumb, tiêu đề và hành động nhất quán, hiển thị theo quyền và bảo toàn thay đổi chưa lưu khi điều hướng.
+- Màn hình sửa Post/Page/CPT có vùng nội dung chính và sidebar. Core quản lý thanh hành động Lưu/Xuất bản; các tính năng đăng ký panel vào vùng được hỗ trợ, với thứ tự và điều kiện hiển thị.
+- Người quản trị chọn các panel áp dụng cho CPT, chọn vị trí cho nhóm custom fields và thứ tự field trong nhóm. Developer sử dụng cùng cơ chế khai báo mở rộng; plugin tuân theo giới hạn UI khai báo và quyền hiện có.
+- Field thuộc nội dung tham gia chung vòng đời nhập liệu, validation, dirty state và nút Lưu của nội dung. Hành động độc lập phải có nút và phản hồi riêng.
+
+Đây là yêu cầu sản phẩm đã xác nhận, **chưa phải contract API/schema, G3 hoặc bằng chứng đã triển khai**. Chưa phân bổ milestone/task; không tự thay phạm vi nghiệm thu hay trạng thái M8 đang thực hiện.
+
 ## Quyết định kỹ thuật còn mở
 
 Đánh giá framework server, thư viện quản trị và builder, template engine, runtime plugin và cơ chế đóng gói/cài đặt theo yêu cầu trên. Xem [đánh giá tech stack](../architecture/TECH_STACK.md), [kiến trúc CMS](../architecture/CMS_ARCHITECTURE.md) và [đề xuất CMS-first](../architecture/CMS_PROPOSAL.md).
