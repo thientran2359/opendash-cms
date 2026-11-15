@@ -1,7 +1,7 @@
 # Admin Navigation và bố cục màn hình chỉnh sửa
 
 **Ngày:** 15/11/2026 · **Owner điều phối:** Atlas · **Draft G2 Contract/ADR:** Nova.
-**Trạng thái:** Yêu cầu sản phẩm được chủ dự án xác nhận trong chat (bao gồm chỉ đạo tách hẳn màn hình cấu hình `Cài đặt → Loại nội dung & Trường` khỏi nhập liệu entry); dự thảo [ADR-0016](../decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](../contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) đang ở trạng thái **`G2 NEEDS_RESPONSE`** (xử lý `R1`–`R5` tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268), chưa `AGREED` toàn bộ cho tới khi Atlas ghi Final Decision); triển khai và kiểm chứng phần bổ sung này chưa thực hiện.
+**Trạng thái:** Yêu cầu sản phẩm được chủ dự án xác nhận trong chat (bao gồm chỉ đạo tách hẳn màn hình cấu hình `Cài đặt → Loại nội dung & Trường` khỏi nhập liệu entry); dự thảo [ADR-0016](../decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](../contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) đang ở trạng thái **`G2 NEEDS_RESPONSE`** (xử lý `R1`–`R5` tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) và `270-R1`–`270-R6` tại [PR #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6902861188), chưa `AGREED` toàn bộ cho tới khi Atlas ghi Final Decision); triển khai và kiểm chứng phần bổ sung này chưa thực hiện.
 
 Nguồn phạm vi: [Product Requirements](PRODUCT_REQUIREMENTS.md). Áp dụng quy trình [Planning Workflow](../plans/PLANNING_WORKFLOW.md), quy chuẩn [Core Foundation](../contracts/CORE_FOUNDATION.md), [Plugin ABI](../contracts/PLUGIN_ABI.md) và dự thảo [Contract Admin Navigation & Single Edit](../contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) khi thiết kế tiếp.
 
@@ -62,32 +62,32 @@ Thanh màn hình: breadcrumb / tiêu đề / Xem trước / Lưu hoặc Xuất b
 Developer đăng ký panel theo cùng cơ chế mà các tính năng core sử dụng. Yêu cầu khai báo gồm định danh có cấu trúc (`ScopedResourceId`), chủ sở hữu (`Core`, `User`, `Theme`, `Plugin`), tiêu đề, vùng hiển thị, thứ tự, loại nội dung áp dụng, quyền xem/sửa (`min_view_role`, `min_edit_role`), mức phơi bày công khai của field (`public_exposure`) và khả năng thu gọn. Kiểu dữ liệu và API đăng ký được đặc tả trong [Contract Admin Navigation & Single Edit](../contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md).
 
 - Người quản trị chọn các panel có sẵn áp dụng cho CPT: nội dung, ảnh đại diện, taxonomy, thuộc tính, SEO và panel mở rộng tương thích. Panel bắt buộc của core và panel chứa field `required: true` không bị tắt tùy ý.
-- Người quản trị đặt **nhóm field** vào vùng mong muốn và sắp xếp field bên trong nhóm (`subgroups`). Ví dụ “Thông tin dự án” dưới nội dung, “Trạng thái dự án” ở sidebar.
-- Đổi vị trí chỉ thay cách trình bày, không đổi field ID, quyền sở hữu schema, giá trị đã lưu hoặc binding của template.
+- Người quản trị đặt **nhóm field** (bao gồm cả việc chia các base fields có sẵn của CPT thành nhiều nhóm `base_field_panels` đặt ở các vùng khác nhau — `270-R6`, cũng như các nhóm `content_field_groups`) vào vùng mong muốn và sắp xếp field bên trong nhóm (`subgroups`). Ví dụ “Thông tin dự án” dưới nội dung, “Trạng thái dự án” ở sidebar.
+- Đổi vị trí chỉ thay cách trình bày, không đổi field ID, quyền sở hữu schema, giá trị đã lưu trong `content_entries.values_json` hoặc binding của template.
 - Cấu hình vị trí của CPT/nhóm field là cấu hình dùng chung. Tùy chọn bố cục riêng từng người dùng và kéo thả panel trực tiếp chưa nằm trong yêu cầu đã chốt.
-- Plugin và Theme khai báo panel/field group bằng cấu hình JSON tĩnh theo contract; không cho phép JavaScript/React/HTML tùy ý. Quyền phải được kiểm cả client và server (bao gồm tách bạch `min_view_role`, `min_edit_role` và `public_exposure`, cùng lọc payload gửi vào Wasm hooks theo quyền actor và capability của plugin — `R2`).
-- Registry xử lý trùng ID, thứ tự bằng nhau, provider bị tắt/rút khai báo và vị trí không hợp lệ một cách xác định. Khi tắt plugin hoặc đổi theme (`provider_inactive` / `withdrawn`), hệ thống **giữ nguyên schema đã lưu, quyền hạn, tham chiếu media (`M8` D02) và dựng form chuẩn của Core để người có quyền tiếp tục xem/sửa dữ liệu nội dung**; chỉ dừng các hành động (`plugin_action`), Wasm hooks và template thuộc về provider đã tắt (`R1`). Không được xóa giá trị vì panel đang ẩn hoặc hard-delete nhóm field đang có dữ liệu (`R4`).
+- Plugin và Theme khai báo panel/field group bằng cấu hình JSON tĩnh theo contract; không cho phép JavaScript/React/HTML tùy ý. Quyền phải được kiểm cả client và server (bao gồm tách bạch `min_view_role`, `min_edit_role` và `public_exposure`, bảo toàn toàn bộ các nhánh nguồn media công khai hiện hữu — `270-R2`, cùng kiểm soát `ScopedFieldGrant` và lọc payload gửi vào Wasm hooks/actions theo quyền thực tế của `actor.user.role` và capability của plugin — `R2`, `270-R3`).
+- Registry xử lý trùng ID, thứ tự bằng nhau, provider bị tắt/rút khai báo và vị trí không hợp lệ một cách xác định. Khi tắt plugin, đổi theme (`provider_inactive`), rút nhóm field, bỏ `target_type` hoặc rút một field (`withdrawn` — `270-R1`), hệ thống **giữ nguyên schema đã lưu, quyền hạn, kiểm kê tham chiếu media (`collect_pins_in_tx`) và dựng form chuẩn của Core để người có quyền tiếp tục xem/sửa dữ liệu nội dung**; chỉ dừng các hành động (`plugin_action`), Wasm hooks và template thuộc về provider đã tắt (`R1`, `R4`, `270-R1`). Không được xóa giá trị vì panel đang ẩn hoặc hard-delete nhóm/target/field đang có dữ liệu.
 
 ## 5. Lưu, validation và hành động riêng
 
-- Các field thuộc cùng nội dung dùng chung draft state, validation, thông báo thay đổi chưa lưu và nút Lưu nguyên tử một lần (`CompositeEntrySaveInput` kèm `expected_schema_token` bắt buộc và kiểm tra lại snapshot trong giao dịch `BEGIN IMMEDIATE` — `R3`). Không tạo nhiều form lưu riêng gây mất nhất quán cho cùng record.
+- Các field thuộc cùng nội dung dùng chung draft state, validation, thông báo thay đổi chưa lưu và nút Lưu nguyên tử một lần (`CompositeEntrySaveInput` với `PatchField<T>` 3 trạng thái bảo đảm `Omitted = Preserve` khi update, kèm `expected_schema_token` bắt buộc và kiểm tra lại snapshot trong giao dịch `BEGIN IMMEDIATE` — `R3`, `270-R4`, `270-R5`). Không tạo nhiều form lưu riêng gây mất nhất quán cho cùng record.
 - Field lỗi trong panel thu gọn phải được chỉ rõ; đưa người dùng đến field cần sửa. Giữ dữ liệu nhập khi gặp lỗi xác thực, quyền hoặc xung đột phiên bản.
 - Giữ semantics hiện có: Lưu draft Post/Page không công khai; Xuất bản mới công khai; Lưu nội dung đã published cập nhật public. Không tự thêm workflow draft cho CPT/Builder.
 - Panel có hành động độc lập (`PanelKind::Action`), như gửi email thử hoặc đồng bộ CRM, dùng nút/phản hồi riêng và khai báo quyền/phạm vi tác động; không tự chạy khi bấm Lưu nội dung.
-- Ranh giới lưu nguyên tử, xử lý xung đột CAS/schema token và lọc dữ liệu nhạy cảm qua Wasm hooks được quy định tại [Contract Admin Navigation & Single Edit](../contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md#4-ma-trận-endpoint-schema_token-đầy-đủ-r3-giao-dịch-compositeentrysaveinput-r2-r3-r4-và-lọc-payload-hook-r2).
+- Ranh giới lưu nguyên tử, xử lý xung đột CAS/schema token và lọc dữ liệu nhạy cảm qua Wasm hooks/actions được quy định tại [Contract Admin Navigation & Single Edit](../contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md#4-ma-trận-endpoint-apiadmincontent-types-schema_token-r3-patchfieldt-3-trạng-thái-270-r5-và-quyền-private-của-plugin-270-r3).
 
 ## 6. Đầu ra cần chốt trước triển khai
 
 1. Inventory màn hình/route hiện tại và sơ đồ điều hướng có ánh xạ quyền; phân biệt tái tổ chức UI với chức năng mới.
 2. Mockup desktop cho danh sách bài viết, single edit Page/CPT và Settings; trạng thái mobile, lỗi, dirty và quyền hạn.
-3. Contract registry: identity/owner (`ScopedResourceId`), vị trí/thứ tự (`EditorLayoutConfigV1`), field groups (`content_field_groups`), lưu cấu hình, validation, provider lifecycle (`R1`–`R5`) và tương thích plugin/theme hiện tại.
+3. Contract registry: identity/owner (`ScopedResourceId`), vị trí/thứ tự (`EditorLayoutConfigV1` / `base_field_panels`), field groups (`content_field_groups` + `content_field_group_targets`), lưu cấu hình, validation, provider lifecycle (`R1`–`R5`, `270-R1`–`270-R6`) và tương thích plugin/theme hiện tại.
 4. Kế hoạch migration, task G3 với ownership/dependency, acceptance theo từng slice và mức tái sử dụng Base APIs. Chưa cấp mã milestone/task hoặc `Project Ready` cho tới khi contract G2 được Atlas duyệt và merge.
 
 ## 7. Tiêu chí đánh giá sản phẩm
 
 - Người dùng tìm được màn hình từ menu/submenu; URL trực tiếp, reload, back/forward và active navigation nhất quán.
 - Admin/Editor thấy đúng các công cụ được phép và không vượt quyền qua URL/API (`Editor` đọc được `effective-editor-config` đã lọc theo quyền để dựng Single Edit nhưng không sửa được raw schema/layout hay template toàn site).
-- Một Page và một CPT có nhóm field đặt ở vùng chính/sidebar, thứ tự ổn định sau reload; sửa vị trí không mất dữ liệu; tắt plugin/đổi theme vẫn xem/sửa được dữ liệu và giữ nguyên tham chiếu media (`R1`).
+- Một Page và một CPT có nhóm field (gồm cả việc chia base fields sẵn có thành nhiều nhóm panel ở các vùng khác nhau — `270-R6`) đặt ở vùng chính/sidebar, thứ tự ổn định sau reload; sửa vị trí không mất dữ liệu; tắt plugin/đổi theme/bỏ target vẫn xem/sửa được dữ liệu và giữ nguyên tham chiếu media (`R1`, `270-R1`).
 - Panel core và panel mở rộng tuân theo cùng quy tắc bố cục; lỗi/trùng ID/provider mất được xử lý rõ ràng.
 - Một lần Lưu xử lý nguyên tử các field của nội dung; navigation, `401` (quarantine + kiểm quyền lại sau khi đăng nhập) và conflict không làm mất draft hoặc lộ trường vừa mất quyền (`R5`). Hành động độc lập không chạy nhầm.
 - Dùng [site demo #258](https://github.com/thientran2359/opendash-cms/issues/258) để bổ sung case và screenshots theo source SHA; ảnh chụp thành công không tự là visual approval.
