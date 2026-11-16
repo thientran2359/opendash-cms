@@ -30,6 +30,13 @@ Bộ fixture và script tự động dựng website mẫu **“Mộc Studio — 
    python cms/scripts/demo-website-runner.py serve --run-name demo-local --port 8787
    ```
    Sau đó mở `http://127.0.0.1:8787/` (public) hoặc `http://127.0.0.1:8787/admin` (admin).
+5. `python dev.py` tại root repository tự dùng demo `runtime/demo-website/dev-local/`
+   (lần đầu seed, lần sau giữ nguyên dữ liệu). Admin demo:
+   `admin_moc` / `MocStudioDemo#2026!`. Để trở lại site data tại root, chạy
+   `python dev.py --no-demo`. Nếu muốn đổi dữ liệu demo về bản gốc, **hãy sao lưu
+   thay đổi trước**, đóng launcher rồi chạy
+   `python cms/scripts/demo-website-runner.py reset --run-name dev-local`;
+   lần tiếp theo `python dev.py` sẽ tự tạo lại site.
 
 ## Quy tắc an toàn
 
