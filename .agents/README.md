@@ -5,7 +5,8 @@ proposed tasks, handoff notes and templates that are not yet approved.
 `docs/` holds official requirements, approved plans/decisions/contracts and
 real verification. Historical docs already linked from plans remain preserved.
 
-- `agents.yaml`: proposed agent identities and their GitHub branches
+- `agents.yaml`: agent identities and their GitHub branches
+- [Aster](ASTER.md): Codex macOS coordinator setup and owner authorization
 - `research/`: preliminary alternatives, code investigation and evidence
 - `discussions/`: append-only technical design turns and questions
 - `tasks/`: shareable task descriptions, reports and acceptance evidence
