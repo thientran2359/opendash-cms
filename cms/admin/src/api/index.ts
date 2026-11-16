@@ -2,6 +2,8 @@ export { ApiClientError, handleResponseText } from './client.ts';
 export { getDashboard } from './dashboard.ts';
 export { getAuthMe, setupAdmin, login, logout, createEditor } from './auth.ts';
 export { listUsers, createUser, updateUser, resetUserPassword, removeUser } from './auth.ts';
+export { getProfile, updateProfile } from './users.ts';
+export type { UserProfile, UpdateProfileInput } from './users.ts';
 export { getRegistry, getHomepage, previewHomepage, saveHomepage, getPrivatePreviewMedia, getOverride, previewOverride, saveOverride, resetOverride } from './builder.ts';
 export type { HomepageOpen, HomepagePreview, HomepageSaved, BuilderDiagnostic, OverrideRole, OverrideOpen, OverrideSaved } from './builder.ts';
 export { getThemes, installTheme, activateTheme } from './themes.ts';

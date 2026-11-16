@@ -356,9 +356,14 @@ pub async fn override_get(
     Path(role): Path<String>,
     Query(query): Query<OverrideScopeQuery>,
 ) -> ApiResult<Response> {
-    require_session(&headers, &db).await?;
+    let actor = require_session(&headers, &db).await?;
     let role = overrides_storage::OverrideRole::parse(&role)?;
     let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
+    if scope.scope_entry_id.is_none() && actor.user.role != crate::auth::Role::Admin {
+        return Err(ApiError::forbidden(
+            "Chỉ Admin mới có quyền truy cập hoặc sửa template dùng chung toàn site.",
+        ));
+    }
     let existing = overrides_storage::get_override(&db, &scope).await?;
     let (exists, document, version, base_theme_id, base_revision_id) = match existing {
         Some(record) => (
@@ -393,9 +398,14 @@ pub async fn override_preview(
     Query(query): Query<OverrideScopeQuery>,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     let role = overrides_storage::OverrideRole::parse(&role)?;
     let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
+    if scope.scope_entry_id.is_none() && actor.user.role != crate::auth::Role::Admin {
+        return Err(ApiError::forbidden(
+            "Chỉ Admin mới có quyền truy cập hoặc sửa template dùng chung toàn site.",
+        ));
+    }
     let document = decode_document(&headers, &bytes)?;
     let preview_entry = match (
         query.preview_type_key.as_deref(),
@@ -417,9 +427,14 @@ pub async fn override_put(
     Query(query): Query<OverrideScopeQuery>,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     let role = overrides_storage::OverrideRole::parse(&role)?;
     let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
+    if scope.scope_entry_id.is_none() && actor.user.role != crate::auth::Role::Admin {
+        return Err(ApiError::forbidden(
+            "Chỉ Admin mới có quyền truy cập hoặc sửa template dùng chung toàn site.",
+        ));
+    }
     let expected_version = parse_optional_builder_if_match(&headers)?;
     let document = decode_document(&headers, &bytes)?;
     let (saved, rendered) =
@@ -450,9 +465,14 @@ pub async fn override_reset(
     Query(query): Query<OverrideScopeQuery>,
     Json(body): Json<OverrideResetRequest>,
 ) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     let role = overrides_storage::OverrideRole::parse(&role)?;
     let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
+    if scope.scope_entry_id.is_none() && actor.user.role != crate::auth::Role::Admin {
+        return Err(ApiError::forbidden(
+            "Chỉ Admin mới có quyền truy cập hoặc sửa template dùng chung toàn site.",
+        ));
+    }
     let expected_version = parse_builder_if_match(&headers)?;
     overrides_storage::reset_override(&db, &scope, expected_version, body.confirm).await?;
     Ok((

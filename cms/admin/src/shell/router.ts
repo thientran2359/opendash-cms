@@ -1,0 +1,153 @@
+import type { Role } from '../types.ts';
+
+export type AdminView =
+  | 'dashboard'
+  | 'posts'
+  | 'pages'
+  | 'cpt'
+  | 'media'
+  | 'taxonomy'
+  | 'themes'
+  | 'builder'
+  | 'plugins'
+  | 'users'
+  | 'profile'
+  | 'tools'
+  | 'settings'
+  | 'content';
+
+export interface ParsedRoute {
+  view: AdminView;
+  sub: string;
+  typeKey?: string;
+  entryId?: number;
+  templateRole?: string;
+  rawHash: string;
+  isLegacyContentRedirect?: boolean;
+}
+
+export function parseAdminRoute(hash: string, pathname: string = '/admin/'): ParsedRoute {
+  if (!hash || hash === '#' || hash === '#/') {
+    if (pathname.replace(/\/$/, '') === '/builder') {
+      return { view: 'builder', sub: 'builder', rawHash: '#/builder' };
+    }
+    return { view: 'dashboard', sub: 'dashboard', rawHash: '#/dashboard' };
+  }
+
+  const cleaned = hash.replace(/^#\/?/, '');
+  const [pathPart, queryPart] = cleaned.split('?');
+  const segs = pathPart.split('/').filter(Boolean);
+  const params = new URLSearchParams(queryPart ?? '');
+  const first = segs[0] ?? 'dashboard';
+
+  if (first === 'content') {
+    return {
+      view: 'settings',
+      sub: 'content-types',
+      rawHash: '#/content',
+      isLegacyContentRedirect: true,
+    };
+  }
+  if (first === 'dashboard') {
+    return { view: 'dashboard', sub: 'dashboard', rawHash: '#/dashboard' };
+  }
+  if (first === 'posts') {
+    if (segs[1] === 'categories') return { view: 'taxonomy', sub: 'categories', rawHash: '#/posts/categories' };
+    if (segs[1] === 'tags') return { view: 'taxonomy', sub: 'tags', rawHash: '#/posts/tags' };
+    if (segs[1] === 'new') return { view: 'posts', sub: 'new', rawHash: '#/posts/new' };
+    if (segs[1] && segs[2] === 'edit' && /^\d+$/.test(segs[1])) {
+      return { view: 'posts', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/posts/${segs[1]}/edit` };
+    }
+    return { view: 'posts', sub: 'list', rawHash: '#/posts' };
+  }
+  if (first === 'pages') {
+    if (segs[1] === 'new') return { view: 'pages', sub: 'new', rawHash: '#/pages/new' };
+    if (segs[1] && segs[2] === 'edit' && /^\d+$/.test(segs[1])) {
+      return { view: 'pages', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/pages/${segs[1]}/edit` };
+    }
+    return { view: 'pages', sub: 'list', rawHash: '#/pages' };
+  }
+  if (first === 'cpt' && segs[1]) {
+    const typeKey = decodeURIComponent(segs[1]);
+    if (segs[2] === 'new') {
+      return { view: 'cpt', sub: 'new', typeKey, rawHash: `#/cpt/${typeKey}/new` };
+    }
+    if (segs[2] && segs[3] === 'edit' && /^\d+$/.test(segs[2])) {
+      return {
+        view: 'cpt',
+        sub: 'edit',
+        typeKey,
+        entryId: Number(segs[2]),
+        rawHash: `#/cpt/${typeKey}/${segs[2]}/edit`,
+      };
+    }
+    return { view: 'cpt', sub: 'list', typeKey, rawHash: `#/cpt/${typeKey}` };
+  }
+  if (first === 'media') {
+    return { view: 'media', sub: segs[1] === 'upload' ? 'upload' : 'library', rawHash: `#/media${segs[1] === 'upload' ? '/upload' : ''}` };
+  }
+  if (first === 'taxonomy') {
+    return { view: 'taxonomy', sub: 'categories', rawHash: '#/posts/categories' };
+  }
+  if (first === 'appearance' || first === 'themes') {
+    const sub = first === 'themes' ? 'themes' : (segs[1] ?? 'themes');
+    return { view: 'themes', sub, rawHash: `#/appearance/${sub}` };
+  }
+  if (first === 'builder') {
+    const entryParam = params.get('entry');
+    const entryId = entryParam && /^\d+$/.test(entryParam) ? Number(entryParam) : undefined;
+    return {
+      view: 'builder',
+      sub: 'builder',
+      templateRole: params.get('template') ?? undefined,
+      typeKey: params.get('type') ?? undefined,
+      entryId,
+      rawHash: hash,
+    };
+  }
+  if (first === 'contact') {
+    return { view: 'settings', sub: `contact-${segs[1] ?? 'submissions'}`, rawHash: `#/contact/${segs[1] ?? 'submissions'}` };
+  }
+  if (first === 'plugins') {
+    return { view: 'plugins', sub: segs[1] === 'install' ? 'install' : 'list', rawHash: `#/plugins${segs[1] === 'install' ? '/install' : ''}` };
+  }
+  if (first === 'users') {
+    if (segs[1] === 'profile') return { view: 'profile', sub: 'profile', rawHash: '#/users/profile' };
+    return { view: 'users', sub: segs[1] === 'new' ? 'new' : 'list', rawHash: `#/users${segs[1] === 'new' ? '/new' : ''}` };
+  }
+  if (first === 'tools') {
+    return { view: 'tools', sub: segs[1] ?? 'backup', rawHash: `#/tools/${segs[1] ?? 'backup'}` };
+  }
+  if (first === 'settings') {
+    const sub = segs[1] ?? 'general';
+    const typeKey = sub === 'content-types' && segs[2] ? decodeURIComponent(segs[2]) : undefined;
+    return {
+      view: 'settings',
+      sub,
+      typeKey,
+      rawHash: typeKey ? `#/settings/content-types/${typeKey}` : `#/settings/${sub}`,
+    };
+  }
+
+  return { view: 'dashboard', sub: 'dashboard', rawHash: '#/dashboard' };
+}
+
+export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
+  if (role === 'admin') return true;
+  if (route.view === 'themes' || route.view === 'plugins' || route.view === 'users' || route.view === 'tools' || route.view === 'settings') {
+    return false;
+  }
+  if (route.view === 'builder' && !route.entryId) {
+    return false;
+  }
+  return true;
+}
+
+export function parseAdminView(hash: string, pathname: string = '/admin/'): AdminView {
+  return parseAdminRoute(hash, pathname).view;
+}
+
+export function isViewAllowed(view: AdminView, role: Role): boolean {
+  if (role === 'admin') return true;
+  return !['themes', 'plugins', 'users', 'tools', 'settings'].includes(view);
+}
