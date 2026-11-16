@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use opendash_core::content::{ContentFieldType, ContentTypeDefinition};
+use opendash_core::content::{ContentFieldType, ContentTypeDefinition, PublicExposure};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -107,9 +107,16 @@ pub fn entry_view_with_url(
     url: Option<String>,
 ) -> EntryView {
     let mut cover_url = None;
+    let mut public_values = BTreeMap::new();
     let mut fields = Vec::with_capacity(schema.fields.len());
     for definition in &schema.fields {
+        if definition.public_exposure != PublicExposure::Public {
+            continue;
+        }
         let value = record.values.get(&definition.key).unwrap_or(&Value::Null);
+        if !value.is_null() {
+            public_values.insert(definition.key.clone(), value.clone());
+        }
         let kind = match definition.field_type {
             ContentFieldType::ShortText => "short_text",
             ContentFieldType::LongText => "long_text",
@@ -169,7 +176,7 @@ pub fn entry_view_with_url(
         slug: record.slug,
         url,
         updated_at: record.updated_at,
-        values: record.values,
+        values: public_values,
         fields,
         cover_url,
     }

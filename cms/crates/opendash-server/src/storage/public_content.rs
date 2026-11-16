@@ -241,6 +241,34 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN json_each(t.definition_json, '$.fields') AS f
            WHERE e.publication_status = 'published'
+             AND COALESCE(json_extract(f.value, '$.public_exposure'), 'public') = 'public'
+             AND (
+             (
+               json_extract(f.value, '$.type') = 'image'
+               AND json_extract(e.values_json, '$.' || json_extract(f.value, '$.key')) = ?
+             )
+             OR (
+               json_extract(f.value, '$.type') = 'gallery'
+               AND EXISTS (
+                 SELECT 1
+                 FROM json_each(json_extract(e.values_json, '$.' || json_extract(f.value, '$.key'))) AS item
+                 WHERE item.value = ?
+               )
+             )
+             )
+           LIMIT 1
+         ) OR EXISTS (
+           SELECT 1
+           FROM content_entries AS e
+           JOIN content_field_group_targets AS gt
+             ON gt.type_key = e.content_type_key
+            AND gt.association_state IN ('declared', 'withdrawn')
+           JOIN content_field_groups AS g
+             ON g.group_id = gt.group_id
+            AND g.status IN ('active', 'provider_inactive', 'withdrawn')
+           JOIN json_each(g.fields_json) AS f
+           WHERE e.publication_status = 'published'
+             AND COALESCE(json_extract(f.value, '$.public_exposure'), 'private') = 'public'
              AND (
              (
                json_extract(f.value, '$.type') = 'image'
@@ -319,6 +347,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              )
          )"#,
     )
+    .bind(id)
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)

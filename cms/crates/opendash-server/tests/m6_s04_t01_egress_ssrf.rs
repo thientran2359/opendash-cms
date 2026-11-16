@@ -36,6 +36,7 @@ fn build_scoped_manifest(port: u16) -> PluginManifest {
             }],
             content_read: vec![],
             content_write: vec![],
+            ..Default::default()
         },
         hooks: vec![],
         hook_priority: 0,

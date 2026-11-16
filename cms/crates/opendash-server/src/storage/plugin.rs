@@ -343,8 +343,7 @@ pub async fn list_plugins(db_pool: &SqlitePool) -> Result<Vec<PluginSummary>, St
             } else {
                 PluginPermissions {
                     sqlite: vec![],
-                    http: vec![], content_read: vec![], network: vec![], content_write: vec![],
-                }
+                    http: vec![], content_read: vec![], network: vec![], content_write: vec![], ..Default::default() }
             };
 
         list.push(PluginSummary {
@@ -386,8 +385,7 @@ pub async fn get_plugin(db_pool: &SqlitePool, id: &str) -> Result<Option<PluginS
     } else {
         PluginPermissions {
             sqlite: vec![],
-            http: vec![], content_read: vec![], network: vec![], content_write: vec![],
-        }
+            http: vec![], content_read: vec![], network: vec![], content_write: vec![], ..Default::default() }
     };
 
     Ok(Some(PluginSummary {

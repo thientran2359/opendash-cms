@@ -185,12 +185,18 @@ impl PluginManager {
                 "Tài khoản không đủ quyền thực thi action này.".into(),
             ));
         }
+        let actor_role = match actor.user.role {
+            crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+            crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+        };
         for cap in &action_decl.capabilities {
             let allowed = match cap.as_str() {
                 "kv_read" => manifest.has_sqlite_perm("kv_read"),
                 "kv_write" => manifest.has_sqlite_perm("kv_write"),
                 "content_read" => !manifest.permissions.content_read.is_empty(),
+                "content_read_private" => !manifest.permissions.content_read_private.is_empty(),
                 "content_write" => !manifest.permissions.content_write.is_empty(),
+                "content_write_private" => !manifest.permissions.content_write_private.is_empty(),
                 "http" => !manifest.permissions.http.is_empty(),
                 _ => false,
             };
@@ -209,12 +215,21 @@ impl PluginManager {
             }
         }
 
+        let mut filtered_input = input;
+        self.filter_action_input_for_plugin(
+            &manifest,
+            &action_decl.capabilities,
+            actor_role,
+            &mut filtered_input,
+        )
+        .await;
+
         let action_res = self
             .runtime
             .run_plugin_action(
                 wasm_blob,
                 manifest.clone(),
-                input,
+                filtered_input,
                 self.db_pool.clone(),
                 correlation_id.clone(),
                 self.allow_loopback,
@@ -262,11 +277,50 @@ impl PluginManager {
                     "Plugin không có quyền ghi loại nội dung này.".into(),
                 ));
             }
-            let schema = {
-                let reg = content_registry.read().await;
-                reg.get(&cmd.type_key).map(|d| d.descriptor.clone())
+            let _ = &content_registry;
+            let effective_schema = crate::storage::content::load_effective_content_schema(&self.db_pool, &cmd.type_key)
+                .await
+                .map_err(|e| mk_err(e.0, "schema_load_failed", e.1.to_string()))?
+                .ok_or_else(|| mk_err(StatusCode::NOT_FOUND, "content_type_not_found", "Kh?ng t?m th?y lo?i n?i dung.".into()))?;
+
+            for field_key in cmd.values.keys() {
+                let Some(field_entry) = effective_schema.effective_fields.get(field_key) else {
+                    return Err(mk_err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "unknown_field_key",
+                        format!("Tr??ng '{field_key}' kh?ng t?n t?i trong schema c?a '{}'.", cmd.type_key),
+                    ));
+                };
+                if !opendash_core::plugin::plugin_can_write_field(
+                    &manifest,
+                    &action_decl.capabilities,
+                    actor_role,
+                    &cmd.type_key,
+                    field_entry,
+                ) {
+                    return Err(mk_err(
+                        StatusCode::FORBIDDEN,
+                        "field_edit_forbidden",
+                        format!("Plugin ho?c t?i kho?n kh?ng c? quy?n ghi tr??ng '{field_key}'."),
+                    ));
+                }
             }
-            .ok_or_else(|| mk_err(StatusCode::NOT_FOUND, "content_type_not_found", "Không tìm thấy loại nội dung.".into()))?;
+
+            let schema = opendash_core::content::ContentTypeDefinition {
+                key: effective_schema.base.descriptor.key.clone(),
+                label: effective_schema.base.descriptor.label.clone(),
+                fields: effective_schema
+                    .effective_fields
+                    .values()
+                    .map(|e| {
+                        let mut def = e.definition.clone();
+                        if !e.effective_required() {
+                            def.required = false;
+                        }
+                        def
+                    })
+                    .collect(),
+            };
 
             let entry_input = opendash_core::content::ContentEntryInput {
                 slug: cmd.slug,
@@ -274,11 +328,15 @@ impl PluginManager {
                 values: cmd.values,
                 term_ids: cmd.term_ids,
             };
-            if let Err(msg) = entry_input.validate_against(&schema) {
+            if let Err(msg) = entry_input.validate_against_effective(&effective_schema) {
                 return Err(mk_err(StatusCode::BAD_REQUEST, "invalid_entry_input", msg.to_string()));
             }
-            if let Err(err) =
-                crate::storage::media::require_existing_references(&self.db_pool, &schema, &entry_input).await
+            if let Err(err) = crate::storage::media::require_existing_effective_references(
+                &self.db_pool,
+                &effective_schema,
+                &entry_input.values,
+            )
+            .await
             {
                 return Err(mk_err(err.0, "media_reference_error", err.1.to_string()));
             }
@@ -295,7 +353,7 @@ impl PluginManager {
                 "term_ids": &entry_input.term_ids,
             });
             if let Err(veto) = hooks
-                .dispatch_content_before_save(&cmd.type_key, candidate)
+                .dispatch_content_before_save_for_actor(&cmd.type_key, actor_role, candidate)
                 .await
             {
                 return Err((
@@ -355,8 +413,9 @@ impl PluginManager {
                 }
             };
             hooks
-                .dispatch_content_after_save(
+                .dispatch_content_after_save_for_actor(
                     &cmd.type_key,
+                    actor_role,
                     serde_json::to_value(&record).unwrap_or_default(),
                 )
                 .await;
@@ -504,6 +563,88 @@ impl PluginManager {
         type_key: &str,
     ) -> Result<Vec<(i32, String)>, String> {
         plugin_storage::content_hook_subscriptions(&self.db_pool, event, type_key).await
+    }
+
+    pub async fn filter_content_payload_for_plugin(
+        &self,
+        plugin_id: &str,
+        type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
+        payload: &mut Value,
+    ) {
+        let manifest_opt = plugin_storage::load_plugin_executable(&self.db_pool, plugin_id)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|(_, manifest_json, _)| PluginManifest::from_json_str(&manifest_json).ok());
+        let schema_opt = crate::storage::content::load_effective_content_schema(&self.db_pool, type_key)
+            .await
+            .ok()
+            .flatten();
+
+        for field_map_key in ["candidate_values", "values"] {
+            if let Some(Value::Object(map)) = payload.get_mut(field_map_key) {
+                match (&manifest_opt, &schema_opt) {
+                    (Some(manifest), Some(effective)) => {
+                        map.retain(|k, _| {
+                            effective.effective_fields.get(k).is_some_and(|fe| {
+                                opendash_core::plugin::plugin_can_read_field(
+                                    manifest,
+                                    None,
+                                    actor_role,
+                                    type_key,
+                                    fe,
+                                )
+                            })
+                        });
+                    }
+                    _ => {
+                        map.clear();
+                    }
+                }
+            }
+        }
+    }
+
+    async fn filter_action_input_for_plugin(
+        &self,
+        manifest: &PluginManifest,
+        action_caps: &[String],
+        actor_role: opendash_core::content::FieldRole,
+        input: &mut Value,
+    ) {
+        let Some(type_key) = input
+            .get("type_key")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let schema_opt =
+            crate::storage::content::load_effective_content_schema(&self.db_pool, &type_key)
+                .await
+                .ok()
+                .flatten();
+        if let Some(Value::Object(map)) = input.get_mut("values") {
+            match &schema_opt {
+                Some(effective) => {
+                    map.retain(|k, _| {
+                        effective.effective_fields.get(k).is_some_and(|fe| {
+                            opendash_core::plugin::plugin_can_read_field(
+                                manifest,
+                                Some(action_caps),
+                                actor_role,
+                                &type_key,
+                                fe,
+                            )
+                        })
+                    });
+                }
+                None => {
+                    map.clear();
+                }
+            }
+        }
     }
 
     pub async fn record_hook_failure(&self, id: &str, correlation_id: &str, message: &str) {

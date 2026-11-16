@@ -238,6 +238,20 @@ impl HookDispatcher {
         type_key: &str,
         payload: Value,
     ) -> Result<(), ContentBeforeSaveVeto> {
+        self.dispatch_content_before_save_for_actor(
+            type_key,
+            opendash_core::content::FieldRole::Admin,
+            payload,
+        )
+        .await
+    }
+
+    pub async fn dispatch_content_before_save_for_actor(
+        &self,
+        type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
+        payload: Value,
+    ) -> Result<(), ContentBeforeSaveVeto> {
         if IN_DISPATCH.try_with(|v| *v).unwrap_or(false) {
             return Err(ContentBeforeSaveVeto {
                 code: "nested_dispatch".into(),
@@ -275,7 +289,16 @@ impl HookDispatcher {
                         });
                     }
                     let remaining = CONTENT_HOOK_PHASE_BUDGET.saturating_sub(started.elapsed());
-                    let env_val = serde_json::to_value(&envelope).expect("JSON envelope");
+                    let mut plugin_env = envelope.clone();
+                    self.plugin_manager
+                        .filter_content_payload_for_plugin(
+                            &plugin_id,
+                            type_key,
+                            actor_role,
+                            &mut plugin_env.payload,
+                        )
+                        .await;
+                    let env_val = serde_json::to_value(&plugin_env).expect("JSON envelope");
                     let out = match self
                         .plugin_manager
                         .run_plugin_with_mode(
@@ -362,6 +385,20 @@ impl HookDispatcher {
         type_key: &str,
         payload: Value,
     ) -> DispatchReport {
+        self.dispatch_content_after_save_for_actor(
+            type_key,
+            opendash_core::content::FieldRole::Admin,
+            payload,
+        )
+        .await
+    }
+
+    pub async fn dispatch_content_after_save_for_actor(
+        &self,
+        type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
+        payload: Value,
+    ) -> DispatchReport {
         let envelope = Self::envelope(HookEvent::ContentAfterSave, payload);
         if IN_DISPATCH.try_with(|v| *v).unwrap_or(false) {
             return DispatchReport {
@@ -400,7 +437,16 @@ impl HookDispatcher {
                         Err("ContentAfterSave phase budget exceeded".to_string())
                     } else {
                         let remaining = CONTENT_HOOK_PHASE_BUDGET.saturating_sub(started.elapsed());
-                        let env_val = serde_json::to_value(&envelope).expect("JSON envelope");
+                        let mut plugin_env = envelope.clone();
+                    self.plugin_manager
+                        .filter_content_payload_for_plugin(
+                            &plugin_id,
+                            type_key,
+                            actor_role,
+                            &mut plugin_env.payload,
+                        )
+                        .await;
+                    let env_val = serde_json::to_value(&plugin_env).expect("JSON envelope");
                         self.plugin_manager
                             .run_plugin_with_mode(
                                 &plugin_id,
