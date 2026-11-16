@@ -9,6 +9,7 @@ export interface AuthUser {
 export interface AuthResponse {
   user: AuthUser;
   csrf_token: string;
+  site_instance_id?: string;
 }
 
 export type BlockRegistry = Record<string, Record<string, string>>;

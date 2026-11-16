@@ -15,6 +15,7 @@ use crate::{
     storage::auth as auth_storage,
 };
 
+
 pub async fn auth_setup(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
@@ -63,9 +64,11 @@ pub async fn auth_login(
     let secure_cookie =
         runtime_cfg.is_some_and(|axum::Extension(cfg)| cfg.trusted_origin_is_https());
     let cookie_header = auth::session_cookie_header_with_secure(&session_token, secure_cookie);
+    let site_instance_id = auth_storage::compute_site_instance_id(&db).await;
     let body = Json(AuthResponse {
         user: AuthUser { id, username, role },
         csrf_token,
+        site_instance_id,
     });
 
     Ok(([(header::SET_COOKIE, cookie_header)], body).into_response())
@@ -76,9 +79,11 @@ pub async fn auth_me(
     headers: HeaderMap,
 ) -> ApiResult<Json<AuthResponse>> {
     let session = require_session(&headers, &db).await?;
+    let site_instance_id = auth_storage::compute_site_instance_id(&db).await;
     Ok(Json(AuthResponse {
         user: session.user,
         csrf_token: session.csrf_token,
+        site_instance_id,
     }))
 }
 

@@ -75,6 +75,8 @@ pub struct AuthInput {
 pub struct AuthResponse {
     pub user: AuthUser,
     pub csrf_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_instance_id: Option<String>,
 }
 
 pub fn validate_username(username: &str) -> Result<(), &'static str> {
