@@ -129,8 +129,26 @@ fn default_entrypoint() -> String {
 
 impl PluginManifest {
     pub fn from_json_str(json_str: &str) -> Result<Self, &'static str> {
-        let manifest: Self =
+        let mut raw_val: serde_json::Value =
             serde_json::from_str(json_str).map_err(|_| "JSON manifest không hợp lệ.")?;
+        if let Some(obj) = raw_val.as_object_mut() {
+            if let Some(top_fg) = obj.remove("field_groups") {
+                let decl = obj
+                    .entry("declarations")
+                    .or_insert_with(|| serde_json::json!({}));
+                let Some(decl_obj) = decl.as_object_mut() else {
+                    return Err("Trường declarations trong plugin.json không hợp lệ.");
+                };
+                if decl_obj.contains_key("field_groups") {
+                    return Err(
+                        "Không được khai báo trùng field_groups ở cả cấp gốc và trong declarations.",
+                    );
+                }
+                decl_obj.insert("field_groups".into(), top_fg);
+            }
+        }
+        let manifest: Self =
+            serde_json::from_value(raw_val).map_err(|_| "JSON manifest không hợp lệ.")?;
         manifest.validate()?;
         Ok(manifest)
     }
@@ -142,6 +160,9 @@ impl PluginManifest {
         if self.manifest_schema != 1 && self.manifest_schema != 2 {
             return Err("manifest_schema không được hỗ trợ (chỉ hỗ trợ 1 hoặc 2).");
         }
+        if !self.declarations.field_groups.is_empty() && self.manifest_schema != 2 {
+            return Err("field_groups trong plugin.json chỉ hợp lệ khi manifest_schema = 2.");
+        }
         if let Some(min_ver) = &self.min_host_version {
             if !validate_semver(min_ver) {
                 return Err("min_host_version không đúng định dạng SemVer 2.0.0.");
@@ -149,7 +170,6 @@ impl PluginManifest {
             if !host_satisfies_min_version(CURRENT_HOST_VERSION, min_ver) {
                 return Err("Phiên bản host hiện tại thấp hơn min_host_version yêu cầu.");
             }
-
         }
         if !validate_semver(&self.version) {
             return Err("Phiên bản plugin không đúng định dạng SemVer 2.0.0.");
@@ -211,7 +231,10 @@ impl PluginManifest {
             }
             for m in &grant.methods {
                 let upper = m.to_ascii_uppercase();
-                if !matches!(upper.as_str(), "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD") {
+                if !matches!(
+                    upper.as_str(),
+                    "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD"
+                ) {
                     return Err("Network scope method không được hỗ trợ.");
                 }
             }
@@ -290,7 +313,10 @@ impl PluginManifest {
         let Ok(target) = url::Url::parse(target_url) else {
             return false;
         };
-        if !target.username().is_empty() || target.password().is_some() || target.fragment().is_some() {
+        if !target.username().is_empty()
+            || target.password().is_some()
+            || target.fragment().is_some()
+        {
             return false;
         }
         let lower_url = target_url.to_ascii_lowercase();

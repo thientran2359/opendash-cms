@@ -1,18 +1,34 @@
-//! Persistent CPT definitions. All content SQL stays in the storage layer.
+//! Persistent CPT definitions and extension field groups. All content SQL stays in the storage layer.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
-use axum::http::StatusCode;
 use opendash_core::{
-    content::{ContentFieldDefinition, ContentFieldType, ContentTypeDefinition},
+    content::{
+        AttachedFieldGroupSnapshot, ContentFieldDefinition, ContentFieldType,
+        ContentTypeDefinition, ContentTypeDefinitionInput, EditorRegion, EffectiveContentSchema,
+        FieldGroupRecord, FieldGroupStatus, FieldGroupTargetBinding, SchemaTransitionError,
+        UserFieldGroupInput, check_base_fields_compatibility, merge_package_redeclared_fields,
+        verify_effective_schema_transition,
+    },
+    id::ScopedResourceId,
     registry::{DeclarationState, OwnedDescriptor, ProviderStatus, RegistryCatalog, ResourceOwner},
 };
-use sqlx::{SqliteConnection, SqlitePool};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use crate::{
     error::{ApiError, ApiResult},
     theme::ThemeDeclarations,
 };
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContentTypeApiItem {
+    #[serde(flatten)]
+    pub base: OwnedDescriptor<ContentTypeDefinition>,
+    pub version: i64,
+    pub schema_token: String,
+}
 
 pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
     let label = match key {
@@ -30,6 +46,7 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
                 field_type: ContentFieldType::RichText,
                 required: false,
                 options: Vec::new(),
+                ..Default::default()
             },
             ContentFieldDefinition {
                 key: "featured_image".into(),
@@ -37,6 +54,7 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
                 field_type: ContentFieldType::Image,
                 required: false,
                 options: Vec::new(),
+                ..Default::default()
             },
         ],
     })
@@ -77,20 +95,275 @@ pub async fn preflight_builtin_key_collisions(
     Ok(())
 }
 
-/// Stores a user-created CPT definition.
+async fn begin_content_write_tx<'a>(db: &'a SqlitePool) -> ApiResult<Transaction<'a, Sqlite>> {
+    let mut tx = db.begin().await?;
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+    Ok(tx)
+}
+
+async fn table_exists_in_tx(conn: &mut SqliteConnection, table_name: &str) -> ApiResult<bool> {
+    Ok(sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?)",
+    )
+    .bind(table_name)
+    .fetch_one(conn)
+    .await?)
+}
+
+fn parse_owner(owner_kind: &str, owner_id: Option<String>) -> ApiResult<ResourceOwner> {
+    match (owner_kind, owner_id) {
+        ("core", None) => Ok(ResourceOwner::Core),
+        ("user", None) => Ok(ResourceOwner::User),
+        ("theme", Some(id)) if !id.is_empty() => Ok(ResourceOwner::Theme(id)),
+        ("plugin", Some(id)) if !id.is_empty() => Ok(ResourceOwner::Plugin(id)),
+        _ => Err(ApiError::internal("Chủ sở hữu loại nội dung không hợp lệ.")),
+    }
+}
+
+fn parse_provider_status(raw: &str) -> ApiResult<ProviderStatus> {
+    match raw {
+        "active" => Ok(ProviderStatus::Active),
+        "provider_inactive" => Ok(ProviderStatus::ProviderInactive),
+        _ => Err(ApiError::internal("Trạng thái loại nội dung không hợp lệ.")),
+    }
+}
+
+fn parse_declaration_state(raw: &str) -> ApiResult<DeclarationState> {
+    match raw {
+        "declared" => Ok(DeclarationState::Declared),
+        "withdrawn" => Ok(DeclarationState::Withdrawn),
+        _ => Err(ApiError::internal(
+            "Trạng thái declaration loại nội dung không hợp lệ.",
+        )),
+    }
+}
+
+pub fn map_input_validation_error(msg: &'static str) -> ApiError {
+    if msg.starts_with("field_key_collision:") {
+        ApiError::conflict(msg)
+    } else if msg.starts_with("invalid_field_acl:")
+        || msg.starts_with("invalid_field_default:")
+        || msg.starts_with("admin_required_field_missing_default:")
+        || msg.starts_with("reserved_panel_namespace:")
+        || msg.starts_with("invalid_panel_region:")
+        || msg.starts_with("duplicate_panel_id:")
+    {
+        ApiError::unprocessable(msg)
+    } else {
+        ApiError::bad_request(msg)
+    }
+}
+
+pub fn map_transition_error(err: SchemaTransitionError, incompat_as_conflict: bool) -> ApiError {
+    match err {
+        SchemaTransitionError::FieldKeyCollision(_)
+        | SchemaTransitionError::CannotRemoveFieldWithData(_) => ApiError::conflict(err.message()),
+        SchemaTransitionError::IncompatibleSchemaChange(_) => {
+            if incompat_as_conflict {
+                ApiError::conflict(err.message())
+            } else {
+                ApiError::unprocessable(err.message())
+            }
+        }
+        SchemaTransitionError::InvalidFieldAcl(_)
+        | SchemaTransitionError::InvalidFieldDefault(_)
+        | SchemaTransitionError::AdminRequiredFieldMissingDefault(_)
+        | SchemaTransitionError::RequiredFieldHiddenOrInaccessible(_) => {
+            ApiError::unprocessable(err.message())
+        }
+    }
+}
+
+async fn compute_schema_token_in_tx(
+    conn: &mut SqliteConnection,
+    schema: &EffectiveContentSchema,
+) -> ApiResult<String> {
+    let taxonomies: Vec<String> = if table_exists_in_tx(conn, "content_type_taxonomy_eligibility")
+        .await?
+    {
+        sqlx::query_scalar(
+            "SELECT taxonomy_kind FROM content_type_taxonomy_eligibility
+             WHERE content_type_key = ? AND provider_status = 'active' AND declaration_state = 'declared'
+             ORDER BY taxonomy_kind ASC",
+        )
+        .bind(&schema.base.descriptor.key)
+        .fetch_all(&mut *conn)
+        .await?
+    } else {
+        Vec::new()
+    };
+
+    let active_theme_revision_id: Option<String> =
+        if table_exists_in_tx(conn, "theme_active_selection").await? {
+            sqlx::query_scalar("SELECT revision_id FROM theme_active_selection WHERE id = 1")
+                .fetch_optional(&mut *conn)
+                .await?
+                .flatten()
+        } else {
+            None
+        };
+
+    let enabled_plugins: Vec<(String, i64)> = if table_exists_in_tx(conn, "plugins").await? {
+        sqlx::query_as(
+            "SELECT id, revision_generation FROM plugins WHERE enabled = 1 ORDER BY id ASC",
+        )
+        .fetch_all(&mut *conn)
+        .await?
+    } else {
+        Vec::new()
+    };
+
+    let canonical = schema.canonical_token_payload_json(
+        &taxonomies,
+        active_theme_revision_id.as_deref(),
+        &enabled_plugins,
+    );
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.as_bytes());
+    let digest = hasher.finalize();
+    let mut hex = String::with_capacity(64);
+    for b in digest {
+        use std::fmt::Write;
+        let _ = write!(&mut hex, "{b:02x}");
+    }
+    Ok(format!("sha256:{hex}"))
+}
+
+pub async fn load_effective_content_schema_in_tx(
+    conn: &mut SqliteConnection,
+    type_key: &str,
+) -> ApiResult<Option<EffectiveContentSchema>> {
+    let row: Option<(String, String, Option<String>, String, String, i64)> = sqlx::query_as(
+        "SELECT definition_json, owner_kind, owner_id, provider_status, declaration_state, version
+         FROM content_types WHERE key = ?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some((raw_def, owner_kind, owner_id, status_str, decl_str, base_version)) = row else {
+        return Ok(None);
+    };
+    let descriptor: ContentTypeDefinition = serde_json::from_str(&raw_def)
+        .map_err(|_| ApiError::internal("Dữ liệu loại nội dung không hợp lệ."))?;
+    if descriptor.key != type_key || descriptor.validate().is_err() {
+        return Err(ApiError::internal("Dữ liệu loại nội dung không hợp lệ."));
+    }
+    let base = OwnedDescriptor {
+        owner: parse_owner(&owner_kind, owner_id)?,
+        status: parse_provider_status(&status_str)?,
+        declaration_state: parse_declaration_state(&decl_str)?,
+        descriptor,
+    };
+
+    let attached_groups = if table_exists_in_tx(conn, "content_field_groups").await?
+        && table_exists_in_tx(conn, "content_field_group_targets").await?
+    {
+        let group_rows: Vec<(
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            String,
+            String,
+            String,
+            i32,
+            i64,
+            String,
+            i64,
+            String,
+        )> = sqlx::query_as(
+            "SELECT g.group_id, g.owner_kind, g.owner_id, g.local_key, g.title, g.description,
+                    g.fields_json, g.default_region, g.default_order, g.collapsible, g.status,
+                    g.version, t.association_state
+             FROM content_field_group_targets t
+             JOIN content_field_groups g ON g.group_id = t.group_id
+             WHERE t.type_key = ?
+             ORDER BY g.group_id ASC",
+        )
+        .bind(type_key)
+        .fetch_all(&mut *conn)
+        .await?;
+
+        let mut snapshots = Vec::with_capacity(group_rows.len());
+        for (
+            group_id,
+            g_owner_kind,
+            g_owner_id,
+            local_key,
+            title,
+            description,
+            fields_json,
+            default_region_str,
+            default_order,
+            collapsible_int,
+            g_status_str,
+            version,
+            assoc_str,
+        ) in group_rows
+        {
+            let fields: Vec<ContentFieldDefinition> = serde_json::from_str(&fields_json)
+                .map_err(|_| ApiError::internal("Dữ liệu fields_json của field group không hợp lệ."))?;
+            let default_region = EditorRegion::from_db(&default_region_str)
+                .ok_or_else(|| ApiError::internal("default_region của field group không hợp lệ."))?;
+            let status = FieldGroupStatus::from_db(&g_status_str)
+                .ok_or_else(|| ApiError::internal("Trạng thái field group không hợp lệ."))?;
+            snapshots.push(AttachedFieldGroupSnapshot {
+                group_id,
+                owner: parse_owner(&g_owner_kind, g_owner_id)?,
+                local_key,
+                title,
+                description,
+                fields,
+                default_region,
+                default_order,
+                collapsible: collapsible_int != 0,
+                status,
+                association_state: parse_declaration_state(&assoc_str)?,
+                version,
+            });
+        }
+        snapshots
+    } else {
+        Vec::new()
+    };
+
+    let mut effective = EffectiveContentSchema::assemble(base, base_version, attached_groups)
+        .map_err(|e| map_transition_error(e, true))?;
+    effective.schema_token = compute_schema_token_in_tx(conn, &effective).await?;
+    Ok(Some(effective))
+}
+
+pub async fn load_effective_content_schema(
+    db: &SqlitePool,
+    type_key: &str,
+) -> ApiResult<Option<EffectiveContentSchema>> {
+    let mut conn = db.acquire().await?;
+    load_effective_content_schema_in_tx(&mut conn, type_key).await
+}
+
+/// Stores a user-created CPT definition (`POST /api/admin/content-types`).
 pub async fn insert_user_content_type(
     db: &SqlitePool,
-    definition: &ContentTypeDefinition,
-) -> ApiResult<OwnedDescriptor<ContentTypeDefinition>> {
-    if builtin_definition(&definition.key).is_some() {
+    input: &ContentTypeDefinitionInput,
+) -> ApiResult<ContentTypeApiItem> {
+    if builtin_definition(&input.key).is_some() {
         return Err(ApiError::conflict("post/page là khóa Core được bảo vệ."));
     }
-    let definition_json = serde_json::to_string(definition)?;
-    let mut tx = db.begin().await?;
+    let definition = input
+        .clone()
+        .into_canonical()
+        .map_err(map_input_validation_error)?;
+    let definition_json = serde_json::to_string(&definition)?;
+
+    let mut tx = begin_content_write_tx(db).await?;
     crate::storage::seo::check_cpt_root_claim_in_tx(&mut tx, &definition.key).await?;
     let result = sqlx::query(
-        "INSERT INTO content_types (key, definition_json, owner_kind, owner_id, provider_status, declaration_state)
-         VALUES (?, ?, 'user', NULL, 'active', 'declared')",
+        "INSERT INTO content_types (key, definition_json, owner_kind, owner_id, provider_status, declaration_state, version)
+         VALUES (?, ?, 'user', NULL, 'active', 'declared', 1)",
     )
     .bind(&definition.key)
     .bind(&definition_json)
@@ -103,15 +376,119 @@ pub async fn insert_user_content_type(
         }
         other => {
             other?;
+            let effective = load_effective_content_schema_in_tx(&mut tx, &definition.key)
+                .await?
+                .ok_or_else(|| ApiError::internal("Không thể tải schema vừa tạo."))?;
+            verify_effective_schema_transition(None, &effective, false)
+                .map_err(|e| map_transition_error(e, true))?;
             tx.commit().await?;
-            Ok(OwnedDescriptor {
-                owner: ResourceOwner::User,
-                status: ProviderStatus::Active,
-                declaration_state: DeclarationState::Declared,
-                descriptor: definition.clone(),
+            Ok(ContentTypeApiItem {
+                base: effective.base,
+                version: effective.base_version,
+                schema_token: effective.schema_token,
             })
         }
     }
+}
+
+/// Updates a `ResourceOwner::User` CPT definition (`PUT /api/admin/content-types/{type_key}`).
+pub async fn update_user_content_type(
+    db: &SqlitePool,
+    type_key: &str,
+    expected_version: i64,
+    input: &ContentTypeDefinitionInput,
+) -> ApiResult<ContentTypeApiItem> {
+    if input.key != type_key {
+        return Err(ApiError::bad_request(
+            "Khóa loại nội dung trong body không khớp với đường dẫn URL.",
+        ));
+    }
+    if builtin_definition(type_key).is_some() {
+        return Err(ApiError::forbidden(
+            "Không thể sửa trực tiếp loại nội dung Core (post/page); hãy dùng Field Groups.",
+        ));
+    }
+    let incoming = input
+        .clone()
+        .into_canonical()
+        .map_err(map_input_validation_error)?;
+    let incoming_json = serde_json::to_string(&incoming)?;
+
+    let mut tx = begin_content_write_tx(db).await?;
+    let existing: Option<(String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT owner_kind, owner_id, version FROM content_types WHERE key = ?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    let Some((owner_kind, _owner_id, current_version)) = existing else {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    };
+    if owner_kind != "user" {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể cập nhật loại nội dung thuộc quyền sở hữu của User.",
+        ));
+    }
+    if current_version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản loại nội dung đã thay đổi. Vui lòng tải lại.",
+        ));
+    }
+
+    let old_effective = load_effective_content_schema_in_tx(&mut tx, type_key)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không thể tải schema hiện tại."))?;
+    let has_entries: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
+    )
+    .bind(type_key)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "UPDATE content_types
+         SET definition_json = ?, version = version + 1, updated_at = datetime('now')
+         WHERE key = ? AND version = ?",
+    )
+    .bind(&incoming_json)
+    .bind(type_key)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?;
+
+    let new_effective = load_effective_content_schema_in_tx(&mut tx, type_key)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không thể tải schema sau cập nhật."))?;
+    verify_effective_schema_transition(Some(&old_effective), &new_effective, has_entries)
+        .map_err(|e| map_transition_error(e, true))?;
+
+    tx.commit().await?;
+    Ok(ContentTypeApiItem {
+        base: new_effective.base,
+        version: new_effective.base_version,
+        schema_token: new_effective.schema_token,
+    })
+}
+
+pub async fn list_content_types_with_meta(
+    db: &SqlitePool,
+) -> ApiResult<Vec<ContentTypeApiItem>> {
+    let keys: Vec<String> = sqlx::query_scalar("SELECT key FROM content_types ORDER BY key ASC")
+        .fetch_all(db)
+        .await?;
+    let mut items = Vec::with_capacity(keys.len());
+    let mut conn = db.acquire().await?;
+    for key in keys {
+        if let Some(effective) = load_effective_content_schema_in_tx(&mut conn, &key).await? {
+            items.push(ContentTypeApiItem {
+                base: effective.base,
+                version: effective.base_version,
+                schema_token: effective.schema_token,
+            });
+        }
+    }
+    Ok(items)
 }
 
 pub async fn list_content_types(
@@ -132,36 +509,10 @@ pub async fn list_content_types(
                 if descriptor.key != key || descriptor.validate().is_err() {
                     return Err(ApiError::internal("Dữ liệu loại nội dung không hợp lệ."));
                 }
-
-                let owner = match (owner_kind.as_str(), owner_id) {
-                    ("core", None) => ResourceOwner::Core,
-                    ("user", None) => ResourceOwner::User,
-                    ("theme", Some(id)) if !id.is_empty() => ResourceOwner::Theme(id),
-                    ("plugin", Some(id)) if !id.is_empty() => ResourceOwner::Plugin(id),
-                    _ => return Err(ApiError::internal("Chủ sở hữu loại nội dung không hợp lệ.")),
-                };
-                let status = match status.as_str() {
-                    "active" => ProviderStatus::Active,
-                    "provider_inactive" => ProviderStatus::ProviderInactive,
-                    _ => {
-                        return Err(ApiError::internal(
-                            "Trạng thái loại nội dung không hợp lệ.",
-                        ))
-                    }
-                };
-                let declaration_state = match decl_state.as_str() {
-                    "declared" => DeclarationState::Declared,
-                    "withdrawn" => DeclarationState::Withdrawn,
-                    _ => {
-                        return Err(ApiError::internal(
-                            "Trạng thái declaration loại nội dung không hợp lệ.",
-                        ))
-                    }
-                };
                 Ok(OwnedDescriptor {
-                    owner,
-                    status,
-                    declaration_state,
+                    owner: parse_owner(&owner_kind, owner_id)?,
+                    status: parse_provider_status(&status)?,
+                    declaration_state: parse_declaration_state(&decl_state)?,
                     descriptor,
                 })
             },
@@ -200,63 +551,444 @@ pub async fn load_content_type_definition(
     .transpose()
 }
 
+async fn load_field_group_in_tx(
+    conn: &mut SqliteConnection,
+    group_id: &str,
+) -> ApiResult<Option<FieldGroupRecord>> {
+    let row: Option<(
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        String,
+        String,
+        String,
+        i32,
+        i64,
+        String,
+        i64,
+        String,
+        String,
+    )> = sqlx::query_as(
+        "SELECT group_id, owner_kind, owner_id, local_key, title, description, fields_json,
+                default_region, default_order, collapsible, status, version, created_at, updated_at
+         FROM content_field_groups WHERE group_id = ?",
+    )
+    .bind(group_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some((
+        group_id,
+        owner_kind,
+        owner_id,
+        local_key,
+        title,
+        description,
+        fields_json,
+        default_region_str,
+        default_order,
+        collapsible_int,
+        status_str,
+        version,
+        created_at,
+        updated_at,
+    )) = row
+    else {
+        return Ok(None);
+    };
+
+    let target_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT type_key, association_state
+         FROM content_field_group_targets
+         WHERE group_id = ?
+         ORDER BY type_key ASC",
+    )
+    .bind(&group_id)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut targets = Vec::with_capacity(target_rows.len());
+    for (type_key, assoc_str) in target_rows {
+        targets.push(FieldGroupTargetBinding {
+            type_key,
+            association_state: parse_declaration_state(&assoc_str)?,
+        });
+    }
+
+    let fields: Vec<ContentFieldDefinition> = serde_json::from_str(&fields_json)
+        .map_err(|_| ApiError::internal("Dữ liệu fields_json của field group không hợp lệ."))?;
+    let default_region = EditorRegion::from_db(&default_region_str)
+        .ok_or_else(|| ApiError::internal("default_region của field group không hợp lệ."))?;
+    let status = FieldGroupStatus::from_db(&status_str)
+        .ok_or_else(|| ApiError::internal("Trạng thái field group không hợp lệ."))?;
+
+    Ok(Some(FieldGroupRecord {
+        group_id,
+        owner: parse_owner(&owner_kind, owner_id)?,
+        local_key,
+        title,
+        description,
+        fields,
+        targets,
+        default_region,
+        default_order,
+        collapsible: collapsible_int != 0,
+        status,
+        version,
+        created_at,
+        updated_at,
+    }))
+}
+
+pub async fn list_field_groups(db: &SqlitePool) -> ApiResult<Vec<FieldGroupRecord>> {
+    let ids: Vec<String> =
+        sqlx::query_scalar("SELECT group_id FROM content_field_groups ORDER BY group_id ASC")
+            .fetch_all(db)
+            .await?;
+    let mut conn = db.acquire().await?;
+    let mut out = Vec::with_capacity(ids.len());
+    for gid in ids {
+        if let Some(rec) = load_field_group_in_tx(&mut conn, &gid).await? {
+            out.push(rec);
+        }
+    }
+    Ok(out)
+}
+
+async fn has_persisted_group_values_for_type_in_tx(
+    conn: &mut SqliteConnection,
+    type_key: &str,
+    fields: &[ContentFieldDefinition],
+) -> ApiResult<bool> {
+    if fields.is_empty() {
+        return Ok(false);
+    }
+    let values_list: Vec<String> =
+        sqlx::query_scalar("SELECT values_json FROM content_entries WHERE content_type_key = ?")
+            .bind(type_key)
+            .fetch_all(&mut *conn)
+            .await?;
+    let field_keys: HashSet<&str> = fields.iter().map(|f| f.key.as_str()).collect();
+    for raw in values_list {
+        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if map
+                .iter()
+                .any(|(k, v)| field_keys.contains(k.as_str()) && !v.is_null())
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub async fn create_user_field_group(
+    db: &SqlitePool,
+    input: &UserFieldGroupInput,
+) -> ApiResult<FieldGroupRecord> {
+    let (scoped_id, fields) = input
+        .validate_and_normalize(None)
+        .map_err(map_input_validation_error)?;
+    let group_id = scoped_id.to_canonical();
+    let fields_json = serde_json::to_string(&fields)?;
+
+    let mut tx = begin_content_write_tx(db).await?;
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT group_id FROM content_field_groups WHERE group_id = ?")
+            .bind(&group_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if existing.is_some() {
+        return Err(ApiError::conflict("group_id hoặc local_key của nhóm trường đã tồn tại."));
+    }
+
+    let mut old_snapshots = HashMap::new();
+    for target in &input.target_types {
+        let Some(old_eff) = load_effective_content_schema_in_tx(&mut tx, target).await? else {
+            return Err(ApiError::not_found("Loại nội dung mục tiêu không tồn tại."));
+        };
+        let has_entries: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
+        )
+        .bind(target)
+        .fetch_one(&mut *tx)
+        .await?;
+        old_snapshots.insert(target.clone(), (old_eff, has_entries));
+    }
+
+    sqlx::query(
+        "INSERT INTO content_field_groups
+         (group_id, owner_kind, owner_id, local_key, title, description, fields_json,
+          default_region, default_order, collapsible, status, version)
+         VALUES (?, 'user', NULL, ?, ?, ?, ?, ?, ?, ?, 'active', 1)",
+    )
+    .bind(&group_id)
+    .bind(&scoped_id.local_key)
+    .bind(&input.title)
+    .bind(&input.description)
+    .bind(&fields_json)
+    .bind(input.default_region.as_str())
+    .bind(input.default_order)
+    .bind(if input.collapsible { 1_i64 } else { 0_i64 })
+    .execute(&mut *tx)
+    .await?;
+
+    for target in &input.target_types {
+        sqlx::query(
+            "INSERT INTO content_field_group_targets (group_id, type_key, association_state)
+             VALUES (?, ?, 'declared')",
+        )
+        .bind(&group_id)
+        .bind(target)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for target in &input.target_types {
+        let (old_eff, has_entries) = old_snapshots
+            .get(target)
+            .expect("target snapshot preloaded");
+        let new_eff = load_effective_content_schema_in_tx(&mut tx, target)
+            .await?
+            .ok_or_else(|| ApiError::internal("Không thể tải schema mục tiêu."))?;
+        verify_effective_schema_transition(Some(old_eff), &new_eff, *has_entries)
+            .map_err(|e| map_transition_error(e, true))?;
+    }
+
+    let created = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không thể tải field group vừa tạo."))?;
+    tx.commit().await?;
+    Ok(created)
+}
+
+pub async fn update_user_field_group(
+    db: &SqlitePool,
+    group_id_param: &str,
+    expected_version: i64,
+    input: &UserFieldGroupInput,
+) -> ApiResult<FieldGroupRecord> {
+    let (scoped_id, incoming_fields) = input
+        .validate_and_normalize(Some(group_id_param))
+        .map_err(map_input_validation_error)?;
+    let group_id = scoped_id.to_canonical();
+    let fields_json = serde_json::to_string(&incoming_fields)?;
+
+    let mut tx = begin_content_write_tx(db).await?;
+    let existing = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy nhóm trường."))?;
+    if existing.owner != ResourceOwner::User {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể cập nhật nhóm trường thuộc quyền sở hữu của User.",
+        ));
+    }
+    if existing.status == FieldGroupStatus::Withdrawn {
+        return Err(ApiError::conflict(
+            "Nhóm trường đã bị rút khai báo; không thể cập nhật.",
+        ));
+    }
+    if existing.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nhóm trường đã thay đổi. Vui lòng tải lại.",
+        ));
+    }
+
+    let old_targets: Vec<String> = existing.targets.iter().map(|t| t.type_key.clone()).collect();
+    let mut all_affected_types = BTreeSet::new();
+    for t in &old_targets {
+        all_affected_types.insert(t.clone());
+    }
+    for t in &input.target_types {
+        all_affected_types.insert(t.clone());
+    }
+
+    let mut old_snapshots = HashMap::new();
+    let mut any_target_has_entries = false;
+    for t in &all_affected_types {
+        let Some(old_eff) = load_effective_content_schema_in_tx(&mut tx, t).await? else {
+            return Err(ApiError::not_found("Loại nội dung mục tiêu không tồn tại."));
+        };
+        let has_entries: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
+        )
+        .bind(t)
+        .fetch_one(&mut *tx)
+        .await?;
+        if has_entries {
+            any_target_has_entries = true;
+        }
+        old_snapshots.insert(t.clone(), (old_eff, has_entries));
+    }
+
+    // Check if any field key was removed completely when any linked type has entries
+    let incoming_keys: HashSet<&str> = incoming_fields.iter().map(|f| f.key.as_str()).collect();
+    for old_f in &existing.fields {
+        if !incoming_keys.contains(old_f.key.as_str()) && any_target_has_entries {
+            return Err(ApiError::conflict(format!(
+                "cannot_remove_field_with_data: Không thể xóa hẳn trường '{}' khi đã có dữ liệu; hãy đặt declaration_state = withdrawn.",
+                old_f.key
+            )));
+        }
+    }
+
+    sqlx::query(
+        "UPDATE content_field_groups
+         SET title = ?, description = ?, fields_json = ?, default_region = ?,
+             default_order = ?, collapsible = ?, version = version + 1,
+             updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         WHERE group_id = ? AND version = ?",
+    )
+    .bind(&input.title)
+    .bind(&input.description)
+    .bind(&fields_json)
+    .bind(input.default_region.as_str())
+    .bind(input.default_order)
+    .bind(if input.collapsible { 1_i64 } else { 0_i64 })
+    .bind(&group_id)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?;
+
+    let new_target_set: HashSet<&str> = input.target_types.iter().map(|s| s.as_str()).collect();
+    for t in &input.target_types {
+        sqlx::query(
+            "INSERT INTO content_field_group_targets (group_id, type_key, association_state)
+             VALUES (?, ?, 'declared')
+             ON CONFLICT(group_id, type_key) DO UPDATE SET
+                 association_state = 'declared',
+                 updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+        )
+        .bind(&group_id)
+        .bind(t)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    for old_t in &old_targets {
+        if !new_target_set.contains(old_t.as_str()) {
+            let has_values =
+                has_persisted_group_values_for_type_in_tx(&mut tx, old_t, &existing.fields).await?;
+            let has_layout_ref: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM content_editor_layouts WHERE type_key = ? AND instr(layout_json, ?) > 0)",
+            )
+            .bind(old_t)
+            .bind(&group_id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            if has_values || has_layout_ref {
+                sqlx::query(
+                    "UPDATE content_field_group_targets
+                     SET association_state = 'withdrawn',
+                         updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                     WHERE group_id = ? AND type_key = ?",
+                )
+                .bind(&group_id)
+                .bind(old_t)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                sqlx::query(
+                    "DELETE FROM content_field_group_targets WHERE group_id = ? AND type_key = ?",
+                )
+                .bind(&group_id)
+                .bind(old_t)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+    }
+
+    for t in &all_affected_types {
+        let (old_eff, has_entries) = old_snapshots.get(t).expect("snapshot preloaded");
+        let new_eff = load_effective_content_schema_in_tx(&mut tx, t)
+            .await?
+            .ok_or_else(|| ApiError::internal("Không thể tải schema sau cập nhật."))?;
+        verify_effective_schema_transition(Some(old_eff), &new_eff, *has_entries)
+            .map_err(|e| map_transition_error(e, true))?;
+    }
+
+    let updated = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không thể tải field group sau cập nhật."))?;
+    tx.commit().await?;
+    Ok(updated)
+}
+
+pub async fn withdraw_user_field_group(
+    db: &SqlitePool,
+    group_id_param: &str,
+    expected_version: i64,
+) -> ApiResult<FieldGroupRecord> {
+    let parsed = if group_id_param.contains(':') {
+        ScopedResourceId::parse(group_id_param).map_err(map_input_validation_error)?
+    } else {
+        ScopedResourceId::new(ResourceOwner::User, group_id_param.to_owned())
+            .map_err(map_input_validation_error)?
+    };
+    if parsed.owner != ResourceOwner::User {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể rút nhóm trường thuộc quyền sở hữu của User.",
+        ));
+    }
+    let group_id = parsed.to_canonical();
+
+    let mut tx = begin_content_write_tx(db).await?;
+    let existing = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy nhóm trường."))?;
+    if existing.owner != ResourceOwner::User {
+        return Err(ApiError::forbidden(
+            "Chỉ có thể rút nhóm trường thuộc quyền sở hữu của User.",
+        ));
+    }
+    if existing.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nhóm trường đã thay đổi. Vui lòng tải lại.",
+        ));
+    }
+
+    sqlx::query(
+        "UPDATE content_field_groups
+         SET status = 'withdrawn', version = version + 1,
+             updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         WHERE group_id = ? AND version = ?",
+    )
+    .bind(&group_id)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "UPDATE content_field_group_targets
+         SET association_state = 'withdrawn',
+             updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         WHERE group_id = ?",
+    )
+    .bind(&group_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let withdrawn = load_field_group_in_tx(&mut tx, &group_id)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không thể tải field group sau khi rút."))?;
+    tx.commit().await?;
+    Ok(withdrawn)
+}
+
 /// Checks schema evolution compatibility for same-owner re-declaration.
-/// Allows label updates, adding optional fields, and adding select options.
-/// Rejects changing field types, changing/removing field keys with existing entries,
-/// turning optional fields required / adding required fields, or removing select options
-/// when existing entries are present.
 pub fn check_content_type_compatibility(
     existing: &ContentTypeDefinition,
     incoming: &ContentTypeDefinition,
     has_existing_entries: bool,
 ) -> Result<(), &'static str> {
-    let incoming_by_key: HashMap<&str, &ContentFieldDefinition> = incoming
-        .fields
-        .iter()
-        .map(|f| (f.key.as_str(), f))
-        .collect();
-    let existing_by_key: HashMap<&str, &ContentFieldDefinition> = existing
-        .fields
-        .iter()
-        .map(|f| (f.key.as_str(), f))
-        .collect();
-
-    for old in &existing.fields {
-        let Some(new) = incoming_by_key.get(old.key.as_str()) else {
-            if has_existing_entries {
-                return Err("Không thể xóa hoặc đổi key field khi đã có dữ liệu cũ.");
-            }
-            continue;
-        };
-        if old.field_type != new.field_type {
-            return Err("Không thể đổi kiểu dữ liệu (type) của custom field đã tồn tại.");
-        }
-        if !old.required && new.required {
-            return Err("Không thể đổi field tùy chọn thành bắt buộc (required) khi nâng cấp.");
-        }
-        if old.field_type == ContentFieldType::Select && has_existing_entries {
-            let new_values: HashSet<&str> =
-                new.options.iter().map(|o| o.value.as_str()).collect();
-            for old_opt in &old.options {
-                if !new_values.contains(old_opt.value.as_str()) {
-                    return Err(
-                        "Không thể xóa lựa chọn (select option) khi đã có dữ liệu cũ.",
-                    );
-                }
-            }
-        }
-    }
-
-    for new in &incoming.fields {
-        if !existing_by_key.contains_key(new.key.as_str()) && new.required {
-            return Err("Không thể thêm field bắt buộc (required) mới khi nâng cấp schema.");
-        }
-    }
-
-    Ok(())
+    check_base_fields_compatibility(&existing.fields, &incoming.fields, has_existing_entries)
 }
 
-/// Synchronizes a theme's CNT declarations (`content_types` and `taxonomy_eligibility`)
+/// Synchronizes a theme's CNT declarations (`content_types`, `taxonomy_eligibility`, and `field_groups`)
 /// inside an active SQLite write transaction. All errors roll back the caller's transaction.
 pub async fn sync_theme_declarations_in_tx(
     conn: &mut SqliteConnection,
@@ -282,6 +1014,18 @@ pub async fn sync_theme_declarations_in_tx(
     .execute(&mut *conn)
     .await?;
 
+    if table_exists_in_tx(conn, "content_field_groups").await? {
+        sqlx::query(
+            "UPDATE content_field_groups
+             SET status = 'provider_inactive',
+                 updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+             WHERE owner_kind = 'theme' AND owner_id != ? AND status != 'withdrawn'",
+        )
+        .bind(theme_id)
+        .execute(&mut *conn)
+        .await?;
+    }
+
     let neutral = opendash_core::content::CntDeclarations {
         content_types: declarations
             .content_types
@@ -301,26 +1045,20 @@ pub async fn sync_theme_declarations_in_tx(
                 taxonomies: e.taxonomies.clone(),
             })
             .collect(),
+        field_groups: declarations.field_groups.clone(),
     };
     sync_owner_cnt_declarations_in_tx(conn, "theme", theme_id, &neutral, false).await
 }
 
-/// Synchronizes a plugin's CNT declarations (`content_types` and `taxonomy_eligibility`)
+/// Synchronizes a plugin's CNT declarations (`content_types`, `taxonomy_eligibility`, and `field_groups`)
 /// inside an active SQLite write transaction without touching theme or other plugin declarations.
 pub async fn sync_plugin_cnt_declarations_in_tx(
     conn: &mut SqliteConnection,
     plugin_id: &str,
     declarations: &opendash_core::content::CntDeclarations,
 ) -> ApiResult<()> {
-    if declarations.is_empty() {
-        let has_cnt: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_types')",
-        )
-        .fetch_one(&mut *conn)
-        .await?;
-        if !has_cnt {
-            return Ok(());
-        }
+    if declarations.is_empty() && !table_exists_in_tx(conn, "content_types").await? {
+        return Ok(());
     }
     sync_owner_cnt_declarations_in_tx(conn, "plugin", plugin_id, declarations, true).await
 }
@@ -331,12 +1069,7 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
     plugin_id: &str,
     active: bool,
 ) -> ApiResult<()> {
-    let has_cnt: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_types')",
-    )
-    .fetch_one(&mut *conn)
-    .await?;
-    if !has_cnt {
+    if !table_exists_in_tx(conn, "content_types").await? {
         return Ok(());
     }
     if active {
@@ -357,6 +1090,18 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
         .bind(plugin_id)
         .execute(&mut *conn)
         .await?;
+
+        if table_exists_in_tx(conn, "content_field_groups").await? {
+            sqlx::query(
+                "UPDATE content_field_groups
+                 SET status = 'active',
+                     updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 WHERE owner_kind = 'plugin' AND owner_id = ? AND status != 'withdrawn'",
+            )
+            .bind(plugin_id)
+            .execute(&mut *conn)
+            .await?;
+        }
     } else {
         sqlx::query(
             "UPDATE content_types
@@ -375,6 +1120,18 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
         .bind(plugin_id)
         .execute(&mut *conn)
         .await?;
+
+        if table_exists_in_tx(conn, "content_field_groups").await? {
+            sqlx::query(
+                "UPDATE content_field_groups
+                 SET status = 'provider_inactive',
+                     updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 WHERE owner_kind = 'plugin' AND owner_id = ? AND status != 'withdrawn'",
+            )
+            .bind(plugin_id)
+            .execute(&mut *conn)
+            .await?;
+        }
     }
     Ok(())
 }
@@ -386,6 +1143,63 @@ async fn sync_owner_cnt_declarations_in_tx(
     declarations: &opendash_core::content::CntDeclarations,
     incompat_as_conflict: bool,
 ) -> ApiResult<()> {
+    declarations
+        .validate()
+        .map_err(map_input_validation_error)?;
+
+    let has_fg_tables = table_exists_in_tx(conn, "content_field_groups").await?
+        && table_exists_in_tx(conn, "content_field_group_targets").await?;
+
+    // Snapshot potentially affected types before mutating so verify_effective_schema_transition
+    // can compare old_effective vs new_effective symmetrically.
+    let mut candidate_types: BTreeSet<String> = BTreeSet::new();
+    for ct in &declarations.content_types {
+        candidate_types.insert(ct.key.clone());
+    }
+    for fg in &declarations.field_groups {
+        for t in &fg.target_types {
+            candidate_types.insert(t.clone());
+        }
+    }
+    let existing_owned_ct_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT key FROM content_types WHERE owner_kind = ? AND owner_id = ?",
+    )
+    .bind(owner_kind_str)
+    .bind(owner_id_str)
+    .fetch_all(&mut *conn)
+    .await?;
+    for k in &existing_owned_ct_keys {
+        candidate_types.insert(k.clone());
+    }
+    if has_fg_tables {
+        let existing_target_types: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT t.type_key
+             FROM content_field_group_targets t
+             JOIN content_field_groups g ON g.group_id = t.group_id
+             WHERE g.owner_kind = ? AND g.owner_id = ?",
+        )
+        .bind(owner_kind_str)
+        .bind(owner_id_str)
+        .fetch_all(&mut *conn)
+        .await?;
+        for k in existing_target_types {
+            candidate_types.insert(k);
+        }
+    }
+
+    let mut old_snapshots: HashMap<String, (EffectiveContentSchema, bool)> = HashMap::new();
+    for t in &candidate_types {
+        if let Some(old_eff) = load_effective_content_schema_in_tx(conn, t).await? {
+            let has_entries: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
+            )
+            .bind(t)
+            .fetch_one(&mut *conn)
+            .await?;
+            old_snapshots.insert(t.clone(), (old_eff, has_entries));
+        }
+    }
+
     let mut declared_ct_keys: HashSet<String> = HashSet::new();
     let mut declared_eligibility: HashSet<(String, String)> = HashSet::new();
 
@@ -393,14 +1207,6 @@ async fn sync_owner_cnt_declarations_in_tx(
         if builtin_definition(&ct.key).is_some() {
             return Err(ApiError::conflict("post/page là khóa Core được bảo vệ."));
         }
-        let incoming = ContentTypeDefinition {
-            key: ct.key.clone(),
-            label: ct.label.clone(),
-            fields: ct.fields.clone(),
-        };
-        incoming.validate().map_err(ApiError::bad_request)?;
-        let incoming_json = serde_json::to_string(&incoming)?;
-
         let existing: Option<(String, String, Option<String>)> = sqlx::query_as(
             "SELECT definition_json, owner_kind, owner_id FROM content_types WHERE key = ?",
         )
@@ -417,21 +1223,17 @@ async fn sync_owner_cnt_declarations_in_tx(
                 }
                 let existing_def: ContentTypeDefinition = serde_json::from_str(&raw_def)
                     .map_err(|_| ApiError::internal("Dữ liệu loại nội dung không hợp lệ."))?;
-                let has_entries: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
-                )
-                .bind(&ct.key)
-                .fetch_one(&mut *conn)
-                .await?;
-                check_content_type_compatibility(&existing_def, &incoming, has_entries).map_err(
-                    |msg| {
-                        if incompat_as_conflict {
-                            ApiError::conflict(msg)
-                        } else {
-                            ApiError(StatusCode::UNPROCESSABLE_ENTITY, msg.into())
-                        }
-                    },
-                )?;
+                // Preserve omitted fields as withdrawn when package re-declares CPT (270-R1)
+                let merged_fields =
+                    merge_package_redeclared_fields(&existing_def.fields, &ct.fields);
+                let incoming = ContentTypeDefinition {
+                    key: ct.key.clone(),
+                    label: ct.label.clone(),
+                    fields: merged_fields,
+                };
+                incoming.validate().map_err(map_input_validation_error)?;
+                let incoming_json = serde_json::to_string(&incoming)?;
+
                 sqlx::query(
                     "UPDATE content_types
                      SET definition_json = ?, provider_status = 'active', declaration_state = 'declared', updated_at = datetime('now')
@@ -443,6 +1245,14 @@ async fn sync_owner_cnt_declarations_in_tx(
                 .await?;
             }
             None => {
+                let incoming = ContentTypeDefinition {
+                    key: ct.key.clone(),
+                    label: ct.label.clone(),
+                    fields: ct.fields.clone(),
+                };
+                incoming.validate().map_err(map_input_validation_error)?;
+                let incoming_json = serde_json::to_string(&incoming)?;
+
                 sqlx::query(
                     "INSERT INTO content_types (key, definition_json, owner_kind, owner_id, provider_status, declaration_state)
                      VALUES (?, ?, ?, ?, 'active', 'declared')",
@@ -463,15 +1273,7 @@ async fn sync_owner_cnt_declarations_in_tx(
     }
 
     // Withdraw omitted CPT declarations previously owned by this owner (never deleting schema/entries)
-    let owned_keys: Vec<String> = sqlx::query_scalar(
-        "SELECT key FROM content_types WHERE owner_kind = ? AND owner_id = ?",
-    )
-    .bind(owner_kind_str)
-    .bind(owner_id_str)
-    .fetch_all(&mut *conn)
-    .await?;
-
-    for key in owned_keys {
+    for key in existing_owned_ct_keys {
         if !declared_ct_keys.contains(&key) {
             sqlx::query(
                 "UPDATE content_types
@@ -586,6 +1388,162 @@ async fn sync_owner_cnt_declarations_in_tx(
             .bind(&tax_kind)
             .execute(&mut *conn)
             .await?;
+        }
+    }
+
+    // Sync package field_groups (3-level tombstone preservation — 270-R1)
+    if has_fg_tables {
+        let mut declared_group_ids: HashSet<String> = HashSet::new();
+        for fg in &declarations.field_groups {
+            let group_id = format!("{owner_kind_str}:{owner_id_str}:{}", fg.local_key);
+            let incoming_fields = fg
+                .validate_and_normalize()
+                .map_err(map_input_validation_error)?;
+
+            for target in &fg.target_types {
+                let exists: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM content_types WHERE key = ?)",
+                )
+                .bind(target)
+                .fetch_one(&mut *conn)
+                .await?;
+                if !exists {
+                    return Err(ApiError::unprocessable(format!(
+                        "Loại nội dung mục tiêu '{target}' trong field_group '{}' chưa tồn tại.",
+                        fg.local_key
+                    )));
+                }
+            }
+
+            if let Some(existing_group) = load_field_group_in_tx(conn, &group_id).await? {
+                let merged_fields =
+                    merge_package_redeclared_fields(&existing_group.fields, &incoming_fields);
+                let fields_json = serde_json::to_string(&merged_fields)?;
+
+                sqlx::query(
+                    "UPDATE content_field_groups
+                     SET title = ?, description = ?, fields_json = ?, default_region = ?,
+                         default_order = ?, collapsible = ?, status = 'active',
+                         version = version + 1,
+                         updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                     WHERE group_id = ?",
+                )
+                .bind(&fg.title)
+                .bind(&fg.description)
+                .bind(&fields_json)
+                .bind(fg.default_region.as_str())
+                .bind(fg.default_order)
+                .bind(if fg.collapsible { 1_i64 } else { 0_i64 })
+                .bind(&group_id)
+                .execute(&mut *conn)
+                .await?;
+
+                let incoming_target_set: HashSet<&str> =
+                    fg.target_types.iter().map(|s| s.as_str()).collect();
+                for target in &fg.target_types {
+                    sqlx::query(
+                        "INSERT INTO content_field_group_targets (group_id, type_key, association_state)
+                         VALUES (?, ?, 'declared')
+                         ON CONFLICT(group_id, type_key) DO UPDATE SET
+                             association_state = 'declared',
+                             updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                    )
+                    .bind(&group_id)
+                    .bind(target)
+                    .execute(&mut *conn)
+                    .await?;
+                }
+                for old_t in &existing_group.targets {
+                    if !incoming_target_set.contains(old_t.type_key.as_str()) {
+                        sqlx::query(
+                            "UPDATE content_field_group_targets
+                             SET association_state = 'withdrawn',
+                                 updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                             WHERE group_id = ? AND type_key = ?",
+                        )
+                        .bind(&group_id)
+                        .bind(&old_t.type_key)
+                        .execute(&mut *conn)
+                        .await?;
+                    }
+                }
+            } else {
+                let fields_json = serde_json::to_string(&incoming_fields)?;
+                sqlx::query(
+                    "INSERT INTO content_field_groups
+                     (group_id, owner_kind, owner_id, local_key, title, description, fields_json,
+                      default_region, default_order, collapsible, status, version)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', 1)",
+                )
+                .bind(&group_id)
+                .bind(owner_kind_str)
+                .bind(owner_id_str)
+                .bind(&fg.local_key)
+                .bind(&fg.title)
+                .bind(&fg.description)
+                .bind(&fields_json)
+                .bind(fg.default_region.as_str())
+                .bind(fg.default_order)
+                .bind(if fg.collapsible { 1_i64 } else { 0_i64 })
+                .execute(&mut *conn)
+                .await?;
+
+                for target in &fg.target_types {
+                    sqlx::query(
+                        "INSERT INTO content_field_group_targets (group_id, type_key, association_state)
+                         VALUES (?, ?, 'declared')",
+                    )
+                    .bind(&group_id)
+                    .bind(target)
+                    .execute(&mut *conn)
+                    .await?;
+                }
+            }
+            declared_group_ids.insert(group_id);
+        }
+
+        // Withdraw omitted field_groups owned by this package (retaining targets & fields)
+        let owned_group_ids: Vec<String> = sqlx::query_scalar(
+            "SELECT group_id FROM content_field_groups WHERE owner_kind = ? AND owner_id = ?",
+        )
+        .bind(owner_kind_str)
+        .bind(owner_id_str)
+        .fetch_all(&mut *conn)
+        .await?;
+
+        for gid in owned_group_ids {
+            if !declared_group_ids.contains(&gid) {
+                sqlx::query(
+                    "UPDATE content_field_groups
+                     SET status = 'withdrawn', version = version + 1,
+                         updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                     WHERE group_id = ?",
+                )
+                .bind(&gid)
+                .execute(&mut *conn)
+                .await?;
+                sqlx::query(
+                    "UPDATE content_field_group_targets
+                     SET association_state = 'withdrawn',
+                         updated_at = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                     WHERE group_id = ?",
+                )
+                .bind(&gid)
+                .execute(&mut *conn)
+                .await?;
+            }
+        }
+    }
+
+    // Enforce Rule COMPAT-1..COMPAT-4 across every affected type_key
+    for t in &candidate_types {
+        if let Some(new_eff) = load_effective_content_schema_in_tx(conn, t).await? {
+            let (old_eff_opt, has_entries) = match old_snapshots.get(t) {
+                Some((old_eff, has)) => (Some(old_eff), *has),
+                None => (None, false),
+            };
+            verify_effective_schema_transition(old_eff_opt, &new_eff, has_entries)
+                .map_err(|e| map_transition_error(e, incompat_as_conflict))?;
         }
     }
 
