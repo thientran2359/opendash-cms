@@ -12,7 +12,7 @@ Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc
 
 ## Tra cứu theo mục đích
 
-Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và bố cục màn hình chỉnh sửa](product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) — menu/submenu, vùng đăng ký panel và vị trí nhóm custom fields; [ADR-0016](decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) đã đạt `G2 AGREED` ([receipt #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) · [#268](https://github.com/thientran2359/opendash-cms/issues/268)), `Implementation NOT_STARTED / Verification NOT_RUN`, chưa phát hành G3.
+Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và bố cục màn hình chỉnh sửa](product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) — menu/submenu, vùng đăng ký panel và vị trí nhóm custom fields; [ADR-0016](decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) đã đạt `G2 AGREED` và merge tại `main@2808e3e` ([receipt #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) · [#268](https://github.com/thientran2359/opendash-cms/issues/268)); đặc tả [G3 (`M7-S09-T01`–`M7-S13-T02`)](plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md) đã soạn xong (`Implementation NOT_STARTED / Verification NOT_RUN`, chưa cấp `Project Ready`).
 
 | Mục đích | Vị trí | Quy ước |
 | --- | --- | --- |
