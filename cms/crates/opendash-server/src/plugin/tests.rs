@@ -1107,10 +1107,13 @@ mod tests {
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (request_started_tx, request_started_rx) = tokio::sync::oneshot::channel();
         std::thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
             let mut buf = [0; 4096];
-            let _ = std::io::Read::read(&mut socket, &mut buf);
+            let bytes_read = std::io::Read::read(&mut socket, &mut buf).unwrap();
+            assert!(bytes_read > 0, "worker must send an HTTP request");
+            let _ = request_started_tx.send(());
             std::thread::sleep(Duration::from_secs(6));
         });
 
@@ -1165,13 +1168,23 @@ mod tests {
         };
 
         let rt = runtime.clone();
-        let task = tokio::spawn(async move {
+        let mut task = tokio::spawn(async move {
             rt.run_plugin(wasm, manifest, json!({}), db, "corr-hang".into(), true)
                 .await
         });
 
-        // Let the worker process start and enter the blocking HTTP call
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Prove the worker is actually blocked in HTTP before aborting it.
+        // A fixed sleep races with process startup when the test suite runs in parallel.
+        tokio::select! {
+            started = tokio::time::timeout(Duration::from_secs(10), request_started_rx) => {
+                started
+                    .expect("worker did not reach the HTTP server within 10 seconds")
+                    .expect("HTTP server stopped before the worker sent its request");
+            }
+            result = &mut task => {
+                panic!("plugin invocation finished before the blocking HTTP request: {result:?}");
+            }
+        }
         assert_eq!(
             runtime.active_workers(),
             1,
