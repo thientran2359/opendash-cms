@@ -3,12 +3,13 @@
 
 use std::collections::BTreeMap;
 
-use opendash_core::content::{ContentFieldType, ContentTypeDefinition};
+use opendash_core::content::{ContentFieldType, ContentTypeDefinition, PublicExposure};
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::{
     error::{ApiError, ApiResult},
+    public_context::CanonicalUrlBuilder,
     storage::{entries::ContentEntryRecord, media::valid_media_id},
     theme,
 };
@@ -25,8 +26,8 @@ nav{display:flex;gap:1rem;margin-top:2rem}
 <header><strong>{{ site.title }}</strong>{% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}</header>
 <h1>{{ content_type.label }}</h1>
 {% for entry in entries %}
-<article><h2><a href="{{ entry.url }}">{{ entry.title }}</a></h2>
-{% if entry.cover_url %}<a href="{{ entry.url }}"><img src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy"></a>{% endif %}
+<article><h2>{% if entry.url %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</h2>
+{% if entry.cover_url %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}<img src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy">{% if entry.url %}</a>{% endif %}{% endif %}
 </article>
 {% else %}<p>Chưa có nội dung.</p>{% endfor %}
 <nav>{% if previous_url %}<a href="{{ previous_url }}">← Trang trước</a>{% endif %}
@@ -71,7 +72,7 @@ pub struct EntryView {
     pub id: i64,
     pub title: String,
     pub slug: String,
-    pub url: String,
+    pub url: Option<String>,
     pub updated_at: String,
     pub values: BTreeMap<String, Value>,
     pub fields: Vec<FieldView>,
@@ -97,10 +98,25 @@ fn media_url(value: &Value) -> Option<String> {
 }
 
 pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) -> EntryView {
+    entry_view_with_url(record, schema, None)
+}
+
+pub fn entry_view_with_url(
+    record: ContentEntryRecord,
+    schema: &ContentTypeDefinition,
+    url: Option<String>,
+) -> EntryView {
     let mut cover_url = None;
+    let mut public_values = BTreeMap::new();
     let mut fields = Vec::with_capacity(schema.fields.len());
     for definition in &schema.fields {
+        if definition.public_exposure != PublicExposure::Public {
+            continue;
+        }
         let value = record.values.get(&definition.key).unwrap_or(&Value::Null);
+        if !value.is_null() {
+            public_values.insert(definition.key.clone(), value.clone());
+        }
         let kind = match definition.field_type {
             ContentFieldType::ShortText => "short_text",
             ContentFieldType::LongText => "long_text",
@@ -153,14 +169,14 @@ pub fn entry_view(record: ContentEntryRecord, schema: &ContentTypeDefinition) ->
             gallery_urls,
         });
     }
-    let url = format!("/content/{}/{}", schema.key, record.slug);
+    let url = url.or_else(|| CanonicalUrlBuilder::entry_from_id(record.id, &schema.key, &record.slug));
     EntryView {
         id: record.id,
         title: record.title,
         slug: record.slug,
         url,
         updated_at: record.updated_at,
-        values: record.values,
+        values: public_values,
         fields,
         cover_url,
     }
@@ -183,11 +199,147 @@ pub fn authenticated_preview_view(
             .map(|url| admin_media(url))
             .collect();
     }
-    view.url = format!(
+    view.url = Some(format!(
         "/api/admin/content-types/{}/entries/{}/preview",
         schema.key, view.id
-    );
+    ));
     view
+}
+
+pub fn render_role_fragment_with_options(
+    template: &str,
+    site: &SiteContext<'_>,
+    options: &BTreeMap<String, Value>,
+) -> Option<String> {
+    render_role_fragment_with_context(template, site, options, &BTreeMap::new())
+}
+
+pub fn render_role_fragment_with_context(
+    template: &str,
+    site: &SiteContext<'_>,
+    options: &BTreeMap<String, Value>,
+    menus: &BTreeMap<String, crate::storage::menu::MenuViewModel>,
+) -> Option<String> {
+    theme::render_content(
+        template,
+        &serde_json::json!({
+            "site": site,
+            "options": options,
+            "menus": menus,
+        }),
+    )
+    .ok()
+}
+
+fn escape_html_attr(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#x27;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Normalizes header/body/footer through the bounded document normalizer and emits
+/// a single trusted `<head>` from `SeoView`. Replaces legacy literal composition.
+pub fn compose_document_with_seo(
+    header_html: Option<&str>,
+    rendered_layout: &str,
+    footer_html: Option<&str>,
+    seo: &crate::seo::SeoView,
+) -> ApiResult<String> {
+    let mut styles = Vec::new();
+    let mut body_attrs_str = String::new();
+    let body_fragment = match crate::document::normalize_public_document(rendered_layout) {
+        Ok(parts) => {
+            for (k, v) in parts.body_attributes {
+                body_attrs_str.push(' ');
+                body_attrs_str.push_str(&k);
+                body_attrs_str.push_str("=\"");
+                body_attrs_str.push_str(&escape_html_attr(&v));
+                body_attrs_str.push('"');
+            }
+            styles.extend(parts.authorized_styles);
+            parts.body_fragment
+        }
+        Err(diag) => {
+            format!(
+                "<main data-doc-diagnostic=\"{}\"><p>Nội dung mẫu không hợp lệ.</p><pre>{}</pre></main>",
+                escape_html_attr(diag.code),
+                escape_html_attr(rendered_layout),
+            )
+        }
+    };
+    let normalize_slot = |slot: Option<&str>, styles: &mut Vec<String>| -> String {
+        let Some(raw) = slot.filter(|s| !s.is_empty()) else {
+            return String::new();
+        };
+        match crate::document::normalize_public_document(raw) {
+            Ok(parts) => {
+                styles.extend(parts.authorized_styles);
+                parts.body_fragment
+            }
+            Err(_) => String::new(),
+        }
+    };
+    let header = normalize_slot(header_html, &mut styles);
+    let footer = normalize_slot(footer_html, &mut styles);
+
+    let mut head = String::from(
+        "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">",
+    );
+    head.push_str(&format!("<title>{}</title>", escape_html_attr(&seo.title)));
+    head.push_str(&format!(
+        "<meta name=\"robots\" content=\"{}\">",
+        escape_html_attr(&seo.robots)
+    ));
+    if let Some(desc) = &seo.description {
+        head.push_str(&format!(
+            "<meta name=\"description\" content=\"{}\">",
+            escape_html_attr(desc)
+        ));
+    }
+    if let Some(canonical) = &seo.canonical_url {
+        head.push_str(&format!(
+            "<link rel=\"canonical\" href=\"{}\">",
+            escape_html_attr(canonical)
+        ));
+    }
+    head.push_str(&format!(
+        "<meta property=\"og:title\" content=\"{}\">",
+        escape_html_attr(&seo.og_title)
+    ));
+    if let Some(og_desc) = &seo.og_description {
+        head.push_str(&format!(
+            "<meta property=\"og:description\" content=\"{}\">",
+            escape_html_attr(og_desc)
+        ));
+    }
+    if let Some(og_url) = &seo.og_url {
+        head.push_str(&format!(
+            "<meta property=\"og:url\" content=\"{}\">",
+            escape_html_attr(og_url)
+        ));
+    }
+    if let Some(og_img) = &seo.og_image_url {
+        head.push_str(&format!(
+            "<meta property=\"og:image\" content=\"{}\">",
+            escape_html_attr(og_img)
+        ));
+    }
+    for style in styles {
+        head.push_str(&style);
+    }
+    Ok(format!(
+        "<!doctype html><html lang=\"{}\"><head>{head}</head><body{body_attrs_str}>{header}{body_fragment}{footer}</body></html>",
+        escape_html_attr(&seo.lang)
+    ))
 }
 
 pub fn render_archive_with_site(
@@ -198,17 +350,19 @@ pub fn render_archive_with_site(
     selected_template: Option<&str>,
     site: &SiteContext<'_>,
 ) -> ApiResult<String> {
-    theme::render_content(
-        selected_template.unwrap_or(DEFAULT_ARCHIVE),
-        &serde_json::json!({
-            "content_type": schema,
-            "entries": entries,
-            "previous_url": previous_url,
-            "next_url": next_url,
-            "site": site,
-        }),
-    )
-    .map_err(ApiError::internal)
+    let data = serde_json::json!({
+        "content_type": schema,
+        "entries": entries,
+        "previous_url": previous_url,
+        "next_url": next_url,
+        "site": site,
+    });
+    if let Some(custom) = selected_template {
+        if let Ok(html) = theme::render_content(custom, &data) {
+            return Ok(html);
+        }
+    }
+    theme::render_content(DEFAULT_ARCHIVE, &data).map_err(ApiError::internal)
 }
 
 pub fn render_single(
@@ -225,16 +379,18 @@ pub fn render_single_with_site(
     selected_template: Option<&str>,
     site: &SiteContext<'_>,
 ) -> ApiResult<String> {
-    theme::render_content(
-        selected_template.unwrap_or(DEFAULT_SINGLE),
-        &serde_json::json!({
-            "content_type": schema,
-            "entry": entry,
-            "archive_url": format!("/content/{}", schema.key),
-            "site": site,
-        }),
-    )
-    .map_err(ApiError::internal)
+    let data = serde_json::json!({
+        "content_type": schema,
+        "entry": entry,
+        "archive_url": CanonicalUrlBuilder::archive(&schema.key).unwrap_or_default(),
+        "site": site,
+    });
+    if let Some(custom) = selected_template {
+        if let Ok(html) = theme::render_content(custom, &data) {
+            return Ok(html);
+        }
+    }
+    theme::render_content(DEFAULT_SINGLE, &data).map_err(ApiError::internal)
 }
 
 #[cfg(test)]
@@ -253,6 +409,7 @@ mod tests {
                 field_type: ContentFieldType::RichText,
                 required: false,
                 options: vec![],
+                ..Default::default()
             }],
         };
         let record = ContentEntryRecord {

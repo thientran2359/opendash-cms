@@ -454,3 +454,122 @@ pub async fn delete_session_by_token_hash(
         .await?;
     Ok(())
 }
+
+pub async fn get_profile(db: &SqlitePool, user_id: i64) -> ApiResult<UserSummary> {
+    let row: Option<(i64, String, String, i64)> =
+        sqlx::query_as("SELECT id, username, role, version FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(db)
+            .await?;
+    let Some((id, username, role, version)) = row else {
+        return Err(ApiError::not_found("Không tìm thấy tài khoản."));
+    };
+    Ok(UserSummary {
+        id,
+        username,
+        role: Role::from_str(&role)
+            .ok_or_else(|| ApiError::internal("Vai trò tài khoản không hợp lệ."))?,
+        version,
+    })
+}
+
+pub async fn load_user_password_hash(db: &SqlitePool, user_id: i64) -> ApiResult<String> {
+    let hash: Option<String> =
+        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(db)
+            .await?;
+    hash.ok_or_else(|| ApiError::not_found("Không tìm thấy tài khoản."))
+}
+
+pub async fn update_own_profile(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    expected_version: i64,
+    new_username: Option<&str>,
+    new_password_hash: Option<&str>,
+) -> ApiResult<UserSummary> {
+    let mut tx = db.begin().await.map_err(mutation_error)?;
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await
+        .map_err(mutation_error)?;
+    let row: Option<i64> = sqlx::query_scalar(
+        "SELECT u.id FROM sessions s JOIN users u ON u.id = s.user_id
+         WHERE s.token_hash = ? AND s.expires_at > ?",
+    )
+    .bind(&actor.token_hash)
+    .bind(auth::current_time_secs())
+    .fetch_optional(&mut *tx)
+    .await?;
+    if row != Some(actor.user.id) {
+        return Err(ApiError::unauthorized("Phiên đăng nhập không hợp lệ."));
+    }
+    let target = load_target(&mut tx, actor.user.id, expected_version).await?;
+    let username = new_username.unwrap_or(&target.username);
+    if let Some(pw_hash) = new_password_hash {
+        let updated = sqlx::query(
+            "UPDATE users SET username = ?, password_hash = ?, version = version + 1
+             WHERE id = ? AND version = ?",
+        )
+        .bind(username)
+        .bind(pw_hash)
+        .bind(actor.user.id)
+        .bind(expected_version)
+        .execute(&mut *tx)
+        .await
+        .map_err(mutation_error)?;
+        if updated.rows_affected() == 0 {
+            return Err(ApiError::precondition_failed(
+                "Phiên bản tài khoản đã thay đổi. Hãy tải lại trước khi lưu.",
+            ));
+        }
+    } else {
+        if username == target.username {
+            tx.commit().await?;
+            return Ok(target);
+        }
+        let updated = sqlx::query(
+            "UPDATE users SET username = ?, version = version + 1
+             WHERE id = ? AND version = ?",
+        )
+        .bind(username)
+        .bind(actor.user.id)
+        .bind(expected_version)
+        .execute(&mut *tx)
+        .await
+        .map_err(mutation_error)?;
+        if updated.rows_affected() == 0 {
+            return Err(ApiError::precondition_failed(
+                "Phiên bản tài khoản đã thay đổi. Hãy tải lại trước khi lưu.",
+            ));
+        }
+    }
+    tx.commit().await?;
+    Ok(UserSummary {
+        id: target.id,
+        username: username.to_owned(),
+        role: target.role,
+        version: expected_version + 1,
+    })
+}
+
+pub async fn compute_site_instance_id(db: &SqlitePool) -> Option<String> {
+    let created_at: Option<i64> =
+        sqlx::query_scalar("SELECT created_at FROM users ORDER BY id ASC LIMIT 1")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten();
+    let title: Option<String> =
+        sqlx::query_scalar("SELECT site_title FROM site_general_settings WHERE id = 1")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten();
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{}:{}", created_at.unwrap_or(0), title.unwrap_or_default()).as_bytes());
+    let hex = format!("{:x}", hasher.finalize());
+    Some(format!("site-{}", &hex[..16]))
+}

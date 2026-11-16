@@ -61,6 +61,39 @@ pub enum ResolvedList {
 pub type ListResults = BTreeMap<String, ResolvedList>;
 
 /// Use the same SQLite snapshot as the saved document/field bindings.
+pub async fn resolve_contact_forms_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+) -> ApiResult<crate::page::ContactFormResults> {
+    let mut results = crate::page::ContactFormResults::new();
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::ContactForm(props)) = &element.content
+                    {
+                        let rec =
+                            crate::storage::contact::get_form_in_conn(&mut *tx, props.form_id)
+                                .await?;
+                        results.insert(element.id.clone(), rec);
+                    }
+                }
+            }
+        }
+    }
+    Ok(results)
+}
+
+pub async fn resolve_contact_forms(
+    db: &SqlitePool,
+    document: &BuilderDocument,
+) -> ApiResult<crate::page::ContactFormResults> {
+    let mut tx = db.begin().await?;
+    let res = resolve_contact_forms_in_tx(&mut tx, document).await?;
+    tx.commit().await?;
+    Ok(res)
+}
+
 pub async fn resolve_lists_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     document: &BuilderDocument,
@@ -207,7 +240,7 @@ fn project_legacy(block: &Block) -> BuilderDocument {
     }
 }
 
-async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<HomeState> {
+pub(crate) async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<HomeState> {
     let (version, raw): (i64, Option<String>) =
         sqlx::query_as("SELECT version, document_json FROM builder_homepage WHERE id = 1")
             .fetch_one(&mut **tx)
@@ -247,9 +280,10 @@ async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<HomeState> 
         Option<String>,
         Option<String>,
     ) = sqlx::query_as(
-        "SELECT a.block_id, t.compatible_block_id, t.template
-         FROM site_active_theme a
-         LEFT JOIN theme_blocks t ON t.id = a.block_id
+        "SELECT r.legacy_block_id, t.compatible_block_id, t.template
+         FROM theme_active_selection a
+         LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
+         LEFT JOIN theme_blocks t ON t.id = r.legacy_block_id
          WHERE a.id = 1",
     )
     .fetch_one(&mut **tx)
@@ -351,13 +385,88 @@ pub fn image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
     ids
 }
 
+pub fn video_ids(document: &BuilderDocument) -> BTreeSet<&str> {
+    let mut ids = BTreeSet::new();
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::Video(video)) = &element.content {
+                        ids.insert(video.media_id.as_str());
+                    }
+                }
+            }
+        }
+    }
+    ids
+}
+
+pub fn poster_image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
+    let mut ids = BTreeSet::new();
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::Video(video)) = &element.content
+                        && let Some(poster) = video.poster_image_id.as_deref()
+                    {
+                        ids.insert(poster);
+                    }
+                }
+            }
+        }
+    }
+    ids
+}
+
+pub async fn validate_media_refs_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    document: &BuilderDocument,
+) -> ApiResult<()> {
+    for id in image_ids(document).into_iter().chain(poster_image_ids(document)) {
+        if !valid_media_id(id) {
+            return Err(ApiError::bad_request("Invalid Builder media ID"));
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')",
+        )
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists == 0 {
+            return Err(ApiError::bad_request(
+                "Image chưa tồn tại trong Media Library.",
+            ));
+        }
+    }
+    for id in video_ids(document) {
+        if !valid_media_id(id) {
+            return Err(ApiError::bad_request("Invalid Builder video ID"));
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'video' AND lifecycle_state = 'active')",
+        )
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists == 0 {
+            return Err(ApiError::bad_request(
+                "Video chưa tồn tại trong Media Library.",
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub async fn check_preview_images(db: &SqlitePool, document: &BuilderDocument) -> ApiResult<()> {
+    let mut conn = db.acquire().await?;
+    validate_media_refs_in_tx(&mut conn, document).await?;
     for id in image_ids(document) {
         if !valid_media_id(id) {
             return Err(ApiError::bad_request("Invalid Builder media ID"));
         }
         let exists: i64 =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ?)")
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')")
                 .bind(id)
                 .fetch_one(db)
                 .await?;
@@ -399,13 +508,16 @@ where
     }
     let current = read_home_tx(&mut tx).await?;
     current.validate(document)?;
+    let videos = video_ids(document);
+    let posters = poster_image_ids(document);
+    validate_media_refs_in_tx(&mut tx, document).await?;
     let images = image_ids(document);
     for id in &images {
         if !valid_media_id(id) {
             return Err(ApiError::bad_request("Invalid Builder media ID"));
         }
         let exists: i64 =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ?)")
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')")
                 .bind(id)
                 .fetch_one(&mut *tx)
                 .await?;
@@ -426,6 +538,25 @@ where
         .bind(raw)
         .execute(&mut *tx)
         .await?;
+    sqlx::query("DELETE FROM builder_homepage_video_refs")
+        .execute(&mut *tx)
+        .await?;
+    for id in videos {
+        sqlx::query(
+            "INSERT INTO builder_homepage_video_refs (media_id, ref_role) VALUES (?, 'video')",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    for id in posters {
+        sqlx::query(
+            "INSERT INTO builder_homepage_video_refs (media_id, ref_role) VALUES (?, 'poster')",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
     sqlx::query("DELETE FROM builder_homepage_media")
         .execute(&mut *tx)
         .await?;
@@ -461,4 +592,21 @@ mod tests {
             different.sections[0].children[0].children[0].children[0].id
         );
     }
+}
+
+pub fn register_plugin_block_template(
+    state: &mut HomeState,
+    block_id: &str,
+    template_csec: &str,
+) -> ApiResult<()> {
+    crate::template_sec::validate_template_csec(block_id, template_csec)
+        .map_err(ApiError::bad_request)?;
+    state.themes.insert(
+        block_id.to_owned(),
+        ThemeDefinition {
+            fields: Fields::default(),
+            template: template_csec.to_owned(),
+        },
+    );
+    Ok(())
 }

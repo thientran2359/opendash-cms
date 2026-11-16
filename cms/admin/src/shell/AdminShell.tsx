@@ -1,55 +1,142 @@
 import React, { useEffect, useState } from 'react';
-import type { AuthUser, Role } from '../types.ts';
+import type { AuthUser } from '../types.ts';
+import type { OwnedContentType } from '../features/content/types.ts';
 import { AuthPanel } from './AuthPanel.tsx';
+import {
+  isRouteAllowed,
+  isViewAllowed,
+  parseAdminRoute,
+  parseAdminView,
+  type AdminView,
+  type ParsedRoute,
+} from './router.ts';
 
-export type AdminView =
-  | 'dashboard' | 'posts' | 'pages' | 'content' | 'media' | 'taxonomy'
-  | 'themes' | 'builder' | 'plugins' | 'users' | 'settings';
+export {
+  isRouteAllowed,
+  isViewAllowed,
+  parseAdminRoute,
+  parseAdminView,
+  type AdminView,
+  type ParsedRoute,
+};
 
-type NavigationItem = { id: AdminView; label: string; icon: string; adminOnly?: boolean };
-type NavigationGroup = { title: string; items: NavigationItem[] };
-
-const navigation: NavigationGroup[] = [
-  { title: 'Tổng quan', items: [{ id: 'dashboard', label: 'Bảng điều khiển', icon: 'dashboard' }] },
-  {
-    title: 'Nội dung',
-    items: [
-      { id: 'posts', label: 'Bài viết', icon: 'posts' },
-      { id: 'pages', label: 'Trang', icon: 'pages' },
-      { id: 'content', label: 'Nội dung tùy chỉnh', icon: 'content' },
-      { id: 'media', label: 'Thư viện ảnh', icon: 'media' },
-      { id: 'taxonomy', label: 'Danh mục & thẻ', icon: 'taxonomy' },
-    ],
-  },
-  {
-    title: 'Giao diện',
-    items: [
-      { id: 'themes', label: 'Themes', icon: 'themes', adminOnly: true },
-      { id: 'builder', label: 'Builder', icon: 'builder' },
-    ],
-  },
-  {
-    title: 'Hệ thống',
-    items: [
-      { id: 'plugins', label: 'Plugins', icon: 'plugins', adminOnly: true },
-      { id: 'users', label: 'Người dùng', icon: 'users', adminOnly: true },
-      { id: 'settings', label: 'Cài đặt', icon: 'settings', adminOnly: true },
-    ],
-  },
-];
-const allItems = navigation.flatMap(group => group.items);
-const titles = Object.fromEntries(allItems.map(item => [item.id, item.label])) as Record<AdminView, string>;
-const adminViews = new Set<AdminView>(['themes', 'plugins', 'users', 'settings']);
-
-export function parseAdminView(hash: string, pathname: string = '/admin/'): AdminView {
-  // Preserve the historical /builder entry point when no client hash is set.
-  if (!hash || hash === '#') return pathname.replace(/\/$/, '') === '/builder' ? 'builder' : 'dashboard';
-  const id = hash.replace(/^#\/?/, '').split('/')[0];
-  return allItems.find(item => item.id === id)?.id ?? 'dashboard';
+interface SubMenuItem {
+  label: string;
+  hash: string;
+  adminOnly?: boolean;
 }
 
-export function isViewAllowed(view: AdminView, role: Role): boolean {
-  return role === 'admin' || !adminViews.has(view);
+interface ParentMenuItem {
+  id: string;
+  label: string;
+  icon: string;
+  hash: string;
+  adminOnly?: boolean;
+  children?: SubMenuItem[];
+}
+
+function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
+  const customTypes = cptTypes.filter(
+    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page',
+  );
+  return [
+    { id: 'dashboard', label: 'Tổng quan', icon: 'dashboard', hash: '#/dashboard' },
+    {
+      id: 'posts',
+      label: 'Bài viết',
+      icon: 'posts',
+      hash: '#/posts',
+      children: [
+        { label: 'Tất cả bài viết', hash: '#/posts' },
+        { label: 'Viết bài mới', hash: '#/posts/new' },
+        { label: 'Chuyên mục', hash: '#/posts/categories' },
+        { label: 'Thẻ', hash: '#/posts/tags' },
+      ],
+    },
+    {
+      id: 'pages',
+      label: 'Trang',
+      icon: 'pages',
+      hash: '#/pages',
+      children: [
+        { label: 'Tất cả trang', hash: '#/pages' },
+        { label: 'Thêm trang mới', hash: '#/pages/new' },
+      ],
+    },
+    ...customTypes.map(ct => ({
+      id: `cpt:${ct.descriptor.key}`,
+      label: ct.descriptor.label,
+      icon: 'content',
+      hash: `#/cpt/${ct.descriptor.key}`,
+      children: [
+        { label: `Tất cả ${ct.descriptor.label}`, hash: `#/cpt/${ct.descriptor.key}` },
+        { label: 'Thêm mới', hash: `#/cpt/${ct.descriptor.key}/new` },
+      ],
+    })),
+    {
+      id: 'media',
+      label: 'Thư viện ảnh',
+      icon: 'media',
+      hash: '#/media',
+      children: [
+        { label: 'Thư viện', hash: '#/media' },
+        { label: 'Tải lên', hash: '#/media/upload' },
+      ],
+    },
+    {
+      id: 'themes',
+      label: 'Giao diện',
+      icon: 'themes',
+      hash: '#/appearance/themes',
+      adminOnly: true,
+      children: [
+        { label: 'Themes', hash: '#/appearance/themes' },
+        { label: 'Menus', hash: '#/appearance/menus' },
+        { label: 'Visual Builder', hash: '#/builder' },
+      ],
+    },
+    {
+      id: 'plugins',
+      label: 'Plugins',
+      icon: 'plugins',
+      hash: '#/plugins',
+      adminOnly: true,
+    },
+    {
+      id: 'users',
+      label: 'Người dùng',
+      icon: 'users',
+      hash: '#/users/profile',
+      children: [
+        { label: 'Tất cả người dùng', hash: '#/users', adminOnly: true },
+        { label: 'Hồ sơ của tôi', hash: '#/users/profile' },
+      ],
+    },
+    {
+      id: 'tools',
+      label: 'Công cụ',
+      icon: 'tools',
+      hash: '#/tools/backup',
+      adminOnly: true,
+      children: [
+        { label: 'Sao lưu & Phục hồi', hash: '#/tools/backup' },
+        { label: 'Đối soát Media', hash: '#/tools/media-reconcile' },
+        { label: 'Tình trạng hệ thống', hash: '#/tools/health' },
+      ],
+    },
+    {
+      id: 'settings',
+      label: 'Cài đặt',
+      icon: 'settings',
+      hash: '#/settings/content-types',
+      adminOnly: true,
+      children: [
+        { label: 'Tổng quát', hash: '#/settings/general' },
+        { label: 'SEO & Liên hệ', hash: '#/settings/seo' },
+        { label: 'Loại nội dung & Trường', hash: '#/settings/content-types' },
+      ],
+    },
+  ];
 }
 
 function NavIcon({ name }: { name: string }) {
@@ -59,14 +146,13 @@ function NavIcon({ name }: { name: string }) {
     pages: <><path d="M5 3h10l4 4v14H5zM15 3v5h4M9 12h6M9 16h6" /></>,
     content: <><path d="M4 5h16v14H4zM8 9h3v3H8zM14 9h3M14 13h3M8 16h9" /></>,
     media: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="1.5" /><path d="m4 17 5-5 4 3 3-4 5 6" /></>,
-    taxonomy: <><path d="M3 5h7l2 2h9v12H3zM7 12h10M7 16h7" /></>,
     themes: <><path d="M12 3 3 8l9 5 9-5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" /></>,
-    builder: <><path d="m14 3 7 7-11 11H3v-7L14 3ZM12 5l7 7M3 17h5" /></>,
     plugins: <><path d="M9 3h6v5h5v5h-5v8H9v-8H4V8h5z" /></>,
     users: <><circle cx="9" cy="8" r="3" /><path d="M3 21v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5v1" /></>,
+    tools: <><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="m10 2-1 3-3 1-3-1-2 4 3 2v2l-3 2 2 4 3-1 3 1 1 3h4l1-3 3-1 3 1 2-4-3-2v-2l3-2-2-4-3 1-3-1-1-3z" /></>,
   };
-  return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" strokeLinecap="round">{paths[name]}</svg>;
+  return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" strokeLinecap="round">{paths[name] ?? paths.content}</svg>;
 }
 
 interface AdminShellProps {
@@ -81,12 +167,15 @@ interface AdminShellProps {
   onSetup: () => void;
   onLogin: () => void;
   onLogout: () => void;
-  activeView: AdminView;
-  onViewChange: (view: AdminView) => void;
+  route: ParsedRoute;
+  routeForbidden: boolean;
+  cptTypes: OwnedContentType[];
+  onNavigateHash: (hash: string) => void;
   hasUnsavedChanges: boolean;
   sidebarContent: React.ReactNode;
   previewContent: React.ReactNode;
   contentContent: React.ReactNode;
+  schemaSettingsContent: React.ReactNode;
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
   mediaContent: React.ReactNode;
@@ -94,6 +183,8 @@ interface AdminShellProps {
   dashboardContent: React.ReactNode;
   pluginsContent: React.ReactNode;
   usersContent: React.ReactNode;
+  profileContent: React.ReactNode;
+  toolsContent: React.ReactNode;
   settingsContent: React.ReactNode;
   themesContent: React.ReactNode;
 }
@@ -101,10 +192,30 @@ interface AdminShellProps {
 export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
-  activeView, onViewChange, hasUnsavedChanges, sidebarContent, previewContent,
-  contentContent, postsContent, pagesContent, mediaContent, taxonomyContent, dashboardContent, pluginsContent, usersContent, settingsContent, themesContent,
+  route, routeForbidden, cptTypes, onNavigateHash, hasUnsavedChanges,
+  sidebarContent, previewContent, contentContent, schemaSettingsContent,
+  postsContent, pagesContent, mediaContent, taxonomyContent, dashboardContent,
+  pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+
+  const menuTree = buildMenuTree(cptTypes);
+  const activeParentId =
+    route.view === 'cpt' && route.typeKey
+      ? `cpt:${route.typeKey}`
+      : route.view === 'taxonomy'
+        ? 'posts'
+        : route.view === 'profile'
+          ? 'users'
+          : route.view === 'builder'
+            ? 'themes'
+            : route.view;
+
+  useEffect(() => {
+    setOpenMenuId(activeParentId);
+  }, [activeParentId]);
+
   useEffect(() => {
     if (!mobileOpen) return;
     const originalOverflow = document.body.style.overflow;
@@ -119,11 +230,16 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     };
   }, [mobileOpen]);
 
-  const navigate = (view: AdminView) => {
-    if (!user || !isViewAllowed(view, user.role)) return;
-    onViewChange(view);
+  const navigate = (hash: string) => {
+    if (!user) return;
+    onNavigateHash(hash);
     setMobileOpen(false);
   };
+
+  const activeParent = menuTree.find(m => m.id === activeParentId);
+  const pageTitle = routeForbidden
+    ? '403 Không có quyền truy cập'
+    : activeParent?.label ?? 'Tổng quan';
 
   return (
     <div className="od-root min-h-screen">
@@ -143,6 +259,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           </section>
         </div>
       )}
+
       <div className={user ? 'od-layout' : 'hidden'} data-testid="admin-layout">
         {mobileOpen && <button type="button" className="od-drawer-overlay" aria-label="Đóng menu" onClick={() => setMobileOpen(false)} />}
         <aside id="admin-navigation" className={'od-sidebar ' + (mobileOpen ? 'od-sidebar-open' : '')} aria-label="Điều hướng quản trị">
@@ -154,28 +271,69 @@ export const AdminShell: React.FC<AdminShellProps> = ({
             </div>
           </div>
           <nav className="od-nav overflow-y-auto px-3 pb-8" aria-label="Các mục quản trị">
-            {navigation.map(group => {
-              const items = group.items.filter(item => !item.adminOnly || user?.role === 'admin');
-              if (items.length === 0) return null;
-              return (
-                <div key={group.title} className="mb-5">
-                  <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">{group.title}</p>
-                  <div className="flex flex-col gap-1">
-                    {items.map(item => (
+            <div className="flex flex-col gap-1">
+              {menuTree
+                .filter(item => !item.adminOnly || user?.role === 'admin')
+                .map(item => {
+                  const isActiveParent = activeParentId === item.id;
+                  const isExpanded = openMenuId === item.id || isActiveParent;
+                  const visibleChildren = (item.children ?? []).filter(
+                    c => !c.adminOnly || user?.role === 'admin',
+                  );
+                  return (
+                    <div key={item.id} className="mb-1">
                       <button
-                        key={item.id} type="button" className={'od-nav-link ' + (activeView === item.id ? 'od-nav-link-active' : '')}
-                        data-view={item.id} aria-current={activeView === item.id ? 'page' : undefined}
-                        onClick={() => navigate(item.id)}
+                        type="button"
+                        className={'od-nav-link w-full justify-between ' + (isActiveParent ? 'od-nav-link-active' : '')}
+                        data-menu-id={item.id}
+                        aria-expanded={visibleChildren.length > 0 ? isExpanded : undefined}
+                        onClick={() => {
+                          if (visibleChildren.length > 0) {
+                            setOpenMenuId(isExpanded ? null : item.id);
+                          }
+                          navigate(item.hash);
+                        }}
                       >
-                        <NavIcon name={item.icon} />
-                        <span>{item.label}</span>
-                        {item.id === 'content' && hasUnsavedChanges && <span className="od-nav-dot" aria-label="Có thay đổi chưa lưu" />}
+                        <span className="flex items-center gap-2.5">
+                          <NavIcon name={item.icon} />
+                          <span>{item.label}</span>
+                        </span>
+                        {visibleChildren.length > 0 && (
+                          <span className="text-xs text-slate-400" aria-hidden="true">
+                            {isExpanded ? '▾' : '▸'}
+                          </span>
+                        )}
                       </button>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+                      {visibleChildren.length > 0 && isExpanded && (
+                        <div className="mt-1 ml-7 flex flex-col gap-0.5 border-l border-slate-700 pl-3">
+                          {visibleChildren.map(sub => {
+                            const isSubActive = route.rawHash === sub.hash;
+                            return (
+                              <a
+                                key={sub.hash}
+                                href={sub.hash}
+                                onClick={e => {
+                                  e.preventDefault();
+                                  navigate(sub.hash);
+                                }}
+                                aria-current={isSubActive ? 'page' : undefined}
+                                className={
+                                  'rounded px-2 py-1 text-xs transition-colors ' +
+                                  (isSubActive
+                                    ? 'bg-slate-800 font-semibold text-white'
+                                    : 'text-slate-300 hover:bg-slate-800/60 hover:text-white')
+                                }
+                              >
+                                {sub.label}
+                              </a>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
           </nav>
           <div className="od-sidebar-bottom px-5 py-4 text-xs text-slate-400">OpenDash · Admin</div>
         </aside>
@@ -187,8 +345,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 <span aria-hidden="true">☰</span>
               </button>
               <div className="min-w-0">
-                <p className="text-xs font-medium text-slate-500">Không gian quản trị / {user?.role === 'admin' ? 'Quản trị viên' : 'Biên tập viên'}</p>
-                <h1 className="mt-1 truncate text-xl font-bold tracking-tight text-slate-900">{titles[activeView]}</h1>
+                <p className="text-xs font-medium text-slate-500" data-testid="breadcrumb">
+                  Quản trị / {pageTitle}{route.sub && route.sub !== route.view ? ` / ${route.sub}` : ''}
+                </p>
+                <h1 className="mt-1 truncate text-xl font-bold tracking-tight text-slate-900">{pageTitle}</h1>
               </div>
             </div>
             <div className="od-topbar-actions flex flex-wrap items-center gap-3">
@@ -203,53 +363,65 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           </header>
 
           <div className="od-page-container px-4 py-6 sm:px-8 sm:py-8">
-            {user && activeView === 'dashboard' && (
+            {user && routeForbidden && (
+              <section className="od-admin-card border-rose-200 bg-rose-50" data-testid="rbac-forbidden" role="alert">
+                <h2 className="text-lg font-bold text-rose-900">403 — Không có quyền truy cập</h2>
+                <p className="mt-2 text-sm text-rose-800">
+                  Tài khoản hiện tại không có quyền mở đường dẫn <code>{route.rawHash}</code>.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => navigate('#/dashboard')}
+                  className="mt-4 rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  Quay về Tổng quan
+                </button>
+              </section>
+            )}
+
+            {user && !routeForbidden && route.view === 'dashboard' && (
               <main className="od-dashboard" id="dashboard-main">
                 <div className="od-welcome mb-7 rounded-2xl p-7 sm:p-9">
                   <div className="text-xs font-semibold uppercase tracking-widest text-sky-200">Trang tổng quan</div>
                   <h2 className="mt-3 text-2xl font-bold text-white sm:text-3xl">Xin chào, {user.username}!</h2>
-                  <p className="mt-3 max-w-xl text-sm leading-6 text-slate-200">Chọn một khu vực bên dưới để tiếp tục công việc. Các tính năng đang phát triển được ghi rõ trạng thái.</p>
+                  <p className="mt-3 max-w-xl text-sm leading-6 text-slate-200">Chọn một khu vực từ menu bên trái để quản lý nội dung và cấu hình hệ thống.</p>
                 </div>
                 {dashboardContent}
-                <h2 className="mb-4 text-lg font-semibold text-slate-900">Truy cập nhanh</h2>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {allItems.filter(item => ['content', 'builder', 'posts', 'pages', 'media', 'taxonomy', 'plugins', 'users'].includes(item.id) && (!item.adminOnly || user.role === 'admin')).map(item => (
-                    <button key={item.id} type="button" className="od-quick-link" onClick={() => navigate(item.id)}>
-                      <span className="od-quick-icon"><NavIcon name={item.icon} /></span>
-                      <span className="flex-1 text-left">
-                        <span className="block font-semibold text-slate-900">{item.label}</span>
-                        <span className="mt-1 block text-xs text-slate-500">
-                          {item.id === 'builder' || item.id === 'content' || item.id === 'posts' || item.id === 'pages' || item.id === 'plugins' || item.id === 'users'
-                            ? 'Mở công cụ hiện có' : 'Xem trạng thái phát triển'}
-                        </span>
-                      </span>
-                      <span aria-hidden="true" className="text-slate-400">›</span>
-                    </button>
-                  ))}
-                </div>
               </main>
             )}
-            <section className={user && activeView === 'posts' ? 'od-editor-panel' : 'hidden'} aria-label="Bài viết" aria-hidden={!user || activeView !== 'posts'}>{postsContent}</section>
-            <section className={user && activeView === 'pages' ? 'od-editor-panel' : 'hidden'} aria-label="Trang" aria-hidden={!user || activeView !== 'pages'}>{pagesContent}</section>
-            {user && activeView === 'media' && mediaContent}
-            {user && activeView === 'taxonomy' && <main className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</main>}
-            {user?.role === 'admin' && activeView === 'themes' && <main className="od-admin-card min-w-0">{themesContent}</main>}
 
-            {/* Keep both editors mounted when navigating: forms and preview must survive switching sections. */}
-            <section className={user && activeView === 'builder' ? 'od-editor-panel' : 'hidden'} aria-label="Builder" aria-hidden={!user || activeView !== 'builder'}>
-              <main id="builder-main">
-                <section className="editor-sidebar">{sidebarContent}</section>
-                {previewContent}
-              </main>
-            </section>
-            <section className={user && activeView === 'content' ? 'od-editor-panel' : 'hidden'} aria-label="Nội dung tùy chỉnh" aria-hidden={!user || activeView !== 'content'}>
-              <main id="content-main">{contentContent}</main>
-            </section>
-            {user?.role === 'admin' && activeView === 'plugins' && <main className="od-admin-card">{pluginsContent}</main>}
-            <section className={user?.role === 'admin' && activeView === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label="Người dùng" aria-hidden={user?.role !== 'admin' || activeView !== 'users'}>
-              {usersContent}
-            </section>
-            {user?.role === 'admin' && activeView === 'settings' && <main className="od-admin-card min-w-0">{settingsContent}</main>}
+            {!routeForbidden && (
+              <>
+                <section className={user && route.view === 'posts' ? 'od-editor-panel' : 'hidden'} aria-label="Bài viết" aria-hidden={!user || route.view !== 'posts'}>{postsContent}</section>
+                <section className={user && route.view === 'pages' ? 'od-editor-panel' : 'hidden'} aria-label="Trang" aria-hidden={!user || route.view !== 'pages'}>{pagesContent}</section>
+                {user && route.view === 'media' && mediaContent}
+                {user && route.view === 'taxonomy' && <main className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</main>}
+                {user?.role === 'admin' && route.view === 'themes' && <main className="od-admin-card min-w-0">{themesContent}</main>}
+
+                <section className={user && route.view === 'builder' ? 'od-editor-panel' : 'hidden'} aria-label="Builder" aria-hidden={!user || route.view !== 'builder'}>
+                  <main id="builder-main">
+                    <section className="editor-sidebar">{sidebarContent}</section>
+                    {previewContent}
+                  </main>
+                </section>
+
+                <section className={user && route.view === 'cpt' ? 'od-editor-panel' : 'hidden'} aria-label="Nội dung tùy chỉnh" aria-hidden={!user || route.view !== 'cpt'}>
+                  <main id="content-main">{contentContent}</main>
+                </section>
+
+                {user?.role === 'admin' && route.view === 'plugins' && <main className="od-admin-card">{pluginsContent}</main>}
+                <section className={user?.role === 'admin' && route.view === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label="Người dùng" aria-hidden={user?.role !== 'admin' || route.view !== 'users'}>
+                  {usersContent}
+                </section>
+                {user && route.view === 'profile' && <main className="od-admin-card min-w-0">{profileContent}</main>}
+                {user?.role === 'admin' && route.view === 'tools' && <main className="od-admin-card min-w-0">{toolsContent}</main>}
+                {user?.role === 'admin' && route.view === 'settings' && (
+                  <main className="od-admin-card min-w-0">
+                    {route.sub === 'content-types' ? schemaSettingsContent : settingsContent}
+                  </main>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>

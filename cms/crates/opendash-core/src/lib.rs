@@ -1,4 +1,6 @@
+pub mod backup;
 pub mod builder;
+pub mod contact;
 pub mod content;
 pub mod hooks;
 pub mod id;

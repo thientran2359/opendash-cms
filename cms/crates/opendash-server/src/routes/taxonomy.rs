@@ -124,6 +124,7 @@ pub async fn taxonomy_list(
 }
 
 pub async fn taxonomy_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     payload: Result<Json<NewTaxonomyTerm>, JsonRejection>,
@@ -143,6 +144,7 @@ pub async fn taxonomy_create(
 }
 
 pub async fn taxonomy_patch(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -171,6 +173,7 @@ pub async fn taxonomy_patch(
 }
 
 pub async fn taxonomy_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(id): Path<i64>,
@@ -182,6 +185,23 @@ pub async fn taxonomy_delete(
     Ok((
         StatusCode::NO_CONTENT,
         [(header::CACHE_CONTROL, "no-store")],
+    )
+        .into_response())
+}
+
+pub async fn taxonomy_eligibility_list(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(content_type_key): Path<String>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    let rows =
+        crate::storage::content::list_content_type_taxonomy_eligibility(&db, &content_type_key)
+            .await?;
+    Ok((
+        StatusCode::OK,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(rows),
     )
         .into_response())
 }

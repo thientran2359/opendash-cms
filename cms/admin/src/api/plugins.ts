@@ -53,3 +53,53 @@ export async function enablePlugin(id: string, csrfToken: string): Promise<void>
     defaultErrorMessage: 'Không thể kích hoạt plugin.',
   });
 }
+
+export async function getPluginUiSchema(
+  id: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return requestJson<unknown>(`/api/admin/plugins/${encodeURIComponent(id)}/ui-schema`, {
+    method: 'GET',
+    signal,
+    defaultErrorMessage: 'Không tải được declarative UI.',
+  });
+}
+
+export async function invokePluginAction(
+  id: string,
+  action: string,
+  payload: unknown,
+  csrfToken: string | null,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  return requestJson<unknown>(
+    `/api/admin/plugins/${encodeURIComponent(id)}/actions/${encodeURIComponent(action)}`,
+    {
+      method: 'POST',
+      csrfToken: csrfToken ?? undefined,
+      contentType: 'application/json',
+      body: JSON.stringify(payload ?? {}),
+      signal,
+      defaultErrorMessage: 'Lỗi thực thi action.',
+    },
+  );
+}
+
+
+export async function runPluginAction(
+  id: string,
+  actionId: string,
+  payload: unknown,
+  csrfToken: string,
+): Promise<PluginRunResult> {
+  return requestJson<PluginRunResult>(
+    `/api/admin/plugins/${encodeURIComponent(id)}/actions/${encodeURIComponent(actionId)}`,
+    {
+      method: 'POST',
+      csrfToken,
+      contentType: 'application/json',
+      body: JSON.stringify(payload ?? {}),
+      defaultErrorMessage: 'Lỗi khi thực thi action của plugin.',
+    },
+  );
+}

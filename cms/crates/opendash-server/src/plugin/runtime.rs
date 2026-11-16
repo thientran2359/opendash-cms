@@ -21,6 +21,18 @@ use super::manifest::PluginManifest;
 pub const INVOCATION_FUEL: u64 = 20_000_000;
 pub const MAX_LINEAR_MEMORY_BYTES: usize = 16 * 1024 * 1024; // 16 MB
 pub const INVOCATION_DEADLINE: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Clone)]
+pub struct ActionActorFence {
+    pub user_id: i64,
+    pub required_role: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionExecutionOutput {
+    pub output: Value,
+    pub staged_content_command: Option<host_ops::StagedContentCommand>,
+}
 pub const MAX_CONCURRENT_INVOCATIONS: usize = 4;
 
 #[cfg(test)]
@@ -166,6 +178,87 @@ impl PluginRuntime {
         correlation_id: String,
         allow_loopback: bool,
     ) -> Result<Value, PluginError> {
+        self.run_plugin_with_generation(
+            wasm_bytes,
+            manifest,
+            input,
+            db_pool,
+            correlation_id,
+            allow_loopback,
+            None,
+        )
+        .await
+    }
+
+    pub async fn run_plugin_with_generation(
+        &self,
+        wasm_bytes: Vec<u8>,
+        manifest: PluginManifest,
+        input: Value,
+        db_pool: SqlitePool,
+        correlation_id: String,
+        allow_loopback: bool,
+        expected_generation: Option<i64>,
+    ) -> Result<Value, PluginError> {
+        self.run_plugin_with_mode(
+            wasm_bytes,
+            manifest,
+            input,
+            db_pool,
+            correlation_id,
+            allow_loopback,
+            expected_generation,
+            opendash_core::hooks::HookExecutionMode::Standard,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_plugin_with_mode(
+        &self,
+        wasm_bytes: Vec<u8>,
+        manifest: PluginManifest,
+        input: Value,
+        db_pool: SqlitePool,
+        correlation_id: String,
+        allow_loopback: bool,
+        expected_generation: Option<i64>,
+        execution_mode: opendash_core::hooks::HookExecutionMode,
+        timeout_override: Option<Duration>,
+    ) -> Result<Value, PluginError> {
+        self.run_plugin_action(
+            wasm_bytes,
+            manifest,
+            input,
+            db_pool,
+            correlation_id,
+            allow_loopback,
+            expected_generation,
+            execution_mode,
+            timeout_override,
+            None,
+            None,
+        )
+        .await
+        .map(|res| res.output)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_plugin_action(
+        &self,
+        wasm_bytes: Vec<u8>,
+        manifest: PluginManifest,
+        input: Value,
+        db_pool: SqlitePool,
+        correlation_id: String,
+        allow_loopback: bool,
+        expected_generation: Option<i64>,
+        execution_mode: opendash_core::hooks::HookExecutionMode,
+        timeout_override: Option<Duration>,
+        action_capabilities: Option<Vec<String>>,
+        actor_fence: Option<ActionActorFence>,
+    ) -> Result<ActionExecutionOutput, PluginError> {
         let cancellation_token = Arc::new(AtomicBool::new(false));
 
         // Fail-fast concurrency control to prevent RAM exhaustion
@@ -175,8 +268,9 @@ impl PluginRuntime {
         };
 
         let start = Instant::now();
-        let deadline = start + INVOCATION_DEADLINE;
-        let remaining = INVOCATION_DEADLINE;
+        let effective_budget = timeout_override.unwrap_or(INVOCATION_DEADLINE).min(INVOCATION_DEADLINE);
+        let deadline = start + effective_budget;
+        let remaining = effective_budget;
 
         // In production and tests, always run in isolated worker process (no in-process fallback)
         let current_exe = std::env::current_exe().map_err(|e| {
@@ -236,7 +330,7 @@ impl PluginRuntime {
                 use std::io::{BufRead, BufReader, Write};
 
                 let cancel_watch = cancel_rx;
-                let run = move || -> Result<(Value, BTreeMap<String, Value>), PluginError> {
+                let run = move || -> Result<(Value, BTreeMap<String, Value>, Option<host_ops::StagedContentCommand>), PluginError> {
                     let wasm_len = wasm_bytes.len() as u32;
                     child_stdin
                         .write_all(&wasm_len.to_le_bytes())
@@ -251,6 +345,8 @@ impl PluginRuntime {
                         allow_loopback,
                         correlation_id,
                         deadline_ms: remaining.as_millis() as u64,
+                        execution_mode,
+                        action_capabilities: action_capabilities.clone(),
                     };
                     let req_json = serde_json::to_vec(&req)
                         .map_err(|e| PluginError::Internal(format!("Lỗi serialize request: {e}")))?;
@@ -348,7 +444,11 @@ impl PluginRuntime {
                                             .get("staged_kv_writes")
                                             .and_then(|v| serde_json::from_value(v.clone()).ok())
                                             .unwrap_or_default();
-                                        return Ok((output, staged_writes));
+                                        let staged_content: Option<host_ops::StagedContentCommand> = msg
+                                            .get("staged_content_command")
+                                            .and_then(|v| serde_json::from_value(v.clone()).ok())
+                                            .flatten();
+                                        return Ok((output, staged_writes, staged_content));
                                     } else {
                                         let error_type = msg
                                             .get("error_type")
@@ -397,14 +497,14 @@ impl PluginRuntime {
             *lock = Some(thread_handle);
         }
 
-        let (output_val, staged_writes) = match tokio::time::timeout(remaining, rx).await {
+        let (output_val, staged_writes, staged_content) = match tokio::time::timeout(remaining, rx).await {
             Ok(Ok(res)) => match res {
-                Ok((out, writes)) => {
+                Ok((out, writes, content_cmd)) => {
                     // Disarm child kill in guard on normal completion
                     if let Ok(mut lock) = guard.child.lock() {
                         let _ = lock.take();
                     }
-                    (out, writes)
+                    (out, writes, content_cmd)
                 }
                 Err(err) => {
                     guard.cleanup();
@@ -423,7 +523,20 @@ impl PluginRuntime {
             }
         };
 
+        if !staged_writes.is_empty() && staged_content.is_some() {
+            guard.cleanup();
+            return Err(PluginError::InvalidOutput(
+                "Không cho phép trộn ghi KV và ghi nội dung trong cùng một action (V1).".into(),
+            ));
+        }
+
         if !staged_writes.is_empty() {
+            if execution_mode != opendash_core::hooks::HookExecutionMode::Standard {
+                guard.cleanup();
+                return Err(PluginError::InvalidOutput(
+                    "Ghi KV bị cấm trong save hook.".into(),
+                ));
+            }
             if cancellation_token.load(Ordering::Relaxed) || Instant::now() >= deadline {
                 guard.cleanup();
                 return Err(PluginError::Timeout);
@@ -488,6 +601,60 @@ impl PluginRuntime {
                 return Err(PluginError::Internal(format!(
                     "Không mở được transaction: {e}"
                 )));
+            }
+
+            if let Some(expected_gen) = expected_generation {
+                match crate::storage::plugin::is_plugin_generation_active(
+                    conn,
+                    &plugin_id,
+                    expected_gen,
+                )
+                .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = plugin_kv::rollback(conn).await;
+                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        guard.cleanup();
+                        return Err(PluginError::Disabled);
+                    }
+                    Err(e) => {
+                        let _ = plugin_kv::rollback(conn).await;
+                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        guard.cleanup();
+                        return Err(PluginError::Internal(format!(
+                            "Lỗi kiểm tra generation plugin: {e}"
+                        )));
+                    }
+                }
+            }
+
+            if let Some(ref fence) = actor_fence {
+                match crate::storage::plugin::is_actor_role_active(
+                    conn,
+                    fence.user_id,
+                    &fence.required_role,
+                )
+                .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        let _ = plugin_kv::rollback(conn).await;
+                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        guard.cleanup();
+                        return Err(PluginError::Internal(
+                            "rbac_revoked: Quyền của tài khoản đã bị thu hồi.".into(),
+                        ));
+                    }
+                    Err(e) => {
+                        let _ = plugin_kv::rollback(conn).await;
+                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        guard.cleanup();
+                        return Err(PluginError::Internal(format!(
+                            "Lỗi kiểm tra RBAC actor: {e}"
+                        )));
+                    }
+                }
             }
 
             for (key, val) in staged_writes {
@@ -578,7 +745,10 @@ impl PluginRuntime {
         }
 
         guard.cleanup();
-        Ok(output_val)
+        Ok(ActionExecutionOutput {
+            output: output_val,
+            staged_content_command: staged_content,
+        })
     }
 }
 
@@ -620,6 +790,7 @@ fn execute_wasm_sync(
         input_bytes,
         output_bytes: None,
         host_calls_count: 0,
+        http_calls_count: 0,
         db_pool: Some(db_pool.clone()),
         kv_ipc: None,
         _correlation_id: correlation_id,
@@ -628,6 +799,9 @@ fn execute_wasm_sync(
         staged_kv_writes: Default::default(),
         cancellation_token,
         deadline,
+        execution_mode: opendash_core::hooks::HookExecutionMode::Standard,
+        staged_content_command: None,
+        action_capabilities: None,
     };
 
     let mut store = Store::new(engine, host_ctx);

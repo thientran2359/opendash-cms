@@ -1,0 +1,60 @@
+{
+  "manifest_version": 2,
+  "theme_id": "moc-studio",
+  "name": "Mộc Studio Editorial",
+  "version": "1.0.0",
+  "templates": {
+    "header": "templates/header.html",
+    "footer": "templates/footer.html",
+    "home": "templates/home.html",
+    "page": "templates/page.html",
+    "archive": "templates/archive.html",
+    "single": "templates/single.html",
+    "taxonomy_archive": "templates/taxonomy_archive.html"
+  },
+  "menus": [
+    "primary",
+    "footer"
+  ],
+  "options": [
+    {
+      "key": "studio_eyebrow",
+      "label": "Nhãn đầu trang",
+      "type": "string",
+      "default": "KIẾN TRÚC & NỘI THẤT THỦ CÔNG",
+      "public": true
+    },
+    {
+      "key": "studio_address",
+      "label": "Địa chỉ xưởng thiết kế",
+      "type": "string",
+      "default": "42 Xuân Thủy, Thảo Điền, TP. Thủ Đức, TP. Hồ Chí Minh",
+      "public": true
+    },
+    {
+      "key": "studio_hotline",
+      "label": "Hotline tư vấn",
+      "type": "string",
+      "default": "028 3898 2046",
+      "public": true
+    },
+    {
+      "key": "accent_tone",
+      "label": "Tông nhấn",
+      "type": "select",
+      "default": "terracotta",
+      "public": true,
+      "choices": [
+        { "value": "terracotta", "label": "Đất nung ấm" },
+        { "value": "moss", "label": "Rêu trầm" }
+      ]
+    },
+    {
+      "key": "show_tagline",
+      "label": "Hiện khẩu hiệu ở header",
+      "type": "boolean",
+      "default": true,
+      "public": true
+    }
+  ]
+}

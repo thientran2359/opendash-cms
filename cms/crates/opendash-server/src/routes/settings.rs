@@ -1,20 +1,25 @@
 //! Admin-only SITE-01 API, with ETag/CAS and no-store responses.
 use axum::{
     Json,
-    extract::{State, rejection::JsonRejection},
+    extract::{Path, State, rejection::JsonRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use std::collections::BTreeMap;
+use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqlitePool;
 
 use crate::{
     auth::{require_admin, require_admin_with_csrf},
     error::{ApiError, ApiResult},
-    storage::settings::{self, GeneralSettings, GeneralSettingsInput, SaveOutcome},
+    storage::settings::{
+        self, GeneralSettings, GeneralSettingsInput, PublicSaveOutcome, PublicSiteSettings,
+        PublicSiteSettingsInput, SaveOutcome, ThemeOptionsOutcome, ThemeOptionsSnapshot,
+    },
 };
 
-fn no_store_headers(version: Option<i64>) -> HeaderMap {
+pub(crate) fn no_store_headers(version: Option<i64>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     if let Some(version) = version {
@@ -29,7 +34,7 @@ fn settings_response(settings: GeneralSettings) -> Response {
     (no_store_headers(Some(settings.version)), Json(settings)).into_response()
 }
 
-fn parse_if_match(headers: &HeaderMap) -> ApiResult<i64> {
+pub(crate) fn parse_if_match(headers: &HeaderMap) -> ApiResult<i64> {
     let value = headers
         .get(header::IF_MATCH)
         .ok_or_else(|| ApiError::precondition_required("Cần If-Match để lưu cài đặt."))?
@@ -74,6 +79,7 @@ pub async fn timezones_get(
 }
 
 pub async fn general_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     input: Result<Json<GeneralSettingsInput>, JsonRejection>,
@@ -92,6 +98,89 @@ pub async fn general_put(
         )),
         SaveOutcome::InvalidTimezone => Err(ApiError::bad_request(
             "Múi giờ không có trong danh mục IANA tzdb 2026f.",
+        )),
+    }
+}
+
+fn public_settings_response(settings: PublicSiteSettings) -> Response {
+    (no_store_headers(Some(settings.version)), Json(settings)).into_response()
+}
+
+pub async fn public_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let current = settings::get_public(&db).await?;
+    Ok(public_settings_response(current))
+}
+
+pub async fn public_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    input: Result<Json<PublicSiteSettingsInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) = input.map_err(|err| {
+        if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError(StatusCode::PAYLOAD_TOO_LARGE, "Dữ liệu cài đặt công khai vượt quá 4 KiB.".into())
+        } else {
+            ApiError::bad_request("Dữ liệu cài đặt công khai không hợp lệ.")
+        }
+    })?;
+    let input = input
+        .validate()
+        .map_err(|msg| ApiError(StatusCode::UNPROCESSABLE_ENTITY, msg.into()))?;
+    match settings::save_public(&db, input, version)
+        .await
+        .map_err(map_storage_error)?
+    {
+        PublicSaveOutcome::Saved(saved) => Ok(public_settings_response(saved)),
+        PublicSaveOutcome::Stale => Err(ApiError::precondition_failed(
+            "Cài đặt công khai đã thay đổi ở một tab khác. Form chưa lưu vẫn được giữ lại.",
+        )),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeOptionsPutInput {
+    pub values: BTreeMap<String, serde_json::Value>,
+}
+
+fn theme_options_response(snapshot: ThemeOptionsSnapshot) -> Response {
+    (no_store_headers(Some(snapshot.version)), Json(snapshot)).into_response()
+}
+
+pub async fn theme_options_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(theme_id): Path<String>,
+) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let Some(snapshot) = settings::get_theme_options(&db, &theme_id).await? else {
+        return Err(ApiError::not_found("Không tìm thấy theme."));
+    };
+    Ok(theme_options_response(snapshot))
+}
+
+pub async fn theme_options_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(theme_id): Path<String>,
+    input: Result<Json<ThemeOptionsPutInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) =
+        input.map_err(|_| ApiError::bad_request("Dữ liệu theme options không hợp lệ."))?;
+    match settings::put_theme_options(&db, &theme_id, version, input.values)
+        .await?
+    {
+        ThemeOptionsOutcome::Saved(saved) => Ok(theme_options_response(saved)),
+        ThemeOptionsOutcome::NotFound => Err(ApiError::not_found("Không tìm thấy theme.")),
+        ThemeOptionsOutcome::Stale => Err(ApiError::precondition_failed(
+            "Theme options đã thay đổi ở phiên khác. Tải lại trước khi lưu.",
         )),
     }
 }

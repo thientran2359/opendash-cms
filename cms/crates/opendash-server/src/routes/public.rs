@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashSet};
 
 use axum::{
+    Extension,
     extract::{RawQuery, State},
     http::header,
     response::{Html, IntoResponse, Response},
@@ -10,9 +11,13 @@ use sqlx::SqlitePool;
 use opendash_core::id::valid_package_id;
 
 use crate::{
+    content_render::{self, SiteContext},
     error::ApiResult,
-    page::{render_builder_with_lists, render_legacy_state},
-    storage::builder,
+    page::{render_builder_with_lists_and_forms, render_legacy_state},
+    public_context::{CanonicalUrlBuilder, PublicRequestContext},
+    routes::themes::ThemeStoreRoot,
+    storage::{builder, overrides, settings, theme as theme_storage},
+    theme,
 };
 
 /// Malformed, repeated or unknown list-page parameters cannot become SQL or
@@ -45,22 +50,79 @@ fn parsed_list_pages(raw: Option<&str>) -> BTreeMap<String, i64> {
 
 pub async fn public_page(
     State(db): State<SqlitePool>,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
+    let _context = PublicRequestContext::Home {
+        canonical_path: CanonicalUrlBuilder::home().to_owned(),
+    };
+    let active_v2 = match themes_root {
+        Some(Extension(root)) => theme_storage::load_active_v2_role_templates(&db, &root.0).await?,
+        None => None,
+    };
     // One SQLite read snapshot for source, document, active theme and block
     // templates. Do not split them across old / and new Builder reads.
     let (state, bindings, lists) =
         builder::read_public_resolved(&db, &parsed_list_pages(raw.as_deref())).await?;
     if let Some(document) = &state.saved {
-        return Ok(rendered_layout(
-            render_builder_with_lists(&state, document, false, &bindings, &lists)?.html,
-        ));
+        let forms = builder::resolve_contact_forms(&db, document).await?;
+        let rendered_layout_res =
+            render_builder_with_lists_and_forms(&state, document, false, &bindings, &lists, &forms)?;
+        let allow_form_self = rendered_layout_res.has_active_contact_form;
+        let mut html = rendered_layout_res.html;
+        let site = settings::get_general(&db).await?;
+        let theme_opts = settings::get_active_public_theme_options(&db).await?;
+        let site_ctx = SiteContext {
+            title: &site.site_title,
+            tagline: &site.tagline,
+        };
+        let (header, footer) = overrides::resolve_and_render_header_footer(
+            &db,
+            active_v2.as_ref(),
+            &site_ctx,
+            &theme_opts,
+            None,
+        )
+        .await?;
+        let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
+        html = content_render::compose_document_with_seo(
+            header.as_deref(),
+            &html,
+            footer.as_deref(),
+            &seo_view,
+        )?;
+        return Ok(rendered_layout_with_form_csp(html, allow_form_self));
     }
-    let html = match render_legacy_state(&state)? {
+    if let Some(v2) = &active_v2 {
+        if let Some(home_tpl) = v2.roles.get("home") {
+            let site = settings::get_general(&db).await?;
+            let theme_opts = settings::get_active_public_theme_options(&db).await?;
+            let site_ctx = SiteContext {
+                title: &site.site_title,
+                tagline: &site.tagline,
+            };
+            if let Ok(home_html) = theme::render_content(home_tpl, &serde_json::json!({ "site": site_ctx, "options": theme_opts })) {
+                let (header, footer) = overrides::resolve_and_render_header_footer(
+                    &db,
+                    Some(v2),
+                    &site_ctx,
+                    &theme_opts,
+                    None,
+                )
+                .await?;
+                let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
+                let html = content_render::compose_document_with_seo(header.as_deref(), &home_html, footer.as_deref(), &seo_view)?;
+                return Ok(rendered_layout_with_form_csp(html, false));
+            }
+        }
+    }
+    let raw_html = match render_legacy_state(&state)? {
         Some(snapshot) => snapshot.html,
         None => "<p>Chưa lưu block.</p>".into(),
     };
-    Ok(rendered(html))
+    let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
+    let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
+    Ok(rendered_layout(html))
 }
 
 #[cfg(test)]
@@ -81,17 +143,41 @@ mod list_query_tests {
     }
 }
 
-pub fn rendered_layout(html: String) -> Response {
+pub fn rendered_layout_with_form_csp(html: String, allow_form_self: bool) -> Response {
+    let has_video = html.contains("<video ");
+    let csp = match (allow_form_self, has_video) {
+        (true, true) => {
+            "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        }
+        (true, false) => {
+            "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        }
+        (false, true) => {
+            "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        }
+        (false, false) => {
+            "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        }
+    };
+    let referrer_policy = if allow_form_self {
+        "same-origin"
+    } else {
+        "no-referrer"
+    };
     (
         [
-            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+            (header::CONTENT_SECURITY_POLICY, csp),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-            (header::REFERRER_POLICY, "no-referrer"),
+            (header::REFERRER_POLICY, referrer_policy),
             (header::CACHE_CONTROL, "no-store"),
         ],
         Html(html),
     )
         .into_response()
+}
+
+pub fn rendered_layout(html: String) -> Response {
+    rendered_layout_with_form_csp(html, false)
 }
 
 pub fn rendered(html: String) -> Response {

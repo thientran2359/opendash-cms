@@ -28,3 +28,13 @@ Payload có giới hạn: `{repository, issue_number, task_id, target, source_sh
 4. Lưu evidence đủ host, OS, phiên bản/API, request ID đã redact, result và giới hạn qua PR tài liệu được review. Chỉ khi một host PASS mới bật `SEND` cho **host đó**; host kia vẫn `BLOCKED_ADAPTER`.
 
 Sau khi có PONG evidence, Atlas dùng `RUN` với **Issue đã giao** và `send-issue` một lần; không tạo lại assignment. `STATUS` tra theo Issue/Task/source bằng `status-task`, không cần nhớ request UUID. Với host offline hoặc `can_send=false`, chặn, không retry và không coi task đã thực hiện. Rotation/restart CoS và thử từ chối bearer cũ cần phiên kiểm chứng có kiểm soát vì có thể làm gián đoạn chat đang hoạt động.
+
+## Author-owned documentation PR correction (2026-11-13 extension)
+
+Owner-authorized maintenance adds `check-pr`, `send-pr`, `status-pr`. This is not implementation Issue pickup: a Draft documentation PR may be corrected while its G2/G3 remain proposed/draft. Do not invent an Issue/Task ID or move Project Ready/Done.
+
+The GitHub preflight uses host-local authenticated `gh api --hostname github.com` against the fixed repository. It requires open same-repo PR to main, explicit agent identity plus agent-owned branch, exact head/base SHA, actionable signed Atlas review pinned to head, and a complete bounded list of 1–100 added/modified Markdown files under docs or .agents/research. Both PR and review author must be the repository's authorized shared account; a signature from an outside contributor is insufficient. No code/script/skill edits, rename/delete, free-form payload or arbitrary review text is sent. Revalidate immediately before POST; recipient rechecks all pins and author file ownership before editing.
+
+Durable lock identity is `(target, PR number)`, independent of head/review/request UUID. Same request replays receipt only; uncertain delivery or changed head never authorizes a second send. `status-pr` finds the receipt by PR without a remembered UUID and reports changed head/review references. Recovery from lock-without-receipt is UNKNOWN and requires reconciliation, not automatic release. Agent slot/absence of conflicting work is a sender preflight requirement; GitHub scope alone does not prove the agent is idle.
+
+Windows ACL inspection now uses the native system Windows PowerShell executable and a process-local system-only PSModulePath. Module/read errors terminate and fail closed. It does not modify global environment or any ACL/token. The SSH transport explicitly streams Python source/output as UTF-8 to preserve non-ASCII signed review markers on Windows→Mac.

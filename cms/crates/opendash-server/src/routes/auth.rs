@@ -15,7 +15,9 @@ use crate::{
     storage::auth as auth_storage,
 };
 
+
 pub async fn auth_setup(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     Json(input): Json<AuthInput>,
 ) -> ApiResult<StatusCode> {
@@ -28,6 +30,8 @@ pub async fn auth_setup(
 }
 
 pub async fn auth_login(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    runtime_cfg: Option<axum::Extension<crate::config::RuntimeConfigV1>>,
     State(db): State<SqlitePool>,
     Json(input): Json<AuthInput>,
 ) -> ApiResult<Response> {
@@ -57,10 +61,14 @@ pub async fn auth_login(
         return Err(invalid_creds());
     }
 
-    let cookie_header = auth::session_cookie_header(&session_token);
+    let secure_cookie =
+        runtime_cfg.is_some_and(|axum::Extension(cfg)| cfg.trusted_origin_is_https());
+    let cookie_header = auth::session_cookie_header_with_secure(&session_token, secure_cookie);
+    let site_instance_id = auth_storage::compute_site_instance_id(&db).await;
     let body = Json(AuthResponse {
         user: AuthUser { id, username, role },
         csrf_token,
+        site_instance_id,
     });
 
     Ok(([(header::SET_COOKIE, cookie_header)], body).into_response())
@@ -71,15 +79,24 @@ pub async fn auth_me(
     headers: HeaderMap,
 ) -> ApiResult<Json<AuthResponse>> {
     let session = require_session(&headers, &db).await?;
+    let site_instance_id = auth_storage::compute_site_instance_id(&db).await;
     Ok(Json(AuthResponse {
         user: session.user,
         csrf_token: session.csrf_token,
+        site_instance_id,
     }))
 }
 
-pub async fn auth_logout(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
+pub async fn auth_logout(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    runtime_cfg: Option<axum::Extension<crate::config::RuntimeConfigV1>>,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
     let session = require_session_with_csrf(&headers, &db).await?;
     auth::delete_session(&db, &session.token_hash).await?;
-    let clear_cookie = auth::clear_session_cookie_header();
+    let secure_cookie =
+        runtime_cfg.is_some_and(|axum::Extension(cfg)| cfg.trusted_origin_is_https());
+    let clear_cookie = auth::clear_session_cookie_header_with_secure(secure_cookie);
     Ok((StatusCode::NO_CONTENT, [(header::SET_COOKIE, clear_cookie)]).into_response())
 }

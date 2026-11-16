@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use opendash_core::content::ContentEntryInput;
+use opendash_core::content::{
+    ContentEntryInput, ContentTypeDefinition, EffectiveContentSchema, EffectiveFieldStatus,
+    FieldRole, PatchField, deserialize_patch_field,
+};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -125,6 +128,41 @@ async fn decoded_with_terms(
 /// Acquire a writer before checking a term's existence or entry CAS. The same
 /// SQLite writer reservation is used by taxonomy term deletion, so no race can
 /// commit a link to a term that has just been deleted.
+#[derive(Debug, Clone)]
+pub struct PluginActionFence {
+    pub plugin_id: String,
+    pub expected_generation: i64,
+    pub required_role: String,
+}
+
+async fn verify_plugin_action_fence(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: &SessionContext,
+    fence: &PluginActionFence,
+) -> ApiResult<()> {
+    let active = crate::storage::plugin::is_plugin_generation_active(
+        &mut **tx,
+        &fence.plugin_id,
+        fence.expected_generation,
+    )
+    .await?;
+    if !active {
+        return Err(ApiError::conflict(
+            "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",
+        ));
+    }
+    let role_ok = crate::storage::plugin::is_actor_role_active(
+        &mut **tx,
+        actor.user.id,
+        &fence.required_role,
+    )
+    .await?;
+    if !role_ok {
+        return Err(ApiError::forbidden("Quyền của tài khoản đã bị thu hồi."));
+    }
+    Ok(())
+}
+
 async fn begin_entry_write<'a>(
     db: &'a SqlitePool,
     actor: &SessionContext,
@@ -142,9 +180,7 @@ async fn begin_entry_write<'a>(
     .fetch_optional(&mut *tx)
     .await?;
     match current {
-        Some((id, role)) if id == actor.user.id && matches!(role.as_str(), "admin" | "editor") => {
-            Ok(tx)
-        }
+        Some((id, role)) if id == actor.user.id && role == actor.user.role.as_str() => Ok(tx),
         Some(_) => Err(ApiError::forbidden(
             "Bạn không có quyền chỉnh sửa nội dung.",
         )),
@@ -452,9 +488,26 @@ pub async fn create_entry(
     db: &SqlitePool,
     actor: &SessionContext,
     type_key: &str,
+    schema: &opendash_core::content::ContentTypeDefinition,
     input: &ContentEntryInput,
 ) -> ApiResult<ContentEntryRecord> {
+    create_entry_with_fence(db, actor, type_key, schema, input, None).await
+}
+
+pub async fn create_entry_with_fence(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    schema: &opendash_core::content::ContentTypeDefinition,
+    input: &ContentEntryInput,
+    fence: Option<&PluginActionFence>,
+) -> ApiResult<ContentEntryRecord> {
     let mut tx = begin_entry_write(db, actor).await?;
+    if let Some(f) = fence {
+        verify_plugin_action_fence(&mut tx, actor, f).await?;
+    }
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
+    crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, ids).await?;
     }
@@ -496,12 +549,39 @@ pub async fn update_entry(
     db: &SqlitePool,
     actor: &SessionContext,
     type_key: &str,
+    schema: &opendash_core::content::ContentTypeDefinition,
     id: i64,
     expected_version: i64,
     input: &ContentEntryInput,
 ) -> ApiResult<ContentEntryRecord> {
+    update_entry_with_fence(db, actor, type_key, schema, id, expected_version, input, None).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn update_entry_with_fence(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    schema: &opendash_core::content::ContentTypeDefinition,
+    id: i64,
+    expected_version: i64,
+    input: &ContentEntryInput,
+    fence: Option<&PluginActionFence>,
+) -> ApiResult<ContentEntryRecord> {
     let mut tx = begin_entry_write(db, actor).await?;
+    if let Some(f) = fence {
+        verify_plugin_action_fence(&mut tx, actor, f).await?;
+    }
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
+    let old_slug: String = sqlx::query_scalar(
+        "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
+    crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, ids).await?;
     }
@@ -533,6 +613,7 @@ pub async fn update_entry(
             if let Some(ids) = &input.term_ids {
                 replace_term_ids(&mut tx, id, ids).await?;
             }
+            crate::storage::seo::record_slug_change_redirect_in_tx(&mut tx, id, type_key, &old_slug, &input.slug).await?;
             let row: EntryRow = sqlx::query_as(
                 "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -548,12 +629,503 @@ pub async fn update_entry(
     }
 }
 
+
+pub fn filter_entry_values_for_role(
+    record: &mut ContentEntryRecord,
+    effective: &EffectiveContentSchema,
+    caller_role: FieldRole,
+) {
+    record.values.retain(|key, _| {
+        effective
+            .effective_fields
+            .get(key)
+            .map(|fe| caller_role >= fe.definition.min_view_role)
+            .unwrap_or(true)
+    });
+}
+
+async fn verify_schema_token_in_tx(
+    tx: &mut sqlx::SqliteConnection,
+    type_key: &str,
+    expected_schema_token: &str,
+) -> ApiResult<EffectiveContentSchema> {
+    let Some(eff) = crate::storage::content::load_effective_content_schema_in_tx(tx, type_key).await? else {
+        return Err(ApiError::not_found(format!(
+            "Kh?ng t?m th?y lo?i n?i dung '{type_key}'."
+        )));
+    };
+    if eff.schema_token != expected_schema_token {
+        return Err(ApiError::conflict(format!(
+            "schema_version_conflict: schema_token hi?n t?i l? '{}', kh?ng kh?p '{}'.",
+            eff.schema_token, expected_schema_token
+        )));
+    }
+    Ok(eff)
+}
+
+pub async fn create_entry_with_schema_fence(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    schema: &ContentTypeDefinition,
+    input: &ContentEntryInput,
+    preflight_schema_token: &str,
+) -> ApiResult<ContentEntryRecord> {
+    let mut tx = begin_entry_write(db, actor).await?;
+    verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
+    crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
+    if let Some(ids) = &input.term_ids {
+        validate_term_ids(&mut tx, ids).await?;
+    }
+    let json = serde_json::to_string(&input.values)?;
+    let result = sqlx::query(
+        "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
+         VALUES (?, ?, ?, ?, CASE WHEN ? IN ('post', 'page') THEN 'draft' ELSE 'published' END)",
+    )
+    .bind(type_key)
+    .bind(&input.slug)
+    .bind(&input.title)
+    .bind(json)
+    .bind(type_key)
+    .execute(&mut *tx)
+    .await;
+    let id = match result {
+        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+            return Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."));
+        }
+        other => other?.last_insert_rowid(),
+    };
+    if let Some(ids) = &input.term_ids {
+        replace_term_ids(&mut tx, id, ids).await?;
+    }
+    let row: EntryRow = sqlx::query_as(
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+         FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let record = decoded_with_terms(&mut tx, row).await?;
+    tx.commit().await?;
+    Ok(record)
+}
+
+pub async fn update_entry_with_schema_fence(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    schema: &ContentTypeDefinition,
+    id: i64,
+    expected_version: i64,
+    input: &ContentEntryInput,
+    preflight_schema_token: &str,
+) -> ApiResult<ContentEntryRecord> {
+    let mut tx = begin_entry_write(db, actor).await?;
+    verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
+    let old_slug: String = sqlx::query_scalar(
+        "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
+    crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
+    if let Some(ids) = &input.term_ids {
+        validate_term_ids(&mut tx, ids).await?;
+    }
+    let json = serde_json::to_string(&input.values)?;
+    let result = sqlx::query(
+        "UPDATE content_entries
+         SET slug = ?, title = ?, values_json = ?, version = version + 1,
+             updated_at = datetime('now')
+         WHERE content_type_key = ? AND id = ? AND version = ?",
+    )
+    .bind(&input.slug)
+    .bind(&input.title)
+    .bind(json)
+    .bind(type_key)
+    .bind(id)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await;
+    match result {
+        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+            Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."))
+        }
+        other => {
+            if other?.rows_affected() == 0 {
+                return Err(ApiError::precondition_failed(
+                    "Phi?n b?n n?i dung ?? thay ??i. H?y t?i l?i tr??c khi l?u.",
+                ));
+            }
+            if let Some(ids) = &input.term_ids {
+                replace_term_ids(&mut tx, id, ids).await?;
+            }
+            crate::storage::seo::record_slug_change_redirect_in_tx(&mut tx, id, type_key, &old_slug, &input.slug).await?;
+            let row: EntryRow = sqlx::query_as(
+                "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+                 FROM content_entries WHERE content_type_key = ? AND id = ?",
+            )
+            .bind(type_key)
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let record = decoded_with_terms(&mut tx, row).await?;
+            tx.commit().await?;
+            Ok(record)
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompositeEntrySaveInput {
+    #[serde(default)]
+    pub expected_version: Option<i64>,
+    #[serde(default)]
+    pub expected_schema_token: Option<String>,
+    pub title: String,
+    pub slug: String,
+    #[serde(default)]
+    pub publication_status: Option<String>,
+    #[serde(default)]
+    pub values: BTreeMap<String, Value>,
+    #[serde(default)]
+    pub term_ids: Option<Vec<i64>>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub custom_path: PatchField<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub seo: PatchField<crate::seo::SeoMetadataInput>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CompositeEntrySaveResult {
+    pub entry: ContentEntryRecord,
+    pub custom_path: Option<String>,
+    pub seo: Option<crate::seo::EntrySeoSnapshot>,
+    pub schema_token: String,
+}
+
+pub struct CompositePreflightPlan {
+    pub preflight_schema_token: String,
+    pub effective: EffectiveContentSchema,
+    pub effective_ct_def: ContentTypeDefinition,
+    pub merged_input: ContentEntryInput,
+    pub publication_status: Option<String>,
+}
+
+fn actor_field_role(role: auth::Role) -> FieldRole {
+    match role {
+        auth::Role::Admin => FieldRole::Admin,
+        auth::Role::Editor => FieldRole::Editor,
+    }
+}
+
+fn effective_as_ct_def(effective: &EffectiveContentSchema) -> ContentTypeDefinition {
+    ContentTypeDefinition {
+        key: effective.base.descriptor.key.clone(),
+        label: effective.base.descriptor.label.clone(),
+        fields: effective
+            .effective_fields
+            .values()
+            .map(|fe| fe.definition.clone())
+            .collect(),
+    }
+}
+
+pub async fn prepare_composite_entry_save(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    entry_id: Option<i64>,
+    input: &CompositeEntrySaveInput,
+) -> ApiResult<CompositePreflightPlan> {
+    let client_token = input
+        .expected_schema_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            ApiError(
+                axum::http::StatusCode::PRECONDITION_REQUIRED,
+                "missing_schema_token: Thi?u expected_schema_token.".into(),
+            )
+        })?;
+
+    let effective = crate::storage::content::load_effective_content_schema(db, type_key)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("Kh?ng t?m th?y lo?i n?i dung '{type_key}'.")))?;
+
+    if client_token != effective.schema_token {
+        return Err(ApiError::conflict(format!(
+            "schema_version_conflict: schema_token hi?n t?i l? '{}'.",
+            effective.schema_token
+        )));
+    }
+
+    if entry_id.is_none() && input.expected_version.is_some() {
+        return Err(ApiError::bad_request(
+            "unexpected_version_on_create: Kh?ng truy?n expected_version khi t?o m?i.",
+        ));
+    }
+    if entry_id.is_some() && input.expected_version.is_none() {
+        return Err(ApiError(
+            axum::http::StatusCode::PRECONDITION_REQUIRED,
+            "missing_expected_version: Thi?u expected_version khi c?p nh?t.".into(),
+        ));
+    }
+
+    if let Some(status) = &input.publication_status {
+        if status != "draft" && status != "published" {
+            return Err(ApiError::unprocessable(
+                "publication_status ch? h? tr? 'draft' ho?c 'published'.",
+            ));
+        }
+    }
+
+    // Check Field ACL BEFORE reading existing entry / comparing values (no value-comparison oracle)
+    let caller_role = actor_field_role(actor.user.role);
+    for key in input.values.keys() {
+        let Some(fe) = effective.effective_fields.get(key) else {
+            return Err(ApiError::unprocessable(format!(
+                "unknown_field_key: Tr??ng '{key}' kh?ng thu?c lo?i n?i dung '{type_key}'."
+            )));
+        };
+        if caller_role < fe.definition.min_edit_role {
+            return Err(ApiError::forbidden(format!(
+                "field_edit_forbidden: Vai tr? hi?n t?i kh?ng c? quy?n s?a tr??ng '{key}'."
+            )));
+        }
+    }
+
+    // Validate patch syntax before DB merge/tx
+    if let PatchField::Set(raw_path) = &input.custom_path {
+        let trimmed = raw_path.trim();
+        if !trimmed.is_empty() {
+            crate::seo::validate_custom_entry_path(trimmed).map_err(ApiError::unprocessable)?;
+        }
+    }
+    if let PatchField::Set(seo_in) = &input.seo {
+        crate::seo::validate_seo_input(seo_in)?;
+    }
+
+    let merged_values = match entry_id {
+        None => {
+            let mut out = BTreeMap::new();
+            for (k, fe) in &effective.effective_fields {
+                if !input.values.contains_key(k)
+                    && fe.effective_status != EffectiveFieldStatus::Withdrawn
+                    && let Some(def) = &fe.definition.default_value
+                {
+                    out.insert(k.clone(), def.clone());
+                }
+            }
+            for (k, v) in &input.values {
+                if !v.is_null() {
+                    out.insert(k.clone(), v.clone());
+                }
+            }
+            out
+        }
+        Some(id) => {
+            let expected_ver = input.expected_version.unwrap();
+            let existing = get_entry(db, type_key, id)
+                .await?
+                .ok_or_else(|| ApiError::not_found("Kh?ng t?m th?y n?i dung."))?;
+            if existing.version != expected_ver {
+                return Err(ApiError::precondition_failed(
+                    "Phi?n b?n n?i dung ?? thay ??i. H?y t?i l?i tr??c khi l?u.",
+                ));
+            }
+            let mut out = existing.values;
+            for (k, v) in &input.values {
+                if v.is_null() {
+                    out.remove(k);
+                } else {
+                    out.insert(k.clone(), v.clone());
+                }
+            }
+            out
+        }
+    };
+
+    let merged_input = ContentEntryInput {
+        title: input.title.clone(),
+        slug: input.slug.clone(),
+        values: merged_values,
+        term_ids: input.term_ids.clone(),
+    };
+    merged_input
+        .validate_against_effective(&effective)
+        .map_err(ApiError::unprocessable)?;
+
+    let effective_ct_def = effective_as_ct_def(&effective);
+    crate::storage::media::require_existing_references(db, &effective_ct_def, &merged_input).await?;
+
+    Ok(CompositePreflightPlan {
+        preflight_schema_token: effective.schema_token.clone(),
+        effective,
+        effective_ct_def,
+        merged_input,
+        publication_status: input.publication_status.clone(),
+    })
+}
+
+pub async fn commit_composite_entry_save(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    entry_id: Option<i64>,
+    input: &CompositeEntrySaveInput,
+    plan: &CompositePreflightPlan,
+) -> ApiResult<CompositeEntrySaveResult> {
+    let mut tx = begin_entry_write(db, actor).await?;
+    let effective = verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
+
+    crate::storage::seo::check_default_slug_claim_in_tx(
+        &mut tx,
+        type_key,
+        &plan.merged_input.slug,
+        entry_id,
+    )
+    .await?;
+    crate::storage::media::require_existing_references_in_tx(
+        &mut tx,
+        &plan.effective_ct_def,
+        &plan.merged_input,
+    )
+    .await?;
+    if let Some(ids) = &plan.merged_input.term_ids {
+        validate_term_ids(&mut tx, ids).await?;
+    }
+
+    let values_json = serde_json::to_string(&plan.merged_input.values)?;
+    let saved_id = match entry_id {
+        None => {
+            let status_clause = plan
+                .publication_status
+                .as_deref()
+                .unwrap_or(if matches!(type_key, "post" | "page") {
+                    "draft"
+                } else {
+                    "published"
+                });
+            let res = sqlx::query(
+                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(type_key)
+            .bind(&plan.merged_input.slug)
+            .bind(&plan.merged_input.title)
+            .bind(&values_json)
+            .bind(status_clause)
+            .execute(&mut *tx)
+            .await;
+            match res {
+                Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+                    return Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."));
+                }
+                other => other?.last_insert_rowid(),
+            }
+        }
+        Some(id) => {
+            let expected_ver = input.expected_version.unwrap();
+            current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
+            let old_slug: String = sqlx::query_scalar(
+                "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+            )
+            .bind(type_key)
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let res = sqlx::query(
+                "UPDATE content_entries
+                 SET slug = ?, title = ?, values_json = ?,
+                     publication_status = COALESCE(?, publication_status),
+                     version = version + 1,
+                     updated_at = datetime('now')
+                 WHERE content_type_key = ? AND id = ? AND version = ?",
+            )
+            .bind(&plan.merged_input.slug)
+            .bind(&plan.merged_input.title)
+            .bind(&values_json)
+            .bind(plan.publication_status.as_deref())
+            .bind(type_key)
+            .bind(id)
+            .bind(expected_ver)
+            .execute(&mut *tx)
+            .await;
+            match res {
+                Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+                    return Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."));
+                }
+                other => {
+                    if other?.rows_affected() == 0 {
+                        return Err(ApiError::precondition_failed(
+                            "Phi?n b?n n?i dung ?? thay ??i. H?y t?i l?i tr??c khi l?u.",
+                        ));
+                    }
+                }
+            }
+            crate::storage::seo::record_slug_change_redirect_in_tx(
+                &mut tx,
+                id,
+                type_key,
+                &old_slug,
+                &plan.merged_input.slug,
+            )
+            .await?;
+            id
+        }
+    };
+
+    if let Some(ids) = &plan.merged_input.term_ids {
+        replace_term_ids(&mut tx, saved_id, ids).await?;
+    }
+
+    let row: EntryRow = sqlx::query_as(
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+         FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(saved_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let mut record = decoded_with_terms(&mut tx, row).await?;
+
+    let custom_path =
+        crate::storage::seo::apply_entry_route_patch_in_tx(&mut tx, saved_id, &input.custom_path)
+            .await?;
+    let seo = crate::storage::seo::apply_entry_seo_patch_in_tx(
+        &mut tx,
+        saved_id,
+        record.version,
+        &input.seo,
+    )
+    .await?;
+
+    tx.commit().await?;
+    filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
+
+    Ok(CompositeEntrySaveResult {
+        entry: record,
+        custom_path,
+        seo,
+        schema_token: effective.schema_token,
+    })
+}
+
 pub async fn delete_entry(
     db: &SqlitePool,
     type_key: &str,
     id: i64,
     expected_version: i64,
 ) -> ApiResult<()> {
+    let mut tx = db.begin().await?;
     let result = sqlx::query(
         "DELETE FROM content_entries
          WHERE content_type_key = ? AND id = ? AND version = ?",
@@ -561,11 +1133,16 @@ pub async fn delete_entry(
     .bind(type_key)
     .bind(id)
     .bind(expected_version)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Err(missing_or_stale(db, type_key, id).await?);
     }
+    sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -577,6 +1154,7 @@ pub async fn set_publication_status(
     expected_version: i64,
     status: &str,
 ) -> ApiResult<ContentEntryRecord> {
+    let mut tx = db.begin().await?;
     let result = sqlx::query(
         "UPDATE content_entries
          SET publication_status = ?, version = version + 1, updated_at = datetime('now')
@@ -587,11 +1165,13 @@ pub async fn set_publication_status(
     .bind(type_key)
     .bind(id)
     .bind(expected_version)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Err(missing_or_stale(db, type_key, id).await?);
     }
+    crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
+    tx.commit().await?;
     get_entry(db, type_key, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải trạng thái xuất bản."))

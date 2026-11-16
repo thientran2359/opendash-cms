@@ -23,6 +23,10 @@ pub struct WorkerInvocationRequest {
     pub allow_loopback: bool,
     pub correlation_id: String,
     pub deadline_ms: u64,
+    #[serde(default)]
+    pub execution_mode: opendash_core::hooks::HookExecutionMode,
+    #[serde(default)]
+    pub action_capabilities: Option<Vec<String>>,
 }
 
 pub fn run_worker_from_stdio() {
@@ -124,6 +128,7 @@ pub fn run_worker_from_stdio() {
         input_bytes,
         output_bytes: None,
         host_calls_count: 0,
+        http_calls_count: 0,
         db_pool: None,
         kv_ipc: Some(kv_ipc),
         _correlation_id: req.correlation_id,
@@ -132,6 +137,9 @@ pub fn run_worker_from_stdio() {
         staged_kv_writes: Default::default(),
         cancellation_token,
         deadline,
+        execution_mode: req.execution_mode,
+        staged_content_command: None,
+        action_capabilities: req.action_capabilities,
     };
 
     let mut store = Store::new(&engine, host_ctx);
@@ -231,7 +239,8 @@ pub fn run_worker_from_stdio() {
         "ok": true,
         "code": exit_code,
         "output": output_val,
-        "staged_kv_writes": ctx.staged_kv_writes
+        "staged_kv_writes": ctx.staged_kv_writes,
+        "staged_content_command": ctx.staged_content_command
     });
     println!("{}{}", IPC_PREFIX, res_msg);
     let _ = std::io::stdout().flush();

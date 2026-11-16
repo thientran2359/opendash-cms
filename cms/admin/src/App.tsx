@@ -1,17 +1,29 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AuthUser, PluginSummary, type Role } from './types.ts';
 import * as api from './api/index.ts';
-import { AdminShell, isViewAllowed, parseAdminView, type AdminView } from './shell/AdminShell.tsx';
+import { AdminShell, isRouteAllowed, parseAdminRoute, type ParsedRoute } from './shell/AdminShell.tsx';
+import { listContentTypes } from './api/content.ts';
+import type { OwnedContentType } from './features/content/types.ts';
+import { ContentTypeSchemaSettings } from './features/content/ContentTypeSchemaSettings.tsx';
+import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
-import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
-import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
+import { SingleEditWorkspace } from './features/editor/SingleEditWorkspace.tsx';
+import { editorDraftStore } from './features/editor/EditorDraftStore.ts';
+
 import { MediaRoute } from './shell/MediaRoute.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
+import { MenusPanel } from './features/menus/MenusPanel.tsx';
+import { SeoPanel } from './features/seo/SeoPanel.tsx';
+import { ContactPanel } from './features/contact/ContactPanel.tsx';
+import { SmtpSettingsPanel } from './features/contact/SmtpSettingsPanel.tsx';
+import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
+import { BackupsPanel } from './features/operations/BackupsPanel.tsx';
+import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 
 export const App: React.FC = () => {
@@ -20,7 +32,11 @@ export const App: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<string>('Đang kiểm tra trạng thái phiên...');
   const [isError, setIsError] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [activeView, setActiveView] = useState<AdminView>(() => parseAdminView(window.location.hash, window.location.pathname));
+  const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
+  const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
+  const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
+  const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
+  const [authGeneration, setAuthGeneration] = useState<number>(1);
   const [contentDirty, setContentDirty] = useState(false);
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
@@ -48,13 +64,27 @@ export const App: React.FC = () => {
 
   // Hash routing works from /admin/ and /builder without server catch-all.
   // The existing editors stay mounted in AdminShell across route changes.
+  const loadCptTypes = useCallback(async () => {
+    try {
+      const list = await listContentTypes();
+      setCptTypes(list);
+    } catch {
+      // Non-fatal on boot; panels handle explicit errors.
+    }
+  }, []);
+
   useEffect(() => {
     const synchronize = () => {
-      const requested = parseAdminView(window.location.hash, window.location.pathname);
-      const next = user && !isViewAllowed(requested, user.role) ? 'dashboard' : requested;
-      setActiveView(next);
-      if (user && next !== requested) {
-        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/' + next);
+      const requested = parseAdminRoute(window.location.hash, window.location.pathname);
+      if (user && requested.isLegacyContentRedirect) {
+        const targetHash = user.role === 'admin' ? '#/settings/content-types' : '#/posts';
+        window.history.replaceState(null, '', window.location.pathname + window.location.search + targetHash);
+        setRoute(parseAdminRoute(targetHash, window.location.pathname));
+        return;
+      }
+      setRoute(requested);
+      if (requested.view === 'settings' && requested.sub === 'content-types' && requested.typeKey) {
+        setSelectedSchemaTypeKey(requested.typeKey);
       }
     };
     synchronize();
@@ -72,10 +102,14 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('beforeunload', guard);
   }, [builderDirty, contentDirty, postsDirty, pagesDirty]);
 
-  const navigateTo = (view: AdminView) => {
-    if (!user || !isViewAllowed(view, user.role)) return;
-    setActiveView(view);
-    if (window.location.hash !== '#/' + view) window.location.hash = '/' + view;
+  const navigateHash = (hash: string) => {
+    if (!user) return;
+    const normalized = hash.startsWith('#') ? hash : '#' + hash;
+    if (window.location.hash !== normalized) {
+      window.location.hash = normalized.slice(1);
+    } else {
+      setRoute(parseAdminRoute(normalized, window.location.pathname));
+    }
   };
 
   const setStatus = (msg: string, error: boolean = false) => {
@@ -88,9 +122,9 @@ export const App: React.FC = () => {
     const msg = err instanceof Error ? err.message : fallback;
     setStatus(msg, true);
     if (is401) {
+      editorDraftStore.quarantineAll();
       setUser(null);
       setCsrfToken(null);
-      // A 401 preserves the mounted Builder draft until the account is known.
     }
   }, []);
 
@@ -113,9 +147,11 @@ export const App: React.FC = () => {
         lastAuthenticatedUserId.current = auth.user.id;
         setAccountContextId(auth.user.id);
         setAccountContextRole(auth.user.role);
+        if (auth.site_instance_id) setSiteInstanceId(auth.site_instance_id);
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
+        await loadCptTypes();
         if (auth.user.role === 'admin') {
           await loadPlugins();
         }
@@ -151,12 +187,19 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       const res = await api.login(authUsername, authPassword);
-      if (lastAuthenticatedUserId.current !== null &&
+      const nextSiteId = res.site_instance_id ?? siteInstanceId;
+      if (res.site_instance_id && res.site_instance_id !== siteInstanceId) {
+        editorDraftStore.clear();
+        setSiteInstanceId(res.site_instance_id);
+      } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
-        // Never expose an expired account's unsaved Builder data to another user.
+        editorDraftStore.clear();
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
+      } else {
+        setAuthGeneration(g => g + 1);
       }
+      if (!res.site_instance_id && nextSiteId !== siteInstanceId) setSiteInstanceId(nextSiteId);
       lastAuthenticatedUserId.current = res.user.id;
       setAccountContextId(res.user.id);
       setAccountContextRole(res.user.role);
@@ -164,6 +207,7 @@ export const App: React.FC = () => {
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
       setStatus('Đăng nhập thành công.', false);
+      await loadCptTypes();
       if (res.user.role === 'admin') {
         await loadPlugins();
       }
@@ -181,6 +225,7 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       await api.logout(csrfToken);
+      editorDraftStore.clear();
       setUser(null);
       setCsrfToken(null);
       setAuthUsername('');
@@ -197,7 +242,8 @@ export const App: React.FC = () => {
       setPostsDirty(false);
       setPagesDirty(false);
       lastAuthenticatedUserId.current = null;
-      setActiveView('dashboard');
+      setRoute(parseAdminRoute('#/dashboard', window.location.pathname));
+      setCptTypes([]);
       window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
       setStatus('Đã đăng xuất.', false);
     } catch (err) {
@@ -305,8 +351,10 @@ export const App: React.FC = () => {
       onSetup={handleSetup}
       onLogin={handleLogin}
       onLogout={handleLogout}
-      activeView={activeView}
-      onViewChange={navigateTo}
+      route={route}
+      routeForbidden={Boolean(user && !isRouteAllowed(route, user.role))}
+      cptTypes={cptTypes}
+      onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
       sidebarContent={<BuilderWorkspace
@@ -314,13 +362,47 @@ export const App: React.FC = () => {
         onDirtyChange={setBuilderDirty} onApiError={handleApiError}
       />}
       previewContent={null}
-      themesContent={<ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
-        onInstalled={() => setThemeRevision(value => value + 1)}
-        onActivated={() => setThemeRevision(value => value + 1)}
-      />}
+      themesContent={<>
+        <ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
+          onInstalled={() => setThemeRevision(value => value + 1)}
+          onActivated={() => setThemeRevision(value => value + 1)}
+        />
+        <MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />
+      </>}
+      schemaSettingsContent={
+        <ContentTypeSchemaSettings
+          selectedTypeKey={selectedSchemaTypeKey}
+          onSelectTypeKey={key => {
+            setSelectedSchemaTypeKey(key);
+            if (key) navigateHash(`#/settings/content-types/${key}`);
+          }}
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onContentTypesChanged={() => {
+            void loadCptTypes();
+          }}
+        />
+      }
+      profileContent={
+        <UserProfilePanel
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onProfileUpdated={prof => {
+            setUser(prev => (prev ? { ...prev, username: prof.username } : prev));
+          }}
+        />
+      }
+      toolsContent={<>
+        <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi sao lưu mã hóa.')} />
+        <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi khôi phục & safe mode.')} />
+        <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
+        <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
+      </>}
       settingsContent={<>
         <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
-        <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
+        <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
+        <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
+        <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cấu hình SMTP.')} />
       </>}
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}
@@ -341,34 +423,57 @@ export const App: React.FC = () => {
         onEnablePlugin={handleEnablePlugin}
         onPluginInputChange={setPluginInputJson}
         onRunPlugin={handleRunPlugin}
+        csrfToken={csrfToken}
+        onUnauthorized={() => {
+          setUser(null);
+          setCsrfToken(null);
+        }}
       />}
       contentContent={
-        <ContentWorkspace
-          key={contentRevision}
-          user={user}
-          csrfToken={csrfToken}
-          onApiError={handleApiError}
-          onDirtyChange={setContentDirty}
-        />
+        route.view === 'cpt' && route.typeKey ? (
+          <SingleEditWorkspace
+            key={`cpt-${route.typeKey}-${contentRevision}`}
+            typeKey={route.typeKey}
+            mode={route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list'}
+            entryId={route.entryId ?? null}
+            user={user}
+            siteInstanceId={siteInstanceId}
+            authGeneration={authGeneration}
+            csrfToken={csrfToken}
+            onApiError={handleApiError}
+            onDirtyChange={setContentDirty}
+            onNavigateHash={navigateHash}
+          />
+        ) : null
       }
       postsContent={
-        <PostPageWorkspace
+        <SingleEditWorkspace
           key={'posts-' + contentRevision}
-          type="post"
+          typeKey="post"
+          mode={route.view === 'posts' ? (route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list') : 'list'}
+          entryId={route.view === 'posts' ? (route.entryId ?? null) : null}
           user={user}
+          siteInstanceId={siteInstanceId}
+          authGeneration={authGeneration}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onDirtyChange={setPostsDirty}
+          onNavigateHash={navigateHash}
         />
       }
       pagesContent={
-        <PostPageWorkspace
+        <SingleEditWorkspace
           key={'pages-' + contentRevision}
-          type="page"
+          typeKey="page"
+          mode={route.view === 'pages' ? (route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list') : 'list'}
+          entryId={route.view === 'pages' ? (route.entryId ?? null) : null}
           user={user}
+          siteInstanceId={siteInstanceId}
+          authGeneration={authGeneration}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onDirtyChange={setPagesDirty}
+          onNavigateHash={navigateHash}
         />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}

@@ -197,12 +197,26 @@ pub enum KnownElement {
     Text(TextProps),
     #[serde(rename = "core/image")]
     Image(ImageProps),
+    #[serde(rename = "core/video")]
+    Video(VideoProps),
     #[serde(rename = "core/button")]
     Button(ButtonProps),
     #[serde(rename = "core/list")]
     List(ListProps),
+    #[serde(rename = "core/contact_form")]
+    ContactForm(ContactFormProps),
     #[serde(rename = "legacy/block")]
     Legacy(LegacyBlockProps),
+    #[serde(rename = "plugin/block")]
+    PluginBlock(PluginBlockProps),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginBlockProps {
+    pub block_id: String,
+    #[serde(default)]
+    pub values: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -269,11 +283,40 @@ fn default_list_size() -> u8 {
     6
 }
 
-/// An allowlisted, exact-entry field reference. No arbitrary queries or JSON paths.
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VideoProps {
+    pub media_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub poster_image_id: Option<String>,
+    #[serde(default = "default_true")]
+    pub controls: bool,
+    #[serde(default)]
+    pub muted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContactFormProps {
+    pub form_id: i64,
+    #[serde(default = "default_submit_label")]
+    pub submit_label: String,
+}
+
+fn default_submit_label() -> String {
+    "Gửi liên hệ".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElementBinding {
+    #[serde(default)]
     pub type_key: String,
+    #[serde(default)]
     pub entry_slug: String,
     pub source: BindingSource,
     pub target: BindingTarget,
@@ -284,6 +327,7 @@ pub struct ElementBinding {
 pub enum BindingSource {
     Title,
     Field { key: String },
+    RouteContext { field_key: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -303,7 +347,11 @@ impl KnownElement {
             Self::Text(p) => p.binding.as_ref(),
             Self::Image(p) => p.binding.as_ref(),
             Self::Button(p) => p.binding.as_ref(),
-            Self::Legacy(_) | Self::List(_) => None,
+            Self::Legacy(_)
+            | Self::List(_)
+            | Self::ContactForm(_)
+            | Self::Video(_)
+            | Self::PluginBlock(_) => None,
         }
     }
 }
@@ -542,6 +590,38 @@ fn validate_known(
                 .validate_against_fields(&descriptor.descriptor.fields)
                 .map_err(|_| "Legacy field map does not match descriptor")?;
         }
+        KnownElement::PluginBlock(props) => {
+            if !valid_namespaced_block_id(&props.block_id) {
+                return Err("Invalid plugin block id");
+            }
+            if props.values.len() > 64 {
+                return Err("Plugin block props exceed limit");
+            }
+            let descriptor = catalog.get(&props.block_id).ok_or("Unknown plugin block descriptor")?;
+            if descriptor.status != ProviderStatus::Active {
+                return Err("Plugin block provider is not active");
+            }
+        }
+        KnownElement::Video(props) => {
+            if !valid_media_id(&props.media_id) {
+                return Err("Invalid Video media ID");
+            }
+            if let Some(poster) = props.poster_image_id.as_deref()
+                && !valid_media_id(poster)
+            {
+                return Err("Invalid Video poster image ID");
+            }
+        }
+        KnownElement::ContactForm(props) => {
+            let label = props.submit_label.trim();
+            if props.form_id <= 0
+                || label.is_empty()
+                || props.submit_label.chars().count() > 80
+                || props.submit_label.chars().any(char::is_control)
+            {
+                return Err("Invalid Builder contact form configuration");
+            }
+        }
         KnownElement::List(props) => {
             if !valid_content_type_key(&props.type_key)
                 || !(1..=20).contains(&props.page_size)
@@ -558,17 +638,84 @@ fn validate_known(
 
 fn valid_binding(binding: Option<&ElementBinding>, targets: &[BindingTarget]) -> bool {
     let Some(binding) = binding else { return true };
-    if !targets.contains(&binding.target)
-        || !valid_content_type_key(&binding.type_key)
-        || !valid_kebab_segment_with_limit(&binding.entry_slug, 64)
-    {
+    if !targets.contains(&binding.target) {
         return false;
     }
+    let fixed_entry_valid = || {
+        valid_content_type_key(&binding.type_key)
+            && valid_kebab_segment_with_limit(&binding.entry_slug, 64)
+    };
     match &binding.source {
         BindingSource::Title => {
-            !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
+            fixed_entry_valid()
+                && !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
         }
-        BindingSource::Field { key } => valid_snake_key(key),
+        BindingSource::Field { key } => fixed_entry_valid() && valid_snake_key(key),
+        BindingSource::RouteContext { field_key } => {
+            let valid_key = matches!(field_key.as_str(), "title" | "slug" | "url" | "cover_url")
+                || valid_snake_key(field_key);
+            let target_ok = match field_key.as_str() {
+                "title" | "slug" => {
+                    !matches!(binding.target, BindingTarget::MediaId | BindingTarget::Url)
+                }
+                "url" => matches!(
+                    binding.target,
+                    BindingTarget::Url | BindingTarget::Text | BindingTarget::Label
+                ),
+                "cover_url" => matches!(
+                    binding.target,
+                    BindingTarget::Url | BindingTarget::MediaId | BindingTarget::Text
+                ),
+                _ => true,
+            };
+            let scope_ok = (binding.type_key.is_empty()
+                || valid_content_type_key(&binding.type_key))
+                && (binding.entry_slug.is_empty()
+                    || valid_kebab_segment_with_limit(&binding.entry_slug, 64));
+            valid_key && target_ok && scope_ok
+        }
+    }
+}
+
+impl BuilderDocument {
+    /// RouteContext bindings are valid only on `single` or `page` role overrides,
+    /// and custom field keys must belong to the scoped CPT when provided.
+    pub fn validate_route_context_for_role(
+        &self,
+        role: Option<&str>,
+        scoped_cpt_fields: Option<&[String]>,
+    ) -> Result<(), BuilderError> {
+        let role_allows_route_context = matches!(role, Some("single") | Some("page"));
+        for section in &self.sections {
+            for row in &section.children {
+                for column in &row.children {
+                    for element in &column.children {
+                        let ElementContent::Known(known) = &element.content else {
+                            continue;
+                        };
+                        let Some(binding) = known.binding() else {
+                            continue;
+                        };
+                        if let BindingSource::RouteContext { field_key } = &binding.source {
+                            if !role_allows_route_context {
+                                return Err(BuilderError::Invalid(
+                                    "RouteContext binding is only valid on single/page role overrides",
+                                ));
+                            }
+                            if !matches!(field_key.as_str(), "title" | "slug" | "url" | "cover_url")
+                                && let Some(allowed) = scoped_cpt_fields
+                                && !allowed.iter().any(|k| k == field_key)
+                            {
+                                return Err(BuilderError::Invalid(
+                                    "RouteContext field_key is not in scoped CPT fields",
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1175,5 +1322,67 @@ mod tests {
                 .validate_for_save(&registry(), None)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn route_context_allowed_only_on_single_or_page_and_checks_fields() {
+        let raw = json!({
+            "schema_version": 1,
+            "sections": [{
+                "id": "sec-1",
+                "children": [{
+                    "id": "row-1",
+                    "children": [{
+                        "id": "col-1",
+                        "children": [{
+                            "id": "heading-1",
+                            "type": "core/heading",
+                            "props": {
+                                "text": "Fallback",
+                                "level": 1,
+                                "binding": {
+                                    "target": "text",
+                                    "source": { "kind": "route_context", "field_key": "title" }
+                                }
+                            }
+                        }]
+                    }]
+                }]
+            }]
+        });
+        let doc = BuilderDocument::from_json(raw.to_string().as_bytes()).unwrap();
+        doc.validate_for_save(&registry(), None).unwrap();
+        assert!(doc.validate_route_context_for_role(Some("single"), None).is_ok());
+        assert!(doc.validate_route_context_for_role(Some("page"), None).is_ok());
+        assert!(doc.validate_route_context_for_role(Some("home"), None).is_err());
+        assert!(doc.validate_route_context_for_role(Some("archive"), None).is_err());
+        assert!(doc.validate_route_context_for_role(Some("single"), Some(&[])).is_ok());
+
+        let custom_field = json!({
+            "schema_version": 1,
+            "sections": [{
+                "id": "sec-1",
+                "children": [{
+                    "id": "row-1",
+                    "children": [{
+                        "id": "col-1",
+                        "children": [{
+                            "id": "text-1",
+                            "type": "core/text",
+                            "props": {
+                                "text": "Fallback",
+                                "binding": {
+                                    "target": "text",
+                                    "source": { "kind": "route_context", "field_key": "summary" }
+                                }
+                            }
+                        }]
+                    }]
+                }]
+            }]
+        });
+        let custom_doc = BuilderDocument::from_json(custom_field.to_string().as_bytes()).unwrap();
+        assert!(custom_doc.validate_route_context_for_role(Some("single"), Some(&["summary".to_string()])).is_ok());
+        assert!(custom_doc.validate_route_context_for_role(Some("single"), Some(&["other".to_string()])).is_err());
     }
 }

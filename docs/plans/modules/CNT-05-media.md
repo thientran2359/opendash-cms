@@ -175,3 +175,25 @@ Living Module Brief G0–G3 giữ một nguồn chi tiết từ scope đến tas
 **Ánh xạ lịch sử ID:** `M3-S04-T01` (Research) và `M3-S04-T02` (Design G2) là nhãn task trong discovery draft cũ; nay được chuyển thành các mục G1/G2, **không tái cấp phát hai ID đó**. Các `T03..T05` mới chỉ là candidates, chưa `READY`.
 
 Sau khi G2 được chốt, dùng [mẫu handoff](../templates/SLICE_TASK.md) để chuẩn bị GitHub Issue; bản nháp nếu cần nằm ở `.agents/tasks/`, không tạo hàng loạt task files riêng. Không triển khai Media M3 theo bản nháp này.
+
+## M7 video G1–G3 — 2026-11-14 (supersedes historical video proposals only)
+
+[Source inventory](../../../.agents/research/2026-11-14-m7-site-features-g1.md), [ADR-0014](../../decisions/ADR-0014-m7-site-features.md), [contract](../../contracts/M7_SITE_FEATURES.md) and [G3](../milestones/M7/slices/2026-11-14-m7-site-features-g3.md) specify bounded MP4 metadata ingest, Range/ACL, library/core video. Existing image capabilities and M8 lifecycle/backup IDs remain unchanged.
+
+| Capability | Primary Acceptance Slice | Task | Status |
+| --- | --- | --- | --- |
+| CNT-05.5 video upload/metadata | M7-S07 | M7-S07-T01 | G3 READY on merge; execution waits dependencies |
+| CNT-05.6 video rendering/Range/privacy | M7-S07 | M7-S07-T02 | G3 READY on merge; execution waits dependencies |
+
+G2 AGREED on merged design; implementation NOT_STARTED and runtime/native/browser NOT_RUN. Fresh/upgrade preserve old image IDs/FKs, reject video in image/gallery; M7-S08 multi-OS E2E is regression, not a second primary capability acceptance. M8 hard-delete/reconcile/backup stays planned.
+
+## M8 lifecycle G1–G3 — 14/11/2026
+
+[ADR-0015](../../decisions/ADR-0015-m8-operations-release.md), [contract](../../contracts/M8_OPERATIONS_RELEASE.md), [full G3](../milestones/M8/slices/2026-11-14-m8-operations-release-g3.md) define conservative all-saved-data pins (not public ACL), journaled deletion, manual reconcile/quarantine/purge, backup boundary and external DB recovery. Existing CNT-05.1–.6 and .4 backup integration IDs remain unchanged.
+
+| Capability | Primary Acceptance Slice | Task | Status |
+| --- | --- | --- | --- |
+| CNT-05.7 safe referenced-delete | M8-S02 | M8-S02-T01 | G3 READY on merged design, execution waits dependencies |
+| CNT-05.8 reconcile/quarantine/purge | M8-S02 | M8-S02-T02 | G3 READY on merged design, execution waits dependencies |
+
+G2 AGREED on merge; implementation NOT_STARTED/runtime NOT_RUN. No automatic scheduled cleanup, destructive force-unlink, loss of draft/inactive provider references or public media leak. OPS-01 snapshot/restore acceptance regresses CNT-05.4, not a duplicate capability.

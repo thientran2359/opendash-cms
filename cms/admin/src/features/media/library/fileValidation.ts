@@ -2,6 +2,7 @@ const ACCEPTED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_DIMENSION = 6000;
 const MAX_PIXELS = 20_000_000;
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 export class MediaUploadValidationError extends Error {
   constructor(message: string) {
@@ -37,5 +38,19 @@ export async function validateImageUpload(file: File): Promise<void> {
     }
   } finally {
     bitmap.close();
+  }
+}
+
+/** Friendly browser preflight for MP4 video uploads. Rust still validates MP4 boxes & codecs. */
+export function validateVideoUpload(file: File): void {
+  const isMp4Type = file.type === 'video/mp4' || file.name.toLowerCase().endsWith('.mp4');
+  if (!isMp4Type) {
+    throw new MediaUploadValidationError('Chỉ hỗ trợ video MP4 (video/mp4).');
+  }
+  if (file.size === 0) {
+    throw new MediaUploadValidationError('Video trống (0 byte). Hãy chọn file khác.');
+  }
+  if (file.size > MAX_VIDEO_BYTES) {
+    throw new MediaUploadValidationError('Video vượt quá 100 MiB.');
   }
 }

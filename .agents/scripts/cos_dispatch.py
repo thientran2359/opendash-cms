@@ -211,9 +211,26 @@ def bootstrap(target, worktree):
             "project_mapping": "EXACT"}
 
 
+def windows_powershell_environment():
+    """Use native Windows modules only, without changing the parent's environment."""
+    system_root = Path(os.environ.get("SystemRoot", ""))
+    home = system_root / "System32" / "WindowsPowerShell" / "v1.0"
+    executable, modules = home / "powershell.exe", home / "Modules"
+    if not system_root.is_absolute() or not executable.is_file() or not modules.is_dir():
+        raise Blocked("WINDOWS_POWERSHELL_UNAVAILABLE")
+    env = os.environ.copy()
+    # A Python child of PowerShell 7 otherwise inherits incompatible type data
+    # paths into Windows PowerShell 5.1, causing Get-Acl auto-loading to fail.
+    env["PSModulePath"] = str(modules)
+    return str(executable), env
+
+
 def windows_acl_safe():
     # Inspect native SIDs; account display names cannot safely identify ACL grants.
     script = r'''
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Import-Module Microsoft.PowerShell.Security -ErrorAction Stop
 $root = Join-Path $env:APPDATA 'chat-on-steroids'
 $p = Join-Path $root 'control-api'
 $stateDir = Join-Path $root 'state'
@@ -281,14 +298,17 @@ if (($parent.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
 '''
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
     try:
-        result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive",
+        executable, env = windows_powershell_environment()
+        result = subprocess.run([executable, "-NoProfile", "-NonInteractive",
                                  "-EncodedCommand", encoded], text=True,
-                                capture_output=True, timeout=10)
+                                capture_output=True, timeout=10, env=env)
         if result.returncode:
             raise Blocked("WINDOWS_ACL_CHECK_FAILED")
         count = json.loads(result.stdout)["unexpectedReadGrants"]
+        if type(count) is not int or count < 0:
+            raise Blocked("WINDOWS_ACL_CHECK_FAILED")
         return count == 0, "UNCLASSIFIED_CONTROL_FILE_ACL" if count else "OK"
-    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
+    except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as exc:
         raise Blocked("WINDOWS_ACL_CHECK_FAILED") from exc
 
 
@@ -420,6 +440,105 @@ def issue_lock_file(target, issue, task_id):
     return storage_root() / "receipts" / ("task-" + identifier + ".json")
 
 
+def pr_lock_file(target, pr):
+    # Lock the PR, not its changing head/review, so a fresh UUID or SHA cannot
+    # bypass an uncertain delivery. Re-dispatch needs a reviewed release design.
+    identifier = hashlib.sha256((target + ":pr:" + str(pr)).encode("utf-8")).hexdigest()
+    return storage_root() / "receipts" / ("pr-" + identifier + ".json")
+
+
+def github_json(path):
+    """Read fixed-repository GitHub resources using host-local gh credentials."""
+    try:
+        result = subprocess.run(["gh", "api", "--hostname", "github.com", path],
+                                capture_output=True, encoding="utf-8", timeout=15)
+        if result.returncode:
+            raise Blocked("GITHUB_PR_CHECK_FAILED")
+        return json.loads(result.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        raise Blocked("GITHUB_PR_CHECK_FAILED") from exc
+
+
+def validate_pr_arguments(target, pr, head_sha, base_sha, review_id):
+    if target not in BRANCHES or type(pr) is not int or pr < 1 or type(review_id) is not int or review_id < 1:
+        raise Blocked("INVALID_PR_OR_REVIEW_ID")
+    if not SHA_RE.fullmatch(head_sha or "") or not SHA_RE.fullmatch(base_sha or ""):
+        raise Blocked("PR_HEAD_AND_BASE_SHA_REQUIRED")
+
+
+def check_pr(target, pr, head_sha, base_sha, review_id):
+    """This is docs-only author feedback, never implementation Issue pickup."""
+    validate_pr_arguments(target, pr, head_sha, base_sha, review_id)
+    prefix = "repos/" + REPOSITORY + "/pulls/" + str(pr)
+    data = github_json(prefix)
+    try:
+        if data["number"] != pr or data["state"] != "open" or data.get("merged") is not False:
+            raise Blocked("PR_NOT_OPEN")
+        # Agents share this authenticated repository-owner account. A signature
+        # in a random contributor's review/body is not authority to dispatch.
+        shared_account = REPOSITORY.split("/")[0]
+        if data["user"]["login"] != shared_account:
+            raise Blocked("PR_AGENT_ACCOUNT_NOT_AUTHORIZED")
+        head, base = data["head"], data["base"]
+        if (head["repo"]["full_name"] != REPOSITORY or base["repo"]["full_name"] != REPOSITORY
+                or base["ref"] != "main"):
+            raise Blocked("WRONG_PR_REPOSITORY_OR_BASE")
+        if head["sha"] != head_sha:
+            raise Blocked("STALE_PR_HEAD")
+        if base["sha"] != base_sha:
+            raise Blocked("STALE_PR_BASE")
+        name = "Forge" if target == "forge" else "Harbor"
+        if not (head["ref"] == BRANCHES[target] or
+                head["ref"].startswith(("docs/" + target + "-", "task/" + target + "-"))):
+            raise Blocked("PR_BRANCH_NOT_OWNED_BY_TARGET")
+        if not re.search(r"\*\*(?:Agent|Author):\*\*\s*" + name + r"\b", data.get("body") or ""):
+            raise Blocked("PR_AGENT_IDENTITY_NOT_CONFIRMED")
+        count = data["changed_files"]
+        if type(count) is not int or not 1 <= count <= 100:
+            raise Blocked("PR_FILE_SCOPE_NOT_BOUNDED")
+        review = github_json(prefix + "/reviews/" + str(review_id))
+        if review["user"]["login"] != shared_account:
+            raise Blocked("PR_REVIEW_ACCOUNT_NOT_AUTHORIZED")
+        if (review["id"] != review_id or review["commit_id"] != head_sha or
+                review["state"] not in ("COMMENTED", "CHANGES_REQUESTED") or
+                not re.search(r"\*\*Atlas \(Codex Windows\) — CHANGES_REQUESTED(?: / AWAITING_AUTHOR)?\*\*",
+                              review.get("body") or "")):
+            raise Blocked("PR_ACTIONABLE_ATLAS_REVIEW_REQUIRED")
+        files = github_json(prefix + "/files?per_page=100")
+        if not isinstance(files, list) or len(files) != count:
+            raise Blocked("PR_FILE_LIST_INCOMPLETE")
+        for item in files:
+            path = item["filename"]
+            if (not isinstance(path, str) or not path.endswith(".md") or
+                    not path.startswith(("docs/", ".agents/research/")) or
+                    any(part in ("", ".", "..") for part in path.split("/")) or
+                    "\\" in path or ":" in path or item["status"] not in ("added", "modified")):
+                raise Blocked("PR_NOT_DOCS_ONLY")
+        return {"target": target, "pr": pr, "head_sha": head_sha, "base_sha": base_sha,
+                "review_id": review_id, "head_branch": head["ref"], "eligible": True,
+                "scope": "DOCS_AUTHOR_CORRECTION_ONLY"}
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise Blocked("GITHUB_PR_RESPONSE_INVALID") from exc
+
+
+def pr_prompt(target, pr, head_sha, base_sha, review_id):
+    name = "Forge" if target == "forge" else "Harbor"
+    return ("You are " + name + " in OpenDash CMS. Correct your existing documentation PR #" + str(pr) +
+            " from head SHA " + head_sha + "; reviewed base SHA " + base_sha +
+            "; actionable Atlas review ID " + str(review_id) + ". Read AGENTS.md and "
+            ".agents/skills/discussion-turn-responder/SKILL.md. Re-fetch that exact PR/review, "
+            "verify your signed ownership, head/base, file scope, current branch, dirty work "
+            "and no conflicting active task before editing. Use your existing PR branch in "
+            "your own worktree and preserve unrelated changes. Address the review's documentation "
+            "findings, record unresolved design/security/data blockers, run required docs checks, "
+            "commit with your Agent trailer and non-force push. Keep the PR Draft when gates "
+            "remain unresolved. Do not implement product code, accept proposed contracts as "
+            "AGREED/READY, create Issues, change Project Ready/Done, merge, deploy, change ACL "
+            "or credentials, start agents, or bypass security/data gates. Stop if the pinned "
+            "references changed or ownership is unclear. Report commit/checks/blockers on the PR "
+            "and in this chat. This docs feedback action is not implementation Issue pickup.")
+
+
 def prompt(target, mode, issue=None, task_id=None, source_sha=None, base_sha=None):
     if mode == "pong":
         return ("OpenDash adapter transport TEST-PONG-01. Reply with exactly PONG. "
@@ -434,8 +553,11 @@ def prompt(target, mode, issue=None, task_id=None, source_sha=None, base_sha=Non
             "Follow repo AGENTS.md and permitted review/merge gates. Report results in this chat.")
 
 
-def payload_hash(target, request_id, mode, issue, task_id, source_sha, base_sha):
+def payload_hash(target, request_id, mode, issue, task_id, source_sha, base_sha,
+                 pr=None, head_sha=None, review_id=None):
     material = [target, request_id, mode, issue, task_id, source_sha, base_sha]
+    if mode == "pr":
+        material.extend([pr, head_sha, review_id])
     return hashlib.sha256(json.dumps(material, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
@@ -476,15 +598,21 @@ def reconcile_record(record):
     return record
 
 
-def send(target, request_id, mode, issue=None, task_id=None, source_sha=None, base_sha=None):
+def send(target, request_id, mode, issue=None, task_id=None, source_sha=None, base_sha=None,
+         *, pr=None, head_sha=None, review_id=None):
     if str(uuid.UUID(request_id)) != request_id:
         raise Blocked("NONCANONICAL_REQUEST_ID")
+    if mode not in ("pong", "issue", "pr"):
+        raise Blocked("UNKNOWN_DISPATCH_MODE")
     if mode == "issue":
         if not isinstance(issue, int) or issue < 1 or not TASK_RE.fullmatch(task_id or ""):
             raise Blocked("INVALID_ISSUE_ID_OR_TASK_ID")
         if not SHA_RE.fullmatch(source_sha or "") or not SHA_RE.fullmatch(base_sha or ""):
             raise Blocked("SOURCE_AND_BASE_SHA_REQUIRED")
-    digest = payload_hash(target, request_id, mode, issue, task_id, source_sha, base_sha)
+    if mode == "pr":
+        validate_pr_arguments(target, pr, head_sha, base_sha, review_id)
+    digest = payload_hash(target, request_id, mode, issue, task_id, source_sha, base_sha,
+                          pr, head_sha, review_id)
     receipt = receipt_file(target, request_id)
     secure, reason = security_check()
     if not secure:
@@ -498,13 +626,19 @@ def send(target, request_id, mode, issue=None, task_id=None, source_sha=None, ba
     details = probe(target)
     if not details["can_send"]:
         raise Blocked("HOST_NOT_AUTHORIZED_" + details["security_reason"])
+    if mode == "pr":
+        if pr_lock_file(target, pr).exists():
+            raise Blocked("PR_ALREADY_DISPATCHED_REUSE_EXISTING_REQUEST")
+        check_pr(target, pr, head_sha, base_sha, review_id)
     create_private_dir(receipt.parent)
     input_id = str(uuid.uuid4())
     record = {"request_id": request_id, "target": target, "mode": mode,
               "input_id": input_id, "payload_hash": digest, "outcome": "UNKNOWN",
               "issue": issue, "task_id": task_id, "source_sha": source_sha, "base_sha": base_sha}
-    if mode == "issue":
-        task_lock = issue_lock_file(target, issue, task_id)
+    if mode == "pr":
+        record.update(pr=pr, head_sha=head_sha, review_id=review_id)
+    if mode in ("issue", "pr"):
+        task_lock = issue_lock_file(target, issue, task_id) if mode == "issue" else pr_lock_file(target, pr)
         if task_lock.exists():
             raise Blocked("TASK_ALREADY_DISPATCHED_REUSE_EXISTING_REQUEST")
         # Reserve task identity BEFORE reserving the request/POST. A crash
@@ -519,9 +653,14 @@ def send(target, request_id, mode, issue=None, task_id=None, source_sha=None, ba
         raise Blocked("CONCURRENT_DISPATCH_DETECTED")
     # Write UNKNOWN before POST; never retry a send after a timeout/crash.
     try:
+        if mode == "pr":
+            check_pr(target, pr, head_sha, base_sha, review_id)
+            text = pr_prompt(target, pr, head_sha, base_sha, review_id)
+        else:
+            text = prompt(target, mode, issue, task_id, source_sha, base_sha)
         status, _ = call_api("POST", "/v1/inputs", {
             "id": input_id, "projectId": load_config(target)["project_id"],
-            "text": prompt(target, mode, issue, task_id, source_sha, base_sha)})
+            "text": text})
         record["outcome"] = "ACCEPTED" if status == 202 else "UNKNOWN"
     except Blocked as exc:
         # Even a 4xx can be ambiguous through proxies; return UNKNOWN and reconcile.
@@ -529,6 +668,11 @@ def send(target, request_id, mode, issue=None, task_id=None, source_sha=None, ba
     atomic_private_json(receipt, record)
     return {"target": target, "request_id": request_id, "outcome": record["outcome"],
             "duplicate": False, "input_id": input_id}
+
+
+def send_pr(target, request_id, pr, head_sha, base_sha, review_id):
+    return send(target, request_id, "pr", base_sha=base_sha,
+                pr=pr, head_sha=head_sha, review_id=review_id)
 
 
 def status(target, request_id):
@@ -541,7 +685,7 @@ def status(target, request_id):
         # writing the request receipt. Report UNKNOWN without resending.
         folder = path.parent
         if folder.is_dir():
-            for task_lock in folder.glob("task-*.json"):
+            for task_lock in (*folder.glob("task-*.json"), *folder.glob("pr-*.json")):
                 try:
                     found = json.loads(task_lock.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
@@ -556,7 +700,8 @@ def status(target, request_id):
     atomic_private_json(path, checked)
     return {k: checked.get(k) for k in ("target", "request_id", "mode", "outcome",
                                        "input_id", "outbox_delivery", "assistant_turn_ended",
-                                       "pong_verified", "unexpected_tool_calls") if k in checked}
+                                       "pong_verified", "unexpected_tool_calls", "pr", "head_sha",
+                                       "base_sha", "review_id", "error_code") if k in checked}
 
 
 def status_task(target, issue, task_id, source_sha):
@@ -587,6 +732,33 @@ def status_task(target, issue, task_id, source_sha):
     return result
 
 
+def status_pr(target, pr, head_sha, review_id):
+    validate_pr_arguments(target, pr, head_sha, "0" * 40, review_id)
+    safe, reason = security_check()
+    if not safe:
+        raise Blocked("HOST_NOT_AUTHORIZED_" + reason)
+    load_config(target)
+    lock = pr_lock_file(target, pr)
+    if not lock.exists():
+        return {"target": target, "pr": pr, "outcome": "NOT_SENT"}
+    try:
+        record = json.loads(lock.read_text(encoding="utf-8"))
+        if record.get("target") != target or record.get("pr") != pr or record.get("mode") != "pr":
+            raise Blocked("PR_LOCK_MISMATCH")
+        request_id = record["request_id"]
+        if not isinstance(request_id, str) or str(uuid.UUID(request_id)) != request_id:
+            raise Blocked("PR_LOCK_INCOMPLETE")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise Blocked("PR_LOCK_INCOMPLETE") from exc
+    result = status(target, request_id)
+    result.update(pr=pr)
+    if record.get("head_sha") != head_sha:
+        result["head_sha_changed_since_dispatch"] = True
+    if record.get("review_id") != review_id:
+        result["review_changed_since_dispatch"] = True
+    return result
+
+
 def execute_local(args):
     if args.command == "bootstrap":
         return bootstrap(args.target, args.worktree)
@@ -597,10 +769,16 @@ def execute_local(args):
     if args.command == "send-issue":
         return send(args.target, args.request_id, "issue", args.issue,
                     args.task_id, args.source_sha, args.base_sha)
+    if args.command in ("check-pr", "send-pr"):
+        if args.command == "check-pr":
+            return check_pr(args.target, args.pr, args.head_sha, args.base_sha, args.review_id)
+        return send_pr(args.target, args.request_id, args.pr, args.head_sha, args.base_sha, args.review_id)
     if args.command == "status":
         return status(args.target, args.request_id)
     if args.command == "status-task":
         return status_task(args.target, args.issue, args.task_id, args.source_sha)
+    if args.command == "status-pr":
+        return status_pr(args.target, args.pr, args.head_sha, args.review_id)
     raise Blocked("UNKNOWN_COMMAND")
 
 
@@ -611,7 +789,7 @@ def run_remote(args):
     command = ["python3", "-", "--local", args.command, args.target]
     if args.command == "bootstrap":
         command.extend(["--worktree", args.worktree])
-    if args.command in ("send-pong", "send-issue", "status"):
+    if args.command in ("send-pong", "send-issue", "send-pr", "status"):
         command.extend(["--request-id", args.request_id])
     if args.command == "send-issue":
         command.extend(["--issue", str(args.issue), "--task-id", args.task_id,
@@ -619,12 +797,17 @@ def run_remote(args):
     if args.command == "status-task":
         command.extend(["--issue", str(args.issue), "--task-id", args.task_id,
                         "--source-sha", args.source_sha])
+    if args.command in ("check-pr", "send-pr", "status-pr"):
+        command.extend(["--pr", str(args.pr), "--head-sha", args.head_sha,
+                        "--review-id", str(args.review_id)])
+        if args.command != "status-pr":
+            command.extend(["--base-sha", args.base_sha])
     remote_command = " ".join(shlex.quote(c) for c in command)
     try:
         proc = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
                                "-o", "ConnectTimeout=7", host, remote_command],
                               input=Path(__file__).read_text(encoding="utf-8"),
-                              text=True, capture_output=True, timeout=35)
+                              encoding="utf-8", capture_output=True, timeout=35)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise Blocked("MAC_SSH_UNREACHABLE") from exc
     if not proc.stdout.strip():
@@ -647,12 +830,13 @@ def main():
     parser.add_argument("--local", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--ssh-host", default=DEFAULT_MAC_SSH)
     sub = parser.add_subparsers(dest="command", required=True)
-    for verb in ("bootstrap", "probe", "send-pong", "send-issue", "status", "status-task"):
+    for verb in ("bootstrap", "probe", "send-pong", "send-issue", "status", "status-task",
+                 "check-pr", "send-pr", "status-pr"):
         p = sub.add_parser(verb)
         p.add_argument("target", choices=tuple(BRANCHES))
         if verb == "bootstrap":
             p.add_argument("--worktree", required=True)
-        if verb in ("send-pong", "send-issue", "status"):
+        if verb in ("send-pong", "send-issue", "send-pr", "status"):
             p.add_argument("--request-id", type=str, required=True)
         if verb == "send-issue":
             p.add_argument("--issue", type=int, required=True)
@@ -663,6 +847,12 @@ def main():
             p.add_argument("--issue", type=int, required=True)
             p.add_argument("--task-id", required=True)
             p.add_argument("--source-sha", required=True)
+        if verb in ("check-pr", "send-pr", "status-pr"):
+            p.add_argument("--pr", type=int, required=True)
+            p.add_argument("--head-sha", required=True)
+            p.add_argument("--review-id", type=int, required=True)
+            if verb != "status-pr":
+                p.add_argument("--base-sha", required=True)
     args = parser.parse_args()
     try:
         result = run_remote(args) if args.target == "harbor" and not args.local else execute_local(args)

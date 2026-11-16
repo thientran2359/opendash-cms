@@ -163,10 +163,14 @@ mod tests {
             id: "loop-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Loop Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let start = std::time::Instant::now();
@@ -219,13 +223,17 @@ mod tests {
             id: "trap-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Trap Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions {
                 sqlite: vec!["kv_write".into()],
-                http: vec![],
-            },
+                http: vec![], content_read: vec![],
+            network: vec![], content_write: vec![], ..Default::default() },
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -284,10 +292,14 @@ mod tests {
             id: "no-perm-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "No Perm".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -347,10 +359,14 @@ mod tests {
             id: "mem-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Mem Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -422,13 +438,18 @@ mod tests {
             id: "http-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "HTTP Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions {
                 sqlite: vec![],
                 http: vec![target_url.clone()],
-            },
+                content_read: vec![],
+            network: vec![], content_write: vec![], ..Default::default() },
+            editor_panels: vec![],
         };
 
         let start = std::time::Instant::now();
@@ -490,8 +511,22 @@ mod tests {
                 wasm_blob BLOB NOT NULL,
                 enabled INTEGER NOT NULL DEFAULT 1,
                 last_error TEXT,
+                active_revision_id INTEGER,
+                revision_generation INTEGER NOT NULL DEFAULT 1,
+                cas_version INTEGER NOT NULL DEFAULT 1,
                 installed_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS plugin_revisions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plugin_id TEXT NOT NULL,
+                version TEXT NOT NULL,
+                revision_digest TEXT NOT NULL,
+                manifest_schema INTEGER NOT NULL DEFAULT 1,
+                manifest_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(plugin_id, version),
+                UNIQUE(plugin_id, revision_digest)
             );",
         )
         .execute(&pool)
@@ -735,10 +770,14 @@ mod tests {
             id: "abort-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Abort".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -782,10 +821,14 @@ mod tests {
             id: "utf8-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "UTF8".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -865,10 +908,14 @@ mod tests {
             id: "worker-teardown".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Worker Teardown Test".into(),
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         // Assert no lingering workers before execution
@@ -950,13 +997,18 @@ mod tests {
             id: "slow-worker-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Slow Worker".into(),
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions {
                 sqlite: vec![],
                 http: vec![origin.clone()],
-            },
+                content_read: vec![],
+            network: vec![], content_write: vec![], ..Default::default() },
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -1025,10 +1077,14 @@ mod tests {
             id: "echo-recovery".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Echo Recovery".into(),
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
         let res_next = runtime
             .run_plugin(
@@ -1094,13 +1150,18 @@ mod tests {
             id: "hang-plugin".into(),
             version: "1.0.0".into(),
             api_version: 1,
+            manifest_schema: 1,
+            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            actions: vec![],
             name: "Hang Plugin".into(),
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions {
                 sqlite: vec![],
                 http: vec![origin.clone()],
-            },
+                content_read: vec![],
+            network: vec![], content_write: vec![], ..Default::default() },
+            editor_panels: vec![],
         };
 
         let rt = runtime.clone();

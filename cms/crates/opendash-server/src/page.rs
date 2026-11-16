@@ -2,6 +2,7 @@
 use crate::{
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
+    public_context::CanonicalUrlBuilder,
     storage::{
         builder::{HomeState, ListResults, ResolvedList},
         builder_binding::{BindingResult, BindingResults},
@@ -33,8 +34,13 @@ pub struct BuilderDiagnostic {
     pub code: &'static str,
 }
 
+pub type ContactFormResults =
+    std::collections::BTreeMap<String, Option<crate::storage::contact::ContactFormRecord>>;
+
 #[derive(Debug, Serialize)]
 pub struct RenderedLayout {
+    #[serde(skip_serializing)]
+    pub has_active_contact_form: bool,
     pub html: String,
     pub diagnostics: Vec<BuilderDiagnostic>,
 }
@@ -188,11 +194,30 @@ pub fn render_builder_with_lists(
     bindings: &BindingResults,
     lists: &ListResults,
 ) -> ApiResult<RenderedLayout> {
+    render_builder_with_lists_and_forms(
+        state,
+        document,
+        is_preview,
+        bindings,
+        lists,
+        &ContactFormResults::new(),
+    )
+}
+
+pub fn render_builder_with_lists_and_forms(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
+    lists: &ListResults,
+    forms: &ContactFormResults,
+) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
     let mut html = builder_responsive_css(document);
     html.push_str("<main data-builder-version=\"1\">");
     let mut diagnostics = Vec::new();
+    let mut has_active_contact_form = false;
     for section in &document.sections {
         html.push_str(&format!(
             "<section data-node-id=\"{}\">",
@@ -282,6 +307,30 @@ pub fn render_builder_with_lists(
                                 alt = escape_html(&props.alt)
                             ))
                         }
+                        ElementContent::Known(KnownElement::Video(props)) => {
+                            let path = if is_preview {
+                                "/api/admin/media"
+                            } else {
+                                "/media"
+                            };
+                            let mut attrs = format!(
+                                "src=\"{path}/{id}/file\" preload=\"metadata\" playsinline",
+                                id = escape_html(&props.media_id),
+                            );
+                            if let Some(poster) = props.poster_image_id.as_deref() {
+                                attrs.push_str(&format!(
+                                    " poster=\"{path}/{poster}/file\"",
+                                    poster = escape_html(poster)
+                                ));
+                            }
+                            if props.controls {
+                                attrs.push_str(" controls");
+                            }
+                            if props.muted {
+                                attrs.push_str(" muted");
+                            }
+                            Some(format!("<video {attrs}></video>"))
+                        }
                         ElementContent::Known(KnownElement::Button(props)) => Some(format!(
                             "<a href=\"{}\" rel=\"noopener noreferrer\">{}</a>",
                             escape_html(&props.url),
@@ -320,16 +369,21 @@ pub fn render_builder_with_lists(
                                         list_html.push_str("<ul>");
                                         for item in items {
                                             // Neither title nor slug is ever treated as raw HTML.
-                                            let path = format!(
-                                                "/content/{}/{}",
-                                                encode_path_segment(&props.type_key),
-                                                encode_path_segment(&item.slug),
-                                            );
-                                            list_html.push_str(&format!(
-                                                "<li><a href=\"{}\">{}</a></li>",
-                                                escape_html(&path),
-                                                escape_html(&item.title),
-                                            ));
+                                            if let Some(path) = CanonicalUrlBuilder::entry(
+                                                &props.type_key,
+                                                &item.slug,
+                                            ) {
+                                                list_html.push_str(&format!(
+                                                    "<li><a href=\"{}\">{}</a></li>",
+                                                    escape_html(&path),
+                                                    escape_html(&item.title),
+                                                ));
+                                            } else {
+                                                list_html.push_str(&format!(
+                                                    "<li>{}</li>",
+                                                    escape_html(&item.title),
+                                                ));
+                                            }
                                         }
                                         list_html.push_str("</ul>");
                                         if !is_preview && *page > 1 {
@@ -354,6 +408,55 @@ pub fn render_builder_with_lists(
                                         code: "list_unavailable",
                                     });
                                     None
+                                }
+                            }
+                        }
+                        ElementContent::Known(KnownElement::ContactForm(props)) => {
+                            match forms.get(&element.id).and_then(|opt| opt.as_ref()) {
+                                Some(form) if form.status == "active" => {
+                                    let rendered = render_contact_form_html(
+                                        &element.id,
+                                        form,
+                                        &props.submit_label,
+                                        is_preview,
+                                    );
+                                    if !is_preview {
+                                        has_active_contact_form = true;
+                                    }
+                                    Some(rendered)
+                                }
+                                _ => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "contact_form_unavailable",
+                                    });
+                                    Some("<p class=\"builder-contact-unavailable\">Biểu mẫu liên hệ hiện không khả dụng.</p>".to_string())
+                                }
+                            }
+                        }
+                        ElementContent::Known(KnownElement::PluginBlock(props)) => {
+                            match state.themes.get(&props.block_id).map(|d| d.template.as_str()) {
+                                Some(template_src) => {
+                                    let rendered = render_plugin_block_csec(
+                                        &props.block_id,
+                                        template_src,
+                                        &props.values,
+                                    )?;
+                                    Some(format!(
+                                        "<div class=\"builder-plugin-block\" data-block-id=\"{}\">{}</div>",
+                                        escape_html(&props.block_id),
+                                        rendered
+                                    ))
+                                }
+                                None => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "plugin_block_unavailable",
+                                    });
+                                    Some(format!(
+                                        "<div class=\"builder-block-unavailable\" data-block-id=\"{}\"></div>",
+                                        escape_html(&props.block_id)
+                                    ))
                                 }
                             }
                         }
@@ -430,17 +533,100 @@ pub fn render_builder_with_lists(
         html.push_str("</section>");
     }
     html.push_str("</main>");
-    Ok(RenderedLayout { html, diagnostics })
+    Ok(RenderedLayout {
+        html,
+        diagnostics,
+        has_active_contact_form,
+    })
 }
 
-fn encode_path_segment(value: &str) -> String {
-    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
+fn render_contact_form_html(
+    node_id: &str,
+    form: &crate::storage::contact::ContactFormRecord,
+    submit_label: &str,
+    is_preview: bool,
+) -> String {
+    use opendash_core::contact::FormKind;
+    let mut out = String::new();
+    if is_preview {
+        out.push_str("<div class=\"builder-contact-form builder-contact-preview\"><fieldset disabled>");
+    } else {
+        let nonce = crate::auth::generate_random_token();
+        out.push_str(&format!(
+            "<form class=\"builder-contact-form\" method=\"post\" action=\"/api/public/contact/{}\">",
+            form.id
+        ));
+        out.push_str(&format!(
+            "<input type=\"hidden\" name=\"form_version\" value=\"{}\">",
+            form.version
+        ));
+        out.push_str(&format!(
+            "<input type=\"hidden\" name=\"nonce\" value=\"{nonce}\">"
+        ));
+        out.push_str("<div class=\"opendash-hp\" hidden><label>Để trống<input type=\"text\" name=\"honeypot\" tabindex=\"-1\" autocomplete=\"off\"></label></div>");
+    }
+
+    for field in &form.schema.fields {
+        let input_id = format!("cf_{}_{}", escape_html(node_id), escape_html(&field.key));
+        let field_name = escape_html(&field.key);
+        let label = escape_html(&field.label);
+        let req_attr = if field.required { " required" } else { "" };
+        out.push_str("<div class=\"builder-contact-field\">");
+        match field.kind {
+            FormKind::Checkbox => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\"><input id=\"{input_id}\" type=\"checkbox\" name=\"{field_name}\" value=\"true\"{req_attr}> {label}</label>"
+                ));
+            }
+            FormKind::Textarea => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\">{label}</label><textarea id=\"{input_id}\" name=\"{field_name}\" maxlength=\"4000\"{req_attr}></textarea>"
+                ));
+            }
+            FormKind::Select => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\">{label}</label><select id=\"{input_id}\" name=\"{field_name}\"{req_attr}>"
+                ));
+                if !field.required {
+                    out.push_str("<option value=\"\">-- Chọn --</option>");
+                }
+                if let Some(options) = &field.options {
+                    for opt in options {
+                        let eopt = escape_html(opt);
+                        out.push_str(&format!("<option value=\"{eopt}\">{eopt}</option>"));
+                    }
+                }
+                out.push_str("</select>");
+            }
+            FormKind::Email => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\">{label}</label><input id=\"{input_id}\" type=\"email\" name=\"{field_name}\" maxlength=\"254\"{req_attr}>"
+                ));
+            }
+            FormKind::Text => {
+                out.push_str(&format!(
+                    "<label for=\"{input_id}\">{label}</label><input id=\"{input_id}\" type=\"text\" name=\"{field_name}\" maxlength=\"254\"{req_attr}>"
+                ));
+            }
+        }
+        out.push_str("</div>");
+    }
+
+    let btn_label = escape_html(submit_label.trim());
+    if is_preview {
+        out.push_str(&format!(
+            "<button type=\"button\" disabled>{btn_label}</button></fieldset></div>"
+        ));
+    } else {
+        out.push_str(&format!("<button type=\"submit\">{btn_label}</button></form>"));
+    }
+    out
 }
 
 /// Canonical link: only currently resolved node IDs with valid nondefault pages
 /// survive. Unknown query parameters, duplicates and invalid values are dropped.
 fn list_page_href(lists: &ListResults, node_id: &str, target: i64) -> String {
-    let mut query = url::form_urlencoded::Serializer::new(String::new());
+    let mut pages = std::collections::BTreeMap::new();
     for (id, current) in lists {
         let ResolvedList::Page {
             page, out_of_range, ..
@@ -456,15 +642,10 @@ fn list_page_href(lists: &ListResults, node_id: &str, target: i64) -> String {
             *page
         };
         if (2..=100).contains(&effective) {
-            query.append_pair(&format!("list_page_{id}"), &effective.to_string());
+            pages.insert(id.clone(), effective);
         }
     }
-    let encoded = query.finish();
-    if encoded.is_empty() {
-        "/".into()
-    } else {
-        format!("/?{encoded}")
-    }
+    CanonicalUrlBuilder::home_list_pages(&pages)
 }
 
 pub fn render_legacy_state(state: &HomeState) -> ApiResult<Option<RenderedBlock>> {
@@ -747,5 +928,134 @@ mod tests {
             layout_hook_payload(&empty, 3),
             json!({"block_type": "core/layout", "layout_version": 3})
         );
+    }
+}
+
+pub fn render_plugin_block_csec(
+    block_id: &str,
+    template_source: &str,
+    values: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> ApiResult<String> {
+    crate::template_sec::validate_template_csec(block_id, template_source)
+        .map_err(ApiError::bad_request)?;
+    let mut ctx_map = std::collections::BTreeMap::new();
+    for (k, v) in values {
+        ctx_map.insert(k.clone(), crate::template_sec::json_to_safe_value(v));
+    }
+    let ctx = minijinja::Value::from(ctx_map);
+    crate::template_sec::render_csec(block_id, template_source, ctx)
+        .map_err(ApiError::bad_request)
+}
+
+#[cfg(test)]
+mod m6_s05_tests {
+    use std::collections::BTreeMap;
+    use super::*;
+    use opendash_core::builder::{
+        BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps,
+        RowNode, SectionNode,
+    };
+
+    #[test]
+    fn plugin_block_csec_escapes_values_blocks_xss_and_falls_back_safely() {
+        // 1. C-SEC rejects dangerous template constructs
+        assert!(render_plugin_block_csec(
+            "acme-plugin/hero",
+            "<script>alert(1)</script>",
+            &BTreeMap::new()
+        )
+        .is_err());
+
+        // 2. C-SEC auto-escapes prop values
+        let mut vals = BTreeMap::new();
+        vals.insert(
+            "title".into(),
+            serde_json::Value::String("<script>xss()</script>Hello".into()),
+        );
+        let ok_html = render_plugin_block_csec(
+            "acme-plugin/hero",
+            "<div class=\"card\">{{ title }}</div>",
+            &vals,
+        )
+        .expect("safe C-SEC template renders");
+        assert!(!ok_html.contains("<script>"));
+        assert!(ok_html.contains("&lt;script&gt;xss()"));
+        assert!(ok_html.contains("Hello"));
+
+        // 3. Builder render with active plugin block vs disabled plugin block fallback
+        let doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-1".into(),
+                responsive: None,
+                children: vec![RowNode {
+                    id: "row-1".into(),
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "col-1".into(),
+                        responsive: None,
+                        children: vec![ElementNode {
+                            id: "el-1".into(),
+                            content: ElementContent::Known(KnownElement::PluginBlock(
+                                PluginBlockProps {
+                                    block_id: "acme-plugin/hero".into(),
+                                    values: vals,
+                                },
+                            )),
+                        }],
+                    }],
+                }],
+            }],
+        };
+
+        let mut active_state = HomeState {
+            active_id: None,
+            active_alias: None,
+            active_template: None,
+            themes: BTreeMap::new(),
+            saved: Some(doc.clone()),
+            legacy: None,
+            version: 1,
+        };
+        crate::storage::builder::register_plugin_block_template(
+            &mut active_state,
+            "acme-plugin/hero",
+            "<section class=\"hero\">{{ title }}</section>",
+        )
+        .expect("register plugin block template");
+
+        let rendered_active = render_builder_with_lists(
+            &active_state,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("active render");
+        assert!(rendered_active.html.contains("data-block-id=\"acme-plugin/hero\""));
+        assert!(rendered_active.html.contains("&lt;script&gt;xss()"));
+        assert!(rendered_active.html.contains("Hello"));
+        assert!(rendered_active.diagnostics.is_empty());
+
+        // Disabled plugin: block absent from state.themes -> safe fallback without error
+        let disabled_state = HomeState {
+            active_id: None,
+            active_alias: None,
+            active_template: None,
+            themes: BTreeMap::new(),
+            saved: Some(doc.clone()),
+            legacy: None,
+            version: 1,
+        };
+        let rendered_disabled = render_builder_with_lists(
+            &disabled_state,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("disabled fallback render must not fail");
+        assert!(rendered_disabled.html.contains("builder-block-unavailable"));
+        assert_eq!(rendered_disabled.diagnostics[0].code, "plugin_block_unavailable");
     }
 }

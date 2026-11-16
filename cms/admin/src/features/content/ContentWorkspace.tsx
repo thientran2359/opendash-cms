@@ -16,6 +16,7 @@ import { ContentTypeForm } from './ContentTypeForm.tsx';
 import { FieldValueInput } from './FieldValueInput.tsx';
 import { MediaPicker } from '../media/MediaPicker.tsx';
 import { TermFilters, TermPicker } from '../taxonomy/TermPicker.tsx';
+import { EntryRouteSeoCard } from '../seo/SeoPanel.tsx';
 import {
   ContentEntryInput,
   ContentEntryRecord,
@@ -494,7 +495,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                   userId={user?.id ?? null}
                   value={filters}
                   disabled={!user || processing}
-                  onApiError={reportError}
+                  onApiError={(error) => reportError(error, 'Lỗi route/SEO.')}
                   onChange={next => {
                     setFilters(next);
                     setOffset(0);
@@ -601,7 +602,7 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                     userId={user?.id ?? null}
                     selectedIds={draft.termIds}
                     disabled={!user || processing}
-                    onApiError={reportError}
+                    onApiError={(error) => reportError(error, 'Lỗi route/SEO.')}
                     onChange={termIds => setDraft(previous => previous ? { ...previous, termIds } : previous)}
                   />
                   {staleVersion && draft.id !== null && (
@@ -636,6 +637,17 @@ export const ContentWorkspace: React.FC<ContentWorkspaceProps> = ({
                     <span className="content-help">Lưu thành công sẽ cập nhật nội dung công khai ngay.</span>
                   </div>
                 </form>
+              )}
+              {draft && draft.id !== null && draft.version !== null && (
+                <EntryRouteSeoCard
+                  typeKey={selectedTypeKey}
+                  entryId={draft.id}
+                  entryVersion={draft.version}
+                  csrfToken={csrfToken}
+                  disabled={!user || processing}
+                  onVersionUpdated={(newVersion) => setDraft(previous => previous ? { ...previous, version: newVersion } : previous)}
+                  onApiError={(error) => reportError(error, 'Lỗi route/SEO.')}
+                />
               )}
             </>
           )}

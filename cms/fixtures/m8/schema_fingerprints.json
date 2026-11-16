@@ -1,0 +1,8 @@
+{
+  "schema_version": 33,
+  "trusted_schema": "OFF",
+  "max_schema_objects": 256,
+  "max_sql_per_object_bytes": 262144,
+  "max_total_sql_bytes": 2097152,
+  "verified_by": "runtime_compiled_migrator_memory_db"
+}

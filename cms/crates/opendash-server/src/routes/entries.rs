@@ -10,7 +10,6 @@ use axum::{
 };
 use opendash_core::{
     content::{ContentEntryInput, valid_content_type_key},
-    hooks::HookEvent,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -98,8 +97,9 @@ pub async fn entry_list(
     Path(type_key): Path<String>,
     Query(pagination): Query<EntryPagination>,
 ) -> ApiResult<Json<Vec<entry_storage::ContentEntryRecord>>> {
-    require_session(&headers, &db).await?;
+    let actor = require_session(&headers, &db).await?;
     content_schema(&db, &type_key).await?;
+    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
     let limit = pagination.limit.unwrap_or(50);
     let offset = pagination.offset.unwrap_or(0);
     if !(1..=100).contains(&limit) || !(0..=1_000_000).contains(&offset) {
@@ -123,9 +123,17 @@ pub async fn entry_list(
         tag_id: pagination.tag_id,
         include_descendants: pagination.include_descendants.unwrap_or(false),
     };
-    Ok(Json(
-        entry_storage::list_entries(&db, &type_key, limit, offset, filters).await?,
-    ))
+    let mut items = entry_storage::list_entries(&db, &type_key, limit, offset, filters).await?;
+    if let Some(eff) = effective {
+        let role = match actor.user.role {
+            crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+            crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+        };
+        for item in &mut items {
+            entry_storage::filter_entry_values_for_role(item, &eff, role);
+        }
+    }
+    Ok(Json(items))
 }
 
 pub async fn entry_get(
@@ -133,15 +141,23 @@ pub async fn entry_get(
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
 ) -> ApiResult<Response> {
-    require_session(&headers, &db).await?;
+    let actor = require_session(&headers, &db).await?;
     valid_type_key(&type_key)?;
-    let entry = entry_storage::get_entry(&db, &type_key, id)
+    let mut entry = entry_storage::get_entry(&db, &type_key, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+    if let Some(eff) = crate::storage::content::load_effective_content_schema(&db, &type_key).await? {
+        let role = match actor.user.role {
+            crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+            crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+        };
+        entry_storage::filter_entry_values_for_role(&mut entry, &eff, role);
+    }
     Ok(([(header::ETAG, etag(entry.version))], Json(entry)).into_response())
 }
 
 pub async fn entry_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -150,19 +166,36 @@ pub async fn entry_create(
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     let schema = content_schema(&db, &type_key).await?;
+    let preflight_schema_token = crate::storage::content::load_effective_content_schema(&db, &type_key).await?.map(|e| e.schema_token);
     input
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
     media_storage::require_existing_references(&db, &schema, &input).await?;
-    hooks.emit(
-        HookEvent::ContentBeforeSave,
-        json!({ "type_key": &type_key, "operation": "create" }),
-    );
-    let entry = entry_storage::create_entry(&db, &actor, &type_key, &input).await?;
-    hooks.emit(
-        HookEvent::ContentAfterSave,
-        json!({ "type_key": &type_key, "id": entry.id, "operation": "create", "version": entry.version }),
-    );
+    let candidate = json!({
+        "operation": "create",
+        "type_key": &type_key,
+        "entry_id": serde_json::Value::Null,
+        "expected_version": serde_json::Value::Null,
+        "title": &input.title,
+        "slug": &input.slug,
+        "candidate_values": &input.values,
+        "term_ids": &input.term_ids,
+    });
+    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
+    }
+    let entry = match preflight_schema_token.as_deref() {
+        Some(tok) => {
+            entry_storage::create_entry_with_schema_fence(&db, &actor, &type_key, &schema, &input, tok).await?
+        }
+        None => entry_storage::create_entry(&db, &actor, &type_key, &schema, &input).await?,
+    };
+    let _ = hooks
+        .dispatch_content_after_save(
+            &type_key,
+            json!({ "type_key": &type_key, "id": entry.id, "operation": "create", "version": entry.version }),
+        )
+        .await;
     Ok((
         StatusCode::CREATED,
         [
@@ -178,6 +211,7 @@ pub async fn entry_create(
 }
 
 pub async fn entry_update(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -187,23 +221,41 @@ pub async fn entry_update(
     let actor = require_session_with_csrf(&headers, &db).await?;
     let version = expected_version(&headers)?;
     let schema = content_schema(&db, &type_key).await?;
+    let preflight_schema_token = crate::storage::content::load_effective_content_schema(&db, &type_key).await?.map(|e| e.schema_token);
     input
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
     media_storage::require_existing_references(&db, &schema, &input).await?;
-    hooks.emit(
-        HookEvent::ContentBeforeSave,
-        json!({ "type_key": &type_key, "id": id, "operation": "update" }),
-    );
-    let entry = entry_storage::update_entry(&db, &actor, &type_key, id, version, &input).await?;
-    hooks.emit(
-        HookEvent::ContentAfterSave,
-        json!({ "type_key": &type_key, "id": entry.id, "operation": "update", "version": entry.version }),
-    );
+    let candidate = json!({
+        "operation": "update",
+        "type_key": &type_key,
+        "entry_id": id,
+        "expected_version": version,
+        "title": &input.title,
+        "slug": &input.slug,
+        "candidate_values": &input.values,
+        "term_ids": &input.term_ids,
+    });
+    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
+    }
+    let entry = match preflight_schema_token.as_deref() {
+        Some(tok) => {
+            entry_storage::update_entry_with_schema_fence(&db, &actor, &type_key, &schema, id, version, &input, tok).await?
+        }
+        None => entry_storage::update_entry(&db, &actor, &type_key, &schema, id, version, &input).await?,
+    };
+    let _ = hooks
+        .dispatch_content_after_save(
+            &type_key,
+            json!({ "type_key": &type_key, "id": entry.id, "operation": "update", "version": entry.version }),
+        )
+        .await;
     Ok(([(header::ETAG, etag(entry.version))], Json(entry)).into_response())
 }
 
 pub async fn entry_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
@@ -218,6 +270,7 @@ pub async fn entry_delete(
 /// Publish/Unpublish is a separate, authenticated optimistic-CAS operation.
 /// Ordinary PUT/Save deliberately never alters the current status.
 pub async fn entry_publication(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
@@ -255,13 +308,16 @@ pub async fn entry_preview(
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
     let view = content_render::authenticated_preview_view(entry, &schema);
     let (_, selected_template) = active_content_templates(&db).await?;
-    let html = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    let raw_html = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    let pub_settings = crate::storage::settings::get_public(&db).await?;
+    let seo_view = crate::seo::SeoView::for_noindex_page(&pub_settings.content_language, &view.title);
+    let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
     Ok((
         [
             (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::REFERRER_POLICY, "no-referrer"),
-            (header::CACHE_CONTROL, "no-store"),
+            (header::CACHE_CONTROL, "private, no-store"),
         ],
         Html(html),
     )
@@ -289,4 +345,106 @@ mod tests {
         headers.insert(header::IF_MATCH, "\"v42\"".parse().unwrap());
         assert_eq!(expected_version(&headers).unwrap(), 42);
     }
+}
+
+pub async fn entry_composite_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path(type_key): Path<String>,
+    Json(input): Json<entry_storage::CompositeEntrySaveInput>,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    valid_type_key(&type_key)?;
+    let plan = entry_storage::prepare_composite_entry_save(&db, &actor, &type_key, None, &input)
+        .await?;
+    let candidate = json!({
+        "operation": "create",
+        "type_key": &type_key,
+        "entry_id": serde_json::Value::Null,
+        "expected_version": serde_json::Value::Null,
+        "title": &plan.merged_input.title,
+        "slug": &plan.merged_input.slug,
+        "candidate_values": &plan.merged_input.values,
+        "term_ids": &plan.merged_input.term_ids,
+    });
+    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
+    }
+    let result =
+        entry_storage::commit_composite_entry_save(&db, &actor, &type_key, None, &input, &plan)
+            .await?;
+    let _ = hooks
+        .dispatch_content_after_save(
+            &type_key,
+            json!({
+                "type_key": &type_key,
+                "id": result.entry.id,
+                "operation": "create",
+                "version": result.entry.version,
+            }),
+        )
+        .await;
+    Ok((
+        StatusCode::CREATED,
+        [
+            (header::ETAG, etag(result.entry.version)),
+            (
+                header::LOCATION,
+                format!("/api/admin/content-types/{type_key}/entries/{}", result.entry.id),
+            ),
+        ],
+        Json(result),
+    )
+        .into_response())
+}
+
+pub async fn entry_composite_update(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    Json(input): Json<entry_storage::CompositeEntrySaveInput>,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    valid_type_key(&type_key)?;
+    let plan =
+        entry_storage::prepare_composite_entry_save(&db, &actor, &type_key, Some(id), &input)
+            .await?;
+    let candidate = json!({
+        "operation": "update",
+        "type_key": &type_key,
+        "entry_id": id,
+        "expected_version": input.expected_version,
+        "title": &plan.merged_input.title,
+        "slug": &plan.merged_input.slug,
+        "candidate_values": &plan.merged_input.values,
+        "term_ids": &plan.merged_input.term_ids,
+    });
+    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
+    }
+    let result = entry_storage::commit_composite_entry_save(
+        &db,
+        &actor,
+        &type_key,
+        Some(id),
+        &input,
+        &plan,
+    )
+    .await?;
+    let _ = hooks
+        .dispatch_content_after_save(
+            &type_key,
+            json!({
+                "type_key": &type_key,
+                "id": result.entry.id,
+                "operation": "update",
+                "version": result.entry.version,
+            }),
+        )
+        .await;
+    Ok(([(header::ETAG, etag(result.entry.version))], Json(result)).into_response())
 }

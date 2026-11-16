@@ -1,17 +1,19 @@
-//! Exact-entry Builder field resolution; never trust a client query or bypass publication.
-//! Every read takes a consistent SQLite snapshot. SQL stays in storage, not the renderer.
+//! Exact-entry and RouteContext Builder field resolution; never trust a client query
+//! or bypass publication. Every read takes a consistent SQLite snapshot.
 use std::collections::BTreeMap;
 
 use opendash_core::{
     builder::{
         BindingSource, BindingTarget, BuilderDocument, ElementBinding, ElementContent, KnownElement,
     },
-    content::{ContentFieldType, ContentTypeDefinition},
+    content::{ContentFieldType, ContentTypeDefinition, PublicExposure},
 };
 use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
-use crate::{error::ApiResult, storage::media::valid_media_id};
+use crate::{
+    error::ApiResult, public_context::CanonicalUrlBuilder, storage::media::valid_media_id,
+};
 
 #[derive(Debug, Clone)]
 pub enum BindingResult {
@@ -22,7 +24,7 @@ pub enum BindingResult {
 }
 
 pub type BindingResults = BTreeMap<String, BindingResult>;
-type SourceRow = (String, String, String);
+type SourceRow = (String, String, String, Option<String>);
 
 pub async fn resolve(
     db: &SqlitePool,
@@ -40,6 +42,15 @@ pub async fn resolve_in_tx(
     document: &BuilderDocument,
     authenticated_preview: bool,
 ) -> ApiResult<BindingResults> {
+    resolve_in_tx_with_route(tx, document, authenticated_preview, None).await
+}
+
+pub async fn resolve_in_tx_with_route(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    authenticated_preview: bool,
+    route_entry: Option<(&str, &str)>,
+) -> ApiResult<BindingResults> {
     let mut cache: BTreeMap<(String, String), Option<SourceRow>> = BTreeMap::new();
     let mut results = BindingResults::new();
     for section in &document.sections {
@@ -52,7 +63,18 @@ pub async fn resolve_in_tx(
                     let Some(binding) = element_type.binding() else {
                         continue;
                     };
-                    let key = (binding.type_key.clone(), binding.entry_slug.clone());
+                    let key = match &binding.source {
+                        BindingSource::RouteContext { .. } => match route_entry {
+                            Some((rt, rs)) => (rt.to_string(), rs.to_string()),
+                            None => {
+                                results.insert(element.id.clone(), BindingResult::Unavailable);
+                                continue;
+                            }
+                        },
+                        BindingSource::Title | BindingSource::Field { .. } => {
+                            (binding.type_key.clone(), binding.entry_slug.clone())
+                        }
+                    };
                     if !cache.contains_key(&key) {
                         // Defensive limit even for damaged/trusted stored JSON.
                         if cache.len() >= 32 {
@@ -62,15 +84,16 @@ pub async fn resolve_in_tx(
                         // An entry's values NEVER leave storage on the public path until
                         // the published predicate and active provider check both hold.
                         let source: Option<SourceRow> = sqlx::query_as(
-                            "SELECT t.definition_json, e.title, e.values_json
+                            "SELECT t.definition_json, e.title, e.values_json, p.path
                                FROM content_entries e JOIN content_types t
                                  ON t.key = e.content_type_key
+                                 LEFT JOIN entry_public_paths p ON p.entry_id = e.id
                               WHERE e.content_type_key = ? AND e.slug = ?
                                 AND t.provider_status = 'active'
                                 AND (? = 1 OR e.publication_status = 'published')",
                         )
-                        .bind(&binding.type_key)
-                        .bind(&binding.entry_slug)
+                        .bind(&key.0)
+                        .bind(&key.1)
                         .bind(i64::from(authenticated_preview))
                         .fetch_optional(&mut **tx)
                         .await?;
@@ -79,12 +102,20 @@ pub async fn resolve_in_tx(
                     let result = cache
                         .get(&key)
                         .and_then(|source| source.as_ref())
-                        .map(|source| {
-                            extract(
+                        .map(|source| match &binding.source {
+                            BindingSource::RouteContext { field_key } => extract_route_context(
+                                binding.target,
+                                field_key,
+                                &key.0,
+                                &key.1,
+                                source,
+                                matches!(element_type, KnownElement::Heading(_)),
+                            ),
+                            _ => extract(
                                 binding,
                                 source,
                                 matches!(element_type, KnownElement::Heading(_)),
-                            )
+                            ),
                         })
                         .unwrap_or(BindingResult::Unavailable);
                     results.insert(element.id.clone(), result);
@@ -97,7 +128,7 @@ pub async fn resolve_in_tx(
 
 fn extract(
     binding: &ElementBinding,
-    (definition, title, values): &SourceRow,
+    (definition, title, values, _custom_path): &SourceRow,
     heading: bool,
 ) -> BindingResult {
     let Ok(schema) = serde_json::from_str::<ContentTypeDefinition>(definition) else {
@@ -117,47 +148,132 @@ fn extract(
             title.clone()
         }
         BindingSource::Field { key } => {
-            let Some(field) = schema.fields.iter().find(|field| &field.key == key) else {
-                return BindingResult::Unavailable;
-            };
-            let compatible = match binding.target {
-                BindingTarget::Text => matches!(
-                    field.field_type,
-                    ContentFieldType::ShortText
-                        | ContentFieldType::LongText
-                        | ContentFieldType::RichText
-                        | ContentFieldType::Number
-                        | ContentFieldType::Boolean
-                        | ContentFieldType::Date
-                        | ContentFieldType::Select
-                ),
-                BindingTarget::MediaId => field.field_type == ContentFieldType::Image,
-                BindingTarget::Alt | BindingTarget::Label => matches!(
-                    field.field_type,
-                    ContentFieldType::ShortText | ContentFieldType::Select
-                ),
-                BindingTarget::Url => matches!(
-                    field.field_type,
-                    ContentFieldType::ShortText | ContentFieldType::Select
-                ),
-            };
-            if !compatible {
+            match extract_field_value(&schema, &values, key, binding.target) {
+                Ok(v) => v,
+                Err(res) => return res,
+            }
+        }
+        BindingSource::RouteContext { .. } => return BindingResult::Unavailable,
+    };
+    finalize_binding_value(binding.target, text, heading)
+}
+
+fn extract_route_context(
+    target: BindingTarget,
+    field_key: &str,
+    type_key: &str,
+    slug: &str,
+    (definition, title, values, custom_path): &SourceRow,
+    heading: bool,
+) -> BindingResult {
+    let Ok(schema) = serde_json::from_str::<ContentTypeDefinition>(definition) else {
+        return BindingResult::Incompatible;
+    };
+    if schema.key != type_key || schema.validate().is_err() {
+        return BindingResult::Incompatible;
+    }
+    let Ok(values) = serde_json::from_str::<BTreeMap<String, Value>>(values) else {
+        return BindingResult::Incompatible;
+    };
+    let text = match field_key {
+        "title" => {
+            if matches!(target, BindingTarget::MediaId | BindingTarget::Url) {
                 return BindingResult::Incompatible;
             }
-            let Some(value) = values.get(key).filter(|value| !value.is_null()) else {
+            title.clone()
+        }
+        "slug" => {
+            if matches!(target, BindingTarget::MediaId | BindingTarget::Url) {
+                return BindingResult::Incompatible;
+            }
+            slug.to_string()
+        }
+        "url" => {
+            let Some(u) = custom_path.clone().or_else(|| CanonicalUrlBuilder::entry(type_key, slug)) else {
                 return BindingResult::Unavailable;
             };
-            match value {
-                Value::String(s) => s.clone(),
-                Value::Number(n) if binding.target == BindingTarget::Text => n.to_string(),
-                Value::Bool(v) if binding.target == BindingTarget::Text => v.to_string(),
+            u
+        }
+        "cover_url" => {
+            let Some(img_field) = schema
+                .fields
+                .iter()
+                .find(|f| f.field_type == ContentFieldType::Image && f.public_exposure == PublicExposure::Public)
+            else {
+                return BindingResult::Unavailable;
+            };
+            let Some(media_id) = values.get(&img_field.key).and_then(Value::as_str) else {
+                return BindingResult::Unavailable;
+            };
+            if !valid_media_id(media_id) {
+                return BindingResult::Incompatible;
+            }
+            match target {
+                BindingTarget::MediaId => media_id.to_string(),
+                BindingTarget::Url | BindingTarget::Text => format!("/media/{media_id}/file"),
                 _ => return BindingResult::Incompatible,
             }
         }
+        other => match extract_field_value(&schema, &values, other, target) {
+            Ok(v) => v,
+            Err(res) => return res,
+        },
     };
+    finalize_binding_value(target, text, heading)
+}
+
+fn extract_field_value(
+    schema: &ContentTypeDefinition,
+    values: &BTreeMap<String, Value>,
+    key: &str,
+    target: BindingTarget,
+) -> Result<String, BindingResult> {
+    let Some(field) = schema
+        .fields
+        .iter()
+        .find(|field| field.key == key && field.public_exposure == PublicExposure::Public)
+    else {
+        return Err(BindingResult::Unavailable);
+    };
+    let compatible = match target {
+        BindingTarget::Text => matches!(
+            field.field_type,
+            ContentFieldType::ShortText
+                | ContentFieldType::LongText
+                | ContentFieldType::RichText
+                | ContentFieldType::Number
+                | ContentFieldType::Boolean
+                | ContentFieldType::Date
+                | ContentFieldType::Select
+        ),
+        BindingTarget::MediaId => field.field_type == ContentFieldType::Image,
+        BindingTarget::Alt | BindingTarget::Label | BindingTarget::Url => matches!(
+            field.field_type,
+            ContentFieldType::ShortText | ContentFieldType::Select
+        ),
+    };
+    if !compatible {
+        return Err(BindingResult::Incompatible);
+    }
+    let Some(value) = values.get(key).filter(|value| !value.is_null()) else {
+        return Err(BindingResult::Unavailable);
+    };
+    match value {
+        Value::String(s) => Ok(s.clone()),
+        Value::Number(n) if target == BindingTarget::Text => Ok(n.to_string()),
+        Value::Bool(v) if target == BindingTarget::Text => Ok(v.to_string()),
+        _ => Err(BindingResult::Incompatible),
+    }
+}
+
+fn finalize_binding_value(
+    target: BindingTarget,
+    text: String,
+    heading: bool,
+) -> BindingResult {
     // Bound data must meet the same output restrictions as static typed props;
     // rich_text is ALWAYS escaped later by the shared core renderer.
-    let max = match binding.target {
+    let max = match target {
         BindingTarget::Text if heading => 512,
         BindingTarget::Text => 16_384,
         BindingTarget::MediaId => 128,
@@ -167,7 +283,7 @@ fn extract(
     };
     if text.chars().count() > max
         || (matches!(
-            binding.target,
+            target,
             BindingTarget::Text
                 | BindingTarget::Label
                 | BindingTarget::Url
@@ -179,11 +295,16 @@ fn extract(
     {
         return BindingResult::Incompatible;
     }
-    if binding.target == BindingTarget::MediaId && !valid_media_id(&text) {
+    if target == BindingTarget::MediaId && !valid_media_id(&text) {
         return BindingResult::Incompatible;
     }
-    if binding.target == BindingTarget::Url && !opendash_core::builder::valid_button_url(&text) {
+    if target == BindingTarget::Url && !opendash_core::builder::valid_button_url(&text) {
         return BindingResult::UrlRejected;
+    }
+    if target == BindingTarget::Url {
+        return CanonicalUrlBuilder::normalize_internal_link(&text)
+            .map(BindingResult::Value)
+            .unwrap_or(BindingResult::UrlRejected);
     }
     BindingResult::Value(text)
 }

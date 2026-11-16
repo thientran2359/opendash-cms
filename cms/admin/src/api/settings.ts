@@ -43,3 +43,38 @@ export function saveGeneralSettings(
     defaultErrorMessage: 'Không lưu được cài đặt website.',
   });
 }
+
+/** M7-S01-T01. Site-public settings singleton (independent CAS version). */
+export interface PublicSiteSettings {
+  public_origin: string | null;
+  content_language: string;
+  indexing_enabled: boolean;
+  version: number;
+}
+
+export type PublicSiteSettingsDraft = Pick<
+  PublicSiteSettings,
+  'public_origin' | 'content_language' | 'indexing_enabled'
+>;
+
+export function getPublicSiteSettings(signal?: AbortSignal): Promise<PublicSiteSettings> {
+  return requestJson<PublicSiteSettings>('/api/admin/settings/public', {
+    signal,
+    defaultErrorMessage: 'Không tải được cài đặt công khai.',
+  });
+}
+
+export function savePublicSiteSettings(
+  draft: PublicSiteSettingsDraft,
+  version: number,
+  csrfToken: string,
+): Promise<PublicSiteSettings> {
+  return requestJson<PublicSiteSettings>('/api/admin/settings/public', {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify(draft),
+    defaultErrorMessage: 'Không lưu được cài đặt công khai.',
+  });
+}

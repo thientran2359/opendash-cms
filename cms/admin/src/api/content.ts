@@ -1,8 +1,15 @@
 import {
+  CompositeEntrySaveInput,
+  CompositeEntrySaveResult,
   ContentEntryInput,
   ContentEntryRecord,
   ContentTypeDefinition,
+  EditorLayoutConfigV1,
+  EditorLayoutSnapshot,
+  EffectiveEditorConfigProjection,
+  FieldGroupRecord,
   OwnedContentType,
+  UserFieldGroupInput,
 } from '../features/content/types.ts';
 import { requestJson, requestText } from './client.ts';
 import { appendEntryTermFilters, type EntryTermFilters } from './taxonomy.ts';
@@ -30,6 +37,96 @@ export function createContentType(input: ContentTypeDefinition, csrfToken: strin
     body: JSON.stringify(input),
     defaultErrorMessage: 'Không thể tạo loại nội dung.',
     oversizeErrorMessage: 'Định nghĩa loại nội dung quá lớn.',
+  });
+}
+
+export function updateContentType(
+  key: string,
+  version: number,
+  input: ContentTypeDefinition,
+  csrfToken: string,
+): Promise<OwnedContentType> {
+  return requestJson(contentTypePath(key), {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể cập nhật loại nội dung.',
+    oversizeErrorMessage: 'Định nghĩa loại nội dung quá lớn.',
+  });
+}
+
+export function listFieldGroups(): Promise<FieldGroupRecord[]> {
+  return requestJson('/api/admin/content-field-groups', {
+    defaultErrorMessage: 'Không thể tải nhóm trường mở rộng.',
+  });
+}
+
+export function createFieldGroup(input: UserFieldGroupInput, csrfToken: string): Promise<FieldGroupRecord> {
+  return requestJson('/api/admin/content-field-groups', {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể tạo nhóm trường.',
+  });
+}
+
+export function updateFieldGroup(
+  groupId: string,
+  version: number,
+  input: UserFieldGroupInput,
+  csrfToken: string,
+): Promise<FieldGroupRecord> {
+  return requestJson(`/api/admin/content-field-groups/${encodeURIComponent(groupId)}`, {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể cập nhật nhóm trường.',
+  });
+}
+
+export function deleteFieldGroup(
+  groupId: string,
+  version: number,
+  csrfToken: string,
+): Promise<FieldGroupRecord> {
+  return requestJson(`/api/admin/content-field-groups/${encodeURIComponent(groupId)}`, {
+    method: 'DELETE',
+    csrfToken,
+    ifMatchVersion: version,
+    defaultErrorMessage: 'Không thể rút nhóm trường.',
+  });
+}
+
+export function getEditorLayout(typeKey: string): Promise<EditorLayoutSnapshot> {
+  return requestJson(`${contentTypePath(typeKey)}/editor-layout`, {
+    defaultErrorMessage: 'Không thể tải bố cục màn hình chỉnh sửa.',
+  });
+}
+
+export function putEditorLayout(
+  typeKey: string,
+  version: number,
+  layout: EditorLayoutConfigV1,
+  csrfToken: string,
+): Promise<EditorLayoutSnapshot> {
+  return requestJson(`${contentTypePath(typeKey)}/editor-layout`, {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify(layout),
+    defaultErrorMessage: 'Không thể lưu bố cục màn hình chỉnh sửa.',
+  });
+}
+
+export function getEffectiveEditorConfig(typeKey: string): Promise<EffectiveEditorConfigProjection> {
+  return requestJson(`${contentTypePath(typeKey)}/effective-editor-config`, {
+    defaultErrorMessage: 'Không thể tải cấu hình editor hiệu lực.',
   });
 }
 
@@ -78,6 +175,37 @@ export function updateContentEntry(
     method: 'PUT',
     csrfToken,
     ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể lưu nội dung.',
+    oversizeErrorMessage: 'Nội dung vượt quá giới hạn 512 KiB.',
+  });
+}
+
+export function createEntryComposite(
+  typeKey: string,
+  input: CompositeEntrySaveInput,
+  csrfToken: string,
+): Promise<CompositeEntrySaveResult> {
+  return requestJson(`${entriesPath(typeKey)}/composite`, {
+    method: 'POST',
+    csrfToken,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể tạo nội dung.',
+    oversizeErrorMessage: 'Nội dung vượt quá giới hạn 512 KiB.',
+  });
+}
+
+export function updateEntryComposite(
+  typeKey: string,
+  id: number,
+  input: CompositeEntrySaveInput,
+  csrfToken: string,
+): Promise<CompositeEntrySaveResult> {
+  return requestJson(`${entryPath(typeKey, id)}/composite`, {
+    method: 'PUT',
+    csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
     defaultErrorMessage: 'Không thể lưu nội dung.',

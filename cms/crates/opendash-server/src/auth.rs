@@ -75,6 +75,8 @@ pub struct AuthInput {
 pub struct AuthResponse {
     pub user: AuthUser,
     pub csrf_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_instance_id: Option<String>,
 }
 
 pub fn validate_username(username: &str) -> Result<(), &'static str> {
@@ -174,6 +176,18 @@ pub fn current_time_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
+}
+
+pub fn session_cookie_header_with_secure(token: &str, secure: bool) -> String {
+    let sec = if secure { "; Secure" } else { "" };
+    format!(
+        "{SESSION_COOKIE_NAME}={token}; HttpOnly; SameSite=Lax; Path=/; Max-Age={SESSION_DURATION_SECS}{sec}"
+    )
+}
+
+pub fn clear_session_cookie_header_with_secure(secure: bool) -> String {
+    let sec = if secure { "; Secure" } else { "" };
+    format!("{SESSION_COOKIE_NAME}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{sec}")
 }
 
 pub fn session_cookie_header(token: &str) -> String {

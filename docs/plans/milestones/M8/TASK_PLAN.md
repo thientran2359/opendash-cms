@@ -14,3 +14,7 @@ Các `M8-Pxx` là **candidate** có dependency, chưa thành Task G3/Project Rea
 | M8-P08 | **D từ #15 (lifecycle):** media delete theo reference policy, reconcile/GC và backup boundary | CNT-05 (OPS-01) | M3 image refs, M7-P08 video, Full-Track G2 tombstone/GC/files/DB crash/restore | Không xóa vật lý asset đang dùng trái policy; failpoint/restart/reconcile idempotent, concurrent upload/delete và DB ngoài site root; backup không bỏ file/metadata |
 
 **Điều kiện đóng V1:** toàn bộ capability bắt buộc có primary acceptance/evidence, không chỉ đếm pass; Linux thật `VERIFIED`, backup/restore chạy site mới và các quyền/sandbox an toàn. Nếu runner hoặc chứng cứ thiếu thì `NOT_RUN/PARTIAL`, không tuyên bố V1 DONE. Không đưa vào V1 scheduled backup, auto-publishing workflow hoặc đa ngữ.
+
+## Full G3 mapping — 14/11/2026
+
+[G1](../../../../.agents/research/2026-11-14-m8-operations-release-g1.md), [ADR-0015](../../../decisions/ADR-0015-m8-operations-release.md), [contract](../../../contracts/M8_OPERATIONS_RELEASE.md), [18-task G3](slices/2026-11-14-m8-operations-release-g3.md). Every candidate above is retained: P01→S01/S03, P08→S02, P02→S04, P03→S05, P04→S06, P05→S07, P06→S08, P07→S09. G2/G3 agreed/ready on merged design only; implementation/runtime NOT_STARTED/NOT_RUN and Project Ready requires actual dependencies/ownership. No candidate silently deferred or replaced by an empty scaffold.

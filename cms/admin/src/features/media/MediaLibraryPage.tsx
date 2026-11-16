@@ -1,8 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { AuthUser } from '../../types.ts';
-import { listMedia, mediaOriginalUrl, mediaThumbnailUrl, uploadMedia } from '../../api/media.ts';
-import type { MediaAsset } from '../../api/media.ts';
-import { MediaUploadValidationError, validateImageUpload } from './library/fileValidation.ts';
+import {
+  deleteMedia,
+  listMedia,
+  MediaDeleteConflictError,
+  mediaOriginalUrl,
+  mediaThumbnailUrl,
+  uploadMedia,
+  uploadVideo,
+} from '../../api/media.ts';
+import type { MediaAsset, MediaKind, MediaPinSummary } from '../../api/media.ts';
+import { MediaUploadValidationError, validateImageUpload, validateVideoUpload } from './library/fileValidation.ts';
 import { formatMediaBytes, formatMediaDate } from './library/format.ts';
 import './media-library.css';
 
@@ -17,6 +25,7 @@ const PAGE_SIZE = 36;
 export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfToken, onApiError }) => {
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [offset, setOffset] = useState(0);
+  const [kindFilter, setKindFilter] = useState<'all' | MediaKind>('all');
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -26,11 +35,16 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
   const [uploadError, setUploadError] = useState('');
   const [notice, setNotice] = useState('');
   const [uploadProgress, setUploadProgress] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteDiagnostics, setDeleteDiagnostics] = useState<{
+    message: string;
+    pins: MediaPinSummary | null;
+  } | null>(null);
   const errorHandler = useRef(onApiError);
   errorHandler.current = onApiError;
 
   useEffect(() => {
-    if (!user) {
+  if (!user) {
       setAssets([]);
       setSelectedId(null);
       setLoading(false);
@@ -41,7 +55,7 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
     setError('');
     setAssets([]);
     setSelectedId(null);
-    listMedia(PAGE_SIZE, offset)
+    listMedia(PAGE_SIZE, offset, kindFilter === 'all' ? undefined : kindFilter)
       .then(items => {
         if (active) setAssets(items);
       })
@@ -54,7 +68,7 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [user?.id, offset, refreshVersion]);
+  }, [user?.id, offset, refreshVersion, kindFilter]);
 
   const refresh = () => setRefreshVersion(previous => previous + 1);
 
@@ -98,6 +112,33 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
     }
   };
 
+  const onUploadVideo = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = '';
+    if (!file || !csrfToken || !user || uploading || loading) return;
+
+    setUploading(true);
+    setNotice('');
+    setUploadError('');
+    setUploadProgress(`Đang kiểm tra và tải video: ${file.name}`);
+    try {
+      validateVideoUpload(file);
+      await uploadVideo(file, csrfToken);
+      setNotice(`Đã tải thành công video “${file.name}”.`);
+      setOffset(0);
+      refresh();
+    } catch (cause) {
+      const reason = cause instanceof Error ? cause.message : 'Không thể tải video.';
+      setUploadError(`Không thể tải “${file.name}”: ${reason}`);
+      if (!(cause instanceof MediaUploadValidationError)) {
+        errorHandler.current(cause, 'Không thể tải video.');
+      }
+    } finally {
+      setUploadProgress('');
+      setUploading(false);
+    }
+  };
+
   if (!user) {
     return <section className="od-media-library" aria-label="Thư viện ảnh"><p>Vui lòng đăng nhập để xem thư viện ảnh.</p></section>;
   }
@@ -126,7 +167,20 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
           <input id="od-media-files" type="file" multiple accept="image/jpeg,image/png,image/webp"
             onChange={onUpload} disabled={!csrfToken || loading || uploading} aria-describedby="od-media-upload-help" />
         </label>
-        <p id="od-media-upload-help">JPEG, PNG, WebP · tối đa 8 MiB · tối đa 6000 px mỗi chiều và 20 triệu điểm ảnh.</p>
+        <label className="od-media-upload" htmlFor="od-media-video-file">
+          <span>+ Tải video MP4</span>
+          <input id="od-media-video-file" type="file" accept="video/mp4,.mp4"
+            onChange={onUploadVideo} disabled={!csrfToken || loading || uploading} />
+        </label>
+        <div className="od-media-filters" role="group" aria-label="Lọc loại media">
+          {(['all', 'image', 'video'] as const).map(k => (
+            <button key={k} type="button" className={kindFilter === k ? 'od-media-primary' : 'od-media-secondary'}
+              onClick={() => { setKindFilter(k); setOffset(0); }} disabled={loading || uploading}>
+              {k === 'all' ? 'Tất cả' : k === 'image' ? 'Ảnh' : 'Video'}
+            </button>
+          ))}
+        </div>
+        <p id="od-media-upload-help">Ảnh: JPEG/PNG/WebP ≤ 8 MiB · Video: MP4 (H.264/AAC) ≤ 100 MiB.</p>
         <label className="od-media-search">
           <span>Tìm trong trang hiện tại</span>
           <input type="search" value={search} onChange={event => setSearch(event.target.value)}
@@ -152,8 +206,13 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
                   <button type="button" className={'od-media-card ' + (selectedId === asset.id ? 'od-media-card-selected' : '')}
                     onClick={() => setSelectedId(asset.id)} aria-pressed={selectedId === asset.id}
                     aria-label={`Xem chi tiết ảnh ${asset.filename}`} disabled={uploading}>
-                    <span className="od-media-thumb"><img src={mediaThumbnailUrl(asset.id)} alt=""
-                      width={asset.thumb_width} height={asset.thumb_height} loading="lazy" /></span>
+                    <span className="od-media-thumb">{asset.kind === 'video' ? (
+                      <span className="od-media-video-placeholder">MP4 · {((asset.duration_ms ?? 0) / 1000).toFixed(1)}s</span>
+                    ) : (
+                      <img src={mediaThumbnailUrl(asset.id)} alt=""
+                        width={asset.thumb_width ?? undefined} height={asset.thumb_height ?? undefined} loading="lazy" />
+                    )}</span>
+
                     <span className="od-media-card-body"><strong title={asset.filename}>{asset.filename}</strong>
                       <small>{asset.width} × {asset.height} · {formatMediaBytes(asset.byte_size)}</small></span>
                   </button>
@@ -174,7 +233,13 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
           {selected ? (
             <>
               <h3>Chi tiết ảnh</h3>
-              <div className="od-media-original"><img src={mediaOriginalUrl(selected.id)} alt={`Xem trước ảnh ${selected.filename}`} /></div>
+              <div className="od-media-original">
+                {selected.kind === 'video' ? (
+                  <video src={mediaOriginalUrl(selected.id)} controls preload="metadata" playsInline style={{ width: '100%', maxHeight: 320 }} />
+                ) : (
+                  <img src={mediaOriginalUrl(selected.id)} alt={`Xem trước ảnh ${selected.filename}`} />
+                )}
+              </div>
               <dl>
                 <dt>Tên file</dt><dd className="od-media-break">{selected.filename}</dd>
                 <dt>Định dạng</dt><dd>{selected.extension.toUpperCase()} · {selected.mime_type}</dd>
@@ -184,6 +249,66 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
                 <dt>Đã tải lên</dt><dd>{formatMediaDate(selected.created_at)}</dd>
               </dl>
               <a href={mediaOriginalUrl(selected.id)} target="_blank" rel="noopener noreferrer" className="od-media-original-link">Mở ảnh gốc trong tab mới</a>
+              {user?.role === 'admin' && csrfToken && (
+                <div className="od-media-delete-panel">
+                  <button
+                    type="button"
+                    className="od-media-secondary"
+                    disabled={deletingId === selected.id || uploading}
+                    onClick={async () => {
+                      setDeletingId(selected.id);
+                      setDeleteDiagnostics(null);
+                      setNotice('');
+                      try {
+                        const job = await deleteMedia(
+                          selected.id,
+                          selected.generation,
+                          selected.version,
+                          csrfToken,
+                        );
+                        setNotice(
+                          job.phase === 'finalized'
+                            ? `Đã chuyển media vào quarantine (${job.job_id.slice(0, 8)}…).`
+                            : `Tác vụ xóa đang chờ hoàn tất (${job.phase}, job ${job.job_id.slice(0, 8)}…).`,
+                        );
+                        setSelectedId(null);
+                        refresh();
+                      } catch (cause) {
+                        if (cause instanceof MediaDeleteConflictError) {
+                          setDeleteDiagnostics({
+                            message: cause.message,
+                            pins: cause.pins,
+                          });
+                        } else {
+                          setDeleteDiagnostics({
+                            message: cause instanceof Error ? cause.message : 'Không thể xóa media.',
+                            pins: null,
+                          });
+                          errorHandler.current(cause, 'Không thể xóa media.');
+                        }
+                      } finally {
+                        setDeletingId(null);
+                      }
+                    }}
+                  >
+                    {deletingId === selected.id ? 'Đang xóa…' : 'Xóa media (Quarantine)'}
+                  </button>
+                  {deleteDiagnostics && (
+                    <div className="od-media-notice od-media-error" role="alert">
+                      <p>{deleteDiagnostics.message}</p>
+                      {deleteDiagnostics.pins && deleteDiagnostics.pins.pins.length > 0 && (
+                        <ul>
+                          {deleteDiagnostics.pins.pins.map((pin, idx) => (
+                            <li key={`${pin.source_kind}-${pin.entity_id}-${idx}`}>
+                              {pin.source_kind}: {pin.entity_id}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
               <p className="od-media-help">Ảnh gốc yêu cầu phiên đăng nhập. Không có URL công khai cho ảnh nháp.</p>
             </>
           ) : (

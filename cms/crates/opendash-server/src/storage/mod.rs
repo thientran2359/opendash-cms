@@ -1,15 +1,26 @@
 pub mod auth;
+pub mod backup;
 pub mod builder;
 pub mod builder_binding;
 pub mod content;
 pub mod dashboard;
 pub mod entries;
+pub mod import;
 pub mod media;
+pub mod media_lifecycle;
+pub mod media_refs;
+pub mod menu;
+pub mod operations;
+pub mod restore;
+pub mod overrides;
 pub mod page;
 pub mod plugin;
 pub mod plugin_kv;
 pub mod public_content;
+pub mod seo;
 pub mod settings;
+pub mod sitemap;
+pub mod smtp;
 pub mod taxonomy;
 pub mod theme;
 
@@ -53,3 +64,4 @@ pub async fn check_db_ready(db: &SqlitePool) -> Result<(), sqlx::Error> {
         .await?;
     Ok(())
 }
+pub mod contact;

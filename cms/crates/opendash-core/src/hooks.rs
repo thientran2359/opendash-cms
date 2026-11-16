@@ -55,6 +55,41 @@ impl HookEnvelope {
     }
 }
 
+
+/// Execution mode for plugin hook invocations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum HookExecutionMode {
+    #[default]
+    Standard,
+    ContentBeforeSave,
+    ContentAfterSave,
+}
+
+/// Tagged decision returned by `content/before_save` validators.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum ContentBeforeSaveDecision {
+    Allow,
+    Veto {
+        code: String,
+        #[serde(default)]
+        message: String,
+        #[serde(default)]
+        field_errors: std::collections::BTreeMap<String, String>,
+    },
+}
+
+/// Sanitizes diagnostic strings to length-bounded raw UTF-8 plain text with control chars stripped.
+pub fn sanitize_plain_text(raw: &str, max_chars: usize) -> String {
+    raw.chars()
+        .filter(|ch| !ch.is_control() || *ch == ' ')
+        .take(max_chars)
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
