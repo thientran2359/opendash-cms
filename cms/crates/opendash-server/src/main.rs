@@ -13,6 +13,7 @@ mod media;
 mod media_lifecycle;
 mod media_video;
 mod operations;
+mod operations_worker_process;
 mod package;
 mod page;
 mod paths;

@@ -2,7 +2,6 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -16,6 +15,9 @@ use sha2::{Digest, Sha256};
 use sqlx::{Connection as _, Row, SqliteConnection, sqlite::SqliteConnectOptions};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
+
+#[path = "../src/operations_worker_process.rs"]
+mod operations_worker_process;
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -49,13 +51,7 @@ fn server_bin() -> &'static str {
 }
 
 fn run_worker(mode: &str, req: &Value) -> (i32, Value) {
-    let mut child = Command::new(server_bin())
-        .arg("--operations-worker")
-        .arg(mode)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+    let mut child = operations_worker_process::spawn(Path::new(server_bin()), mode)
         .expect("spawn worker");
 
     {

@@ -2,7 +2,6 @@
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use opendash_core::backup::{BackupManifestV1, validate_manifest_v1};
@@ -96,13 +95,7 @@ async fn create_snapshot_with_timeout_and_cancel(
     let exe = std::env::current_exe()
         .map_err(|_| ApiError::internal("Không xác định được đường dẫn thực thi."))?;
 
-    let mut child = Command::new(exe)
-        .arg("--operations-worker")
-        .arg("snapshot")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+    let mut child = crate::operations_worker_process::spawn(&exe, "snapshot")
         .map_err(|_| ApiError::internal("Không khởi chạy được operations worker."))?;
 
     if let Some(mut stdin) = child.stdin.take() {
@@ -387,13 +380,7 @@ pub async fn archive_snapshot_via_worker(
     let exe = std::env::current_exe()
         .map_err(|_| ApiError::internal("Không xác định được đường dẫn thực thi."))?;
 
-    let mut child = Command::new(exe)
-        .arg("--operations-worker")
-        .arg("archive")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+    let mut child = crate::operations_worker_process::spawn(&exe, "archive")
         .map_err(|_| ApiError::internal("Không khởi chạy được archive worker."))?;
 
     let mut stdin = child
