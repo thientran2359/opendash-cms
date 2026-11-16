@@ -1,6 +1,7 @@
 //! M7-S03-T01 SQLite storage for custom entry paths, ID-based redirects, and route claims.
 use std::collections::{BTreeMap, HashMap};
 
+use opendash_core::content::PatchField;
 use serde::Serialize;
 use sqlx::{SqliteConnection, SqlitePool};
 
@@ -511,7 +512,7 @@ pub async fn sync_entry_seo_media_ref_in_tx(
     Ok(())
 }
 
-async fn verify_og_media_exists_in_tx(
+pub(crate) async fn verify_og_media_exists_in_tx(
     conn: &mut SqliteConnection,
     og_image_id: Option<&str>,
 ) -> ApiResult<()> {
@@ -852,4 +853,142 @@ pub async fn build_simple_seo_view(
         og_url: canonical_url,
         og_image_url: None,
     })
+}
+
+pub(crate) async fn apply_entry_route_patch_in_tx(
+    conn: &mut SqliteConnection,
+    entry_id: i64,
+    patch: &PatchField<String>,
+) -> ApiResult<Option<String>> {
+    let old_custom: Option<String> =
+        sqlx::query_scalar("SELECT path FROM entry_public_paths WHERE entry_id = ?")
+            .bind(entry_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+
+    let normalized_new = match patch {
+        PatchField::Omitted => return Ok(old_custom),
+        PatchField::Clear => None,
+        PatchField::Set(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(validate_route_claim_in_tx(conn, trimmed, Some(entry_id)).await?)
+            }
+        }
+    };
+
+    if normalized_new == old_custom {
+        return Ok(old_custom);
+    }
+
+    if let Some(old_path) = old_custom {
+        sqlx::query("INSERT OR IGNORE INTO entry_redirects (source_path, entry_id) VALUES (?, ?)")
+            .bind(&old_path)
+            .bind(entry_id)
+            .execute(&mut *conn)
+            .await?;
+    }
+
+    match &normalized_new {
+        Some(new_path) => {
+            sqlx::query("DELETE FROM entry_redirects WHERE source_path = ? AND entry_id = ?")
+                .bind(new_path)
+                .bind(entry_id)
+                .execute(&mut *conn)
+                .await?;
+            sqlx::query(
+                "INSERT INTO entry_public_paths (entry_id, path)
+                 VALUES (?, ?)
+                 ON CONFLICT(entry_id) DO UPDATE SET path = excluded.path",
+            )
+            .bind(entry_id)
+            .bind(new_path)
+            .execute(&mut *conn)
+            .await?;
+        }
+        None => {
+            sqlx::query("DELETE FROM entry_public_paths WHERE entry_id = ?")
+                .bind(entry_id)
+                .execute(&mut *conn)
+                .await?;
+        }
+    }
+
+    Ok(normalized_new)
+}
+
+pub(crate) async fn apply_entry_seo_patch_in_tx(
+    conn: &mut SqliteConnection,
+    entry_id: i64,
+    entry_version: i64,
+    patch: &PatchField<SeoMetadataInput>,
+) -> ApiResult<Option<EntrySeoSnapshot>> {
+    match patch {
+        PatchField::Omitted => {
+            let row: Option<(Option<String>, Option<String>, Option<String>, Option<String>, i64)> =
+                sqlx::query_as(
+                    "SELECT title, description, og_image_id, canonical_url, noindex
+                     FROM entry_seo WHERE entry_id = ?",
+                )
+                .bind(entry_id)
+                .fetch_optional(&mut *conn)
+                .await?;
+            Ok(row.map(|(title, description, og_image_id, canonical_url, noindex)| {
+                EntrySeoSnapshot {
+                    entry_version,
+                    title,
+                    description,
+                    og_image_id,
+                    canonical_url,
+                    noindex: noindex != 0,
+                }
+            }))
+        }
+        PatchField::Clear => {
+            sqlx::query(
+                "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
+            )
+            .bind(entry_id)
+            .execute(&mut *conn)
+            .await?;
+            sqlx::query("DELETE FROM entry_seo WHERE entry_id = ?")
+                .bind(entry_id)
+                .execute(&mut *conn)
+                .await?;
+            Ok(None)
+        }
+        PatchField::Set(raw_seo) => {
+            let clean = validate_seo_input(raw_seo)?;
+            verify_og_media_exists_in_tx(conn, clean.og_image_id.as_deref()).await?;
+            sqlx::query(
+                "INSERT INTO entry_seo (entry_id, title, description, og_image_id, canonical_url, noindex)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(entry_id) DO UPDATE SET
+                    title = excluded.title,
+                    description = excluded.description,
+                    og_image_id = excluded.og_image_id,
+                    canonical_url = excluded.canonical_url,
+                    noindex = excluded.noindex",
+            )
+            .bind(entry_id)
+            .bind(&clean.title)
+            .bind(&clean.description)
+            .bind(&clean.og_image_id)
+            .bind(&clean.canonical_url)
+            .bind(i64::from(clean.noindex))
+            .execute(&mut *conn)
+            .await?;
+            sync_entry_seo_media_ref_in_tx(conn, entry_id).await?;
+            Ok(Some(EntrySeoSnapshot {
+                entry_version,
+                title: clean.title,
+                description: clean.description,
+                og_image_id: clean.og_image_id,
+                canonical_url: clean.canonical_url,
+                noindex: clean.noindex,
+            }))
+        }
+    }
 }
