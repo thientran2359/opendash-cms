@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AuthUser, PluginSummary, type Role } from './types.ts';
 import * as api from './api/index.ts';
-import { AdminShell, isViewAllowed, parseAdminView, type AdminView } from './shell/AdminShell.tsx';
+import { AdminShell, isRouteAllowed, parseAdminRoute, type ParsedRoute } from './shell/AdminShell.tsx';
+import { listContentTypes } from './api/content.ts';
+import type { OwnedContentType } from './features/content/types.ts';
+import { ContentTypeSchemaSettings } from './features/content/ContentTypeSchemaSettings.tsx';
+import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
@@ -27,7 +31,9 @@ export const App: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<string>('Đang kiểm tra trạng thái phiên...');
   const [isError, setIsError] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [activeView, setActiveView] = useState<AdminView>(() => parseAdminView(window.location.hash, window.location.pathname));
+  const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
+  const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
+  const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
   const [contentDirty, setContentDirty] = useState(false);
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
@@ -55,13 +61,27 @@ export const App: React.FC = () => {
 
   // Hash routing works from /admin/ and /builder without server catch-all.
   // The existing editors stay mounted in AdminShell across route changes.
+  const loadCptTypes = useCallback(async () => {
+    try {
+      const list = await listContentTypes();
+      setCptTypes(list);
+    } catch {
+      // Non-fatal on boot; panels handle explicit errors.
+    }
+  }, []);
+
   useEffect(() => {
     const synchronize = () => {
-      const requested = parseAdminView(window.location.hash, window.location.pathname);
-      const next = user && !isViewAllowed(requested, user.role) ? 'dashboard' : requested;
-      setActiveView(next);
-      if (user && next !== requested) {
-        window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/' + next);
+      const requested = parseAdminRoute(window.location.hash, window.location.pathname);
+      if (user && requested.isLegacyContentRedirect) {
+        const targetHash = user.role === 'admin' ? '#/settings/content-types' : '#/posts';
+        window.history.replaceState(null, '', window.location.pathname + window.location.search + targetHash);
+        setRoute(parseAdminRoute(targetHash, window.location.pathname));
+        return;
+      }
+      setRoute(requested);
+      if (requested.view === 'settings' && requested.sub === 'content-types' && requested.typeKey) {
+        setSelectedSchemaTypeKey(requested.typeKey);
       }
     };
     synchronize();
@@ -79,10 +99,14 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('beforeunload', guard);
   }, [builderDirty, contentDirty, postsDirty, pagesDirty]);
 
-  const navigateTo = (view: AdminView) => {
-    if (!user || !isViewAllowed(view, user.role)) return;
-    setActiveView(view);
-    if (window.location.hash !== '#/' + view) window.location.hash = '/' + view;
+  const navigateHash = (hash: string) => {
+    if (!user) return;
+    const normalized = hash.startsWith('#') ? hash : '#' + hash;
+    if (window.location.hash !== normalized) {
+      window.location.hash = normalized.slice(1);
+    } else {
+      setRoute(parseAdminRoute(normalized, window.location.pathname));
+    }
   };
 
   const setStatus = (msg: string, error: boolean = false) => {
@@ -123,6 +147,7 @@ export const App: React.FC = () => {
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
+        await loadCptTypes();
         if (auth.user.role === 'admin') {
           await loadPlugins();
         }
@@ -171,6 +196,7 @@ export const App: React.FC = () => {
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
       setStatus('Đăng nhập thành công.', false);
+      await loadCptTypes();
       if (res.user.role === 'admin') {
         await loadPlugins();
       }
@@ -204,7 +230,8 @@ export const App: React.FC = () => {
       setPostsDirty(false);
       setPagesDirty(false);
       lastAuthenticatedUserId.current = null;
-      setActiveView('dashboard');
+      setRoute(parseAdminRoute('#/dashboard', window.location.pathname));
+      setCptTypes([]);
       window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
       setStatus('Đã đăng xuất.', false);
     } catch (err) {
@@ -312,8 +339,10 @@ export const App: React.FC = () => {
       onSetup={handleSetup}
       onLogin={handleLogin}
       onLogout={handleLogout}
-      activeView={activeView}
-      onViewChange={navigateTo}
+      route={route}
+      routeForbidden={Boolean(user && !isRouteAllowed(route, user.role))}
+      cptTypes={cptTypes}
+      onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
       sidebarContent={<BuilderWorkspace
@@ -328,15 +357,40 @@ export const App: React.FC = () => {
         />
         <MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />
       </>}
+      schemaSettingsContent={
+        <ContentTypeSchemaSettings
+          selectedTypeKey={selectedSchemaTypeKey}
+          onSelectTypeKey={key => {
+            setSelectedSchemaTypeKey(key);
+            if (key) navigateHash(`#/settings/content-types/${key}`);
+          }}
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onContentTypesChanged={() => {
+            void loadCptTypes();
+          }}
+        />
+      }
+      profileContent={
+        <UserProfilePanel
+          csrfToken={csrfToken}
+          onApiError={handleApiError}
+          onProfileUpdated={prof => {
+            setUser(prev => (prev ? { ...prev, username: prof.username } : prev));
+          }}
+        />
+      }
+      toolsContent={<>
+        <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi sao lưu mã hóa.')} />
+        <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi khôi phục & safe mode.')} />
+        <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
+        <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
+      </>}
       settingsContent={<>
         <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
         <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
         <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
         <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cấu hình SMTP.')} />
-        <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi sao lưu mã hóa.')} />
-        <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi khôi phục & safe mode.')} />
-        <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
-        <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
       </>}
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}
