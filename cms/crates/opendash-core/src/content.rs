@@ -1178,6 +1178,26 @@ pub struct ContentEntryInput {
     pub term_ids: Option<Vec<i64>>,
 }
 
+/// Three-state patch field distinguishing omitted key (`Omitted`), JSON `null` (`Clear`), and value (`Set(T)`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PatchField<T> {
+    #[default]
+    Omitted,
+    Clear,
+    Set(T),
+}
+
+pub fn deserialize_patch_field<'de, D, T>(deserializer: D) -> Result<PatchField<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    match Option::<T>::deserialize(deserializer)? {
+        None => Ok(PatchField::Clear),
+        Some(val) => Ok(PatchField::Set(val)),
+    }
+}
+
 impl ContentEntryInput {
     pub fn validate_against(&self, schema: &ContentTypeDefinition) -> Result<(), &'static str> {
         if self.title.trim().is_empty()
@@ -2638,5 +2658,22 @@ mod tests {
             .values
             .insert("photos".into(), json!(["asset1", "asset2"]));
         assert!(entry.validate_against(&schema).is_ok());
+    }
+
+    #[test]
+    fn patch_field_distinguishes_omitted_clear_and_set() {
+        #[derive(Debug, Deserialize)]
+        struct Probe {
+            #[serde(default, deserialize_with = "deserialize_patch_field")]
+            path: PatchField<String>,
+        }
+        let omitted: Probe = serde_json::from_str("{}").unwrap();
+        assert_eq!(omitted.path, PatchField::Omitted);
+
+        let cleared: Probe = serde_json::from_str(r#"{"path": null}"#).unwrap();
+        assert_eq!(cleared.path, PatchField::Clear);
+
+        let set: Probe = serde_json::from_str(r#"{"path": "/hello"}"#).unwrap();
+        assert_eq!(set.path, PatchField::Set("/hello".to_string()));
     }
 }

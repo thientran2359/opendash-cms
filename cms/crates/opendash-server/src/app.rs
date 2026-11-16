@@ -34,7 +34,8 @@ use crate::{
         dashboard::dashboard_get,
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
-            entry_preview, entry_publication, entry_update,
+            entry_composite_create, entry_composite_update, entry_preview, entry_publication,
+            entry_update,
         },
         media::{
             media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
@@ -61,7 +62,8 @@ use crate::{
         },
         themes::{ThemeStoreRoot, theme_activate, theme_asset, theme_install, theme_list},
         users::{
-            max_users_json_bytes, user_create, user_delete, user_list, user_patch,
+            max_users_json_bytes, profile_get, profile_put, user_create, user_delete, user_list,
+            user_patch,
             user_reset_password,
         },
     },
@@ -411,6 +413,22 @@ pub fn build_router_with_themes_root(
             get(entry_list)
                 .post(entry_create)
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/composite",
+            post(entry_composite_create)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/composite",
+            put(entry_composite_update)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/profile",
+            get(profile_get)
+                .put(profile_put)
+                .layer(DefaultBodyLimit::max(max_users_json_bytes())),
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/{id}",

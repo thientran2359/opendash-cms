@@ -130,6 +130,8 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "entry_update",
                 "entry_delete",
                 "entry_publication",
+                "entry_composite_create",
+                "entry_composite_update",
             ],
         ),
         ("import.rs", &["import_dry_run", "import_execute"]),
@@ -178,6 +180,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "user_patch",
                 "user_reset_password",
                 "user_delete",
+                "profile_put",
             ],
         ),
     ];

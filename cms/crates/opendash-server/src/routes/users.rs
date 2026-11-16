@@ -11,8 +11,8 @@ use sqlx::SqlitePool;
 
 use crate::{
     auth::{
-        Role, hash_password_blocking, require_admin, require_admin_with_csrf, validate_password,
-        validate_username,
+        Role, hash_password_blocking, require_admin, require_admin_with_csrf, require_session,
+        require_session_with_csrf, validate_password, validate_username, verify_password_blocking,
     },
     error::{ApiError, ApiResult},
     storage::auth as users,
@@ -194,4 +194,65 @@ pub async fn user_delete(
         [(header::CACHE_CONTROL, "no-store")],
     )
         .into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateProfileInput {
+    pub username: Option<String>,
+    pub current_password: Option<String>,
+    pub new_password: Option<String>,
+}
+
+pub async fn profile_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    let actor = require_session(&headers, &db).await?;
+    let summary = users::get_profile(&db, actor.user.id).await?;
+    Ok(response(StatusCode::OK, summary))
+}
+
+pub async fn profile_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    payload: Result<Json<UpdateProfileInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    let version = parse_version(&headers)?;
+    let input = parse_body(payload)?;
+    if input.username.is_none() && input.new_password.is_none() {
+        return Err(ApiError::bad_request("Cần username hoặc new_password."));
+    }
+    if let Some(username) = &input.username {
+        validate_username(username).map_err(ApiError::bad_request)?;
+    }
+    let new_hash = if let Some(new_pw) = &input.new_password {
+        let Some(curr_pw) = input.current_password.as_deref() else {
+            return Err(ApiError::forbidden(
+                "invalid_current_password: Phải nhập mật khẩu hiện tại khi đổi mật khẩu.",
+            ));
+        };
+        let stored_hash = users::load_user_password_hash(&db, actor.user.id).await?;
+        let ok = verify_password_blocking(curr_pw.to_owned(), stored_hash).await?;
+        if !ok {
+            return Err(ApiError::forbidden(
+                "invalid_current_password: Mật khẩu hiện tại không đúng.",
+            ));
+        }
+        validate_password(new_pw).map_err(ApiError::bad_request)?;
+        Some(hash_password_blocking(new_pw.clone()).await?)
+    } else {
+        None
+    };
+    let summary = users::update_own_profile(
+        &db,
+        &actor,
+        version,
+        input.username.as_deref(),
+        new_hash.as_deref(),
+    )
+    .await?;
+    Ok(response(StatusCode::OK, summary))
 }
