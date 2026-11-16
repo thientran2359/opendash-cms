@@ -402,6 +402,7 @@ mod tests {
                 field_type: ContentFieldType::RichText,
                 required: false,
                 options: vec![],
+                ..Default::default()
             }],
         };
         let record = ContentEntryRecord {

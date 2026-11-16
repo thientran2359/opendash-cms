@@ -112,7 +112,16 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "public_submit",
             ],
         ),
-        ("content.rs", &["content_type_create"]),
+        (
+            "content.rs",
+            &[
+                "content_type_create",
+                "content_type_update",
+                "field_group_create",
+                "field_group_update",
+                "field_group_delete",
+            ],
+        ),
         (
             "entries.rs",
             &[

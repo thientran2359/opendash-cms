@@ -105,12 +105,19 @@ impl Theme {
         };
 
         let template = template.ok_or("Thiếu block.html.")?;
-        if template.trim().is_empty() || crate::template_sec::restricted_environment().template_from_str(&template).is_err() {
+        if template.trim().is_empty()
+            || crate::template_sec::restricted_environment()
+                .template_from_str(&template)
+                .is_err()
+        {
             return Err("Template block không hợp lệ.");
         }
         for optional in [&content_list_template, &content_single_template] {
             if let Some(template) = optional {
-                if template.trim().is_empty() || crate::template_sec::restricted_environment().template_from_str(template).is_err()
+                if template.trim().is_empty()
+                    || crate::template_sec::restricted_environment()
+                        .template_from_str(template)
+                        .is_err()
                 {
                     return Err("Template CPT không hợp lệ.");
                 }
@@ -168,6 +175,8 @@ pub struct ThemeV2Manifest {
     pub sample: Option<serde_json::Value>,
     #[serde(default)]
     pub declarations: Option<serde_json::Value>,
+    #[serde(default)]
+    pub field_groups: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -284,8 +293,7 @@ pub fn parse_theme_zip_v2(bytes: &[u8]) -> Result<ThemeV2Package, V2ZipError> {
         if rel_path.to_ascii_lowercase().ends_with(".css") {
             let css_src = std::str::from_utf8(content)
                 .map_err(|_| V2ZipError::BadRequest("File CSS phải là UTF-8 hợp lệ."))?;
-            crate::template_sec::validate_safe_css(css_src)
-                .map_err(V2ZipError::BadRequest)?;
+            crate::template_sec::validate_safe_css(css_src).map_err(V2ZipError::BadRequest)?;
         }
     }
 
@@ -300,12 +308,15 @@ pub fn manifest_has_declarations(manifest_json: &str) -> bool {
     let Ok(val) = serde_json::from_str::<serde_json::Value>(manifest_json) else {
         return false;
     };
-    let Some(decl) = val.get("declarations") else {
-        return false;
-    };
-    !decl.is_null()
-        && !matches!(decl, serde_json::Value::Object(m) if m.is_empty())
-        && !matches!(decl, serde_json::Value::Array(a) if a.is_empty())
+    let has_decl = val.get("declarations").is_some_and(|decl| {
+        !decl.is_null()
+            && !matches!(decl, serde_json::Value::Object(m) if m.is_empty())
+            && !matches!(decl, serde_json::Value::Array(a) if a.is_empty())
+    });
+    let has_top_fg = val.get("field_groups").is_some_and(|fg| {
+        !fg.is_null() && !matches!(fg, serde_json::Value::Array(a) if a.is_empty())
+    });
+    has_decl || has_top_fg
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -315,6 +326,8 @@ pub struct ThemeDeclarations {
     pub content_types: Vec<ThemeContentTypeDeclaration>,
     #[serde(default)]
     pub taxonomy_eligibility: Vec<ThemeTaxonomyEligibilityDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub field_groups: Vec<opendash_core::content::ManifestFieldGroupInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -336,17 +349,28 @@ pub struct ThemeTaxonomyEligibilityDeclaration {
     pub taxonomies: Vec<String>,
 }
 
-/// Parses and validates `declarations` from a v2 theme manifest.
+/// Parses and validates `declarations` (and optional top-level `field_groups`) from a v2 theme manifest.
 /// Rejects unknown fields, invalid CPT/field schemas, duplicate keys, and any
 /// taxonomy kind outside Core `category` / `tag`.
 pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations, &'static str> {
-    let val: serde_json::Value = serde_json::from_str(manifest_json)
-        .map_err(|_| "Manifest theme v2 không hợp lệ.")?;
-    let Some(raw_decl) = val.get("declarations").cloned() else {
-        return Ok(ThemeDeclarations::default());
+    let val: serde_json::Value =
+        serde_json::from_str(manifest_json).map_err(|_| "Manifest theme v2 không hợp lệ.")?;
+    let mut raw_decl = match val.get("declarations").cloned() {
+        Some(v) if !v.is_null() => v,
+        _ => serde_json::json!({}),
     };
-    if raw_decl.is_null() {
-        return Ok(ThemeDeclarations::default());
+    if let Some(top_fg) = val.get("field_groups").cloned() {
+        if !top_fg.is_null() {
+            let Some(obj) = raw_decl.as_object_mut() else {
+                return Err("Khai báo declarations trong theme.json không đúng định dạng.");
+            };
+            if obj.contains_key("field_groups") {
+                return Err(
+                    "Không được khai báo trùng field_groups ở cả cấp gốc và trong declarations của theme.json.",
+                );
+            }
+            obj.insert("field_groups".into(), top_fg);
+        }
     }
     let parsed: ThemeDeclarations = serde_json::from_value(raw_decl)
         .map_err(|_| "Khai báo declarations trong theme.json không đúng định dạng.")?;
@@ -363,7 +387,9 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
         def.validate()?;
         for tax in &ct.taxonomies {
             if tax != "category" && tax != "tag" {
-                return Err("Theme chỉ được khai báo taxonomy eligibility cho category hoặc tag lõi.");
+                return Err(
+                    "Theme chỉ được khai báo taxonomy eligibility cho category hoặc tag lõi.",
+                );
             }
         }
     }
@@ -373,9 +399,23 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
         }
         for tax in &elig.taxonomies {
             if tax != "category" && tax != "tag" {
-                return Err("Theme chỉ được khai báo taxonomy eligibility cho category hoặc tag lõi.");
+                return Err(
+                    "Theme chỉ được khai báo taxonomy eligibility cho category hoặc tag lõi.",
+                );
             }
         }
+    }
+    if parsed.field_groups.len() > 16 {
+        return Err("Theme chỉ được khai báo tối đa 16 field_groups.");
+    }
+    let mut seen_groups = std::collections::HashSet::new();
+    for fg in &parsed.field_groups {
+        if !seen_groups.insert(fg.local_key.as_str()) {
+            return Err(
+                "duplicate_panel_id: Trùng local_key trong danh sách field_groups của theme.",
+            );
+        }
+        fg.validate_and_normalize()?;
     }
     Ok(parsed)
 }

@@ -6,7 +6,7 @@ use axum::{
     http::{StatusCode, header},
     middleware::{self, Next},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use opendash_core::builder::MAX_BUILDER_JSON_BYTES;
 use rust_embed::RustEmbed;
@@ -25,7 +25,11 @@ use crate::{
             override_preview, override_put, override_reset, overrides_list, page, preview,
             registry, save, serve_asset,
         },
-        content::{MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list},
+        content::{
+            MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list,
+            content_type_update, field_group_create, field_group_delete, field_group_list,
+            field_group_update,
+        },
         dashboard::dashboard_get,
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
@@ -373,6 +377,22 @@ pub fn build_router_with_themes_root(
             "/api/admin/content-types",
             get(content_type_list)
                 .post(content_type_create)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}",
+            put(content_type_update).layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-field-groups",
+            get(field_group_list)
+                .post(field_group_create)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-field-groups/{group_id}",
+            put(field_group_update)
+                .delete(field_group_delete)
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
         )
         .route(

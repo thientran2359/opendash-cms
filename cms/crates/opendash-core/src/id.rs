@@ -115,6 +115,153 @@ pub fn validate_semver(version: &str) -> bool {
     true
 }
 
+/// Validates a layout-scoped base-field slice panel identifier (`layout:<slice_key>`),
+/// returning the inner `<slice_key>` when valid.
+pub fn valid_layout_slice_panel_id(value: &str) -> Option<&str> {
+    let slice_key = value.strip_prefix("layout:")?;
+    if valid_snake_key(slice_key) {
+        Some(slice_key)
+    } else {
+        None
+    }
+}
+
+/// Structured identifier for field groups and editor panels (`owner` + `local_key`),
+/// keeping `PackageId` (`kebab-case`) separate from `local_key` (`snake_case`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ScopedResourceId {
+    pub owner: crate::registry::ResourceOwner,
+    pub local_key: String,
+}
+
+impl std::hash::Hash for ScopedResourceId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match &self.owner {
+            crate::registry::ResourceOwner::Core => {
+                0u8.hash(state);
+            }
+            crate::registry::ResourceOwner::User => {
+                1u8.hash(state);
+            }
+            crate::registry::ResourceOwner::Theme(id) => {
+                2u8.hash(state);
+                id.hash(state);
+            }
+            crate::registry::ResourceOwner::Plugin(id) => {
+                3u8.hash(state);
+                id.hash(state);
+            }
+        }
+        self.local_key.hash(state);
+    }
+}
+
+impl ScopedResourceId {
+    pub fn new(
+        owner: crate::registry::ResourceOwner,
+        local_key: impl Into<String>,
+    ) -> Result<Self, &'static str> {
+        let local_key = local_key.into();
+        if !valid_snake_key(&local_key) {
+            return Err("local_key trong ScopedResourceId phải là snake_case hợp lệ (1..=64 ký tự).");
+        }
+        match &owner {
+            crate::registry::ResourceOwner::Core | crate::registry::ResourceOwner::User => {}
+            crate::registry::ResourceOwner::Theme(pkg_id)
+            | crate::registry::ResourceOwner::Plugin(pkg_id) => {
+                if !valid_package_id(pkg_id) {
+                    return Err(
+                        "owner_id trong ScopedResourceId phải là package_id hợp lệ (3..=64 ký tự).",
+                    );
+                }
+            }
+        }
+        Ok(Self { owner, local_key })
+    }
+
+    pub fn to_canonical(&self) -> String {
+        match &self.owner {
+            crate::registry::ResourceOwner::Core => format!("core:{}", self.local_key),
+            crate::registry::ResourceOwner::User => format!("user:{}", self.local_key),
+            crate::registry::ResourceOwner::Theme(pkg_id) => {
+                format!("theme:{pkg_id}:{}", self.local_key)
+            }
+            crate::registry::ResourceOwner::Plugin(pkg_id) => {
+                format!("plugin:{pkg_id}:{}", self.local_key)
+            }
+        }
+    }
+
+    pub fn parse(raw: &str) -> Result<Self, &'static str> {
+        if raw.starts_with("layout:") {
+            return Err(
+                "reserved_panel_namespace: Tiền tố 'layout:' chỉ dành riêng cho cấu hình bố cục cấp site.",
+            );
+        }
+        let parts: Vec<&str> = raw.split(':').collect();
+        match parts.as_slice() {
+            ["core", local_key] => Self::new(crate::registry::ResourceOwner::Core, *local_key),
+            ["user", local_key] => Self::new(crate::registry::ResourceOwner::User, *local_key),
+            ["theme", pkg_id, local_key] => Self::new(
+                crate::registry::ResourceOwner::Theme((*pkg_id).to_owned()),
+                *local_key,
+            ),
+            ["plugin", pkg_id, local_key] => Self::new(
+                crate::registry::ResourceOwner::Plugin((*pkg_id).to_owned()),
+                *local_key,
+            ),
+            _ => Err("Định danh ScopedResourceId không đúng định dạng chuẩn."),
+        }
+    }
+}
+
+impl std::fmt::Display for ScopedResourceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_canonical())
+    }
+}
+
+impl std::str::FromStr for ScopedResourceId {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl serde::Serialize for ScopedResourceId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_canonical())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ScopedResourceId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(serde::Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Canonical(String),
+            Structured {
+                owner: crate::registry::ResourceOwner,
+                local_key: String,
+            },
+        }
+
+        match Repr::deserialize(deserializer)? {
+            Repr::Canonical(s) => Self::parse(&s).map_err(serde::de::Error::custom),
+            Repr::Structured { owner, local_key } => {
+                Self::new(owner, local_key).map_err(serde::de::Error::custom)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,5 +299,36 @@ mod tests {
         assert!(validate_semver("1.0.0-0a+001"));
         assert!(valid_namespaced_block_id("legacy-/block-")); // M1 compatibility
         assert!(!valid_package_id("legacy-"));
+    }
+
+    #[test]
+    fn parses_and_serializes_scoped_resource_id() {
+        let user_id = ScopedResourceId::parse("user:project_meta").unwrap();
+        assert_eq!(user_id.owner, crate::registry::ResourceOwner::User);
+        assert_eq!(user_id.local_key, "project_meta");
+        assert_eq!(user_id.to_canonical(), "user:project_meta");
+
+        let theme_id = ScopedResourceId::parse("theme:moc-studio:hero_fields").unwrap();
+        assert_eq!(
+            theme_id.owner,
+            crate::registry::ResourceOwner::Theme("moc-studio".into())
+        );
+        assert_eq!(theme_id.local_key, "hero_fields");
+        assert_eq!(theme_id.to_canonical(), "theme:moc-studio:hero_fields");
+
+        let plugin_id = ScopedResourceId::parse("plugin:seo-pro:extra_meta").unwrap();
+        assert_eq!(
+            plugin_id.owner,
+            crate::registry::ResourceOwner::Plugin("seo-pro".into())
+        );
+        assert_eq!(plugin_id.local_key, "extra_meta");
+        assert_eq!(plugin_id.to_canonical(), "plugin:seo-pro:extra_meta");
+
+        assert!(ScopedResourceId::parse("layout:project_info").is_err());
+        assert_eq!(
+            valid_layout_slice_panel_id("layout:project_info"),
+            Some("project_info")
+        );
+        assert_eq!(valid_layout_slice_panel_id("layout:bad-key"), None);
     }
 }
