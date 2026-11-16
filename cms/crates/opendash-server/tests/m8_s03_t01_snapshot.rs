@@ -15,6 +15,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Connection as _, SqliteConnection, SqlitePool, sqlite::SqliteConnectOptions};
 
+#[path = "../src/operations_worker_process.rs"]
+mod operations_worker_process;
+
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 struct TempDirGuard(PathBuf);
@@ -117,13 +120,7 @@ fn invoke_snapshot_worker(
     snapshot_dir: &Path,
 ) -> (bool, Value) {
     let bin = env!("CARGO_BIN_EXE_opendash");
-    let mut child = Command::new(bin)
-        .arg("--operations-worker")
-        .arg("snapshot")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+    let mut child = operations_worker_process::spawn(Path::new(bin), "snapshot")
         .expect("spawn snapshot worker");
 
     let req = json!({

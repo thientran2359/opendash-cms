@@ -8,6 +8,9 @@ use std::{
     time::Duration,
 };
 
+#[path = "../src/operations_worker_process.rs"]
+mod operations_worker_process;
+
 use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
 use sqlx::{Connection as _, SqliteConnection, sqlite::SqliteConnectOptions};
@@ -332,12 +335,7 @@ async fn m8_s04_t02_admin_backup_jobs_download_cancel_and_retention() {
     let downloaded_path = tmp.path().join("downloaded.odbackup.age");
     fs::write(&downloaded_path, &dl_bytes).unwrap();
     let verify_dir = tmp.path().join("verify-dl");
-    let mut child = Command::new(server_bin())
-        .arg("--operations-worker")
-        .arg("verify")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
+    let mut child = operations_worker_process::spawn(std::path::Path::new(server_bin()), "verify")
         .unwrap();
     {
         let mut stdin = child.stdin.take().unwrap();
