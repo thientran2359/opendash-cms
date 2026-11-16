@@ -6,7 +6,7 @@ use opendash_core::{
     builder::{
         BindingSource, BindingTarget, BuilderDocument, ElementBinding, ElementContent, KnownElement,
     },
-    content::{ContentFieldType, ContentTypeDefinition},
+    content::{ContentFieldType, ContentTypeDefinition, PublicExposure},
 };
 use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -198,7 +198,7 @@ fn extract_route_context(
             let Some(img_field) = schema
                 .fields
                 .iter()
-                .find(|f| f.field_type == ContentFieldType::Image)
+                .find(|f| f.field_type == ContentFieldType::Image && f.public_exposure == PublicExposure::Public)
             else {
                 return BindingResult::Unavailable;
             };
@@ -228,7 +228,11 @@ fn extract_field_value(
     key: &str,
     target: BindingTarget,
 ) -> Result<String, BindingResult> {
-    let Some(field) = schema.fields.iter().find(|field| field.key == key) else {
+    let Some(field) = schema
+        .fields
+        .iter()
+        .find(|field| field.key == key && field.public_exposure == PublicExposure::Public)
+    else {
         return Err(BindingResult::Unavailable);
     };
     let compatible = match target {

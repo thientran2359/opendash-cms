@@ -419,6 +419,7 @@ mod egress_quota_tests {
                 }],
                 content_read: vec![],
                 content_write: vec![],
+                ..Default::default()
             },
             hooks: vec![],
             hook_priority: 0,

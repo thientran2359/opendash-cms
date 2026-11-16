@@ -231,8 +231,7 @@ mod tests {
             permissions: PluginPermissions {
                 sqlite: vec!["kv_write".into()],
                 http: vec![], content_read: vec![],
-            network: vec![], content_write: vec![],
-            },
+            network: vec![], content_write: vec![], ..Default::default() },
         };
 
         let res = runtime
@@ -445,8 +444,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![target_url.clone()],
                 content_read: vec![],
-            network: vec![], content_write: vec![],
-            },
+            network: vec![], content_write: vec![], ..Default::default() },
         };
 
         let start = std::time::Instant::now();
@@ -1001,8 +999,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![origin.clone()],
                 content_read: vec![],
-            network: vec![], content_write: vec![],
-            },
+            network: vec![], content_write: vec![], ..Default::default() },
         };
 
         let res = runtime
@@ -1153,8 +1150,7 @@ mod tests {
                 sqlite: vec![],
                 http: vec![origin.clone()],
                 content_read: vec![],
-            network: vec![], content_write: vec![],
-            },
+            network: vec![], content_write: vec![], ..Default::default() },
         };
 
         let rt = runtime.clone();

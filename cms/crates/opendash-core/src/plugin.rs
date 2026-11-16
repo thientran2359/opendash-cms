@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 pub use crate::id::{
@@ -39,6 +41,15 @@ fn default_network_methods() -> Vec<String> {
     vec!["GET".into()]
 }
 
+/// Narrowly scoped permission grant for reading or writing `public_exposure = Private` fields
+/// owned by another entity (`270-R3`). Wildcard `"*"` is forbidden for both `content_type` and `field_keys`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ScopedFieldGrant {
+    pub content_type: String,
+    pub field_keys: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginPermissions {
@@ -52,6 +63,10 @@ pub struct PluginPermissions {
     pub content_read: Vec<String>,
     #[serde(default)]
     pub content_write: Vec<String>,
+    #[serde(default)]
+    pub content_read_private: Vec<ScopedFieldGrant>,
+    #[serde(default)]
+    pub content_write_private: Vec<ScopedFieldGrant>,
 }
 
 fn default_action_role() -> String {
@@ -127,6 +142,43 @@ fn default_entrypoint() -> String {
     "plugin.wasm".into()
 }
 
+fn validate_scoped_field_grants<F>(
+    grants: &[ScopedFieldGrant],
+    has_base_type_perm: F,
+    label: &str,
+) -> Result<(), &'static str>
+where
+    F: Fn(&str) -> bool,
+{
+    for grant in grants {
+        if grant.content_type == "*" || !crate::content::valid_content_type_key(&grant.content_type)
+        {
+            return Err(match label {
+                "read" => "content_read_private không cho phép wildcard '*' và phải dùng content_type hợp lệ.",
+                _ => "content_write_private không cho phép wildcard '*' và phải dùng content_type hợp lệ.",
+            });
+        }
+        if !has_base_type_perm(&grant.content_type) {
+            return Err(match label {
+                "read" => "content_read_private yêu cầu plugin đã có quyền content_read cho loại nội dung tương ứng.",
+                _ => "content_write_private yêu cầu plugin đã có quyền content_write cho loại nội dung tương ứng.",
+            });
+        }
+        if grant.field_keys.is_empty() || grant.field_keys.len() > 64 {
+            return Err("ScopedFieldGrant.field_keys phải có từ 1 đến 64 khóa trường.");
+        }
+        let mut seen = HashSet::new();
+        for fk in &grant.field_keys {
+            if fk == "*" || !crate::id::valid_snake_key(fk) || !seen.insert(fk.as_str()) {
+                return Err(
+                    "ScopedFieldGrant.field_keys không cho phép wildcard '*', phải là snake_case hợp lệ và không trùng lặp.",
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 impl PluginManifest {
     pub fn from_json_str(json_str: &str) -> Result<Self, &'static str> {
         let mut raw_val: serde_json::Value =
@@ -163,6 +215,14 @@ impl PluginManifest {
         if !self.declarations.field_groups.is_empty() && self.manifest_schema != 2 {
             return Err("field_groups trong plugin.json chỉ hợp lệ khi manifest_schema = 2.");
         }
+        if (!self.permissions.content_read_private.is_empty()
+            || !self.permissions.content_write_private.is_empty())
+            && (self.manifest_schema != 2 || self.min_host_version.is_none())
+        {
+            return Err(
+                "content_read_private và content_write_private chỉ hợp lệ khi manifest_schema = 2 và có khai báo min_host_version.",
+            );
+        }
         if let Some(min_ver) = &self.min_host_version {
             if !validate_semver(min_ver) {
                 return Err("min_host_version không đúng định dạng SemVer 2.0.0.");
@@ -184,7 +244,7 @@ impl PluginManifest {
         if self.entrypoint != "plugin.wasm" {
             return Err("Entrypoint phải là 'plugin.wasm'.");
         }
-        let mut seen_hooks = std::collections::HashSet::new();
+        let mut seen_hooks = HashSet::new();
         for event in &self.hooks {
             if !matches!(
                 event,
@@ -203,6 +263,22 @@ impl PluginManifest {
                 return Err("Quyền content_read không hợp lệ.");
             }
         }
+        for ct_perm in &self.permissions.content_write {
+            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+                return Err("Quyền content_write không hợp lệ.");
+            }
+        }
+        validate_scoped_field_grants(
+            &self.permissions.content_read_private,
+            |ct| self.can_read_content_type(ct),
+            "read",
+        )?;
+        validate_scoped_field_grants(
+            &self.permissions.content_write_private,
+            |ct| self.can_write_content_type(ct),
+            "write",
+        )?;
+
         for perm in &self.permissions.sqlite {
             if perm != "kv_read" && perm != "kv_write" {
                 return Err("Quyền SQLite không hợp lệ (chỉ hỗ trợ 'kv_read' và 'kv_write').");
@@ -257,7 +333,7 @@ impl PluginManifest {
                 return Err("Chỉ hỗ trợ scheme http hoặc https.");
             }
         }
-        let mut seen_actions = std::collections::HashSet::new();
+        let mut seen_actions = HashSet::new();
         for action in &self.actions {
             if !crate::id::valid_package_id(&action.id) && !crate::id::valid_snake_key(&action.id) {
                 return Err("Action id trong manifest không hợp lệ.");
@@ -271,16 +347,36 @@ impl PluginManifest {
             }
             let mut has_kv_write = false;
             let mut has_content_write = false;
+            let mut has_content_read = false;
+            let mut has_content_read_private = false;
+            let mut has_content_write_private = false;
             for cap in &action.capabilities {
                 match cap.as_str() {
-                    "kv_read" | "content_read" | "http" => {}
+                    "kv_read" | "http" => {}
+                    "content_read" => has_content_read = true,
+                    "content_read_private" => has_content_read_private = true,
                     "kv_write" => has_kv_write = true,
                     "content_write" => has_content_write = true,
+                    "content_write_private" => has_content_write_private = true,
                     _ => return Err("Action capability không nằm trong allowlist V1."),
                 }
             }
             if has_kv_write && has_content_write {
                 return Err("Action V1 không được kết hợp cả kv_write và content_write.");
+            }
+            if has_content_read_private
+                && (!has_content_read || self.permissions.content_read_private.is_empty())
+            {
+                return Err(
+                    "Action khai báo content_read_private phải kèm content_read và permissions.content_read_private.",
+                );
+            }
+            if has_content_write_private
+                && (!has_content_write || self.permissions.content_write_private.is_empty())
+            {
+                return Err(
+                    "Action khai báo content_write_private phải kèm content_write và permissions.content_write_private.",
+                );
             }
         }
         self.declarations.validate()?;
@@ -303,6 +399,20 @@ impl PluginManifest {
             .content_write
             .iter()
             .any(|k| k == "*" || k == type_key)
+    }
+
+    pub fn has_private_read_grant(&self, type_key: &str, field_key: &str) -> bool {
+        self.permissions
+            .content_read_private
+            .iter()
+            .any(|g| g.content_type == type_key && g.field_keys.iter().any(|k| k == field_key))
+    }
+
+    pub fn has_private_write_grant(&self, type_key: &str, field_key: &str) -> bool {
+        self.permissions
+            .content_write_private
+            .iter()
+            .any(|g| g.content_type == type_key && g.field_keys.iter().any(|k| k == field_key))
     }
 
     pub fn action(&self, id: &str) -> Option<&PluginActionDeclaration> {
@@ -412,6 +522,63 @@ impl PluginManifest {
     }
 }
 
+/// Checks whether a plugin (in hook mode `action_caps == None` or action mode `Some(caps)`)
+/// is permitted to read `field_entry` for `actor_role` (`270-R3`).
+pub fn plugin_can_read_field(
+    manifest: &PluginManifest,
+    action_caps: Option<&[String]>,
+    actor_role: crate::content::FieldRole,
+    type_key: &str,
+    field_entry: &crate::content::EffectiveFieldEntry,
+) -> bool {
+    if !manifest.can_read_content_type(type_key) {
+        return false;
+    }
+    if let Some(caps) = action_caps {
+        if !caps.iter().any(|c| c == "content_read") {
+            return false;
+        }
+    }
+    if actor_role < field_entry.definition.min_view_role {
+        return false;
+    }
+    if field_entry.definition.public_exposure == crate::content::PublicExposure::Public {
+        return true;
+    }
+    if field_entry.owner == crate::registry::ResourceOwner::Plugin(manifest.id.clone()) {
+        return true;
+    }
+    manifest.has_private_read_grant(type_key, &field_entry.definition.key)
+        && action_caps.is_none_or(|caps| caps.iter().any(|c| c == "content_read_private"))
+}
+
+/// Checks whether a plugin executing an action with `action_caps` is permitted to write
+/// `field_entry` for `actor_role` (`270-R3`).
+pub fn plugin_can_write_field(
+    manifest: &PluginManifest,
+    action_caps: &[String],
+    actor_role: crate::content::FieldRole,
+    type_key: &str,
+    field_entry: &crate::content::EffectiveFieldEntry,
+) -> bool {
+    if !manifest.can_write_content_type(type_key)
+        || !action_caps.iter().any(|c| c == "content_write")
+    {
+        return false;
+    }
+    if actor_role < field_entry.definition.min_edit_role {
+        return false;
+    }
+    if field_entry.definition.public_exposure == crate::content::PublicExposure::Public {
+        return true;
+    }
+    if field_entry.owner == crate::registry::ResourceOwner::Plugin(manifest.id.clone()) {
+        return true;
+    }
+    manifest.has_private_write_grant(type_key, &field_entry.definition.key)
+        && action_caps.iter().any(|c| c == "content_write_private")
+}
+
 pub const PLUGIN_ABI_VERSION: u32 = 1;
 
 #[cfg(test)]
@@ -439,6 +606,56 @@ mod tests {
         assert!(!manifest.is_http_allowed("http://attacker.com/steal"));
         assert!(validate_semver("1.0.0-alpha.1+build.123"));
         assert!(!validate_semver("v1.0.0"));
+    }
+
+    #[test]
+    fn validates_scoped_field_grants_v2_and_rejects_v1_or_wildcards() {
+        let v1_with_private = serde_json::json!({
+            "id": "priv-plugin",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 1,
+            "name": "Priv",
+            "permissions": {
+                "content_read": ["portfolio"],
+                "content_read_private": [{ "content_type": "portfolio", "field_keys": ["secret"] }]
+            }
+        });
+        assert!(PluginManifest::from_json_str(&v1_with_private.to_string()).is_err());
+
+        let v2_wildcard = serde_json::json!({
+            "id": "priv-plugin",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 2,
+            "min_host_version": "0.1.0",
+            "name": "Priv",
+            "permissions": {
+                "content_read": ["*"],
+                "content_read_private": [{ "content_type": "*", "field_keys": ["secret"] }]
+            }
+        });
+        assert!(PluginManifest::from_json_str(&v2_wildcard.to_string()).is_err());
+
+        let v2_valid = serde_json::json!({
+            "id": "priv-plugin",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 2,
+            "min_host_version": "0.1.0",
+            "name": "Priv",
+            "permissions": {
+                "content_read": ["portfolio"],
+                "content_read_private": [{ "content_type": "portfolio", "field_keys": ["secret"] }]
+            },
+            "actions": [{
+                "id": "sync",
+                "title": "Sync",
+                "required_role": "editor",
+                "capabilities": ["content_read", "content_read_private"]
+            }]
+        });
+        assert!(PluginManifest::from_json_str(&v2_valid.to_string()).is_ok());
     }
 }
 
