@@ -10,15 +10,15 @@ use axum::{
 };
 use opendash_core::{
     content::{
-        ContentTypeDefinition, ContentTypeDefinitionInput, FieldGroupRecord, UserFieldGroupInput,
-        valid_content_type_key,
+        ContentTypeDefinition, ContentTypeDefinitionInput, EditorLayoutConfigV1, FieldGroupRecord,
+        FieldRole, UserFieldGroupInput, valid_content_type_key,
     },
     registry::RegistryCatalog,
 };
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::{require_admin, require_admin_with_csrf, require_session},
+    auth::{Role, require_admin, require_admin_with_csrf, require_session},
     error::{ApiError, ApiResult},
     routes::settings::{no_store_headers, parse_if_match},
     storage::content::{self as content_storage, ContentTypeApiItem},
@@ -119,4 +119,66 @@ pub async fn field_group_delete(
     let withdrawn =
         content_storage::withdraw_user_field_group(&db, &group_id, expected_version).await?;
     Ok((no_store_headers(Some(withdrawn.version)), Json(withdrawn)))
+}
+
+fn parse_if_match_allow_zero(headers: &HeaderMap) -> ApiResult<i64> {
+    let raw = headers
+        .get(axum::http::header::IF_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .ok_or_else(|| ApiError(StatusCode::PRECONDITION_REQUIRED, "Thiếu header If-Match.".into()))?;
+    let trimmed = raw.trim_matches('"');
+    let digits = trimmed.strip_prefix('v').unwrap_or(trimmed);
+    let version = digits
+        .parse::<i64>()
+        .map_err(|_| ApiError::bad_request("Header If-Match không hợp lệ."))?;
+    if version < 0 {
+        return Err(ApiError::bad_request("Header If-Match không hợp lệ."));
+    }
+    Ok(version)
+}
+
+pub async fn editor_layout_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(type_key): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    require_admin(&headers, &db).await?;
+    let snapshot = content_storage::get_editor_layout(&db, &type_key).await?;
+    Ok((no_store_headers(Some(snapshot.version)), Json(snapshot)))
+}
+
+pub async fn editor_layout_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(type_key): Path<String>,
+    Json(input): Json<EditorLayoutConfigV1>,
+) -> ApiResult<impl IntoResponse> {
+    let session = require_admin_with_csrf(&headers, &db).await?;
+    let expected_version = parse_if_match_allow_zero(&headers)?;
+    let snapshot = content_storage::put_editor_layout(
+        &db,
+        &type_key,
+        expected_version,
+        session.user.id,
+        input,
+    )
+    .await?;
+    Ok((no_store_headers(Some(snapshot.version)), Json(snapshot)))
+}
+
+pub async fn effective_editor_config_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(type_key): Path<String>,
+) -> ApiResult<impl IntoResponse> {
+    let session = require_session(&headers, &db).await?;
+    let caller_role = match session.user.role {
+        Role::Admin => FieldRole::Admin,
+        Role::Editor => FieldRole::Editor,
+    };
+    let projection =
+        content_storage::get_effective_editor_config(&db, &type_key, caller_role).await?;
+    Ok((no_store_headers(None), Json(projection)))
 }

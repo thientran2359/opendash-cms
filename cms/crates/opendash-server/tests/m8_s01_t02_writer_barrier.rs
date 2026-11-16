@@ -120,6 +120,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "field_group_create",
                 "field_group_update",
                 "field_group_delete",
+                "editor_layout_put",
             ],
         ),
         (

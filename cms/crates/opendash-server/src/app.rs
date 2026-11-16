@@ -27,8 +27,9 @@ use crate::{
         },
         content::{
             MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list,
-            content_type_update, field_group_create, field_group_delete, field_group_list,
-            field_group_update,
+            content_type_update, editor_layout_get, editor_layout_put,
+            effective_editor_config_get, field_group_create, field_group_delete,
+            field_group_list, field_group_update,
         },
         dashboard::dashboard_get,
         entries::{
@@ -382,6 +383,16 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/content-types/{type_key}",
             put(content_type_update).layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/editor-layout",
+            get(editor_layout_get)
+                .put(editor_layout_put)
+                .layer(DefaultBodyLimit::max(MAX_CONTENT_TYPE_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/effective-editor-config",
+            get(effective_editor_config_get),
         )
         .route(
             "/api/admin/content-field-groups",

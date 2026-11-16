@@ -111,6 +111,8 @@ pub struct PluginManifest {
     pub actions: Vec<PluginActionDeclaration>,
     #[serde(default, skip_serializing_if = "crate::content::CntDeclarations::is_empty")]
     pub declarations: crate::content::CntDeclarations,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub editor_panels: Vec<crate::content::ManifestActionPanelInput>,
 }
 
 pub const CURRENT_HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -214,6 +216,12 @@ impl PluginManifest {
         }
         if !self.declarations.field_groups.is_empty() && self.manifest_schema != 2 {
             return Err("field_groups trong plugin.json chỉ hợp lệ khi manifest_schema = 2.");
+        }
+        if !self.editor_panels.is_empty() && self.manifest_schema != 2 {
+            return Err("editor_panels trong plugin.json chỉ hợp lệ khi manifest_schema = 2.");
+        }
+        if self.editor_panels.len() > 16 {
+            return Err("plugin.json không được khai báo quá 16 editor_panels.");
         }
         if (!self.permissions.content_read_private.is_empty()
             || !self.permissions.content_write_private.is_empty())
@@ -377,6 +385,28 @@ impl PluginManifest {
                 return Err(
                     "Action khai báo content_write_private phải kèm content_write và permissions.content_write_private.",
                 );
+            }
+        }
+        let mut seen_panel_keys = HashSet::new();
+        for fg in &self.declarations.field_groups {
+            seen_panel_keys.insert(fg.local_key.as_str());
+        }
+        for ep in &self.editor_panels {
+            ep.validate()?;
+            if !seen_panel_keys.insert(ep.local_key.as_str()) {
+                return Err("local_key trong editor_panels bị trùng lặp hoặc trùng với field_groups.");
+            }
+            let Some(act) = self.action(&ep.action_id) else {
+                return Err("editor_panels tham chiếu action_id không tồn tại trong actions.");
+            };
+            let min_edit = ep.min_edit_role.unwrap_or(crate::content::FieldRole::Editor);
+            let act_role = if act.required_role == "admin" {
+                crate::content::FieldRole::Admin
+            } else {
+                crate::content::FieldRole::Editor
+            };
+            if min_edit < act_role {
+                return Err("editor_panels có min_edit_role thấp hơn required_role của action.");
             }
         }
         self.declarations.validate()?;
@@ -656,6 +686,96 @@ mod tests {
             }]
         });
         assert!(PluginManifest::from_json_str(&v2_valid.to_string()).is_ok());
+    }
+
+    #[test]
+    fn validates_editor_panels_in_v2_manifest() {
+        let valid = serde_json::json!({
+            "id": "seo-plugin",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 2,
+            "name": "SEO Plugin",
+            "actions": [{
+                "id": "analyze_seo",
+                "title": "Analyze SEO",
+                "required_role": "admin",
+                "capabilities": ["kv_read"]
+            }],
+            "editor_panels": [{
+                "local_key": "seo_action",
+                "title": "SEO Check",
+                "action_id": "analyze_seo",
+                "button_label": "Run SEO Check",
+                "applies_to": ["project"],
+                "min_edit_role": "admin"
+            }]
+        });
+        PluginManifest::from_json_str(&valid.to_string()).expect("valid editor_panels");
+
+        // Rejects min_edit_role < action.required_role
+        let bad_acl = serde_json::json!({
+            "id": "seo-plugin",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 2,
+            "name": "SEO Plugin",
+            "actions": [{
+                "id": "analyze_seo",
+                "title": "Analyze SEO",
+                "required_role": "admin",
+                "capabilities": ["kv_read"]
+            }],
+            "editor_panels": [{
+                "local_key": "seo_action",
+                "title": "SEO Check",
+                "action_id": "analyze_seo",
+                "button_label": "Run SEO Check",
+                "applies_to": ["project"],
+                "min_edit_role": "editor"
+            }]
+        });
+        assert!(PluginManifest::from_json_str(&bad_acl.to_string()).is_err());
+
+        // Rejects missing action_id
+        let missing_action = serde_json::json!({
+            "id": "seo-plugin",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 2,
+            "name": "SEO Plugin",
+            "editor_panels": [{
+                "local_key": "seo_action",
+                "title": "SEO Check",
+                "action_id": "does_not_exist",
+                "button_label": "Run",
+                "applies_to": ["project"]
+            }]
+        });
+        assert!(PluginManifest::from_json_str(&missing_action.to_string()).is_err());
+
+        // Rejects v1 with editor_panels
+        let v1_panels = serde_json::json!({
+            "id": "seo-plugin",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 1,
+            "name": "SEO Plugin",
+            "actions": [{
+                "id": "analyze_seo",
+                "title": "Analyze SEO",
+                "required_role": "editor",
+                "capabilities": ["kv_read"]
+            }],
+            "editor_panels": [{
+                "local_key": "seo_action",
+                "title": "SEO Check",
+                "action_id": "analyze_seo",
+                "button_label": "Run",
+                "applies_to": ["project"]
+            }]
+        });
+        assert!(PluginManifest::from_json_str(&v1_panels.to_string()).is_err());
     }
 }
 
