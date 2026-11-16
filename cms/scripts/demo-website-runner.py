@@ -240,7 +240,10 @@ def running_server(binary: Path, site_root: Path, port: int = 0, public_origin: 
             proc.kill()
 
 
-def seed_site(base: str) -> dict:
+def seed_site(base: str, public_origin: str | None = None) -> dict:
+    # The seeding server uses an ephemeral port. Persist the developer-facing
+    # origin instead when another launcher will serve this same site later.
+    public_origin = public_origin or base
     # 1. Setup admin & editor
     must(json_http(base, "POST", "/auth/setup", {"username": ADMIN_USER, "password": ADMIN_PASS}), 201, "setup")
     admin = login(base, ADMIN_USER, ADMIN_PASS)
@@ -358,7 +361,7 @@ def seed_site(base: str) -> dict:
             base,
             "PUT",
             "/api/admin/settings/public",
-            {"public_origin": base, "content_language": "vi", "indexing_enabled": True},
+            {"public_origin": public_origin, "content_language": "vi", "indexing_enabled": True},
             {**admin, "If-Match": pub_hdrs["etag"]},
         ),
         200,
@@ -665,10 +668,10 @@ def seed_site(base: str) -> dict:
         "primary",
         "Điều hướng chính",
         [
-            {"id": None, "client_key": "home", "parent_id": None, "parent_client_key": None, "position": 0, "label": "Trang chủ", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{base}/"},
-            {"id": None, "client_key": "dv", "parent_id": None, "parent_client_key": None, "position": 1, "label": "Dịch vụ", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{base}/content/dich_vu"},
-            {"id": None, "client_key": "da", "parent_id": None, "parent_client_key": None, "position": 2, "label": "Dự án", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{base}/content/du_an"},
-            {"id": None, "client_key": "post", "parent_id": None, "parent_client_key": None, "position": 3, "label": "Bài viết", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{base}/content/post"},
+            {"id": None, "client_key": "home", "parent_id": None, "parent_client_key": None, "position": 0, "label": "Trang chủ", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/"},
+            {"id": None, "client_key": "dv", "parent_id": None, "parent_client_key": None, "position": 1, "label": "Dịch vụ", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/content/dich_vu"},
+            {"id": None, "client_key": "da", "parent_id": None, "parent_client_key": None, "position": 2, "label": "Dự án", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/content/du_an"},
+            {"id": None, "client_key": "post", "parent_id": None, "parent_client_key": None, "position": 3, "label": "Bài viết", "target_kind": "external", "target_entry_id": None, "target_term_id": None, "external_url": f"{public_origin}/content/post"},
             {"id": None, "client_key": "about", "parent_id": None, "parent_client_key": None, "position": 4, "label": "Giới thiệu", "target_kind": "entry", "target_entry_id": page_about["id"], "target_term_id": None, "external_url": None},
             {"id": None, "client_key": "contact", "parent_id": None, "parent_client_key": None, "position": 5, "label": "Liên hệ", "target_kind": "entry", "target_entry_id": page_contact["id"], "target_term_id": None, "external_url": None},
         ],
@@ -1230,7 +1233,7 @@ def main():
         if site_root.exists():
             shutil.rmtree(site_root)
         with running_server(binary, site_root) as base:
-            meta = seed_site(base)
+            meta = seed_site(base, public_origin=args.public_origin)
             meta_file.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
             print(f"Seeded site at {site_root}")
             if args.cmd == "all":
