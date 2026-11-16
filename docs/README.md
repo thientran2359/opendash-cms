@@ -1,5 +1,10 @@
 # OpenDash — Mục lục tài liệu
 
+**Checkpoint ưu tiên 16/11/2026:** [ADR-0017 — Usable Beta staging](decisions/ADR-0017-usable-beta-staging.md)
+và [G3 M7-S14](plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md).
+Dev demo, internal Beta và V1 public là ba phạm vi khác nhau; thiết kế không chứng minh
+runtime/human usability. V1/native/security/license gates giữ nguyên.
+
 Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc lập với mã nguồn trong `cms/`. Đọc [README gốc](../README.md) và [hướng dẫn phát triển CMS](../cms/README.md) để biết cách chạy OpenDash và phạm vi chưa triển khai.
 
 ## Nguồn quyết định và thứ tự ưu tiên

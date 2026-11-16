@@ -1,5 +1,14 @@
 # M8 — Operations & Release V1
 
+## Delivery stages — 16/11/2026
+
+[ADR-0017](../../../decisions/ADR-0017-usable-beta-staging.md) ưu tiên internal Windows
+Beta trước common RC/V1 public. [Beta G3](../M7/slices/2026-11-16-usable-beta-g3.md) là
+integration checkpoint, không thay M8 gates. #242/#245 Forge; #246 Harbor; #247/#248
+Atlas, tất cả Backlog tại snapshot 16/11. #188 còn In progress dù đã có Mac exact-SHA
+evidence; không suy từ memory fix thành full native acceptance. Các status/owner cũ
+phía dưới là snapshot lịch sử, live Issue/Project có ưu tiên.
+
 **Đích V1:** media lifecycle (referenced-delete/reconcile) từ D/#15, backup/restore thủ công DB+uploads+theme/plugin+site config, Linux VPS single binary, upgrade/migration/recovery và E2E toàn bộ V1. [Roadmap](../../ROADMAP_V1.md) · [PRD](../../../product/PRODUCT_REQUIREMENTS.md).
 
 **Modules chủ trì:** OPS-01, OPS-02; tích hợp FND-03/04, CNT-05, THM-01, PLG-01 và hồi quy các capability V1. Contract backup được nghiên cứu từ M3, theme/plugin package từ M5/M6; **M8 mới có backup engine và nghiệm thu restore**.

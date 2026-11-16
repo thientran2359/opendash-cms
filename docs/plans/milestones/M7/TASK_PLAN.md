@@ -1,5 +1,15 @@
 # M7 — Task planning: Site Features
 
+## Usable Beta integration overlay — 16/11/2026
+
+[G3 M7-S14](slices/2026-11-16-usable-beta-g3.md) bổ sung bốn task evidence/planning trên
+capability đã có, không thêm candidate sản phẩm: T01 Forge audit Windows; T02 Atlas
+triage/G3 fixes; T03 Forge retest/human dogfood; T04 Atlas Beta readiness.
+T03 chờ required fixes G5 và human tester; T04 chờ candidate evidence.
+T01 không chờ full Linux/macOS closure. Product fixes phát hiện sau audit cần G3 riêng,
+exact ownership và Ready, không thuộc quyền sửa của audit. Status bên dưới là snapshot
+planning 14/11, không thay Project.
+
 `M7-Pxx` là candidates lập kế hoạch, chỉ trở thành GitHub tasks sau khi G2/G3 được review/merge, owner/reviewer và dependencies rõ. [PRD V1](../../../product/PRODUCT_REQUIREMENTS.md) · [M5 prerequisites](../M5/README.md).
 
 | Candidate | Slice / task outcome | Module primary (phối hợp) | Dependency / gate | Acceptance dự kiến |

@@ -1,5 +1,35 @@
 # OpenDash — Yêu cầu sản phẩm bản đầu
 
+## Delivery stages — Usable Beta (16/11/2026)
+
+Theo [quyết định #292](https://github.com/thientran2359/opendash-cms/issues/292#issuecomment-6917897791)
+và [ADR-0017](../decisions/ADR-0017-usable-beta-staging.md), ưu tiên **Usable Beta nội bộ
+Windows → common RC → V1 public**. Giữ nguyên Rust/SQLite/single executable, Linux VPS,
+Builder/plugin server logic và phạm vi V1. Nội dung đã xác nhận bên dưới vẫn áp dụng.
+
+Beta phải chứng minh site trống → bootstrap/login → Post/Page/CPT + field groups →
+media/taxonomy/menu → theme ZIP/sample import không ghi đè → Builder homepage/header/
+footer/single/archive → restart/provider changes giữ dữ liệu/layout → backup/restore
+root mới → operator kích hoạt → re-edit. Desktop editing và responsive preview/public
+không tự chứng nhận mobile authoring hoặc thiết bị thật. Semantics Lưu/Xuất bản giữ nguyên:
+draft không public, preview chưa lưu không đổi public, Save Builder cập nhật public ngay.
+
+Biên tập thường ngày qua Admin, không SQL/API thủ công/edit file. Operator được chuẩn bị
+binary/môi trường và kích hoạt restored root theo ADR-0015; không hot-swap. Beta dùng
+dữ liệu thử/site cô lập; public routes của instance nội bộ không là deploy Internet.
+Pin source/binary/fixture hashes; demo Mộc Studio hoặc capability tests không thay
+cold walkthrough. Ít nhất một người thử không viết code thực hiện kịch bản, ghi thời gian
+và trợ giúp, tách khỏi agent/automated QA. Atlas điều phối người thử, không mặc định owner.
+Thiếu người thử không chặn audit/sửa lỗi nhưng chưa đạt human usability readiness.
+
+Beta exit cần tất cả hành trình bắt buộc đạt, không blocker security/data/recovery hoặc
+không hoàn thành công việc; lỗi cosmetic có Issue/owner/giới hạn, không dùng để waive
+security/data. SEO/contact/video và các capability khác vẫn giữ acceptance V1.
+Beta PASS không là M8/V1 VERIFIED: native Windows/Linux/macOS, common RC, deferred
+milestones, notices/license và owner public-release authorization vẫn bắt buộc.
+[G3 checkpoint](../plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md) quy định
+case matrix/ownership/sequence; yêu cầu này chưa là evidence nghiệm thu.
+
 **Trạng thái:** Chủ dự án đã xác nhận phạm vi sau vòng rà soát yêu cầu. Tài liệu này là đầu vào cho đánh giá tech stack và có ưu tiên cao hơn các đề xuất thiết kế trước đó.
 
 ## Đối tượng và ưu tiên

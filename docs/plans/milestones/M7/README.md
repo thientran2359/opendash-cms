@@ -1,5 +1,15 @@
 # M7 — Site Features
 
+## Usable Beta checkpoint — 16/11/2026
+
+[ADR-0017](../../../decisions/ADR-0017-usable-beta-staging.md) ·
+[G3 M7-S14: bốn task](slices/2026-11-16-usable-beta-g3.md).
+Forge audit Windows; Atlas triage/G3 fixes; Forge retest + human dogfood; Atlas Beta
+readiness. Mỗi task cần spec merged, Issue ownership/dependency và Project Ready.
+Checkpoint chưa runtime/human evidence. #284 Done theo scope riêng; #214/#215 Backlog
+tại snapshot 16/11. Beta không đóng full M7/M8. Những đoạn NOT_STARTED/Backlog hoặc
+“chưa phát hành” bên dưới giữ snapshot lúc lập tài liệu, không là trạng thái live.
+
 **Kế hoạch V1:** mở rộng General Settings M3 thành site settings/navigation, SEO URL/title/description/OG image/canonical/robots/sitemap, contact form qua Builder với submissions+SMTP, và **media video V1** chuyển từ M3 cũ.
 
 **Modules:** SITE-01/02/03, CNT-05 (video); dùng BLD-02/03, CNT-04, FND-02/05. General Settings core M3, Theme Options/URL policy M5 là **dependency**, không nghiệm thu lại như scope mới. [Roadmap](../../ROADMAP_V1.md) · [PRD](../../../product/PRODUCT_REQUIREMENTS.md).
