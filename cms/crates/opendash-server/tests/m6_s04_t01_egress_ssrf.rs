@@ -42,6 +42,7 @@ fn build_scoped_manifest(port: u16) -> PluginManifest {
         hook_priority: 0,
         actions: vec![],
         declarations: Default::default(),
+        editor_panels: vec![],
     }
 }
 

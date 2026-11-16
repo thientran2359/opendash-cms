@@ -5,12 +5,16 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use opendash_core::{
     content::{
         AttachedFieldGroupSnapshot, ContentFieldDefinition, ContentFieldType,
-        ContentTypeDefinition, ContentTypeDefinitionInput, EditorRegion, EffectiveContentSchema,
-        FieldGroupRecord, FieldGroupStatus, FieldGroupTargetBinding, SchemaTransitionError,
-        UserFieldGroupInput, check_base_fields_compatibility, merge_package_redeclared_fields,
+        ContentTypeDefinition, ContentTypeDefinitionInput, EditorLayoutConfigV1, EditorRegion,
+        EffectiveContentSchema, EffectiveEditorConfigProjection, EffectiveFieldStatus,
+        FieldGroupRecord, FieldGroupStatus, FieldGroupTargetBinding, FieldRole, PanelDefinition,
+        PanelKind, SchemaTransitionError, UserFieldGroupInput, build_core_and_group_panels,
+        check_base_fields_compatibility, merge_package_redeclared_fields,
+        project_effective_editor_config, resolve_and_validate_editor_layout, valid_content_type_key,
         verify_effective_schema_transition,
     },
     id::ScopedResourceId,
+    plugin::PluginManifest,
     registry::{DeclarationState, OwnedDescriptor, ProviderStatus, RegistryCatalog, ResourceOwner},
 };
 use serde::Serialize;
@@ -1594,4 +1598,241 @@ pub async fn list_content_type_taxonomy_eligibility(
             },
         )
         .collect())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EditorLayoutSnapshot {
+    pub layout: EditorLayoutConfigV1,
+    pub panels: Vec<PanelDefinition>,
+    pub version: i64,
+}
+
+async fn load_effective_taxonomies_in_tx(
+    conn: &mut SqliteConnection,
+    type_key: &str,
+) -> ApiResult<Vec<String>> {
+    if !table_exists_in_tx(conn, "content_type_taxonomy_eligibility").await? {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<String> = sqlx::query_scalar(
+        "SELECT taxonomy_kind
+         FROM content_type_taxonomy_eligibility
+         WHERE content_type_key = ? AND provider_status = 'active' AND declaration_state = 'active'
+         ORDER BY taxonomy_kind ASC",
+    )
+    .bind(type_key)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows)
+}
+
+async fn load_plugin_action_panels_for_type_in_tx(
+    conn: &mut SqliteConnection,
+    type_key: &str,
+) -> ApiResult<Vec<PanelDefinition>> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT id, manifest_json FROM plugins WHERE enabled = 1 ORDER BY id ASC",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut out = Vec::new();
+    for (plugin_id, raw_manifest) in rows {
+        let Ok(manifest) = serde_json::from_str::<PluginManifest>(&raw_manifest) else {
+            continue;
+        };
+        for ep in &manifest.editor_panels {
+            if !ep.applies_to.iter().any(|t| t == type_key) {
+                continue;
+            }
+            let Some(action) = manifest.action(&ep.action_id) else {
+                continue;
+            };
+            let action_min_role = if action.required_role == "admin" {
+                FieldRole::Admin
+            } else {
+                FieldRole::Editor
+            };
+            let min_edit_role = ep.min_edit_role.unwrap_or(action_min_role).max(action_min_role);
+            let min_view_role = ep.min_view_role.unwrap_or(FieldRole::Editor);
+            out.push(PanelDefinition {
+                panel_id: format!("plugin:{plugin_id}:{}", ep.local_key),
+                owner: ResourceOwner::Plugin(plugin_id.clone()),
+                title: ep.title.clone(),
+                kind: PanelKind::Action {
+                    action_id: ep.action_id.clone(),
+                    button_label: ep.button_label.clone(),
+                    confirm_message: ep.confirm_message.clone(),
+                    public_effect: ep.public_effect,
+                },
+                applies_to: ep.applies_to.clone(),
+                default_region: ep.default_region,
+                allowed_regions: ep.allowed_regions.clone(),
+                default_order: ep.default_order,
+                min_view_role,
+                min_edit_role,
+                collapsible: ep.collapsible,
+                required_core: false,
+                effective_status: EffectiveFieldStatus::Active,
+            });
+        }
+    }
+    Ok(out)
+}
+
+async fn load_raw_editor_layout_in_tx(
+    conn: &mut SqliteConnection,
+    type_key: &str,
+) -> ApiResult<(Option<EditorLayoutConfigV1>, i64)> {
+    if !table_exists_in_tx(conn, "content_editor_layouts").await? {
+        return Ok((None, 0));
+    }
+    let row: Option<(String, i64)> = sqlx::query_as(
+        "SELECT layout_json, version FROM content_editor_layouts WHERE type_key = ?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    match row {
+        Some((raw_json, version)) => {
+            let parsed: EditorLayoutConfigV1 = serde_json::from_str(&raw_json).map_err(|_| {
+                ApiError::internal(format!(
+                    "Dữ liệu content_editor_layouts của '{type_key}' không hợp lệ."
+                ))
+            })?;
+            Ok((Some(parsed), version))
+        }
+        None => Ok((None, 0)),
+    }
+}
+
+pub async fn get_editor_layout(db: &SqlitePool, type_key: &str) -> ApiResult<EditorLayoutSnapshot> {
+    if !valid_content_type_key(type_key) {
+        return Err(ApiError::bad_request("Khóa loại nội dung không hợp lệ."));
+    }
+    let mut conn = db.acquire().await?;
+    let Some(effective) = load_effective_content_schema_in_tx(&mut conn, type_key).await? else {
+        return Err(ApiError::not_found(format!(
+            "Không tìm thấy loại nội dung '{type_key}'."
+        )));
+    };
+    let taxonomies = load_effective_taxonomies_in_tx(&mut conn, type_key).await?;
+    let plugin_action_panels = load_plugin_action_panels_for_type_in_tx(&mut conn, type_key).await?;
+    let (raw_layout, version) = load_raw_editor_layout_in_tx(&mut conn, type_key).await?;
+    let base_panels =
+        build_core_and_group_panels(&effective, !taxonomies.is_empty(), &plugin_action_panels);
+    let (layout, panels) = resolve_and_validate_editor_layout(
+        &effective,
+        base_panels,
+        raw_layout,
+        version.max(0) as u64,
+    )
+    .map_err(|e| ApiError::unprocessable(e.message))?;
+
+    Ok(EditorLayoutSnapshot {
+        layout,
+        panels,
+        version,
+    })
+}
+
+pub async fn put_editor_layout(
+    db: &SqlitePool,
+    type_key: &str,
+    expected_version: i64,
+    updated_by: i64,
+    input: EditorLayoutConfigV1,
+) -> ApiResult<EditorLayoutSnapshot> {
+    if !valid_content_type_key(type_key) {
+        return Err(ApiError::bad_request("Khóa loại nội dung không hợp lệ."));
+    }
+    if expected_version < 0 {
+        return Err(ApiError::bad_request("If-Match version không hợp lệ."));
+    }
+    let mut tx = begin_content_write_tx(db).await?;
+    let Some(effective) = load_effective_content_schema_in_tx(&mut tx, type_key).await? else {
+        return Err(ApiError::not_found(format!(
+            "Không tìm thấy loại nội dung '{type_key}'."
+        )));
+    };
+    let (_, current_version) = load_raw_editor_layout_in_tx(&mut tx, type_key).await?;
+    if current_version != expected_version {
+        return Err(ApiError::conflict(format!(
+            "Xung đột phiên bản bố cục '{type_key}': hiện tại là v{current_version}, If-Match là v{expected_version}."
+        )));
+    }
+    let next_version = current_version + 1;
+    let taxonomies = load_effective_taxonomies_in_tx(&mut tx, type_key).await?;
+    let plugin_action_panels = load_plugin_action_panels_for_type_in_tx(&mut tx, type_key).await?;
+    let base_panels =
+        build_core_and_group_panels(&effective, !taxonomies.is_empty(), &plugin_action_panels);
+    let (layout, panels) = resolve_and_validate_editor_layout(
+        &effective,
+        base_panels,
+        Some(input),
+        next_version as u64,
+    )
+    .map_err(|e| ApiError::unprocessable(e.message))?;
+
+    let layout_json = serde_json::to_string(&layout)
+        .map_err(|e| ApiError::internal(format!("Không thể serialize layout_json: {e}")))?;
+
+    sqlx::query(
+        "INSERT INTO content_editor_layouts (type_key, layout_json, version, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))
+         ON CONFLICT(type_key) DO UPDATE SET
+            layout_json = excluded.layout_json,
+            version = excluded.version,
+            updated_by = excluded.updated_by,
+            updated_at = excluded.updated_at",
+    )
+    .bind(type_key)
+    .bind(&layout_json)
+    .bind(next_version)
+    .bind(updated_by)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(EditorLayoutSnapshot {
+        layout,
+        panels,
+        version: next_version,
+    })
+}
+
+pub async fn get_effective_editor_config(
+    db: &SqlitePool,
+    type_key: &str,
+    caller_role: FieldRole,
+) -> ApiResult<EffectiveEditorConfigProjection> {
+    if !valid_content_type_key(type_key) {
+        return Err(ApiError::bad_request("Khóa loại nội dung không hợp lệ."));
+    }
+    let mut conn = db.acquire().await?;
+    let Some(effective) = load_effective_content_schema_in_tx(&mut conn, type_key).await? else {
+        return Err(ApiError::not_found(format!(
+            "Không tìm thấy loại nội dung '{type_key}'."
+        )));
+    };
+    let taxonomies = load_effective_taxonomies_in_tx(&mut conn, type_key).await?;
+    let plugin_action_panels = load_plugin_action_panels_for_type_in_tx(&mut conn, type_key).await?;
+    let (raw_layout, version) = load_raw_editor_layout_in_tx(&mut conn, type_key).await?;
+    let base_panels =
+        build_core_and_group_panels(&effective, !taxonomies.is_empty(), &plugin_action_panels);
+    let (layout, panels) = resolve_and_validate_editor_layout(
+        &effective,
+        base_panels,
+        raw_layout,
+        version.max(0) as u64,
+    )
+    .map_err(|e| ApiError::unprocessable(e.message))?;
+
+    Ok(project_effective_editor_config(
+        &effective,
+        &layout,
+        &panels,
+        &taxonomies,
+        caller_role,
+    ))
 }

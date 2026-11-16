@@ -170,6 +170,7 @@ mod tests {
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let start = std::time::Instant::now();
@@ -232,6 +233,7 @@ mod tests {
                 sqlite: vec!["kv_write".into()],
                 http: vec![], content_read: vec![],
             network: vec![], content_write: vec![], ..Default::default() },
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -297,6 +299,7 @@ mod tests {
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -363,6 +366,7 @@ mod tests {
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -445,6 +449,7 @@ mod tests {
                 http: vec![target_url.clone()],
                 content_read: vec![],
             network: vec![], content_write: vec![], ..Default::default() },
+            editor_panels: vec![],
         };
 
         let start = std::time::Instant::now();
@@ -772,6 +777,7 @@ mod tests {
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -822,6 +828,7 @@ mod tests {
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -908,6 +915,7 @@ mod tests {
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
 
         // Assert no lingering workers before execution
@@ -1000,6 +1008,7 @@ mod tests {
                 http: vec![origin.clone()],
                 content_read: vec![],
             network: vec![], content_write: vec![], ..Default::default() },
+            editor_panels: vec![],
         };
 
         let res = runtime
@@ -1075,6 +1084,7 @@ mod tests {
             description: String::new(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions::default(),
+            editor_panels: vec![],
         };
         let res_next = runtime
             .run_plugin(
@@ -1151,6 +1161,7 @@ mod tests {
                 http: vec![origin.clone()],
                 content_read: vec![],
             network: vec![], content_write: vec![], ..Default::default() },
+            editor_panels: vec![],
         };
 
         let rt = runtime.clone();

@@ -425,6 +425,7 @@ mod egress_quota_tests {
             hook_priority: 0,
             actions: vec![],
             declarations: Default::default(),
+            editor_panels: vec![],
         };
         let mut ctx = HostContext {
             plugin_id: manifest.id.clone(),
