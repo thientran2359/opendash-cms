@@ -55,4 +55,3 @@ native tasks. Source đổi phải đánh giá impact, repin và rerun affected 
 Docs merged + Issue/G3/ownership/dependencies + Project Ready mới mở pickup.
 Không tự dispatch từ tài liệu. Owner chỉ cần quyết định khi đổi scope G0, license
 hoặc phát hành công khai.
-
