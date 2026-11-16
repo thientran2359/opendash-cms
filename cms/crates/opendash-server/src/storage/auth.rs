@@ -553,3 +553,23 @@ pub async fn update_own_profile(
         version: expected_version + 1,
     })
 }
+
+pub async fn compute_site_instance_id(db: &SqlitePool) -> Option<String> {
+    let created_at: Option<i64> =
+        sqlx::query_scalar("SELECT created_at FROM users ORDER BY id ASC LIMIT 1")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten();
+    let title: Option<String> =
+        sqlx::query_scalar("SELECT site_title FROM site_general_settings WHERE id = 1")
+            .fetch_optional(db)
+            .await
+            .ok()
+            .flatten();
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{}:{}", created_at.unwrap_or(0), title.unwrap_or_default()).as_bytes());
+    let hex = format!("{:x}", hasher.finalize());
+    Some(format!("site-{}", &hex[..16]))
+}

@@ -11,8 +11,9 @@ import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx
 import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
-import { ContentWorkspace } from './features/content/ContentWorkspace.tsx';
-import { PostPageWorkspace } from './features/posts/PostPageWorkspace.tsx';
+import { SingleEditWorkspace } from './features/editor/SingleEditWorkspace.tsx';
+import { editorDraftStore } from './features/editor/EditorDraftStore.ts';
+
 import { MediaRoute } from './shell/MediaRoute.tsx';
 import { DashboardPage } from './features/dashboard/DashboardPage.tsx';
 import { ThemesPanel } from './features/themes/ThemesPanel.tsx';
@@ -34,6 +35,8 @@ export const App: React.FC = () => {
   const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
   const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
   const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
+  const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
+  const [authGeneration, setAuthGeneration] = useState<number>(1);
   const [contentDirty, setContentDirty] = useState(false);
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
@@ -119,9 +122,9 @@ export const App: React.FC = () => {
     const msg = err instanceof Error ? err.message : fallback;
     setStatus(msg, true);
     if (is401) {
+      editorDraftStore.quarantineAll();
       setUser(null);
       setCsrfToken(null);
-      // A 401 preserves the mounted Builder draft until the account is known.
     }
   }, []);
 
@@ -144,6 +147,7 @@ export const App: React.FC = () => {
         lastAuthenticatedUserId.current = auth.user.id;
         setAccountContextId(auth.user.id);
         setAccountContextRole(auth.user.role);
+        if (auth.site_instance_id) setSiteInstanceId(auth.site_instance_id);
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
@@ -183,12 +187,19 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       const res = await api.login(authUsername, authPassword);
-      if (lastAuthenticatedUserId.current !== null &&
+      const nextSiteId = res.site_instance_id ?? siteInstanceId;
+      if (res.site_instance_id && res.site_instance_id !== siteInstanceId) {
+        editorDraftStore.clear();
+        setSiteInstanceId(res.site_instance_id);
+      } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
-        // Never expose an expired account's unsaved Builder data to another user.
+        editorDraftStore.clear();
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
+      } else {
+        setAuthGeneration(g => g + 1);
       }
+      if (!res.site_instance_id && nextSiteId !== siteInstanceId) setSiteInstanceId(nextSiteId);
       lastAuthenticatedUserId.current = res.user.id;
       setAccountContextId(res.user.id);
       setAccountContextRole(res.user.role);
@@ -214,6 +225,7 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       await api.logout(csrfToken);
+      editorDraftStore.clear();
       setUser(null);
       setCsrfToken(null);
       setAuthUsername('');
@@ -418,32 +430,50 @@ export const App: React.FC = () => {
         }}
       />}
       contentContent={
-        <ContentWorkspace
-          key={contentRevision}
-          user={user}
-          csrfToken={csrfToken}
-          onApiError={handleApiError}
-          onDirtyChange={setContentDirty}
-        />
+        route.view === 'cpt' && route.typeKey ? (
+          <SingleEditWorkspace
+            key={`cpt-${route.typeKey}-${contentRevision}`}
+            typeKey={route.typeKey}
+            mode={route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list'}
+            entryId={route.entryId ?? null}
+            user={user}
+            siteInstanceId={siteInstanceId}
+            authGeneration={authGeneration}
+            csrfToken={csrfToken}
+            onApiError={handleApiError}
+            onDirtyChange={setContentDirty}
+            onNavigateHash={navigateHash}
+          />
+        ) : null
       }
       postsContent={
-        <PostPageWorkspace
+        <SingleEditWorkspace
           key={'posts-' + contentRevision}
-          type="post"
+          typeKey="post"
+          mode={route.view === 'posts' ? (route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list') : 'list'}
+          entryId={route.view === 'posts' ? (route.entryId ?? null) : null}
           user={user}
+          siteInstanceId={siteInstanceId}
+          authGeneration={authGeneration}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onDirtyChange={setPostsDirty}
+          onNavigateHash={navigateHash}
         />
       }
       pagesContent={
-        <PostPageWorkspace
+        <SingleEditWorkspace
           key={'pages-' + contentRevision}
-          type="page"
+          typeKey="page"
+          mode={route.view === 'pages' ? (route.sub === 'new' ? 'new' : route.sub === 'edit' ? 'edit' : 'list') : 'list'}
+          entryId={route.view === 'pages' ? (route.entryId ?? null) : null}
           user={user}
+          siteInstanceId={siteInstanceId}
+          authGeneration={authGeneration}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onDirtyChange={setPagesDirty}
+          onNavigateHash={navigateHash}
         />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}

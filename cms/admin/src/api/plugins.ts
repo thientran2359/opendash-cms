@@ -84,3 +84,22 @@ export async function invokePluginAction(
     },
   );
 }
+
+
+export async function runPluginAction(
+  id: string,
+  actionId: string,
+  payload: unknown,
+  csrfToken: string,
+): Promise<PluginRunResult> {
+  return requestJson<PluginRunResult>(
+    `/api/admin/plugins/${encodeURIComponent(id)}/actions/${encodeURIComponent(actionId)}`,
+    {
+      method: 'POST',
+      csrfToken,
+      contentType: 'application/json',
+      body: JSON.stringify(payload ?? {}),
+      defaultErrorMessage: 'Lỗi khi thực thi action của plugin.',
+    },
+  );
+}
