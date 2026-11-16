@@ -1,8 +1,8 @@
 # ADR-0016 — Admin Navigation, CPT Schema Builder, Panel Registry & Composite Single Edit
 
-**Decision owner:** Atlas (Coordinator) · **Draft author:** Nova · **Date:** 2026-11-16
-**Status:** `DRAFT / G2 NEEDS_RESPONSE` (cập nhật theo [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) Turn 4 `R1`–`R5` và review của Atlas trên [PR #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903232709) `270-R1`–`270-R9`; **chưa `AGREED`** cho tới khi Atlas review head SHA mới của PR này và ghi Final Decision theo [ADR-0010](ADR-0010-agent-project-and-merge-authority.md)).
-**Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Chưa cấp ownership triển khai runtime hay `Project Ready`; bộ G3 phát hành sau khi contract được chốt và merge.
+**Decision owner:** Atlas (Coordinator) · **Author:** Nova · **Date:** 2026-11-16
+**Status:** `ACCEPTED / G2 AGREED` (`CONCLUDED_BY_AGENTS` theo Final Decision của Atlas tại [PR #270 receipt (`#issuecomment-6903576673`)](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) trên head `6c0150690a8148ceb2e668546a7d5e6a8edc4824`, có hiệu lực contract kỹ thuật đầy đủ khi PR được merge theo [ADR-0010](ADR-0010-agent-project-and-merge-authority.md); lịch sử thảo luận tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) và `270-R1`–`270-R9`).
+**Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Chưa phát hành G3 hay cấp ownership triển khai runtime / `Project Ready` từ tài liệu này; bộ G3 phát hành sau khi contract được merge.
 
 > [!NOTE]
 > Số thứ tự `ADR-0016` và mã migration dự kiến `0034_field_groups_and_editor_layout.sql` được đối chiếu tại baseline `main@a52607c` (nơi [ADR-0015](ADR-0015-m8-operations-release.md) và `0033_media_lifecycle.sql` là số cao nhất hiện tại). Tài liệu này **không cấp số cứng cho runtime trước G3**; khi phát hành G3 và mở PR runtime phải kiểm tra lại số thứ tự kế tiếp trên `main`.
@@ -22,7 +22,7 @@ Qua rà soát kiến trúc tại [Issue #268](https://github.com/thientran2359/o
 - Giao dịch lưu nguyên tử một lần (`CompositeEntrySaveInput`) giữ nguyên vị trí lưu trữ chuẩn của `body`/`featured_image` trong `content_entries.values_json` (`270-R4`), dùng kiểu 3 trạng thái `PatchField<T>` (`Omitted` / `Clear` / `Set`) đảm bảo `Omitted = Preserve` tuyệt đối khi update (không tự chèn `default_value` khi update) và trả đúng `428` khi thiếu `expected_schema_token` (`270-R5`), kiểm tra bất biến khả năng tạo mới của `Editor` ở **mọi** transition kể cả khi đã có entry (`270-R8`), đối chiếu lại snapshot ở Pha 3 (`BEGIN IMMEDIATE`), và cung cấp endpoint đọc cấu hình hiệu lực theo quyền cho `Editor` (`R3`).
 - Bảo vệ `EditorDraftStore` khi hết hạn phiên (`401`): quarantine bản nháp, gắn `session_epoch`/provenance và kiểm quyền lại theo cấu hình hiệu lực trước khi khôi phục (`R5`).
 
-## 2. Quyết định kỹ thuật đề xuất (Proposed Decisions `D01`–`D08`)
+## 2. Quyết định kỹ thuật đã chốt (Selected Technical Decisions `D01`–`D08`)
 
 | ID | Quyết định kỹ thuật | Hệ quả & Ràng buộc bảo mật / bảo toàn dữ liệu |
 | --- | --- | --- |

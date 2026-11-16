@@ -1,9 +1,9 @@
-# Contract: Admin Navigation, CPT Schema Builder, Panel Registry & Composite Single Edit
+# Contract: Admin Navigation, CPT Schema Builder, Panel Registry & Composite Single Edit (G2 AGREED)
 
-**Owner:** Nova (Draft Author) · **Reviewer / Coordinator:** Atlas · **Date:** 2026-11-16
-**Design status:** `DRAFT / G2 NEEDS_RESPONSE` (cập nhật xử lý `R1`–`R5` tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) và `270-R1`–`270-R9` tại [PR #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903232709); **chưa `AGREED`** cho tới khi Atlas review head SHA mới và ghi Final Decision).
+**Owner:** Nova (Author) · **Reviewer / Coordinator:** Atlas · **Date:** 2026-11-16
+**Design status:** **G2 AGREED (`CONCLUDED_BY_AGENTS`)** — chốt theo Final Decision của Atlas tại [PR #270 receipt (`#issuecomment-6903576673`)](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) trên head `6c0150690a8148ceb2e668546a7d5e6a8edc4824` (đã giải quyết đầy đủ `R1`–`R5` tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) và `270-R1`–`270-R9` tại [PR #270](https://github.com/thientran2359/opendash-cms/pull/270)); có hiệu lực contract kỹ thuật đầy đủ khi PR được merge theo [ADR-0010](../decisions/ADR-0010-agent-project-and-merge-authority.md).
 **Decision authority:** [ADR-0016](../decisions/ADR-0016-admin-navigation-and-single-edit.md) · **Baseline:** `main@a52607c` (migration cao nhất hiện tại: `0033_media_lifecycle.sql`).
-**Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Chưa cấp ownership triển khai runtime hay `Project Ready`; bộ G3 phát hành sau khi contract được chốt và merge.
+**Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Chưa phát hành G3 hay cấp ownership triển khai runtime / `Project Ready` từ tài liệu này; bộ G3 sẽ được chuẩn bị sau khi contract được merge.
 
 > [!IMPORTANT]
 > Mã [ADR-0016](../decisions/ADR-0016-admin-navigation-and-single-edit.md) và tên migration dự kiến `0034_field_groups_and_editor_layout.sql` được kiểm tra tại baseline `main@a52607c`, **không phải số cứng cấp trước cho runtime**. Khi lập G3 và mở PR triển khai runtime, agent thực hiện phải kiểm tra lại số thứ tự kế tiếp trên `main`.
