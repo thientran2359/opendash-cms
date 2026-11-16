@@ -9,6 +9,7 @@ The window owns the server: closing it stops build processes and OpenDash.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import os
 from pathlib import Path
 import queue
@@ -20,6 +21,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import uuid
 import webbrowser
 
 
@@ -31,6 +33,7 @@ if sys.platform == "win32":
 
 
 ROOT = Path(__file__).resolve().parent
+DEMO_SITE_ROOT = ROOT / "runtime" / "demo-website" / "dev-local"
 WATCH_PATHS = (
     "cms/admin/src", "cms/admin/index.html", "cms/admin/vite.config.ts",
     "cms/admin/package.json", "cms/admin/package-lock.json",
@@ -43,6 +46,18 @@ def command(name: str) -> str:
     if not path:
         raise RuntimeError(f"Không tìm thấy {name}. Hãy cài công cụ này và thêm vào PATH.")
     return path
+
+
+def resolve_site_config(site_override: Path | None, no_demo: bool,
+                        environment: Mapping[str, str]) -> tuple[Path, bool]:
+    """Explicit site/DB overrides retain legacy behavior and never auto-seed."""
+    if site_override is not None:
+        return site_override, False
+    if environment.get("OPENDASH_SITE_ROOT"):
+        return Path(environment["OPENDASH_SITE_ROOT"]), False
+    if no_demo or environment.get("OPENDASH_DB_PATH"):
+        return ROOT, False
+    return DEMO_SITE_ROOT, True
 
 
 def health(port: int) -> bool:
@@ -84,7 +99,7 @@ def port_owner(port: int) -> int | None:
     return next(iter(pids), None)
 
 
-def is_opendash_process(pid: int) -> bool:
+def is_opendash_process(pid: int, expected_executable: Path | None = None) -> bool:
     """Reject unrelated port owners before attempting a takeover."""
     if sys.platform == "win32":
         script = (
@@ -101,7 +116,13 @@ def is_opendash_process(pid: int) -> bool:
             capture_output=True, text=True, timeout=8, check=False,
         )
     executable = result.stdout.strip().strip('"')
-    return Path(executable).stem.lower() == "opendash"
+    if Path(executable).stem.lower() != "opendash":
+        return False
+    # On Windows CIM gives the absolute executable path. Never terminate an
+    # OpenDash instance belonging to another agent's checkout/worktree.
+    if sys.platform == "win32" and expected_executable is not None:
+        return bool(executable) and Path(executable).resolve() == expected_executable.resolve()
+    return True
 
 
 def stop_process_tree(process: subprocess.Popen | None) -> None:
@@ -138,11 +159,11 @@ def stop_port_owner(pid: int) -> None:
         os.kill(pid, signal.SIGTERM)
 
 
-def take_over_port(port: int, log) -> None:
+def take_over_port(port: int, log, expected_executable: Path | None = None) -> None:
     owner = port_owner(port)
     if owner is None:
         return
-    if not is_opendash_process(owner) or not health(port):
+    if not is_opendash_process(owner, expected_executable) or not health(port):
         raise RuntimeError(
             f"Cổng {port} đang được PID {owner} sử dụng nhưng chưa xác minh "
             "được đây là OpenDash. Không tự động dừng tiến trình lạ."
@@ -181,13 +202,14 @@ def source_snapshot(root: Path) -> dict[str, tuple[int, int]]:
 
 class DevRunner:
     def __init__(self, root: Path, site_root: Path, port: int, watch: bool,
-                 events: queue.Queue, open_browser: bool) -> None:
+                 events: queue.Queue, open_browser: bool, seed_demo: bool = False) -> None:
         self.root = root.resolve()
         self.site_root = site_root.resolve()
         self.port = port
         self.watch = watch
         self.events = events
         self.open_browser = open_browser
+        self.seed_demo = seed_demo
         self.stop_event = threading.Event()
         self.rebuild_event = threading.Event()
         self.lock = threading.Lock()
@@ -263,6 +285,58 @@ class DevRunner:
         self.execute([command("cargo"), "build", "--locked", "-p", "opendash-server"],
                      self.root / "cms")
 
+    def ensure_demo_site(self) -> None:
+        """Seed the isolated dev demo once, without replacing an existing site."""
+        if not self.seed_demo:
+            return
+        meta = self.site_root / "seed-meta.json"
+        database = self.site_root / "database" / "opendash.sqlite"
+        if self.site_root.exists():
+            if not meta.is_file() or not database.is_file():
+                raise RuntimeError(
+                    f"Site demo {self.site_root} đã tồn tại nhưng thiếu seed-meta.json "
+                    "hoặc database/opendash.sqlite. Không tự xóa/ghi đè; hãy "
+                    "kiểm tra hoặc sao lưu site này trước khi khởi tạo lại."
+                )
+            self.emit("log", f"Dùng lại dữ liệu demo hiện có: {self.site_root}")
+            return
+
+        binary = self.root / "cms" / "target" / "debug" / (
+            "opendash.exe" if sys.platform == "win32" else "opendash"
+        )
+        stage_name = f".dev-init-{os.getpid()}-{uuid.uuid4().hex[:12]}"
+        stage_root = self.root / "runtime" / "demo-website" / stage_name
+        self.emit("status", "Đang tạo dữ liệu demo Mộc Studio (lần đầu)...")
+        try:
+            self.execute(
+                [
+                    sys.executable,
+                    str(self.root / "cms" / "scripts" / "demo-website-runner.py"),
+                    "seed", "--run-name", stage_name,
+                    "--binary", str(binary),
+                    "--public-origin", f"http://127.0.0.1:{self.port}",
+                ],
+                self.root,
+            )
+            if not (stage_root / "seed-meta.json").is_file() or not (
+                stage_root / "database" / "opendash.sqlite"
+            ).is_file():
+                raise RuntimeError("Demo seed thiếu metadata hoặc SQLite.")
+            if self.site_root.exists():
+                raise RuntimeError(
+                    f"Site demo {self.site_root} xuất hiện trong lúc seed; "
+                    "không ghi đè dữ liệu của tiến trình khác."
+                )
+            stage_root.rename(self.site_root)
+            self.emit("log", f"Đã tạo dữ liệu demo: {self.site_root}")
+        finally:
+            # The staging directory is unique to this invocation. Never remove
+            # the destination, including on interrupted or failed seeding.
+            if stage_root.exists() and stage_root.parent.resolve() == (
+                self.root / "runtime" / "demo-website"
+            ).resolve():
+                shutil.rmtree(stage_root)
+
     def launch_server(self) -> None:
         if self.stop_event.is_set():
             raise InterruptedError()
@@ -309,10 +383,14 @@ class DevRunner:
             self.emit("log", f"Source: {self.root}")
             self.emit("log", f"Site data: {self.site_root}")
             self.emit("log", f"URL: http://127.0.0.1:{self.port}/admin/")
-            take_over_port(self.port, lambda message: self.emit("log", message))
+            binary = self.root / "cms" / "target" / "debug" / (
+                "opendash.exe" if sys.platform == "win32" else "opendash"
+            )
+            take_over_port(self.port, lambda message: self.emit("log", message), binary)
             while not self.stop_event.is_set():
                 self.stop_server()
                 self.build()
+                self.ensure_demo_site()
                 self.launch_server()
                 baseline = source_snapshot(self.root)
                 pending = None
@@ -348,15 +426,18 @@ class DevRunner:
 def main() -> int:
     parser = argparse.ArgumentParser(description="OpenDash desktop dev launcher (Windows/macOS)")
     parser.add_argument("--port", type=int, default=int(os.environ.get("OPENDASH_PORT", "18766")))
-    parser.add_argument("--site-root", type=Path, default=Path(os.environ.get("OPENDASH_SITE_ROOT", ROOT)))
+    parser.add_argument("--site-root", type=Path, default=None, help="Site data riêng; không tự seed demo")
+    parser.add_argument("--no-demo", action="store_true", help="Dùng site data tại root repository như trước")
     parser.add_argument("--no-watch", action="store_true", help="Không tự build lại khi file thay đổi")
     parser.add_argument("--no-browser", action="store_true", help="Không tự mở trình duyệt")
     parser.add_argument("--headless", action="store_true", help="Dùng terminal, Ctrl+C để dừng")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("Port phải trong khoảng 1..65535.")
+    site_root, seed_demo = resolve_site_config(args.site_root, args.no_demo, os.environ)
     messages: queue.Queue = queue.Queue()
-    runner = DevRunner(ROOT, args.site_root, args.port, not args.no_watch, messages, not args.no_browser)
+    runner = DevRunner(ROOT, site_root, args.port, not args.no_watch, messages,
+                       not args.no_browser, seed_demo=seed_demo)
 
     if args.headless:
         runner.start()

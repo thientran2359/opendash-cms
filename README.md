@@ -67,19 +67,32 @@ Trên macOS có thể dùng `python3 dev.py`; nếu Python thiếu Tkinter, cài
 Python hỗ trợ Tk hoặc chạy `python3 dev.py --headless` (dừng bằng Ctrl+C).
 Launcher mở cửa sổ điều khiển, tự build React Admin và binary Rust **debug**,
 chạy tại `http://127.0.0.1:18766/admin/#/posts`, rồi mở trình duyệt mặc định.
+Lần đầu chạy mặc định, launcher tự tạo website mẫu **Mộc Studio** bằng
+[`cms/scripts/demo-website-runner.py`](cms/scripts/demo-website-runner.py) tại
+`runtime/demo-website/dev-local/` (đã được `.gitignore` bỏ qua). Demo gồm theme,
+bài viết, trang, custom content, media, menu, Builder và tài khoản mẫu.
+Lần chạy tiếp theo **sử dụng lại SQLite/site data hiện có**, không reset seed
+và không mất nội dung đã chỉnh. Site data ở root repository vẫn nguyên vẹn.
+Tài khoản demo: `admin_moc` / `MocStudioDemo#2026!` (chỉ dùng localhost/dev).
 Chọn **Mở Admin** / **Mở website** trong cửa sổ để mở lại; đóng cửa sổ là
 dừng server và tiến trình build do launcher quản lý. Khi sửa mã nguồn React,
 Rust hoặc migrations, launcher tự build và khởi động lại server; cần tải lại
 trang trên trình duyệt sau khi build (chưa phải Vite HMR).
 
 - Nếu `18766` đang được tiến trình **OpenDash** khác sử dụng, launcher xác thực
-  owner và health trước khi dừng nó. Nếu là chương trình khác, launcher báo lỗi
-  và **không** kết thúc tiến trình lạ.
-- Mặc định site data nằm trong `database/`, `themes/`, `plugins/` và
-  `uploads/` tại repository đang chạy. Build và restart **không xóa** dữ liệu.
-  Chọn site khác bằng `python dev.py --site-root /duong/dan/toi/site`.
-  Nếu server trước đó dùng site root khác thì cần truyền lại đường dẫn đó
-  để giữ nguyên tài khoản/nội dung, không tự copy hoặc ghi đè SQLite.
+  owner và health trước khi dừng nó. Trên Windows, launcher chỉ dừng tiến trình
+  chạy từ **cùng binary/worktree**, không dừng server của Codex/agent khác.
+  Nếu là chương trình khác hoặc OpenDash thuộc worktree khác, launcher báo lỗi;
+  hãy chọn cổng riêng bằng `--port`.
+- Mặc định site data demo nằm trong `runtime/demo-website/dev-local/`, không
+  dùng `database/`, `themes/`, `plugins/`, `uploads/` tại root repository.
+  Chạy `python dev.py --no-demo` để dùng lại site data tại root như trước;
+  dùng `python dev.py --site-root /duong/dan/toi/site` để chọn site riêng.
+  Khi có `OPENDASH_SITE_ROOT` hoặc `OPENDASH_DB_PATH`, launcher tôn trọng
+  cấu hình cũ và **không tự seed** dữ liệu demo.
+  Site demo đã tồn tại nhưng thiếu metadata/SQLite sẽ báo lỗi và giữ nguyên,
+  không tự xóa. Muốn tạo lại dữ liệu demo phải sao lưu dữ liệu cũ rồi chủ động
+  reset `dev-local` bằng lệnh trong [fixture README](cms/fixtures/demo-website/README.md).
 - `python dev.py --no-watch` tắt tự build khi thay đổi; `--no-browser`
   không tự mở tab; `--headless` dùng khi không có giao diện Tk.
   `--port 18766` ghi đè cổng mặc định.
