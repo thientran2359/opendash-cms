@@ -8,6 +8,7 @@ use std::{io::Read, net::TcpListener, sync::atomic::Ordering, time::Duration};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn invocation_timeout_must_not_commit_later() {
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
@@ -102,11 +103,13 @@ async fn invocation_timeout_must_not_commit_later() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn timeout_during_commit_must_not_write_later() {
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     assert_no_late_write_with_sqlite_lock(false).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn timeout_after_sqlite_receives_commit_must_not_write_later() {
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     assert_no_late_write_with_sqlite_lock(true).await;
 }
 
@@ -237,6 +240,7 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn timeout_must_not_be_reported_if_commit_succeeded() {
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     use std::io::Write;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -379,6 +383,7 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ipc_kv_get_stuck_parent_must_cancel_and_clean_up() {
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -478,6 +483,7 @@ async fn ipc_kv_get_stuck_parent_must_cancel_and_clean_up() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     let temp_db = std::env::temp_dir().join(format!("staged_abort_{}.sqlite", std::process::id()));
     let _ = std::fs::remove_file(&temp_db);
     let db_url = format!(
@@ -613,6 +619,7 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn ipc_kv_get_stuck_parent_must_timeout_and_clean_up() {
+    let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")

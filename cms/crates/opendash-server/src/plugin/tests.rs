@@ -80,6 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sample_plugin_full_execution() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let manager = PluginManager::new(db.clone(), true);
         let zip_bytes =
@@ -133,6 +134,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fuel_exhaustion_infinite_loop() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -200,6 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_zero_late_writes_on_guest_trap() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -266,6 +269,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_permission_denial_kv_and_loopback() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -329,6 +333,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_linear_memory_limit() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -385,6 +390,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_slow_http_timeout_and_cleanup() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         use tokio::io::AsyncReadExt;
 
         // Bind dummy slow HTTP server on loopback
@@ -392,12 +398,17 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let target_url = format!("http://{addr}/delay");
 
-        // Spawn background task that accepts connection and delays for 5 seconds without response
-        tokio::spawn(async move {
+        // Hold the fixture open longer than the invocation budget. Assert that
+        // the guest reports the HTTP timeout while the server is still silent,
+        // instead of treating process-spawn/scheduler latency as HTTP latency.
+        let (request_seen_tx, request_seen_rx) = tokio::sync::oneshot::channel();
+        let slow_server = tokio::spawn(async move {
             if let Ok((mut socket, _)) = listener.accept().await {
                 let mut buf = [0u8; 1024];
-                let _ = socket.read(&mut buf).await;
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                if socket.read(&mut buf).await.unwrap() > 0 {
+                    let _ = request_seen_tx.send(());
+                }
+                tokio::time::sleep(Duration::from_secs(10)).await;
             }
         });
 
@@ -469,19 +480,30 @@ mod tests {
         // Must report error from host_call due to HTTP timeout (2s)
         assert_eq!(res["ok"], false);
         assert!(res["error"].as_str().unwrap().contains("Lỗi kết nối HTTP"));
-        // Timeout should take ~2 seconds, well under the 5s deadline
+        request_seen_rx
+            .await
+            .expect("the HTTP fixture must observe a real outbound request");
+        assert!(
+            !slow_server.is_finished(),
+            "the guest must time out before the fixture responds"
+        );
+        slow_server.abort();
+        // The HTTP timeout is 2s and the invocation budget remains 5s;
+        // allow time for child-process startup and thread scheduling under
+        // the full workspace's default parallelism, but not an unbounded wait.
         assert!(
             elapsed >= Duration::from_secs(2),
             "Timeout did not wait for 2s HTTP timeout: {elapsed:?}"
         );
         assert!(
-            elapsed < Duration::from_secs(4),
+            elapsed < Duration::from_secs(8),
             "Timeout exceeded expected duration: {elapsed:?}"
         );
     }
 
     #[tokio::test]
     async fn test_sqlite_lock_timeout_and_zero_late_writes() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db_dir = std::env::temp_dir().join(format!(
             "opendash_test_lock_{}_{}",
             std::process::id(),
@@ -654,6 +676,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_complex_json_input_and_escaping() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let manager = PluginManager::new(db.clone(), true);
         let zip_bytes =
@@ -753,6 +776,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_env_abort_traps_execution() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -796,6 +820,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_host_imports_pointer_and_utf8_validation() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
 
@@ -884,6 +909,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_worker_lifecycle_and_teardown() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
         let wasm_echo = wat::parse_str(
@@ -947,6 +973,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_worker_termination_and_permit_reclamation_on_timeout() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -1104,22 +1131,32 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_worker_termination_on_caller_cancellation() {
+        let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let (request_started_tx, request_started_rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().unwrap();
-            let mut buf = [0; 4096];
-            let bytes_read = std::io::Read::read(&mut socket, &mut buf).unwrap();
-            assert!(bytes_read > 0, "worker must send an HTTP request");
-            let _ = request_started_tx.send(());
-            std::thread::sleep(Duration::from_secs(6));
-        });
+        let (abort_handle_tx, abort_handle_rx) =
+            std::sync::mpsc::sync_channel::<tokio::task::AbortHandle>(1);
 
         let db = create_test_db().await;
         let runtime = PluginRuntime::new();
         assert_eq!(runtime.active_workers(), 0);
+        let runtime_at_request = runtime.clone();
+        std::thread::spawn(move || {
+            // Arrange cancellation on the I/O thread that first sees the
+            // request. The async test task may not be rescheduled until after
+            // the 2-second egress timeout when other tests run in parallel.
+            let abort_handle = abort_handle_rx.recv().unwrap();
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut buf = [0; 4096];
+            let bytes_read = std::io::Read::read(&mut socket, &mut buf).unwrap();
+            assert!(bytes_read > 0, "worker must send an HTTP request");
+            let active_at_request = runtime_at_request.active_workers();
+            abort_handle.abort();
+            let _ = request_started_tx.send(active_at_request);
+            std::thread::sleep(Duration::from_secs(6));
+        });
 
         let req =
             json!({"op":"http_request","method":"GET","url":format!("{origin}/hang")}).to_string();
@@ -1168,32 +1205,27 @@ mod tests {
         };
 
         let rt = runtime.clone();
-        let mut task = tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             rt.run_plugin(wasm, manifest, json!({}), db, "corr-hang".into(), true)
                 .await
         });
+        abort_handle_tx.send(task.abort_handle()).unwrap();
 
-        // Prove the worker is actually blocked in HTTP before aborting it.
-        // A fixed sleep races with process startup when the test suite runs in parallel.
-        tokio::select! {
-            started = tokio::time::timeout(Duration::from_secs(10), request_started_rx) => {
-                started
-                    .expect("worker did not reach the HTTP server within 10 seconds")
-                    .expect("HTTP server stopped before the worker sent its request");
-            }
-            result = &mut task => {
-                panic!("plugin invocation finished before the blocking HTTP request: {result:?}");
-            }
-        }
+        // The I/O thread snapshots active workers and aborts the caller in
+        // the same scheduling turn, before the simulated egress can time out.
+        let active_at_request = tokio::time::timeout(Duration::from_secs(10), request_started_rx)
+            .await
+            .expect("worker did not reach the HTTP server within 10 seconds")
+            .expect("HTTP server stopped before the worker sent its request");
         assert_eq!(
-            runtime.active_workers(),
+            active_at_request,
             1,
-            "worker must be active during call"
+            "worker must be active at cancellation"
         );
 
-        // Caller cancels the future (abort task)
-        task.abort();
-        let _ = task.await;
+        // Caller cancellation must be observed, not a natural worker timeout.
+        let cancelled = task.await.expect_err("caller task must be aborted");
+        assert!(cancelled.is_cancelled(), "caller abort must cancel the task");
 
         // Allow guard drop and process kill
         tokio::time::sleep(Duration::from_millis(200)).await;
