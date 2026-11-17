@@ -40,6 +40,8 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
     message: string;
     pins: MediaPinSummary | null;
   } | null>(null);
+  const imageUploadRef = useRef<HTMLInputElement>(null);
+  const videoUploadRef = useRef<HTMLInputElement>(null);
   const errorHandler = useRef(onApiError);
   errorHandler.current = onApiError;
 
@@ -162,16 +164,22 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
       </div>
 
       <section className="od-media-toolbar" aria-label="Tải ảnh và tìm kiếm">
-        <label className="od-media-upload" htmlFor="od-media-files">
-          <span>+ Tải ảnh lên</span>
-          <input id="od-media-files" type="file" multiple accept="image/jpeg,image/png,image/webp"
-            onChange={onUpload} disabled={!csrfToken || loading || uploading} aria-describedby="od-media-upload-help" />
-        </label>
-        <label className="od-media-upload" htmlFor="od-media-video-file">
-          <span>+ Tải video MP4</span>
-          <input id="od-media-video-file" type="file" accept="video/mp4,.mp4"
-            onChange={onUploadVideo} disabled={!csrfToken || loading || uploading} />
-        </label>
+        <div className="od-media-upload-actions" role="group" aria-label="Tải media lên">
+          <button className="od-media-upload" type="button" aria-describedby="od-media-upload-help"
+            onClick={() => imageUploadRef.current?.click()} disabled={!csrfToken || loading || uploading}>
+            + Tải ảnh lên
+          </button>
+          <input ref={imageUploadRef} className="od-media-upload-file" id="od-media-files"
+            type="file" multiple accept="image/jpeg,image/png,image/webp"
+            onChange={onUpload} disabled={!csrfToken || loading || uploading} tabIndex={-1} />
+          <button className="od-media-upload" type="button" aria-describedby="od-media-upload-help"
+            onClick={() => videoUploadRef.current?.click()} disabled={!csrfToken || loading || uploading}>
+            + Tải video MP4
+          </button>
+          <input ref={videoUploadRef} className="od-media-upload-file" id="od-media-video-file"
+            type="file" accept="video/mp4,.mp4"
+            onChange={onUploadVideo} disabled={!csrfToken || loading || uploading} tabIndex={-1} />
+        </div>
         <div className="od-media-filters" role="group" aria-label="Lọc loại media">
           {(['all', 'image', 'video'] as const).map(k => (
             <button key={k} type="button" className={kindFilter === k ? 'od-media-primary' : 'od-media-secondary'}
