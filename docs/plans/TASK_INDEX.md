@@ -223,7 +223,7 @@ Issue/Project là nguồn live; snapshot 17/11/2026 dưới đây không tự c�
 | Task | Responsible | Dependency / outcome | Issue |
 | --- | --- | --- | --- |
 | M7-S14-T01 | Forge | Done; [báo cáo audit Windows](../verification/2026-11-16-usable-beta-windows-audit.md) merged qua [PR #306](https://github.com/thientran2359/opendash-cms/pull/306); verdict sản phẩm BLOCKED | [#300](https://github.com/thientran2359/opendash-cms/issues/300) |
-| M7-S14-T02 | Atlas | Ready; phân loại F01–F09 và hoàn thiện G3 cho các sửa lỗi bắt buộc | [#301](https://github.com/thientran2359/opendash-cms/issues/301) |
+| M7-S14-T02 | Aster (owner handoff 17/11) | Project Ready verified; planning submitted for review, Project update pending tool access; [disposition/G3](milestones/M7/slices/2026-11-16-usable-beta-fixes-g3.md) | [#301](https://github.com/thientran2359/opendash-cms/issues/301) |
 | M7-S14-T03 | Forge | Backlog; T02 + required fixes G5 + human tester → retest/dogfood | [#302](https://github.com/thientran2359/opendash-cms/issues/302) |
 | M7-S14-T04 | Atlas | Backlog; T03 → Beta-only readiness report | [#303](https://github.com/thientran2359/opendash-cms/issues/303) |
 
@@ -265,3 +265,21 @@ Published all18 Issues in GitHub Milestone#9 / Project#3 from immutable G3 `4ec2
 | M8-S08-T04 | Harbor (macOS deferred) | Backlog | [#246](https://github.com/thientran2359/opendash-cms/issues/246) |
 | M8-S09-T01 | Atlas | Backlog | [#247](https://github.com/thientran2359/opendash-cms/issues/247) |
 | M8-S09-T02 | Atlas | Backlog | [#248](https://github.com/thientran2359/opendash-cms/issues/248) |
+
+## Beta remediation specifications — 17/11/2026
+
+Proposed tasks below are authored specifications under #301, not published Issues
+or Project Ready. Required peer review, milestone docs/contract merge and source
+pins precede publication; exact live status remains GitHub Issue/Project.
+
+| Task | Responsible proposed | Outcome / dependency | Issue |
+| --- | --- | --- | --- |
+| M7-S15-T01 | Forge | F01 menu target picker; G3 review/merge | Not published |
+| M7-S15-T02 | Forge | F03 draft preservation; exclusive editor seam | Not published |
+| M7-S15-T03 | Aster | F04 atomic publication create; no migration edit | Not published |
+| M7-S15-T04 | Forge | F05 media picker; after T02 | Not published |
+| M7-S15-T05 | Forge | F07 harness lifecycle; after editor fixes | Not published |
+| M5-S11-T01 | Forge | F02 theme v2; separate M5 contract/G3 PR | Not published |
+| M6-S09-T01 | Aster | F09 repeatability; actual Windows receipt required | Not published |
+| M8-S10-T01 | Aster | F08 security blocker; separate M8 G3 PR | Not published |
+| M8-S10-T02 | Forge | F06 tracked harness; after recovery/editor repairs | Not published |
