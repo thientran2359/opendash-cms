@@ -270,9 +270,12 @@ Published all18 Issues in GitHub Milestone#9 / Project#3 from immutable G3 `4ec2
 
 Nine tasks below were published from merged source `54a56c74c80c886f7b3bb91eaccaa798b772dcf6`
 after owner-directed macOS Beta/Harbor handoff in PR #317. Aster self-review
-replaces mandatory peer review. Project status remains unverified; publication
-does not authorize pickup. First priority: #318; one active Harbor task at a time.
-Dispatch probe: MAC_SSH_HOST_NOT_CONFIGURED; no delivery/start claimed.
+replaces mandatory peer review; owner later authorized Harbor to self-review
+each remediation implementation and G5 without waiting for Aster. At initial
+publication Project statuses were unverified, so publication alone did not
+authorize pickup. #318 was subsequently picked up, G4 merged and G5 independently
+verified on Mac Intel; maintain one active Harbor task at a time. Historical
+dispatch probe `MAC_SSH_HOST_NOT_CONFIGURED` did not establish delivery/start.
 
 | Task | Responsible | Outcome / dependency | Issue |
 | --- | --- | --- | --- |
@@ -283,5 +286,5 @@ Dispatch probe: MAC_SSH_HOST_NOT_CONFIGURED; no delivery/start claimed.
 | M7-S15-T05 | Harbor | F07 harness lifecycle; after editor fixes | [#324](https://github.com/thientran2359/opendash-cms/issues/324) — published; Project status unverified |
 | M5-S11-T01 | Harbor | F02 theme v2; separate M5 contract/G3 PR | [#320](https://github.com/thientran2359/opendash-cms/issues/320) — published; Project status unverified |
 | M6-S09-T01 | Harbor | F09 macOS repeatability; Windows RC follow-up retained | [#325](https://github.com/thientran2359/opendash-cms/issues/325) — published; Project status unverified |
-| M8-S10-T01 | Harbor | F08 security blocker; separate M8 G3 PR | [#318](https://github.com/thientran2359/opendash-cms/issues/318) — published; Project status unverified |
+| M8-S10-T01 | Harbor | **Done · native macOS G5 VERIFIED 2026-11-17** — Project #3 Done / Issue closed completed; restore safe-before-activation across restart, release workspace PASS, actual Intel old/new/old rollback PASS. Windows historical F08 remains a blocker **before common RC** | [#318](https://github.com/thientran2359/opendash-cms/issues/318) · [G4 PR #328](https://github.com/thientran2359/opendash-cms/pull/328) · [macOS G5](../verification/2026-11-17-m8-s10-t01-g5-macos.md) |
 | M8-S10-T02 | Harbor | F06 tracked harness; after recovery/editor repairs | [#326](https://github.com/thientran2359/opendash-cms/issues/326) — published; Project status unverified |
