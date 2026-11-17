@@ -30,6 +30,7 @@ export interface PanelRegionRendererProps {
   onSlugChange: (slug: string) => void;
   onPublicationStatusChange: (status: 'draft' | 'published') => void;
   onFieldChange: (key: string, value: ContentFieldValue) => void;
+  onPickMedia: (fieldKey: string, kind: 'image' | 'gallery') => void;
   onFieldClear: (key: string) => void;
   onCustomPathChange: (path: string) => void;
   onSeoChange: (patch: { title?: string; description?: string; og_image_id?: string; noindex?: boolean }) => void;
@@ -86,6 +87,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   onSlugChange,
   onPublicationStatusChange,
   onFieldChange,
+  onPickMedia,
   onFieldClear,
   onCustomPathChange,
   onSeoChange,
@@ -131,8 +133,18 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         <FieldValueInput
           field={eff.definition}
           value={valStr}
-          disabled={!eff.editable}
+          disabled={!eff.editable || (
+            (eff.definition.type === 'image' || eff.definition.type === 'gallery')
+            && eff.effective_status !== 'active'
+          )}
           onChange={raw => onFieldChange(fieldKey, parseInputString(eff.definition, raw))}
+          onPickMedia={
+            eff.editable
+            && eff.effective_status === 'active'
+            && (eff.definition.type === 'image' || eff.definition.type === 'gallery')
+              ? () => onPickMedia(fieldKey, eff.definition.type as 'image' | 'gallery')
+              : undefined
+          }
         />
         {err && (
           <p className="text-xs font-medium text-rose-700" role="alert">
