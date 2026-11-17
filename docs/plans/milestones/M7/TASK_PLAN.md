@@ -39,3 +39,9 @@ v2 discovery, M6-S09-T01 SSRF test reproducibility and M8-S10-T01/T02 recovery
 security/harness use separate milestone docs PRs; no runtime ownership is granted
 by this planning update. Mandatory fixes and harness receipts precede #302.
 F08 remains a security blocker; no Beta/native/release PASS from specs or CI.
+
+## Owner review notes01–07 — 17/11/2026
+
+[Harbor follow-up G3](slices/2026-11-17-owner-admin-review-g3.md) covers the bounded
+Admin delta under [ADR-0018](../../../decisions/ADR-0018-owner-admin-review.md).
+PLANNED, not Project Ready or runtime VERIFIED. See shared serial delivery order.

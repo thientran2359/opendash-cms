@@ -102,3 +102,15 @@ Chủ dự án xác nhận ưu tiên hoàn thiện **Admin và điều hướng 
 ## Quyết định kỹ thuật còn mở
 
 Đánh giá framework server, thư viện quản trị và builder, template engine, runtime plugin và cơ chế đóng gói/cài đặt theo yêu cầu trên. Xem [đánh giá tech stack](../architecture/TECH_STACK.md), [kiến trúc CMS](../architecture/CMS_ARCHITECTURE.md) và [đề xuất CMS-first](../architecture/CMS_PROPOSAL.md).
+
+## Owner review follow-up — 17/11/2026
+
+Chủ dự án chốt notes01–07: Admin grouped navigation; one screen per menu destination;
+WordPress-like content list/filter/actions with controlled theme/plugin contributions;
+one taxonomy panel and explicit draft/publish/update/view actions; separate category/tag
+list/edit routes; exact Page Builder; visible image/video uploads; private Section CPT
+and local template library. See [ADR-0018](../decisions/ADR-0018-owner-admin-review.md)
+and [bounded contract](../contracts/ADMIN_REVIEW_2026_11.md). Page has no core-default
+category/tag, while existing links and explicit provider/user eligibility are preserved.
+Section insertion copies AST; synced propagation remains deferred. Cloud library and
+note08 full Builder redesign stay deferred. No Beta PASS follows from this decision.
