@@ -34,6 +34,7 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [Windows source-matched M5 #157 / M7 #214 (2026-11-17)](2026-11-17-m5-m7-windows-source-rebaseline.md) — binary/rollback/tests trên `c59d2f6` (M5) và `69d311b` (M7); browser assertion receipts, runner teardown và giới hạn full G5 được phân biệt rõ.
 - [G5 native macOS Intel — M8-S10-T01 / #318 (2026-11-17)](2026-11-17-m8-s10-t01-g5-macos.md) — release suite, Safe Mode khi restore/restart, actual old/new/old và negative ACL/CSRF; Windows F08 vẫn là follow-up trước common RC.
 - [G5 native macOS Intel — M7-S15-T01 / #319 (2026-11-17)](2026-11-17-m7-s15-t01-g5-macos.md) — real Chrome picker Page/Post/CPT, bounded pagination, 401/403/412, stable IDs, rollback old/new/old và M7 browser regression; Windows F01 chưa revalidate.
+- [G5 native macOS Intel — M5-S11-T01 / #320 (2026-11-17)](2026-11-17-m5-s11-t01-g5-macos.md) — real Chrome v2 revision discovery/activation, legacy workflow, sample import, 401/403/412/409, release Rust 5/5, old/new/old data continuity; Windows F02 chưa revalidate.
 
 - [M7 planning G1/G2/G3 — 14/11/2026](2026-11-14-m7-planning.md): docs/source validation only, full14-task coverage; M7 runtime/native/browser NOT_RUN.
 
