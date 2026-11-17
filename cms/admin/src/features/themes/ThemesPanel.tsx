@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import {
   activateTheme,
+  activateThemeRevision,
   dryRunSampleImport,
   executeSampleImport,
   getThemes,
   installTheme,
+  isV2ThemeInstall,
   type ImportExecutionOutcome,
   type ImportPlan,
   type SampleGroup,
@@ -23,6 +25,9 @@ interface Props {
 export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalled, onActivated }) => {
   const [data, setData] = useState<ThemesSummary | null>(null);
   const [busy, setBusy] = useState(false);
+  // The chosen revision is an explicit Admin draft, not the active selection.
+  // Keep it untouched on stale 412 and permission failures.
+  const [selectedRevisionId, setSelectedRevisionId] = useState<string | null>(null);
   const [sampleGroups, setSampleGroups] = useState<SampleGroup[]>(['pages', 'menus', 'media', 'settings']);
   const [importPlan, setImportPlan] = useState<ImportPlan | null>(null);
   const [ackPublic, setAckPublic] = useState(false);
@@ -34,17 +39,19 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
   onErrorRef.current = onApiError;
   const mounted = useRef(true);
 
-  const refresh = async () => {
+  const refresh = async (): Promise<boolean> => {
     setLoading(true);
     setError('');
     try {
       const result = await getThemes();
       if (mounted.current) setData(result);
+      return mounted.current;
     } catch (cause) {
       if (mounted.current) {
         setError(cause instanceof Error ? cause.message : 'Không thể tải themes.');
         onErrorRef.current(cause, 'Không thể tải themes.');
       }
+      return false;
     } finally {
       if (mounted.current) setLoading(false);
     }
@@ -65,7 +72,12 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
     setNotice('');
     try {
       const item = await installTheme(file, csrfToken);
-      setNotice(`Đã cài theme ${item.id}. Chọn Kích hoạt để đổi giao diện công khai.`);
+      if (isV2ThemeInstall(item)) {
+        setSelectedRevisionId(item.revision_id);
+        setNotice(`Đã cài ${item.theme_id} v${item.version} (revision ${item.revision_id.slice(0, 16)}…). Chưa kích hoạt.`);
+      } else {
+        setNotice(`Đã cài theme ${item.id}. Chọn Kích hoạt để đổi giao diện công khai.`);
+      }
       onInstalled();
       await refresh();
     } catch (cause) {
@@ -82,10 +94,15 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
     setError('');
     setNotice('');
     try {
-      const next = await activateTheme(id, data.version, csrfToken);
-      setData(next);
-      setNotice(`Đã kích hoạt ${id}. Nội dung Builder được giữ nguyên.`);
+      await activateTheme(id, data.version, csrfToken);
+      const reloaded = await refresh();
+      setSelectedRevisionId(null);
+      setImportPlan(null);
+      setImportOutcome(null);
+      setAckPublic(false);
       onActivated();
+      if (reloaded) setNotice(`Đã kích hoạt ${id}. Nội dung Builder được giữ nguyên.`);
+      else setError('Đã gửi kích hoạt nhưng chưa tải lại được trạng thái server. Hãy Tải lại danh sách.');
     } catch (cause) {
       const stale = cause instanceof ApiClientError && cause.status === 412;
       setError(stale
@@ -97,6 +114,41 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
     }
   };
 
+  const activateRevision = async () => {
+    if (!csrfToken || !data || busy || !selectedRevisionId) return;
+    const revisionId = selectedRevisionId;
+    if (!data.revisions.some(rev => rev.source_format === 'v2' && rev.revision_id === revisionId)) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      // Revision activation returns ThemeSelection, not the legacy ThemeList.
+      // Always read the complete projection after the mutation.
+      await activateThemeRevision(revisionId, data.selection.version, csrfToken);
+      const reloaded = await refresh();
+      if (reloaded) setSelectedRevisionId(null);
+      setImportPlan(null);
+      setImportOutcome(null);
+      setAckPublic(false);
+      onActivated();
+      if (reloaded) setNotice('Đã kích hoạt revision đã chọn. Nội dung, menu và tùy chọn đã lưu được giữ nguyên.');
+      else setError('Đã gửi kích hoạt nhưng chưa tải lại được trạng thái server. Revision đã chọn vẫn được giữ.');
+    } catch (cause) {
+      const stale = cause instanceof ApiClientError && cause.status === 412;
+      setError(stale
+        ? 'Theme đã đổi ở tab khác (412). Revision đã chọn vẫn được giữ. Hãy Tải lại để xem phiên bản mới rồi thử tiếp.'
+        : cause instanceof Error ? cause.message : 'Không thể kích hoạt revision.');
+      onErrorRef.current(cause, 'Không thể kích hoạt revision.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const v2Revisions = data?.revisions.filter(revision => revision.source_format === 'v2') ?? [];
+  const activeThemeKey = data?.selection.source_format === 'v2'
+    ? data.selection.theme_id
+    : data?.active_id;
+
   return (
     <section className="min-w-0 space-y-5" aria-label="Quản lý Themes" data-testid="themes-panel">
       <div>
@@ -106,13 +158,13 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
       </div>
       <label className="block rounded-xl border border-dashed border-sky-300 bg-sky-50 p-4">
         <span className="block font-semibold text-slate-900">Cài theme từ ZIP</span>
-        <span className="block text-sm text-slate-600">block.json, block.html và homepage-compat.json tùy chọn (tối đa 64 KiB).</span>
+        <span className="block text-sm text-slate-600">ZIP legacy (block.json, block.html; tối đa 64 KiB) hoặc Theme v2 (theme.json và templates, giới hạn riêng cho v2).</span>
         <input data-testid="themes-upload" type="file" accept=".zip,application/zip" onChange={upload} disabled={!csrfToken || busy} className="mt-3 block max-w-full text-sm" />
       </label>
       {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-900">{error}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold text-slate-900">Đã cài ({data?.items.length ?? 0})</h3>
+        <h3 className="text-lg font-semibold text-slate-900">Đã cài ({data?.items.length ?? 0} legacy · {v2Revisions.length} revision v2)</h3>
         <button type="button" onClick={() => void refresh()} disabled={busy || loading}
           className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium">Tải lại danh sách</button>
       </div>
@@ -120,7 +172,7 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
       {!loading && data && (
         <>
           <p className="text-sm text-slate-700" data-testid="active-theme">
-            Theme đang kích hoạt: <strong>{data.active_id ?? 'Chế độ legacy (theo homepage)'}</strong> · Phiên bản {data.version}
+            Theme đang kích hoạt: <strong>{data.selection.source_format === 'v2' ? `${data.selection.theme_id} (v2)` : data.active_id ?? 'Chế độ legacy (theo homepage)'}</strong> · Phiên bản chọn {data.selection.version}
           </p>
           {data.homepage_compatible === false && (
             <p role="alert" data-testid="theme-compat-warning" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
@@ -130,7 +182,8 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
           {data.homepage_compatible === true && (
             <p role="status" data-testid="theme-compat-ok" className="text-sm text-emerald-800">Theme hỗ trợ block homepage đã lưu.</p>
           )}
-          {data.items.length === 0 && <p>Chưa có theme nào. Hãy cài ZIP để bắt đầu.</p>}
+          {data.items.length === 0 && v2Revisions.length === 0 && <p>Chưa có theme nào. Hãy cài ZIP để bắt đầu.</p>}
+          {data.items.length > 0 && <h4 className="text-sm font-semibold text-slate-700">Theme legacy</h4>}
           <ul className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
             {data.items.map(item => (
               <li key={item.id} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4" data-theme-id={item.id}>
@@ -144,7 +197,43 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
               </li>
             ))}
           </ul>
-          {data.active_id && (
+          {v2Revisions.length > 0 && (
+            <section className="space-y-3" aria-label="Revision theme v2" data-testid="theme-v2-revisions">
+              <h4 className="text-sm font-semibold text-slate-700">Các revision v2 đã cài ({v2Revisions.length})</h4>
+              <ul className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+                {v2Revisions.map(revision => (
+                  <li key={revision.revision_id} data-theme-revision-id={revision.revision_id}
+                    className="min-w-0 space-y-2 rounded-xl border border-slate-200 bg-white p-4">
+                    <div className="break-all font-semibold text-slate-900">{revision.theme_id}</div>
+                    <p className="break-all text-xs text-slate-600">Version {revision.version} · SHA {revision.revision_digest.slice(0, 12)}…</p>
+                    {data.selection.revision_id === revision.revision_id
+                      ? <span className="inline-block text-sm font-semibold text-emerald-800">Đang kích hoạt</span>
+                      : <label className="inline-flex items-center gap-2 text-sm">
+                          <input type="radio" name="selected-theme-revision" value={revision.revision_id}
+                            checked={selectedRevisionId === revision.revision_id}
+                            onChange={() => setSelectedRevisionId(revision.revision_id)} disabled={busy || loading} />
+                          Chọn revision để kích hoạt
+                        </label>}
+                  </li>
+                ))}
+              </ul>
+              <button type="button" onClick={() => void activateRevision()}
+                disabled={!csrfToken || busy || loading || !selectedRevisionId || !v2Revisions.some(rev => rev.revision_id === selectedRevisionId && data.selection.revision_id !== rev.revision_id)}
+                className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                Kích hoạt revision đã chọn
+              </button>
+              <p className="text-xs text-slate-600">Cài ZIP không tự kích hoạt. Revision đang hoạt động được lấy từ phiên bản chọn trên server.</p>
+            </section>
+          )}
+          {data.selection.source_format === 'v2' && (
+            <nav aria-label="Chỉnh sửa template theme" className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm">
+              <p className="w-full">Để chỉnh header, footer, single hoặc archive, mở Visual Builder và chọn đúng Role trong bộ chọn.</p>
+              <a href="#/builder" className="rounded-md border border-slate-300 px-3 py-1.5 font-medium text-sky-800">
+                Mở Visual Builder
+              </a>
+            </nav>
+          )}
+          {activeThemeKey && (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3" data-testid="sample-import-box">
               <h3 className="text-base font-semibold text-slate-900">Nhập dữ liệu mẫu có chọn lọc</h3>
               <div className="flex flex-wrap gap-3 text-sm">
@@ -168,11 +257,11 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
                   type="button"
                   disabled={!csrfToken || busy || sampleGroups.length === 0}
                   onClick={() => {
-                    if (!data.active_id || !csrfToken) return;
+                    if (!activeThemeKey || !csrfToken) return;
                     setBusy(true);
                     setError('');
                     setImportOutcome(null);
-                    void dryRunSampleImport(data.active_id, sampleGroups, csrfToken)
+                    void dryRunSampleImport(activeThemeKey, sampleGroups, csrfToken)
                       .then(plan => { setImportPlan(plan); setAckPublic(false); })
                       .catch(cause => setError(cause instanceof Error ? cause.message : 'Dry-run thất bại.'))
                       .finally(() => setBusy(false));
@@ -182,14 +271,20 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
                   Xem trước (Dry-run)
                 </button>
                 {importPlan && (
+                  <button type="button" disabled={busy} onClick={() => { setImportPlan(null); setAckPublic(false); }}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium">
+                    Huỷ xem trước
+                  </button>
+                )}
+                {importPlan && (
                   <button
                     type="button"
                     disabled={!csrfToken || busy || (importPlan.requires_public_ack && !ackPublic)}
                     onClick={() => {
-                      if (!data.active_id || !csrfToken) return;
+                      if (!activeThemeKey || !csrfToken) return;
                       setBusy(true);
                       setError('');
-                      void executeSampleImport(data.active_id, importPlan, ackPublic, csrfToken)
+                      void executeSampleImport(activeThemeKey, importPlan, ackPublic, csrfToken)
                         .then(out => { setImportOutcome(out); setImportPlan(null); })
                         .catch(cause => setError(cause instanceof Error ? cause.message : 'Execute thất bại.'))
                         .finally(() => setBusy(false));
@@ -221,8 +316,9 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
               )}
             </div>
           )}
-          {data.active_id && (
-            <ThemeOptionsForm themeId={data.active_id} csrfToken={csrfToken} onApiError={onApiError} />
+          {activeThemeKey && (
+            <ThemeOptionsForm key={`${activeThemeKey}@${data.selection.revision_id ?? data.selection.version}`}
+              themeId={activeThemeKey} csrfToken={csrfToken} onApiError={onApiError} />
           )}
         </>
       )}
