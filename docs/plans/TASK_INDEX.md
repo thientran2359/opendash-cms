@@ -280,7 +280,7 @@ dispatch probe `MAC_SSH_HOST_NOT_CONFIGURED` did not establish delivery/start.
 | Task | Responsible | Outcome / dependency | Issue |
 | --- | --- | --- | --- |
 | M7-S15-T01 | Harbor | **Done · native macOS G5 VERIFIED 2026-11-17** — Project #3 Done, Chrome release picker/negative cases, M7 browser baseline và old/new/old data preservation PASS; Windows F01/common RC chưa revalidate | [#319](https://github.com/thientran2359/opendash-cms/issues/319) · [G4 PR #330](https://github.com/thientran2359/opendash-cms/pull/330) · [macOS G5](../verification/2026-11-17-m7-s15-t01-g5-macos.md) |
-| M7-S15-T02 | Harbor | F03 draft preservation; exclusive editor seam | [#321](https://github.com/thientran2359/opendash-cms/issues/321) — published; Project status unverified |
+| M7-S15-T02 | Harbor | **Done · native macOS G5 VERIFIED bằng test phân lớp 2026-11-17** — Project #3 Done; Chrome release 12 check, Rust release 3/3, old/new/old PASS; integrated Chrome 401/downgrade/reauth và Windows F03/common RC NOT_RUN | [#321](https://github.com/thientran2359/opendash-cms/issues/321) · [G4 PR #334](https://github.com/thientran2359/opendash-cms/pull/334) · [macOS G5](../verification/2026-11-17-m7-s15-t02-g5-macos.md) |
 | M7-S15-T03 | Harbor | F04 atomic publication create; no migration edit | [#322](https://github.com/thientran2359/opendash-cms/issues/322) — published; Project status unverified |
 | M7-S15-T04 | Harbor | F05 media picker; after T02 | [#323](https://github.com/thientran2359/opendash-cms/issues/323) — published; Project status unverified |
 | M7-S15-T05 | Harbor | F07 harness lifecycle; after editor fixes | [#324](https://github.com/thientran2359/opendash-cms/issues/324) — published; Project status unverified |
