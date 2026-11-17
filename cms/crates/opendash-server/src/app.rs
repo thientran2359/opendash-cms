@@ -34,6 +34,7 @@ use crate::{
         dashboard::dashboard_get,
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
+            entry_table_get,
             entry_composite_create, entry_composite_update, entry_preview, entry_publication,
             entry_update,
         },
@@ -414,6 +415,10 @@ pub fn build_router_with_themes_root(
             get(entry_list)
                 .post(entry_create)
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entry-table",
+            get(entry_table_get),
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/composite",

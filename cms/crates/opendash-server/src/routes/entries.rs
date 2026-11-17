@@ -1,10 +1,10 @@
 //! Authenticated content entry CRUD for CPTs (M3.3 backend).
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query, RawQuery, State},
     http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
@@ -21,7 +21,8 @@ use crate::{
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
     storage::{
-        content::load_content_type_definition, entries as entry_storage, media as media_storage,
+        content::load_content_type_definition, entries as entry_storage,
+        entry_table, media as media_storage,
         page::active_content_templates,
     },
 };
@@ -45,6 +46,95 @@ pub struct EntryPagination {
     category_id: Option<i64>,
     tag_id: Option<i64>,
     include_descendants: Option<bool>,
+}
+
+/// Unlike the legacy list extractor this intentionally rejects duplicate and
+/// unknown query keys, including invalid scalar syntax.
+pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTableFilter> {
+    let raw = raw.unwrap_or("");
+    if raw.len() > 4096 {
+        return Err(ApiError::bad_request("Truy vấn bảng nội dung quá dài."));
+    }
+    let mut filter = entry_table::EntryTableFilter::default();
+    let mut keys = BTreeSet::new();
+    for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
+        if !keys.insert(key.to_string()) {
+            return Err(ApiError::bad_request("Tham số truy vấn bảng bị trùng."));
+        }
+        let value = value.as_ref();
+        match key.as_ref() {
+            "q" => {
+                filter.q = value.trim().to_string();
+                if filter.q.chars().count() > 200 || filter.q.chars().any(char::is_control) {
+                    return Err(ApiError::bad_request("Tìm kiếm quá dài hoặc không hợp lệ."));
+                }
+            }
+            "status" if matches!(value, "all" | "draft" | "published") => {
+                filter.status = value.into();
+            }
+            "category_id" => {
+                filter.category_id = Some(value.parse::<i64>().ok()
+                    .filter(|id| *id > 0)
+                    .ok_or_else(|| ApiError::bad_request("category_id không hợp lệ."))?);
+            }
+            "tag_id" => {
+                filter.tag_id = Some(value.parse::<i64>().ok()
+                    .filter(|id| *id > 0)
+                    .ok_or_else(|| ApiError::bad_request("tag_id không hợp lệ."))?);
+            }
+            "include_descendants" if matches!(value, "true" | "false") => {
+                filter.include_descendants = value == "true";
+            }
+            "updated_month" => {
+                let bytes = value.as_bytes();
+                if bytes.len() != 7 || bytes[4] != b'-'
+                    || !bytes[..4].iter().chain(&bytes[5..]).all(u8::is_ascii_digit)
+                    || value[..4].parse::<u16>().unwrap_or(0) == 0
+                    || !(1..=12).contains(&value[5..].parse::<u8>().unwrap_or(0))
+                {
+                    return Err(ApiError::bad_request("updated_month phải là YYYY-MM."));
+                }
+                filter.updated_month = Some(value.into());
+            }
+            "sort" if matches!(value, "title" | "created_at" | "updated_at" | "id") => {
+                filter.sort = value.into();
+            }
+            "order" if matches!(value, "asc" | "desc") => {
+                filter.order = value.into();
+            }
+            "limit" => {
+                filter.limit = value.parse::<i64>().ok()
+                    .filter(|n| (1..=100).contains(n))
+                    .ok_or_else(|| ApiError::bad_request("limit phải là 1..100."))?;
+            }
+            "offset" => {
+                filter.offset = value.parse::<i64>().ok()
+                    .filter(|n| (0..=1_000_000).contains(n))
+                    .ok_or_else(|| ApiError::bad_request("offset phải là 0..1000000."))?;
+            }
+            _ => return Err(ApiError::bad_request("Tham số bảng nội dung không hợp lệ.")),
+        }
+    }
+    if filter.include_descendants && filter.category_id.is_none() {
+        return Err(ApiError::bad_request("include_descendants yêu cầu category_id."));
+    }
+    Ok(filter)
+}
+
+pub async fn entry_table_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(type_key): Path<String>,
+    RawQuery(raw): RawQuery,
+) -> ApiResult<Json<entry_table::EntryTableResult>> {
+    let actor = require_session(&headers, &db).await?;
+    valid_type_key(&type_key)?;
+    let filter = parse_table_query(raw.as_deref())?;
+    let role = match actor.user.role {
+        crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+        crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+    };
+    Ok(Json(entry_table::query(&db, &type_key, role, &filter).await?))
 }
 
 fn valid_type_key(key: &str) -> ApiResult<()> {
