@@ -139,3 +139,31 @@ Selected invariant: no committed visible entry/menu/option/provenance may refere
 PR #135 remains **G3 DRAFT / NOT RELEASED**. Forge may now update the 13 G3 task briefs in PR #135 against this G2 contract and `ADR-0012` for review/merge before issuing implementation `Ready` tasks.
 
 This docs-only change must pass planning checker, self-test, artifact guard and diff check. M5 runtime/security/migration/crash/browser tests are NOT_RUN and not replaced by documentation checks.
+
+
+## Beta remediation delta — sanitized Admin revision discovery (2026-11-17)
+
+Coordinator decision submitted for Forge review under #301/F02; effective after
+this contract/G3 PR is reviewed and merged. No migration or new route. Existing
+Admin-only GET `/api/admin/themes` preserves legacy `items`, `active_id`, `version`
+and `homepage_compatible` fields exactly. Add:
+
+- `revisions`: array sorted deterministically by `theme_id`, `version`, `revision_id`;
+  each object contains ONLY `revision_id`, `theme_id`, `version` (package string),
+  `revision_digest`, `source_format` (`v1_legacy` or `v2`). Include all committed
+  revisions, not staging or provenance archives; malformed/corrupt activation is
+  still rejected by existing digest validation, listing is not certification.
+- `selection`: object with `revision_id`, `theme_id`, `version` (selection CAS integer),
+  `legacy_block_id`, `source_format`, using the existing ActiveThemeSelection
+  nullability. Read legacy and revision metadata consistently in one storage read
+  transaction so selection/version is a coherent snapshot. Do not send manifest,
+  filesystem paths, provenance_json or private host metadata.
+
+V2 POST response stays the existing revision DTO; legacy POST stays ThemeItem.
+Client uses a discriminated type guard (`revision_id` for v2, `id` for legacy).
+Install never activates. Existing PUT accepts exactly one of `id` or `revision_id`;
+use `If-Match` from current selection version for v2. Response shape remains legacy
+ThemeList or existing ActiveThemeSelection; client refreshes GET after success.
+401/403/CSRF/Origin, 428/412, durability/compatibility checks and data preservation
+are unchanged. Legacy consumers may ignore additive fields; tests must verify this.
+The M5-S11-T01 G3 in the same PR is the only implementation handoff for this delta.
