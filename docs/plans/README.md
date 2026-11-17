@@ -1,5 +1,13 @@
 # Kế hoạch triển khai
 
+## Checkpoint ưu tiên — 16/11/2026
+
+[ADR-0017](../decisions/ADR-0017-usable-beta-staging.md) ·
+[Bộ G3 M7-S14](milestones/M7/slices/2026-11-16-usable-beta-g3.md): Windows audit →
+triage/G3 fixes → dogfood → Beta readiness, rồi common RC/V1 public giữ native gates.
+Các mô tả PARTIAL/NOT_STARTED/assignment cũ bên dưới là snapshot lịch sử, không thay
+live Issue/Project. Không nhận việc từ số đếm hoặc status bảng cũ.
+
 Kế hoạch tách biệt với kết quả thực chạy. Khi một bước có bằng chứng trên mã thực, ghi sang [verification](../verification/README.md).
 
 **Xem nhanh toàn bộ 9 milestone và 82 task candidate:** [TASK_INDEX — danh sách task, mô tả ngắn và trạng thái đối chiếu GitHub](TASK_INDEX.md). Đây là **một bảng tổng hợp để đọc**, không thay thế Issue/Project làm nguồn trạng thái live; sau khi task được nghiệm thu G5/Project Done, agent phụ trách closure cập nhật hàng tương ứng qua PR tài liệu.

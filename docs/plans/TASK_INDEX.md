@@ -211,6 +211,24 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 | [M8-P07](milestones/M8/TASK_PLAN.md) | Hướng dẫn vận hành và release acceptance | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#247](https://github.com/thientran2359/opendash-cms/issues/247) · [#248](https://github.com/thientran2359/opendash-cms/issues/248) |
 | [M8-P08](milestones/M8/TASK_PLAN.md) | D từ #15 (lifecycle): media delete theo reference policy, reconcile/GC và backup boundary | [G3 đủ18 task](milestones/M8/slices/2026-11-14-m8-operations-release-g3.md); Issues đã phát hành; Ready theo dependency | [#233](https://github.com/thientran2359/opendash-cms/issues/233) · [#234](https://github.com/thientran2359/opendash-cms/issues/234) |
 
+## Usable Beta checkpoint — planning 16/11/2026
+
+[ADR-0017](../decisions/ADR-0017-usable-beta-staging.md) ·
+[G3](milestones/M7/slices/2026-11-16-usable-beta-g3.md).
+Không thêm candidate/capability. Issue phát hành sau docs merge với G3 source immutable;
+bảng này không cấp Ready.
+
+| Task | Responsible | Dependency / outcome | Issue |
+| --- | --- | --- | --- |
+| M7-S14-T01 | Forge | G3 merged + free slot; Windows fresh-site audit report | Chưa phát hành |
+| M7-S14-T02 | Atlas | T01; all findings disposition và complete G3 fixes | Chưa phát hành |
+| M7-S14-T03 | Forge | T02 + required fixes G5 + human tester; retest/dogfood | Chưa phát hành |
+| M7-S14-T04 | Atlas | T03; Beta-only readiness report | Chưa phát hành |
+
+**Live snapshot đã kiểm 16/11:** #157/#188 In progress; #214/#215/#242/#245/#246/#247/#248
+Backlog; #284 Done. #242/#245 hiện do Forge phụ trách theo owner transfer.
+Nova assignment ở bảng 14/11 là lịch sử, không dùng để nhận task. Beta NOT_RUN.
+
 ## Task thực tế không thuộc 9 milestone CMS
 
 | GitHub task | Công việc | Trạng thái ghi nhận | GitHub Issue |

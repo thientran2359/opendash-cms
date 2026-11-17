@@ -1,5 +1,12 @@
 # M8 — G3 Operations & Release V1 (18 task / 8 candidate)
 
+> **Staging addendum 16/11/2026:** [ADR-0017](../../../../decisions/ADR-0017-usable-beta-staging.md)
+> và [Beta G3](../../M7/slices/2026-11-16-usable-beta-g3.md) thêm checkpoint Windows.
+> Giữ nguyên 18 task, dependencies, native/common RC, security/data/release acceptance.
+> Source thay đổi cần impact/repin/rerun. Beta không đóng #248 hoặc deferred milestones.
+> Proposed owners/status bên dưới là snapshot 14/11; assignment live #242/#245 hiện
+> là Forge, #188 vẫn Harbor. Issue/Project là nguồn pickup; không sửa evidence lịch sử.
+
 **Coordinator / Final Decision:** Atlas · **Date:** 2026-11-14.
 **Baseline:** main@8c5b90072c231c1f0813eb593d7be4447fb0a11d (highest migration0031).
 **G2:** AGREED · **G3:** READY effective after this design PR merges to main.

@@ -1,5 +1,24 @@
 # OpenDash V1 — Ma trận 27 Module → 9 Milestone → Task
 
+## Usable Beta integration overlay — 16/11/2026
+
+[ADR-0017](../../decisions/ADR-0017-usable-beta-staging.md) ·
+[G3 M7-S14](M7/slices/2026-11-16-usable-beta-g3.md).
+Không thêm module/candidate hoặc đổi primary acceptance. Milestone status table cũ
+bên dưới là snapshot lịch sử, không dùng cấp Ready.
+
+| Beta case | Existing capability/primary scope | Integration evidence |
+| --- | --- | --- |
+| B01/B07 navigation/rights/dirty edits | FND-02/05; M3, M7-S09–S13; FND-05.5 primary M7-S13 | T01 baseline/T03 final |
+| B02/B03 content/media/publication | CNT-01/02/04/05; M3 content, M4 taxonomy, M5 public delivery | T01/T03 |
+| B04/B05 theme/import/templates/Builder | THM-01–03, BLD-01–05; M4/M5 primary | T01/T03 |
+| B06 provider lifecycle/recovery | PLG-01–04, THM-03; M5/M6 primary | T01/T03 |
+| B08/B09 encrypted recovery | OPS-01; M8-S03–S05 and S08 | T01/T03 |
+| B10 related regression/native boundary | SITE-01–03/CNT-05/OPS-02; M7/M8 primary | T03 regression, T04 Beta-only verdict |
+
+T02 maps findings to disposition/G3 fix; T04 reviews all cases and human receipt.
+Linux/macOS/performance/V1 remain existing release obligations, not closed by this overlay.
+
 **Nguồn thẩm quyền:** [PRD V1](../../product/PRODUCT_REQUIREMENTS.md) (scope), [Module Catalog](../MODULE_CATALOG_V1.md) (27 ID), [Roadmap](../ROADMAP_V1.md) (mốc M1, M2, M2.5, M3–M8), [Planning Workflow](../PLANNING_WORKFLOW.md) (G0–G5). Đây là **bản đồ kế hoạch tĩnh**, không phải G2 design được chốt hay task `READY`. Tham khảo [GitHub Milestones #1–#9](https://github.com/thientran2359/opendash-cms/milestones), [GitHub Project #3](https://github.com/users/thientran2359/projects/3) để xem milestones thực tế và trạng thái mỗi Issue.
 
 **Phương pháp:** Mỗi module/capability có nơi chịu trách nhiệm thực hiện **chính** và các milestone **tiêu thụ/tích hợp**. Module đi qua nhiều mốc **không sinh một bản copy module brief**; milestone dùng task candidate trỏ về đúng scope. Task candidate `Mx-Pxx` chỉ là hàng phân rã, **không phải** `Mx-Sxx-Txx` G3 Task ID, Issue, hay bằng chứng hoàn thành. Khi chuẩn bị giao task: nghiên cứu source/evidence → G2 nếu cần → G3 được review/merge → tạo Issue trong milestone GitHub đúng number → Project Ready theo gate.

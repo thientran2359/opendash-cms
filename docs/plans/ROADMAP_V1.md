@@ -1,5 +1,27 @@
 # OpenDash V1 — Roadmap theo release, milestone và slice
 
+## Ưu tiên 16/11/2026 — Usable Beta
+
+[ADR-0017](../decisions/ADR-0017-usable-beta-staging.md) thêm checkpoint nội bộ Windows
+trước common RC/V1 public; giữ M1–M8 và scope V1. Critical path:
+**Forge Windows audit → Atlas triage/G3 fixes → Nova hoặc implementer được giao sửa
+từng Issue → Forge retest + human dogfood → Atlas Beta readiness**.
+[Bốn task G3](milestones/M7/slices/2026-11-16-usable-beta-g3.md) đặt trong M7 để điều phối
+integration, không tạo capability/primary acceptance trùng. Fix mới có G3 theo module
+sở hữu, không giao lại task Done. Audit xong không có nghĩa sản phẩm PASS.
+
+Forge giữ Linux #242/#245; Harbor giữ #188/macOS theo assignment; Atlas giữ #215/#247/#248.
+Native work có thể tiếp tục khi đủ gate/slot nhưng Beta có ưu tiên điều phối.
+Sau fixes repin common RC và rerun affected platforms. Không waive Linux/memory/restore/
+security/license/public approval, không tự dispatch hoặc Ready từ roadmap.
+
+**Live snapshot 16/11 tại main d1338d6:** #157/#188 In progress;
+#214/#215/#242/#245/#246/#247/#248 Backlog; #284 Done. Mac exact-SHA evidence ở #188/#246
+chỉ chứng minh phần đã chạy; Usable Beta NOT_RUN.
+**Các trạng thái M3 PARTIAL/M4–M8 Proposed và kế hoạch “gần nhất” bên dưới là snapshot
+lịch sử 08–10/11, không phải trạng thái implementation hiện tại.** Tra Issue/Project
+và bằng chứng mới trước nhận việc; giữ snapshot để truy vết.
+
 **Phạm vi sản phẩm:** [PRD V1, bổ sung G0 M3 10/11/2026](../product/PRODUCT_REQUIREMENTS.md). **Chủ dự án đã chốt phương án A**: M3 là **Core CMS & WordPress-like Admin bằng Tailwind CSS**, dùng được từ browser, không phải chỉ Content & Media hoặc full WordPress. **Evidence M3.1–M3.6 ngày 09/11/2026** chứng minh một số slice cũ trên macOS, M3 vẫn `PARTIAL`; xem [snapshot theo scope cũ](M3_STATUS_2026-11-09.md) và [M3 task plan mới](milestones/M3/TASK_PLAN.md). M4–M8 giữ các năng lực V1 nâng cao.
 
 **Mốc nghiên cứu 08/11/2026:** M2.5 đã [kiểm chứng](../verification/2026-11-07-m2-5-core-kernel.md); G1 CNT-01/CNT-05 được review, G2 là đề xuất vào thời điểm đó. **Sau mốc nghiên cứu**, M3.1–M3.6 đã có [kiểm chứng macOS](M3_STATUS_2026-11-09.md); không dùng nhãn `NOT_STARTED` cũ để giao lại việc.
