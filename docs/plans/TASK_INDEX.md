@@ -222,8 +222,8 @@ Issue/Project là nguồn live; snapshot 17/11/2026 dưới đây không tự c�
 
 | Task | Responsible | Dependency / outcome | Issue |
 | --- | --- | --- | --- |
-| M7-S14-T01 | Forge | Ready đã xác minh; Windows fresh-site audit, chưa có G5 | [#300](https://github.com/thientran2359/opendash-cms/issues/300) |
-| M7-S14-T02 | Atlas | Backlog; T01 → all findings disposition và complete G3 fixes | [#301](https://github.com/thientran2359/opendash-cms/issues/301) |
+| M7-S14-T01 | Forge | Done; [báo cáo audit Windows](../verification/2026-11-16-usable-beta-windows-audit.md) merged qua [PR #306](https://github.com/thientran2359/opendash-cms/pull/306); verdict sản phẩm BLOCKED | [#300](https://github.com/thientran2359/opendash-cms/issues/300) |
+| M7-S14-T02 | Atlas | Ready; phân loại F01–F09 và hoàn thiện G3 cho các sửa lỗi bắt buộc | [#301](https://github.com/thientran2359/opendash-cms/issues/301) |
 | M7-S14-T03 | Forge | Backlog; T02 + required fixes G5 + human tester → retest/dogfood | [#302](https://github.com/thientran2359/opendash-cms/issues/302) |
 | M7-S14-T04 | Atlas | Backlog; T03 → Beta-only readiness report | [#303](https://github.com/thientran2359/opendash-cms/issues/303) |
 
