@@ -1,5 +1,32 @@
 # M7 — Beta findings disposition and remediation G3
 
+## Owner directive — macOS Beta and Harbor, 2026-11-17
+
+Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt
+kỹ thuật và tự review; không cần peer review. Aster chỉ tham gia thảo luận
+liên-agent khi chủ dự án tạo cuộc thảo luận. Harbor là implementer của toàn bộ
+chín task remediation F01–F09 và thực hiện technical retest macOS; một task
+active trên `agent/harbor`, không hai writer trên cùng file. Aster chuẩn bị
+candidate và phối hợp human dogfood; automation không thay người thử thật.
+
+Chỉ đạo này thay ownership, nền tảng Beta và yêu cầu peer review cũ bên dưới.
+Các PR #310–#313 đã merge. G3 vẫn cần immutable source/base, dependencies,
+file ownership và Project Ready được xác minh trước pickup. Bằng chứng Windows
+cũ giữ nguyên; không suy thành macOS PASS. Beta yêu cầu native macOS B01–B10
+và negative regressions trên cùng candidate. Windows/Linux/native common RC và
+V1 gates vẫn riêng; không đóng chúng từ Beta PASS. F08 giữ security hold đến
+khi có giải thích provenance và kiểm chứng macOS đầy đủ; đối chiếu Windows
+vẫn là follow-up bắt buộc trước common RC. F09 cần full release suite macOS
+hai lượt và isolated run; receipt Windows thất bại vẫn giữ và phải được đối
+chiếu trước common RC, không gọi là Windows defect resolved.
+
+Thứ tự Harbor: M8-S10-T01 → M7-S15-T01 → M5-S11-T01 → M7-S15-T02 →
+M7-S15-T03 → M7-S15-T04 → M7-S15-T05 → M6-S09-T01 → M8-S10-T02.
+Mọi task sau giữ Backlog đến khi dependencies và slot đủ gate. Aster ghi
+self-review/acceptance tại head SHA, checks thực chạy và giới hạn; không waive
+security/data, CI, human test hoặc release authorization.
+
+
 ## Shared gate, provenance and verification
 
 Coordinator: Aster; owner-directed #301 handoff, 17/11/2026. Source reviewed:
@@ -11,8 +38,8 @@ Windows Beta retest. Implementation NOT_STARTED; runtime verification NOT_RUN.
 [Audit](../../../../verification/2026-11-16-usable-beta-windows-audit.md) ·
 [Planning](../../../PLANNING_WORKFLOW.md) ·
 [Task #301](https://github.com/thientran2359/opendash-cms/issues/301).
-G2/G3 metadata below records the coordinator decision submitted for Forge review;
-effectiveness requires that review and this docs PR merge. No Issue publication,
+G2/G3 metadata records the owner-authorized Aster decision; effectiveness requires
+self-review and docs merge, with no mandatory peer review. No Issue publication,
 Ready, implementation, release or dispatch from an unmerged specification.
 Pin merged source SHA and current code base when publishing, check both open/closed
 Issues for exact task IDs, verify Project Ready and agent slot before pickup.
@@ -112,9 +139,9 @@ triggers or introduce a parallel media path. F07 repairs test lifecycle only.
 - **G2:** AGREED
 - **Lý do Fast-Track:** Existing API adaptation only; no schema or permission delta.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** forge / Aster; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -134,7 +161,7 @@ No unrelated product changes, live site mutation, release approval or native mul
 
 #### Phụ thuộc và điều kiện chặn
 
-This specification peer-reviewed and merged; immutable source, ownership and Project Ready verified. No task occupies the responsible agent branch.
+This specification self-reviewed and merged; immutable source, ownership and Project Ready verified. No task occupies the responsible agent branch.
 
 #### Kỹ thuật và file ownership
 
@@ -155,7 +182,7 @@ Use existing listContentEntries, menu/slot APIs and ApiClientError; preserve aut
 
 #### Kiểm thử, rủi ro và rollback
 
-npm run build --prefix cms/admin; run the new runner against a pinned native Windows binary and isolated site, then affected existing m7_browser_e2e.py. Capture exact actual invocation in receipt.
+npm run build --prefix cms/admin; run the new runner against a pinned native macOS binary and isolated site, then affected existing m7_browser_e2e.py. Capture exact actual invocation in receipt.
 Use the shared provenance/rollback rules. Failure leaves the task open; never remove a guard to get a green run.
 
 #### Bàn giao và review
@@ -172,9 +199,9 @@ Submit Task ID, exact head/base, bounded diff, commands and exit codes, negative
 - **G2:** AGREED
 - **Lý do Fast-Track:** Restore ADR-0016 RAM draft/leave semantics; no new persistence or API.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** forge / Aster; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -194,7 +221,7 @@ No unrelated product changes, live site mutation, release approval or native mul
 
 #### Phụ thuộc và điều kiện chặn
 
-This specification peer-reviewed and merged; immutable source, ownership and Project Ready verified. No task occupies the responsible agent branch.
+This specification self-reviewed and merged; immutable source, ownership and Project Ready verified. No task occupies the responsible agent branch.
 
 #### Kỹ thuật và file ownership
 
@@ -218,7 +245,7 @@ Use existing account/site/session_epoch provenance and quarantine. Restore activ
 
 #### Kiểm thử, rủi ro và rollback
 
-Build Admin; new focused native Windows browser runner plus existing admin_nav_single_edit_e2e.py after T05. Run 1440 and 390 viewport, two sessions and delayed responses. No content write occurs when merely navigating.
+Build Admin; new focused native macOS browser runner plus existing admin_nav_single_edit_e2e.py after T05. Run 1440 and 390 viewport, two sessions and delayed responses. No content write occurs when merely navigating.
 Use the shared provenance/rollback rules. Failure leaves the task open; never remove a guard to get a green run.
 
 #### Bàn giao và review
@@ -235,9 +262,9 @@ Submit Task ID, exact head/base, bounded diff, commands and exit codes, negative
 - **G2:** AGREED
 - **Lý do Fast-Track:** Repair internal transaction sequencing under existing composite save contract; no migration/API delta.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** aster / Forge; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -257,7 +284,7 @@ No unrelated product changes, live site mutation, release approval or native mul
 
 #### Phụ thuộc và điều kiện chặn
 
-This specification peer-reviewed and merged; immutable source, ownership and Project Ready verified. No task occupies the responsible agent branch.
+This specification self-reviewed and merged; immutable source, ownership and Project Ready verified. No task occupies the responsible agent branch.
 
 #### Kỹ thuật và file ownership
 
@@ -279,7 +306,7 @@ Use existing begin_entry_write, schema fence, merged validation, ACL, media/term
 
 #### Kiểm thử, rủi ro và rollback
 
-cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test m7_s15_t03_publication_create; existing m7_s11_t01_composite_save_and_profile; Admin build; native Windows UI fresh published create in T03. Security/privacy negatives required, not only DB success.
+cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test m7_s15_t03_publication_create; existing m7_s11_t01_composite_save_and_profile; Admin build; native macOS UI fresh published create in T03. Security/privacy negatives required, not only DB success.
 Use the shared provenance/rollback rules. Failure leaves the task open; never remove a guard to get a green run.
 
 #### Bàn giao và review
@@ -296,9 +323,9 @@ Submit Task ID, exact head/base, bounded diff, commands and exit codes, negative
 - **G2:** AGREED
 - **Lý do Fast-Track:** Reuse existing media UI/API and ACL; no schema delta.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** forge / Aster; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -334,7 +361,7 @@ Reuse features/media/MediaPicker.tsx and existing media client. Bind target fiel
 
 #### Nghiệm thu
 
-- [ ] Reproduce source wiring gap on baseline, then native Windows image/gallery open/select/cancel/save/reopen succeeds.
+- [ ] Reproduce source wiring gap on baseline, then native macOS image/gallery open/select/cancel/save/reopen succeeds.
 - [ ] Readonly/hidden provider fields cannot receive picker writes; account switch or route change drops late selection.
 - [ ] 401/quarantine, upload errors and invalid media IDs handled without silent draft loss; save updates public only per publication status.
 
@@ -357,9 +384,9 @@ Submit Task ID, exact head/base, bounded diff, commands and exit codes, negative
 - **G2:** AGREED
 - **Lý do Fast-Track:** Harness-only diagnosis, unchanged product assertions.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** forge / Aster; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -399,7 +426,7 @@ Use explicit expected readiness instead of unbounded networkidle where appropria
 
 #### Kiểm thử, rủi ro và rollback
 
-Run tracked runner on native Windows current pinned candidate, once normal and once induced test-only failure; python3 -m py_compile cms/scripts/admin_nav_single_edit_e2e.py. T03 reruns complete B01/B07.
+Run tracked runner on native macOS current pinned candidate, once normal and once induced test-only failure; python3 -m py_compile cms/scripts/admin_nav_single_edit_e2e.py. T03 reruns complete B01/B07.
 Use the shared provenance/rollback rules. Failure leaves the task open; never remove a guard to get a green run.
 
 #### Bàn giao và review
