@@ -15,6 +15,7 @@ interface TermsProps {
 interface TermPickerProps extends TermsProps {
   selectedIds: number[];
   onChange: (ids: number[]) => void;
+  allowedKinds?: TaxonomyKind[];
 }
 
 interface TermFiltersProps extends TermsProps {
@@ -99,7 +100,7 @@ function useTermOptions(userId: number | null, onApiError: TermsProps['onApiErro
 }
 
 /** Native checkboxes preserve keyboard navigation and leave unknown saved IDs removable. */
-export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError }: TermPickerProps) {
+export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError, allowedKinds = ['category', 'tag'] }: TermPickerProps) {
   const { categories, tags, loading, error, reload } = useTermOptions(userId, onApiError);
   const searchId = useId();
   const [search, setSearch] = useState('');
@@ -126,15 +127,17 @@ export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError
       .sort((a, b) => a - b));
   };
 
-  const groups: Array<{ kind: TaxonomyKind; title: string; terms: Array<{ term: TaxonomyTerm; depth: number }>; count: number }> = [
+  const allGroups: Array<{ kind: TaxonomyKind; title: string; terms: Array<{ term: TaxonomyTerm; depth: number }>; count: number }> = [
     { kind: 'category', title: 'Danh mục', terms: categoryTree(categories), count: categoryCount },
     { kind: 'tag', title: 'Thẻ', terms: [...tags].sort(sortTerms).map(term => ({ term, depth: 0 })), count: tagCount },
   ];
+  const groups = allGroups.filter(group => allowedKinds.includes(group.kind));
+  const selectedTags = tags.filter(term => selected.has(term.id) && allowedKinds.includes('tag'));
 
   return (
     <section className="min-w-0 space-y-3" aria-label="Gắn danh mục và thẻ">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-600">Chọn tối đa 32 danh mục và 64 thẻ.</p>
+        <p className="text-xs text-slate-600">Chọn tối đa 32 danh mục và 64 thẻ (khi được cho phép).</p>
         <button type="button" className="btn-secondary" onClick={reload} disabled={disabled || loading}>
           Tải lại danh mục/thẻ
         </button>
@@ -152,6 +155,18 @@ export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError
         </div>
       )}
       {selectionError && <p role="alert" className="text-sm text-red-700">{selectionError}</p>}
+      {allowedKinds.includes('tag') && selectedTags.length > 0 && (
+        <div className="flex flex-wrap gap-2" role="list" aria-label="Thẻ đã chọn">
+          {selectedTags.map(tag => (
+            <div key={tag.id} role="listitem" className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-900">
+              <span>{tag.name}</span>
+              <button type="button" aria-label={`Bỏ thẻ ${tag.name}`} disabled={disabled}
+                className="rounded-full px-1 font-bold hover:bg-sky-100 disabled:opacity-50"
+                onClick={() => toggle(tag.id, false)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2">
         {groups.map(group => {
           const visible = group.terms.filter(({ term }) =>

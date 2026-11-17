@@ -17,7 +17,6 @@ import type {
 } from '../content/types.ts';
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
-import { TermPicker } from '../taxonomy/TermPicker.tsx';
 import { MediaPicker } from '../media/MediaPicker.tsx';
 
 interface FieldMediaPickerTarget {
@@ -84,6 +83,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [actionOutputs, setActionOutputs] = useState<Record<string, string>>({});
   const [actionBusy, setActionBusy] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+  const saveInFlightRef = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
   const [mediaPicker, setMediaPicker] = useState<FieldMediaPickerTarget | null>(null);
@@ -314,8 +314,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     }, 20);
   };
 
-  const handleSave = async () => {
-    if (!config || !csrfToken || saving || !draftRef.current || !user) return;
+  const handleSave = async (intent?: 'draft' | 'published') => {
+    if (!config || !csrfToken || saving || saveInFlightRef.current || !draftRef.current || !user) return;
+    const isBuiltInContent = typeKey === 'post' || typeKey === 'page';
+    if (isBuiltInContent && !intent) return;
     const snapshot = draftRef.current;
     const submittedRevision = editRevisionRef.current;
     const requestEpoch = editorDraftStore.getSessionEpoch();
@@ -342,6 +344,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     }
 
     setFieldErrors({});
+    saveInFlightRef.current = true;
     setSaving(true);
     setStatusNote(null);
 
@@ -362,7 +365,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         expected_schema_token: expectedSchemaToken,
         title: snapshot.title.trim(),
         slug: snapshot.slug.trim(),
-        publication_status: snapshot.publication_status,
+        publication_status: isBuiltInContent ? intent : snapshot.publication_status,
         values: submitValues,
         // Omitted term_ids retains existing links; [] only clears by user edit.
         term_ids: baselineRef.current && diffEditorPayload(baselineRef.current, snapshot).includes('term_ids')
@@ -405,7 +408,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         applyPayload(saved);
         setDirty(false);
       } else if (draftRef.current) {
-        const remaining = { ...draftRef.current, id: res.entry.id, version: res.entry.version };
+        const remaining = { ...draftRef.current, id: res.entry.id, version: res.entry.version,
+          publication_status: isBuiltInContent ? res.entry.publication_status : draftRef.current.publication_status };
         draftRef.current = remaining;
         const changed = diffEditorPayload(saved, remaining);
         const newKey = editorDraftStore.makeDraftKey(typeKey, res.entry.id);
@@ -436,6 +440,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       }
       onApiError(err, 'Không thể lưu nội dung.');
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   };
@@ -484,6 +489,16 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     return <p className="text-sm text-slate-600">Đang tải cấu hình trình chỉnh sửa...</p>;
   }
 
+  // Link from the last server-confirmed version, never a dirty custom-path
+  // draft. A draft has no public URL and must not get a public View link.
+  const confirmed = baselineRef.current;
+  const confirmedCustomPath = confirmed?.custom_path;
+  const publicPath = confirmed?.id === entryId && confirmed?.publication_status === 'published'
+    ? confirmedCustomPath?.startsWith('/') && !confirmedCustomPath.startsWith('//')
+      ? confirmedCustomPath
+      : `/content/${encodeURIComponent(typeKey)}/${encodeURIComponent(confirmed.slug)}`
+    : null;
+
   return (
     <div className="space-y-4">
       {statusNote && (
@@ -511,6 +526,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         actionOutputs={actionOutputs}
         actionBusy={actionBusy}
         entryId={entryId}
+        userId={user?.id ?? null}
+        termIds={termIds}
+        publicPath={publicPath}
         saving={saving}
         dirty={dirty}
         onToggleCollapse={pid => setCollapsedPanels(prev => ({ ...prev, [pid]: !prev[pid] }))}
@@ -528,6 +546,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           setPublicationStatus(s);
           persistDraftPatch({ publication_status: s });
         }}
+        onTermIdsChange={nextIds => {
+          const sorted = [...nextIds].sort((a, b) => a - b);
+          setTermIds(sorted);
+          persistDraftPatch({ term_ids: sorted });
+        }}
+        onApiError={onApiError}
         onFieldChange={(fk, val) => {
           const nextVals = { ...(draftRef.current?.values ?? values), [fk]: val };
           const nextCleared = clearedFields.filter(k => k !== fk);
@@ -584,7 +608,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             setActionBusy(prev => ({ ...prev, [panelId]: false }));
           }
         }}
-        onSave={() => void handleSave()}
+        onSave={intent => void handleSave(intent)}
         onOpenBuilder={() => {
           if (entryId === null) {
             setStatusNote('Vui lòng Lưu nội dung trước khi mở Visual Builder.');
@@ -623,22 +647,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             }}
           />
         )}
-      {(config.taxonomies.length > 0 || typeKey === 'post' || typeKey === 'page') && (
-        <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4" data-testid="single-edit-terms">
-          <h3 className="mb-3 text-sm font-semibold text-slate-900">Danh mục &amp; Thẻ</h3>
-          <TermPicker
-            userId={user?.id ?? null}
-            selectedIds={termIds}
-            disabled={!csrfToken || saving}
-            onApiError={onApiError}
-            onChange={nextIds => {
-              const sorted = [...nextIds].sort((a, b) => a - b);
-              setTermIds(sorted);
-              persistDraftPatch({ term_ids: sorted });
-            }}
-          />
-        </section>
-      )}
     </div>
   );
 };

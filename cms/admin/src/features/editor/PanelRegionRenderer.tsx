@@ -7,6 +7,8 @@ import type {
   EffectivePanelProjection,
 } from '../content/types.ts';
 import { FieldValueInput } from '../content/FieldValueInput.tsx';
+import { TermPicker } from '../taxonomy/TermPicker.tsx';
+import type { TaxonomyKind } from '../../api/taxonomy.ts';
 
 export interface PanelRegionRendererProps {
   config: EffectiveEditorConfigProjection;
@@ -25,17 +27,22 @@ export interface PanelRegionRendererProps {
   actionOutputs: Record<string, string>;
   actionBusy: Record<string, boolean>;
   entryId: number | null;
+  userId: number | null;
+  termIds: number[];
+  publicPath: string | null;
   onToggleCollapse: (panelId: string) => void;
   onTitleChange: (title: string) => void;
   onSlugChange: (slug: string) => void;
   onPublicationStatusChange: (status: 'draft' | 'published') => void;
+  onTermIdsChange: (ids: number[]) => void;
+  onApiError: (error: unknown, fallback: string) => void;
   onFieldChange: (key: string, value: ContentFieldValue) => void;
   onPickMedia: (fieldKey: string, kind: 'image' | 'gallery') => void;
   onFieldClear: (key: string) => void;
   onCustomPathChange: (path: string) => void;
   onSeoChange: (patch: { title?: string; description?: string; og_image_id?: string; noindex?: boolean }) => void;
   onRunAction: (pluginId: string, actionId: string, panelId: string) => void;
-  onSave: () => void;
+  onSave: (intent?: 'draft' | 'published') => void;
   onOpenBuilder: () => void;
   saving: boolean;
   dirty: boolean;
@@ -82,10 +89,15 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   actionOutputs,
   actionBusy,
   entryId,
+  userId,
+  termIds,
+  publicPath,
   onToggleCollapse,
   onTitleChange,
   onSlugChange,
   onPublicationStatusChange,
+  onTermIdsChange,
+  onApiError,
   onFieldChange,
   onPickMedia,
   onFieldClear,
@@ -97,6 +109,42 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   saving,
   dirty,
 }) => {
+  const isBuiltInContent = config.type_key === 'post' || config.type_key === 'page';
+  const renderSaveActions = (compact = false) => (
+    <div className="flex flex-wrap items-center gap-2">
+      {isBuiltInContent ? (
+        publicationStatus === 'published' ? (
+          <button type="button" onClick={() => onSave('published')} disabled={saving}
+            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            {saving ? 'Đang lưu...' : 'Cập nhật'}
+          </button>
+        ) : (
+          <>
+            <button type="button" onClick={() => onSave('draft')} disabled={saving}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-50">
+              {saving ? 'Đang lưu...' : 'Lưu nháp'}
+            </button>
+            <button type="button" onClick={() => onSave('published')} disabled={saving}
+              className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              Đăng bài
+            </button>
+          </>
+        )
+      ) : (
+        <button type="button" onClick={() => onSave()} disabled={saving}
+          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          {saving ? 'Đang lưu...' : 'Lưu'}
+        </button>
+      )}
+      {isBuiltInContent && publicationStatus === 'published' && entryId !== null && publicPath && (
+        <a href={publicPath} target="_blank" rel="noopener noreferrer"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
+          {config.type_key === 'page' ? 'Xem trang' : 'Xem bài viết'}
+        </a>
+      )}
+      {!compact && saving && <span role="status" className="text-xs text-slate-500">Đang lưu dữ liệu...</span>}
+    </div>
+  );
   const renderField = (fieldKey: string) => {
     const eff: EffectiveFieldProjection | undefined = config.effective_fields[fieldKey];
     if (!eff) return null;
@@ -255,25 +303,22 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         case 'publish_box':
           return (
             <div className="space-y-3">
-              <label className="block text-xs font-medium text-slate-700">
-                Trạng thái xuất bản
-                <select
-                  className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
-                  value={publicationStatus}
-                  onChange={e => onPublicationStatusChange(e.target.value as 'draft' | 'published')}
-                >
-                  <option value="draft">Bản nháp (draft)</option>
-                  <option value="published">Công khai (published)</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={onSave}
-                disabled={saving}
-                className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-              >
-                {saving ? 'Đang lưu...' : entryId === null ? 'Tạo & Lưu nội dung' : 'Lưu thay đổi'}
-              </button>
+              {isBuiltInContent ? (
+                <p className="text-xs text-slate-600">
+                  {publicationStatus === 'published' ? 'Đã xuất bản' : 'Chưa công khai (bản nháp)'}
+                </p>
+              ) : (
+                <label className="block text-xs font-medium text-slate-700">
+                  Trạng thái xuất bản
+                  <select className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+                    value={publicationStatus}
+                    onChange={e => onPublicationStatusChange(e.target.value as 'draft' | 'published')}>
+                    <option value="draft">Bản nháp (draft)</option>
+                    <option value="published">Công khai (published)</option>
+                  </select>
+                </label>
+              )}
+              {renderSaveActions()}
               <button
                 type="button"
                 onClick={onOpenBuilder}
@@ -283,6 +328,14 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
               </button>
             </div>
           );
+        case 'taxonomies':
+          return config.taxonomies.length > 0 ? (
+            <div data-testid="single-edit-terms">
+              <TermPicker userId={userId} selectedIds={termIds} disabled={saving}
+                allowedKinds={config.taxonomies.filter((kind): kind is TaxonomyKind => kind === 'category' || kind === 'tag')}
+                onApiError={onApiError} onChange={onTermIdsChange} />
+            </div>
+          ) : null;
         default:
           return <p className="text-xs text-slate-500">Panel hệ thống: {kind.core_key}</p>;
       }
@@ -382,16 +435,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
             {dirty && <span className="ml-2 text-xs font-normal text-amber-700">(Chưa lưu)</span>}
           </h2>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={saving}
-            className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-          >
-            {saving ? 'Đang lưu...' : 'Lưu'}
-          </button>
-        </div>
+        {renderSaveActions(true)}
       </header>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
