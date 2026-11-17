@@ -31,6 +31,7 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [Adapter Atlas → CoS Windows: W01 ACL và PONG thực tế (2026-11-12)](2026-11-12-cos-dispatch-w01-pong.md) — chứng cứ gửi chat trên Forge và giới hạn token rotation/production Issue pickup.
 - [Kiểm chứng M5 G5 trên Windows (2026-11-13)](2026-11-13-m5-g5-windows.md) — build, full workspace tests và cross-module E2E `M5-S08-T01` trên Windows.
 - [Kiểm chứng M5 #157 native macOS Intel (thực chạy 2026-11-17)](2026-11-13-m5-g5-macos.md) — M4→M5→M4, Chrome và preservation PASS trong phạm vi ghi nhận; full cross-OS G5 chưa đóng.
+- [Windows source-matched M5 #157 / M7 #214 (2026-11-17)](2026-11-17-m5-m7-windows-source-rebaseline.md) — binary/rollback/tests trên `c59d2f6` (M5) và `69d311b` (M7); browser assertion receipts, runner teardown và giới hạn full G5 được phân biệt rõ.
 
 - [M7 planning G1/G2/G3 — 14/11/2026](2026-11-14-m7-planning.md): docs/source validation only, full14-task coverage; M7 runtime/native/browser NOT_RUN.
 
