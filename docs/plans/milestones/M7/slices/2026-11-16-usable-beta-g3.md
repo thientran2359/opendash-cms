@@ -1,5 +1,32 @@
 # M7 — Usable Beta integration G3 (4 tasks)
 
+## Owner directive — macOS Beta and Harbor, 2026-11-17
+
+Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt
+kỹ thuật và tự review; không cần peer review. Aster chỉ tham gia thảo luận
+liên-agent khi chủ dự án tạo cuộc thảo luận. Harbor là implementer của toàn bộ
+chín task remediation F01–F09 và thực hiện technical retest macOS; một task
+active trên `agent/harbor`, không hai writer trên cùng file. Aster chuẩn bị
+candidate và phối hợp human dogfood; automation không thay người thử thật.
+
+Chỉ đạo này thay ownership, nền tảng Beta và yêu cầu peer review cũ bên dưới.
+Các PR #310–#313 đã merge. G3 vẫn cần immutable source/base, dependencies,
+file ownership và Project Ready được xác minh trước pickup. Bằng chứng Windows
+cũ giữ nguyên; không suy thành macOS PASS. Beta yêu cầu native macOS B01–B10
+và negative regressions trên cùng candidate. Windows/Linux/native common RC và
+V1 gates vẫn riêng; không đóng chúng từ Beta PASS. F08 giữ security hold đến
+khi có giải thích provenance và kiểm chứng macOS đầy đủ; đối chiếu Windows
+vẫn là follow-up bắt buộc trước common RC. F09 cần full release suite macOS
+hai lượt và isolated run; receipt Windows thất bại vẫn giữ và phải được đối
+chiếu trước common RC, không gọi là Windows defect resolved.
+
+Thứ tự Harbor: M8-S10-T01 → M7-S15-T01 → M5-S11-T01 → M7-S15-T02 →
+M7-S15-T03 → M7-S15-T04 → M7-S15-T05 → M6-S09-T01 → M8-S10-T02.
+Mọi task sau giữ Backlog đến khi dependencies và slot đủ gate. Aster ghi
+self-review/acceptance tại head SHA, checks thực chạy và giới hạn; không waive
+security/data, CI, human test hoặc release authorization.
+
+
 **Coordinator / author:** Atlas · **Date:** 2026-11-16.
 **Baseline code:** `d1338d631e1421db075db6f024afabee988de99a`.
 **G2:** AGREED · **G3:** READY effective only after Forge review and docs PR merge.

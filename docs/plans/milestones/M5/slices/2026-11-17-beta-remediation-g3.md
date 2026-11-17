@@ -1,5 +1,32 @@
 # M5 — Beta theme v2 management G2/G3 delta
 
+## Owner directive — macOS Beta and Harbor, 2026-11-17
+
+Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt
+kỹ thuật và tự review; không cần peer review. Aster chỉ tham gia thảo luận
+liên-agent khi chủ dự án tạo cuộc thảo luận. Harbor là implementer của toàn bộ
+chín task remediation F01–F09 và thực hiện technical retest macOS; một task
+active trên `agent/harbor`, không hai writer trên cùng file. Aster chuẩn bị
+candidate và phối hợp human dogfood; automation không thay người thử thật.
+
+Chỉ đạo này thay ownership, nền tảng Beta và yêu cầu peer review cũ bên dưới.
+Các PR #310–#313 đã merge. G3 vẫn cần immutable source/base, dependencies,
+file ownership và Project Ready được xác minh trước pickup. Bằng chứng Windows
+cũ giữ nguyên; không suy thành macOS PASS. Beta yêu cầu native macOS B01–B10
+và negative regressions trên cùng candidate. Windows/Linux/native common RC và
+V1 gates vẫn riêng; không đóng chúng từ Beta PASS. F08 giữ security hold đến
+khi có giải thích provenance và kiểm chứng macOS đầy đủ; đối chiếu Windows
+vẫn là follow-up bắt buộc trước common RC. F09 cần full release suite macOS
+hai lượt và isolated run; receipt Windows thất bại vẫn giữ và phải được đối
+chiếu trước common RC, không gọi là Windows defect resolved.
+
+Thứ tự Harbor: M8-S10-T01 → M7-S15-T01 → M5-S11-T01 → M7-S15-T02 →
+M7-S15-T03 → M7-S15-T04 → M7-S15-T05 → M6-S09-T01 → M8-S10-T02.
+Mọi task sau giữ Backlog đến khi dependencies và slot đủ gate. Aster ghi
+self-review/acceptance tại head SHA, checks thực chạy và giới hạn; không waive
+security/data, CI, human test hoặc release authorization.
+
+
 ## Shared gate, provenance and verification
 
 Coordinator: Aster; owner-directed #301 handoff, 17/11/2026. Source reviewed:
@@ -11,8 +38,8 @@ Windows Beta retest. Implementation NOT_STARTED; runtime verification NOT_RUN.
 [Audit](../../../../verification/2026-11-16-usable-beta-windows-audit.md) ·
 [Planning](../../../PLANNING_WORKFLOW.md) ·
 [Task #301](https://github.com/thientran2359/opendash-cms/issues/301).
-G2/G3 metadata below records the coordinator decision submitted for Forge review;
-effectiveness requires that review and this docs PR merge. No Issue publication,
+G2/G3 metadata records the owner-authorized Aster decision; effectiveness requires
+self-review and docs merge, with no mandatory peer review. No Issue publication,
 Ready, implementation, release or dispatch from an unmerged specification.
 Pin merged source SHA and current code base when publishing, check both open/closed
 Issues for exact task IDs, verify Project Ready and agent slot before pickup.
@@ -38,7 +65,7 @@ ThemeItem/ThemeList; native v2 install already returns revision identity and act
 accepts revision_id, but GET list exposes legacy items only. Do not add a parallel
 legacy install or silently activate on upload. Add a sanitized read projection under
 the existing Admin GET list, preserve all existing fields. See the contract appendix
-in the same PR. Full-Track: this additive wire contract needs Forge review and merge
+in the same PR. Full-Track: this additive wire contract needs Aster self-review and merge
 before this G3 is effective. No migration, package format or ABI change.
 
 ### M5-S11-T01 — Expose and activate installed v2 revisions in Admin
@@ -51,9 +78,9 @@ before this G3 is effective. No migration, package format or ABI change.
 - **G2:** AGREED
 - **Lý do Fast-Track:** Full-Track selected for additive revision-discovery DTO.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** forge / Aster; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -73,7 +100,7 @@ No unrelated product changes, live site mutation, release approval or native mul
 
 #### Phụ thuộc và điều kiện chặn
 
-M5 contract appendix peer-reviewed and merged with this G3; M7-S15-T01 for full navigation/import journey; one free Forge slot. Reserve these files exclusively; no concurrent theme writer.
+M5 contract appendix self-reviewed and merged with this G3; M7-S15-T01 for full navigation/import journey; one free Harbor slot. Reserve these files exclusively; no concurrent theme writer.
 
 #### Kỹ thuật và file ownership
 
@@ -99,7 +126,7 @@ Use list_packages/list_revisions/load_selection through storage, never raw SQL i
 
 #### Kiểm thử, rủi ro và rollback
 
-Admin build; new Rust revision-discovery tests, existing m5_s01_t02_zip_v2 and focused theme/import/preservation tests; native Windows new browser runner. Record Python fixture ZIP hash; PowerShell packaging failure remains unconfirmed, not silently fixed.
+Admin build; new Rust revision-discovery tests, existing m5_s01_t02_zip_v2 and focused theme/import/preservation tests; native macOS new browser runner. Record Python fixture ZIP hash; PowerShell packaging failure remains unconfirmed, not silently fixed.
 Use the shared provenance/rollback rules. Failure leaves the task open; never remove a guard to get a green run.
 
 #### Bàn giao và review

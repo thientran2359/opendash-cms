@@ -1,5 +1,32 @@
 # M6 — Beta egress test reproducibility G3
 
+## Owner directive — macOS Beta and Harbor, 2026-11-17
+
+Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt
+kỹ thuật và tự review; không cần peer review. Aster chỉ tham gia thảo luận
+liên-agent khi chủ dự án tạo cuộc thảo luận. Harbor là implementer của toàn bộ
+chín task remediation F01–F09 và thực hiện technical retest macOS; một task
+active trên `agent/harbor`, không hai writer trên cùng file. Aster chuẩn bị
+candidate và phối hợp human dogfood; automation không thay người thử thật.
+
+Chỉ đạo này thay ownership, nền tảng Beta và yêu cầu peer review cũ bên dưới.
+Các PR #310–#313 đã merge. G3 vẫn cần immutable source/base, dependencies,
+file ownership và Project Ready được xác minh trước pickup. Bằng chứng Windows
+cũ giữ nguyên; không suy thành macOS PASS. Beta yêu cầu native macOS B01–B10
+và negative regressions trên cùng candidate. Windows/Linux/native common RC và
+V1 gates vẫn riêng; không đóng chúng từ Beta PASS. F08 giữ security hold đến
+khi có giải thích provenance và kiểm chứng macOS đầy đủ; đối chiếu Windows
+vẫn là follow-up bắt buộc trước common RC. F09 cần full release suite macOS
+hai lượt và isolated run; receipt Windows thất bại vẫn giữ và phải được đối
+chiếu trước common RC, không gọi là Windows defect resolved.
+
+Thứ tự Harbor: M8-S10-T01 → M7-S15-T01 → M5-S11-T01 → M7-S15-T02 →
+M7-S15-T03 → M7-S15-T04 → M7-S15-T05 → M6-S09-T01 → M8-S10-T02.
+Mọi task sau giữ Backlog đến khi dependencies và slot đủ gate. Aster ghi
+self-review/acceptance tại head SHA, checks thực chạy và giới hạn; không waive
+security/data, CI, human test hoặc release authorization.
+
+
 ## Shared gate, provenance and verification
 
 Coordinator: Aster; owner-directed #301 handoff, 17/11/2026. Source reviewed:
@@ -11,8 +38,8 @@ Windows Beta retest. Implementation NOT_STARTED; runtime verification NOT_RUN.
 [Audit](../../../../verification/2026-11-16-usable-beta-windows-audit.md) ·
 [Planning](../../../PLANNING_WORKFLOW.md) ·
 [Task #301](https://github.com/thientran2359/opendash-cms/issues/301).
-G2/G3 metadata below records the coordinator decision submitted for Forge review;
-effectiveness requires that review and this docs PR merge. No Issue publication,
+G2/G3 metadata records the owner-authorized Aster decision; effectiveness requires
+self-review and docs merge, with no mandatory peer review. No Issue publication,
 Ready, implementation, release or dispatch from an unmerged specification.
 Pin merged source SHA and current code base when publishing, check both open/closed
 Issues for exact task IDs, verify Project Ready and agent slot before pickup.
@@ -41,9 +68,9 @@ and matched snapshots/binaries. Git revert does not undo migrated data.
 - **G2:** AGREED
 - **Lý do Fast-Track:** Test/fixture reliability only; product security policy unchanged.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** aster / Forge; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -63,7 +90,7 @@ No unrelated product changes, live site mutation, release approval or native mul
 
 #### Phụ thuộc và điều kiện chặn
 
-Free Aster slot after M8-S10-T01 and M7-S15-T03; obtain authorized native Windows operator/Forge validation without claiming macOS as Windows. #214 source and Harbor ownership unchanged.
+Free Aster slot after M8-S10-T01 and M7-S15-T03; obtain authorized native macOS operator/Forge validation without claiming macOS as Windows. #214 source and Harbor ownership unchanged.
 
 #### Kỹ thuật và file ownership
 
@@ -78,13 +105,13 @@ Inspect the actual failure before patching. If a per-invocation deadline is requ
 #### Nghiệm thu
 
 - [ ] Record original full-suite failing receipt and one bounded diagnostic run; isolated pass alone never closes finding.
-- [ ] Native Windows unfiltered release suite twice plus isolated target exercise all assertions with zero ignored/filtered tests for full runs; macOS regression separate.
+- [ ] Native macOS unfiltered release suite twice plus isolated target exercise all assertions with zero ignored/filtered tests for full runs; Windows regression remains separate before common RC.
 - [ ] Redirect destination counter stays zero; private/link-local/deny policy and oversized response assertions remain; production egress limits untouched.
 - [ ] If not reproducible after evidence review, no-product-change disposition needs actual repeated matrix and reviewer signoff; retain original failure.
 
 #### Kiểm thử, rủi ro và rollback
 
-cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --release --no-fail-fast -- --test-threads=4 (twice, record both); isolated target --test m6_s04_t01_egress_ssrf -- --test-threads=1; native Windows required, macOS separate. If Windows executor unavailable keep BLOCKED; no retry loop.
+cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --release --no-fail-fast -- --test-threads=4 (twice, record both); isolated target --test m6_s04_t01_egress_ssrf -- --test-threads=1; native macOS required, Windows separate before common RC. If macOS executor unavailable keep BLOCKED; no retry loop.
 Use the shared provenance/rollback rules. Failure leaves the task open; never remove a guard to get a green run.
 
 #### Bàn giao và review

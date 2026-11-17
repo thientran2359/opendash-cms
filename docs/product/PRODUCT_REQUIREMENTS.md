@@ -1,11 +1,15 @@
 # OpenDash — Yêu cầu sản phẩm bản đầu
 
-## Delivery stages — Usable Beta (16/11/2026)
+## Delivery stages — Usable Beta (cập nhật 17/11/2026)
 
 Theo [quyết định #292](https://github.com/thientran2359/opendash-cms/issues/292#issuecomment-6917897791)
 và [ADR-0017](../decisions/ADR-0017-usable-beta-staging.md), ưu tiên **Usable Beta nội bộ
-Windows → common RC → V1 public**. Giữ nguyên Rust/SQLite/single executable, Linux VPS,
+macOS → common RC → V1 public**. Giữ nguyên Rust/SQLite/single executable, Linux VPS,
 Builder/plugin server logic và phạm vi V1. Nội dung đã xác nhận bên dưới vẫn áp dụng.
+
+Theo chỉ đạo mới của chủ dự án: Aster tự review/chốt kỹ thuật, Harbor triển khai
+các sửa lỗi Beta và technical retest; chỉ tham gia thảo luận liên-agent khi
+chủ dự án tạo thảo luận. Xem cập nhật ownership tại ADR-0017.
 
 Beta phải chứng minh site trống → bootstrap/login → Post/Page/CPT + field groups →
 media/taxonomy/menu → theme ZIP/sample import không ghi đè → Builder homepage/header/
@@ -19,7 +23,7 @@ binary/môi trường và kích hoạt restored root theo ADR-0015; không hot-s
 dữ liệu thử/site cô lập; public routes của instance nội bộ không là deploy Internet.
 Pin source/binary/fixture hashes; demo Mộc Studio hoặc capability tests không thay
 cold walkthrough. Ít nhất một người thử không viết code thực hiện kịch bản, ghi thời gian
-và trợ giúp, tách khỏi agent/automated QA. Atlas điều phối người thử, không mặc định owner.
+và trợ giúp, tách khỏi agent/automated QA. Aster điều phối người thử, không mặc định owner.
 Thiếu người thử không chặn audit/sửa lỗi nhưng chưa đạt human usability readiness.
 
 Beta exit cần tất cả hành trình bắt buộc đạt, không blocker security/data/recovery hoặc
@@ -39,7 +43,7 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 ## Cài đặt, vận hành và phân phối
 
 - Dùng Rust, SQLite và phân phối CMS bằng một file thực thi. Mỗi bản cài quản lý một website.
-- Developer hoặc người quản trị máy chủ cài trên VPS Linux. Chủ website làm việc qua trình duyệt. Windows phục vụ phát triển và kiểm thử.
+- Developer hoặc người quản trị máy chủ cài trên VPS Linux. Chủ website làm việc qua trình duyệt. macOS là môi trường phát triển và thử Usable Beta ưu tiên; Windows tiếp tục được hỗ trợ và kiểm chứng ở common RC/V1.
 - Admin cho sao lưu và phục hồi thủ công, bao gồm nội dung, ảnh, cấu hình, theme và plugin.
 - Mỗi website phục vụ một ngôn ngữ nội dung. Giao diện Admin ưu tiên tiếng Việt.
 - Công khai mã nguồn. Giấy phép và mô hình thu phí còn mở.

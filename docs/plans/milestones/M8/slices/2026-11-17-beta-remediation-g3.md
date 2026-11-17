@@ -1,5 +1,32 @@
 # M8 — Beta recovery blocker and browser harness G3
 
+## Owner directive — macOS Beta and Harbor, 2026-11-17
+
+Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt
+kỹ thuật và tự review; không cần peer review. Aster chỉ tham gia thảo luận
+liên-agent khi chủ dự án tạo cuộc thảo luận. Harbor là implementer của toàn bộ
+chín task remediation F01–F09 và thực hiện technical retest macOS; một task
+active trên `agent/harbor`, không hai writer trên cùng file. Aster chuẩn bị
+candidate và phối hợp human dogfood; automation không thay người thử thật.
+
+Chỉ đạo này thay ownership, nền tảng Beta và yêu cầu peer review cũ bên dưới.
+Các PR #310–#313 đã merge. G3 vẫn cần immutable source/base, dependencies,
+file ownership và Project Ready được xác minh trước pickup. Bằng chứng Windows
+cũ giữ nguyên; không suy thành macOS PASS. Beta yêu cầu native macOS B01–B10
+và negative regressions trên cùng candidate. Windows/Linux/native common RC và
+V1 gates vẫn riêng; không đóng chúng từ Beta PASS. F08 giữ security hold đến
+khi có giải thích provenance và kiểm chứng macOS đầy đủ; đối chiếu Windows
+vẫn là follow-up bắt buộc trước common RC. F09 cần full release suite macOS
+hai lượt và isolated run; receipt Windows thất bại vẫn giữ và phải được đối
+chiếu trước common RC, không gọi là Windows defect resolved.
+
+Thứ tự Harbor: M8-S10-T01 → M7-S15-T01 → M5-S11-T01 → M7-S15-T02 →
+M7-S15-T03 → M7-S15-T04 → M7-S15-T05 → M6-S09-T01 → M8-S10-T02.
+Mọi task sau giữ Backlog đến khi dependencies và slot đủ gate. Aster ghi
+self-review/acceptance tại head SHA, checks thực chạy và giới hạn; không waive
+security/data, CI, human test hoặc release authorization.
+
+
 ## Shared gate, provenance and verification
 
 Coordinator: Aster; owner-directed #301 handoff, 17/11/2026. Source reviewed:
@@ -11,8 +38,8 @@ Windows Beta retest. Implementation NOT_STARTED; runtime verification NOT_RUN.
 [Audit](../../../../verification/2026-11-16-usable-beta-windows-audit.md) ·
 [Planning](../../../PLANNING_WORKFLOW.md) ·
 [Task #301](https://github.com/thientran2359/opendash-cms/issues/301).
-G2/G3 metadata below records the coordinator decision submitted for Forge review;
-effectiveness requires that review and this docs PR merge. No Issue publication,
+G2/G3 metadata records the owner-authorized Aster decision; effectiveness requires
+self-review and docs merge, with no mandatory peer review. No Issue publication,
 Ready, implementation, release or dispatch from an unmerged specification.
 Pin merged source SHA and current code base when publishing, check both open/closed
 Issues for exact task IDs, verify Project Ready and agent slot before pickup.
@@ -54,9 +81,9 @@ activation marker/schema/permission semantics needs a separate G2 contract revie
 - **G2:** AGREED
 - **Lý do Fast-Track:** Security-sensitive existing-invariant repair; no policy relaxation.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** aster / Forge; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -76,7 +103,7 @@ No unrelated product changes, live site mutation, release approval or native mul
 
 #### Phụ thuộc và điều kiện chặn
 
-M8 existing contract unchanged and this Full-Track G3 peer-reviewed/merged; exclusive Aster repair slot; native Windows validation scheduled with Forge after UI task slot release. If new security persistence semantics required, BLOCKED until distinct G2 PR.
+M8 existing contract unchanged and this Full-Track G3 self-reviewed/merged; exclusive Harbor repair slot; native macOS validation required for Beta. If new security persistence semantics required, BLOCKED until distinct G2 PR.
 
 #### Kỹ thuật và file ownership
 
@@ -97,11 +124,11 @@ Reuse typed PortableRuntimeConfigV1 validation, canonical package/secret path gu
 - [ ] Old sessions invalid; fresh Admin can login/re-edit in recovery; Editor cannot activate; wrong password/CSRF/Origin/generation denied with no state change.
 - [ ] Valid activation clears safe mode durably across restart; SMTP stays disabled, no queued work replay; original site content/config unchanged.
 - [ ] Malformed/missing/oversize config/marker, symlink/reparse and interrupted publication fail closed without exposing target; existing format1 compatibility preserved.
-- [ ] Windows and macOS actual restore/start evidence reconciled; failure to reproduce keeps security blocker until reviewer-approved explanation with provenance, not cosmetic downgrade.
+- [ ] macOS actual restore/start evidence reconciled; Windows follow-up retained before common RC; failure to reproduce keeps security blocker until reviewer-approved explanation with provenance, not cosmetic downgrade.
 
 #### Kiểm thử, rủi ro và rollback
 
-cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test m8_s10_t01_restored_startup; existing m8_s05_t01_restore/m8_s05_t02_restore_admin/m8_s06_t01_runtime; native Windows and macOS end-to-end loopback restored-root launch, exact source/hash. No public host, no live backups. Evidence must distinguish actual public noindex policy from optional HTTP denial.
+cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test m8_s10_t01_restored_startup; existing m8_s05_t01_restore/m8_s05_t02_restore_admin/m8_s06_t01_runtime; native macOS for Beta; Windows follow-up before common RC end-to-end loopback restored-root launch, exact source/hash. No public host, no live backups. Evidence must distinguish actual public noindex policy from optional HTTP denial.
 Use the shared provenance/rollback rules. Failure leaves the task open; never remove a guard to get a green run.
 
 #### Bàn giao và review
@@ -118,9 +145,9 @@ Submit Task ID, exact head/base, bounded diff, commands and exit codes, negative
 - **G2:** AGREED
 - **Lý do Fast-Track:** Harness-only selectors/lifecycle under unchanged acceptance.
 - **G3:** READY
-- **Trạng thái:** PLANNED; conditional on peer review and merge, not Project Ready
+- **Trạng thái:** PLANNED; owner-authorized self-review and merge, not Project Ready
 - **Nguồn quyết định:** #301, audit #300/#306, shared rules and source evidence below
-- **Người triển khai / review:** forge / Aster; coordinator Aster
+- **Người triển khai / review:** harbor / Aster; coordinator Aster
 
 #### Tổng quan và giá trị
 
@@ -140,7 +167,7 @@ No unrelated product changes, live site mutation, release approval or native mul
 
 #### Phụ thuộc và điều kiện chặn
 
-M8-S10-T01 G5 and affected M7 editor fixes merged/G5; free Forge slot; Harbor coordinates macOS rerun without overlapping #214 files. No scratch runner as substitute.
+M8-S10-T01 G5 and affected M7 editor fixes merged/G5; free Harbor slot; Harbor coordinates macOS rerun without overlapping #214 files. No scratch runner as substitute.
 
 #### Kỹ thuật và file ownership
 
@@ -154,13 +181,13 @@ Use observed current route/accessible name or stable existing test ID, not broad
 
 #### Nghiệm thu
 
-- [ ] Tracked Windows Chrome runner exit0 with backup/artifact/source/candidate hashes and full restore/reauth/activation/re-edit assertions.
+- [ ] Tracked macOS Chrome runner exit0 with backup/artifact/source/candidate hashes and full restore/reauth/activation/re-edit assertions.
 - [ ] Native macOS tracked-runner receipt closes only applicable #297 harness gap, not M5/M7/Linux release.
 - [ ] Missing navigation/server exit/wrong password produce bounded nonzero; owned processes cleaned, original site and recovered copy preserved.
 
 #### Kiểm thử, rủi ro và rollback
 
-python3 -m py_compile cms/scripts/m8_browser_e2e.py; tracked runner --help then actual flags on native Windows/macOS with isolated site-root/artifact-dir --keep-artifacts --timeout 180 (record actual binary paths privately). T03 consumes exact integrated candidate evidence.
+python3 -m py_compile cms/scripts/m8_browser_e2e.py; tracked runner --help then actual flags on native macOS with isolated site-root/artifact-dir --keep-artifacts --timeout 180 (record actual binary paths privately). T03 consumes exact integrated candidate evidence.
 Use the shared provenance/rollback rules. Failure leaves the task open; never remove a guard to get a green run.
 
 #### Bàn giao và review

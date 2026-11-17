@@ -1,6 +1,6 @@
 # OpenDash
 
-**Ưu tiên 16/11/2026:** [Usable Beta nội bộ Windows](docs/decisions/ADR-0017-usable-beta-staging.md)
+**Ưu tiên 17/11/2026:** [Usable Beta nội bộ macOS](docs/decisions/ADR-0017-usable-beta-staging.md)
 trước common RC/V1 public; [G3 checkpoint](docs/plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md)
 chưa có nghiệm thu runtime/human. Dev launcher/Mộc Studio là demo phát triển; không là
 installer, Beta PASS hoặc production deployment. V1 vẫn giữ Linux VPS/native multi-OS,
