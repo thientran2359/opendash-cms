@@ -25,6 +25,7 @@ import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
 import { BackupsPanel } from './features/operations/BackupsPanel.tsx';
 import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
+import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
 
 const HISTORY_INDEX = '__openDashAdminHistoryIndex';
 
@@ -68,6 +69,12 @@ export const App: React.FC = () => {
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
+  const [termDirty, setTermDirty] = useState(false);
+  const termDirtyRef = useRef(false);
+  const markTermDirty = (next: boolean) => {
+    termDirtyRef.current = next;
+    setTermDirty(next);
+  };
   const [contentRevision, setContentRevision] = useState(0);
   const acceptedHashRef = useRef(window.location.hash || '#/dashboard');
   const historyIndexRef = useRef(0);
@@ -129,7 +136,9 @@ export const App: React.FC = () => {
     const leavingDirtyEditor = currentEditor !== null && currentEditor !== nextEditor &&
       editorDraftStore.hasDirtyKey(currentEditor);
     const leavingBuilder = current.view === 'builder' && next.view !== 'builder' && builderDirtyRef.current;
-    return !(leavingDirtyEditor || leavingBuilder) ||
+    const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
+      && termDirtyRef.current && acceptedHashRef.current !== destination;
+    return !(leavingDirtyEditor || leavingBuilder || leavingTerm) ||
       window.confirm('Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
   };
 
@@ -192,13 +201,13 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || postsDirty || pagesDirty)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || postsDirty || pagesDirty || termDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, postsDirty, pagesDirty]);
+  }, [contentDirty, postsDirty, pagesDirty, termDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -319,7 +328,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || builderDirty || postsDirty || pagesDirty) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || builderDirty || postsDirty || pagesDirty || termDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -341,6 +350,7 @@ export const App: React.FC = () => {
       setBuilderDirty(false);
       setPostsDirty(false);
       setPagesDirty(false);
+      markTermDirty(false);
       lastAuthenticatedUserId.current = null;
       setRoute(parseAdminRoute('#/dashboard', window.location.pathname));
       setCptTypes([]);
@@ -458,7 +468,7 @@ export const App: React.FC = () => {
       cptTypes={cptTypes}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
+      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty || termDirty}
       sidebarContent={<BuilderWorkspace
         user={user} csrfToken={csrfToken} resetToken={builderReset} themeRevision={themeRevision}
         onDirtyChange={setBuilderDirty} onApiError={handleApiError}
@@ -592,7 +602,13 @@ export const App: React.FC = () => {
         />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
-      taxonomyContent={<TaxonomyPage user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
+      taxonomyContent={route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
+        ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
+            kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
+            termId={route.entryId ?? null} user={user} csrfToken={csrfToken}
+            onApiError={handleApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
+        : <TaxonomyPage kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
+            onApiError={handleApiError} onNavigateHash={navigateHash} />}
     />
   );
 };

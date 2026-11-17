@@ -43,6 +43,13 @@ export type TaxonomyTermChanges = Partial<Pick<TaxonomyTerm, 'name' | 'slug' | '
 const termsPath = '/api/admin/taxonomy/terms';
 const termPath = (id: number): string => `${termsPath}/${id}`;
 
+export function getTaxonomyTerm(id: number, signal?: AbortSignal): Promise<TaxonomyTerm> {
+  return requestJson<TaxonomyTerm>(termPath(id), {
+    signal,
+    defaultErrorMessage: 'Không tìm thấy category/tag.',
+  });
+}
+
 export function listTaxonomyTerms(
   kind: TaxonomyKind,
   limit = 100,

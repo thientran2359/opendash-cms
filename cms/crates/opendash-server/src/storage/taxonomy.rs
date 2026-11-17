@@ -270,6 +270,19 @@ pub async fn list_terms(
     })
 }
 
+/// Read one stable term ID for a dedicated editor route. Authorization belongs
+/// to the route; this projection is identical to the paged list DTO.
+pub async fn get_term(db: &SqlitePool, id: i64) -> ApiResult<Option<TaxonomyTerm>> {
+    let row: Option<TermRow> = sqlx::query_as(
+        "SELECT id, kind, name, slug, parent_id, version
+           FROM taxonomy_terms WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(term))
+}
+
 pub async fn create_term(
     db: &SqlitePool,
     actor: &SessionContext,

@@ -57,7 +57,7 @@ use crate::{
             theme_options_put, timezones_get,
         },
         taxonomy::{
-            MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_list,
+            MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_get, taxonomy_list,
             taxonomy_patch, taxonomy_eligibility_list,
         },
         themes::{ThemeStoreRoot, theme_activate, theme_asset, theme_install, theme_list},
@@ -266,7 +266,8 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/taxonomy/terms/{id}",
-            axum::routing::patch(taxonomy_patch)
+            get(taxonomy_get)
+                .patch(taxonomy_patch)
                 .delete(taxonomy_delete)
                 .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
         )
