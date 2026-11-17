@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { ApiClientError, requestJson } from '../../api/client.ts';
+import { ApiClientError } from '../../api/client.ts';
+import { listContentEntries, listContentTypes } from '../../api/content.ts';
 import {
   createMenu,
   deleteMenu,
@@ -30,6 +31,14 @@ interface EntryOption {
   id: number;
   title: string;
   content_type_key: string;
+}
+
+const ENTRY_PAGE_SIZE = 50;
+
+function publishedOptions(typeKey: string, rows: Awaited<ReturnType<typeof listContentEntries>>): EntryOption[] {
+  return rows
+    .filter((row) => row.publication_status === 'published')
+    .map((row) => ({ id: row.id, title: row.title, content_type_key: typeKey }));
 }
 
 interface DraftItem {
@@ -100,6 +109,8 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
   const [newKey, setNewKey] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [entries, setEntries] = useState<EntryOption[]>([]);
+  const [entryNextOffsets, setEntryNextOffsets] = useState<Record<string, number>>({});
+  const [loadingMoreEntries, setLoadingMoreEntries] = useState(false);
   const [terms, setTerms] = useState<TaxonomyTerm[]>([]);
   const [activeThemeId, setActiveThemeId] = useState<string | null>(null);
   const [slots, setSlots] = useState<MenuSlotsSnapshot | null>(null);
@@ -110,17 +121,25 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
 
   const loadMenusAndRefs = useCallback(async () => {
     try {
-      const [page, themesRes, catRes, tagRes, postRes, pageRes] = await Promise.all([
+      const [page, themesRes, catRes, tagRes, contentTypes] = await Promise.all([
         listMenus(100, 0),
         getThemes(),
         listTaxonomyTerms('category', 100).catch(() => ({ items: [] as TaxonomyTerm[] })),
         listTaxonomyTerms('tag', 100).catch(() => ({ items: [] as TaxonomyTerm[] })),
-        requestJson<{ items: EntryOption[] }>('/api/admin/content-types/post/entries?limit=50', { defaultErrorMessage: '' }).catch(() => ({ items: [] as EntryOption[] })),
-        requestJson<{ items: EntryOption[] }>('/api/admin/content-types/page/entries?limit=50', { defaultErrorMessage: '' }).catch(() => ({ items: [] as EntryOption[] })),
+        listContentTypes(),
       ]);
+      const typeKeys = [...new Set(['post', 'page', ...contentTypes.map((type) => type.descriptor.key)])];
+      const contentPages = await Promise.all(
+        typeKeys.map(async (key) => ({ key, rows: await listContentEntries(key, ENTRY_PAGE_SIZE, 0) })),
+      );
+      const cursors: Record<string, number> = {};
+      for (const { key, rows } of contentPages) {
+        if (rows.length === ENTRY_PAGE_SIZE) cursors[key] = ENTRY_PAGE_SIZE;
+      }
       setMenus(page.items);
       setTerms([...catRes.items, ...tagRes.items]);
-      setEntries([...pageRes.items, ...postRes.items]);
+      setEntries(contentPages.flatMap(({ key, rows }) => publishedOptions(key, rows)));
+      setEntryNextOffsets(cursors);
       const active = themesRes.active_id ?? null;
       setActiveThemeId(active);
       if (active) {
@@ -141,6 +160,39 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
       onApiError?.(reason);
     }
   }, [onApiError]);
+
+  async function loadMoreEntryOptions() {
+    if (loadingMoreEntries) return;
+    const pending = Object.entries(entryNextOffsets);
+    if (!pending.length) return;
+    setLoadingMoreEntries(true);
+    setError(null);
+    try {
+      const pages = await Promise.all(
+        pending.map(async ([key, offset]) => ({ key, offset, rows: await listContentEntries(key, ENTRY_PAGE_SIZE, offset) })),
+      );
+      setEntries((existing) => {
+        const byId = new Map(existing.map((option) => [option.id, option]));
+        for (const { key, rows } of pages) {
+          for (const option of publishedOptions(key, rows)) byId.set(option.id, option);
+        }
+        return [...byId.values()];
+      });
+      setEntryNextOffsets((existing) => {
+        const next = { ...existing };
+        for (const { key, offset, rows } of pages) {
+          if (rows.length < ENTRY_PAGE_SIZE) delete next[key];
+          else next[key] = offset + ENTRY_PAGE_SIZE;
+        }
+        return next;
+      });
+    } catch (reason) {
+      setError(messageFor(reason));
+      onApiError?.(reason);
+    } finally {
+      setLoadingMoreEntries(false);
+    }
+  }
 
   useEffect(() => {
     void loadMenusAndRefs();
@@ -401,6 +453,15 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
           </div>
 
           <div className="space-y-3">
+            {Object.keys(entryNextOffsets).length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <span>Đã tải {entries.length} mục nội dung đã xuất bản. Còn trang kết quả khác.</span>
+                <button type="button" onClick={() => void loadMoreEntryOptions()} disabled={loadingMoreEntries}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-800">
+                  {loadingMoreEntries ? 'Đang tải…' : 'Tải thêm bài/trang/CPT'}
+                </button>
+              </div>
+            )}
             {itemsDraft.map((item, idx) => (
               <div key={item.localKey} className="rounded border border-slate-200 bg-slate-50 p-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -453,6 +514,9 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
                       className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                     >
                       <option value="">-- Chọn entry --</option>
+                      {item.target_entry_id !== null && !entries.some((entry) => entry.id === item.target_entry_id) && (
+                        <option value={item.target_entry_id}>#{item.target_entry_id} (đích đã lưu; chưa tải trong danh sách)</option>
+                      )}
                       {entries.map((entry) => (
                         <option key={entry.id} value={entry.id}>
                           #{entry.id} {entry.title} ({entry.content_type_key})
