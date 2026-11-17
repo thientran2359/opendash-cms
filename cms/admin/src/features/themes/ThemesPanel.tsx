@@ -16,13 +16,14 @@ import {
 import { ThemeOptionsForm } from './ThemeOptionsForm.tsx';
 
 interface Props {
+  mode?: 'themes' | 'options';
   csrfToken: string | null;
   onApiError: (error: unknown, fallback: string) => void;
   onInstalled: () => void;
   onActivated: () => void;
 }
 
-export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalled, onActivated }) => {
+export const ThemesPanel: React.FC<Props> = ({ mode = 'themes', csrfToken, onApiError, onInstalled, onActivated }) => {
   const [data, setData] = useState<ThemesSummary | null>(null);
   const [busy, setBusy] = useState(false);
   // The chosen revision is an explicit Admin draft, not the active selection.
@@ -148,6 +149,29 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
   const activeThemeKey = data?.selection.source_format === 'v2'
     ? data.selection.theme_id
     : data?.active_id;
+
+  if (mode === 'options') {
+    return (
+      <section className="min-w-0 space-y-5" aria-label="Tùy chỉnh giao diện" data-testid="theme-options-screen">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">Giao diện / Tùy chỉnh giao diện</p>
+          <h2 className="mt-2 text-2xl font-bold text-slate-900">Tùy chọn giao diện</h2>
+          <p className="mt-2 text-sm text-slate-600">Cấu hình theme đang hoạt động. Cài và kích hoạt theme trong màn hình Giao diện riêng.</p>
+        </div>
+        {loading && <p role="status">Đang tải tùy chọn theme…</p>}
+        {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-900">{error}</p>}
+        {!loading && data && !activeThemeKey && (
+          <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            Chưa có theme được kích hoạt để tùy chỉnh. Hãy mở Giao diện để cài và kích hoạt theme trước.
+          </p>
+        )}
+        {!loading && data && activeThemeKey && (
+          <ThemeOptionsForm key={`${activeThemeKey}@${data.selection.revision_id ?? data.selection.version}`}
+            themeId={activeThemeKey} csrfToken={csrfToken} onApiError={onApiError} />
+        )}
+      </section>
+    );
+  }
 
   return (
     <section className="min-w-0 space-y-5" aria-label="Quản lý Themes" data-testid="themes-panel">
@@ -315,10 +339,6 @@ export const ThemesPanel: React.FC<Props> = ({ csrfToken, onApiError, onInstalle
                 </p>
               )}
             </div>
-          )}
-          {activeThemeKey && (
-            <ThemeOptionsForm key={`${activeThemeKey}@${data.selection.revision_id ?? data.selection.version}`}
-              themeId={activeThemeKey} csrfToken={csrfToken} onApiError={onApiError} />
           )}
         </>
       )}

@@ -146,7 +146,7 @@ export const App: React.FC = () => {
       let target = normalizeEditorHash(window.location.hash || '#/dashboard');
       const requested = parseAdminRoute(target, window.location.pathname);
       if (userRef.current && requested.isLegacyContentRedirect) {
-        target = userRef.current.role === 'admin' ? '#/settings/content-types' : '#/posts';
+        target = userRef.current.role === 'admin' ? '#/appearance/content-types' : '#/posts';
       }
       if (target === acceptedHashRef.current && event) return;
       if (!mayLeave(target)) {
@@ -464,19 +464,21 @@ export const App: React.FC = () => {
         onDirtyChange={setBuilderDirty} onApiError={handleApiError}
       />}
       previewContent={null}
-      themesContent={<>
-        <ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
-          onInstalled={() => setThemeRevision(value => value + 1)}
-          onActivated={() => setThemeRevision(value => value + 1)}
-        />
-        <MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />
-      </>}
+      themesContent={<ThemesPanel mode="themes" csrfToken={csrfToken} onApiError={handleApiError}
+        onInstalled={() => setThemeRevision(value => value + 1)}
+        onActivated={() => setThemeRevision(value => value + 1)}
+      />}
+      menusContent={<MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />}
+      themeOptionsContent={<ThemesPanel mode="options" csrfToken={csrfToken} onApiError={handleApiError}
+        onInstalled={() => setThemeRevision(value => value + 1)}
+        onActivated={() => setThemeRevision(value => value + 1)}
+      />}
       schemaSettingsContent={
         <ContentTypeSchemaSettings
           selectedTypeKey={selectedSchemaTypeKey}
           onSelectTypeKey={key => {
             setSelectedSchemaTypeKey(key);
-            if (key) navigateHash(`#/settings/content-types/${key}`);
+            if (key) navigateHash(`#/appearance/content-types/${key}`);
           }}
           csrfToken={csrfToken}
           onApiError={handleApiError}
@@ -494,26 +496,33 @@ export const App: React.FC = () => {
           }}
         />
       }
-      toolsContent={<>
-        <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi sao lưu mã hóa.')} />
-        <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi khôi phục & safe mode.')} />
-        <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
-        <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
-      </>}
-      settingsContent={<>
-        <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
-        <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
-        <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
-        <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cấu hình SMTP.')} />
-      </>}
+      toolsContent={route.sub === 'backup'
+        ? <>
+            <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi sao lưu mã hóa.')} />
+            <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi khôi phục & safe mode.')} />
+          </>
+        : route.sub === 'media-reconcile'
+          ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
+          : route.sub === 'health' ? <SystemStatus /> : null}
+      settingsContent={route.sub === 'general'
+        ? <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        : route.sub === 'seo'
+          ? <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
+          : route.sub === 'contact'
+            ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
+            : route.sub === 'smtp'
+              ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cấu hình SMTP.')} />
+              : null}
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}
+        mode={route.view === 'users' && route.sub === 'new' ? 'new' : 'list'}
         csrfToken={csrfToken}
         currentUserId={accountContextId}
         onApiError={handleApiError}
         onOwnAccountChanged={handleOwnAccountChanged}
       />}
       pluginsContent={<PluginsPanel
+        mode={route.view === 'plugins' && route.sub === 'install' ? 'install' : 'list'}
         plugins={plugins}
         selectedPluginId={selectedPluginId}
         pluginInputJson={pluginInputJson}
