@@ -11,7 +11,9 @@ use opendash_core::backup::PortableRuntimeConfigV1;
 use crate::error::{ApiError, ApiResult};
 use crate::paths::SitePaths;
 use crate::restore::RestoreReadyMarker;
-use crate::secrets::{create_private_file, ensure_no_reparse_or_symlink, ensure_private_directory_tree};
+use crate::secrets::{
+    create_private_file, ensure_no_reparse_or_symlink, ensure_private_directory_tree,
+};
 
 const MAX_SITE_CONFIG_BYTES: u64 = 64 * 1024;
 
@@ -44,14 +46,16 @@ impl RecoveryState {
 
 pub fn load_ready_marker(paths: &SitePaths) -> ApiResult<Option<RestoreReadyMarker>> {
     let p = paths.site_root().join("READY.json");
-    if !p.exists() {
-        return Ok(None);
-    }
+    let meta = match fs::symlink_metadata(&p) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err(ApiError::internal("Không đọc được thông tin READY.json.")),
+    };
     ensure_no_reparse_or_symlink(&p)?;
-    let meta = fs::metadata(&p)
-        .map_err(|_| ApiError::internal("Không đọc được thông tin READY.json."))?;
     if !meta.is_file() || meta.len() > MAX_SITE_CONFIG_BYTES {
-        return Err(ApiError::bad_request("READY.json không hợp lệ hoặc vượt kích thước."));
+        return Err(ApiError::bad_request(
+            "READY.json không hợp lệ hoặc vượt kích thước.",
+        ));
     }
     let raw = fs::read(&p).map_err(|_| ApiError::internal("Không đọc được READY.json."))?;
     let marker: RestoreReadyMarker = serde_json::from_slice(&raw)
@@ -61,19 +65,25 @@ pub fn load_ready_marker(paths: &SitePaths) -> ApiResult<Option<RestoreReadyMark
 
 pub fn load_portable_config(paths: &SitePaths) -> ApiResult<PortableRuntimeConfigV1> {
     let cfg_path = paths.site_config_path();
-    if !cfg_path.exists() {
-        return Ok(PortableRuntimeConfigV1::default());
-    }
+    let meta = match fs::symlink_metadata(&cfg_path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(PortableRuntimeConfigV1::default());
+        }
+        Err(_) => {
+            return Err(ApiError::internal(
+                "Không đọc được metadata config/site.json.",
+            ));
+        }
+    };
     ensure_no_reparse_or_symlink(&cfg_path)?;
-    let meta = fs::metadata(&cfg_path)
-        .map_err(|_| ApiError::internal("Không đọc được metadata config/site.json."))?;
     if !meta.is_file() || meta.len() > MAX_SITE_CONFIG_BYTES {
         return Err(ApiError::bad_request(
             "config/site.json không hợp lệ hoặc vượt quá 64 KiB.",
         ));
     }
-    let raw = fs::read(&cfg_path)
-        .map_err(|_| ApiError::internal("Không đọc được config/site.json."))?;
+    let raw =
+        fs::read(&cfg_path).map_err(|_| ApiError::internal("Không đọc được config/site.json."))?;
     let cfg: PortableRuntimeConfigV1 = serde_json::from_slice(&raw)
         .map_err(|_| ApiError::bad_request("config/site.json không đúng định dạng."))?;
     cfg.validate().map_err(ApiError::bad_request)?;
@@ -159,7 +169,6 @@ pub fn build_recovery_state_for_root(site_root: &Path, db_path: &Path) -> Recove
         Err(_) => RecoveryState::new(false),
     }
 }
-
 
 impl RuntimeConfigV1 {
     pub fn trusted_origin_normalized(&self) -> Option<String> {

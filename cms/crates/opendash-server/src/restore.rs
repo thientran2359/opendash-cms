@@ -163,8 +163,9 @@ pub async fn restore_to_new_root(
             seen_config = true;
             let raw = fs::read(&src_path)
                 .map_err(|_| ApiError::internal("Không đọc được portable config từ backup."))?;
-            let mut cfg: PortableRuntimeConfigV1 = serde_json::from_slice(&raw)
-                .map_err(|_| ApiError::bad_request("config/site.json trong backup không hợp lệ."))?;
+            let mut cfg: PortableRuntimeConfigV1 = serde_json::from_slice(&raw).map_err(|_| {
+                ApiError::bad_request("config/site.json trong backup không hợp lệ.")
+            })?;
             cfg.validate().map_err(ApiError::bad_request)?;
             cfg.recovery_safe_mode = true;
             let cfg_bytes = serde_json::to_vec_pretty(&cfg)
@@ -205,7 +206,9 @@ pub async fn restore_to_new_root(
     }
 
     if !seen_db {
-        return Err(ApiError::bad_request("Backup thiếu database/opendash.sqlite."));
+        return Err(ApiError::bad_request(
+            "Backup thiếu database/opendash.sqlite.",
+        ));
     }
     if !seen_config {
         let cfg_dir = stage_root.join("config");
@@ -218,6 +221,20 @@ pub async fn restore_to_new_root(
             .map_err(|_| ApiError::internal("Không ghi được config mặc định."))?;
         dst.sync_all()
             .map_err(|_| ApiError::internal("Không fsync được config mặc định."))?;
+    }
+
+    // A restored root must never be published with the source site's
+    // recovery_safe_mode=false. The startup loader deliberately accepts false
+    // *after* authenticated activation, so the restore worker must guarantee
+    // the initial on-disk state before publishing READY.json.
+    let staged_paths = crate::paths::SitePaths::from_parts(
+        stage_root.clone(),
+        stage_root.join("database/opendash.sqlite"),
+    );
+    if !crate::config::load_portable_config(&staged_paths)?.recovery_safe_mode {
+        return Err(ApiError::internal(
+            "Từ chối publish restore: config/site.json chưa bật Safe Mode.",
+        ));
     }
 
     if policy.failpoint == Some(RestoreFailpoint::AfterExtract) {
