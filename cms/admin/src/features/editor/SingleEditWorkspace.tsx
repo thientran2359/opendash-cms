@@ -18,6 +18,15 @@ import type {
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
 import { TermPicker } from '../taxonomy/TermPicker.tsx';
+import { MediaPicker } from '../media/MediaPicker.tsx';
+
+interface FieldMediaPickerTarget {
+  fieldKey: string;
+  kind: 'image' | 'gallery';
+  scopeKey: string;
+  sessionEpoch: number;
+  schemaToken: string;
+}
 
 interface SingleEditWorkspaceProps {
   typeKey: string;
@@ -77,6 +86,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [mediaPicker, setMediaPicker] = useState<FieldMediaPickerTarget | null>(null);
   const baselineRef = useRef<EditorDraftPayload | null>(null);
   const draftRef = useRef<EditorDraftPayload | null>(null);
   const editRevisionRef = useRef(0);
@@ -88,6 +98,45 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const draftKey = editorDraftStore.makeDraftKey(typeKey, entryId, draftUuid ?? tabUuid.current);
   const activeDraftKeyRef = useRef(draftKey);
   activeDraftKeyRef.current = draftKey;
+  // Scope both modal visibility and eventual Apply to the complete editor
+  // identity. A late callback from a prior entry/account may never mutate it.
+  const mediaScopeKey = JSON.stringify([
+    siteInstanceId, user?.id, user?.role, authGeneration,
+    typeKey, mode, entryId, draftKey,
+  ]);
+  const activeMediaScopeRef = useRef(mediaScopeKey);
+  activeMediaScopeRef.current = mediaScopeKey;
+  const activeMediaSchemaRef = useRef(config?.schema_token);
+  activeMediaSchemaRef.current = config?.schema_token;
+
+  useEffect(() => {
+    setMediaPicker(null);
+  }, [mediaScopeKey]);
+
+  const applyMediaSelection = (target: FieldMediaPickerTarget, ids: string[]) => {
+    const current = draftRef.current;
+    const eff = config?.effective_fields[target.fieldKey];
+    if (
+      !csrfToken || !user || !current || !config || mode === 'list'
+      || target.scopeKey !== activeMediaScopeRef.current
+      || target.sessionEpoch !== editorDraftStore.getSessionEpoch()
+      || target.schemaToken !== activeMediaSchemaRef.current
+      || !eff || !eff.editable || eff.effective_status !== 'active'
+      || eff.definition.type !== target.kind
+    ) return;
+    setMediaPicker(null);
+    // Trust the picker-provided ordered selection, not any stale React values
+    // snapshot; the draft ref is authoritative across fast field edits.
+    const nextIds = [...new Set(ids)].slice(0, target.kind === 'image' ? 1 : 50);
+    const nextValues: Record<string, ContentFieldValue> = {
+      ...current.values,
+      [target.fieldKey]: target.kind === 'image' ? (nextIds[0] ?? '') : nextIds,
+    };
+    const nextCleared = current.cleared_fields.filter(k => k !== target.fieldKey);
+    setValues(nextValues);
+    setClearedFields(nextCleared);
+    persistDraftPatch({ values: nextValues, cleared_fields: nextCleared });
+  };
 
   const listHashPrefix = typeKey === 'post' ? '#/posts' : typeKey === 'page' ? '#/pages' : `#/cpt/${typeKey}`;
 
@@ -480,11 +529,24 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           persistDraftPatch({ publication_status: s });
         }}
         onFieldChange={(fk, val) => {
-          const nextVals = { ...values, [fk]: val };
+          const nextVals = { ...(draftRef.current?.values ?? values), [fk]: val };
           const nextCleared = clearedFields.filter(k => k !== fk);
           setValues(nextVals);
           setClearedFields(nextCleared);
           persistDraftPatch({ values: nextVals, cleared_fields: nextCleared });
+        }}
+        onPickMedia={(fieldKey, kind) => {
+          const eff = config.effective_fields[fieldKey];
+          if (
+            !csrfToken || !user || !draftRef.current
+            || !eff || !eff.editable || eff.effective_status !== 'active'
+            || eff.definition.type !== kind
+          ) return;
+          setMediaPicker({
+            fieldKey, kind, scopeKey: mediaScopeKey,
+            sessionEpoch: editorDraftStore.getSessionEpoch(),
+            schemaToken: config.schema_token,
+          });
         }}
         onFieldClear={fk => {
           const nextVals = { ...values };
@@ -531,6 +593,36 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           onNavigateHash(`#/builder?template=single&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
         }}
       />
+      {mediaPicker && mediaPicker.scopeKey === mediaScopeKey && csrfToken && user && config
+        && config.schema_token === mediaPicker.schemaToken
+        && editorDraftStore.getSessionEpoch() === mediaPicker.sessionEpoch
+        && config.effective_fields[mediaPicker.fieldKey]?.editable
+        && config.effective_fields[mediaPicker.fieldKey]?.effective_status === 'active'
+        && config.effective_fields[mediaPicker.fieldKey]?.definition.type === mediaPicker.kind
+        && (
+          <MediaPicker
+            key={`${mediaPicker.scopeKey}:${mediaPicker.fieldKey}`}
+            mode={mediaPicker.kind}
+            selectedIds={(() => {
+              const raw = draftRef.current?.values[mediaPicker.fieldKey];
+              if (Array.isArray(raw)) return raw.map(String);
+              if (typeof raw === 'string') return mediaPicker.kind === 'gallery'
+                ? raw.split(/[\n,]+/).map(id => id.trim()).filter(Boolean)
+                : raw ? [raw] : [];
+              return [];
+            })()}
+            csrfToken={csrfToken}
+            onApply={ids => applyMediaSelection(mediaPicker, ids)}
+            onClose={() => setMediaPicker(null)}
+            onError={(error, fallback) => {
+              if (error instanceof ApiClientError && error.status === 401) {
+                editorDraftStore.quarantineAll();
+                setMediaPicker(null);
+              }
+              onApiError(error, fallback);
+            }}
+          />
+        )}
       {(config.taxonomies.length > 0 || typeKey === 'post' || typeKey === 'page') && (
         <section className="min-w-0 rounded-xl border border-slate-200 bg-white p-4" data-testid="single-edit-terms">
           <h3 className="mb-3 text-sm font-semibold text-slate-900">Danh mục &amp; Thẻ</h3>
