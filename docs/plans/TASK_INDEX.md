@@ -268,18 +268,20 @@ Published all18 Issues in GitHub Milestone#9 / Project#3 from immutable G3 `4ec2
 
 ## Beta remediation specifications — 17/11/2026
 
-Proposed tasks below are authored specifications under #301, not published Issues
-or Project Ready. Required peer review, milestone docs/contract merge and source
-pins precede publication; exact live status remains GitHub Issue/Project.
+Nine tasks below were published from merged source `54a56c74c80c886f7b3bb91eaccaa798b772dcf6`
+after owner-directed macOS Beta/Harbor handoff in PR #317. Aster self-review
+replaces mandatory peer review. Project status remains unverified; publication
+does not authorize pickup. First priority: #318; one active Harbor task at a time.
+Dispatch probe: MAC_SSH_HOST_NOT_CONFIGURED; no delivery/start claimed.
 
-| Task | Responsible proposed | Outcome / dependency | Issue |
+| Task | Responsible | Outcome / dependency | Issue |
 | --- | --- | --- | --- |
-| M7-S15-T01 | Forge | F01 menu target picker; G3 review/merge | Not published |
-| M7-S15-T02 | Forge | F03 draft preservation; exclusive editor seam | Not published |
-| M7-S15-T03 | Aster | F04 atomic publication create; no migration edit | Not published |
-| M7-S15-T04 | Forge | F05 media picker; after T02 | Not published |
-| M7-S15-T05 | Forge | F07 harness lifecycle; after editor fixes | Not published |
-| M5-S11-T01 | Forge | F02 theme v2; separate M5 contract/G3 PR | Not published |
-| M6-S09-T01 | Aster | F09 repeatability; actual Windows receipt required | Not published |
-| M8-S10-T01 | Aster | F08 security blocker; separate M8 G3 PR | Not published |
-| M8-S10-T02 | Forge | F06 tracked harness; after recovery/editor repairs | Not published |
+| M7-S15-T01 | Harbor | F01 menu target picker; merged G3 | [#319](https://github.com/thientran2359/opendash-cms/issues/319) — published; Project status unverified |
+| M7-S15-T02 | Harbor | F03 draft preservation; exclusive editor seam | [#321](https://github.com/thientran2359/opendash-cms/issues/321) — published; Project status unverified |
+| M7-S15-T03 | Harbor | F04 atomic publication create; no migration edit | [#322](https://github.com/thientran2359/opendash-cms/issues/322) — published; Project status unverified |
+| M7-S15-T04 | Harbor | F05 media picker; after T02 | [#323](https://github.com/thientran2359/opendash-cms/issues/323) — published; Project status unverified |
+| M7-S15-T05 | Harbor | F07 harness lifecycle; after editor fixes | [#324](https://github.com/thientran2359/opendash-cms/issues/324) — published; Project status unverified |
+| M5-S11-T01 | Harbor | F02 theme v2; separate M5 contract/G3 PR | [#320](https://github.com/thientran2359/opendash-cms/issues/320) — published; Project status unverified |
+| M6-S09-T01 | Harbor | F09 macOS repeatability; Windows RC follow-up retained | [#325](https://github.com/thientran2359/opendash-cms/issues/325) — published; Project status unverified |
+| M8-S10-T01 | Harbor | F08 security blocker; separate M8 G3 PR | [#318](https://github.com/thientran2359/opendash-cms/issues/318) — published; Project status unverified |
+| M8-S10-T02 | Harbor | F06 tracked harness; after recovery/editor repairs | [#326](https://github.com/thientran2359/opendash-cms/issues/326) — published; Project status unverified |
