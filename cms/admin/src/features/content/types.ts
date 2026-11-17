@@ -86,6 +86,45 @@ export interface ContentEntryRecord extends ContentEntryInput {
   updated_at: string;
 }
 
+/** M7-S16-T05: authenticated, ACL-projected server-side table result. */
+export interface EntryTableRow {
+  id: number;
+  type_key: string;
+  title: string;
+  slug: string;
+  publication_status: 'draft' | 'published';
+  version: number;
+  created_at: string;
+  updated_at: string;
+  term_ids: number[];
+  /** Null for draft or any entry without a publicly routable URL. */
+  public_url: string | null;
+  /** Only custom fields the current actor is authorized to read. */
+  fields: Record<string, ContentFieldValue>;
+}
+
+export interface EntryTableResult {
+  schema_version: 1;
+  items: EntryTableRow[];
+  total: number;
+  status_counts: { all: number; draft: number; published: number };
+  limit: number;
+  offset: number;
+}
+
+export interface EntryTableQuery {
+  q?: string;
+  status?: 'all' | 'draft' | 'published';
+  category_id?: number;
+  tag_id?: number;
+  include_descendants?: boolean;
+  updated_month?: string;
+  sort?: 'title' | 'created_at' | 'updated_at' | 'id';
+  order?: 'asc' | 'desc';
+  limit?: number;
+  offset?: number;
+}
+
 export interface UserFieldGroupInput {
   local_key: string;
   title: string;

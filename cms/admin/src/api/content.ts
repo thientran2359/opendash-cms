@@ -3,6 +3,8 @@ import {
   CompositeEntrySaveResult,
   ContentEntryInput,
   ContentEntryRecord,
+  EntryTableQuery,
+  EntryTableResult,
   ContentTypeDefinition,
   EditorLayoutConfigV1,
   EditorLayoutSnapshot,
@@ -140,6 +142,17 @@ export function listContentEntries(
   appendEntryTermFilters(query, filters);
   return requestJson(`${entriesPath(typeKey)}?${query}`, {
     defaultErrorMessage: 'Không thể tải danh sách nội dung.',
+  });
+}
+
+/** The old entries API stays a bare array; table clients use this new endpoint. */
+export function queryContentEntryTable(typeKey: string, filter: EntryTableQuery = {}): Promise<EntryTableResult> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) {
+    if (value !== undefined && value !== null) query.set(key, String(value));
+  }
+  return requestJson(`${contentTypePath(typeKey)}/entry-table?${query}`, {
+    defaultErrorMessage: 'Không thể tải bảng nội dung.',
   });
 }
 
