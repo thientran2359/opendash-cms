@@ -28,3 +28,14 @@ planning 14/11, không thay Project.
 ## G1–G3 đã chuẩn bị cho toàn milestone (2026-11-14)
 
 [G1 inventory](../../../../.agents/research/2026-11-14-m7-site-features-g1.md) · [ADR-0014](../../../decisions/ADR-0014-m7-site-features.md) · [Contract](../../../contracts/M7_SITE_FEATURES.md) · [G3 đủ14 task](slices/2026-11-14-m7-site-features-g3.md). G2/G3 có hiệu lực sau merge design PR; mọi candidate ở bảng trên đã có task/Primary Acceptance/owner/dependency/acceptance, không candidate nào bị bỏ. Project Ready vẫn chờ M5/M6 Windows development gate và từng seam bàn giao (macOS NOT_RUN hoãn theo ADR-0014). Implementation NOT_STARTED, runtime/native/browser NOT_RUN. Không phát hành Issue hoặc dispatch từ lượt planning này.
+
+## Beta remediation disposition — 17/11/2026
+
+[Findings and M7 repair G3](slices/2026-11-16-usable-beta-fixes-g3.md) records all
+nine findings from #300. Aster owns #301 by direct owner handoff; Forge reviews.
+M7-S15-T01..T05 cover menu target array consumption, draft preservation, atomic
+published create, media picker and bounded navigation harness. M5-S11-T01 theme
+v2 discovery, M6-S09-T01 SSRF test reproducibility and M8-S10-T01/T02 recovery
+security/harness use separate milestone docs PRs; no runtime ownership is granted
+by this planning update. Mandatory fixes and harness receipts precede #302.
+F08 remains a security blocker; no Beta/native/release PASS from specs or CI.
