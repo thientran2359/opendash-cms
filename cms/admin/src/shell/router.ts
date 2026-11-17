@@ -22,6 +22,8 @@ export interface ParsedRoute {
   sub: string;
   typeKey?: string;
   entryId?: number;
+  taxonomyKind?: 'category' | 'tag';
+  taxonomyMode?: 'list' | 'new' | 'edit';
   templateRole?: string;
   rawHash: string;
   isLegacyContentRedirect?: boolean;
@@ -53,8 +55,18 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     return { view: 'dashboard', sub: 'dashboard', rawHash: '#/dashboard' };
   }
   if (first === 'posts') {
-    if (segs[1] === 'categories') return { view: 'taxonomy', sub: 'categories', rawHash: '#/posts/categories' };
-    if (segs[1] === 'tags') return { view: 'taxonomy', sub: 'tags', rawHash: '#/posts/tags' };
+    if (segs[1] === 'categories' || segs[1] === 'tags') {
+      const sub = segs[1];
+      const taxonomyKind = sub === 'categories' ? 'category' : 'tag';
+      if (segs[2] === 'new' && segs.length === 3) {
+        return { view: 'taxonomy', sub, taxonomyKind, taxonomyMode: 'new', rawHash: `#/posts/${sub}/new` };
+      }
+      if (segs.length === 4 && segs[3] === 'edit' && /^[1-9]\d*$/.test(segs[2]) && Number.isSafeInteger(Number(segs[2]))) {
+        return { view: 'taxonomy', sub, taxonomyKind, taxonomyMode: 'edit', entryId: Number(segs[2]), rawHash: `#/posts/${sub}/${segs[2]}/edit` };
+      }
+      if (segs.length === 2) return { view: 'taxonomy', sub, taxonomyKind, taxonomyMode: 'list', rawHash: `#/posts/${sub}` };
+      return { view: 'taxonomy', sub, taxonomyKind, taxonomyMode: 'edit', entryId: 0, rawHash: hash };
+    }
     if (segs[1] === 'new') return { view: 'posts', sub: 'new', rawHash: '#/posts/new' };
     if (segs[1] && segs[2] === 'edit' && /^\d+$/.test(segs[1])) {
       return { view: 'posts', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/posts/${segs[1]}/edit` };
@@ -95,7 +107,8 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     return { view: 'media', sub: segs[1] === 'upload' ? 'upload' : 'library', rawHash: `#/media${segs[1] === 'upload' ? '/upload' : ''}` };
   }
   if (first === 'taxonomy') {
-    return { view: 'taxonomy', sub: 'categories', rawHash: '#/posts/categories' };
+    const sub = segs[1] === 'tags' ? 'tags' : 'categories';
+    return { view: 'taxonomy', sub, taxonomyKind: sub === 'tags' ? 'tag' : 'category', taxonomyMode: 'list', rawHash: hash };
   }
   if (first === 'appearance' || first === 'themes') {
     const sub = first === 'themes' ? 'themes' : (segs[1] ?? 'themes');
@@ -155,6 +168,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 
 export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
   if (role === 'admin') return true;
+  if (route.view === 'taxonomy' && route.taxonomyMode !== 'list') return false;
   if (route.view === 'themes' || route.view === 'plugins' || route.view === 'users' || route.view === 'tools' || route.view === 'settings') {
     return false;
   }

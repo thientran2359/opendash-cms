@@ -123,6 +123,19 @@ pub async fn taxonomy_list(
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(page)).into_response())
 }
 
+pub async fn taxonomy_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    valid_id(id)?;
+    let result = taxonomy::get_term(&db, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy term."))?;
+    Ok(term_response(StatusCode::OK, result))
+}
+
 pub async fn taxonomy_create(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
