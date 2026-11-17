@@ -36,6 +36,7 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [G5 native macOS Intel — M7-S15-T01 / #319 (2026-11-17)](2026-11-17-m7-s15-t01-g5-macos.md) — real Chrome picker Page/Post/CPT, bounded pagination, 401/403/412, stable IDs, rollback old/new/old và M7 browser regression; Windows F01 chưa revalidate.
 - [G5 native macOS Intel — M5-S11-T01 / #320 (2026-11-17)](2026-11-17-m5-s11-t01-g5-macos.md) — real Chrome v2 revision discovery/activation, legacy workflow, sample import, 401/403/412/409, release Rust 5/5, old/new/old data continuity; Windows F02 chưa revalidate.
 - [G5 native macOS Intel — M7-S15-T02 / #321 (2026-11-17)](2026-11-17-m7-s15-t02-g5-macos.md) — Chrome draft navigation/Save/412/reload/delayed, store ACL test, Rust release 3/3 và old/new/old; tổ hợp browser 401/downgrade/reauth và Windows F03 vẫn NOT_RUN.
+- [G5 native macOS Intel — M7-S15-T03 / #322 (2026-11-17)](2026-11-17-m7-s15-t03-g5-macos.md) — atomic published Post/Page create v1, SQLite trigger/rollback, Chrome Admin trực tiếp, Rust release 5/5, old/new/old/new preservation; Windows F04/common RC chưa revalidate.
 
 - [M7 planning G1/G2/G3 — 14/11/2026](2026-11-14-m7-planning.md): docs/source validation only, full14-task coverage; M7 runtime/native/browser NOT_RUN.
 
