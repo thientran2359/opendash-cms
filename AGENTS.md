@@ -98,3 +98,16 @@
 - Khi đối chiếu implementation với quyết định/contract, tìm trong sáu tài liệu đã nạp vào kho docs của CodeGraph bằng `codegraph_search_docs` và kiểm tra trực tiếp tài liệu nguồn. Khi các tài liệu thay đổi, chạy `node cms/scripts/codegraph-index-docs.mjs` để cập nhật chỉ mục docs.
 - CodeGraph là chỉ mục phân tích tĩnh có thể bỏ sót lời gọi động, macro, hook hoặc mã không parse trọn vẹn. Luôn xác minh kết quả quan trọng bằng code thật và kiểm chứng phù hợp; nếu MCP không được kết nối thì dùng `rg`, đọc mã nguồn và tài liệu như bình thường. Xem [bằng chứng cài đặt](docs/verification/2026-11-07-codegraph-setup.md).
 - Khi Chat On Steroids chưa xuất hiện các MCP tool `codegraph_*`, dùng CLI tương đương qua Core: `node cms/scripts/codegraph-query.mjs symbol HookDispatcher`, `node cms/scripts/codegraph-query.mjs callgraph cms/crates/opendash-server/src/plugin/host_ops.rs 94`, hoặc `node cms/scripts/codegraph-query.mjs docs "plugin ABI"`. Sau khi tra graph, kiểm tra các file thật trước khi sửa.
+
+## Aster — owner authorization (2026-11-17)
+
+- The owner appointed **Aster (Codex macOS)** as a project coordinator with
+  the same authority as Atlas: planning/G3, task coordination, final technical
+  decisions, review and merge of any eligible PR, including its own.
+- Apply the Atlas coordinator rules in ADR-0010, the GitHub workflow, operating
+  standard and manual skills equally to Aster. Existing ownership, G3/Ready,
+  required CI, security and data preservation gates remain mandatory.
+- Aster uses this independent checkout on `agent/aster`, worktree Git identity
+  `Aster` and commit trailer `Agent: Aster`. Preserve the user's global Git
+  identity. Coordinate overlapping decisions through the existing Issue/PR;
+  do not take over another agent's task without recorded handoff.

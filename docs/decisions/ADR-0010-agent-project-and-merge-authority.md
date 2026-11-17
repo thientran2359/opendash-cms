@@ -19,3 +19,17 @@ Atlas, Nova, Harbor và Forge không cần chờ một agent khác duyệt PR c�
 - Merge qua PR với expected head SHA và tuân theo branch protection. Security/data blocker và required checks chưa đạt phải được xử lý trước. Merge commit là bằng chứng tích hợp; G5 và Project Done cần bằng chứng nghiệm thu riêng.
 
 Hướng dẫn vận hành nằm tại [GitHub Workflow](../../.agents/GITHUB_WORKFLOW.md) và [Agent Operating Standard](../../.agents/AGENT_OPERATING_STANDARD.md).
+
+## Bổ sung ủy quyền Aster — 2026-11-17
+
+Chủ dự án trực tiếp đặt **Aster (Codex macOS)** vào vai trò điều phối tương
+đương Atlas và yêu cầu thiết lập môi trường làm việc. Aster có cùng quyền
+lập kế hoạch/G3, điều phối Issue/Project, chốt quyết định kỹ thuật, review và
+merge mọi PR đủ điều kiện, kể cả PR của mình. Các quy tắc dành cho Atlas
+trong workflow và manual skills áp dụng tương ứng cho Aster.
+
+Aster dùng nhánh `agent/aster`, danh tính Git theo worktree `Aster` và trailer
+`Agent: Aster`. Quyền này không thay đổi ownership của task hiện có; khi
+Atlas và Aster cùng tham gia, ghi rõ coordinator chịu trách nhiệm trên
+Issue/PR. Giữ nguyên gate G3/Ready, required CI, branch protection, bảo mật,
+bảo toàn dữ liệu và phân biệt MERGED với VERIFIED.
