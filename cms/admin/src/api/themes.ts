@@ -5,11 +5,44 @@ export interface ThemeItem {
   compatible_block_id: string | null;
 }
 
+export interface ThemeRevisionSummary {
+  revision_id: string;
+  theme_id: string;
+  version: string;
+  revision_digest: string;
+  source_format: 'v1_legacy' | 'v2';
+}
+
+export interface ThemeSelection {
+  revision_id: string | null;
+  theme_id: string | null;
+  version: number;
+  legacy_block_id: string | null;
+  source_format: 'v1_legacy' | 'v2' | null;
+}
+
 export interface ThemesSummary {
   items: ThemeItem[];
   active_id: string | null;
   version: number;
   homepage_compatible: boolean | null;
+  revisions: ThemeRevisionSummary[];
+  selection: ThemeSelection;
+}
+
+export interface ThemeV2InstallResponse {
+  revision_id: string;
+  theme_id: string;
+  version: string;
+  revision_digest: string;
+  source_format: 'v2';
+  activated: false;
+}
+
+export type ThemeInstallResponse = ThemeItem | ThemeV2InstallResponse;
+
+export function isV2ThemeInstall(response: ThemeInstallResponse): response is ThemeV2InstallResponse {
+  return 'revision_id' in response;
 }
 
 export type ThemeOptionType = 'string' | 'number' | 'boolean' | 'select' | 'image_ref';
@@ -43,7 +76,7 @@ export function getThemes(): Promise<ThemesSummary> {
   });
 }
 
-export function installTheme(file: File, csrfToken: string): Promise<ThemeItem> {
+export function installTheme(file: File, csrfToken: string): Promise<ThemeInstallResponse> {
   return requestJson('/api/admin/themes', {
     method: 'POST',
     body: file,
@@ -61,6 +94,17 @@ export function activateTheme(id: string, version: number, csrfToken: string): P
     contentType: 'application/json',
     body: JSON.stringify({ id }),
     defaultErrorMessage: 'Không thể kích hoạt theme.',
+  });
+}
+
+export function activateThemeRevision(revisionId: string, selectionVersion: number, csrfToken: string): Promise<ThemeSelection> {
+  return requestJson('/api/admin/themes/active', {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: selectionVersion,
+    contentType: 'application/json',
+    body: JSON.stringify({ revision_id: revisionId }),
+    defaultErrorMessage: 'Không thể kích hoạt revision theme.',
   });
 }
 

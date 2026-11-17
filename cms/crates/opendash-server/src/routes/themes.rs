@@ -32,9 +32,7 @@ use crate::{
             ThemeList, ThemeRevisionRecord,
         },
     },
-    theme::{
-        Theme, is_v2_theme_zip, parse_theme_zip_v2, theme_asset_mime,
-    },
+    theme::{Theme, is_v2_theme_zip, parse_theme_zip_v2, theme_asset_mime},
 };
 
 static RUN_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -202,6 +200,9 @@ pub async fn theme_install(
         compatible_block_id: data.compatible_block_id.clone(),
     };
     insert_theme_block(&db, &data).await?;
+    // 0015 only backfills blocks present *at migration time*. Preserve the
+    // legacy ZIP install→list→CAS activation workflow for subsequent installs.
+    theme::register_installed_legacy_block(&db, &item.id).await?;
     Ok((StatusCode::CREATED, headers(None), Json(item)).into_response())
 }
 
@@ -211,7 +212,13 @@ pub async fn theme_activate(
     Extension(themes_root): Extension<ThemeStoreRoot>,
     request_headers: HeaderMap,
     State(content_registry): State<
-        Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>,
+        Arc<
+            tokio::sync::RwLock<
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
+            >,
+        >,
     >,
     input: Result<Json<ActivateInput>, JsonRejection>,
 ) -> ApiResult<Response> {
@@ -238,8 +245,7 @@ pub async fn theme_activate(
                 &rev.manifest_json,
             )
             .await?;
-            match theme::activate_revision(&db, &themes_root.0, &revision_id, Some(version))
-                .await?
+            match theme::activate_revision(&db, &themes_root.0, &revision_id, Some(version)).await?
             {
                 RevisionActivationOutcome::Activated(selection) => {
                     *content_registry.write().await =
@@ -249,9 +255,9 @@ pub async fn theme_activate(
                 RevisionActivationOutcome::NotFound => {
                     Err(ApiError::not_found("Revision theme chưa được cài đặt."))
                 }
-                RevisionActivationOutcome::MissingExpectedVersion => {
-                    Err(ApiError::precondition_required("Cần If-Match để kích hoạt theme."))
-                }
+                RevisionActivationOutcome::MissingExpectedVersion => Err(
+                    ApiError::precondition_required("Cần If-Match để kích hoạt theme."),
+                ),
                 RevisionActivationOutcome::Stale => Err(ApiError::precondition_failed(
                     "Theme đã thay đổi ở phiên khác (412). Tải lại trạng thái trước khi thử tiếp.",
                 )),
