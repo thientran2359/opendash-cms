@@ -1617,7 +1617,7 @@ async fn load_effective_taxonomies_in_tx(
     let rows: Vec<String> = sqlx::query_scalar(
         "SELECT taxonomy_kind
          FROM content_type_taxonomy_eligibility
-         WHERE content_type_key = ? AND provider_status = 'active' AND declaration_state = 'active'
+         WHERE content_type_key = ? AND provider_status = 'active' AND declaration_state = 'declared'
          ORDER BY taxonomy_kind ASC",
     )
     .bind(type_key)
