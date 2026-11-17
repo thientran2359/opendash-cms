@@ -4,6 +4,7 @@ export type AdminView =
   | 'dashboard'
   | 'posts'
   | 'pages'
+  | 'sections'
   | 'cpt'
   | 'media'
   | 'taxonomy'
@@ -83,6 +84,13 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     }
     return { view: 'cpt', sub: 'list', typeKey, rawHash: `#/cpt/${typeKey}` };
   }
+  if (first === 'sections') {
+    if (segs[1] === 'new') return { view: 'sections', sub: 'new', rawHash: '#/sections/new' };
+    if (segs[1] && segs[2] === 'edit' && /^\d+$/.test(segs[1])) {
+      return { view: 'sections', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/sections/${segs[1]}/edit` };
+    }
+    return { view: 'sections', sub: 'list', rawHash: '#/sections' };
+  }
   if (first === 'media') {
     return { view: 'media', sub: segs[1] === 'upload' ? 'upload' : 'library', rawHash: `#/media${segs[1] === 'upload' ? '/upload' : ''}` };
   }
@@ -91,7 +99,17 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
   }
   if (first === 'appearance' || first === 'themes') {
     const sub = first === 'themes' ? 'themes' : (segs[1] ?? 'themes');
-    return { view: 'themes', sub, rawHash: `#/appearance/${sub}` };
+    if (sub === 'content-types') {
+      const typeKey = segs[2] ? decodeURIComponent(segs[2]) : undefined;
+      return {
+        view: 'settings', sub: 'content-types', typeKey,
+        rawHash: typeKey ? `#/appearance/content-types/${typeKey}` : '#/appearance/content-types',
+      };
+    }
+    if (sub === 'library') return { view: 'themes', sub: 'library', rawHash: '#/appearance/library' };
+    if (sub === 'options') return { view: 'themes', sub: 'options', rawHash: '#/appearance/options' };
+    if (sub === 'menus') return { view: 'themes', sub: 'menus', rawHash: '#/appearance/menus' };
+    return { view: 'themes', sub: 'themes', rawHash: '#/appearance/themes' };
   }
   if (first === 'builder') {
     const entryParam = params.get('entry');
@@ -106,7 +124,9 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     };
   }
   if (first === 'contact') {
-    return { view: 'settings', sub: `contact-${segs[1] ?? 'submissions'}`, rawHash: `#/contact/${segs[1] ?? 'submissions'}` };
+    // Preserve legacy contact deep links while routing to the same guarded
+    // feature screen as #/settings/contact.
+    return { view: 'settings', sub: 'contact', rawHash: `#/contact/${segs[1] ?? 'submissions'}` };
   }
   if (first === 'plugins') {
     return { view: 'plugins', sub: segs[1] === 'install' ? 'install' : 'list', rawHash: `#/plugins${segs[1] === 'install' ? '/install' : ''}` };
@@ -116,7 +136,8 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     return { view: 'users', sub: segs[1] === 'new' ? 'new' : 'list', rawHash: `#/users${segs[1] === 'new' ? '/new' : ''}` };
   }
   if (first === 'tools') {
-    return { view: 'tools', sub: segs[1] ?? 'backup', rawHash: `#/tools/${segs[1] ?? 'backup'}` };
+    const sub = segs[1] === 'restore' ? 'backup' : (segs[1] ?? 'backup');
+    return { view: 'tools', sub, rawHash: `#/tools/${segs[1] ?? 'backup'}` };
   }
   if (first === 'settings') {
     const sub = segs[1] ?? 'general';

@@ -687,3 +687,30 @@ button.btn-danger {
     .od-sidebar, .od-quick-link, .od-nav-link { transition: none; }
   }
 }
+.od-nav-group + .od-nav-group {
+  margin-top: 1rem;
+}
+.od-nav-group-title {
+  margin: 0 0 .35rem .8rem;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+.od-nav-coming-soon {
+  margin-left: .25rem;
+  font-size: .65rem;
+  color: #cbd5e1;
+}
+.od-nav-link:disabled {
+  opacity: .65;
+  cursor: not-allowed;
+}
+.od-nav-sub-disabled {
+  display: block;
+  padding: .25rem .5rem;
+  font-size: .75rem;
+  color: #94a3b8;
+  cursor: not-allowed;
+}

@@ -6,6 +6,7 @@ import {
 import { ApiClientError } from '../../api/client.ts';
 
 interface UsersPanelProps {
+  mode?: 'list' | 'new';
   csrfToken: string | null;
   currentUserId: number | null;
   onApiError: (error: unknown, fallback: string) => void;
@@ -17,7 +18,7 @@ const fieldClass = 'w-full min-w-0 rounded-lg border border-slate-300 bg-white p
 const buttonClass = 'rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
 
 export const UsersPanel: React.FC<UsersPanelProps> = ({
-  csrfToken, currentUserId, onApiError, onOwnAccountChanged,
+  mode = 'list', csrfToken, currentUserId, onApiError, onOwnAccountChanged,
 }) => {
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -186,12 +187,13 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
 
   return (
     <div className="w-full min-w-0 space-y-8">
+      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{error} <button className="underline" type="button" onClick={() => void refresh()}>Tải lại</button></div>}
+      {notice && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800" role="status">{notice}</p>}
+      {mode === 'list' && <>
       <div>
         <h2 className="text-lg font-semibold text-slate-900">Danh sách tài khoản</h2>
         <p className="mt-1 text-sm text-slate-500">Chỉ Admin có thể quản lý tài khoản. Thay đổi username, vai trò hoặc mật khẩu sẽ thu hồi phiên đang hoạt động của tài khoản đó.</p>
       </div>
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{error} <button className="underline" type="button" onClick={() => void refresh()}>Tải lại</button></div>}
-      {notice && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800" role="status">{notice}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-slate-600">{loading ? 'Đang tải...' : total + ' tài khoản'}</p>
         <button className={buttonClass} type="button" disabled={loading || busy} onClick={() => void refresh()}>Làm mới</button>
@@ -244,7 +246,8 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
         <label className="block text-sm font-medium">Mật khẩu mới<input ref={resetInputRef} type="password" className={'mt-1 ' + fieldClass} required minLength={8} maxLength={128} autoComplete="new-password" value={resetPassword} onChange={e => setResetPassword(e.target.value)} disabled={busy}/></label>
         <div className="flex gap-2"><button type="submit" className="od-primary-action" disabled={busy}>Đặt lại mật khẩu</button><button type="button" className={buttonClass} onClick={() => setResetting(null)} disabled={busy}>Hủy</button></div>
       </form>}
-      <form className="space-y-4 rounded-xl border border-slate-200 p-4" onSubmit={handleCreate}>
+      </>}
+      {mode === 'new' && <form className="space-y-4 rounded-xl border border-slate-200 p-4" onSubmit={handleCreate}>
         <h3 className="font-semibold text-slate-900">Thêm tài khoản</h3>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="text-sm font-medium">Tên đăng nhập<input className={'mt-1 ' + fieldClass} required minLength={3} maxLength={32} autoComplete="off" value={newUsername} onChange={e => setNewUsername(e.target.value)} disabled={busy}/></label>
@@ -252,7 +255,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({
           <label className="text-sm font-medium">Vai trò<select className={'mt-1 ' + fieldClass} value={newRole} onChange={e => setNewRole(e.target.value as UserRole)} disabled={busy}><option value="editor">Editor</option><option value="admin">Admin</option></select></label>
         </div>
         <button type="submit" disabled={busy || !csrfToken} className="od-primary-action">Tạo tài khoản</button>
-      </form>
+      </form>}
     </div>
   );
 };
