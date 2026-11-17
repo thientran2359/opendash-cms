@@ -292,18 +292,21 @@ dispatch probe `MAC_SSH_HOST_NOT_CONFIGURED` did not establish delivery/start.
 
 ## Owner Admin review follow-ups — 17/11/2026
 
-Aster coordinator, Harbor implementer; specs PLANNED, publication/Project gate pending.
+Aster coordinator, Harbor implementer; specs merged in PR #346 at
+`49b0a205f3d831bf2e1708166684be6af63c8251`. Ten Issues published; live Project
+status/Ready NOT_VERIFIED by Aster. First task #347; one active Harbor task, serial
+dependencies as specified. Publication is not a claim or dispatch.
 No changes to #302 Project or closure, no Beta PASS.
 
 | Task | Scope | Status | Issue |
 | --- | --- | --- | --- |
-| [M7-S16-T01](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Make image and video upload independently usable | Harbor · PLANNED | Not published |
-| [M7-S16-T02](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Group Admin navigation and isolate destination screens | Harbor · PLANNED | Not published |
-| [M7-S16-T03](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Fix publication actions and render taxonomy once in editor | Harbor · PLANNED | Not published |
-| [M7-S16-T04](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Separate category and tag lists with dedicated term editors | Harbor · PLANNED | Not published |
-| [M7-S16-T05](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Add bounded permission-aware entry table query | Harbor · PLANNED | Not published |
-| [M7-S16-T06](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Build useful Posts Pages and CPT list tables | Harbor · PLANNED | Not published |
-| [M6-S10-T01](milestones/M6/slices/2026-11-17-owner-admin-review-g3.md) | Enable safe provider columns actions and taxonomy panels | Harbor · PLANNED | Not published |
-| [M4-S11-T01](milestones/M4/slices/2026-11-17-owner-admin-review-g3.md) | Open and save Builder for the exact Page | Harbor · PLANNED | Not published |
-| [M4-S11-T02](milestones/M4/slices/2026-11-17-owner-admin-review-g3.md) | Add site-owned private Section CPT with scoped Builder | Harbor · PLANNED | Not published |
-| [M5-S12-T01](milestones/M5/slices/2026-11-17-owner-admin-review-g3.md) | Expose local template library and copy Sections into designs | Harbor · PLANNED | Not published |
+| [M7-S16-T01](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Make image and video upload independently usable | Harbor · PLANNED | [#347](https://github.com/thientran2359/opendash-cms/issues/347) |
+| [M7-S16-T02](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Group Admin navigation and isolate destination screens | Harbor · PLANNED | [#348](https://github.com/thientran2359/opendash-cms/issues/348) |
+| [M7-S16-T03](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Fix publication actions and render taxonomy once in editor | Harbor · PLANNED | [#349](https://github.com/thientran2359/opendash-cms/issues/349) |
+| [M7-S16-T04](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Separate category and tag lists with dedicated term editors | Harbor · PLANNED | [#350](https://github.com/thientran2359/opendash-cms/issues/350) |
+| [M7-S16-T05](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Add bounded permission-aware entry table query | Harbor · PLANNED | [#351](https://github.com/thientran2359/opendash-cms/issues/351) |
+| [M7-S16-T06](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Build useful Posts Pages and CPT list tables | Harbor · PLANNED | [#352](https://github.com/thientran2359/opendash-cms/issues/352) |
+| [M6-S10-T01](milestones/M6/slices/2026-11-17-owner-admin-review-g3.md) | Enable safe provider columns actions and taxonomy panels | Harbor · PLANNED | [#353](https://github.com/thientran2359/opendash-cms/issues/353) |
+| [M4-S11-T01](milestones/M4/slices/2026-11-17-owner-admin-review-g3.md) | Open and save Builder for the exact Page | Harbor · PLANNED | [#354](https://github.com/thientran2359/opendash-cms/issues/354) |
+| [M4-S11-T02](milestones/M4/slices/2026-11-17-owner-admin-review-g3.md) | Add site-owned private Section CPT with scoped Builder | Harbor · PLANNED | [#355](https://github.com/thientran2359/opendash-cms/issues/355) |
+| [M5-S12-T01](milestones/M5/slices/2026-11-17-owner-admin-review-g3.md) | Expose local template library and copy Sections into designs | Harbor · PLANNED | [#356](https://github.com/thientran2359/opendash-cms/issues/356) |
