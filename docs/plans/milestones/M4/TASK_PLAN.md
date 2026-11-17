@@ -20,3 +20,9 @@
 | M4-P10 | Taxonomy entry links, filter/query cho CPT và Builder | CNT-03/04 (BLD-05) | P09, M3 entry CRUD, G2 cardinality/concurrency | Gắn/đổi term, list/filter đúng, delete/reparent không làm mất entry, ETag và restart; URL taxonomy public G2 M5 |
 
 **Giới hạn:** Theme composition page/header/footer/archive/single và mẫu import là M5; SEO hoàn chỉnh M7; plugin CPT/fields provider bridge cùng plugin UI/manifest toàn diện ở M6. [M4→M5 gate](../../ROADMAP_V1.md#gates-quan-trọng-xuyên-các-milestone) yêu cầu taxonomy và layout/field binding có lưu/preview/test.
+
+## Owner review notes01–07 — 17/11/2026
+
+[Harbor follow-up G3](slices/2026-11-17-owner-admin-review-g3.md) covers the bounded
+Admin delta under [ADR-0018](../../../decisions/ADR-0018-owner-admin-review.md).
+PLANNED, not Project Ready or runtime VERIFIED. See shared serial delivery order.

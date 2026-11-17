@@ -14,3 +14,9 @@
 | M6-P08 | **C từ #15:** plugin CPT/field provider bridge vào canonical core schema | PLG-03 (CNT-01/02) | M3 core CPT/post/page + M4-P09/P10 taxonomy; Full-Track G1/G2 manifest/namespace/schema evolution/atomic rollback | Plugin khai báo CPT/fields, collision/invalid declarations bị chặn; disable/restart/reinstall vẫn quản lý entry, không ảnh hưởng built-in post/page |
 
 **Ngoài phạm vi:** plugin viết giao diện HTML tự do và scheduled jobs (ngoài PRD V1), backup engine (M8), UI chỉnh sửa theme theo code. Khi plugin bị tắt phải giữ dữ liệu do website sở hữu và quản trị được qua domain APIs.
+
+## Owner review notes01–07 — 17/11/2026
+
+[Harbor follow-up G3](slices/2026-11-17-owner-admin-review-g3.md) covers the bounded
+Admin delta under [ADR-0018](../../../decisions/ADR-0018-owner-admin-review.md).
+PLANNED, not Project Ready or runtime VERIFIED. See shared serial delivery order.

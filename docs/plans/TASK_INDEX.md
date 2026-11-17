@@ -289,3 +289,21 @@ dispatch probe `MAC_SSH_HOST_NOT_CONFIGURED` did not establish delivery/start.
 | M6-S09-T01 | Harbor | **Done · G5 VERIFIED native macOS Intel 2026-11-17** — Project #3 Done/Issue closed completed; merged-source unfiltered Rust release 2× **162/162 PASS**, isolated SSRF PASS, redirect hit counter 0, no product egress change. Windows F09 historical full-suite FAIL/root cause unproven, native Windows/common RC NOT_RUN | [#325](https://github.com/thientran2359/opendash-cms/issues/325) · [G4 PR #342](https://github.com/thientran2359/opendash-cms/pull/342) · [macOS G5](../verification/2026-11-17-m6-s09-t01-g5-macos.md) |
 | M8-S10-T01 | Harbor | **Done · native macOS G5 VERIFIED 2026-11-17** — Project #3 Done / Issue closed completed; restore safe-before-activation across restart, release workspace PASS, actual Intel old/new/old rollback PASS. Windows historical F08 remains a blocker **before common RC** | [#318](https://github.com/thientran2359/opendash-cms/issues/318) · [G4 PR #328](https://github.com/thientran2359/opendash-cms/pull/328) · [macOS G5](../verification/2026-11-17-m8-s10-t01-g5-macos.md) |
 | M8-S10-T02 | Harbor | **Done · G5 VERIFIED native macOS Intel 2026-11-17** — Project #3 Done/Issue closed completed; tracked Chrome encrypted backup→recovery new root Safe Mode→reauth→activate→Visual Builder re-edit→restart PASS; negative nav/server/wrong Admin/wrong archive passphrase exit 1, watchdog exit 124, owned cleanup & preserved source/candidate; Windows F06/common RC NOT_RUN | [#326](https://github.com/thientran2359/opendash-cms/issues/326) · [G4 PR #344](https://github.com/thientran2359/opendash-cms/pull/344) · [macOS G5](../verification/2026-11-17-m8-s10-t02-g5-macos.md) |
+
+## Owner Admin review follow-ups — 17/11/2026
+
+Aster coordinator, Harbor implementer; specs PLANNED, publication/Project gate pending.
+No changes to #302 Project or closure, no Beta PASS.
+
+| Task | Scope | Status | Issue |
+| --- | --- | --- | --- |
+| [M7-S16-T01](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Make image and video upload independently usable | Harbor · PLANNED | Not published |
+| [M7-S16-T02](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Group Admin navigation and isolate destination screens | Harbor · PLANNED | Not published |
+| [M7-S16-T03](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Fix publication actions and render taxonomy once in editor | Harbor · PLANNED | Not published |
+| [M7-S16-T04](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Separate category and tag lists with dedicated term editors | Harbor · PLANNED | Not published |
+| [M7-S16-T05](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Add bounded permission-aware entry table query | Harbor · PLANNED | Not published |
+| [M7-S16-T06](milestones/M7/slices/2026-11-17-owner-admin-review-g3.md) | Build useful Posts Pages and CPT list tables | Harbor · PLANNED | Not published |
+| [M6-S10-T01](milestones/M6/slices/2026-11-17-owner-admin-review-g3.md) | Enable safe provider columns actions and taxonomy panels | Harbor · PLANNED | Not published |
+| [M4-S11-T01](milestones/M4/slices/2026-11-17-owner-admin-review-g3.md) | Open and save Builder for the exact Page | Harbor · PLANNED | Not published |
+| [M4-S11-T02](milestones/M4/slices/2026-11-17-owner-admin-review-g3.md) | Add site-owned private Section CPT with scoped Builder | Harbor · PLANNED | Not published |
+| [M5-S12-T01](milestones/M5/slices/2026-11-17-owner-admin-review-g3.md) | Expose local template library and copy Sections into designs | Harbor · PLANNED | Not published |
