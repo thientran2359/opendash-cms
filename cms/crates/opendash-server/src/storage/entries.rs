@@ -1006,14 +1006,16 @@ pub async fn commit_composite_entry_save(
     let values_json = serde_json::to_string(&plan.merged_input.values)?;
     let saved_id = match entry_id {
         None => {
-            let status_clause = plan
-                .publication_status
-                .as_deref()
-                .unwrap_or(if matches!(type_key, "post" | "page") {
-                    "draft"
-                } else {
-                    "published"
-                });
+            // Migration 0008 deliberately rejects a directly published INSERT
+            // for the built-in types. Keep that security trigger intact and
+            // transition to published *within this same writer transaction*.
+            // No intermediate draft can be observed or committed.
+            let is_builtin = matches!(type_key, "post" | "page");
+            let status_clause = if is_builtin {
+                "draft"
+            } else {
+                plan.publication_status.as_deref().unwrap_or("published")
+            };
             let res = sqlx::query(
                 "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
                  VALUES (?, ?, ?, ?, ?)",
@@ -1025,12 +1027,25 @@ pub async fn commit_composite_entry_save(
             .bind(status_clause)
             .execute(&mut *tx)
             .await;
-            match res {
+            let new_id = match res {
                 Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
                     return Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."));
                 }
                 other => other?.last_insert_rowid(),
+            };
+            if is_builtin && plan.publication_status.as_deref() == Some("published") {
+                // Initial create remains v1; this is one logical atomic Save,
+                // not a separate publication/CAS transition.
+                sqlx::query(
+                    "UPDATE content_entries SET publication_status = 'published'
+                     WHERE id = ? AND content_type_key = ? AND publication_status = 'draft'",
+                )
+                .bind(new_id)
+                .bind(type_key)
+                .execute(&mut *tx)
+                .await?;
             }
+            new_id
         }
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
