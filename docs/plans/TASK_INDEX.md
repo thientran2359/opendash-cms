@@ -215,15 +215,17 @@ Danh sách này là **bản tóm tắt dễ đọc**; **[GitHub Issues](https://
 
 [ADR-0017](../decisions/ADR-0017-usable-beta-staging.md) ·
 [G3](milestones/M7/slices/2026-11-16-usable-beta-g3.md).
-Không thêm candidate/capability. Issue phát hành sau docs merge với G3 source immutable;
-bảng này không cấp Ready.
+Không thêm candidate/capability. G3 merged qua PR #293 tại
+`9d5929bcee8c3eb43a5d49977bd745c89e39ecfc`; product baseline
+`d1338d631e1421db075db6f024afabee988de99a`. [Beta tracker #304](https://github.com/thientran2359/opendash-cms/issues/304).
+Issue/Project là nguồn live; snapshot 17/11/2026 dưới đây không tự cấp Ready.
 
 | Task | Responsible | Dependency / outcome | Issue |
 | --- | --- | --- | --- |
-| M7-S14-T01 | Forge | G3 merged + free slot; Windows fresh-site audit report | Chưa phát hành |
-| M7-S14-T02 | Atlas | T01; all findings disposition và complete G3 fixes | Chưa phát hành |
-| M7-S14-T03 | Forge | T02 + required fixes G5 + human tester; retest/dogfood | Chưa phát hành |
-| M7-S14-T04 | Atlas | T03; Beta-only readiness report | Chưa phát hành |
+| M7-S14-T01 | Forge | Ready đã xác minh; Windows fresh-site audit, chưa có G5 | [#300](https://github.com/thientran2359/opendash-cms/issues/300) |
+| M7-S14-T02 | Atlas | Backlog; T01 → all findings disposition và complete G3 fixes | [#301](https://github.com/thientran2359/opendash-cms/issues/301) |
+| M7-S14-T03 | Forge | Backlog; T02 + required fixes G5 + human tester → retest/dogfood | [#302](https://github.com/thientran2359/opendash-cms/issues/302) |
+| M7-S14-T04 | Atlas | Backlog; T03 → Beta-only readiness report | [#303](https://github.com/thientran2359/opendash-cms/issues/303) |
 
 **Live snapshot đã kiểm 16/11:** #157/#188 In progress; #214/#215/#242/#245/#246/#247/#248
 Backlog; #284 Done. #242/#245 hiện do Forge phụ trách theo owner transfer.
