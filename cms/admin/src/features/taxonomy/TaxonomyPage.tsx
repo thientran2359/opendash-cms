@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
-import { deleteTaxonomyTerm, listAllTaxonomyTerms, type TaxonomyKind, type TaxonomyTerm } from '../../api/taxonomy.ts';
+import { deleteTaxonomyTerm, getTaxonomyDefinition, listAllTaxonomyTerms,
+  type TaxonomyDefinition, type TaxonomyKind, type TaxonomyTerm } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
 
 interface TaxonomyPageProps {
@@ -14,9 +15,9 @@ interface TaxonomyPageProps {
 const PAGE_SIZE = 20;
 const buttonClass = 'rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50';
 
-function orderedTerms(kind: TaxonomyKind, terms: TaxonomyTerm[]): Array<{ term: TaxonomyTerm; depth: number }> {
+function orderedTerms(hierarchical: boolean, terms: TaxonomyTerm[]): Array<{ term: TaxonomyTerm; depth: number }> {
   const sort = (a: TaxonomyTerm, b: TaxonomyTerm) => a.name.localeCompare(b.name, 'vi') || a.id - b.id;
-  if (kind === 'tag') return [...terms].sort(sort).map(term => ({ term, depth: 0 }));
+  if (!hierarchical) return [...terms].sort(sort).map(term => ({ term, depth: 0 }));
   const ids = new Set(terms.map(term => term.id));
   const children = new Map<number | null, TaxonomyTerm[]>();
   for (const term of terms) {
@@ -44,6 +45,7 @@ function orderedTerms(kind: TaxonomyKind, terms: TaxonomyTerm[]): Array<{ term: 
 /** Route chooses the fixed taxonomy kind. Lists never mount an editor form. */
 export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash }: TaxonomyPageProps) {
   const [terms, setTerms] = useState<TaxonomyTerm[]>([]);
+  const [definition, setDefinition] = useState<TaxonomyDefinition | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -51,19 +53,26 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
   const admin = user?.role === 'admin';
-  const listHash = `#/posts/${kind === 'category' ? 'categories' : 'tags'}`;
+  const listHash = kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
+    : `#/taxonomy/${encodeURIComponent(kind)}/terms`;
+  const newHash = `${listHash}/new`;
+  const editHash = (id: number) => `${listHash}/${id}/edit`;
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     if (!user) return;
     setLoading(true);
     try {
-      const received = await listAllTaxonomyTerms(kind, signal);
+      const [received, descriptor] = await Promise.all([
+        listAllTaxonomyTerms(kind, signal), getTaxonomyDefinition(kind, signal),
+      ]);
       if (signal?.aborted) return;
       setTerms(received);
+      setDefinition(descriptor);
       setError('');
     } catch (cause) {
       if (signal?.aborted) return;
       setTerms([]);
+      setDefinition(null);
       setError(cause instanceof Error ? cause.message : 'Không thể tải taxonomy.');
       onApiError(cause, 'Không thể tải taxonomy.');
     } finally {
@@ -78,7 +87,7 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
     return () => controller.abort();
   }, [refresh]);
 
-  const ordered = useMemo(() => orderedTerms(kind, terms), [kind, terms]);
+  const ordered = useMemo(() => orderedTerms(Boolean(definition?.hierarchical), terms), [definition?.hierarchical, terms]);
   const query = search.trim().toLocaleLowerCase('vi');
   const filtered = ordered.filter(({term}) => !query || term.name.toLocaleLowerCase('vi').includes(query)
     || term.slug.includes(query) || String(term.id) === query);
@@ -89,7 +98,7 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
 
   const remove = async (term: TaxonomyTerm) => {
     if (!admin || !csrfToken || busy) return;
-    if (!window.confirm(`Xóa vĩnh viễn ${kind === 'category' ? 'danh mục' : 'thẻ'} "${term.name}" (#${term.id})? Liên kết nội dung hoặc mục con sẽ chặn xóa.`)) return;
+    if (!window.confirm(`Xóa vĩnh viễn term "${term.name}" (#${term.id}) trong taxonomy ${kind}? Liên kết nội dung hoặc mục con sẽ chặn xóa.`)) return;
     setBusy(true); setError(''); setNotice('');
     try {
       await deleteTaxonomyTerm(term.id, term.version, csrfToken);
@@ -109,16 +118,20 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">Nội dung / Taxonomy</p>
           <h2 className="mt-2 text-2xl font-bold text-slate-900">
-            {kind === 'category' ? 'Danh mục' : 'Thẻ'} ({terms.length})
+            {definition?.label ?? (kind === 'category' ? 'Danh mục' : kind === 'tag' ? 'Thẻ' : kind)} ({terms.length})
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            {kind === 'category' ? 'Danh mục có tối đa 8 cấp; có thể chuyển cha mà không đổi ID.' : 'Thẻ không có cha; đổi tên hoặc slug không đổi ID.'}
+            {definition?.hierarchical ? 'Taxonomy phân cấp tối đa 8 cấp; có thể chuyển cha mà không đổi ID.' : 'Taxonomy phẳng không có cha; đổi tên hoặc slug không đổi ID.'}
           </p>
-          {!admin && user && <p className="text-sm text-slate-600">Editor chỉ xem danh sách; Admin mới được chỉnh sửa.</p>}
+          {!admin && user && <p className="text-sm text-slate-600">Editor có thể chỉnh sửa extension field được cấp quyền; các thuộc tính lõi chỉ Admin sửa.</p>}
+          {definition && (definition.provider_status !== 'active' || definition.declaration_state !== 'declared') &&
+            <p className="text-sm text-amber-700">Taxonomy hiện không hoạt động; vẫn có thể xem term đã lưu.</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          {admin && <button type="button" className="od-primary-action" disabled={busy}
-            onClick={() => onNavigateHash(`${listHash}/new`)}>Thêm mới</button>}
+          {admin && <button type="button" className="od-primary-action" disabled={busy || loading || !definition || definition.provider_status !== 'active' || definition.declaration_state !== 'declared'}
+            onClick={() => onNavigateHash(newHash)}>Thêm mới</button>}
+          <button type="button" className={buttonClass} disabled={busy}
+            onClick={() => onNavigateHash('#/taxonomy/definitions')}>Định nghĩa taxonomy</button>
           <button type="button" className={buttonClass} disabled={loading || busy}
             onClick={() => void refresh()}>Làm mới</button>
         </div>
@@ -143,22 +156,22 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
               <div className="min-w-0 space-y-1">
                 <h3 className="break-words text-sm font-semibold text-slate-900">
-                  {kind === 'category' && depth > 0 && <span aria-hidden="true" className="mr-1 text-slate-400">{'— '.repeat(Math.min(depth, 7))}</span>}
+                  {definition?.hierarchical && depth > 0 && <span aria-hidden="true" className="mr-1 text-slate-400">{'— '.repeat(Math.min(depth, 7))}</span>}
                   {term.name}
                 </h3>
                 <p className="break-all text-xs text-slate-600">/{term.slug} · ID #{term.id} · v{term.version}</p>
-                {kind === 'category' && <p className="text-xs text-slate-500">
+                {definition?.hierarchical && <p className="text-xs text-slate-500">
                   {term.parent_id === null ? 'Danh mục gốc' : `Cha: ${byId.get(term.parent_id)?.name ?? `#${term.parent_id}`}`} · Cấp {depth + 1}
                 </p>}
               </div>
-              {admin && <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2">
                 <button type="button" className={buttonClass} disabled={busy}
-                  aria-label={`Sửa ${term.name}, ID ${term.id}`}
-                  onClick={() => onNavigateHash(`${listHash}/${term.id}/edit`)}>Sửa</button>
-                <button type="button" className={buttonClass} disabled={busy}
+                  aria-label={`Mở chỉnh sửa ${term.name}, ID ${term.id}`}
+                  onClick={() => onNavigateHash(editHash(term.id))}>{admin ? 'Sửa' : 'Extensions'}</button>
+                {admin && <button type="button" className={buttonClass} disabled={busy}
                   aria-label={`Xóa ${term.name}, ID ${term.id}`}
-                  onClick={() => void remove(term)}>Xóa</button>
-              </div>}
+                  onClick={() => void remove(term)}>Xóa</button>}
+              </div>
             </div>
           </article>
         ))}

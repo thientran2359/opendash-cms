@@ -1,13 +1,18 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   listAllTaxonomyTerms,
+  listEffectiveTaxonomies,
+  listTaxonomyDefinitions,
   type EntryTermFilters,
+  type TaxonomyDefinition,
   type TaxonomyKind,
   type TaxonomyTerm,
 } from '../../api/taxonomy.ts';
 
 interface TermsProps {
   userId: number | null;
+  /** Scope the picker to the server's current canonical eligibility for this CPT. */
+  typeKey?: string;
   disabled?: boolean;
   onApiError: (error: unknown, fallback: string) => void;
 }
@@ -24,14 +29,14 @@ interface TermFiltersProps extends TermsProps {
 }
 
 const fieldClass = 'block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 disabled:opacity-50';
-const maxTerms: Record<TaxonomyKind, number> = { category: 32, tag: 64 };
+const maxTerms = (kind: TaxonomyKind): number => kind === 'category' ? 32 : 64;
 
 function sortTerms(a: TaxonomyTerm, b: TaxonomyTerm): number {
   return a.name.localeCompare(b.name, 'vi') || a.id - b.id;
 }
 
-/** Order categories by parent without hiding an orphan if the tree changed mid-fetch. */
-function categoryTree(terms: TaxonomyTerm[]): Array<{ term: TaxonomyTerm; depth: number }> {
+/** Order hierarchical terms by parent without hiding an orphan if the tree changed mid-fetch. */
+function termTree(terms: TaxonomyTerm[]): Array<{ term: TaxonomyTerm; depth: number }> {
   const byParent = new Map<number | null, TaxonomyTerm[]>();
   const known = new Set(terms.map(term => term.id));
   for (const term of terms) {
@@ -59,66 +64,96 @@ function categoryTree(terms: TaxonomyTerm[]): Array<{ term: TaxonomyTerm; depth:
   return result;
 }
 
-function useTermOptions(userId: number | null, onApiError: TermsProps['onApiError']) {
-  const [categories, setCategories] = useState<TaxonomyTerm[]>([]);
-  const [tags, setTags] = useState<TaxonomyTerm[]>([]);
+function useTermOptions(userId: number | null, typeKey: string | undefined,
+  onApiError: TermsProps['onApiError'], allowedKinds?: TaxonomyKind[]) {
+  const [definitions, setDefinitions] = useState<TaxonomyDefinition[]>([]);
+  const [byKind, setByKind] = useState<Record<string, TaxonomyTerm[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const onErrorRef = useRef(onApiError);
   onErrorRef.current = onApiError;
+  const kindsKey = allowedKinds?.join('\u0001') ?? '';
 
   useEffect(() => {
     if (userId === null) {
-      setCategories([]);
-      setTags([]);
+      setDefinitions([]);
+      setByKind({});
       setLoading(false);
       return;
     }
     const controller = new AbortController();
     setLoading(true);
     setError('');
+    setDefinitions([]);
+    setByKind({});
     Promise.all([
-      listAllTaxonomyTerms('category', controller.signal),
-      listAllTaxonomyTerms('tag', controller.signal),
-    ])
-      .then(([nextCategories, nextTags]) => {
+      listTaxonomyDefinitions(controller.signal),
+      typeKey ? listEffectiveTaxonomies(typeKey, controller.signal)
+        : Promise.resolve(allowedKinds ?? ['category', 'tag']),
+    ]).then(async ([knownDefinitions, eligible]) => {
+      // The backend checks eligibility again on Save. Do not offer unknown,
+      // withdrawn or inactive definitions, even if a stale UI has their keys.
+      const permitted = [...new Set(eligible)];
+      const available = knownDefinitions.filter(definition => permitted.includes(definition.key)
+        && definition.provider_status === 'active' && definition.declaration_state === 'declared');
+      const pages = await Promise.all(available.map(async definition =>
+        [definition.key, await listAllTaxonomyTerms(definition.key, controller.signal)] as const));
+      return { available, pages };
+    })
+      .then(({ available, pages }) => {
         if (controller.signal.aborted) return;
-        setCategories(nextCategories);
-        setTags(nextTags);
+        setDefinitions(available);
+        setByKind(Object.fromEntries(pages));
       })
       .catch(cause => {
         if (controller.signal.aborted) return;
-        setError(cause instanceof Error ? cause.message : 'Không thể tải category/tag.');
-        onErrorRef.current(cause, 'Không thể tải category/tag.');
+        setError(cause instanceof Error ? cause.message : 'Không thể tải taxonomy được áp dụng.');
+        onErrorRef.current(cause, 'Không thể tải taxonomy được áp dụng.');
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [userId, revision]);
+  }, [userId, typeKey, kindsKey, revision]);
 
-  return { categories, tags, loading, error, reload: () => setRevision(value => value + 1) };
+  return { definitions, byKind,
+    categories: byKind.category ?? [], tags: byKind.tag ?? [], loading, error,
+    reload: () => setRevision(value => value + 1) };
 }
 
 /** Native checkboxes preserve keyboard navigation and leave unknown saved IDs removable. */
-export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError, allowedKinds = ['category', 'tag'] }: TermPickerProps) {
-  const { categories, tags, loading, error, reload } = useTermOptions(userId, onApiError);
+export function TermPicker({ userId, typeKey, disabled, selectedIds, onChange, onApiError, allowedKinds }: TermPickerProps) {
+  const { definitions, byKind, loading, error, reload } = useTermOptions(userId, typeKey, onApiError, allowedKinds);
   const searchId = useId();
   const [search, setSearch] = useState('');
   const [selectionError, setSelectionError] = useState('');
-  const allTerms = useMemo(() => [...categories, ...tags], [categories, tags]);
+  const allTerms = useMemo(() => Object.values(byKind).flat(), [byKind]);
   const known = useMemo(() => new Map(allTerms.map(term => [term.id, term])), [allTerms]);
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const categoryCount = selectedIds.filter(id => known.get(id)?.kind === 'category').length;
-  const tagCount = selectedIds.filter(id => known.get(id)?.kind === 'tag').length;
+  const counts = useMemo(() => {
+    const result: Record<string, number> = {};
+    for (const id of selectedIds) {
+      const kind = known.get(id)?.kind;
+      if (kind) result[kind] = (result[kind] ?? 0) + 1;
+    }
+    return result;
+  }, [selectedIds, known]);
   const unknownIds = selectedIds.filter(id => !known.has(id));
   const normalizedSearch = search.trim().toLocaleLowerCase('vi');
 
   const toggle = (id: number, checked: boolean) => {
     const term = known.get(id);
     if (checked && term) {
-      const count = term.kind === 'category' ? categoryCount : tagCount;
-      if (count >= maxTerms[term.kind]) {
-        setSelectionError(`Tối đa ${maxTerms[term.kind]} ${term.kind === 'category' ? 'category' : 'tag'} cho một nội dung.`);
+      if (unknownIds.length > 0) {
+        setSelectionError('Có term đã lưu không còn khả dụng. Hãy bỏ các ID đó trước khi chọn thêm term khác.');
+        return;
+      }
+      if (selected.size >= 96) {
+        setSelectionError('Một nội dung chỉ được gắn tối đa 96 term tổng cộng.');
+        return;
+      }
+      const count = counts[term.kind] ?? 0;
+      if (count >= maxTerms(term.kind)) {
+        setSelectionError(`Tối đa ${maxTerms(term.kind)} term của taxonomy ${term.kind} cho một nội dung.`);
         return;
       }
     }
@@ -127,27 +162,28 @@ export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError
       .sort((a, b) => a - b));
   };
 
-  const allGroups: Array<{ kind: TaxonomyKind; title: string; terms: Array<{ term: TaxonomyTerm; depth: number }>; count: number }> = [
-    { kind: 'category', title: 'Danh mục', terms: categoryTree(categories), count: categoryCount },
-    { kind: 'tag', title: 'Thẻ', terms: [...tags].sort(sortTerms).map(term => ({ term, depth: 0 })), count: tagCount },
-  ];
-  const groups = allGroups.filter(group => allowedKinds.includes(group.kind));
-  const selectedTags = tags.filter(term => selected.has(term.id) && allowedKinds.includes('tag'));
+  const groups = definitions.map(definition => ({
+    kind: definition.key, title: definition.label,
+    terms: definition.hierarchical ? termTree(byKind[definition.key] ?? [])
+      : [...(byKind[definition.key] ?? [])].sort(sortTerms).map(term => ({ term, depth: 0 })),
+    count: counts[definition.key] ?? 0,
+  }));
+  const selectedTags = (byKind.tag ?? []).filter(term => selected.has(term.id));
 
   return (
-    <section className="min-w-0 space-y-3" aria-label="Gắn danh mục và thẻ">
+    <section className="min-w-0 space-y-3" aria-label="Gắn taxonomy cho nội dung">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-600">Chọn tối đa 32 danh mục và 64 thẻ (khi được cho phép).</p>
+        <p className="text-xs text-slate-600">Chọn tối đa 32 category hoặc 64 term mỗi taxonomy khác được cho phép.</p>
         <button type="button" className="btn-secondary" onClick={reload} disabled={disabled || loading}>
-          Tải lại danh mục/thẻ
+          Tải lại taxonomy
         </button>
       </div>
       <div>
-        <label htmlFor={searchId} className="mb-1 block text-sm font-medium text-slate-700">Tìm danh mục hoặc thẻ</label>
+        <label htmlFor={searchId} className="mb-1 block text-sm font-medium text-slate-700">Tìm term</label>
         <input id={searchId} type="search" value={search} onChange={event => setSearch(event.target.value)}
           placeholder="Tìm theo tên hoặc slug" disabled={disabled} className={fieldClass} />
       </div>
-      {loading && <p role="status" className="text-sm text-slate-600">Đang tải category/tag…</p>}
+      {loading && <p role="status" className="text-sm text-slate-600">Đang tải taxonomy được áp dụng…</p>}
       {error && (
         <div role="alert" className="space-y-2 text-sm text-red-700">
           <p>{error} Các ID đã chọn vẫn được giữ trong bản nháp.</p>
@@ -155,7 +191,7 @@ export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError
         </div>
       )}
       {selectionError && <p role="alert" className="text-sm text-red-700">{selectionError}</p>}
-      {allowedKinds.includes('tag') && selectedTags.length > 0 && (
+      {selectedTags.length > 0 && (
         <div className="flex flex-wrap gap-2" role="list" aria-label="Thẻ đã chọn">
           {selectedTags.map(tag => (
             <div key={tag.id} role="listitem" className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-900">
@@ -175,14 +211,14 @@ export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError
           return (
             <fieldset key={group.kind} disabled={disabled} className="min-w-0 rounded-lg border border-slate-200 p-3">
               <legend className="px-1 text-sm font-semibold text-slate-800">
-                {group.title} ({group.count}/{maxTerms[group.kind]})
+                {group.title} ({group.count}/{maxTerms(group.kind)})
               </legend>
               <div className="max-h-56 space-y-1 overflow-y-auto">
                 {visible.map(({ term, depth }) => (
                   <label key={term.id} className="flex min-w-0 cursor-pointer items-start gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50">
                     <input type="checkbox" className="mt-1 accent-blue-600" checked={selected.has(term.id)}
                       onChange={event => toggle(term.id, event.target.checked)}
-                      disabled={disabled || (!selected.has(term.id) && group.count >= maxTerms[group.kind])} />
+                      disabled={disabled || loading || Boolean(error) || (!selected.has(term.id) && (group.count >= maxTerms(group.kind) || selected.size >= 96))} />
                     <span className="min-w-0 break-words" style={{ paddingLeft: `${Math.min(depth, 8) * 10}px` }}>
                       <span>{term.name}</span> <span className="text-slate-500">({term.slug})</span>
                     </span>
@@ -220,20 +256,26 @@ export function TermPicker({ userId, disabled, selectedIds, onChange, onApiError
 }
 
 /** Same filter controls for Post, Page and CPT; the API applies them before LIMIT/OFFSET. */
-export function TermFilters({ userId, disabled, value, onChange, onApiError }: TermFiltersProps) {
-  const { categories, tags, loading, error, reload } = useTermOptions(userId, onApiError);
+export function TermFilters({ userId, typeKey, disabled, value, onChange, onApiError }: TermFiltersProps) {
+  const { categories, tags, definitions, byKind, loading, error, reload } = useTermOptions(userId, typeKey, onApiError);
   const categoryId = useId();
   const tagId = useId();
   const descendantId = useId();
-  const ordered = useMemo(() => categoryTree(categories), [categories]);
+  const genericTaxonomyId = useId();
+  const genericTermId = useId();
+  const ordered = useMemo(() => termTree(categories), [categories]);
   const missingCategory = value.categoryId != null && !categories.some(term => term.id === value.categoryId);
   const missingTag = value.tagId != null && !tags.some(term => term.id === value.tagId);
+  const genericDefinition = definitions.find(item => item.key === value.taxonomyKey);
+  const genericTerms = value.taxonomyKey ? byKind[value.taxonomyKey] ?? [] : [];
+  const genericRows = genericDefinition?.hierarchical
+    ? termTree(genericTerms) : [...genericTerms].sort(sortTerms).map(term => ({term, depth: 0}));
   return (
     <div className="min-w-0 space-y-2" aria-label="Bộ lọc danh mục và thẻ">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs text-slate-600">Lọc kết quả trên máy chủ trước khi phân trang.</span>
         <button type="button" className="btn-secondary" onClick={reload} disabled={disabled || loading}>
-          Tải lại danh mục/thẻ
+          Tải lại taxonomy
         </button>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
@@ -241,7 +283,8 @@ export function TermFilters({ userId, disabled, value, onChange, onApiError }: T
           Danh mục
           <select id={categoryId} className={`mt-1 ${fieldClass}`} value={value.categoryId ?? ''}
             disabled={disabled || loading} onChange={event => onChange({
-              ...value, categoryId: event.target.value ? Number(event.target.value) : null,
+              ...value, taxonomyKey: null, termId: null,
+              categoryId: event.target.value ? Number(event.target.value) : null,
               includeDescendants: event.target.value ? value.includeDescendants : false,
             })}>
             <option value="">Tất cả danh mục</option>
@@ -255,7 +298,8 @@ export function TermFilters({ userId, disabled, value, onChange, onApiError }: T
           Thẻ
           <select id={tagId} className={`mt-1 ${fieldClass}`} value={value.tagId ?? ''}
             disabled={disabled || loading} onChange={event => onChange({
-              ...value, tagId: event.target.value ? Number(event.target.value) : null,
+              ...value, taxonomyKey: null, termId: null,
+              tagId: event.target.value ? Number(event.target.value) : null,
             })}>
             <option value="">Tất cả thẻ</option>
             {missingTag && <option value={value.tagId!}>ID #{value.tagId} (không còn trong danh sách)</option>}
@@ -263,10 +307,37 @@ export function TermFilters({ userId, disabled, value, onChange, onApiError }: T
           </select>
         </label>
       </div>
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <label htmlFor={genericTaxonomyId} className="block min-w-0 text-sm font-medium text-slate-700">
+          Taxonomy tùy chỉnh
+          <select id={genericTaxonomyId} className={`mt-1 ${fieldClass}`}
+            value={value.taxonomyKey ?? ''} disabled={disabled || loading}
+            onChange={event => onChange({ taxonomyKey: event.target.value || null, termId: null, includeDescendants: false })}>
+            <option value="">Không dùng bộ lọc tùy chỉnh</option>
+            {definitions.filter(item => item.key !== 'category' && item.key !== 'tag').map(item =>
+              <option key={item.key} value={item.key}>{item.label} ({item.key})</option>)}
+            {value.taxonomyKey && !genericDefinition && <option value={value.taxonomyKey}>Taxonomy không còn hiệu lực ({value.taxonomyKey})</option>}
+          </select>
+        </label>
+        {value.taxonomyKey && <label htmlFor={genericTermId} className="block min-w-0 text-sm font-medium text-slate-700">
+          Term
+          <select id={genericTermId} className={`mt-1 ${fieldClass}`}
+            value={value.termId ?? ''} disabled={disabled || loading || !genericDefinition}
+            onChange={event => onChange({ ...value, termId: event.target.value ? Number(event.target.value) : null })}>
+            <option value="">Chọn term</option>
+            {value.termId != null && !genericTerms.some(term => term.id === value.termId) &&
+              <option value={value.termId}>ID #{value.termId} (không còn khả dụng)</option>}
+            {genericRows.map(({ term, depth }) =>
+              <option key={term.id} value={term.id}>{'— '.repeat(Math.min(depth, 8))}{term.name} ({term.slug})</option>)}
+          </select>
+        </label>}
+      </div>
       <label htmlFor={descendantId} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
-        <input id={descendantId} type="checkbox" checked={Boolean(value.includeDescendants && value.categoryId != null)}
-          disabled={disabled || value.categoryId == null} onChange={event => onChange({ ...value, includeDescendants: event.target.checked })} />
-        Bao gồm danh mục con
+        <input id={descendantId} type="checkbox"
+          checked={Boolean(value.includeDescendants && (value.categoryId != null || (value.termId != null && genericDefinition?.hierarchical)))}
+          disabled={disabled || (value.categoryId == null && !(value.termId != null && genericDefinition?.hierarchical))}
+          onChange={event => onChange({ ...value, includeDescendants: event.target.checked })} />
+        Bao gồm term con (taxonomy phân cấp)
       </label>
       {loading && <p role="status" className="text-xs text-slate-500">Đang tải bộ lọc…</p>}
       {error && (
