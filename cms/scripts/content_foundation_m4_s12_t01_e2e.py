@@ -236,11 +236,41 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         {'title':'C2 Book Updated','slug':'c2-book','values':{},
                          'term_ids':[flat['id'],arc_category['id'],arc_tag['id']]},
                         csrf, edited['version'])
+                    brand_query = f'?taxonomy_key=brand&term_id={flat["id"]}'
                     for kind, slug in [('category','c2-archive'),('tag','c2-archive-tag')]:
-                        html = fetch(ctx, base, 'GET',
-                            f'/taxonomy/{kind}/{slug}?taxonomy_key=brand&term_id={flat["id"]}', 200).text()
-                        assert 'C2 Book Updated' in html, (kind, html[:400])
+                        for suffix in ('', brand_query):
+                            html = fetch(ctx, base, 'GET',
+                                f'/taxonomy/{kind}/{slug}{suffix}', 200).text()
+                            assert 'C2 Book Updated' in html, (kind, suffix, html[:400])
                     checks.append('generic_filter_on_category_and_tag_archives_cross_kind')
+
+                    # Aster P2: archive root kind MUST be in the effective CPT
+                    # eligibility set even when another taxonomy filter is valid.
+                    # Both SQL COUNT and page rows are asserted in Rust storage
+                    # tests; these verify the real public HTTP archive routes.
+                    custom = api(ctx, base, 'PUT', '/api/admin/taxonomy/eligibility/book_c2', 200,
+                        {'taxonomies':['brand','tag'], 'expected_version':custom['version']},
+                        csrf, custom['version'])
+                    for suffix in ('', brand_query):
+                        assert 'C2 Book Updated' not in fetch(ctx, base, 'GET',
+                            f'/taxonomy/category/c2-archive{suffix}', 200).text()
+                        assert 'C2 Book Updated' in fetch(ctx, base, 'GET',
+                            f'/taxonomy/tag/c2-archive-tag{suffix}', 200).text()
+                    custom = api(ctx, base, 'PUT', '/api/admin/taxonomy/eligibility/book_c2', 200,
+                        {'taxonomies':['brand','category'], 'expected_version':custom['version']},
+                        csrf, custom['version'])
+                    for suffix in ('', brand_query):
+                        assert 'C2 Book Updated' in fetch(ctx, base, 'GET',
+                            f'/taxonomy/category/c2-archive{suffix}', 200).text()
+                        assert 'C2 Book Updated' not in fetch(ctx, base, 'GET',
+                            f'/taxonomy/tag/c2-archive-tag{suffix}', 200).text()
+                    unchanged = api(ctx, base, 'GET',
+                        f'/api/admin/content-types/book_c2/entries/{entry["id"]}')
+                    assert set(unchanged['term_ids']) == {flat['id'], arc_category['id'], arc_tag['id']}
+                    custom = api(ctx, base, 'PUT', '/api/admin/taxonomy/eligibility/book_c2', 200,
+                        {'taxonomies':['brand','category','tag'], 'expected_version':custom['version']},
+                        csrf, custom['version'])
+                    checks.append('archive_root_eligibility_withdrawal_http_plain_and_generic_preserves_links')
 
                     brand = api(ctx, base, 'PATCH', '/api/admin/taxonomy/definitions/brand', 200,
                                 {'public':False}, csrf, brand['version'])

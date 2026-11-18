@@ -49,8 +49,32 @@ that this existing public query would expose the slug of a new private custom
 taxonomy using a bogus `/taxonomy/tag/<slug>` path and fail to honor withdrawn
 CPT eligibility. The small sitemap SQL public/eligibility guard is a required
 security integration for C2 (not a new rewrite feature); it is disclosed here
-as a **file-ownership Design Delta to be acknowledged before merge**. No
-changes were made to ADR-0019, the C2 contract, or immutable G3 planning.
+  as a **file-ownership Design Delta**. **Aster explicitly ACKNOWLEDGED/APPROVED**
+  this bounded `storage/sitemap.rs` extension in the coordinator review on
+  [PR #383](https://github.com/thientran2359/opendash-cms/pull/383), at head
+  `491a5b8e8f370e9066ccae98dcd89422bb94d9e3`. Aster also confirmed the
+  paired parser integration in `routes/entries.rs` and default wiring in
+  `storage/builder.rs`; no competing writer was assigned. This clears the
+  ownership hold **only for this scoped C2 integration**, not a general file
+  handoff. No changes to ADR-0019, the C2 contract, or immutable G3 planning.
+
+### Coordinator P2 correctness review and fix
+
+Aster's same independent review identified a blocking P2: category/tag
+archive-root kinds were not included in CPT effective eligibility unless
+they happened to be supplied as extra query filters. The root kind must be
+checked independently of optional `taxonomy_key` + `term_id`; otherwise an
+entry with preserved old memberships could leak into the archive after an
+override/provider association was withdrawn. Both SQL `COUNT` and paged row
+bindings in `storage/public_content.rs::list_taxonomy_published_in_tx` now
+bind `kind.as_str()` as the first required taxonomy, while leaving the generic
+filter CTE seeded from `filters.taxonomy_key`. The new storage regression
+checks count, offsets, category and tag roots, plain and valid generic extra
+filters, draft exclusion, withdrawn override/provider/defaults and unchanged
+membership links; the native E2E runner now exercises both archive URLs
+before/after eligibility changes. This P2 must pass on the updated head
+before PR ready/merge; Aster's old-head approval is not a test verdict on
+the new head.
 
 ## Pre-merge validation — actual observed results
 
@@ -118,6 +142,44 @@ Migration 0039 SHA-256:
 
 Both runner sites used disposable isolated SQLite/uploads and random
 `127.0.0.1` ports. **Port 18964 and owner review data were not accessed.**
+
+### Aster P2 follow-up — new-head premerge validation
+
+After receiving coordinator review on PR #383, Harbor changed both archive
+root eligibility query bindings and added the Rust storage + real-browser
+regressions described above. The following **actual** macOS 15.8.2 x86_64
+checks were rerun against this follow-up working tree (not yet an exact
+merged-source G5 release):
+
+| Check | Result |
+| --- | --- |
+| Rust `opendash -- c2_archive_root_eligibility_gates_count_rows_and_cross_filters` | **1/1 PASS** |
+| Rust server binary unit suite `--test-threads=4` | **91/91 PASS** |
+| C2 focused domain tests | **3/3 PASS** |
+| `cargo build --locked -p opendash-server` | PASS |
+| Native Chrome 158 + API/SQLite isolated C2 E2E | **17/17 PASS** |
+| Native old 0038 → new 0039 → restored 0038 → re-upgrade | **5/5 PASS** |
+| Plans checker and 12-fixture self-test, Python compile, diff whitespace check | PASS |
+
+The newly added 17th E2E case tests category/tag archive routes both with
+no filters and with a valid extra `brand` filter, first eligible, then each
+root independently removed by CPT override; it asserts old membership IDs
+are not destroyed. Rust asserts matching `total` and paged row counts for
+both kinds and both filter modes, plus provider-inactive and withdrawn
+default declarations. This closes the reviewer-reproduced P2 on the tested
+working tree; the new pushed head, governance CI and independent follow-up
+review remain recorded separately on PR #383.
+
+Debug binary SHA-256: `49b4860726bffc4bf599dfc5005f55d5f1feffa5c7b78a93d5d9a8c30d45af18`.
+Ignored receipts: `.g5-checkouts/evidence/c2-p2-acceptance/receipt.json`
+SHA-256 `bc99d84b0063a68c93f4e4512ec1cc8ba71cad467a5903051b1cbde836c3a528`;
+`.g5-checkouts/evidence/c2-p2-upgrade/upgrade_receipt.json`
+SHA-256 `729d13d3fb4f6bfa4a0aed0e46c4cde2d7fc8691f13c6dfe206a3353a1ce268e`.
+The E2E receipt intentionally records `source_worktree_clean=false` for
+this precommit run; these artifacts are not postmerge G5 evidence.
+`cargo fmt --all -- --check` was also attempted, but reported existing
+workspace-wide formatting drift in many unrelated Rust files, so no global
+reformat was made; `git diff --check` is PASS.
 
 ## G4/G5 distinction, scope and known limits
 

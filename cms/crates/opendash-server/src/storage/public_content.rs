@@ -298,7 +298,7 @@ async fn list_taxonomy_published_in_tx(
         .bind(extra_tag)
         .bind(extra_tag)
         .bind(filters.term_id)
-        .bind(filters.taxonomy_key.as_deref())
+        .bind(kind.as_str()) // Root archive taxonomy is always required.
         .bind(filters.category_id)
         .bind(filters.tag_id)
         .bind(&filters.taxonomy_key)
@@ -329,7 +329,7 @@ async fn list_taxonomy_published_in_tx(
         .bind(extra_tag)
         .bind(extra_tag)
         .bind(filters.term_id)
-        .bind(filters.taxonomy_key.as_deref())
+        .bind(kind.as_str()) // Root archive taxonomy is always required.
         .bind(filters.category_id)
         .bind(filters.tag_id)
         .bind(&filters.taxonomy_key)
@@ -527,6 +527,108 @@ mod m5_public_context_tests {
                 .unwrap();
         }
         id
+    }
+
+    #[tokio::test]
+    async fn c2_archive_root_eligibility_gates_count_rows_and_cross_filters() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query("INSERT INTO taxonomy_definitions(key,label,owner_kind) VALUES('brand','Brand','user')")
+            .execute(&db).await.unwrap();
+        let mut term_ids = Vec::new();
+        for (kind, slug) in [
+            ("category", "c2-root-category"),
+            ("tag", "c2-root-tag"),
+            ("brand", "c2-extra-brand"),
+        ] {
+            let id = sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES(?, ?, ?)")
+                .bind(kind).bind(slug).bind(slug).execute(&db).await.unwrap()
+                .last_insert_rowid();
+            term_ids.push(id);
+        }
+        sqlx::query("INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json) VALUES('post','[\"category\",\"tag\",\"brand\"]')")
+            .execute(&db).await.unwrap();
+        let mut published_ids = Vec::new();
+        for index in 0..3 {
+            published_ids.push(add_entry(
+                &db, "post", &format!("c2-p2-published-{index}"), true, &term_ids,
+            ).await);
+        }
+        add_entry(&db, "post", "c2-p2-draft", false, &term_ids).await;
+
+        let generic_brand = PublicFilters {
+            taxonomy_key: Some("brand".into()), term_id: Some(term_ids[2]),
+            ..PublicFilters::default()
+        };
+        for (kind, slug) in [
+            (TaxonomyKind::Category, "c2-root-category"),
+            (TaxonomyKind::Tag, "c2-root-tag"),
+        ] {
+            for filters in [PublicFilters::default(), generic_brand.clone()] {
+                let first = taxonomy_public_page(&db, kind, slug, filters.clone(), 2, 0)
+                    .await.unwrap().unwrap().1;
+                let second = taxonomy_public_page(&db, kind, slug, filters.clone(), 2, 2)
+                    .await.unwrap().unwrap().1;
+                assert_eq!(first.total, 3, "{kind:?} count before withdrawal");
+                assert_eq!(second.total, 3, "{kind:?} count on second page");
+                assert_eq!(first.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
+                           [published_ids[2], published_ids[1]]);
+                assert_eq!(second.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
+                           [published_ids[0]]);
+            }
+        }
+
+        // Retain all links while removing only the archive root's CPT association.
+        // The extra generic brand remains eligible: it must never bypass the root.
+        sqlx::query("UPDATE content_type_taxonomy_overrides SET taxonomies_json='[\"brand\"]' WHERE content_type_key='post'")
+            .execute(&db).await.unwrap();
+        for (kind, slug) in [
+            (TaxonomyKind::Category, "c2-root-category"),
+            (TaxonomyKind::Tag, "c2-root-tag"),
+        ] {
+            for filters in [PublicFilters::default(), generic_brand.clone()] {
+                for offset in [0, 2] {
+                    let page = taxonomy_public_page(&db, kind, slug, filters.clone(), 2, offset)
+                        .await.unwrap().unwrap().1;
+                    assert_eq!(page.total, 0, "{kind:?} must not count withdrawn root");
+                    assert!(page.entries.is_empty(), "{kind:?} must not page withdrawn root");
+                }
+            }
+        }
+        let links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entry_terms")
+            .fetch_one(&db).await.unwrap();
+        assert_eq!(links, 12, "withdrawing eligibility must preserve term memberships");
+
+        // Without a site override, the provider declaration is authoritative.
+        sqlx::query("DELETE FROM content_type_taxonomy_overrides WHERE content_type_key='post'")
+            .execute(&db).await.unwrap();
+        let provider_rows = sqlx::query("UPDATE content_type_taxonomy_eligibility SET provider_status='provider_inactive' WHERE content_type_key='post' AND taxonomy_kind IN ('category','tag')")
+            .execute(&db).await.unwrap().rows_affected();
+        assert_eq!(provider_rows, 2);
+        for (kind, slug) in [
+            (TaxonomyKind::Category, "c2-root-category"),
+            (TaxonomyKind::Tag, "c2-root-tag"),
+        ] {
+            let page = taxonomy_public_page(&db, kind, slug, PublicFilters::default(), 2, 0)
+                .await.unwrap().unwrap().1;
+            assert_eq!(page.total, 0, "{kind:?} provider-inactive must exclude root");
+            assert!(page.entries.is_empty());
+        }
+        sqlx::query("UPDATE content_type_taxonomy_eligibility SET provider_status='active', declaration_state='withdrawn' WHERE content_type_key='post' AND taxonomy_kind IN ('category','tag')")
+            .execute(&db).await.unwrap();
+        for (kind, slug) in [
+            (TaxonomyKind::Category, "c2-root-category"),
+            (TaxonomyKind::Tag, "c2-root-tag"),
+        ] {
+            let page = taxonomy_public_page(&db, kind, slug, PublicFilters::default(), 2, 0)
+                .await.unwrap().unwrap().1;
+            assert_eq!(page.total, 0, "{kind:?} withdrawn declaration must exclude root");
+            assert!(page.entries.is_empty());
+        }
     }
 
     #[tokio::test]
