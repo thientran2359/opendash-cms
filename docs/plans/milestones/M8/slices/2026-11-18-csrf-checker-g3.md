@@ -24,13 +24,50 @@ file/line diagnostics. Do not silently skip a registration to keep the repositor
 green. A bounded tokenizer/parser in Python stdlib is acceptable. New parser
 dependencies, runtime route changes and broad Rust formatting require another task.
 
-Preserve existing architecture checks, CLI options and exit-code behavior. A guard
-must be in the resolved handler's executable body under the existing checker policy.
+Preserve existing architecture checks, CLI options and exit-code behavior. Ordinary
+session mutations require a guard in the resolved handler's executable body.
 Comments, strings and a different function with the same name cannot satisfy it.
-Exemptions for the existing login/setup bootstrap endpoints use their fully resolved
-identities, not matching bare names in arbitrary modules. This task preserves the
-existing direct-guard policy. If a real registered handler delegates its guard,
-report the concrete case to Aster for contract review before inventing exemptions.
+Bootstrap exemptions use the fully resolved login/setup identities. The two
+reviewed policy paths below have separate checked classifications and counts.
+
+### Reviewed admission-policy delta — 18/11/2026
+
+Forge's [PR #389](https://github.com/thientran2359/opendash-cms/pull/389) at
+`ddd8b5e8991ca712deb33899a4bf9a152b6dd451` resolves all 82 registrations and
+flags two actual handlers. Aster inspected these source paths at baseline
+`8ac77781a6770688d3a66d9b5b338a9de81cb106` and accepts the following bounded
+checker correction. Runtime endpoint protection remains governed by the existing
+[M7 contact contract](../../../../contracts/M7_SITE_FEATURES.md) and
+[M8 operations contract](../../../../contracts/M8_OPERATIONS_RELEASE.md).
+
+1. `crate::routes::contact::public_submit` is an anonymous contact submission.
+   M7 S05 requires explicit strict Origin admission and bounded contact validation,
+   not an authenticated session token. Classify only this canonical handler as
+   `public_origin_guarded`. Check the executable call to the existing
+   `check_strict_contact_origin` helper and the rejecting branch before submission
+   processing, including the reviewed trusted-origin alternative from M8 runtime
+   config. Resolve and inspect the same module's helper, which rejects missing,
+   null and foreign Origin and compares the listener/configured public origin.
+   Merely finding the handler name or a string/comment is insufficient. Removing
+   the call, helper, rejection branch or Origin checks must fail checker fixtures.
+   This does not authorize a second anonymous exemption or infer policy from names.
+2. `crate::routes::operations::upload_restore_archive` is a thin wrapper whose
+   returned result is the awaited `upload_restore_archive_with_timeout` call.
+   Classify it as `delegated_csrf_guarded` only after checking the exact canonical
+   wrapper-to-helper pair. Require the wrapper to propagate that helper's result,
+   with no successful bypass, and the helper to call
+   `require_admin_with_csrf(&headers, &state.db).await?` before upload side effects.
+   Missing/renamed/unresolved helper, removed guard, nonpropagated guard result,
+   changed delegation or a wrapper bypass fails closed. Do not accept arbitrary
+   transitive calls or name-based exemptions.
+
+Implement these narrowly in the checker with named policy metadata and focused
+positive/negative synthetic fixtures. Preserve canonical handler resolution and
+the existing direct-guard tests. Inventory must distinguish direct, delegated,
+public-Origin and bootstrap classifications so all resolved handlers reconcile.
+Unexpected production policy shapes produce actionable failures for review.
+Static inspection remains bounded lint evidence, not general control-flow proof.
+No Rust routes/auth/storage or Harbor-owned files are granted to Forge by this delta.
 
 ### M8-S11-T01 — Kiểm đủ CSRF handlers với định danh module đầy đủ
 
@@ -95,11 +132,14 @@ Contract là [CORE_FOUNDATION](../../../../contracts/CORE_FOUNDATION.md) và
 #### Cách triển khai theo contract
 
 1. Thêm negative fixture tái hiện post(crate::routes::missing_unguarded_handler)
-   và duplicate bare-name collision, ghi kết quả trước sửa.
-2. Resolve canonical identity trước lookup guard. Kiểm qualified bootstrap
-   exemptions rõ ràng. Giữ các architecture checks cũ hoạt động.
+   và duplicate bare-name collision, ghi kết quả trước sửa. Thêm positive/negative
+   fixtures cho hai admission-policy paths đã chốt ở trên.
+2. Resolve canonical identity trước lookup guard. Kiểm qualified bootstrap,
+   public-Origin và exact delegated pair theo delta trên. Giữ các architecture
+   checks cũ hoạt động.
 3. Chạy inventory trên current main và self-tests, đối chiếu registration sites
-   với diagnostics/counts. Mọi mutation phải được check hoặc thuộc exact exemption.
+   với diagnostics/counts. Mọi mutation phải được check theo một classification
+   đã chốt hoặc thuộc exact bootstrap exemption.
 4. Ghi tested SHA, Python/OS, commands/exits và các grammar limits trong receipt.
 
 #### Nghiệm thu
@@ -112,6 +152,11 @@ Contract là [CORE_FOUNDATION](../../../../contracts/CORE_FOUNDATION.md) và
   comment hoặc string không làm unguarded handler PASS.
 - [ ] Nested module và alias registrations được resolve hoặc fail rõ ràng;
   bootstrap exemption chỉ đúng login/setup identities thực tế.
+- [ ] Public contact admission và restore delegated guard PASS đúng policy path;
+  thiếu helper/guard/rejection/propagation hoặc wrapper bypass FAIL. Một module
+  khác trùng tên, string/comment hoặc arbitrary delegation không được chấp nhận.
+- [ ] Counts direct/delegated/public-Origin/bootstrap cộng đúng số unique resolved
+  handlers, tách biệt với tổng registration sites; không âm thầm giảm coverage.
 - [ ] Inventory mutation sites trên source pin không còn registrations bị skip;
   counts và unique handler checks/exemptions đối chiếu được.
 - [ ] Existing SQL/core I/O/dependency/Admin HTTP checks và self-test regressions
