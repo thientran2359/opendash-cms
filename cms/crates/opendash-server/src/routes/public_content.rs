@@ -62,6 +62,9 @@ pub async fn archive(
     if uri.path() != canonical_base {
         return Err(ApiError::not_found("Đường dẫn nội dung không hợp lệ."));
     }
+    // Enforce the CPT's public/archive settings before loading or rendering
+    // content. The storage archive query independently checks this policy.
+    public_content::require_public_archive(&db, &type_key).await?;
     let query =
         parse_query(raw.as_deref(), QueryScope::ContentArchive).map_err(ApiError::bad_request)?;
     let _context = PublicRequestContext::Archive {
@@ -411,6 +414,7 @@ async fn taxonomy_archive(
         key: kind.as_str().to_owned(),
         label: term.name,
         fields: Vec::new(),
+        settings: Default::default(),
     };
     let active_v2 = match themes_root {
         Some(root) => theme_storage::load_active_v2_role_templates(db, &root.0).await?,

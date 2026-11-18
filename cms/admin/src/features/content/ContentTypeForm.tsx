@@ -9,8 +9,8 @@ import {
   CONTENT_FIELD_TYPES,
   ContentFieldDefinition,
   ContentFieldType,
-  ContentTypeDefinition,
 } from './types.ts';
+import type { ContentPublicationPolicy, ContentSupport, ContentTypeDefinitionWithSettings } from '../../api/content.ts';
 
 interface DraftField {
   id: number;
@@ -25,7 +25,7 @@ const snakeKeyPattern = /^[a-z][a-z0-9_]{0,63}$/;
 
 interface ContentTypeFormProps {
   disabled: boolean;
-  onCreate: (input: ContentTypeDefinition) => Promise<boolean>;
+  onCreate: (input: ContentTypeDefinitionWithSettings) => Promise<boolean>;
   onDirtyChange: (dirty: boolean) => void;
 }
 
@@ -35,9 +35,14 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
   const [key, setKey] = useState('');
   const [label, setLabel] = useState('');
   const [fields, setFields] = useState<DraftField[]>([]);
+  const [isPublic, setIsPublic] = useState(true);
+  const [hasArchive, setHasArchive] = useState(true);
+  const [publication, setPublication] = useState<ContentPublicationPolicy>('immediate');
+  const [supports, setSupports] = useState<ContentSupport[]>(['editor', 'featured_image']);
   const [error, setError] = useState('');
   const nextId = useRef(0);
-  const dirty = Boolean(key || label || fields.length);
+  const dirty = Boolean(key || label || fields.length || !isPublic || !hasArchive
+    || publication !== 'immediate' || supports.length !== 2);
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
@@ -62,7 +67,13 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
     }]);
   };
 
-  const buildSchema = (): ContentTypeDefinition => {
+  const toggleSupport = (support: ContentSupport, enabled: boolean) => {
+    setSupports(previous => enabled
+      ? [...previous.filter(value => value !== support), support]
+      : previous.filter(value => value !== support));
+  };
+
+  const buildSchema = (): ContentTypeDefinitionWithSettings => {
     if (!snakeKeyPattern.test(key)) {
       throw new Error('Khóa CPT phải bắt đầu bằng chữ thường và chỉ chứa chữ thường, số, dấu _ (tối đa 64 ký tự).');
     }
@@ -102,7 +113,9 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
         options,
       };
     });
-    return { key, label, fields: resultFields };
+    return { key, label, fields: resultFields,
+      settings: { public: isPublic, has_archive: hasArchive, publication, supports },
+    };
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -115,6 +128,10 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
         setKey('');
         setLabel('');
         setFields([]);
+        setIsPublic(true);
+        setHasArchive(true);
+        setPublication('immediate');
+        setSupports(['editor', 'featured_image']);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể đọc cấu hình CPT.');
@@ -124,11 +141,35 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
   return (
     <form onSubmit={submit} className="content-schema-form">
       <h3>Đăng ký loại nội dung mới</h3>
-      <p className="content-help">Chỉ quản trị viên được khai báo CPT. Hiện chưa có chức năng sửa/xóa schema sau khi tạo.</p>
+      <p className="content-help">Chỉ quản trị viên được khai báo CPT. Có thể chỉnh sửa nhãn và hành vi trong phần cài đặt loại nội dung.</p>
       <div className="content-form-grid">
         <TextField id="content-type-key" name="key" label="Khóa CPT *" value={key} disabled={disabled} maxLength={64} onChange={setKey} placeholder="vi_du: portfolio_item" />
         <TextField id="content-type-label" name="label" label="Tên hiển thị *" value={label} disabled={disabled} maxLength={100} onChange={setLabel} placeholder="Dự án" />
       </div>
+      <fieldset className="space-y-3 rounded-lg border border-slate-200 p-3">
+        <legend className="px-1 font-semibold">Hành vi loại nội dung</legend>
+        <CheckboxField id="new-cpt-public" label="Công khai bài viết (public)" checked={isPublic}
+          disabled={disabled} onChange={setIsPublic} />
+        <CheckboxField id="new-cpt-archive" label="Cho phép trang danh sách (has_archive)"
+          checked={hasArchive} disabled={disabled} onChange={setHasArchive} />
+        <SelectField id="new-cpt-publication" label="Cơ chế xuất bản"
+          value={publication} disabled={disabled}
+          options={[
+            { value: 'immediate', label: 'Lưu là xuất bản (immediate)' },
+            { value: 'draft_publish', label: 'Lưu nháp / Xuất bản (draft_publish)' },
+          ]}
+          onChange={event => setPublication(event.target.value as ContentPublicationPolicy)} />
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">Thành phần màn hình chỉnh sửa</legend>
+          <CheckboxField id="new-cpt-editor" label="Trình soạn thảo (editor)"
+            checked={supports.includes('editor')} disabled={disabled}
+            onChange={checked => toggleSupport('editor', checked)} />
+          <CheckboxField id="new-cpt-featured-image" label="Ảnh đại diện (featured_image)"
+            checked={supports.includes('featured_image')} disabled={disabled}
+            onChange={checked => toggleSupport('featured_image', checked)} />
+          <p className="text-xs text-slate-600">Tắt thành phần chỉ ẩn quyền chỉnh sửa, không xóa nội dung hoặc ảnh đã lưu.</p>
+        </fieldset>
+      </fieldset>
       <div className="content-section-heading">
         <h4>Custom fields ({fields.length})</h4>
         <button type="button" className="btn-secondary" onClick={addField} disabled={disabled || fields.length >= 64}>+ Thêm field</button>

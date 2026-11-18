@@ -403,6 +403,7 @@ mod tests {
         let schema = ContentTypeDefinition {
             key: "post".into(),
             label: "Bài viết".into(),
+            settings: opendash_core::content::ContentTypeSettings::builtin_publication(),
             fields: vec![ContentFieldDefinition {
                 key: "body".into(),
                 label: "Nội dung".into(),
@@ -441,6 +442,7 @@ mod tests {
             key: "news".into(),
             label: "Tin tức".into(),
             fields: vec![],
+            settings: Default::default(),
         };
         let site = SiteContext {
             title: "<script>alert(1)</script>",

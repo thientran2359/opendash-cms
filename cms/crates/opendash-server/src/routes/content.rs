@@ -5,8 +5,8 @@ use std::sync::Arc;
 use axum::{
     Json,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    http::{HeaderMap, StatusCode, header},
+    response::{Html, IntoResponse, Response},
 };
 use opendash_core::{
     content::{
@@ -18,10 +18,15 @@ use opendash_core::{
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::{Role, require_admin, require_admin_with_csrf, require_session},
+    auth::{Role, require_admin, require_admin_with_csrf, require_session, require_session_with_csrf},
+    content_render,
     error::{ApiError, ApiResult},
     routes::settings::{no_store_headers, parse_if_match},
-    storage::content::{self as content_storage, ContentTypeApiItem},
+    storage::{
+        content::{self as content_storage, ContentTypeApiItem},
+        entries as entry_storage,
+        page::active_content_templates,
+    },
 };
 
 pub const MAX_CONTENT_TYPE_JSON_BYTES: usize = 512 * 1024;
@@ -68,6 +73,75 @@ pub async fn content_type_update(
         content_storage::update_user_content_type(&db, &type_key, expected_version, &input).await?;
     *content_registry.write().await = content_storage::load_content_type_catalog(&db).await?;
     Ok((no_store_headers(Some(result.version)), Json(result)))
+}
+
+/// Publication policy is persisted per CPT; one CAS endpoint handles Post/Page
+/// and opted-in user CPTs with the same authorization and transaction semantics.
+pub async fn content_entry_publication(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    Json(input): Json<crate::routes::entries::PublicationInput>,
+) -> ApiResult<impl IntoResponse> {
+    require_session_with_csrf(&headers, &db).await?;
+    if !valid_content_type_key(&type_key) || type_key == "section" {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    }
+    let expected_version = parse_if_match(&headers)?;
+    let entry = entry_storage::set_publication_status(
+        &db,
+        &type_key,
+        id,
+        expected_version,
+        &input.status,
+    )
+    .await?;
+    Ok((no_store_headers(Some(entry.version)), Json(entry)))
+}
+
+/// Private authenticated preview never uses the published-content reader.
+pub async fn content_entry_preview(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+) -> ApiResult<Response> {
+    let actor = require_session(&headers, &db).await?;
+    if !valid_content_type_key(&type_key) || type_key == "section" {
+        return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
+    }
+    let schema = content_storage::load_content_type_definition(&db, &type_key)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let mut record = entry_storage::get_entry(&db, &type_key, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+    if let Some(effective) = content_storage::load_effective_content_schema(&db, &type_key).await? {
+        let role = match actor.user.role {
+            Role::Admin => FieldRole::Admin,
+            Role::Editor => FieldRole::Editor,
+        };
+        entry_storage::filter_entry_values_for_role(&mut record, &effective, role);
+    }
+    let view = content_render::authenticated_preview_view(record, &schema);
+    let (_, selected_template) = active_content_templates(&db).await?;
+    let raw = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    let public_settings = crate::storage::settings::get_public(&db).await?;
+    let seo_view = crate::seo::SeoView::for_noindex_page(
+        &public_settings.content_language,
+        &view.title,
+    );
+    let html = content_render::compose_document_with_seo(None, &raw, None, &seo_view)?;
+    Ok((
+        [
+            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::CACHE_CONTROL, "private, no-store"),
+        ],
+        Html(html),
+    )
+        .into_response())
 }
 
 pub async fn field_group_list(

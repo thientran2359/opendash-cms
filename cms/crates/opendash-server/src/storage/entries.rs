@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use opendash_core::content::{
-    ContentEntryInput, ContentTypeDefinition, EffectiveContentSchema, EffectiveFieldStatus,
+    ContentEntryInput, ContentTypeDefinition, ContentTypeSettings, ContentPublication,
+    ContentSupport, EffectiveContentSchema, EffectiveFieldStatus,
     FieldRole, PatchField, deserialize_patch_field,
 };
 use serde::Serialize;
@@ -25,6 +26,39 @@ fn forbid_generic_section_write(type_key: &str) -> ApiResult<()> {
     } else {
         Ok(())
     }
+}
+
+fn verify_supported_values(
+    type_key: &str,
+    values: &BTreeMap<String, Value>,
+    settings: &ContentTypeSettings,
+) -> ApiResult<()> {
+    // These are protected Core fields only on Post/Page. A custom CPT may
+    // legitimately define unrelated fields named `body` or `featured_image`.
+    if !matches!(type_key, "post" | "page") {
+        return Ok(());
+    }
+    for (key, feature) in [
+        ("body", ContentSupport::Editor),
+        ("featured_image", ContentSupport::FeaturedImage),
+    ] {
+        if values.contains_key(key) && !settings.supports(feature) {
+            return Err(ApiError::unprocessable(format!(
+                "Không thể chỉnh sửa '{key}' khi tính năng này bị tắt."
+            )));
+        }
+    }
+    Ok(())
+}
+
+async fn current_settings_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+) -> ApiResult<ContentTypeSettings> {
+    let schema = crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    Ok(schema.base.descriptor.settings)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -354,7 +388,8 @@ pub async fn list_published_page_in_tx(
     }
 
     let type_exists: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'",
+        "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'
+         AND key != 'section' AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(type_key)
     .fetch_optional(&mut **tx)
@@ -470,8 +505,11 @@ async fn query_entries_filtered(
          SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json, e.publication_status,
                 e.version, e.created_at, e.updated_at
            FROM content_entries e
+           JOIN content_types t ON t.key = e.content_type_key
           WHERE e.content_type_key = ?
-            AND (? = 0 OR e.publication_status = 'published')
+            AND (? = 0 OR (e.publication_status = 'published'
+                 AND e.content_type_key != 'section' AND t.provider_status = 'active'
+                 AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1))
             AND (? IS NULL OR EXISTS (
                 SELECT 1 FROM entry_terms et
                  WHERE et.entry_id = e.id AND et.term_id IN (SELECT id FROM category_scope)
@@ -520,6 +558,8 @@ pub async fn create_entry_with_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
+    let settings = current_settings_in_tx(&mut tx, type_key).await?;
+    verify_supported_values(type_key, &input.values, &settings)?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
@@ -529,15 +569,16 @@ pub async fn create_entry_with_fence(
         validate_term_ids(&mut tx, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
+    let status = if settings.publication == ContentPublication::DraftPublish { "draft" } else { "published" };
     let result = sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
-         VALUES (?, ?, ?, ?, CASE WHEN ? IN ('post', 'page') THEN 'draft' ELSE 'published' END)",
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(type_key)
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
-    .bind(type_key)
+    .bind(status)
     .execute(&mut *tx)
     .await;
     let id = match result {
@@ -587,6 +628,8 @@ pub async fn update_entry_with_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
+    let settings = current_settings_in_tx(&mut tx, type_key).await?;
+    verify_supported_values(type_key, &input.values, &settings)?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
@@ -691,22 +734,25 @@ pub async fn create_entry_with_schema_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
-    verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    let settings = &effective.base.descriptor.settings;
+    verify_supported_values(type_key, &input.values, settings)?;
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
+    let status = if settings.publication == ContentPublication::DraftPublish { "draft" } else { "published" };
     let result = sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
-         VALUES (?, ?, ?, ?, CASE WHEN ? IN ('post', 'page') THEN 'draft' ELSE 'published' END)",
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(type_key)
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
-    .bind(type_key)
+    .bind(status)
     .execute(&mut *tx)
     .await;
     let id = match result {
@@ -743,7 +789,8 @@ pub async fn update_entry_with_schema_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
-    verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
     let old_slug: String = sqlx::query_scalar(
         "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -849,6 +896,7 @@ fn effective_as_ct_def(effective: &EffectiveContentSchema) -> ContentTypeDefinit
     ContentTypeDefinition {
         key: effective.base.descriptor.key.clone(),
         label: effective.base.descriptor.label.clone(),
+        settings: effective.base.descriptor.settings.clone(),
         fields: effective
             .effective_fields
             .values()
@@ -906,7 +954,15 @@ pub async fn prepare_composite_entry_save(
                 "publication_status ch? h? tr? 'draft' ho?c 'published'.",
             ));
         }
+        if effective.base.descriptor.settings.publication == ContentPublication::Immediate
+            && status == "draft"
+        {
+            return Err(ApiError::unprocessable(
+                "Loại nội dung lưu ngay không hỗ trợ trạng thái bản nháp.",
+            ));
+        }
     }
+    verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
 
     // Check Field ACL BEFORE reading existing entry / comparing values (no value-comparison oracle)
     let caller_role = actor_field_role(actor.user.role);
@@ -1006,6 +1062,14 @@ pub async fn commit_composite_entry_save(
 ) -> ApiResult<CompositeEntrySaveResult> {
     let mut tx = begin_entry_write(db, actor).await?;
     let effective = verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
+    verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
+    let is_draft_capable = effective.base.descriptor.settings.publication
+        == ContentPublication::DraftPublish;
+    if !is_draft_capable && plan.publication_status.as_deref() == Some("draft") {
+        return Err(ApiError::unprocessable(
+            "Loại nội dung lưu ngay không hỗ trợ trạng thái bản nháp.",
+        ));
+    }
 
     crate::storage::seo::check_default_slug_claim_in_tx(
         &mut tx,
@@ -1031,12 +1095,7 @@ pub async fn commit_composite_entry_save(
             // for the built-in types. Keep that security trigger intact and
             // transition to published *within this same writer transaction*.
             // No intermediate draft can be observed or committed.
-            let is_builtin = matches!(type_key, "post" | "page");
-            let status_clause = if is_builtin {
-                "draft"
-            } else {
-                plan.publication_status.as_deref().unwrap_or("published")
-            };
+            let status_clause = if is_draft_capable { "draft" } else { "published" };
             let res = sqlx::query(
                 "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
                  VALUES (?, ?, ?, ?, ?)",
@@ -1054,7 +1113,7 @@ pub async fn commit_composite_entry_save(
                 }
                 other => other?.last_insert_rowid(),
             };
-            if is_builtin && plan.publication_status.as_deref() == Some("published") {
+            if is_draft_capable && plan.publication_status.as_deref() == Some("published") {
                 // Initial create remains v1; this is one logical atomic Save,
                 // not a separate publication/CAS transition.
                 sqlx::query(
@@ -1191,12 +1250,22 @@ pub async fn set_publication_status(
     expected_version: i64,
     status: &str,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
+    if status != "draft" && status != "published" {
+        return Err(ApiError::bad_request("Trạng thái xuất bản không hợp lệ."));
+    }
     let mut tx = db.begin().await?;
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+    let settings = current_settings_in_tx(&mut tx, type_key).await?;
+    if settings.publication != ContentPublication::DraftPublish {
+        return Err(ApiError::bad_request("Loại nội dung này sử dụng chế độ lưu ngay."));
+    }
     let result = sqlx::query(
         "UPDATE content_entries
          SET publication_status = ?, version = version + 1, updated_at = datetime('now')
-         WHERE content_type_key = ? AND id = ? AND version = ?
-           AND content_type_key IN ('post', 'page')",
+         WHERE content_type_key = ? AND id = ? AND version = ?",
     )
     .bind(status)
     .bind(type_key)

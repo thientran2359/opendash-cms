@@ -563,6 +563,8 @@ mod tests {
             None,
             None,
             Some(Some(tail.id)),
+            None,
+            None,
         )
         .await
         .unwrap_err();
@@ -575,6 +577,8 @@ mod tests {
             None,
             None,
             Some(Some(branch_leaf.id)),
+            None,
+            None,
         )
         .await
         .unwrap_err();
@@ -610,13 +614,13 @@ mod tests {
             .unwrap_err();
         assert_eq!(bad_parent.0, axum::http::StatusCode::BAD_REQUEST);
 
-        let changed = patch_term(&db, &actor, child.id, 1, Some("Renamed"), None, Some(None))
+        let changed = patch_term(&db, &actor, child.id, 1, Some("Renamed"), None, Some(None), None, None)
             .await
             .unwrap();
         assert_eq!(changed.version, 2);
         assert_eq!(changed.parent_id, None);
         assert_eq!(
-            patch_term(&db, &actor, child.id, 1, Some("Stale"), None, None)
+            patch_term(&db, &actor, child.id, 1, Some("Stale"), None, None, None, None)
                 .await
                 .unwrap_err()
                 .0,
@@ -684,8 +688,8 @@ mod tests {
             .await
             .unwrap();
         let (a_result, b_result) = tokio::join!(
-            patch_term(&db, &actor, a.id, 1, None, None, Some(Some(b.id))),
-            patch_term(&db, &actor, b.id, 1, None, None, Some(Some(a.id)))
+            patch_term(&db, &actor, a.id, 1, None, None, Some(Some(b.id)), None, None),
+            patch_term(&db, &actor, b.id, 1, None, None, Some(Some(a.id)), None, None)
         );
         assert_eq!(
             u8::from(a_result.is_ok()) + u8::from(b_result.is_ok()),

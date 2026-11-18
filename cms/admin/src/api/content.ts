@@ -27,13 +27,59 @@ const entriesPath = (key: string): string =>
 const entryPath = (key: string, id: number): string =>
   `${entriesPath(key)}/${id}`;
 
-export function listContentTypes(): Promise<OwnedContentType[]> {
+/** C1 settings extend the existing schema DTO without changing legacy callers. */
+export type ContentSupport = 'editor' | 'featured_image';
+export type ContentPublicationPolicy = 'immediate' | 'draft_publish';
+
+export interface ContentTypeSettings {
+  public: boolean;
+  has_archive: boolean;
+  publication: ContentPublicationPolicy;
+  supports: ContentSupport[];
+}
+
+export type ContentTypeDefinitionWithSettings = ContentTypeDefinition & {
+  /** Optional on update: omission preserves the canonical stored settings. */
+  settings?: ContentTypeSettings;
+};
+
+export type OwnedContentTypeWithSettings = Omit<OwnedContentType, 'descriptor'> & {
+  descriptor: ContentTypeDefinitionWithSettings;
+};
+
+export type EffectiveEditorConfigWithSettings = EffectiveEditorConfigProjection & {
+  /** New C1 server responses always include effective settings. */
+  settings?: ContentTypeSettings;
+};
+
+/** Compatibility while an older binary or stored CPT is being upgraded. */
+export function effectiveContentTypeSettings(
+  typeKey: string,
+  settings?: ContentTypeSettings,
+): ContentTypeSettings {
+  const effective: ContentTypeSettings = settings ?? {
+    public: typeKey !== 'section',
+    has_archive: typeKey !== 'section',
+    publication: typeKey === 'post' || typeKey === 'page' || typeKey === 'section'
+      ? 'draft_publish' : 'immediate',
+    supports: ['editor', 'featured_image'],
+  };
+  if (typeKey === 'section') {
+    return { ...effective, public: false, has_archive: false, publication: 'draft_publish' };
+  }
+  if (typeKey === 'post' || typeKey === 'page') {
+    return { ...effective, publication: 'draft_publish' };
+  }
+  return effective;
+}
+
+export function listContentTypes(): Promise<OwnedContentTypeWithSettings[]> {
   return requestJson('/api/admin/content-types', {
     defaultErrorMessage: 'Không thể tải loại nội dung.',
   });
 }
 
-export function createContentType(input: ContentTypeDefinition, csrfToken: string): Promise<OwnedContentType> {
+export function createContentType(input: ContentTypeDefinitionWithSettings, csrfToken: string): Promise<OwnedContentTypeWithSettings> {
   return requestJson('/api/admin/content-types', {
     method: 'POST',
     csrfToken,
@@ -47,9 +93,9 @@ export function createContentType(input: ContentTypeDefinition, csrfToken: strin
 export function updateContentType(
   key: string,
   version: number,
-  input: ContentTypeDefinition,
+  input: ContentTypeDefinitionWithSettings,
   csrfToken: string,
-): Promise<OwnedContentType> {
+): Promise<OwnedContentTypeWithSettings> {
   return requestJson(contentTypePath(key), {
     method: 'PUT',
     csrfToken,
@@ -128,7 +174,7 @@ export function putEditorLayout(
   });
 }
 
-export function getEffectiveEditorConfig(typeKey: string): Promise<EffectiveEditorConfigProjection> {
+export function getEffectiveEditorConfig(typeKey: string): Promise<EffectiveEditorConfigWithSettings> {
   return requestJson(`${contentTypePath(typeKey)}/effective-editor-config`, {
     defaultErrorMessage: 'Không thể tải cấu hình editor hiệu lực.',
   });

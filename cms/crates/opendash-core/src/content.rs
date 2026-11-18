@@ -425,6 +425,79 @@ pub fn valid_default_value(field: &ContentFieldDefinition, value: &Value) -> boo
     true
 }
 
+/// Publication semantics are server-owned; the Admin UI must not infer them from
+/// the content-type key. Legacy custom types use the immediate policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentPublication {
+    Immediate,
+    DraftPublish,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentSupport {
+    Editor,
+    FeaturedImage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentTypeSettings {
+    pub public: bool,
+    pub has_archive: bool,
+    pub publication: ContentPublication,
+    pub supports: Vec<ContentSupport>,
+}
+
+impl Default for ContentTypeSettings {
+    fn default() -> Self {
+        Self {
+            public: true,
+            has_archive: true,
+            publication: ContentPublication::Immediate,
+            supports: vec![ContentSupport::Editor, ContentSupport::FeaturedImage],
+        }
+    }
+}
+
+impl ContentTypeSettings {
+    pub fn default_for_type_key(type_key: &str) -> Self {
+        match type_key {
+            "post" | "page" => Self::builtin_publication(),
+            "section" => Self::private_section(),
+            _ => Self::default(),
+        }
+    }
+
+    pub fn builtin_publication() -> Self {
+        Self { publication: ContentPublication::DraftPublish, ..Self::default() }
+    }
+
+    pub fn private_section() -> Self {
+        Self {
+            public: false,
+            has_archive: false,
+            publication: ContentPublication::DraftPublish,
+            supports: Vec::new(),
+        }
+    }
+
+    pub fn validate_and_normalize(&mut self) -> Result<(), &'static str> {
+        let original_len = self.supports.len();
+        self.supports.sort_unstable();
+        self.supports.dedup();
+        if self.supports.len() != original_len {
+            return Err("supports không được chứa tính năng trùng lặp.");
+        }
+        Ok(())
+    }
+
+    pub fn supports(&self, feature: ContentSupport) -> bool {
+        self.supports.contains(&feature)
+    }
+}
+
 /// Wire input DTO for `POST /api/admin/content-types` and `PUT /api/admin/content-types/{type_key}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -433,6 +506,8 @@ pub struct ContentTypeDefinitionInput {
     pub label: String,
     #[serde(default)]
     pub fields: Vec<FieldDefinitionInput>,
+    #[serde(default)]
+    pub settings: Option<ContentTypeSettings>,
 }
 
 impl ContentTypeDefinitionInput {
@@ -455,10 +530,15 @@ impl ContentTypeDefinitionInput {
             }
             canonical_fields.push(cf);
         }
+        let mut settings = self
+            .settings
+            .unwrap_or_else(|| ContentTypeSettings::default_for_type_key(&self.key));
+        settings.validate_and_normalize()?;
         let def = ContentTypeDefinition {
             key: self.key,
             label: self.label,
             fields: canonical_fields,
+            settings,
         };
         def.validate()?;
         Ok(def)
@@ -474,6 +554,9 @@ pub struct ContentTypeDefinition {
     pub label: String,
     #[serde(default)]
     pub fields: Vec<ContentFieldDefinition>,
+    /// Legacy definitions without this property deserialize to public immediate.
+    #[serde(default)]
+    pub settings: ContentTypeSettings,
 }
 
 impl ContentTypeDefinition {
@@ -483,6 +566,19 @@ impl ContentTypeDefinition {
         }
         if !valid_label(&self.label) {
             return Err("Tên loại nội dung không hợp lệ.");
+        }
+        let mut settings = self.settings.clone();
+        settings.validate_and_normalize()?;
+        if settings != self.settings {
+            return Err("supports chưa được chuẩn hóa.");
+        }
+        if matches!(self.key.as_str(), "post" | "page")
+            && self.settings.publication != ContentPublication::DraftPublish
+        {
+            return Err("post/page phải sử dụng cơ chế Lưu nháp và Xuất bản.");
+        }
+        if self.key == "section" && self.settings != ContentTypeSettings::private_section() {
+            return Err("Section phải luôn riêng tư và không được xuất bản.");
         }
         if self.fields.len() > 64 {
             return Err("Mỗi loại nội dung hỗ trợ tối đa 64 custom fields.");
@@ -945,6 +1041,7 @@ impl EffectiveContentSchema {
                 "version": self.base_version,
                 "taxonomies": sorted_tax,
                 "fields": self.base.descriptor.fields,
+                "settings": self.base.descriptor.settings,
             },
             "attached_groups": self.attached_groups.iter().map(|g| {
                 serde_json::json!({
@@ -1104,10 +1201,13 @@ impl CntDeclarations {
             if !seen_keys.insert(ct.key.as_str()) {
                 return Err("Khóa content_type bị trùng lặp trong declarations.");
             }
+            let mut settings = ct.settings.clone().unwrap_or_default();
+            settings.validate_and_normalize()?;
             let def = ContentTypeDefinition {
                 key: ct.key.clone(),
                 label: ct.label.clone(),
                 fields: ct.fields.clone(),
+                settings,
             };
             def.validate()?;
             for tax in &ct.taxonomies {
@@ -1149,6 +1249,9 @@ pub struct ContentTypeDeclaration {
     pub fields: Vec<ContentFieldDefinition>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
+    /// Omission preserves existing provider-owned settings on package re-install.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<ContentTypeSettings>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1638,6 +1741,7 @@ pub struct EffectiveEditorRegionsProjection {
 pub struct EffectiveEditorConfigProjection {
     pub type_key: String,
     pub label: String,
+    pub settings: ContentTypeSettings,
     pub owner: ResourceOwner,
     pub provider_status: ProviderStatus,
     pub declaration_state: DeclarationState,
@@ -2376,6 +2480,7 @@ pub fn project_effective_editor_config(
     EffectiveEditorConfigProjection {
         type_key: effective.base.descriptor.key.clone(),
         label: effective.base.descriptor.label.clone(),
+        settings: effective.base.descriptor.settings.clone(),
         owner: effective.base.owner.clone(),
         provider_status: effective.base.status,
         declaration_state: effective.base.declaration_state,
@@ -2443,6 +2548,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            settings: ContentTypeSettings::default(),
         }
     }
 

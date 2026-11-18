@@ -1,5 +1,5 @@
 //! M7-S03-T01 SQLite storage for custom entry paths, ID-based redirects, and route claims.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use opendash_core::content::PatchField;
 use serde::Serialize;
@@ -62,7 +62,9 @@ pub async fn resolve_public_entry_path_in_tx(
            LEFT JOIN entry_public_paths p ON p.entry_id = e.id
           WHERE e.id = ?
             AND e.publication_status = 'published'
-            AND t.provider_status = 'active'",
+            AND e.content_type_key != 'section'
+            AND t.provider_status = 'active'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(entry_id)
     .fetch_optional(&mut *conn)
@@ -80,18 +82,12 @@ pub async fn resolve_public_entry_paths_by_ids(
     if entries.is_empty() {
         return Ok(out);
     }
-    let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT entry_id, path FROM entry_public_paths",
-    )
-    .fetch_all(db)
-    .await?;
-    let custom_map: HashMap<i64, String> = rows.into_iter().collect();
+    let mut conn = db.acquire().await?;
     for e in entries {
-        if let Some(url) = custom_map
-            .get(&e.id)
-            .cloned()
-            .or_else(|| CanonicalUrlBuilder::entry_from_id(e.id, &e.content_type_key, &e.slug))
-        {
+        // Even a stale caller must not construct a public URL for a private CPT.
+        // Only resolve the bounded page supplied by the caller, never scan every
+        // custom path in the database.
+        if let Some(url) = resolve_public_entry_path_in_tx(&mut conn, e.id).await? {
             out.insert(e.id, url);
         }
     }
@@ -410,7 +406,9 @@ pub async fn custom_path_for_published_slug(
           WHERE e.content_type_key = ?
             AND e.slug = ?
             AND e.publication_status = 'published'
-            AND t.provider_status = 'active'",
+            AND e.content_type_key != 'section'
+            AND t.provider_status = 'active'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(type_key)
     .bind(slug)
@@ -433,7 +431,9 @@ pub async fn resolve_custom_or_redirect_path(
                JOIN content_types t ON t.key = e.content_type_key
               WHERE p.path = ?
                 AND e.publication_status = 'published'
-                AND t.provider_status = 'active'",
+                AND e.content_type_key != 'section'
+                AND t.provider_status = 'active'
+                AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
         )
         .bind(path)
         .fetch_optional(db)
@@ -456,7 +456,9 @@ pub async fn resolve_custom_or_redirect_path(
            JOIN content_types t ON t.key = e.content_type_key
           WHERE r.source_path = ?
             AND e.publication_status = 'published'
-            AND t.provider_status = 'active'",
+            AND e.content_type_key != 'section'
+            AND t.provider_status = 'active'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(path)
     .fetch_optional(&mut *tx)
@@ -493,6 +495,7 @@ pub async fn sync_entry_seo_media_ref_in_tx(
           WHERE s.entry_id = ?
             AND e.publication_status = 'published'
             AND t.provider_status = 'active'
+            AND e.content_type_key != 'section'
             AND s.og_image_id IS NOT NULL",
     )
     .bind(entry_id)

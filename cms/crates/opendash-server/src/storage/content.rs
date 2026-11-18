@@ -5,7 +5,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use opendash_core::{
     content::{
         AttachedFieldGroupSnapshot, ContentFieldDefinition, ContentFieldType,
-        ContentTypeDefinition, ContentTypeDefinitionInput, EditorLayoutConfigV1, EditorRegion,
+        ContentTypeDefinition, ContentTypeDefinitionInput, ContentTypeSettings, ContentPublication,
+        EditorLayoutConfigV1, EditorRegion,
         EffectiveContentSchema, EffectiveEditorConfigProjection, EffectiveFieldStatus,
         FieldGroupRecord, FieldGroupStatus, FieldGroupTargetBinding, FieldRole, PanelDefinition,
         PanelKind, SchemaTransitionError, UserFieldGroupInput, build_core_and_group_panels,
@@ -40,6 +41,7 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
             key: "section".into(),
             label: "Section".into(),
             fields: Vec::new(),
+            settings: ContentTypeSettings::private_section(),
         });
     }
     let label = match key {
@@ -68,6 +70,7 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
                 ..Default::default()
             },
         ],
+        settings: ContentTypeSettings::builtin_publication(),
     })
 }
 
@@ -93,8 +96,30 @@ pub async fn preflight_builtin_key_collisions(
     for (key, raw, owner, owner_id, status) in rows {
         let matching_definition = serde_json::from_str::<ContentTypeDefinition>(&raw)
             .ok()
-            .as_ref()
-            == builtin_definition(&key).as_ref();
+            .map(|mut definition| {
+                // 0038 backfills the original 0008/0037 core JSON. Before
+                // migration, absence of settings must not look like key theft.
+                let has_settings = serde_json::from_str::<serde_json::Value>(&raw)
+                    .ok()
+                    .and_then(|value| value.get("settings").cloned())
+                    .is_some();
+                if !has_settings {
+                    definition.settings = builtin_definition(&key)
+                        .expect("known core key")
+                        .settings;
+                }
+                let canonical = builtin_definition(&key).expect("known core key");
+                let allowed_settings = if key == "section" {
+                    definition.settings == canonical.settings
+                } else {
+                    definition.settings.publication == ContentPublication::DraftPublish
+                };
+                definition.key == canonical.key
+                    && definition.label == canonical.label
+                    && definition.fields == canonical.fields
+                    && allowed_settings
+            })
+            == Some(true);
         if owner != "core" || owner_id.is_some() || status != "active" || !matching_definition {
             return Err(format!(
                 "M3-S20 preflight: khóa '{key}' đang bị chiếm hoặc sai định nghĩa Core. \
@@ -414,16 +439,15 @@ pub async fn update_user_content_type(
             "Khóa loại nội dung trong body không khớp với đường dẫn URL.",
         ));
     }
-    if builtin_definition(type_key).is_some() {
+    if type_key == "section" {
         return Err(ApiError::forbidden(
-            "Không thể sửa trực tiếp loại nội dung Core (post/page); hãy dùng Field Groups.",
+            "Không thể thay đổi Section riêng tư.",
         ));
     }
-    let incoming = input
+    let mut incoming = input
         .clone()
         .into_canonical()
         .map_err(map_input_validation_error)?;
-    let incoming_json = serde_json::to_string(&incoming)?;
 
     let mut tx = begin_content_write_tx(db).await?;
     let existing: Option<(String, Option<String>, i64)> = sqlx::query_as(
@@ -436,7 +460,8 @@ pub async fn update_user_content_type(
     let Some((owner_kind, _owner_id, current_version)) = existing else {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     };
-    if owner_kind != "user" {
+    let is_builtin = matches!(type_key, "post" | "page");
+    if owner_kind != "user" && !(is_builtin && owner_kind == "core") {
         return Err(ApiError::forbidden(
             "Chỉ có thể cập nhật loại nội dung thuộc quyền sở hữu của User.",
         ));
@@ -450,6 +475,33 @@ pub async fn update_user_content_type(
     let old_effective = load_effective_content_schema_in_tx(&mut tx, type_key)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải schema hiện tại."))?;
+    if is_builtin && (incoming.key != old_effective.base.descriptor.key
+        || incoming.label != old_effective.base.descriptor.label
+        || incoming.fields != old_effective.base.descriptor.fields)
+    {
+        return Err(ApiError::forbidden(
+            "Post/Page chỉ hỗ trợ đổi cấu hình hành vi; schema Core phải giữ nguyên.",
+        ));
+    }
+    if input.settings.is_none() {
+        incoming.settings = old_effective.base.descriptor.settings.clone();
+    }
+    if old_effective.base.descriptor.settings.publication == ContentPublication::DraftPublish
+        && incoming.settings.publication == ContentPublication::Immediate
+    {
+        let drafts: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND publication_status = 'draft')",
+        )
+        .bind(type_key)
+        .fetch_one(&mut *tx)
+        .await?;
+        if drafts {
+            return Err(ApiError::conflict(
+                "Không thể chuyển sang lưu ngay khi loại nội dung còn bản nháp.",
+            ));
+        }
+    }
+    let incoming_json = serde_json::to_string(&incoming)?;
     let has_entries: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ?)",
     )
@@ -1046,6 +1098,7 @@ pub async fn sync_theme_declarations_in_tx(
                 label: ct.label.clone(),
                 fields: ct.fields.clone(),
                 taxonomies: ct.taxonomies.clone(),
+                settings: ct.settings.clone(),
             })
             .collect(),
         taxonomy_eligibility: declarations
@@ -1237,10 +1290,28 @@ async fn sync_owner_cnt_declarations_in_tx(
                 // Preserve omitted fields as withdrawn when package re-declares CPT (270-R1)
                 let merged_fields =
                     merge_package_redeclared_fields(&existing_def.fields, &ct.fields);
+                let mut incoming_settings = ct.settings.clone().unwrap_or_else(|| existing_def.settings.clone());
+                incoming_settings.validate_and_normalize().map_err(map_input_validation_error)?;
+                if existing_def.settings.publication == ContentPublication::DraftPublish
+                    && incoming_settings.publication == ContentPublication::Immediate
+                {
+                    let drafts: bool = sqlx::query_scalar(
+                        "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND publication_status = 'draft')",
+                    )
+                    .bind(&ct.key)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if drafts {
+                        return Err(ApiError::conflict(
+                            "Không thể chuyển sang lưu ngay khi loại nội dung còn bản nháp.",
+                        ));
+                    }
+                }
                 let incoming = ContentTypeDefinition {
                     key: ct.key.clone(),
                     label: ct.label.clone(),
                     fields: merged_fields,
+                    settings: incoming_settings,
                 };
                 incoming.validate().map_err(map_input_validation_error)?;
                 let incoming_json = serde_json::to_string(&incoming)?;
@@ -1256,10 +1327,13 @@ async fn sync_owner_cnt_declarations_in_tx(
                 .await?;
             }
             None => {
+                let mut settings = ct.settings.clone().unwrap_or_default();
+                settings.validate_and_normalize().map_err(map_input_validation_error)?;
                 let incoming = ContentTypeDefinition {
                     key: ct.key.clone(),
                     label: ct.label.clone(),
                     fields: ct.fields.clone(),
+                    settings,
                 };
                 incoming.validate().map_err(map_input_validation_error)?;
                 let incoming_json = serde_json::to_string(&incoming)?;
