@@ -18,7 +18,7 @@ import {
   type MenuViewModel,
   type MenuWithItems,
 } from '../../api/menus.ts';
-import { listTaxonomyTerms, type TaxonomyTerm } from '../../api/taxonomy.ts';
+import { listAllTaxonomyTerms, listTaxonomyDefinitions, type TaxonomyDefinition, type TaxonomyTerm } from '../../api/taxonomy.ts';
 import { getThemes } from '../../api/themes.ts';
 
 interface Props {
@@ -112,6 +112,7 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
   const [entryNextOffsets, setEntryNextOffsets] = useState<Record<string, number>>({});
   const [loadingMoreEntries, setLoadingMoreEntries] = useState(false);
   const [terms, setTerms] = useState<TaxonomyTerm[]>([]);
+  const [taxonomyDefinitions, setTaxonomyDefinitions] = useState<TaxonomyDefinition[]>([]);
   const [activeThemeId, setActiveThemeId] = useState<string | null>(null);
   const [slots, setSlots] = useState<MenuSlotsSnapshot | null>(null);
   const [slotDraft, setSlotDraft] = useState<Record<string, number | null>>({});
@@ -121,13 +122,22 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
 
   const loadMenusAndRefs = useCallback(async () => {
     try {
-      const [page, themesRes, catRes, tagRes, contentTypes] = await Promise.all([
+      const [page, themesRes, definitions, contentTypes] = await Promise.all([
         listMenus(100, 0),
         getThemes(),
-        listTaxonomyTerms('category', 100).catch(() => ({ items: [] as TaxonomyTerm[] })),
-        listTaxonomyTerms('tag', 100).catch(() => ({ items: [] as TaxonomyTerm[] })),
+        listTaxonomyDefinitions(),
         listContentTypes(),
       ]);
+      // Fetch only public and active taxonomies; a menu item resolves to a
+      // public term route. Retain saved IDs even if the target is withdrawn.
+      const publicDefinitions = definitions.filter(def =>
+        def.public && def.provider_status === 'active' && def.declaration_state === 'declared');
+      const availableTerms: TaxonomyTerm[] = [];
+      for (let index = 0; index < publicDefinitions.length; index += 8) {
+        const pages = await Promise.all(publicDefinitions.slice(index, index + 8)
+          .map(def => listAllTaxonomyTerms(def.key)));
+        for (const page of pages) availableTerms.push(...page);
+      }
       const typeKeys = [...new Set(['post', 'page', ...contentTypes.map((type) => type.descriptor.key)])];
       const contentPages = await Promise.all(
         typeKeys.map(async (key) => ({ key, rows: await listContentEntries(key, ENTRY_PAGE_SIZE, 0) })),
@@ -137,7 +147,8 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
         if (rows.length === ENTRY_PAGE_SIZE) cursors[key] = ENTRY_PAGE_SIZE;
       }
       setMenus(page.items);
-      setTerms([...catRes.items, ...tagRes.items]);
+      setTaxonomyDefinitions(definitions);
+      setTerms(availableTerms);
       setEntries(contentPages.flatMap(({ key, rows }) => publishedOptions(key, rows)));
       setEntryNextOffsets(cursors);
       const active = themesRes.active_id ?? null;
@@ -526,7 +537,7 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
                   )}
                   {item.target_kind === 'term' && (
                     <select
-                      aria-label="Chọn danh mục/thẻ"
+                      aria-label="Chọn taxonomy term"
                       value={item.target_term_id ?? ''}
                       onChange={(e) => {
                         const next = [...itemsDraft];
@@ -536,9 +547,14 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
                       className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                     >
                       <option value="">-- Chọn term --</option>
+                      {item.target_term_id !== null && !terms.some(term => term.id === item.target_term_id) && (
+                        <option value={item.target_term_id}>
+                          #{item.target_term_id} (đích đã lưu; chưa khả dụng)
+                        </option>
+                      )}
                       {terms.map((term) => (
                         <option key={term.id} value={term.id}>
-                          #{term.id} {term.name} ({term.kind})
+                          #{term.id} {term.name} ({taxonomyDefinitions.find(def => def.key === term.kind)?.label ?? term.kind})
                         </option>
                       ))}
                     </select>

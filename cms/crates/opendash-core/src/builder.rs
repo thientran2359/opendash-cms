@@ -263,6 +263,12 @@ pub struct ListProps {
     pub category_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag_id: Option<i64>,
+    /// C2 generic taxonomy filter; both fields must be present together.
+    /// Legacy category/tag aliases remain readable for existing documents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taxonomy_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term_id: Option<i64>,
     #[serde(default)]
     pub include_descendants: bool,
     #[serde(default)]
@@ -627,7 +633,13 @@ fn validate_known(
                 || !(1..=20).contains(&props.page_size)
                 || props.category_id.is_some_and(|id| id <= 0)
                 || props.tag_id.is_some_and(|id| id <= 0)
-                || (props.include_descendants && props.category_id.is_none())
+                || props.term_id.is_some_and(|id| id <= 0)
+                || props.taxonomy_key.as_deref().is_some_and(|key| !valid_content_type_key(key))
+                || (props.taxonomy_key.is_some() != props.term_id.is_some())
+                || (props.taxonomy_key.is_some()
+                    && (props.category_id.is_some() || props.tag_id.is_some()))
+                || (props.include_descendants
+                    && props.category_id.is_none() && props.taxonomy_key.is_none())
             {
                 return Err("Invalid Builder list configuration");
             }
@@ -1264,6 +1276,8 @@ mod tests {
         assert_eq!(props.sort, ListSort::IdDesc);
         assert!(!props.include_descendants);
         assert_eq!(props.category_id, None);
+        assert_eq!(props.taxonomy_key, None);
+        assert_eq!(props.term_id, None);
         assert_eq!(
             BuilderDocument::from_json(&document.to_json().unwrap()).unwrap(),
             document
@@ -1276,6 +1290,11 @@ mod tests {
             json!({"category_id": 0}),
             json!({"tag_id": -1}),
             json!({"include_descendants": true}),
+            json!({"taxonomy_key": "genre"}),
+            json!({"term_id": 42}),
+            json!({"taxonomy_key": "bad-key", "term_id": 42}),
+            json!({"taxonomy_key": "genre", "term_id": 0}),
+            json!({"taxonomy_key": "genre", "term_id": 42, "tag_id": 6}),
             json!({"sort": "id_random"}),
             json!({"type_key": "invalid-key"}),
             json!({"extra": "injection"}),
@@ -1297,6 +1316,15 @@ mod tests {
                    "include_descendants": true, "sort": "id_asc", "page_size": 20});
         let filtered = BuilderDocument::from_json(filtered.to_string().as_bytes()).unwrap();
         filtered.validate_for_save(&registry(), None).unwrap();
+
+        let mut generic = original.clone();
+        generic["sections"][0]["children"][0]["children"][0]["children"][0]["props"] =
+            json!({"type_key": "post", "taxonomy_key": "genre", "term_id": 37,
+                   "include_descendants": true});
+        let generic = BuilderDocument::from_json(generic.to_string().as_bytes()).unwrap();
+        generic.validate_for_save(&registry(), None).unwrap();
+        let roundtrip = BuilderDocument::from_json(&generic.to_json().unwrap()).unwrap();
+        assert_eq!(roundtrip, generic);
 
         let mut many = original.clone();
         let children = many["sections"][0]["children"][0]["children"][0]["children"]
