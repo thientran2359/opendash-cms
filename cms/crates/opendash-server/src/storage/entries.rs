@@ -463,7 +463,7 @@ pub async fn list_published_page_in_tx(
         // visibility and term kind. Do not expose drafts or private taxonomy
         // membership by probing an unavailable saved Builder node.
         let usable: Option<i64> = sqlx::query_scalar(
-            "SELECT 1 FROM taxonomy_terms term
+            "SELECT d.hierarchical FROM taxonomy_terms term
               JOIN taxonomy_definitions d ON d.key = term.kind
              WHERE term.id = ? AND term.kind = ? AND d.public = 1
                AND d.provider_status = 'active'
@@ -473,7 +473,14 @@ pub async fn list_published_page_in_tx(
         .bind(kind)
         .fetch_optional(&mut **tx)
         .await?;
-        if usable.is_none() || !effective_taxonomies.iter().any(|enabled| enabled == kind) {
+        // A saved list can outlive a legitimate hierarchical -> flat edit
+        // (allowed once all terms are roots). Treat its now-incompatible
+        // descendant filter as missing configuration, while request filters
+        // still receive the strict 400 from validate_filter_in_tx below.
+        if usable.is_none()
+            || (filters.include_descendants && usable == Some(0))
+            || !effective_taxonomies.iter().any(|enabled| enabled == kind)
+        {
             return Ok(PublishedListResult::MissingConfig(
                 PublishedListMissing::Taxonomy,
             ));
@@ -1886,7 +1893,7 @@ mod tests {
             .unwrap();
         let deleted = list_published_page(
             &db, "post", 1, 6, PublishedListSort::IdDesc,
-            EntryFilters { term_id: Some(child), ..filters },
+            EntryFilters { term_id: Some(child), ..filters.clone() },
         )
         .await
         .unwrap();
@@ -1894,6 +1901,21 @@ mod tests {
             deleted,
             PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
         ));
+        // An Admin can switch a taxonomy to flat once every remaining term
+        // is a root. An older saved Builder node with descendants=true must
+        // not turn the entire public homepage into HTTP 400.
+        sqlx::query("UPDATE taxonomy_definitions SET hierarchical=0 WHERE key='genre'")
+            .execute(&db).await.unwrap();
+        let incompatible = list_published_page(
+            &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+        ).await.unwrap();
+        assert!(matches!(incompatible,
+            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)));
+        let mut tx = db.begin().await.unwrap();
+        let query_error = validate_filter_in_tx(&mut tx, "post", &filters, true)
+            .await.unwrap_err();
+        assert_eq!(query_error.0, axum::http::StatusCode::BAD_REQUEST,
+            "user-provided filters remain strict after the definition change");
     }
 
     #[tokio::test]

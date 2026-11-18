@@ -1729,6 +1729,65 @@ pub async fn load_effective_taxonomies(
     load_effective_taxonomies_in_tx(&mut conn, type_key).await
 }
 
+/// The complete persisted choice for Admin editing. Effective taxonomy keys
+/// intentionally omit inactive providers, whereas the choice retained in a
+/// site override must survive unrelated edits and later provider reactivation.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConfiguredContentTypeTaxonomies {
+    pub taxonomies: Vec<String>,
+    pub has_override: bool,
+    pub effective: Vec<String>,
+}
+
+pub async fn load_configured_taxonomies(
+    db: &SqlitePool,
+    type_key: &str,
+) -> ApiResult<ConfiguredContentTypeTaxonomies> {
+    if !valid_content_type_key(type_key) || type_key == "section" {
+        return Err(ApiError::bad_request("Loại nội dung không hỗ trợ taxonomy."));
+    }
+    let mut conn = db.acquire().await?;
+    let exists: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM content_types WHERE key=?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if exists.is_none() {
+        return Err(ApiError::not_found("Loại nội dung không tồn tại."));
+    }
+    let raw: Option<String> = sqlx::query_scalar(
+        "SELECT taxonomies_json FROM content_type_taxonomy_overrides WHERE content_type_key=?",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let has_override = raw.is_some();
+    let mut taxonomies: Vec<String> = if let Some(raw) = raw {
+        serde_json::from_str(&raw)
+            .map_err(|_| ApiError::internal("Danh sách taxonomy override bị hỏng."))?
+    } else {
+        // A provider may be temporarily inactive or withdraw a declaration.
+        // Preserve its configured default association for a future reactivation.
+        sqlx::query_scalar(
+            "SELECT e.taxonomy_kind FROM content_type_taxonomy_eligibility e
+             JOIN taxonomy_definitions d ON d.key=e.taxonomy_kind
+             WHERE e.content_type_key=? ORDER BY e.taxonomy_kind",
+        )
+        .bind(type_key)
+        .fetch_all(&mut *conn)
+        .await?
+    };
+    taxonomies.sort();
+    taxonomies.dedup();
+    let effective = load_effective_taxonomies_in_tx(&mut conn, type_key).await?;
+    Ok(ConfiguredContentTypeTaxonomies {
+        taxonomies,
+        has_override,
+        effective,
+    })
+}
+
 pub async fn put_site_taxonomy_eligibility(
     db: &SqlitePool, actor: &crate::auth::SessionContext, type_key: &str,
     expected_version: i64, taxonomies: &[String],

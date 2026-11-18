@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import {
   createContentType,
   effectiveContentTypeSettings,
+  getConfiguredContentTypeTaxonomies,
   listContentTypes,
+  updateContentTypeTaxonomyEligibility,
   updateContentType,
   type ContentPublicationPolicy,
   type ContentSupport,
@@ -11,6 +13,7 @@ import {
   type OwnedContentTypeWithSettings,
 } from '../../api/content.ts';
 import { ApiClientError } from '../../api/client.ts';
+import { listTaxonomyDefinitions, type TaxonomyDefinition } from '../../api/taxonomy.ts';
 import { ContentTypeForm } from './ContentTypeForm.tsx';
 import { EditorLayoutConfigurator } from './EditorLayoutConfigurator.tsx';
 import { FieldGroupsManager } from './FieldGroupsManager.tsx';
@@ -21,6 +24,7 @@ interface ContentTypeSchemaSettingsProps {
   csrfToken: string | null;
   onApiError: (error: unknown, fallback: string) => void;
   onContentTypesChanged: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps> = ({
@@ -29,6 +33,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   csrfToken,
   onApiError,
   onContentTypesChanged,
+  onDirtyChange,
 }) => {
   const [contentTypes, setContentTypes] = useState<OwnedContentTypeWithSettings[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -40,6 +45,14 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsError, setSettingsError] = useState('');
   const [revision, setRevision] = useState(0);
+  const [taxonomyState, setTaxonomyState] = useState<{
+    identity: string;
+    available: TaxonomyDefinition[];
+    applied: string[];
+  } | null>(null);
+  const [taxonomyDraft, setTaxonomyDraft] = useState<string[]>([]);
+  const [taxonomyBusy, setTaxonomyBusy] = useState(false);
+  const [taxonomyError, setTaxonomyError] = useState('');
 
   const load = async () => {
     try {
@@ -76,6 +89,61 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     || editSettings.publication !== canonicalSettings.publication
     || [...editSettings.supports].sort().join(',') !== [...canonicalSettings.supports].sort().join(',')
   );
+  const taxonomyLoaded = taxonomyState?.identity === currentIdentity ? taxonomyState : null;
+  const taxonomyChanged = Boolean(taxonomyLoaded && taxonomyDraft.slice().sort().join('\u0000')
+    !== taxonomyLoaded.applied.slice().sort().join('\u0000'));
+
+  useEffect(() => {
+    onDirtyChange?.(settingsChanged || taxonomyChanged);
+    return () => onDirtyChange?.(false);
+  }, [settingsChanged, taxonomyChanged, onDirtyChange]);
+
+  useEffect(() => {
+    if (!currentIdentity || !activeKey || isSection) {
+      setTaxonomyState(null);
+      setTaxonomyError('');
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    setTaxonomyState(null);
+    setTaxonomyError('');
+    void Promise.all([
+      listTaxonomyDefinitions(controller.signal),
+      getConfiguredContentTypeTaxonomies(activeKey, controller.signal),
+    ]).then(([available, applied]) => {
+      if (!active) return;
+      setTaxonomyDraft(applied.taxonomies);
+      setTaxonomyState({ identity: currentIdentity, available, applied: applied.taxonomies });
+    }).catch(error => {
+      if (!active || controller.signal.aborted) return;
+      setTaxonomyError(error instanceof Error ? error.message : 'Không thể tải liên kết taxonomy.');
+      onApiError(error, 'Không thể tải liên kết taxonomy.');
+    });
+    return () => { active = false; controller.abort(); };
+  }, [activeKey, currentIdentity, revision, isSection]);
+
+  const handleUpdateTaxonomies = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!activeType || !taxonomyLoaded || !canEditSettings || isSection || taxonomyBusy || !csrfToken) return;
+    setTaxonomyBusy(true);
+    setTaxonomyError('');
+    try {
+      await updateContentTypeTaxonomyEligibility(activeKey, activeType.version, taxonomyDraft, csrfToken);
+      setRevision(prev => prev + 1);
+      onContentTypesChanged();
+    } catch (error) {
+      const suffix = error instanceof ApiClientError && error.status === 412
+        ? '412 — Loại nội dung đã được thay đổi. Lựa chọn đang nhập vẫn được giữ; hãy tải lại cấu hình trước khi lưu.'
+        : error instanceof ApiClientError && error.status === 403
+          ? '403 — Bạn không có quyền cập nhật taxonomy.'
+          : error instanceof Error ? error.message : 'Không thể lưu taxonomy.';
+      setTaxonomyError(suffix);
+      if (error instanceof ApiClientError && error.status === 401) onApiError(error, suffix);
+    } finally {
+      setTaxonomyBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (activeType) {
@@ -177,10 +245,6 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
             aria-pressed={selectedTypeKey === ct.descriptor.key}
             onClick={() => {
               if (ct.descriptor.key === selectedTypeKey) return;
-              if ((settingsChanged || settingsError) &&
-                  !window.confirm('Cấu hình đang sửa chưa được lưu. Bỏ bản nhập và chuyển loại nội dung?')) {
-                return;
-              }
               onSelectTypeKey(ct.descriptor.key);
             }}
             className={
@@ -288,6 +352,49 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
               </p>
             )}
           </div>
+
+          <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="Taxonomy áp dụng cho loại nội dung">
+            <h3 className="text-base font-semibold text-slate-900">Taxonomy áp dụng</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              Chọn taxonomy được phép gắn vào {activeType.descriptor.label}. Bỏ chọn không xóa liên kết đã lưu.
+            </p>
+            {isSection ? <p className="mt-3 text-sm text-slate-600">Section không hỗ trợ taxonomy.</p>
+              : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-slate-600">Đang tải taxonomy áp dụng…</p>
+                : <form className="mt-3 space-y-3" onSubmit={handleUpdateTaxonomies}>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {taxonomyLoaded.available.filter(def =>
+                        (def.provider_status === 'active' && def.declaration_state === 'declared')
+                        || taxonomyDraft.includes(def.key)).map(def => (
+                        <label key={def.key} className="flex items-start gap-2 rounded border border-slate-200 p-3 text-sm text-slate-700">
+                          <input type="checkbox" className="mt-1" checked={taxonomyDraft.includes(def.key)}
+                            disabled={!canEditSettings || !csrfToken || taxonomyBusy
+                              || (!taxonomyDraft.includes(def.key) &&
+                                (def.provider_status !== 'active' || def.declaration_state !== 'declared'))}
+                            onChange={event => setTaxonomyDraft(prev => event.target.checked
+                              ? Array.from(new Set([...prev, def.key])) : prev.filter(value => value !== def.key))} />
+                          <span><strong className="block">{def.label}</strong>
+                            <code className="text-xs">{def.key}</code> · {def.hierarchical ? 'Phân cấp' : 'Không phân cấp'}
+                            {(def.provider_status !== 'active' || def.declaration_state !== 'declared')
+                              && <span className="block text-xs text-amber-700">Provider không hoạt động hoặc khai báo đã rút; lựa chọn đã lưu được giữ lại.</span>}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    {!canEditSettings && <p className="text-xs text-slate-600">Chỉ loại nội dung có quyền cấu hình mới thay đổi taxonomy được.</p>}
+                    {taxonomyError && <p role="alert" className="text-sm text-rose-700">{taxonomyError}</p>}
+                    <div className="flex flex-wrap gap-2">
+                      <button type="submit" className="rounded bg-slate-800 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                        disabled={!canEditSettings || !taxonomyChanged || taxonomyBusy || !csrfToken}>
+                        {taxonomyBusy ? 'Đang lưu…' : 'Lưu taxonomy áp dụng'}
+                      </button>
+                      <button type="button" className="rounded border border-slate-300 px-3 py-2 text-sm"
+                        disabled={taxonomyBusy} onClick={() => { setTaxonomyDraft(taxonomyLoaded.applied); setTaxonomyError(''); }}>
+                        Hủy lựa chọn chưa lưu
+                      </button>
+                    </div>
+                  </form>}
+            {!taxonomyLoaded && taxonomyError && <p role="alert" className="mt-3 text-sm text-rose-700">{taxonomyError}</p>}
+          </section>
 
           <FieldGroupsManager
             typeKey={activeType.descriptor.key}

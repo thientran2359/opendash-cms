@@ -228,7 +228,9 @@ export function runEntryProviderAction(
 
 export interface ContentTypeTaxonomyEligibility {
   content_type_key: string;
-  taxonomy_kind: 'category' | 'tag';
+  taxonomy_kind: string;
+  owner_kind: string;
+  owner_id: string | null;
   provider_status: string;
   declaration_state: string;
 }
@@ -237,6 +239,47 @@ export function listContentTypeTaxonomyEligibility(typeKey: string, signal?: Abo
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
     signal,
     defaultErrorMessage: 'Không thể kiểm tra taxonomy hiệu lực.',
+  });
+}
+
+/** Effective, active taxonomies include the site's explicit CPT override. */
+export function getEffectiveContentTypeTaxonomies(typeKey: string, signal?: AbortSignal): Promise<string[]> {
+  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/effective`, {
+    signal,
+    defaultErrorMessage: 'Không thể tải taxonomy áp dụng cho loại nội dung.',
+  });
+}
+
+export interface ConfiguredContentTypeTaxonomies {
+  taxonomies: string[];
+  effective: string[];
+  has_override: boolean;
+}
+
+/** Full saved choice, including inactive provider keys hidden from public use. */
+export function getConfiguredContentTypeTaxonomies(
+  typeKey: string, signal?: AbortSignal,
+): Promise<ConfiguredContentTypeTaxonomies> {
+  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
+    signal,
+    defaultErrorMessage: 'Không thể tải toàn bộ cấu hình taxonomy đã lưu.',
+  });
+}
+
+/** Shares the canonical CPT schema version; stale edits fail with 412. */
+export function updateContentTypeTaxonomyEligibility(
+  typeKey: string,
+  expectedVersion: number,
+  taxonomies: string[],
+  csrfToken: string,
+): Promise<OwnedContentTypeWithSettings> {
+  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
+    method: 'PUT',
+    contentType: 'application/json',
+    csrfToken,
+    ifMatchVersion: expectedVersion,
+    body: JSON.stringify({ taxonomies, expected_version: expectedVersion }),
+    defaultErrorMessage: 'Không thể cập nhật taxonomy áp dụng.',
   });
 }
 

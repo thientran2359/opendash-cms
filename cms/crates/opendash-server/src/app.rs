@@ -333,6 +333,10 @@ pub fn build_router_with_themes_root(
             get(taxonomy_eligibility_effective),
         )
         .route(
+            "/api/admin/taxonomy/eligibility/{content_type_key}/configured",
+            get(crate::routes::taxonomy::taxonomy_eligibility_configured),
+        )
+        .route(
             "/api/admin/operations/diagnostics",
             get(crate::routes::operations::diagnostics),
         )

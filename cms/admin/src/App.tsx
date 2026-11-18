@@ -26,6 +26,7 @@ import { BackupsPanel } from './features/operations/BackupsPanel.tsx';
 import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
+import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
 import { SectionsPage } from './features/sections/SectionsPage.tsx';
 import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
 
@@ -73,6 +74,12 @@ export const App: React.FC = () => {
   const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
   const [authGeneration, setAuthGeneration] = useState<number>(1);
   const [contentDirty, setContentDirty] = useState(false);
+  const [schemaDirty, setSchemaDirty] = useState(false);
+  const schemaDirtyRef = useRef(false);
+  const markSchemaDirty = useCallback((value: boolean) => {
+    schemaDirtyRef.current = value;
+    setSchemaDirty(value);
+  }, []);
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
@@ -151,9 +158,11 @@ export const App: React.FC = () => {
       && builderIdentity(current) !== builderIdentity(next);
     const leavingBuilder = switchingBuilderTarget && builderDirtyRef.current;
     const leavingSection = current.view === 'sections' && current.rawHash !== destination && sectionsDirtyRef.current;
+    const leavingSchema = current.view === 'settings' && current.sub === 'content-types'
+      && schemaDirtyRef.current && acceptedHashRef.current !== destination;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    return !(leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection) ||
+    return !(leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema) ||
       window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
         : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
@@ -218,13 +227,13 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
+  }, [contentDirty, schemaDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -349,7 +358,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -490,7 +499,7 @@ export const App: React.FC = () => {
       cptTypes={cptTypes}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
+      hasUnsavedChanges={contentDirty || schemaDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
       sidebarContent={<BuilderWorkspace
         key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
         route={lastBuilderRouteRef.current}
@@ -517,14 +526,15 @@ export const App: React.FC = () => {
         <ContentTypeSchemaSettings
           selectedTypeKey={selectedSchemaTypeKey}
           onSelectTypeKey={key => {
-            setSelectedSchemaTypeKey(key);
             if (key) navigateHash(`#/appearance/content-types/${key}`);
+            else setSelectedSchemaTypeKey(null);
           }}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onContentTypesChanged={() => {
             void loadCptTypes();
           }}
+          onDirtyChange={markSchemaDirty}
         />
       }
       profileContent={
@@ -643,13 +653,18 @@ export const App: React.FC = () => {
           onDirtyChange={markSectionsDirty} onNavigateHash={navigateHash} />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
-      taxonomyContent={route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
-        ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
-            kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
-            termId={route.entryId ?? null} user={user} csrfToken={csrfToken}
-            onApiError={handleApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
-        : <TaxonomyPage kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
-            onApiError={handleApiError} onNavigateHash={navigateHash} />}
+      taxonomyContent={route.taxonomyMode === 'definitions'
+        ? <TaxonomyDefinitionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}`}
+            user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={handleApiError}
+            onNavigateHash={navigateHash} onDirtyChange={markTermDirty} />
+        : route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
+          ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
+              kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
+              termId={route.entryId ?? null} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+              onApiError={handleApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
+          : <TaxonomyPage key={`terms-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
+              kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
+              onApiError={handleApiError} onNavigateHash={navigateHash} />}
     />
   );
 };

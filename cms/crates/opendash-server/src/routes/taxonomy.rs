@@ -16,7 +16,7 @@ use opendash_core::content::{
 };
 
 use crate::{
-    auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
+    auth::{require_admin, require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     storage::taxonomy,
 };
@@ -365,6 +365,17 @@ pub async fn taxonomy_eligibility_effective(
     }
     let keys = crate::storage::content::load_effective_taxonomies(&db, &content_type_key).await?;
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(keys)).into_response())
+}
+
+/// Admin reads the entire persisted selection before replacing a site
+/// override. Returning only effective keys would silently drop dormant keys.
+pub async fn taxonomy_eligibility_configured(
+    State(db): State<SqlitePool>, headers: HeaderMap,
+    Path(content_type_key): Path<String>,
+) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let configured = crate::storage::content::load_configured_taxonomies(&db, &content_type_key).await?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(configured)).into_response())
 }
 
 #[cfg(test)]

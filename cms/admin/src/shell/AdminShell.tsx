@@ -136,6 +136,14 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       adminOnly: true,
     },
     {
+      id: 'taxonomies',
+      label: 'Taxonomy tùy chỉnh',
+      icon: 'content',
+      hash: '#/taxonomy/definitions',
+      group: 'appearance',
+      adminOnly: true,
+    },
+    {
       id: 'library',
       label: 'Thư viện mẫu',
       icon: 'content',
@@ -268,7 +276,8 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     route.view === 'cpt' && route.typeKey
       ? `cpt:${route.typeKey}`
       : route.view === 'taxonomy'
-        ? 'posts'
+        ? (route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
+          ? 'taxonomies' : 'posts')
         : route.view === 'profile'
           ? 'users'
           : route.view === 'builder'
@@ -320,7 +329,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   // follows the resolved route, not a potentially obsolete URL spelling.
   const selectedNavHash =
     route.view === 'themes' ? `#/appearance/${route.sub}` :
-    route.view === 'taxonomy' ? `#/posts/${route.sub}` :
+    route.view === 'taxonomy'
+      ? (route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
+        ? '#/taxonomy/definitions' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
     route.view === 'profile' ? '#/users/profile' :
     route.view === 'builder' ? '#/builder' :
     route.view === 'tools' ? `#/tools/${route.sub}` :
@@ -334,6 +345,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     list: 'Danh sách', new: 'Thêm mới', edit: 'Chỉnh sửa', library: 'Thư viện',
     general: 'Tổng quát', seo: 'SEO', contact: 'Liên hệ', smtp: 'Thông báo Email (SMTP)',
     'content-types': 'Loại nội dung & Trường', themes: 'Themes', menus: 'Menus',
+    definitions: 'Taxonomy tùy chỉnh', terms: 'Các term',
     options: 'Tùy chọn theme', health: 'Tình trạng hệ thống',
     'media-reconcile': 'Đối soát Media', backup: 'Sao lưu & Phục hồi',
     install: 'Cài đặt', profile: 'Hồ sơ của tôi',
