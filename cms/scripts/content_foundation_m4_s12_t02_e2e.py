@@ -608,6 +608,12 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         settings_form.get_by_role('button', name='Lưu cấu hình').click()
                     check(stale_save.value.status == 412, 'stale CPT settings CAS must reject concurrent edit')
                     settings_form.get_by_role('button', name='Đối chiếu CPT mới, giữ thay đổi đang nhập').click()
+                    # Rebase fetches the latest CPT asynchronously; wait for
+                    # the completion state rather than asserting on a stale
+                    # form render immediately after the click.
+                    settings_form.get_by_role('alert').filter(
+                        has_text='Đã đối chiếu phiên bản CPT mới',
+                    ).wait_for(timeout=15000)
                     check(settings_label.input_value() == 'Books Local Draft T02'
                           and not settings_form.get_by_role('checkbox', name='Công khai nội dung (public)').is_checked()
                           and not settings_form.get_by_role('checkbox', name='Cho phép trang danh sách (has_archive)').is_checked(),

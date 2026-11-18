@@ -326,7 +326,20 @@ post-push exact-source CI or exact merged-source G5 receipts.
 The first new C2 attempt failed only because a Playwright text locator matched
 two intentionally visible identical create notices; it was corrected to target
 the top-level `role=status`. The subsequent 30/30 run passed, including the
-provider-owned branch. Neither receipt is a G5 release artifact.
+provider-owned branch. A subsequent clean-head repetition at `315464b` exposed
+an additional test synchronization issue: the test checked 412 CPT settings
+rebase immediately after clicking an asynchronous fetch action, sometimes
+before React had applied the result. The runner now waits for the explicit
+successful rebase `role=alert` before asserting local label/public and remote
+archive fields. With that wait, the repeat **30/30 PASS** on the same source
+and embedded Admin binary; receipt
+`.g5-checkouts/evidence/c2-t02-final-round/c2-exacthead-rebase/receipt.json`,
+binary SHA-256 `23505c10b0b66cbb08c4a9067fe14c5fc901e912f1728267592843fec134beaf`,
+runner SHA-256
+`fe92ac98cba44964957a4741ee37f156400391a00ffe6a66c347672237c4c76e`.
+This repeat was made with the corrected runner dirty but no product-source
+changes; a clean source/runner repeat is required after its own commit. None
+of these premerge receipts is a G5 release artifact.
 
 ## G4/G5 release gates
 
