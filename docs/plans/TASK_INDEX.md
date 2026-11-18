@@ -241,7 +241,7 @@ App/Menu/Builder; các correction trùng file chờ bàn giao và đối chiếu
 
 | Task | Responsible | Status / source | Issue |
 | --- | --- | --- | --- |
-| [M8-S11-T01](milestones/M8/slices/2026-11-18-csrf-checker-g3.md) | Forge | G3 specified; implementation NOT_STARTED, verification NOT_RUN; live Project Ready pending verification | Chưa phát hành trước spec merge |
+| [M8-S11-T01](milestones/M8/slices/2026-11-18-csrf-checker-g3.md) | Forge | G3 merged [#386](https://github.com/thientran2359/opendash-cms/pull/386); implementation NOT_STARTED, verification NOT_RUN; Project Backlog observed 18/11/2026, Ready transition blocked by Project API scope / Desktop attachment ownership | [#387](https://github.com/thientran2359/opendash-cms/issues/387) |
 
 ## Task thực tế không thuộc 9 milestone CMS
 
