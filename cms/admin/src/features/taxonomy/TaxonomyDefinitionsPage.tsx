@@ -1,0 +1,592 @@
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { listContentTypes } from '../../api/content.ts';
+import type { OwnedContentTypeWithSettings } from '../../api/content.ts';
+import { ApiClientError, requestJson } from '../../api/client.ts';
+import {
+  createTaxonomyDefinition, deleteTaxonomyDefinition, getTaxonomyDefinition,
+  listTaxonomyDefinitions, updateTaxonomyDefinition, updateTaxonomyEligibility,
+  type TaxonomyDefinition,
+} from '../../api/taxonomy.ts';
+import type { AuthUser } from '../../types.ts';
+
+interface Props {
+  user: AuthUser | null;
+  /** Stable server site instance ID, provided by App. Without it drafts cannot be safely cached. */
+  siteInstanceId?: string;
+  csrfToken: string | null;
+  onApiError: (error: unknown, fallback: string) => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onNavigateHash: (hash: string) => void;
+}
+
+interface FormValues { key: string; label: string; hierarchical: boolean; public: boolean }
+interface DefinitionsDraft {
+  activeKey: string;
+  form: FormValues;
+  baseline: FormValues;
+  definitionVersion: number | null;
+  conflict: boolean;
+  typeKey: string;
+  eligible: string[];
+  eligibilityBaseline: string[];
+  typeVersion: number | null;
+  eligibilityConflict: boolean;
+}
+
+// Session-only memory. A 401 unmounts AdminShell's taxonomy screen; retaining
+// drafts here avoids browser storage and prevents another account/site reading
+// an old form. App must pass its authenticated siteInstanceId to enable it.
+const definitionDrafts = new Map<string, DefinitionsDraft>();
+const draftScope = (siteInstanceId: string | undefined, user: AuthUser | null): string | null =>
+  siteInstanceId && siteInstanceId !== 'default-site' && user
+    ? JSON.stringify([siteInstanceId, user.id, user.role]) : null;
+const keysEqual = (a: string[], b: string[]): boolean =>
+  [...a].sort().join('\u0000') === [...b].sort().join('\u0000');
+interface ConfiguredTaxonomies {
+  taxonomies: string[];
+  has_override: boolean;
+  effective: string[];
+  /** CPT version from the same SQLite read transaction as taxonomies. */
+  type_version: number;
+}
+const getConfiguredTaxonomies = async (typeKey: string, signal?: AbortSignal): Promise<ConfiguredTaxonomies> => {
+  const configured: ConfiguredTaxonomies = await requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
+    signal, defaultErrorMessage: 'Không thể tải cấu hình taxonomy đã lưu.',
+  });
+  // Fail closed if the server has not deployed the atomic snapshot contract.
+  if (!Number.isSafeInteger(configured.type_version) || configured.type_version < 1) {
+    throw new Error('Server chưa trả type_version của cùng snapshot taxonomy; không thể lưu an toàn.');
+  }
+  return configured;
+};
+// Both the site override and the provider defaults are persisted selections.
+// `effective` omits inactive providers, which would otherwise be silently
+// lost when a user saves a new explicit override.
+const selectedKeys = (config: ConfiguredTaxonomies): string[] =>
+  config.taxonomies;
+
+const blank = (): FormValues => ({ key: '', label: '', hierarchical: false, public: true });
+const fromDefinition = (definition: TaxonomyDefinition): FormValues => ({
+  key: definition.key, label: definition.label,
+  hierarchical: definition.hierarchical, public: definition.public,
+});
+const fieldClass = 'mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50';
+const buttonClass = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50';
+
+function failure(cause: unknown, fallback: string): string {
+  if (cause instanceof ApiClientError) {
+    if (cause.status === 401) return 'Phiên đăng nhập hết hạn (401); bản nhập vẫn được giữ.';
+    if (cause.status === 412) return 'Cấu hình đã thay đổi (412); giữ bản nhập và tải lại trước khi lưu.';
+    if (cause.status === 409) return `Không thể thay đổi cấu hình (409): ${cause.message}`;
+  }
+  return cause instanceof Error ? cause.message : fallback;
+}
+
+function termsHash(key: string): string {
+  if (key === 'category') return '#/posts/categories';
+  if (key === 'tag') return '#/posts/tags';
+  return `#/taxonomy/${encodeURIComponent(key)}/terms`;
+}
+
+/** Definitions and membership configuration live alongside content schema, away from the term editor. */
+export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApiError, onDirtyChange, onNavigateHash }: Props) {
+  const scope = draftScope(siteInstanceId, user);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const recoveredRef = useRef<DefinitionsDraft | null>(scope ? definitionDrafts.get(scope) ?? null : null);
+  const recovered = recoveredRef.current;
+  const [definitions, setDefinitions] = useState<TaxonomyDefinition[]>([]);
+  const [types, setTypes] = useState<OwnedContentTypeWithSettings[]>([]);
+  const [activeKey, setActiveKey] = useState<string>(recovered?.activeKey ?? '');
+  const [form, setForm] = useState<FormValues>(recovered?.form ?? blank);
+  const [baseline, setBaseline] = useState<FormValues>(recovered?.baseline ?? blank);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [conflict, setConflict] = useState(recovered?.conflict ?? false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [typeKey, setTypeKey] = useState(recovered?.typeKey ?? '');
+  const [eligible, setEligible] = useState<string[]>(recovered?.eligible ?? []);
+  const [eligibilityBaseline, setEligibilityBaseline] = useState<string[]>(recovered?.eligibilityBaseline ?? []);
+  const [eligibilityTypeVersion, setEligibilityTypeVersion] = useState<number | null>(recovered?.typeVersion ?? null);
+  const [eligibilityLoading, setEligibilityLoading] = useState(false);
+  // One publication fence for effect loads, explicit reload and rebase. A
+  // slower earlier GET must not replace newer server baseline or user edits.
+  const eligibilityRequestEpochRef = useRef(0);
+  const [eligibilityConflict, setEligibilityConflict] = useState(recovered?.eligibilityConflict ?? false);
+  const [configuredEffective, setConfiguredEffective] = useState<string[]>([]);
+  const onErrorRef = useRef(onApiError);
+  onErrorRef.current = onApiError;
+  const reportDirtyRef = useRef(onDirtyChange);
+  reportDirtyRef.current = onDirtyChange;
+  const active = definitions.find(definition => definition.key === activeKey) ?? null;
+  const isNew = activeKey === '__new__';
+  const missingDefinition = activeKey !== '' && !isNew && !active && !loading;
+  const coreCategoryOrTag = active?.owner.kind === 'core' && (active.key === 'category' || active.key === 'tag');
+  const canEdit = user?.role === 'admin' && (isNew || active?.owner.kind === 'user' || coreCategoryOrTag);
+  const canDelete = user?.role === 'admin' && active?.owner.kind === 'user';
+  const configDirty = (isNew && JSON.stringify(form) !== JSON.stringify(blank()))
+    || (activeKey !== '' && !isNew && JSON.stringify(form) !== JSON.stringify(baseline));
+  const eligibleDirty = !keysEqual(eligible, eligibilityBaseline);
+  const dirty = configDirty || eligibleDirty;
+  const selectedType = types.find(item => item.descriptor.key === typeKey);
+  // A site-admin can change the taxonomy *override* for a theme/plugin CPT;
+  // this does not grant ownership of its provider-managed schema/definition.
+  const typeEditable = user?.role === 'admin' && typeKey !== 'section' && !!selectedType;
+  const eligibilityVersionMismatch = eligibilityTypeVersion !== null && !!selectedType
+    && selectedType.version !== eligibilityTypeVersion;
+  const ordered = useMemo(() => [...definitions].sort((a, b) => a.label.localeCompare(b.label, 'vi') || a.key.localeCompare(b.key)), [definitions]);
+
+  useEffect(() => { reportDirtyRef.current?.(dirty); }, [dirty]);
+  useEffect(() => () => reportDirtyRef.current?.(false), []);
+
+  useEffect(() => {
+    // Never overwrite a recovered snapshot with loading placeholders.
+    if (!scope || loading || eligibilityLoading) return;
+    if (dirty) definitionDrafts.set(scope, {
+      activeKey, form: { ...form }, baseline: { ...baseline },
+      definitionVersion: conflict
+        ? recoveredRef.current?.definitionVersion ?? active?.version ?? null
+        : active?.version ?? recoveredRef.current?.definitionVersion ?? null,
+      conflict,
+      typeKey, eligible: [...eligible], eligibilityBaseline: [...eligibilityBaseline],
+      typeVersion: eligibilityTypeVersion,
+      eligibilityConflict,
+    });
+    else definitionDrafts.delete(scope);
+  }, [scope, dirty, loading, eligibilityLoading, activeKey, form, baseline, active?.version, conflict,
+    typeKey, eligible, eligibilityBaseline, eligibilityTypeVersion, eligibilityConflict]);
+
+  useEffect(() => () => {
+    // Explicit route navigation has its own dirty confirmation in App. A 401
+    // leaves this hash untouched, so it retains the account-scoped draft.
+    if (scope && window.location.hash.split('?')[0] !== '#/taxonomy/definitions') definitionDrafts.delete(scope);
+  }, [scope]);
+
+  const reload = async (signal?: AbortSignal) => {
+    setLoading(true);
+    try {
+      const [nextDefinitions, nextTypes] = await Promise.all([listTaxonomyDefinitions(signal), listContentTypes()]);
+      if (signal?.aborted) return;
+      setDefinitions(nextDefinitions);
+      setTypes(nextTypes);
+      setError('');
+      const remembered = recoveredRef.current;
+      if (remembered) {
+        if (remembered.activeKey && remembered.activeKey !== '__new__') {
+          const latest = nextDefinitions.find(item => item.key === remembered.activeKey);
+          if (!latest || latest.version !== remembered.definitionVersion) setConflict(true);
+        }
+        // listContentTypes is for labels/selector only. It cannot provide a
+        // version for the taxonomy snapshot's If-Match token.
+        const latestType = nextTypes.find(item => item.descriptor.key === remembered.typeKey);
+        if (!keysEqual(remembered.eligible, remembered.eligibilityBaseline) &&
+            (!latestType || latestType.version !== remembered.typeVersion)) setEligibilityConflict(true);
+      }
+      if (!typeKey) setTypeKey(nextTypes.find(item => item.descriptor.key !== 'section')?.descriptor.key ?? '');
+    } catch (cause) {
+      if (signal?.aborted) return;
+      setError(failure(cause, 'Không thể tải danh sách taxonomy.'));
+      onErrorRef.current(cause, 'Không thể tải danh sách taxonomy.');
+    } finally { if (!signal?.aborted) setLoading(false); }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void reload(controller.signal);
+    return () => controller.abort();
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    const requestEpoch = ++eligibilityRequestEpochRef.current;
+    const controller = new AbortController();
+    setEligibilityLoading(true);
+    const remembered = recoveredRef.current?.typeKey === typeKey ? recoveredRef.current : null;
+    if (!remembered) {
+      setEligibilityConflict(false);
+      setEligible([]);
+      setEligibilityBaseline([]);
+      setEligibilityTypeVersion(null);
+    }
+    if (!typeKey || !user) { setEligibilityLoading(false); return () => controller.abort(); }
+    void getConfiguredTaxonomies(typeKey, controller.signal).then(value => {
+      if (controller.signal.aborted || !mountedRef.current ||
+          requestEpoch !== eligibilityRequestEpochRef.current) return;
+      setConfiguredEffective(value.effective);
+      if (remembered) {
+        // Preserve the user's input, including a stale schema CAS, until they
+        // explicitly rebase or discard it. Never silently re-apply a new token.
+        setEligible(remembered.eligible);
+        setEligibilityBaseline(remembered.eligibilityBaseline);
+        const rememberedDirty = !keysEqual(remembered.eligible, remembered.eligibilityBaseline);
+        setEligibilityTypeVersion(rememberedDirty ? remembered.typeVersion : value.type_version);
+        if (rememberedDirty && (remembered.typeVersion !== value.type_version ||
+            !keysEqual(remembered.eligibilityBaseline, selectedKeys(value)))) setEligibilityConflict(true);
+      } else {
+        setEligible(selectedKeys(value)); setEligibilityBaseline(selectedKeys(value));
+        setEligibilityTypeVersion(value.type_version);
+      }
+    }).catch(cause => {
+      if (controller.signal.aborted || !mountedRef.current ||
+          requestEpoch !== eligibilityRequestEpochRef.current) return;
+      setEligibilityConflict(true);
+      setError(failure(cause, 'Không thể tải taxonomy của loại nội dung.'));
+      onErrorRef.current(cause, 'Không thể tải taxonomy của loại nội dung.');
+    }).finally(() => {
+      if (!controller.signal.aborted && mountedRef.current &&
+          requestEpoch === eligibilityRequestEpochRef.current) setEligibilityLoading(false);
+    });
+    return () => controller.abort();
+  }, [typeKey, user?.id, user?.role]);
+
+  const choose = (next: string) => {
+    if (next === activeKey) return;
+    if (configDirty && !window.confirm('Bỏ thay đổi của định nghĩa đang sửa để chuyển sang mục khác?')) return;
+    recoveredRef.current = null;
+    const definition = definitions.find(item => item.key === next);
+    setActiveKey(next);
+    setForm(definition ? fromDefinition(definition) : blank());
+    setBaseline(definition ? fromDefinition(definition) : blank());
+    setError(''); setNotice(''); setConflict(false);
+  };
+
+  const rebaseDefinition = async () => {
+    if (!activeKey || isNew || busy) return;
+    setBusy(true); setError('');
+    try {
+      const latest = await getTaxonomyDefinition(activeKey);
+      if (!mountedRef.current) return;
+      const server = fromDefinition(latest);
+      const changed = (Object.keys(form) as Array<keyof FormValues>)
+        .filter(field => field !== 'key' && !(latest.owner.kind === 'core' && field === 'hierarchical') &&
+          form[field] !== baseline[field]);
+      const overlaps = changed.filter(field => server[field] !== baseline[field]);
+      if (overlaps.length && !window.confirm(
+        `Máy chủ cũng đã thay đổi ${overlaps.join(', ')}. Giữ giá trị đang nhập và thử lưu trên phiên bản mới?`,
+      )) return;
+      const next = { ...server };
+      for (const field of changed) {
+        if (field === 'label') next.label = form.label;
+        if (field === 'hierarchical') next.hierarchical = form.hierarchical;
+        if (field === 'public') next.public = form.public;
+      }
+      setDefinitions(previous => [...previous.filter(item => item.key !== activeKey), latest]);
+      setBaseline(server); setForm(next); setConflict(false);
+      setNotice(`Đã đối chiếu bản v${latest.version}. Những trường đã sửa được giữ lại; kiểm tra trước khi Lưu.`);
+      recoveredRef.current = null;
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      setError(failure(cause, 'Không thể tải phiên bản mới của taxonomy.'));
+      onErrorRef.current(cause, 'Không thể tải phiên bản mới của taxonomy.');
+    } finally { setBusy(false); }
+  };
+
+  const rebaseEligibility = async () => {
+    if (!typeKey || busy || eligibilityLoading) return;
+    const requestEpoch = ++eligibilityRequestEpochRef.current;
+    setBusy(true); setError('');
+    try {
+      // The configured endpoint supplies the version AND associated keys from
+      // one SQLite snapshot. Never pair keys with a concurrently read list
+      // version: that can silently overwrite someone else's new membership.
+      const configured = await getConfiguredTaxonomies(typeKey);
+      if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
+      const previous = new Set(eligibilityBaseline);
+      const added = eligible.filter(key => !previous.has(key));
+      const removed = new Set(eligibilityBaseline.filter(key => !eligible.includes(key)));
+      const configuredKeys = selectedKeys(configured);
+      const next = [...new Set([...configuredKeys.filter(key => !removed.has(key)), ...added])];
+      const nextTypes = await listContentTypes();
+      if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
+      const latestType = nextTypes.find(item => item.descriptor.key === typeKey);
+      if (!latestType) {
+        setEligibilityConflict(true);
+        setError('Loại nội dung không còn tồn tại; bản chọn vẫn được giữ.'); return;
+      }
+      if (latestType.version !== configured.type_version) {
+        setEligibilityConflict(true);
+        setError('Version trong danh sách CPT không khớp snapshot taxonomy. Bản chọn vẫn giữ nguyên; đối chiếu lại để tránh mất liên kết.');
+        return;
+      }
+      setTypes(nextTypes);
+      setConfiguredEffective(configured.effective);
+      setEligibilityBaseline(configuredKeys);
+      setEligible(next);
+      setEligibilityTypeVersion(configured.type_version);
+      setEligibilityConflict(false);
+      setNotice('Đã đối chiếu cấu hình taxonomy mới; các lựa chọn đang sửa được áp dụng lại, hãy kiểm tra trước khi Lưu.');
+      recoveredRef.current = null;
+    } catch (cause) {
+      if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
+      setError(failure(cause, 'Không thể đối chiếu cấu hình taxonomy.'));
+      onErrorRef.current(cause, 'Không thể đối chiếu cấu hình taxonomy.');
+    } finally { setBusy(false); }
+  };
+
+  const saveDefinition = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!csrfToken || !canEdit || busy || loading || conflict) return;
+    const label = form.label.trim();
+    if (!label || [...label].length > 100 || /[\u0000-\u001f\u007f]/.test(label)) {
+      setError('Tên taxonomy phải từ 1 đến 100 ký tự, không chứa ký tự điều khiển.'); return;
+    }
+    if (isNew && (form.key.length > 64 || !/^[a-z][a-z0-9_]*$/.test(form.key))) {
+      setError('Khóa taxonomy phải là định danh chữ thường hợp lệ.'); return;
+    }
+    const changes = {
+      ...(label !== baseline.label ? { label } : {}),
+      ...(active?.owner.kind !== 'core' && form.hierarchical !== baseline.hierarchical
+        ? { hierarchical: form.hierarchical } : {}),
+      ...(form.public !== baseline.public ? { public: form.public } : {}),
+    };
+    if (!isNew && Object.keys(changes).length === 0) {
+      setForm(baseline);
+      setNotice('Không có thay đổi cần lưu.');
+      return;
+    }
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const updated = isNew
+        ? await createTaxonomyDefinition({ key: form.key, label, hierarchical: form.hierarchical, public: form.public }, csrfToken)
+        : await updateTaxonomyDefinition(active!.key, active!.version, changes, csrfToken);
+      if (!mountedRef.current) return;
+      setActiveKey(updated.key); setBaseline(fromDefinition(updated)); setForm(fromDefinition(updated));
+      setDefinitions(previous => [...previous.filter(item => item.key !== updated.key), updated]);
+      setNotice(`Đã lưu taxonomy ${updated.key} (v${updated.version}).`);
+      setConflict(false);
+      recoveredRef.current = null;
+      if (scope) {
+        if (eligibleDirty) definitionDrafts.set(scope, {
+          activeKey: updated.key, form: fromDefinition(updated), baseline: fromDefinition(updated),
+          definitionVersion: updated.version, conflict: false,
+          typeKey, eligible: [...eligible], eligibilityBaseline: [...eligibilityBaseline],
+          typeVersion: eligibilityTypeVersion, eligibilityConflict,
+        });
+        else definitionDrafts.delete(scope);
+      }
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      if (cause instanceof ApiClientError && cause.status === 412) setConflict(true);
+      setError(failure(cause, 'Không thể lưu taxonomy.'));
+      onErrorRef.current(cause, 'Không thể lưu taxonomy.');
+    } finally { setBusy(false); }
+  };
+
+  const remove = async () => {
+    if (!active || !canDelete || !csrfToken || busy) return;
+    if (!window.confirm(`Xóa taxonomy ${active.label} (${active.key})? Các term, liên kết và provider đang dùng sẽ chặn thao tác.`)) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      await deleteTaxonomyDefinition(active.key, active.version, csrfToken);
+      if (!mountedRef.current) return;
+      setDefinitions(previous => previous.filter(item => item.key !== active.key));
+      setActiveKey(''); setForm(blank()); setBaseline(blank());
+      setNotice(`Đã xóa taxonomy ${active.key}.`);
+      recoveredRef.current = null;
+      if (scope) {
+        if (eligibleDirty) definitionDrafts.set(scope, {
+          activeKey: '', form: blank(), baseline: blank(), definitionVersion: null, conflict: false,
+          typeKey, eligible: [...eligible], eligibilityBaseline: [...eligibilityBaseline],
+          typeVersion: eligibilityTypeVersion, eligibilityConflict,
+        });
+        else definitionDrafts.delete(scope);
+      }
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      if (cause instanceof ApiClientError && cause.status === 412) setConflict(true);
+      setError(failure(cause, 'Không thể xóa taxonomy.'));
+      onErrorRef.current(cause, 'Không thể xóa taxonomy.');
+    } finally { setBusy(false); }
+  };
+
+  const saveEligibility = async () => {
+    if (!selectedType || !csrfToken || !typeEditable || busy || eligibilityLoading || eligibilityConflict ||
+      eligibilityTypeVersion === null || eligibilityVersionMismatch || !eligibleDirty) return;
+    setBusy(true); setError(''); setNotice('');
+    try {
+      // Read again just before PUT; the version and membership must both
+      // match the draft's atomic baseline. The following If-Match still fences
+      // a concurrent writer between this GET and the PUT.
+      const latest = await getConfiguredTaxonomies(typeKey);
+      if (!mountedRef.current) return;
+      if (latest.type_version !== eligibilityTypeVersion ||
+          !keysEqual(selectedKeys(latest), eligibilityBaseline)) {
+        setEligibilityConflict(true);
+        setError('Schema/eligibility đã thay đổi từ khi bắt đầu chỉnh sửa. Giữ lựa chọn và đối chiếu trước khi lưu.');
+        return;
+      }
+      const submitted = [...eligible];
+      const updated = await updateTaxonomyEligibility(typeKey, latest.type_version, submitted, csrfToken) as OwnedContentTypeWithSettings;
+      if (!mountedRef.current) return;
+      // Mutation response carries the new authoritative CPT version. Avoid a
+      // second, independent list/configured read that might straddle a write.
+      setTypes(previous => previous.map(item => item.descriptor.key === typeKey ? updated : item));
+      setEligible(submitted); setEligibilityBaseline(submitted);
+      setEligibilityTypeVersion(updated.version);
+      setEligibilityConflict(false);
+      // A successful explicit override resolves to its active/declared keys.
+      // The pre-PUT `latest.effective` describes the old selection instead.
+      setConfiguredEffective(submitted.filter(key => definitions.some(item =>
+        item.key === key && item.provider_status === 'active' && item.declaration_state === 'declared')));
+      setNotice(`Đã cập nhật taxonomy áp dụng cho ${typeKey}.`);
+      recoveredRef.current = null;
+      if (scope) {
+        if (configDirty) definitionDrafts.set(scope, {
+          activeKey, form: { ...form }, baseline: { ...baseline },
+          definitionVersion: active?.version ?? null, conflict,
+          typeKey, eligible: [...submitted], eligibilityBaseline: [...submitted],
+          typeVersion: updated.version,
+          eligibilityConflict: false,
+        });
+        else definitionDrafts.delete(scope);
+      }
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      if (cause instanceof ApiClientError && cause.status === 412) setEligibilityConflict(true);
+      setError(failure(cause, 'Không thể cập nhật taxonomy được áp dụng.'));
+      onErrorRef.current(cause, 'Không thể cập nhật taxonomy được áp dụng.');
+    } finally { setBusy(false); }
+  };
+
+  if (!user) return null;
+  return <section className="w-full min-w-0 space-y-5" data-testid="taxonomy-definitions-page">
+    <header className="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">Nội dung / Cấu hình</p>
+        <h2 className="mt-1 text-2xl font-bold">Taxonomy</h2>
+        <p className="text-sm text-slate-600">Tạo loại phân nhóm, quản lý term và chỉ định loại nội dung được sử dụng.</p>
+      </div>
+      <button className={buttonClass} type="button" disabled={busy || loading} onClick={() => {
+        if (dirty && !window.confirm('Bỏ thay đổi chưa lưu và tải lại?')) return;
+        const requestEpoch = ++eligibilityRequestEpochRef.current;
+        if (scope) definitionDrafts.delete(scope);
+        recoveredRef.current = null;
+        setConflict(false); setEligibilityConflict(false); setActiveKey(''); setForm(blank()); setBaseline(blank());
+        void reload();
+        if (typeKey) { setEligibilityLoading(true); void getConfiguredTaxonomies(typeKey).then(configured => {
+          if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
+          setEligible(selectedKeys(configured)); setEligibilityBaseline(selectedKeys(configured));
+          setEligibilityTypeVersion(configured.type_version);
+          setConfiguredEffective(configured.effective);
+        }).catch(cause => {
+          if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
+          setEligibilityConflict(true);
+          setError(failure(cause, 'Không thể tải lại taxonomy.'));
+          onErrorRef.current(cause, 'Không thể tải lại taxonomy.');
+        }).finally(() => {
+          if (mountedRef.current && requestEpoch === eligibilityRequestEpochRef.current)
+            setEligibilityLoading(false);
+        }); }
+      }}>Tải lại</button>
+    </header>
+    {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+    {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
+      {missingDefinition && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+        Taxonomy {activeKey} đã bị xóa hoặc không còn truy cập được. Bản nhập của bạn vẫn hiển thị bên dưới để sao chép; không thể lưu lên định nghĩa đã mất.
+      </p>}
+    {loading && <p role="status">Đang tải taxonomy…</p>}
+    <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+      <div className="min-w-0 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-base font-semibold">Định nghĩa ({definitions.length}/64)</h3>
+          {user.role === 'admin' && <button type="button" className="od-primary-action" disabled={busy || definitions.length >= 64}
+            onClick={() => choose('__new__')}>Thêm taxonomy</button>}
+        </div>
+        {ordered.map(item => <div key={item.key} className={`rounded-lg border p-3 ${activeKey === item.key ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="break-words text-sm font-semibold">{item.label} <span className="text-slate-500">({item.key})</span></p>
+              <p className="text-xs text-slate-600">{item.hierarchical ? 'Phân cấp' : 'Phẳng'} · {item.public ? 'Công khai' : 'Riêng tư'} · {item.owner.kind} · v{item.version}</p>
+              {item.provider_status !== 'active' || item.declaration_state !== 'declared' ?
+                <p className="text-xs text-amber-800">Provider {item.provider_status}, khai báo {item.declaration_state}; dữ liệu vẫn được giữ.</p> : null}
+            </div>
+            <div className="flex gap-2">
+              <button className={buttonClass} type="button" disabled={busy} onClick={() => choose(item.key)}>Cấu hình</button>
+              <button className={buttonClass} type="button" disabled={busy} onClick={() => {
+                if (dirty && !window.confirm('Có thay đổi chưa lưu. Rời trang?')) return;
+                onNavigateHash(termsHash(item.key));
+              }}>Term</button>
+            </div>
+          </div>
+        </div>)}
+      </div>
+      <div className="min-w-0 space-y-4">
+        {(isNew || active || missingDefinition) && <form onSubmit={event => void saveDefinition(event)} className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+          <h3 className="text-base font-semibold">{isNew ? 'Tạo định nghĩa' : `Chỉnh sửa ${active?.key ?? activeKey}`}</h3>
+          <label className="block text-sm font-medium">Khóa *
+            <input className={fieldClass} value={form.key} maxLength={64} required disabled={!isNew || busy || !canEdit}
+              onChange={event => setForm(previous => ({ ...previous, key: event.target.value }))}/>
+            <span className="block text-xs font-normal text-slate-500">Dùng chữ thường, số và dấu gạch dưới; khóa không thể đổi sau khi tạo.</span>
+          </label>
+          <label className="block text-sm font-medium">Tên hiển thị *
+            <input className={fieldClass} value={form.label} maxLength={100} required disabled={busy || !canEdit}
+              onChange={event => setForm(previous => ({ ...previous, label: event.target.value }))}/>
+          </label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.hierarchical}
+            disabled={busy || !canEdit || active?.owner.kind === 'core'} onChange={event => setForm(previous => ({ ...previous, hierarchical: event.target.checked }))}/>
+            Cho phép phân cấp cha/con (tối đa 8 cấp)</label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.public}
+            disabled={busy || !canEdit} onChange={event => setForm(previous => ({ ...previous, public: event.target.checked }))}/>
+            Cho phép hiển thị công khai</label>
+          {active && active.owner.kind !== 'user' && <p className="text-xs text-slate-600">{active.owner.kind === 'core'
+            ? 'Taxonomy Core giữ nguyên khóa và chế độ phân cấp.'
+            : 'Định nghĩa do provider quản lý. Chỉ provider được sửa hoặc xóa.'}</p>}
+          {conflict && <div role="alert" className="space-y-2 text-sm text-amber-800">
+            <p>Phiên bản đã cũ. Bản nhập được giữ; đối chiếu bản mới trước khi lưu.</p>
+            <button type="button" className={buttonClass} disabled={busy || !active}
+              onClick={() => void rebaseDefinition()}>Đối chiếu phiên bản mới, giữ các trường đang sửa</button>
+          </div>}
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" className="od-primary-action" disabled={busy || !csrfToken || !canEdit || conflict || (!isNew && !configDirty)}>
+              {busy ? 'Đang lưu…' : 'Lưu định nghĩa'}</button>
+            {canDelete && <button type="button" className={buttonClass} disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>Xóa</button>}
+            {missingDefinition && <button type="button" className={buttonClass} onClick={() => choose('')}>
+              Bỏ bản nhập không còn đích lưu
+            </button>}
+          </div>
+        </form>}
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+          <h3 className="text-base font-semibold">Gắn taxonomy với loại nội dung</h3>
+          <label className="block text-sm font-medium">Loại nội dung
+            <select className={fieldClass} value={typeKey} disabled={busy || eligibilityLoading || loading}
+              onChange={event => {
+                if (eligibleDirty && !window.confirm('Bỏ thay đổi taxonomy chưa lưu?')) return;
+                recoveredRef.current = null;
+                setTypeKey(event.target.value); setError('');
+              }}>
+              {types.filter(item => item.descriptor.key !== 'section').map(item =>
+                <option key={item.descriptor.key} value={item.descriptor.key}>{item.descriptor.label} ({item.descriptor.key})</option>)}
+            </select>
+          </label>
+          {eligibilityLoading && <p role="status" className="text-sm">Đang tải cấu hình áp dụng…</p>}
+          {!eligibilityLoading && definitions.map(item => <label key={item.key} className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={eligible.includes(item.key)}
+              disabled={!typeEditable || busy || eligibilityLoading || eligibilityConflict}
+              onChange={event => setEligible(previous => event.target.checked
+                ? [...previous, item.key] : previous.filter(key => key !== item.key))}/>
+            <span>{item.label} ({item.key})
+              {(item.provider_status !== 'active' || item.declaration_state !== 'declared') &&
+                <span className="block text-xs text-amber-700">Provider không hoạt động hoặc đã rút khai báo; liên kết đã cấu hình được giữ.</span>}
+            </span>
+          </label>)}
+          {(eligibilityConflict || eligibilityVersionMismatch) && <div role="alert" className="space-y-2 text-sm text-amber-800">
+            <p>Version CPT không khớp với snapshot taxonomy hoặc schema đã thay đổi. Bản chọn được giữ; đối chiếu trước khi lưu.</p>
+            <button type="button" className={buttonClass} disabled={busy || eligibilityLoading}
+              onClick={() => void rebaseEligibility()}>Đối chiếu schema mới, giữ lựa chọn đã sửa</button>
+          </div>}
+          {eligible.some(key => !definitions.some(item => item.key === key)) &&
+            <p role="status" className="text-xs text-amber-700">Có taxonomy cấu hình nhưng không còn trong danh sách. Chúng được giữ để tránh mất liên kết ngoài ý muốn.</p>}
+          {definitions.some(item => eligible.includes(item.key) && !configuredEffective.includes(item.key)) &&
+            <p role="status" className="text-xs text-amber-700">Taxonomy chưa hiệu lực sẽ không hiện trong picker, nhưng vẫn giữ cấu hình để phục hồi khi provider hoạt động trở lại.</p>}
+          <button type="button" className="od-primary-action" onClick={() => void saveEligibility()}
+            disabled={!typeEditable || !csrfToken || !eligibleDirty || busy || eligibilityLoading ||
+              eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>Lưu loại được áp dụng</button>
+          {!typeEditable && typeKey && <p className="text-xs text-slate-600">Chỉ Admin được chỉnh sửa taxonomy áp dụng cho CPT hợp lệ (trừ Section).</p>}
+        </div>
+      </div>
+    </div>
+  </section>;
+}

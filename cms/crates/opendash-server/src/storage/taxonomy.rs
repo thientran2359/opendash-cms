@@ -38,6 +38,15 @@ pub struct TaxonomyPage {
     pub total: i64,
 }
 
+/// Small read-only projection for labels referenced by the current Admin page.
+/// Unlike term lists, this does not enumerate a taxonomy's full catalog.
+#[derive(Debug, Clone, Serialize)]
+pub struct TaxonomyTermLabel {
+    pub id: i64,
+    pub kind: String,
+    pub name: String,
+}
+
 type TermRow = (i64, String, String, String, Option<i64>, i64);
 
 fn term(row: TermRow) -> TaxonomyTerm {
@@ -442,6 +451,29 @@ pub async fn list_terms(
     })
 }
 
+/// The route enforces at most 100 distinct IDs. JSON array binding keeps the
+/// query parameterized regardless of the number of requested IDs.
+pub async fn resolve_term_labels(
+    db: &SqlitePool,
+    ids: &[i64],
+) -> ApiResult<Vec<TaxonomyTermLabel>> {
+    if ids.is_empty() || ids.len() > 100 || ids.iter().any(|id| *id <= 0) {
+        return Err(ApiError::bad_request("Danh sách ID term không hợp lệ."));
+    }
+    let raw = serde_json::to_string(ids)?;
+    let rows: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT t.id, t.kind, t.name
+         FROM taxonomy_terms t JOIN json_each(?) ids ON ids.value = t.id
+         ORDER BY t.id",
+    )
+    .bind(raw)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().map(|(id, kind, name)| TaxonomyTermLabel {
+        id, kind, name,
+    }).collect())
+}
+
 /// Read one stable term ID for a dedicated editor route. Authorization belongs
 /// to the route; this projection is identical to the paged list DTO.
 pub async fn get_term(db: &SqlitePool, id: i64) -> ApiResult<Option<TaxonomyTerm>> {
@@ -689,6 +721,33 @@ mod tests {
             .unwrap();
         let actor = fixture(&db).await;
         (db, actor)
+    }
+
+    #[tokio::test]
+    async fn bulk_term_labels_only_project_requested_ids_even_with_large_catalog() {
+        let (db, _) = memory_fixture().await;
+        let mut requested = Vec::new();
+        // Many unrelated terms must never appear in a table-row projection.
+        for i in 0..250 {
+            let kind = if i % 2 == 0 { "category" } else { "tag" };
+            let id = sqlx::query("INSERT INTO taxonomy_terms(kind, name, slug) VALUES(?, ?, ?)")
+                .bind(kind).bind(format!("Term {i}")).bind(format!("bulk-resolve-{i}"))
+                .execute(&db).await.unwrap().last_insert_rowid();
+            if matches!(i, 0 | 111 | 249) { requested.push(id); }
+        }
+        let resolved = resolve_term_labels(&db, &requested).await.unwrap();
+        assert_eq!(resolved.len(), 3);
+        for (found, id) in resolved.iter().zip(&requested) {
+            assert_eq!(&found.id, id);
+        }
+        assert_eq!(resolved[0].kind, "category");
+        assert_eq!(resolved[1].kind, "tag");
+        assert_eq!(resolved[2].name, "Term 249");
+        assert_eq!(resolve_term_labels(&db, &[999999]).await.unwrap().len(), 0);
+        assert_eq!(resolve_term_labels(&db, &[0]).await.unwrap_err().0,
+            axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(resolve_term_labels(&db, &(1..=101).collect::<Vec<_>>()).await.unwrap_err().0,
+            axum::http::StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

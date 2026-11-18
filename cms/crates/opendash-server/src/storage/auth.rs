@@ -1,5 +1,5 @@
 use serde::Serialize;
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{Row, Sqlite, SqlitePool, Transaction};
 
 use crate::{
     auth::{self, AuthUser, Role, SessionContext},
@@ -555,21 +555,42 @@ pub async fn update_own_profile(
 }
 
 pub async fn compute_site_instance_id(db: &SqlitePool) -> Option<String> {
-    let created_at: Option<i64> =
-        sqlx::query_scalar("SELECT created_at FROM users ORDER BY id ASC LIMIT 1")
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten();
-    let title: Option<String> =
-        sqlx::query_scalar("SELECT site_title FROM site_general_settings WHERE id = 1")
-            .fetch_optional(db)
-            .await
-            .ok()
-            .flatten();
+    // A previous identifier included site_title, which is editable. Renaming
+    // a site then expiring a session made same-account unsaved Admin drafts
+    // impossible to recover. Bind the identity to the existing durable SQLite
+    // file instead, without adding a migration or writing mutable site data.
+    // Distinct roots (even if bootstrapped in the same second) stay distinct;
+    // replacing the underlying DB invalidates old RAM drafts intentionally.
+    // No user row belongs in the identity: the first Admin can be deleted,
+    // renamed or have their credentials changed while the site remains intact.
+    let rows = sqlx::query("PRAGMA database_list").fetch_all(db).await.ok()?;
+    let database_path: String = rows.into_iter().find_map(|row| {
+        (row.try_get::<String, _>("name").ok()?.as_str() == "main")
+            .then(|| row.try_get::<String, _>("file").ok())
+            .flatten()
+    })?;
+    if database_path.is_empty() {
+        // In-memory/unknown backing files cannot provide safe site isolation.
+        return None;
+    }
+    let canonical = std::fs::canonicalize(database_path).ok()?;
+    let metadata = std::fs::metadata(&canonical).ok()?;
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
-    hasher.update(format!("{}:{}", created_at.unwrap_or(0), title.unwrap_or_default()).as_bytes());
+    hasher.update(canonical.to_string_lossy().as_bytes());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        hasher.update(metadata.dev().to_be_bytes());
+        hasher.update(metadata.ino().to_be_bytes());
+    }
+    #[cfg(not(unix))]
+    if let Ok(created) = metadata.created().and_then(|time| {
+        time.duration_since(std::time::UNIX_EPOCH)
+            .map_err(std::io::Error::other)
+    }) {
+        hasher.update(created.as_nanos().to_be_bytes());
+    }
     let hex = format!("{:x}", hasher.finalize());
     Some(format!("site-{}", &hex[..16]))
 }

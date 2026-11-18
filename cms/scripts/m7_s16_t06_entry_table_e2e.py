@@ -182,10 +182,16 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     wait_count(root, 125)
                     expect(root.get_by_label('Lọc danh mục')).to_be_visible(timeout=20000)
                     expect(root.get_by_label('Lọc thẻ')).to_be_visible(timeout=20000)
+                    # Filter term catalogs are intentionally loaded on focus,
+                    # not scanned on every entry-list page visit.
+                    root.get_by_label('Lọc danh mục').focus()
+                    root.get_by_label('Lọc danh mục').locator(f'option[value="{category["id"]}"]').wait_for(state='attached', timeout=20000)
                     root.get_by_label('Lọc danh mục').select_option(str(category['id']))
                     wait_count(root, 1)
                     root.get_by_label('Gồm danh mục con').check()
                     wait_count(root, 4)
+                    root.get_by_label('Lọc thẻ').focus()
+                    root.get_by_label('Lọc thẻ').locator(f'option[value="{tag["id"]}"]').wait_for(state='attached', timeout=20000)
                     root.get_by_label('Lọc thẻ').select_option(str(tag['id']))
                     wait_count(root, 3)
                     root.get_by_label('Lọc tháng cập nhật').fill('2026-10')

@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  changeContentEntryPublication, deleteContentEntry, listContentTypeTaxonomyEligibility,
+  changeContentEntryPublication, deleteContentEntry, getEffectiveContentTypeTaxonomies,
   queryContentEntryTable, getEffectiveEntryListConfig, runEntryProviderAction,
 } from '../../api/content.ts';
 import {
   AdminColumnCell, type EffectiveListConfig, type ProviderColumn,
 } from '../extensions/AdminContributionRenderer.tsx';
 import { ApiClientError } from '../../api/client.ts';
-import { listAllTaxonomyTerms, type TaxonomyTerm } from '../../api/taxonomy.ts';
+import {
+  listAllTaxonomyTerms, listTaxonomyDefinitions, resolveTaxonomyTermLabels,
+  type TaxonomyDefinition, type TaxonomyTerm, type TaxonomyTermLabel,
+} from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
 import type { EntryTableQuery, EntryTableResult, EntryTableRow } from './types.ts';
 
@@ -25,7 +28,10 @@ interface Props {
 const control = 'min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800';
 const action = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
 const statuses = ['all', 'draft', 'published'] as const;
+const TERM_RESOLVE_BATCH = 100;
+const TERM_RESOLVE_CONCURRENCY = 2;
 type BulkAction = 'published' | 'draft' | 'delete';
+type TaxonomyTableQuery = EntryTableQuery & { taxonomy_key?: string; term_id?: number };
 
 function rootHash(typeKey: string): string {
   return typeKey === 'post' ? '#/posts' : typeKey === 'page' ? '#/pages' : `#/cpt/${encodeURIComponent(typeKey)}`;
@@ -37,9 +43,9 @@ function boundedInt(raw: string | null, fallback: number, min: number, max: numb
   return Number.isSafeInteger(value) && value >= min && value <= max ? value : fallback;
 }
 
-export function parseEntryTableHash(hash: string): EntryTableQuery {
+export function parseEntryTableHash(hash: string): TaxonomyTableQuery {
   const p = new URLSearchParams(hash.split('?')[1] ?? '');
-  const query: EntryTableQuery = {};
+  const query: TaxonomyTableQuery = {};
   const q = p.get('q')?.trim();
   if (q && [...q].length <= 200 && !/[\u0000-\u001f\u007f]/.test(q)) query.q = q;
   const status = p.get('status');
@@ -48,7 +54,9 @@ export function parseEntryTableHash(hash: string): EntryTableQuery {
   const tag = boundedInt(p.get('tag_id'), 0, 1, Number.MAX_SAFE_INTEGER);
   if (category) query.category_id = category;
   if (tag) query.tag_id = tag;
-  if (category && p.get('include_descendants') === 'true') query.include_descendants = true;
+  if (p.has('taxonomy_key')) query.taxonomy_key = p.get('taxonomy_key') ?? '';
+  if (p.has('term_id')) query.term_id = Number(p.get('term_id'));
+  if (p.get('include_descendants') === 'true') query.include_descendants = true;
   const month = p.get('updated_month');
   if (month && /^\d{4}-(0[1-9]|1[0-2])$/.test(month) && month.slice(0, 4) !== '0000') {
     query.updated_month = month;
@@ -63,13 +71,15 @@ export function parseEntryTableHash(hash: string): EntryTableQuery {
   return query;
 }
 
-export function entryTableHash(base: string, filter: EntryTableQuery): string {
+export function entryTableHash(base: string, filter: TaxonomyTableQuery): string {
   const p = new URLSearchParams();
   if (filter.q) p.set('q', filter.q);
   if (filter.status && filter.status !== 'all') p.set('status', filter.status);
   if (filter.category_id) p.set('category_id', String(filter.category_id));
   if (filter.tag_id) p.set('tag_id', String(filter.tag_id));
-  if (filter.category_id && filter.include_descendants) p.set('include_descendants', 'true');
+  if (filter.taxonomy_key !== undefined) p.set('taxonomy_key', filter.taxonomy_key);
+  if (filter.term_id !== undefined) p.set('term_id', String(filter.term_id));
+  if (filter.include_descendants) p.set('include_descendants', 'true');
   if (filter.updated_month) p.set('updated_month', filter.updated_month);
   if (filter.sort && filter.sort !== 'updated_at') p.set('sort', filter.sort);
   if (filter.order && filter.order !== 'desc') p.set('order', filter.order);
@@ -113,8 +123,15 @@ export function EntryListPage({
   const [errorState, setErrorState] = useState<{ scope: string; message: string } | null>(null);
   const [retry, setRetry] = useState(0);
   const [termsState, setTermsState] = useState<{
-    accountScope: string; category: TaxonomyTerm[]; tag: TaxonomyTerm[];
+    accountScope: string;
     categoryEnabled: boolean; tagEnabled: boolean;
+    definitions: TaxonomyDefinition[];
+    byKind: Record<string, TaxonomyTerm[]>;
+  } | null>(null);
+  const [termLoadErrors, setTermLoadErrors] = useState<string[]>([]);
+  const optionRequestsRef = useRef(new Map<string, AbortController>());
+  const [resolvedState, setResolvedState] = useState<{
+    scope: string; labels: Map<number, TaxonomyTermLabel>; failed: boolean;
   } | null>(null);
   const [providerState, setProviderState] = useState<{
     accountScope: string; config: EffectiveListConfig;
@@ -124,6 +141,7 @@ export function EntryListPage({
   const providerBusyRef = useRef(false);
   const [providerNotice, setProviderNotice] = useState('');
   const [searchInput, setSearchInput] = useState(filters.q ?? '');
+  const [taxonomyChoice, setTaxonomyChoice] = useState(filters.taxonomy_key ?? '');
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const bulkBusyRef = useRef(false);
@@ -133,10 +151,11 @@ export function EntryListPage({
   const error = errorState?.scope === scope ? errorState.message : '';
   const loading = loadingScope === scope || (!data && !error);
   const terms = termsState?.accountScope === accountScope ? termsState : null;
+  const resolved = resolvedState?.scope === scope ? resolvedState : null;
   const providerColumns = providerState?.accountScope === accountScope
     ? providerState.config.columns : [];
 
-  const updateFilter = (patch: Partial<EntryTableQuery>, resetPage = true) => {
+  const updateFilter = (patch: Partial<TaxonomyTableQuery>, resetPage = true) => {
     if (bulkBusyRef.current) return;
     const next = { ...filters, ...patch };
     if (resetPage) delete next.offset;
@@ -149,6 +168,10 @@ export function EntryListPage({
     setSelected(new Set());
     setBulkResults([]);
   }, [scope]);
+
+  // A taxonomy choice alone is not a valid server filter. Keep it local until
+  // a term is chosen, so the server never receives an incomplete pair.
+  useEffect(() => { setTaxonomyChoice(filters.taxonomy_key ?? ''); }, [typeKey]);
 
   useEffect(() => {
     let active = true;
@@ -174,26 +197,119 @@ export function EntryListPage({
   useEffect(() => {
     let active = true;
     const controller = new AbortController();
+    optionRequestsRef.current.forEach(request => request.abort());
+    optionRequestsRef.current.clear();
     setTermsState(null);
+    setTermLoadErrors([]);
     void (async () => {
       try {
-        const eligibility = await listContentTypeTaxonomyEligibility(typeKey, controller.signal);
-        const enabled = (kind: 'category' | 'tag') => eligibility.some(row =>
-          row.taxonomy_kind === kind && row.provider_status === 'active' && row.declaration_state === 'declared');
-        const categoryEnabled = enabled('category'), tagEnabled = enabled('tag');
-        const [category, tag] = await Promise.all([
-          categoryEnabled ? listAllTaxonomyTerms('category', controller.signal) : Promise.resolve([]),
-          tagEnabled ? listAllTaxonomyTerms('tag', controller.signal) : Promise.resolve([]),
+        const [keys, allDefinitions] = await Promise.all([
+          getEffectiveContentTypeTaxonomies(typeKey, controller.signal),
+          listTaxonomyDefinitions(controller.signal),
         ]);
-        if (active) setTermsState({ accountScope, category, tag, categoryEnabled, tagEnabled });
+        const enabledKeys = new Set(keys);
+        const definitions = allDefinitions.filter(def => enabledKeys.has(def.key)
+          && def.provider_status === 'active' && def.declaration_state === 'declared');
+        if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        // Defining a column never triggers a full paginated term catalog walk.
+        // Option catalogs are fetched only when the user opens a filter.
+        setTermsState({
+          accountScope, definitions, byKind: {},
+          categoryEnabled: definitions.some(def => def.key === 'category'),
+          tagEnabled: definitions.some(def => def.key === 'tag'),
+        });
       } catch (cause) {
-        if (!active || controller.signal.aborted) return;
-        setTermsState({ accountScope, category: [], tag: [], categoryEnabled: false, tagEnabled: false });
+        if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        setTermsState({ accountScope, categoryEnabled: false, tagEnabled: false,
+          definitions: [], byKind: {} });
         onApiError(cause, 'Không thể tải bộ lọc taxonomy.');
       }
     })();
+    return () => {
+      active = false;
+      controller.abort();
+      optionRequestsRef.current.forEach(request => request.abort());
+      optionRequestsRef.current.clear();
+    };
+  }, [accountScope, retry]);
+
+  const loadFilterOptions = (kind: string) => {
+    if (!terms || !terms.definitions.some(def => def.key === kind) ||
+      Object.prototype.hasOwnProperty.call(terms.byKind, kind) ||
+      optionRequestsRef.current.has(kind)) return;
+    const controller = new AbortController();
+    optionRequestsRef.current.set(kind, controller);
+    void listAllTaxonomyTerms(kind, controller.signal).then(found => {
+      if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+      setTermsState(previous => previous?.accountScope === accountScope
+        ? { ...previous, byKind: { ...previous.byKind, [kind]: found } } : previous);
+      setTermLoadErrors(previous => previous.filter(error => !error.startsWith(`${kind}: `)));
+    }).catch(cause => {
+      if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+      if (cause instanceof ApiClientError && cause.status === 401) {
+        controller.abort();
+        onApiError(cause, 'Phiên đăng nhập hết hạn khi tải bộ lọc taxonomy.');
+      } else {
+        setTermLoadErrors(previous => [...previous.filter(error => !error.startsWith(`${kind}: `)),
+          `${kind}: ${readableError(cause)}`]);
+      }
+    }).finally(() => {
+      if (optionRequestsRef.current.get(kind) === controller) optionRequestsRef.current.delete(kind);
+    });
+  };
+
+  // Only IDs in the current server-paginated rows are eligible for label lookup.
+  // One request resolves at most 100 IDs; at most two requests run at a time.
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setResolvedState(null);
+    if (!data) return () => { active = false; controller.abort(); };
+    const ids = [...new Set(data.items.flatMap(row => row.term_ids))]
+      .filter(id => Number.isSafeInteger(id) && id > 0);
+    if (!ids.length) {
+      setResolvedState({ scope, labels: new Map(), failed: false });
+      return () => { active = false; controller.abort(); };
+    }
+    const batches: number[][] = [];
+    for (let i = 0; i < ids.length; i += TERM_RESOLVE_BATCH) {
+      batches.push(ids.slice(i, i + TERM_RESOLVE_BATCH));
+    }
+    let nextBatch = 0;
+    let failed = false;
+    let authReported = false;
+    const labels = new Map<number, TaxonomyTermLabel>();
+    const load = async () => {
+      while (active && !controller.signal.aborted && scopeRef.current === scope) {
+        const batch = batches[nextBatch++];
+        if (!batch) return;
+        try {
+          const found = await resolveTaxonomyTermLabels(batch, controller.signal);
+          if (!active || controller.signal.aborted || scopeRef.current !== scope) return;
+          for (const term of found) if (batch.includes(term.id)) labels.set(term.id, term);
+        } catch (cause) {
+          if (!active || controller.signal.aborted || scopeRef.current !== scope) return;
+          if (cause instanceof ApiClientError && cause.status === 401) {
+            if (!authReported) {
+              authReported = true;
+              controller.abort();
+              onApiError(cause, 'Phiên đăng nhập hết hạn khi tải tên term.');
+            }
+            return;
+          }
+          failed = true;
+        }
+      }
+    };
+    void Promise.all(Array.from({
+      length: Math.min(TERM_RESOLVE_CONCURRENCY, batches.length),
+    }, load)).then(() => {
+      if (active && !controller.signal.aborted && scopeRef.current === scope) {
+        setResolvedState({ scope, labels, failed });
+      }
+    });
     return () => { active = false; controller.abort(); };
-  }, [accountScope]);
+  }, [scope, data]);
 
   useEffect(() => {
     let active = true;
@@ -312,13 +428,21 @@ export function EntryListPage({
     updateFilter({ sort: column, order: nextOrder });
   };
   const editSuffix = queryHash.includes('?') ? queryHash.slice(queryHash.indexOf('?')) : '';
-  const termLabels = new Map([...(terms?.category ?? []), ...(terms?.tag ?? [])]
-    .map(term => [term.id, term.name] as const));
-  const namesFor = (row: EntryTableRow, kind: 'category' | 'tag') => {
-    const known = kind === 'category' ? (terms?.category ?? []) : (terms?.tag ?? []);
-    const ids = new Set(known.map(term => term.id));
-    return row.term_ids.filter(id => ids.has(id)).map(id => termLabels.get(id) ?? `#${id}`).join(', ') || '—';
+  const namesFor = (row: EntryTableRow, kind: string) => {
+    if (!row.term_ids.length) return '—';
+    if (!resolved) return 'Đang tải…';
+    const names = row.term_ids.map(id => resolved.labels.get(id))
+      .filter((term): term is TaxonomyTermLabel => term?.kind === kind)
+      .map(term => term.name);
+    return names.join(', ') || (resolved.failed ? 'Không tải được' : '—');
   };
+  const selectedOptionLabel = (kind: string, id: number): string => {
+    const term = resolved?.labels.get(id);
+    return term?.kind === kind ? term.name : `#${id}`;
+  };
+  const customDefinitions = terms?.definitions.filter(def => def.key !== 'category' && def.key !== 'tag') ?? [];
+  const selectedTaxonomy = filters.taxonomy_key || taxonomyChoice;
+  const chosenDefinition = terms?.definitions.find(def => def.key === selectedTaxonomy);
 
   return (
     <section className="w-full min-w-0 space-y-5" data-testid={`entry-list-${typeKey}`} data-type-key={typeKey}>
@@ -370,21 +494,66 @@ export function EntryListPage({
           Danh mục
           <select aria-label="Lọc danh mục" className={`${control} mt-1 block w-full`}
             value={filters.category_id ?? ''} disabled={bulkBusy}
+            onFocus={() => loadFilterOptions('category')}
             onChange={event => updateFilter({
               category_id: event.target.value ? Number(event.target.value) : undefined,
+              taxonomy_key: undefined, term_id: undefined,
               include_descendants: false,
             })}>
             <option value="">Mọi danh mục</option>
-            {terms.category.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+            {filters.category_id && !terms.byKind.category?.some(term => term.id === filters.category_id) &&
+              <option value={filters.category_id}>{selectedOptionLabel('category', filters.category_id)}</option>}
+            {terms.byKind.category?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+            {!terms.byKind.category && <option disabled>Chạm để tải danh mục…</option>}
           </select>
         </label>}
         {terms?.tagEnabled && <label className="min-w-0 text-sm font-medium text-slate-700">
           Thẻ
           <select aria-label="Lọc thẻ" className={`${control} mt-1 block w-full`}
             value={filters.tag_id ?? ''} disabled={bulkBusy}
-            onChange={event => updateFilter({ tag_id: event.target.value ? Number(event.target.value) : undefined })}>
+            onFocus={() => loadFilterOptions('tag')}
+            onChange={event => updateFilter({ tag_id: event.target.value ? Number(event.target.value) : undefined,
+              taxonomy_key: undefined, term_id: undefined,
+              // A tag is an AND filter, not a reset of the selected category
+              // subtree. Preserve descendants only when a category is active.
+              include_descendants: Boolean(filters.category_id && filters.include_descendants) })}>
             <option value="">Mọi thẻ</option>
-            {terms.tag.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+            {filters.tag_id && !terms.byKind.tag?.some(term => term.id === filters.tag_id) &&
+              <option value={filters.tag_id}>{selectedOptionLabel('tag', filters.tag_id)}</option>}
+            {terms.byKind.tag?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+            {!terms.byKind.tag && <option disabled>Chạm để tải thẻ…</option>}
+          </select>
+        </label>}
+        {customDefinitions.length > 0 && <label className="min-w-0 text-sm font-medium text-slate-700">
+          Taxonomy tùy chỉnh
+          <select aria-label="Chọn taxonomy để lọc" className={`${control} mt-1 block w-full`}
+            disabled={bulkBusy} value={selectedTaxonomy}
+            onChange={event => {
+              setTaxonomyChoice(event.target.value);
+              updateFilter({ taxonomy_key: undefined,
+                term_id: undefined, category_id: undefined, tag_id: undefined, include_descendants: false });
+            }}>
+            <option value="">Tất cả taxonomy</option>
+            {customDefinitions.map(def => <option key={def.key} value={def.key}>{def.label}</option>)}
+          </select>
+        </label>}
+        {chosenDefinition && <label className="min-w-0 text-sm font-medium text-slate-700">
+          {chosenDefinition.label}
+          <select aria-label={`Lọc theo ${chosenDefinition.label}`} className={`${control} mt-1 block w-full`}
+            disabled={bulkBusy} value={filters.term_id ?? ''}
+            onFocus={() => loadFilterOptions(chosenDefinition.key)}
+            onChange={event => {
+              setTaxonomyChoice(selectedTaxonomy);
+              updateFilter({ taxonomy_key: event.target.value ? selectedTaxonomy : undefined,
+                term_id: event.target.value ? Number(event.target.value) : undefined,
+                include_descendants: false });
+            }}>
+            <option value="">Chọn term</option>
+            {filters.term_id && !terms?.byKind[chosenDefinition.key]?.some(term => term.id === filters.term_id) &&
+              <option value={filters.term_id}>{selectedOptionLabel(chosenDefinition.key, filters.term_id)}</option>}
+            {(terms?.byKind[chosenDefinition.key] ?? []).map(term =>
+              <option key={term.id} value={term.id}>{term.name}</option>)}
+            {!terms?.byKind[chosenDefinition.key] && <option disabled>Chạm để tải term…</option>}
           </select>
         </label>}
         <label className="min-w-0 text-sm font-medium text-slate-700">
@@ -402,14 +571,25 @@ export function EntryListPage({
           </select>
         </label>
       </div>
+      {termLoadErrors.length > 0 && <p role="alert" className="text-sm text-amber-800">
+        Không tải được một số term: {termLoadErrors.join('; ')}. Các bộ lọc khác vẫn sử dụng được.
+      </p>}
+      {resolved?.failed && <p role="alert" className="text-sm text-amber-800">
+        Không tải được tên của một số term trên trang. Thử Tải lại để hiển thị đầy đủ.
+      </p>}
       {filters.category_id && terms?.categoryEnabled && <label className="flex items-center gap-2 text-sm text-slate-700">
         <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
           onChange={event => updateFilter({ include_descendants: event.target.checked })} />
         Gồm danh mục con
       </label>}
+      {filters.term_id && chosenDefinition?.hierarchical && <label className="flex items-center gap-2 text-sm text-slate-700">
+        <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
+          onChange={event => updateFilter({ include_descendants: event.target.checked })} />
+        Gồm các term con của {chosenDefinition.label}
+      </label>}
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <button className={action} disabled={bulkBusy} type="button"
-          onClick={() => { setSearchInput(''); onNavigateHash(base); }}>Xóa tất cả bộ lọc</button>
+          onClick={() => { setSearchInput(''); setTaxonomyChoice(''); onNavigateHash(base); }}>Xóa tất cả bộ lọc</button>
         <span className="text-slate-600" role="status">{data ? `Tổng: ${data.total} mục phù hợp` : 'Đang lấy số lượng…'}</span>
       </div>
 
@@ -469,6 +649,7 @@ export function EntryListPage({
               <th scope="col" className="px-3 py-3">Trạng thái</th>
               {terms?.categoryEnabled && <th scope="col" className="px-3 py-3">Danh mục</th>}
               {terms?.tagEnabled && <th scope="col" className="px-3 py-3">Thẻ</th>}
+              {customDefinitions.map(def => <th key={def.key} scope="col" className="px-3 py-3">{def.label}</th>)}
               {providerColumns.map(column => <th key={column.key} scope="col"
                 className="min-w-[120px] px-3 py-3">{column.label}</th>)}
               <th scope="col" className="min-w-[135px] px-3 py-3">
@@ -483,7 +664,7 @@ export function EntryListPage({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {!loading && !error && currentRows.length === 0 && <tr>
-              <td colSpan={5 + Number(Boolean(terms?.categoryEnabled)) + Number(Boolean(terms?.tagEnabled)) + providerColumns.length}
+              <td colSpan={5 + (terms?.definitions.length ?? 0) + providerColumns.length}
                 className="px-4 py-8 text-center text-slate-600">
                 {data?.total === 0 ? 'Không tìm thấy nội dung phù hợp. Có thể xóa bộ lọc để xem lại.' : 'Không có mục trên trang này.'}
               </td>
@@ -501,6 +682,7 @@ export function EntryListPage({
                 <td className="px-3 py-3">{row.publication_status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}</td>
                 {terms?.categoryEnabled && <td className="break-words px-3 py-3">{namesFor(row, 'category')}</td>}
                 {terms?.tagEnabled && <td className="break-words px-3 py-3">{namesFor(row, 'tag')}</td>}
+                {customDefinitions.map(def => <td key={def.key} className="break-words px-3 py-3">{namesFor(row, def.key)}</td>)}
                 {providerColumns.map(column => <td key={column.key} className="break-words px-3 py-3">
                   <AdminColumnCell column={column} row={row} busy={providerBusy || bulkBusy}
                     onRun={(col, entry) => void performProviderAction(col, entry)} />

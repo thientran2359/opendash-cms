@@ -60,7 +60,7 @@ use crate::{
         },
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_get, taxonomy_list,
-            taxonomy_patch, taxonomy_eligibility_list,
+            taxonomy_patch, taxonomy_terms_resolve, taxonomy_eligibility_list,
             taxonomy_eligibility_put, taxonomy_eligibility_effective,
             taxonomy_definitions_list, taxonomy_definitions_create, taxonomy_definitions_get,
             taxonomy_definitions_patch, taxonomy_definitions_delete,
@@ -312,6 +312,10 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
         )
         .route(
+            "/api/admin/taxonomy/terms/resolve",
+            get(taxonomy_terms_resolve),
+        )
+        .route(
             "/api/admin/taxonomy/terms/{id}",
             get(taxonomy_get)
                 .patch(taxonomy_patch)
@@ -331,6 +335,10 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/taxonomy/eligibility/{content_type_key}/effective",
             get(taxonomy_eligibility_effective),
+        )
+        .route(
+            "/api/admin/taxonomy/eligibility/{content_type_key}/configured",
+            get(crate::routes::taxonomy::taxonomy_eligibility_configured),
         )
         .route(
             "/api/admin/operations/diagnostics",

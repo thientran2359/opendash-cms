@@ -22,6 +22,9 @@ export interface ListProps {
   type_key: string;
   category_id?: number;
   tag_id?: number;
+  /** C2 generic taxonomy filter. A valid List requires both fields together. */
+  taxonomy_key?: string;
+  term_id?: number;
   include_descendants: boolean;
   sort: ListSort;
   page_size: number;
@@ -171,6 +174,32 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** Mirrors the core/list validation contract for both editor updates and
+ * locked historical nodes. Category + tag may coexist; generic filters
+ * cannot be mixed with those legacy aliases.
+ */
+function validListTaxonomyFilter(props: {
+  category_id?: unknown;
+  tag_id?: unknown;
+  taxonomy_key?: unknown;
+  term_id?: unknown;
+  include_descendants?: unknown;
+}): boolean {
+  const category = props.category_id !== undefined;
+  const tag = props.tag_id !== undefined;
+  const taxonomy = props.taxonomy_key !== undefined;
+  const term = props.term_id !== undefined;
+  return !(category && (!Number.isSafeInteger(props.category_id) || Number(props.category_id) <= 0))
+    && !(tag && (!Number.isSafeInteger(props.tag_id) || Number(props.tag_id) <= 0))
+    && !(taxonomy && (typeof props.taxonomy_key !== 'string'
+      || !/^[a-z][a-z0-9_]{0,63}$/.test(props.taxonomy_key)))
+    && !(term && (!Number.isSafeInteger(props.term_id) || Number(props.term_id) <= 0))
+    && taxonomy === term
+    && !(taxonomy && (category || tag))
+    && (props.include_descendants === undefined || typeof props.include_descendants === 'boolean')
+    && !(props.include_descendants === true && !category && !taxonomy);
+}
+
 /** Unknown, malformed, or inactive-provider elements are immutable anchors.
  * The server's is_preserved validator is the final authority. */
 export function isLockedElement(element: BuilderElement, registry: Record<string, Record<string, string>>): boolean {
@@ -190,10 +219,7 @@ export function isLockedElement(element: BuilderElement, registry: Record<string
     case 'core/contact_form': return typeof props.form_id !== 'number' || props.form_id <= 0 || typeof props.submit_label !== 'string' || !props.submit_label.trim();
     case 'core/list': return typeof props.type_key !== 'string'
       || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
-      || (props.category_id !== undefined && (!Number.isSafeInteger(props.category_id) || Number(props.category_id) <= 0))
-      || (props.tag_id !== undefined && (!Number.isSafeInteger(props.tag_id) || Number(props.tag_id) <= 0))
-      || (props.include_descendants !== undefined && typeof props.include_descendants !== 'boolean')
-      || (props.include_descendants === true && props.category_id === undefined)
+      || !validListTaxonomyFilter(props)
       || (props.sort !== undefined && !['id_desc', 'id_asc'].includes(String(props.sort)))
       || (props.page_size !== undefined && (!Number.isInteger(props.page_size)
         || Number(props.page_size) < 1 || Number(props.page_size) > 20));
@@ -331,9 +357,7 @@ export function setListProps(document: BuilderDocument, id: string, props: ListP
   if (!props.type_key || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
       || !Number.isInteger(props.page_size) || props.page_size < 1 || props.page_size > 20
       || !['id_desc', 'id_asc'].includes(props.sort)
-      || (props.category_id !== undefined && (!Number.isSafeInteger(props.category_id) || props.category_id <= 0))
-      || (props.tag_id !== undefined && (!Number.isSafeInteger(props.tag_id) || props.tag_id <= 0))
-      || (props.include_descendants && props.category_id === undefined)) return null;
+      || !validListTaxonomyFilter(props)) return null;
   const next = clone(document);
   const element = locate(next, id)?.node;
   if (!element || !isElement(element) || element.type !== 'core/list') return null;

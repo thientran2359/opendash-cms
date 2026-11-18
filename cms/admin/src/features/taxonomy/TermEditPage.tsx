@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ApiClientError } from '../../api/client.ts';
-import { createTaxonomyTerm, getTaxonomyTerm, getEffectiveTermConfig, listAllTaxonomyTerms, updateTaxonomyTerm,
-  type TaxonomyKind, type TaxonomyTerm, type TaxonomyTermChanges } from '../../api/taxonomy.ts';
+import { createTaxonomyTerm, getTaxonomyTerm, getEffectiveTermConfig, getTaxonomyDefinition,
+  listAllTaxonomyTerms, updateTaxonomyTerm,
+  type TaxonomyDefinition, type TaxonomyKind, type TaxonomyTerm, type TaxonomyTermChanges } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
 import { AdminTermPanels, type EffectiveTermConfig, type TermExtensionValues } from '../extensions/AdminContributionRenderer.tsx';
 
@@ -10,6 +11,8 @@ interface TermEditProps {
   mode: 'new' | 'edit';
   termId: number | null;
   user: AuthUser | null;
+  /** Site instance from App, required to safely recover a draft after a 401. */
+  siteInstanceId?: string;
   csrfToken: string | null;
   onApiError: (error: unknown, fallback: string) => void;
   onDirtyChange: (dirty: boolean) => void;
@@ -17,6 +20,27 @@ interface TermEditProps {
 }
 
 interface FormValues { name: string; slug: string; parentId: string }
+interface TermDraft {
+  form: FormValues;
+  baseline: FormValues;
+  version: number | null;
+  manualSlug: boolean;
+  extensions: TermExtensionValues;
+  extensionBaseline: TermExtensionValues;
+  schemaToken: string | null;
+  conflict: boolean;
+}
+
+// In-memory only: no localStorage/cookies and no cross-site or cross-account
+// visibility. A route change discards the draft; a 401 leaves its route hash.
+const termDrafts = new Map<string, TermDraft>();
+const termScope = (siteId: string | undefined, actor: AuthUser | null,
+  kind: TaxonomyKind, mode: 'new' | 'edit', id: number | null): string | null =>
+  siteId && siteId !== 'default-site' && actor
+    ? JSON.stringify([siteId, actor.id, actor.role, kind, mode, id]) : null;
+const cloneExtensions = (source: TermExtensionValues): TermExtensionValues =>
+  Object.fromEntries(Object.entries(source).map(([panel, values]) => [panel, { ...values }]));
+
 const blank = (): FormValues => ({ name: '', slug: '', parentId: '' });
 const fromTerm = (term: TaxonomyTerm): FormValues => ({
   name: term.name, slug: term.slug, parentId: term.parent_id === null ? '' : String(term.parent_id),
@@ -53,22 +77,31 @@ function allowedParents(terms: TaxonomyTerm[], targetId: number | null): Taxonom
 }
 
 /** A full-route editor; extension mount slots intentionally contain no fake fields. */
-export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
+export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToken, onApiError,
   onDirtyChange, onNavigateHash}: TermEditProps) {
+  const scope = termScope(siteInstanceId, user, kind, mode, termId);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const recoveredRef = useRef<TermDraft | null>(scope ? termDrafts.get(scope) ?? null : null);
+  const recovered = recoveredRef.current;
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [current, setCurrent] = useState<TaxonomyTerm | null>(null);
-  const [allCategories, setAllCategories] = useState<TaxonomyTerm[]>([]);
-  const [form, setForm] = useState<FormValues>(blank);
-  const [baseline, setBaseline] = useState<FormValues>(blank);
-  const [version, setVersion] = useState<number | null>(null);
-  const [manualSlug, setManualSlug] = useState(false);
-  const [conflict, setConflict] = useState(false);
+  const [definition, setDefinition] = useState<TaxonomyDefinition | null>(null);
+  const [allTerms, setAllTerms] = useState<TaxonomyTerm[]>([]);
+  const [form, setForm] = useState<FormValues>(recovered?.form ?? blank);
+  const [baseline, setBaseline] = useState<FormValues>(recovered?.baseline ?? blank);
+  const [version, setVersion] = useState<number | null>(recovered?.version ?? null);
+  const [manualSlug, setManualSlug] = useState(recovered?.manualSlug ?? false);
+  const [conflict, setConflict] = useState(recovered?.conflict ?? false);
   const [latest, setLatest] = useState<TaxonomyTerm | null>(null);
   const [extensionConfig, setExtensionConfig] = useState<EffectiveTermConfig | null>(null);
-  const [extensions, setExtensions] = useState<TermExtensionValues>({});
-  const [extensionBaseline, setExtensionBaseline] = useState<TermExtensionValues>({});
+  const [extensions, setExtensions] = useState<TermExtensionValues>(recovered?.extensions ?? {});
+  const [extensionBaseline, setExtensionBaseline] = useState<TermExtensionValues>(recovered?.extensionBaseline ?? {});
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const savingRef = useRef(false);
@@ -76,21 +109,49 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
   onErrorRef.current = onApiError;
   const reportDirtyRef = useRef(onDirtyChange);
   reportDirtyRef.current = onDirtyChange;
-  const listHash = `#/posts/${kind === 'category' ? 'categories' : 'tags'}`;
+  const listHash = kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
+    : `#/taxonomy/${encodeURIComponent(kind)}/terms`;
+  const routeHash = mode === 'new' ? `${listHash}/new` : `${listHash}/${termId}/edit`;
+  const hierarchical = Boolean(definition?.hierarchical);
+  const providerUnavailable = Boolean(definition &&
+    (definition.provider_status !== 'active' || definition.declaration_state !== 'declared'));
   const dirty = form.name !== baseline.name || form.slug !== baseline.slug ||
     form.parentId !== baseline.parentId || JSON.stringify(extensions) !== JSON.stringify(extensionBaseline);
-  const parentOptions = useMemo(() => allowedParents(allCategories, current?.id ?? null), [allCategories, current?.id]);
+  const parentOptions = useMemo(() => allowedParents(allTerms, current?.id ?? null), [allTerms, current?.id]);
 
   useEffect(() => { reportDirtyRef.current(dirty); }, [dirty]);
   useEffect(() => () => reportDirtyRef.current(false), []);
 
   useEffect(() => {
+    // Do not replace the snapshot with transient empty state during hydration.
+    if (!scope || loading) return;
+    if (dirty) termDrafts.set(scope, {
+      form: { ...form }, baseline: { ...baseline }, version, manualSlug,
+      extensions: cloneExtensions(extensions),
+      extensionBaseline: cloneExtensions(extensionBaseline),
+      schemaToken: extensionConfig?.schema_token ?? recoveredRef.current?.schemaToken ?? null,
+      conflict,
+    });
+    else termDrafts.delete(scope);
+  }, [scope, loading, dirty, conflict, form, baseline, version, manualSlug, extensions,
+    extensionBaseline, extensionConfig?.schema_token]);
+
+  useEffect(() => () => {
+    if (scope && window.location.hash.split('?')[0] !== routeHash) termDrafts.delete(scope);
+  }, [scope, routeHash]);
+
+  useEffect(() => {
     const controller = new AbortController();
     const { signal } = controller;
-    setLoading(true); setNotFound(false); setError(''); setNotice(''); setConflict(false);
-    setCurrent(null); setLatest(null); setForm(blank()); setBaseline(blank()); setVersion(null);
-    setExtensionConfig(null); setExtensions({}); setExtensionBaseline({});
-    setManualSlug(false);
+    setLoading(true); setNotFound(false); setError(''); setNotice(''); setConflict(recoveredRef.current?.conflict ?? false);
+    const remembered = recoveredRef.current;
+    setCurrent(null); setLatest(null);
+    setForm(remembered?.form ?? blank()); setBaseline(remembered?.baseline ?? blank());
+    setVersion(remembered?.version ?? null);
+    setDefinition(null); setAllTerms([]);
+    setExtensionConfig(null); setExtensions(remembered?.extensions ?? {});
+    setExtensionBaseline(remembered?.extensionBaseline ?? {});
+    setManualSlug(remembered?.manualSlug ?? false);
     if (!user) { setLoading(false); return () => controller.abort(); }
     (async () => {
       try {
@@ -98,22 +159,35 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
           if (!signal.aborted) setNotFound(true);
           return;
         }
-        const [saved, categories, config] = await Promise.all([
+        const [saved, descriptor, config] = await Promise.all([
           mode === 'edit' ? getTaxonomyTerm(termId!, signal) : Promise.resolve(null),
-          kind === 'category' ? listAllTaxonomyTerms('category', signal) : Promise.resolve([]),
+          getTaxonomyDefinition(kind, signal),
           mode === 'edit' ? getEffectiveTermConfig(termId!, signal) : Promise.resolve(null),
         ]);
         if (signal.aborted) return;
         if (saved && saved.kind !== kind) { setNotFound(true); return; }
-        setAllCategories(categories);
+        setDefinition(descriptor);
+        if (descriptor.hierarchical) setAllTerms(await listAllTaxonomyTerms(kind, signal));
+        if (signal.aborted) return;
         if (saved) {
           const next = fromTerm(saved);
-          setCurrent(saved); setVersion(saved.version);
-          setBaseline(next); setForm(next); setManualSlug(true);
+          setCurrent(saved);
+          setVersion(remembered?.version ?? saved.version);
+          setBaseline(remembered?.baseline ?? next);
+          setForm(remembered?.form ?? next);
+          setManualSlug(remembered?.manualSlug ?? true);
           if (config) {
             setExtensionConfig(config);
-            setExtensions(config.extensions);
-            setExtensionBaseline(config.extensions);
+            setExtensions(remembered?.extensions ?? config.extensions);
+            setExtensionBaseline(remembered?.extensionBaseline ?? config.extensions);
+          }
+          if (remembered && (saved.version !== remembered.version ||
+              (config?.schema_token ?? null) !== remembered.schemaToken)) {
+            // Keep the old CAS and field values until the user inspects the
+            // fresh record/schema; never submit an old draft with a new token.
+            setConflict(true);
+            setLatest(null);
+            setError('Term hoặc schema đã đổi trong lúc đăng xuất. Nháp được giữ; hãy đối chiếu phiên bản mới.');
           }
         }
       } catch (cause) {
@@ -135,29 +209,63 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
       const [fresh, config] = await Promise.all([
         getTaxonomyTerm(termId), getEffectiveTermConfig(termId),
       ]);
+      if (!mountedRef.current) return;
       setLatest(fresh.kind === kind ? fresh : null);
       if (fresh.kind === kind) {
-        // Withdrawn fields are scrubbed; still-readable drafts remain editable.
+        // Rebase extension data by per-field differences. Preserve only fields
+        // actually edited locally; otherwise take the newest server value.
+        // Withdrawn fields are not submitted or revived by a stale draft.
         setExtensionConfig(config);
         setExtensions(prev => Object.fromEntries(config.panels.map(panel => [
           panel.key,
           Object.fromEntries(panel.fields.map(field => [
-            field.key, prev[panel.key]?.[field.key] ?? config.extensions[panel.key]?.[field.key] ?? null,
+            field.key,
+            prev[panel.key]?.[field.key] !== extensionBaseline[panel.key]?.[field.key]
+              ? (prev[panel.key]?.[field.key] ?? null)
+              : (config.extensions[panel.key]?.[field.key] ?? null),
           ])),
         ])) as TermExtensionValues);
         setExtensionBaseline(config.extensions);
       }
       if (fresh.kind !== kind) setNotFound(true);
     } catch (cause) {
+      if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 404) setNotFound(true);
       else { setError(cause instanceof Error ? cause.message : 'Không thể đọc bản mới.');
         onErrorRef.current(cause, 'Không thể đọc bản mới.'); }
     } finally { setBusy(false); }
   };
 
+  const continueWithLatest = () => {
+    if (!latest || latest.kind !== kind) return;
+    const currentServer = fromTerm(latest);
+    const changed = (Object.keys(form) as Array<keyof FormValues>)
+      .filter(field => form[field] !== baseline[field]);
+    const overlaps = changed.filter(field => currentServer[field] !== baseline[field]);
+    if (overlaps.length && !window.confirm(
+      `Máy chủ cũng thay đổi ${overlaps.join(', ')}. Giữ giá trị đang nhập trên phiên bản mới?`,
+    )) return;
+    const merged = { ...currentServer };
+    for (const field of changed) merged[field] = form[field];
+    setBaseline(currentServer); setForm(merged);
+    setVersion(latest.version); setConflict(false); setLatest(null); setError('');
+    setNotice(`Đã đối chiếu v${latest.version}. Trường đã sửa vẫn được giữ; kiểm tra rồi Lưu.`);
+    recoveredRef.current = null;
+  };
+
+  const discardAndBack = () => {
+    if (dirty && !window.confirm('Bỏ bản nhập taxonomy chưa lưu và về danh sách?')) return;
+    if (scope) termDrafts.delete(scope);
+    recoveredRef.current = null;
+    setForm(baseline); setExtensions(extensionBaseline);
+    reportDirtyRef.current(false);
+    onNavigateHash(listHash);
+  };
+
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!user || !csrfToken || savingRef.current || busy || loading || notFound || conflict ||
+      (mode === 'new' && providerUnavailable) ||
       (mode === 'new' && user.role !== 'admin')) return;
     const canEditCore = user.role === 'admin';
     const name = form.name.trim();
@@ -167,10 +275,10 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
       setError('Tên hoặc slug không hợp lệ (tên 1–120 ký tự, slug kebab-case tối đa 64).');
       return;
     }
-    const parentId = kind === 'category' && form.parentId ? Number(form.parentId) : null;
+    const parentId = hierarchical && form.parentId ? Number(form.parentId) : null;
     if (canEditCore && parentId !== null &&
       (!Number.isSafeInteger(parentId) || !parentOptions.some(t => t.id === parentId))) {
-      setError('Danh mục cha không hợp lệ hoặc vượt quá 8 cấp.'); return;
+      setError('Term cha không hợp lệ hoặc vượt quá 8 cấp.'); return;
     }
     savingRef.current = true;
     setBusy(true); setError(''); setNotice('');
@@ -179,14 +287,14 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
         let saved: TaxonomyTerm;
         if (mode === 'new') {
           saved = await createTaxonomyTerm({kind, name, slug,
-            ...(kind === 'category' ? {parent_id: parentId} : {})}, csrfToken);
+            ...(hierarchical ? {parent_id: parentId} : {})}, csrfToken);
         } else {
           if (!current || version === null) return;
           const changes: TaxonomyTermChanges = {};
           if (canEditCore && name !== baseline.name) changes.name = name;
           if (canEditCore && slug !== baseline.slug) changes.slug = slug;
           const oldParent = baseline.parentId ? Number(baseline.parentId) : null;
-          if (canEditCore && kind === 'category' && parentId !== oldParent) changes.parent_id = parentId;
+          if (canEditCore && hierarchical && parentId !== oldParent) changes.parent_id = parentId;
           if (extensionConfig) {
             const altered: TermExtensionValues = {};
             for (const panel of extensionConfig.panels) {
@@ -206,16 +314,20 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
           if (!Object.keys(changes).length) { setNotice('Không có thay đổi cần lưu.'); return; }
           saved = await updateTaxonomyTerm(current.id, version, changes, csrfToken);
         }
+        if (!mountedRef.current) return;
         const next = fromTerm(saved);
         setCurrent(saved); setVersion(saved.version); setBaseline(next); setForm(next);
         setExtensionBaseline(extensions);
         if (saved.schema_token && extensionConfig)
           setExtensionConfig({...extensionConfig, schema_token: saved.schema_token});
         setConflict(false); setLatest(null);
+        if (scope) termDrafts.delete(scope);
+        recoveredRef.current = null;
         reportDirtyRef.current(false);
-        setNotice(`Đã lưu ${kind === 'category' ? 'danh mục' : 'thẻ'} #${saved.id} (v${saved.version}).`);
+        setNotice(`Đã lưu term ${definition?.label ?? kind} #${saved.id} (v${saved.version}).`);
         if (mode === 'new') onNavigateHash(`${listHash}/${saved.id}/edit`);
       } catch (cause) {
+        if (!mountedRef.current) return;
         if (cause instanceof ApiClientError && (cause.status === 412 || cause.status === 409)) {
           setConflict(true);
           setError(cause.status === 412 ?
@@ -230,9 +342,13 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
   if (!user) return null;
   if (notFound) return (
     <section data-testid="term-not-found" className="space-y-3">
-      <h2 className="text-xl font-bold text-slate-900">404 Không tìm thấy {kind === 'category' ? 'danh mục' : 'thẻ'}</h2>
+      <h2 className="text-xl font-bold text-slate-900">404 Không tìm thấy term {kind}</h2>
       <p className="text-sm text-slate-600">ID không tồn tại hoặc thuộc loại taxonomy khác.</p>
-      <button type="button" className={buttonClass} onClick={() => onNavigateHash(listHash)}>Quay lại danh sách</button>
+      {recoveredRef.current && <div className="space-y-2 rounded-lg border border-amber-200 p-3 text-sm">
+        <p role="status">Bản nháp từ phiên trước vẫn được giữ để sao chép, nhưng đích lưu hiện không còn khả dụng.</p>
+        <pre className="max-w-full overflow-auto whitespace-pre-wrap break-words">{JSON.stringify({ form, extensions }, null, 2)}</pre>
+      </div>}
+      <button type="button" className={buttonClass} onClick={discardAndBack}>Bỏ bản nhập / Về danh sách</button>
     </section>
   );
   if (loading) return <p role="status">Đang tải màn hình chỉnh sửa taxonomy...</p>;
@@ -242,19 +358,22 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
       data-term-kind={kind} data-term-id={current?.id ?? ''}>
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-widest text-sky-700">Nội dung / {kind === 'category' ? 'Danh mục' : 'Thẻ'}</p>
+          <p className="text-xs uppercase tracking-widest text-sky-700">Nội dung / {definition?.label ?? kind}</p>
           <h2 className="mt-1 text-2xl font-bold text-slate-900">
-            {mode === 'new' ? `Thêm ${kind === 'category' ? 'danh mục' : 'thẻ'}` : `Chỉnh sửa ${kind === 'category' ? 'danh mục' : 'thẻ'} #${current?.id}`}
+            {mode === 'new' ? `Thêm term ${definition?.label ?? kind}` : `Chỉnh sửa term ${definition?.label ?? kind} #${current?.id}`}
           </h2>
           {current && <p className="text-xs text-slate-600">ID #{current.id} · Phiên bản v{version} · {dirty ? 'Chưa lưu' : 'Đã đồng bộ'}</p>}
         </div>
-        <button type="button" className={buttonClass} disabled={busy} onClick={() => onNavigateHash(listHash)}>
+        <button type="button" className={buttonClass} disabled={busy} onClick={discardAndBack}>
           Hủy / Về danh sách
         </button>
       </header>
 
       {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
+      {providerUnavailable && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+        Taxonomy này không còn hoạt động hoặc đã rút khai báo. Có thể giữ/chỉnh sửa term hiện có; không tạo term mới.
+      </p>}
 
       <div data-extension-slot="term-before-core" aria-hidden="true" />
       <form onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-5"
@@ -274,11 +393,11 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
             onChange={event => { setManualSlug(true); setForm(previous => ({...previous, slug: event.target.value})); }} />
           <span className="mt-1 block text-xs font-normal text-slate-600">Slug duy nhất trong loại, bắt đầu bằng a-z, tối đa 64 ký tự.</span>
         </label>
-        {kind === 'category' && <label className="block text-sm font-medium text-slate-800" htmlFor="term-parent">
-          Danh mục cha
+        {hierarchical && <label className="block text-sm font-medium text-slate-800" htmlFor="term-parent">
+          Term cha
           <select id="term-parent" className={fieldClass} value={form.parentId} disabled={busy || user.role !== 'admin'}
             onChange={event => setForm(previous => ({...previous, parentId: event.target.value}))}>
-            <option value="">Không có (danh mục gốc)</option>
+            <option value="">Không có (term gốc)</option>
             {parentOptions.map(term => <option key={term.id} value={term.id}>{term.name} (#{term.id})</option>)}
             {form.parentId && !parentOptions.some(term => String(term.id) === form.parentId) &&
               <option value={form.parentId} disabled>Cha không còn hợp lệ (#{form.parentId})</option>}
@@ -298,18 +417,17 @@ export function TermEditPage({kind, mode, termId, user, csrfToken, onApiError,
           {!latest ? <button className={buttonClass} type="button" disabled={busy}
             onClick={() => void inspectConflict()}>Tải bản mới để so sánh</button> : <>
             <p>Bản trên máy chủ: v{latest.version} · {latest.name} · /{latest.slug}</p>
-            <button className={buttonClass} type="button" disabled={busy} onClick={() => {
-              setVersion(latest.version); setConflict(false); setLatest(null); setError('');
-              setNotice(`Tiếp tục với v${latest.version}; các trường đang nhập vẫn giữ nguyên.`);
-            }}>Tiếp tục với v{latest.version} (giữ bản nhập)</button>
+            <button className={buttonClass} type="button" disabled={busy} onClick={continueWithLatest}>
+              Tiếp tục với v{latest.version} (giữ trường đã sửa)
+            </button>
           </>}
         </div>}
         <div className="flex flex-wrap gap-3">
           <button type="submit" className="od-primary-action"
-            disabled={busy || conflict || !csrfToken || (mode === 'new' && user.role !== 'admin')}>
+            disabled={busy || conflict || !csrfToken || (mode === 'new' && (user.role !== 'admin' || providerUnavailable))}>
             {busy ? 'Đang lưu...' : mode === 'new' ? 'Tạo mới' : 'Lưu thay đổi'}
           </button>
-          <button type="button" className={buttonClass} disabled={busy} onClick={() => onNavigateHash(listHash)}>
+          <button type="button" className={buttonClass} disabled={busy} onClick={discardAndBack}>
             Hủy sửa
           </button>
         </div>

@@ -22,8 +22,8 @@ export interface ParsedRoute {
   sub: string;
   typeKey?: string;
   entryId?: number;
-  taxonomyKind?: 'category' | 'tag';
-  taxonomyMode?: 'list' | 'new' | 'edit';
+  taxonomyKind?: string;
+  taxonomyMode?: 'definitions' | 'list' | 'new' | 'edit' | 'invalid';
   templateRole?: string;
   rawHash: string;
   isLegacyContentRedirect?: boolean;
@@ -110,8 +110,27 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     return { view: 'media', sub: segs[1] === 'upload' ? 'upload' : 'library', rawHash: `#/media${segs[1] === 'upload' ? '/upload' : ''}` };
   }
   if (first === 'taxonomy') {
-    const sub = segs[1] === 'tags' ? 'tags' : 'categories';
-    return { view: 'taxonomy', sub, taxonomyKind: sub === 'tags' ? 'tag' : 'category', taxonomyMode: 'list', rawHash: hash };
+    if (segs.length === 2 && segs[1] === 'definitions') {
+      return { view: 'taxonomy', sub: 'definitions', taxonomyMode: 'definitions', rawHash: '#/taxonomy/definitions' };
+    }
+    // The old /taxonomy/categories|tags aliases continue to work.
+    if (segs.length === 2 && (segs[1] === 'categories' || segs[1] === 'tags')) {
+      const sub = segs[1];
+      return { view: 'taxonomy', sub, taxonomyKind: sub === 'tags' ? 'tag' : 'category', taxonomyMode: 'list', rawHash: hash };
+    }
+    const key = segs[1];
+    const validKey = Boolean(key && /^[a-z][a-z0-9_]{0,63}$/.test(key) && key !== 'section');
+    if (validKey && segs[2] === 'terms') {
+      const root = `#/taxonomy/${key}/terms`;
+      if (segs.length === 3) return { view: 'taxonomy', sub: 'terms', taxonomyKind: key, taxonomyMode: 'list', rawHash: root };
+      if (segs.length === 4 && segs[3] === 'new') {
+        return { view: 'taxonomy', sub: 'terms', taxonomyKind: key, taxonomyMode: 'new', rawHash: `${root}/new` };
+      }
+      if (segs.length === 5 && segs[4] === 'edit' && /^[1-9]\d*$/.test(segs[3]) && Number.isSafeInteger(Number(segs[3]))) {
+        return { view: 'taxonomy', sub: 'terms', taxonomyKind: key, taxonomyMode: 'edit', entryId: Number(segs[3]), rawHash: `${root}/${segs[3]}/edit` };
+      }
+    }
+    return { view: 'taxonomy', sub: 'invalid', taxonomyMode: 'invalid', rawHash: hash };
   }
   if (first === 'appearance' || first === 'themes') {
     const sub = first === 'themes' ? 'themes' : (segs[1] ?? 'themes');
@@ -182,9 +201,12 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 
 export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
   if (route.view === 'sections' && route.sub === 'invalid') return false;
+  if (route.view === 'taxonomy' && route.taxonomyMode === 'invalid') return false;
   if (route.view === 'builder' && route.sub !== 'builder') return false;
   if (role === 'admin') return true;
-  if (route.view === 'taxonomy' && route.taxonomyMode !== 'list') return false;
+  // Editors may update term extension values on an existing term. Creating
+  // terms and editing definition/eligibility schemas remain Admin-only.
+  if (route.view === 'taxonomy' && !['list', 'edit'].includes(route.taxonomyMode ?? '')) return false;
   if (route.view === 'themes' || route.view === 'plugins' || route.view === 'users' || route.view === 'tools' || route.view === 'settings') {
     return false;
   }
