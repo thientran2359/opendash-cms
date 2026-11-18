@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
+import { getContentEntry } from '../api/content.ts';
 import type { AuthUser, BlockRegistry } from '../types.ts';
 import type { BuilderDiagnostic, HomepageOpen, OverrideRole } from '../api/builder.ts';
+import type { ParsedRoute } from '../shell/router.ts';
 import {
   type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type ListProps, type NodeKind, type ResponsiveAlign,
   type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
@@ -13,6 +15,9 @@ import { BuilderCanvas } from './BuilderCanvas.tsx';
 import { BuilderInspector } from './BuilderInspector.tsx';
 
 interface Props {
+  route: ParsedRoute;
+  active: boolean;
+  onNavigateHash: (hash: string) => void;
   user: AuthUser | null;
   csrfToken: string | null;
   resetToken: number;
@@ -77,12 +82,18 @@ async function preparePreviewMarkup(
 }
 
 export function BuilderWorkspace({
-  user, csrfToken, resetToken, themeRevision, onDirtyChange, onApiError,
+  route, active, onNavigateHash, user, csrfToken, resetToken, themeRevision, onDirtyChange, onApiError,
 }: Props) {
   const [draft, setDraft] = useState<BuilderDocument>(EMPTY_DOCUMENT);
   const draftRef = useRef<BuilderDocument>(EMPTY_DOCUMENT);
-  const [targetRole, setTargetRole] = useState<'homepage' | OverrideRole>('homepage');
-  const [scopeTypeKey, setScopeTypeKey] = useState('');
+  // The accepted route owns the target identity. Never change this independently
+  // of App's dirty-navigation guard (including browser Back/Forward).
+  const targetRole = (route.templateRole ?? 'homepage') as 'homepage' | OverrideRole;
+  const scopeTypeKey = route.typeKey ?? '';
+  const scopeEntryId = route.entryId ?? null;
+  const scopedPage = targetRole === 'page' && scopeTypeKey === 'page' && scopeEntryId !== null;
+  const [scopeTypeInput, setScopeTypeInput] = useState(scopeTypeKey);
+  const [pageDetails, setPageDetails] = useState<{ status: 'draft' | 'published'; url: string } | null>(null);
   const [overrideExists, setOverrideExists] = useState(false);
   const [version, setVersion] = useState<number | null>(null);
   const versionRef = useRef<number | null>(null);
@@ -107,11 +118,13 @@ export function BuilderWorkspace({
   const [notice, setNotice] = useState('Mở Builder để chỉnh homepage.');
   const [error, setError] = useState(false);
   const ownerRef = useRef<number | null>(null);
+  const ownerRoleRef = useRef<AuthUser['role'] | null>(null);
   const loadedRef = useRef(false);
   const resetRef = useRef(resetToken);
   const themeRef = useRef(themeRevision);
   const previewSeq = useRef(0);
   const previewAbort = useRef<AbortController | null>(null);
+  const loadSeq = useRef(0);
 
   const message = (text: string, failed = false) => { setNotice(text); setError(failed); };
   const invalidatePreview = () => {
@@ -123,6 +136,7 @@ export function BuilderWorkspace({
     setDiagnostics([]);
   };
   const clear = () => {
+    loadSeq.current += 1;
     invalidatePreview();
     draftRef.current = EMPTY_DOCUMENT;
     setDraft(EMPTY_DOCUMENT);
@@ -137,6 +151,7 @@ export function BuilderWorkspace({
     registryRef.current = {};
     setConflict(false);
     setMode('canvas');
+    setPageDetails(null);
     loadedRef.current = false;
   };
 
@@ -144,28 +159,54 @@ export function BuilderWorkspace({
     onDirtyChange(revision !== savedRevision);
   }, [revision, savedRevision, onDirtyChange]);
 
-  // This component stays mounted across Admin routes and an expired session.
-  // A deliberate logout or a different account discards the previous draft.
+  // Fetch only the accepted target. An inactive Builder must not fetch homepage
+  // in the background while an Editor is working on a Page.
   useEffect(() => {
     if (resetRef.current !== resetToken) {
       resetRef.current = resetToken;
       clear();
       ownerRef.current = null;
+      ownerRoleRef.current = null;
     }
-    if (!user || !csrfToken) return;
-    if (ownerRef.current !== null && ownerRef.current !== user.id) clear();
+    if (!user || !csrfToken) {
+      // An expired session quarantines the AST for same-account recovery, but
+      // any in-flight preview/load must lose authority to render its result.
+      loadSeq.current += 1;
+      invalidatePreview();
+      setLoading(false);
+      return;
+    }
+    if ((ownerRef.current !== null && ownerRef.current !== user.id)
+        || (ownerRoleRef.current !== null && ownerRoleRef.current !== user.role)) clear();
     ownerRef.current = user.id;
+    ownerRoleRef.current = user.role;
+    if (!active || route.sub !== 'builder') return;
     if (loadedRef.current) return;
     let alive = true;
+    const requestId = ++loadSeq.current;
     setLoading(true);
-    Promise.all([api.getHomepage(), api.getRegistry()])
-      .then(([opened, descriptors]) => {
-        if (!alive || ownerRef.current !== user.id) return;
+    const openedPromise = targetRole === 'homepage'
+      ? api.getHomepage().then(opened => ({ ...opened, exists: false }))
+      : api.getOverride(targetRole, scopeTypeKey || null, scopeEntryId);
+    const entryPromise = scopedPage && scopeEntryId !== null
+      ? Promise.all([getContentEntry('page', scopeEntryId), api.getEntryRoute('page', scopeEntryId)])
+          .then(([entry, entryRoute]) => ({
+            status: entry.publication_status,
+            url: entryRoute.custom_path?.startsWith('/') && !entryRoute.custom_path.startsWith('//')
+              ? entryRoute.custom_path
+              : `/content/page/${encodeURIComponent(entry.slug)}`,
+          }))
+      : Promise.resolve(null);
+    Promise.all([openedPromise, api.getRegistry(), entryPromise])
+      .then(([opened, descriptors, details]) => {
+        if (!alive || requestId !== loadSeq.current || ownerRef.current !== user.id) return;
         draftRef.current = opened.document;
         setDraft(opened.document);
         setVersion(opened.version);
         versionRef.current = opened.version;
-        setSource(opened.source);
+        setSource('source' in opened && opened.source ? opened.source : opened.exists ? 'layout' : 'empty');
+        setOverrideExists(opened.exists);
+        setPageDetails(details);
         setRegistry(descriptors);
         registryRef.current = descriptors;
         revisionRef.current = 0;
@@ -174,17 +215,18 @@ export function BuilderWorkspace({
         setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
         loadedRef.current = true;
         setConflict(false);
-        message('Đã mở homepage (' + opened.source + ', ETag "v' + opened.version + '").');
+        message('Đã mở ' + (scopedPage ? `Page #${scopeEntryId}` : targetRole)
+          + ' (ETag "v' + opened.version + '").');
       })
       .catch(cause => {
-        if (alive) {
-          message('Không thể tải homepage.', true);
-          onApiError(cause, 'Không thể mở homepage.');
+        if (alive && requestId === loadSeq.current) {
+          message('Không thể tải Builder cho target này.', true);
+          onApiError(cause, 'Không thể mở Builder.');
         }
       })
-      .finally(() => { if (alive) setLoading(false); });
+      .finally(() => { if (alive && requestId === loadSeq.current) setLoading(false); });
     return () => { alive = false; };
-  }, [user?.id, csrfToken, resetToken]);
+  }, [active, user?.id, user?.role, csrfToken, resetToken, route.rawHash]);
 
   // A theme change may make legacy providers resolvable/unresolvable.
   useEffect(() => {
@@ -274,7 +316,7 @@ export function BuilderWorkspace({
   };
 
   const preview = async () => {
-    if (!csrfToken || !user || !loadedRef.current) return;
+    if (!active || !csrfToken || !user || !loadedRef.current) return;
     const current = ++previewSeq.current;
     previewAbort.current?.abort();
     const controller = new AbortController();
@@ -289,7 +331,7 @@ export function BuilderWorkspace({
 
         ? await api.previewHomepage(snapshot, csrfToken, controller.signal)
 
-        : await api.previewOverride(targetRole, snapshot, csrfToken, scopeTypeKey.trim() || null, null, controller.signal);
+        : await api.previewOverride(targetRole, snapshot, csrfToken, scopeTypeKey || null, scopeEntryId, controller.signal);
       if (current !== previewSeq.current || revisionRef.current !== snapshotRevision
           || ownerRef.current !== accountId) return;
       const prepared = await preparePreviewMarkup(result.html, controller.signal);
@@ -304,14 +346,18 @@ export function BuilderWorkspace({
     } catch (cause) {
       if (controller.signal.aborted || current !== previewSeq.current) return;
       message('Preview thất bại.', true);
-      onApiError(cause, 'Không thể xem trước homepage.');
+      onApiError(cause, 'Không thể xem trước Builder.');
     } finally {
       if (current === previewSeq.current) setPreviewing(false);
     }
   };
 
   const save = async () => {
-    if (!csrfToken || !user || !loadedRef.current || savingRef.current || versionRef.current === null) return;
+    if (!active || !csrfToken || !user || !loadedRef.current || savingRef.current || versionRef.current === null) return;
+    if (scopedPage && !overrideExists && !window.confirm(
+      'Thiết kế mới sẽ thay phần thân Page đang hiển thị sau khi Lưu. ' +
+      'Nội dung văn bản hiện tại vẫn được giữ để khôi phục khi Reset. Tiếp tục?'
+    )) return;
     savingRef.current = true;
     setSaving(true);
     setConflict(false);
@@ -333,7 +379,7 @@ export function BuilderWorkspace({
           setDiagnostics(result.diagnostics);
         }
       } else {
-        const result = await api.saveOverride(targetRole, snapshot, snapshotVersion, csrfToken, scopeTypeKey.trim() || null, null);
+        const result = await api.saveOverride(targetRole, snapshot, snapshotVersion, csrfToken, scopeTypeKey || null, scopeEntryId);
         if (ownerRef.current !== accountId) return;
         versionRef.current = result.version;
         setVersion(result.version);
@@ -346,16 +392,18 @@ export function BuilderWorkspace({
         }
       }
       message(snapshotRevision === revisionRef.current
-        ? 'Đã lưu và cập nhật website công khai.'
+        ? scopedPage && pageDetails?.status === 'draft'
+          ? 'Đã lưu bố cục nháp. Page vẫn chưa xuất bản.'
+          : 'Đã lưu và cập nhật website công khai.'
         : 'Snapshot đã lưu. Các chỉnh sửa mới hơn vẫn chưa được lưu.');
     } catch (cause) {
       if (ownerRef.current !== accountId) return;
       if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        message('Homepage đã được lưu từ phiên khác (412). Nháp của bạn vẫn còn.', true);
+        message('Bố cục đã được lưu từ phiên khác (412). Nháp của bạn vẫn còn.', true);
       } else {
         message('Lưu thất bại; nháp vẫn được giữ.', true);
-        onApiError(cause, 'Không thể lưu homepage.');
+        onApiError(cause, 'Không thể lưu Builder.');
       }
     } finally {
       savingRef.current = false;
@@ -363,15 +411,17 @@ export function BuilderWorkspace({
     }
   };
 
-  const loadRoleTarget = async (nextRole: 'homepage' | OverrideRole, nextTypeKey: string, confirmDiscard = true) => {
-    if (!user || !csrfToken) return;
-    if (confirmDiscard && revision !== savedRevision && !window.confirm('B? to?n b? b?n nh?p hi?n t?i v? t?i phi?n b?n tr?n server?')) return;
+  const loadRoleTarget = async (confirmDiscard = true) => {
+    if (!active || !user || !csrfToken) return;
+    if (confirmDiscard && revisionRef.current !== savedRevision
+        && !window.confirm('Bỏ nháp chưa lưu và tải bản trên server?')) return;
     const accountId = user.id;
+    const requestId = ++loadSeq.current;
     setLoading(true);
     try {
-      if (nextRole === 'homepage') {
+      if (targetRole === 'homepage') {
         const opened = await api.getHomepage();
-        if (ownerRef.current !== accountId) return;
+        if (ownerRef.current !== accountId || requestId !== loadSeq.current) return;
         invalidatePreview();
         draftRef.current = opened.document;
         setDraft(opened.document);
@@ -379,15 +429,16 @@ export function BuilderWorkspace({
         setVersion(opened.version);
         setOverrideExists(false);
         setSource(opened.source);
+        setPageDetails(null);
         revisionRef.current = 0;
         setRevision(0);
         setSavedRevision(0);
         setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
         setConflict(false);
-        message('?? t?i homepage (ETag "v' + opened.version + '").');
+        message('Đã tải lại homepage (ETag "v' + opened.version + '").');
       } else {
-        const opened = await api.getOverride(nextRole, nextTypeKey.trim() || null, null);
-        if (ownerRef.current !== accountId) return;
+        const opened = await api.getOverride(targetRole, scopeTypeKey || null, scopeEntryId);
+        if (ownerRef.current !== accountId || requestId !== loadSeq.current) return;
         invalidatePreview();
         draftRef.current = opened.document;
         setDraft(opened.document);
@@ -400,25 +451,30 @@ export function BuilderWorkspace({
         setSavedRevision(0);
         setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
         setConflict(false);
-        message('?? t?i override ' + nextRole + (opened.exists ? ' (ETag "v' + opened.version + '")' : ' (ch?a t?o)') + '.');
+        message('Đã tải lại ' + targetRole + (opened.exists ? ' (ETag "v' + opened.version + '")' : ' (chưa tạo)') + '.');
       }
     } catch (cause) {
-      onApiError(cause, 'Kh?ng th? t?i l?i template.');
+      if (requestId === loadSeq.current && ownerRef.current === accountId) {
+        message('Không thể tải lại Builder.', true);
+        onApiError(cause, 'Không thể tải lại template.');
+      }
     } finally {
-      setLoading(false);
+      if (requestId === loadSeq.current) setLoading(false);
     }
   };
 
-  const reload = () => loadRoleTarget(targetRole, scopeTypeKey, true);
+  const reload = () => loadRoleTarget(true);
 
   const resetRoleOverride = async () => {
-    if (targetRole === 'homepage' || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
-    if (!window.confirm('X?c nh?n reset override "' + targetRole + '" v? m?c ??nh c?a theme?')) return;
+    if (!active || targetRole === 'homepage' || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
+    if (revisionRef.current !== savedRevision
+        && !window.confirm('Reset sẽ bỏ nháp chưa lưu. Tiếp tục?')) return;
+    if (!window.confirm('Reset bố cục ' + targetRole + ' để sử dụng nội dung dự phòng?')) return;
     setSaving(true);
     try {
-      await api.resetOverride(targetRole, versionRef.current, csrfToken, scopeTypeKey.trim() || null, null);
-      await loadRoleTarget(targetRole, scopeTypeKey, false);
-      message('?? reset override "' + targetRole + '" v? m?c ??nh.');
+      await api.resetOverride(targetRole, versionRef.current, csrfToken, scopeTypeKey || null, scopeEntryId);
+      await loadRoleTarget(false);
+      message('Đã reset bố cục ' + targetRole + '.');
     } catch (cause) {
       onApiError(cause, 'Kh?ng th? reset override.');
     } finally {
@@ -427,6 +483,7 @@ export function BuilderWorkspace({
   };
 
   const dirty = revision !== savedRevision;
+  if (!user || !csrfToken || !active) return null;
   return (
     <div className="builder-workspace min-w-0 space-y-4" data-testid="builder-workspace">
       {/* AdminShell provides an existing builder slot; the tree owns the complete workspace. */}
@@ -434,7 +491,7 @@ export function BuilderWorkspace({
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
         <div>
           <h2 className="!m-0 text-lg font-bold text-slate-900">
-            {targetRole === 'homepage' ? 'Homepage Builder' : 'Override: ' + targetRole}
+            {scopedPage ? `Page Builder #${scopeEntryId}` : targetRole === 'homepage' ? 'Homepage Builder' : 'Override: ' + targetRole}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
             Nguồn: {source} · ETag: {version === null ? 'Chưa tải' : '"v' + version + '"'}
@@ -445,20 +502,17 @@ export function BuilderWorkspace({
           <label htmlFor="builder-role-target" className="text-sm font-medium text-slate-600">Role</label>
 
           <select id="builder-role-target" aria-label="Role Builder" className="text-sm"
-
+            disabled={user.role !== 'admin' || scopedPage}
             value={targetRole} onChange={event => {
-
               const next = event.target.value as 'homepage' | OverrideRole;
-
-              setTargetRole(next);
-
-              void loadRoleTarget(next, scopeTypeKey, true);
-
+              if (next === 'page') return;
+              onNavigateHash(next === 'homepage' ? '#/builder'
+                : `#/builder?template=${next}${scopeTypeKey && (next === 'archive' || next === 'single') ? `&type=${encodeURIComponent(scopeTypeKey)}` : ''}`);
             }}>
 
             <option value="homepage">homepage</option>
 
-            <option value="page">page</option>
+            <option value="page" disabled={!scopedPage}>page</option>
 
             <option value="header">header</option>
 
@@ -472,15 +526,18 @@ export function BuilderWorkspace({
 
           </select>
 
-          {(targetRole === 'page' || targetRole === 'archive' || targetRole === 'single') && (
+          {scopedPage && <span className="text-xs font-medium text-slate-600">page · entry #{scopeEntryId}</span>}
+          {(targetRole === 'archive' || targetRole === 'single') && !scopedPage && (
 
             <input type="text" className="w-28 text-sm" placeholder="type_key"
 
-              aria-label="Scope type_key" value={scopeTypeKey}
-
-              onChange={event => setScopeTypeKey(event.target.value)}
-
-              onBlur={() => void loadRoleTarget(targetRole, scopeTypeKey, false)} />
+              aria-label="Scope type_key" value={scopeTypeInput}
+              onChange={event => setScopeTypeInput(event.target.value)}
+              onBlur={() => {
+                if (scopeTypeInput === scopeTypeKey) return;
+                const encoded = scopeTypeInput.trim() ? `&type=${encodeURIComponent(scopeTypeInput.trim())}` : '';
+                onNavigateHash(`#/builder?template=${targetRole}${encoded}`);
+              }} />
 
           )}
 
@@ -490,7 +547,7 @@ export function BuilderWorkspace({
             {(['desktop', 'tablet', 'mobile'] as BuilderViewport[]).map(key =>
               <option key={key} value={key}>{VIEWPORT_LABELS[key]} · {VIEWPORT_WIDTHS[key]}px</option>)}
           </select>
-          <button type="button" className="btn-secondary" disabled={loading || !user} onClick={() => void reload()}>
+          <button type="button" className="btn-secondary" disabled={loading || saving || !user} onClick={() => void reload()}>
             Tải bản server
           </button>
           <button id="preview" type="button" className="btn-secondary"
@@ -502,14 +559,23 @@ export function BuilderWorkspace({
             <button type="button" className="btn-secondary" disabled={!user || loading || saving}
               onClick={() => void resetRoleOverride()}>Reset mặc định</button>
           )}
-          <a href="/" target="_blank" rel="noopener noreferrer" className="rounded border border-slate-200 px-3 py-2 text-sm text-sky-700">
-            Trang công khai
-          </a>
+          {scopedPage && <button type="button" className="btn-secondary"
+            onClick={() => onNavigateHash(`#/pages/${scopeEntryId}/edit`)}>Trở lại Page</button>}
+          {(scopedPage ? pageDetails?.status === 'published' : true) && (
+            <a href={scopedPage ? pageDetails?.url : '/'} target="_blank" rel="noopener noreferrer"
+              className="rounded border border-slate-200 px-3 py-2 text-sm text-sky-700">
+              {scopedPage ? 'Xem Page công khai' : 'Trang công khai'}
+            </a>
+          )}
         </div>
       </header>
       <div role={error ? 'alert' : 'status'} className={'rounded-lg border p-3 text-sm ' +
         (error ? 'border-red-200 bg-red-50 text-red-800' : 'border-slate-200 bg-white text-slate-600')}>
-        {loading ? 'Đang tải homepage… ' : ''}{notice}
+        {loading ? 'Đang tải Builder… ' : ''}{notice}
+        {scopedPage && pageDetails?.status === 'draft' &&
+          <p className="mt-1">Page đang là bản nháp. Lưu bố cục sẽ không xuất bản Page.</p>}
+        {scopedPage && !overrideExists && loadedRef.current &&
+          <p className="mt-1">Chưa có thiết kế Page riêng. Nội dung văn bản hiện tại vẫn được dùng cho đến khi bạn lưu thiết kế mới. Lưu thiết kế sẽ thay phần thân hiển thị, và Reset sẽ khôi phục phần thân văn bản.</p>}
         {conflict && <button type="button" className="btn-secondary ml-3" onClick={() => void reload()}>
           Xem bản server (cần xác nhận bỏ nháp)
         </button>}
@@ -543,7 +609,7 @@ export function BuilderWorkspace({
           </div>
           {mode === 'preview' && (
             <div className="overflow-x-auto" data-testid="builder-preview-viewport">
-              <iframe id="canvas" title="Preview homepage (sandbox opaque)" sandbox=""
+              <iframe id="canvas" title="Preview Builder (sandbox opaque)" sandbox=""
                 referrerPolicy="no-referrer" className="!h-[650px] !border-0"
                 style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: 'none', display: 'block' }}
                 srcDoc={previewHtml} />

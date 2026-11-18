@@ -129,12 +129,22 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
   }
   if (first === 'builder') {
     const entryParam = params.get('entry');
-    const entryId = entryParam && /^\d+$/.test(entryParam) ? Number(entryParam) : undefined;
+    const entryId = entryParam && /^[1-9]\d*$/.test(entryParam) && Number.isSafeInteger(Number(entryParam))
+      ? Number(entryParam) : undefined;
+    const templateRole = params.get('template') ?? undefined;
+    const typeKey = params.get('type') ?? undefined;
+    const scopedPage = templateRole === 'page' && typeKey === 'page' && entryId !== undefined;
+    const noScope = !entryParam && !templateRole && !typeKey && !queryPart;
+    const validGlobal = !entryParam && templateRole !== 'page' &&
+      (templateRole === 'homepage' || templateRole === 'header' || templateRole === 'footer'
+        || templateRole === 'taxonomy_archive' || templateRole === 'archive'
+        || templateRole === 'single') && (!typeKey || /^[a-z][a-z0-9_]{0,63}$/.test(typeKey));
+    const validAdminScopedSingle = templateRole === 'single' && !!typeKey && entryId !== undefined;
     return {
       view: 'builder',
-      sub: 'builder',
-      templateRole: params.get('template') ?? undefined,
-      typeKey: params.get('type') ?? undefined,
+      sub: scopedPage || noScope || validGlobal || validAdminScopedSingle ? 'builder' : 'invalid',
+      templateRole,
+      typeKey,
       entryId,
       rawHash: hash,
     };
@@ -170,13 +180,15 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 }
 
 export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
+  if (route.view === 'builder' && route.sub !== 'builder') return false;
   if (role === 'admin') return true;
   if (route.view === 'taxonomy' && route.taxonomyMode !== 'list') return false;
   if (route.view === 'themes' || route.view === 'plugins' || route.view === 'users' || route.view === 'tools' || route.view === 'settings') {
     return false;
   }
-  if (route.view === 'builder' && !route.entryId) {
-    return false;
+  if (route.view === 'builder') {
+    return route.templateRole === 'page' && route.typeKey === 'page'
+      && Number.isSafeInteger(route.entryId) && (route.entryId ?? 0) > 0;
   }
   return true;
 }
