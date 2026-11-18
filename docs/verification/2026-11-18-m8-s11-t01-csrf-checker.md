@@ -1,8 +1,8 @@
 # M8-S11-T01 — CSRF mutation registration checker (Windows)
 
 **Task:** [#387](https://github.com/thientran2359/opendash-cms/issues/387) ·
-**agent:** Forge · **coordinator:** Aster · **status:** implementation
-PASS against amended contract; exact-head review and G5 pending.
+**agent:** Forge · **coordinator:** Aster · **status:** P2 postmerge
+constructor-alias follow-up; G5 acceptance pending.
 
 ## Immutable source and scope
 
@@ -114,3 +114,69 @@ negative fixtures reject missing guards/calls and bypasses, and confirmed
 only the two task-owned files changed. The exact reviewed commit/head and
 CI results are recorded on PR #389. This is bounded static policy evidence;
 it does not imply runtime CSRF audit, macOS Beta or common RC verification.
+
+## Postmerge G5 review: P2 routing-constructor aliases (follow-up)
+
+Source of finding: Aster's [postmerge #389 review](https://github.com/thientran2359/opendash-cms/pull/389)
+and [Issue #387 disposition](https://github.com/thientran2359/opendash-cms/issues/387#issuecomment-6984699580).
+The review accepted the previous public-Origin/delegated checks, but G5
+remained open because a constructor alias caused a false-green result.
+
+- **Bug baseline / actual main:** `1b276b49d320d757cdf1ae0f140824a650b47226`
+  (merge commit of #389). On a minimal temporary full-checker repository,
+  `use axum::routing::post as submit;` followed by
+  `submit(crate::routes::page::unguarded)` returned **exit 0 / PASS**,
+  with `registrations=0` despite a declared unguarded async handler.
+  Adding this expected-failure fixture made the original self-test
+  **FAIL (exit 1, AssertionError: expected exit 1, got exit 0)**.
+- **Follow-up branch:** `task/forge-m8-s11-t01-alias-followup`,
+  created from this exact `origin/main` in a new clean Windows worktree.
+  The prior Forge worktree/branch and merged PR #389 remain unchanged.
+- **Contract:** amended G3 at `a57482f1de422740b8df73695e2ebdc2b728f6c5`;
+  Aster approved this correction within the original #387 scope. No new
+  exceptions to the direct, public-Origin or delegated policies were added.
+- **Files owned:** only `cms/scripts/check-standards.py` and this receipt.
+
+The checker now expands top-level `axum::routing` imports in both single
+and grouped/nested `use` trees, recording aliases for all four mutation
+constructors. It includes their actual call sites in the sorted mutation
+inventory, checks the resolved canonical handler under the unchanged
+CSRF policies and deduplicates **unique handlers only**, not registration
+sites. Unsupported/wildcard/raw-identifier constructor imports and
+ambiguous or shadowing aliases return **nonzero** with actionable
+`app.rs:<line>` messages. Aliased constructor names are not inferred
+without an import; unrelated object methods are not counted.
+
+Self-test coverage now includes **35 mutation cases** (previous 21 plus
+14 constructor-alias cases), **16 public-Origin** and **10 delegated-CSRF**
+negative cases, both approved policy-positive fixtures and the original
+architecture regressions. The alias fixtures demonstrate:
+
+- Unguarded/missing target through a standalone/grouped/nested alias FAIL.
+- Guarded aliases PASS for post/put/patch/delete, both bare and aliased
+  handler imports. Mixed alias and regular routes preserve registration
+  counts even if they resolve to the same canonical function.
+- Ambiguous aliases, shadowed standard verb names and unsupported
+  constructor import forms FAIL; unrelated strings and methods do not
+  introduce false registration sites.
+
+**Follow-up Windows validation** — Python 3.13.4 on Windows 11.
+Tested source: `origin/main@1b276b49d320d757cdf1ae0f140824a650b47226`
+plus the two task-owned follow-up files. No Rust build/runtime or
+other OS product validation was performed.
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `python cms/scripts/check-standards.py` | 0 | PASS, production inventory 82 registration sites / 82 resolved: 78 direct, 1 delegated, 1 public Origin, 2 bootstrap |
+| `python cms/scripts/check-standards.py --self-test` | 0 | PASS, 35 mutation + 16 public-Origin + 10 delegated-CSRF fixtures and legacy regressions |
+| `python cms/scripts/check-plans.py` | 0 | PASS |
+| `python cms/scripts/check-plans.py --self-test` | 0 | PASS, 12 fixtures |
+| `python .agents/scripts/check-agent-artifacts.py` | 0 | PASS |
+| `python -m py_compile cms/scripts/check-standards.py` | 0 | PASS |
+| `git diff --check` | 0 | PASS |
+
+**Scope limit:** bounded Python source scanning is not Rust name resolution,
+does not execute requests and is not a general proof of CSRF security. New
+macro-generated or exotic function-pointer routing syntax needs separate
+reviewed parser support. Follow-up commit, PR head review, exact-head CI
+and merge-head evidence are recorded on the follow-up PR/Issue.

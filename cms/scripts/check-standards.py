@@ -43,6 +43,7 @@ def production_source(source):
 IDENT = r'[A-Za-z_][A-Za-z_0-9]*'
 PATH = re.compile(rf'{IDENT}(?:::{IDENT})*\Z')
 MUTATION = re.compile(r'\b(?:post|put|patch|delete)\s*(?:::\s*<[^()\n]*>)?\s*\(')
+MUTATION_VERBS = {'post', 'put', 'patch', 'delete'}
 ITEM = re.compile(
     rf'\bmod\s+({IDENT})\s*(?=[;{{])|'
     rf'\b(?:pub(?:\s*\([^)]*\))?\s+)?(?:async\s+)?fn\s+({IDENT})\s*\('
@@ -85,24 +86,30 @@ def split_use_group(group):
 
 
 def app_imports(app):
-    """Expand the use trees that introduce a route handler or module in app.rs."""
+    """Expand top-level handler imports and routing-constructor aliases."""
     imports = {}
+    constructors = {}
+    errors = []
 
-    def expand(tree, prefix=''):
+    def expand(tree, prefix='', location='app.rs:1'):
         tree = tree.strip()
         if not tree:
             return
         brace = tree.find('{')
         if brace >= 0:
             if not tree.endswith('}'):
+                if prefix.startswith('axum::routing') or tree.startswith('axum::routing'):
+                    errors.append(f'{location}: unsupported routing constructor import: {tree}')
                 return
             base = tree[:brace].strip().removesuffix('::')
             path = '::'.join(part for part in (prefix, base) if part)
             for part in split_use_group(tree[brace + 1:-1]):
-                expand(part, path)
+                expand(part, path, location)
             return
         match = re.fullmatch(rf'({IDENT}(?:::{IDENT})*)(?:\s+as\s+({IDENT}))?', tree)
         if not match:
+            if prefix == 'axum::routing' or tree.startswith('axum::routing::'):
+                errors.append(f'{location}: unsupported routing constructor import: {tree}')
             return
         fragment, alias = match.groups()
         if fragment == 'self':
@@ -113,18 +120,30 @@ def app_imports(app):
             canonical = '::'.join(part for part in (prefix, fragment) if part)
         if canonical == 'crate::routes' or canonical.startswith('crate::routes::'):
             imports.setdefault(alias or fragment.split('::')[-1], set()).add(canonical)
+        if canonical.startswith('axum::routing::'):
+            verb = canonical.removeprefix('axum::routing::')
+            if verb in MUTATION_VERBS:
+                binding = alias or fragment.split('::')[-1]
+                if binding in MUTATION_VERBS and binding != verb:
+                    errors.append(
+                        f'{location}: mutation constructor alias {binding} shadows '
+                        f'the standard {binding} registration: {canonical}'
+                    )
+                constructors.setdefault(binding, set()).add(verb)
 
     # Top-level imports only; local use declarations inside function bodies do
     # not introduce bindings at the router's scope.
-    depth = 0
     for match in re.finditer(r'\buse\s+', app):
         depth = app[:match.start()].count('{') - app[:match.start()].count('}')
         if depth != 0:
             continue
         end = app.find(';', match.end())
+        location = f'app.rs:{app.count(chr(10), 0, match.start()) + 1}'
         if end >= 0:
-            expand(app[match.end():end])
-    return imports
+            expand(app[match.end():end], location=location)
+        elif 'axum::routing' in app[match.end():]:
+            errors.append(f'{location}: unterminated routing constructor import')
+    return imports, constructors, errors
 
 
 def route_functions(routes):
@@ -320,11 +339,24 @@ def delegated_csrf_guarded(functions, handler):
     return None
 
 
-def mutation_handlers(app, imports, functions):
+def mutation_handlers(app, imports, functions, constructors=None):
     errors = []
+    constructors = constructors or {}
     registrations = checked = exemptions = found = public = delegated = 0
     seen = set()
-    for match in MUTATION.finditer(app):
+    # Count ordinary method/constructor invocations and additional calls bound
+    # by top-level use trees to axum::routing::{post,put,patch,delete}. A name
+    # such as "submit" is not a mutation constructor without that import.
+    sites = {match.start(): match for match in MUTATION.finditer(app)}
+    for alias in constructors:
+        if alias in MUTATION_VERBS:
+            continue  # Already matched, including chained .post/.put/etc.
+        pattern = re.compile(
+            rf'(?<![\w.:]){re.escape(alias)}\s*(?:::\s*<[^()\n]*>)?\s*\('
+        )
+        for match in pattern.finditer(app):
+            sites.setdefault(match.start(), match)
+    for _, match in sorted(sites.items()):
         registrations += 1
         start = match.end() - 1
         end = start + 1
@@ -337,6 +369,13 @@ def mutation_handlers(app, imports, functions):
             end += 1
         raw = app[start + 1:end - 1].strip() if depth == 0 else ''
         location = f'app.rs:{app.count(chr(10), 0, match.start()) + 1}'
+        called = re.match(IDENT, match[0])[0]
+        if called in constructors and len(constructors[called]) != 1:
+            errors.append(
+                f'{location}: ambiguous mutation constructor alias: {called} '
+                f'(verbs={",".join(sorted(constructors[called]))})'
+            )
+            continue
         if '<' in match[0] or not PATH.fullmatch(raw):
             errors.append(f'{location}: unsupported mutation registration: {match[0].strip()}({raw})')
             continue
@@ -422,7 +461,9 @@ def check(root):
             if re.search(r'\bfetch\s*\(', mask_literals(path.read_text(encoding='utf-8'))):
                 errors.append(f'HTTP must use api/client.ts: {path.relative_to(root)}')
     app = production_source((server / 'app.rs').read_text(encoding='utf-8'))
-    errors.extend(mutation_handlers(app, app_imports(app), route_functions(server / 'routes')))
+    imports, constructors, import_errors = app_imports(app)
+    errors.extend(import_errors)
+    errors.extend(mutation_handlers(app, imports, route_functions(server / 'routes'), constructors))
     return errors
 
 
@@ -504,6 +545,51 @@ def self_test():
              0, 'bootstrap_exemptions=2'),
             ('post(crate::routes::other::auth_login)', 1,
              'mutation requires CSRF guard: crate::routes::other::auth_login'),
+            # Aster P2 review on #389: aliased constructors used to disappear
+            # from inventory, allowing an unguarded route to pass the full CLI.
+            ('use axum::routing::post as submit;\n'
+             'Router::new().route("/write", submit(crate::routes::page::unguarded))',
+             1, 'mutation requires CSRF guard: crate::routes::page::unguarded'),
+            ('use axum::routing::{post as submit, put as update};\n'
+             'Router::new().route("/write", submit(crate::routes::page::missing))',
+             1, 'mutation handler definition missing/ambiguous: crate::routes::page::missing'),
+            ('use axum::{routing::{post as submit, patch as edit}};\n'
+             'submit(crate::routes::page::unguarded)',
+             1, 'mutation requires CSRF guard: crate::routes::page::unguarded'),
+            ('use axum::routing::post as submit;\n'
+             'Router::new().route("/write", submit(crate::routes::page::save))',
+             0, 'registrations=1 resolved_handlers=1 direct_guarded=1'),
+            ('use axum::routing::{post as submit, put as update};\n'
+             'submit(crate::routes::page::save).put(crate::routes::page::save);\n'
+             'update(crate::routes::page::save)',
+             0, 'registrations=3 resolved_handlers=1 direct_guarded=1'),
+            ('use axum::routing::{post as submit, put as update, '
+             'patch as edit, delete as destroy};\n'
+             'submit(crate::routes::page::save); update(crate::routes::page::save);\n'
+             'edit(crate::routes::page::save); destroy(crate::routes::page::save)',
+             0, 'registrations=4 resolved_handlers=1 direct_guarded=1'),
+            ('use axum::routing::{post as submit, delete as destroy};\n'
+             'destroy(crate::routes::other::save)',
+             1, 'mutation requires CSRF guard: crate::routes::other::save'),
+            ('use crate::routes::page::save as write;\n'
+             'use axum::routing::post as submit;\nsubmit(write)',
+             0, 'registrations=1 resolved_handlers=1 direct_guarded=1'),
+            ('use axum::routing::{post as submit, put as submit};\n'
+             'submit(crate::routes::page::save)',
+             1, 'ambiguous mutation constructor alias: submit'),
+            ('use axum::routing::put as post;\npost(crate::routes::page::save)',
+             1, 'mutation constructor alias post shadows the standard post'),
+            ('use axum::routing::post as r#submit;\n'
+             'r#submit(crate::routes::page::unguarded)',
+             1, 'unsupported routing constructor import'),
+            ('use axum::routing::*;\npost(crate::routes::page::save)',
+             1, 'unsupported routing constructor import'),
+            ('use axum::routing::post as submit;\n'
+             'let text = "submit(crate::routes::page::unguarded)";',
+             0, 'registrations=0 resolved_handlers=0'),
+            ('use axum::routing::post as submit;\n'
+             'some_service.submit(crate::routes::page::unguarded)',
+             0, 'registrations=0 resolved_handlers=0'),
         ]
         for app_source, expected, evidence in cases:
             app_path.write_text(app_source, encoding='utf-8')
