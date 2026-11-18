@@ -22,6 +22,8 @@ pub struct EntryTableFilter {
     pub status: String,
     pub category_id: Option<i64>,
     pub tag_id: Option<i64>,
+    pub taxonomy_key: Option<String>,
+    pub term_id: Option<i64>,
     pub include_descendants: bool,
     pub updated_month: Option<String>,
     pub sort: String,
@@ -37,6 +39,8 @@ impl Default for EntryTableFilter {
             status: "all".into(),
             category_id: None,
             tag_id: None,
+            taxonomy_key: None,
+            term_id: None,
             include_descendants: false,
             updated_month: None,
             sort: "updated_at".into(),
@@ -88,6 +92,12 @@ const CATEGORY_SCOPE: &str = "
    SELECT c.id, category_scope.depth + 1 FROM taxonomy_terms c
    JOIN category_scope ON c.parent_id = category_scope.id
    WHERE category_scope.depth < 8 AND ? = 1
+ ), generic_scope(id, depth) AS (
+   SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = ?
+   UNION ALL
+   SELECT c.id, generic_scope.depth + 1 FROM taxonomy_terms c
+   JOIN generic_scope ON c.parent_id = generic_scope.id
+   WHERE generic_scope.depth < 8 AND ? = 1
  )";
 
 const SCOPE: &str = "
@@ -102,12 +112,19 @@ const SCOPE: &str = "
    ))
    AND (? IS NULL OR EXISTS (
      SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id AND et.term_id = ?
+   ))
+   AND (? IS NULL OR EXISTS (
+     SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id
+       AND et.term_id IN (SELECT id FROM generic_scope)
    ))";
 
 macro_rules! bind_scope {
     ($query:expr, $key:expr, $filter:expr) => {
         $query
             .bind($filter.category_id)
+            .bind(i64::from($filter.include_descendants))
+            .bind($filter.term_id)
+            .bind(&$filter.taxonomy_key)
             .bind(i64::from($filter.include_descendants))
             .bind($key)
             .bind(&$filter.q)
@@ -118,28 +135,22 @@ macro_rules! bind_scope {
             .bind($filter.category_id)
             .bind($filter.tag_id)
             .bind($filter.tag_id)
+            .bind($filter.term_id)
     };
 }
 
 async fn validate_terms(
     tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
     filter: &EntryTableFilter,
 ) -> ApiResult<()> {
-    for (id, kind) in [(filter.category_id, "category"), (filter.tag_id, "tag")] {
-        if let Some(id) = id {
-            let actual: Option<String> =
-                sqlx::query_scalar("SELECT kind FROM taxonomy_terms WHERE id = ?")
-                    .bind(id)
-                    .fetch_optional(&mut **tx)
-                    .await?;
-            if actual.as_deref() != Some(kind) {
-                return Err(ApiError::bad_request(
-                    "Category/Tag không tồn tại hoặc sai loại.",
-                ));
-            }
-        }
-    }
-    Ok(())
+    entries::validate_filter_in_tx(tx, type_key, &entries::EntryFilters {
+        category_id: filter.category_id,
+        tag_id: filter.tag_id,
+        taxonomy_key: filter.taxonomy_key.clone(),
+        term_id: filter.term_id,
+        include_descendants: filter.include_descendants,
+    }, false).await
 }
 
 /// A single SQLite read transaction guarantees counts, ACL and rows are from
@@ -161,7 +172,7 @@ pub async fn query(
     if effective.base.status != ProviderStatus::Active {
         return Err(ApiError::not_found("Loại nội dung không khả dụng."));
     }
-    validate_terms(&mut tx, filter).await?;
+    validate_terms(&mut tx, type_key, filter).await?;
 
     let count_sql = format!(
         "{CATEGORY_SCOPE} SELECT COUNT(*),

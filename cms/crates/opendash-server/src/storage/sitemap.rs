@@ -73,7 +73,12 @@ WITH indexable AS (
            END AS path,
            NULL AS lastmod
       FROM taxonomy_terms tm
-     WHERE EXISTS (
+      JOIN taxonomy_definitions td ON td.key = tm.kind
+     WHERE tm.kind IN ('category', 'tag')
+       AND td.public = 1
+       AND td.provider_status = 'active'
+       AND td.declaration_state = 'declared'
+       AND EXISTS (
          SELECT 1
            FROM entry_terms et
            JOIN content_entries e ON e.id = et.entry_id
@@ -83,6 +88,27 @@ WITH indexable AS (
             AND ct.provider_status = 'active'
             AND e.content_type_key != 'section'
             AND COALESCE(json_extract(ct.definition_json, '$.settings.public'), 1) = 1
+            AND (
+              EXISTS (
+                SELECT 1 FROM content_type_taxonomy_overrides ov
+                JOIN json_each(ov.taxonomies_json) selected
+                  ON selected.value = tm.kind
+               WHERE ov.content_type_key = e.content_type_key
+              )
+              OR (
+                NOT EXISTS (
+                  SELECT 1 FROM content_type_taxonomy_overrides ov
+                   WHERE ov.content_type_key = e.content_type_key
+                )
+                AND EXISTS (
+                  SELECT 1 FROM content_type_taxonomy_eligibility eligible
+                   WHERE eligible.content_type_key = e.content_type_key
+                     AND eligible.taxonomy_kind = tm.kind
+                     AND eligible.provider_status = 'active'
+                     AND eligible.declaration_state = 'declared'
+                )
+              )
+            )
      )
 )
 "#;

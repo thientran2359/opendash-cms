@@ -1262,6 +1262,74 @@ pub struct TaxonomyEligibilityDeclaration {
     pub taxonomies: Vec<String>,
 }
 
+/// Canonical site taxonomy descriptor (C2). Ownership is the same registry
+/// primitive used by content types, not a second competing ownership system.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyDefinition {
+    pub key: String,
+    pub label: String,
+    pub hierarchical: bool,
+    pub public: bool,
+    pub version: i64,
+    pub owner: ResourceOwner,
+    pub provider_status: ProviderStatus,
+    pub declaration_state: DeclarationState,
+}
+
+fn taxonomy_public_default() -> bool { true }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyDefinitionInput {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub hierarchical: bool,
+    #[serde(default = "taxonomy_public_default")]
+    pub public: bool,
+}
+
+impl TaxonomyDefinitionInput {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !valid_content_type_key(&self.key) {
+            return Err("Khóa taxonomy không hợp lệ.");
+        }
+        if matches!(self.key.as_str(), "category" | "tag" | "post" | "page" | "section")
+            || RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
+        {
+            return Err("Khóa taxonomy thuộc namespace Core được bảo vệ.");
+        }
+        if !valid_label(&self.label) {
+            return Err("Tên taxonomy không hợp lệ (tối đa 100 ký tự).");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyDefinitionPatch {
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub hierarchical: Option<bool>,
+    #[serde(default)]
+    pub public: Option<bool>,
+}
+
+impl TaxonomyDefinitionPatch {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.label.is_none() && self.hierarchical.is_none() && self.public.is_none() {
+            return Err("Cần ít nhất một thuộc tính taxonomy để cập nhật.");
+        }
+        if self.label.as_ref().is_some_and(|label| !valid_label(label)) {
+            return Err("Tên taxonomy không hợp lệ (tối đa 100 ký tự).");
+        }
+        Ok(())
+    }
+}
+
 pub fn valid_label(value: &str) -> bool {
     !value.trim().is_empty() && value.chars().count() <= 100 && !value.chars().any(char::is_control)
 }

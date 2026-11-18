@@ -69,13 +69,15 @@ pub async fn archive(
         parse_query(raw.as_deref(), QueryScope::ContentArchive).map_err(ApiError::bad_request)?;
     let _context = PublicRequestContext::Archive {
         type_key: type_key.clone(),
-        query,
-        canonical_path: CanonicalUrlBuilder::content_page(&type_key, query).unwrap_or_default(),
+        query: query.clone(),
+        canonical_path: CanonicalUrlBuilder::content_page(&type_key, query.clone()).unwrap_or_default(),
     };
     let page = query.page;
     let filters = EntryFilters {
         category_id: query.filters.category_id,
         tag_id: query.filters.tag_id,
+        taxonomy_key: query.filters.taxonomy_key.clone(),
+        term_id: query.filters.term_id,
         include_descendants: query.filters.descendants,
     };
     let schema = load_content_type_definition(&db, &type_key)
@@ -100,7 +102,7 @@ pub async fn archive(
                 &type_key,
                 PublicQuery {
                     page: page - 1,
-                    ..query
+                    ..query.clone()
                 },
             )
         })
@@ -111,7 +113,7 @@ pub async fn archive(
                 &type_key,
                 PublicQuery {
                     page: page + 1,
-                    ..query
+                    ..query.clone()
                 },
             )
         })
@@ -355,15 +357,15 @@ async fn taxonomy_archive(
         parse_query(raw_query, QueryScope::TaxonomyArchive(kind)).map_err(ApiError::bad_request)?;
     let offset = (query.page - 1) * ARCHIVE_SIZE;
     let (term, page) =
-        public_content::taxonomy_public_page(db, kind, slug, query.filters, ARCHIVE_SIZE, offset)
+        public_content::taxonomy_public_page(db, kind, slug, query.filters.clone(), ARCHIVE_SIZE, offset)
             .await?
             .ok_or_else(|| ApiError::not_found("Không tìm thấy taxonomy."))?;
     let _context = PublicRequestContext::TaxonomyArchive {
         term_id: term.id,
         kind,
         slug: term.slug.clone(),
-        query,
-        canonical_path: CanonicalUrlBuilder::taxonomy_page(kind, &term.slug, query)
+        query: query.clone(),
+        canonical_path: CanonicalUrlBuilder::taxonomy_page(kind, &term.slug, query.clone())
             .unwrap_or_default(),
     };
     let entry_urls = crate::storage::seo::resolve_public_entry_paths_by_ids(db, &page.entries).await?;
@@ -389,7 +391,7 @@ async fn taxonomy_archive(
                 slug,
                 PublicQuery {
                     page: query.page - 1,
-                    ..query
+                    ..query.clone()
                 },
             )
         })
@@ -401,7 +403,7 @@ async fn taxonomy_archive(
                 slug,
                 PublicQuery {
                     page: query.page + 1,
-                    ..query
+                    ..query.clone()
                 },
             )
         })

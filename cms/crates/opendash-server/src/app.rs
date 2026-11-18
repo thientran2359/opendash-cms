@@ -61,6 +61,9 @@ use crate::{
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_get, taxonomy_list,
             taxonomy_patch, taxonomy_eligibility_list,
+            taxonomy_eligibility_put, taxonomy_eligibility_effective,
+            taxonomy_definitions_list, taxonomy_definitions_create, taxonomy_definitions_get,
+            taxonomy_definitions_patch, taxonomy_definitions_delete,
         },
         themes::{ThemeStoreRoot, theme_activate, theme_asset, theme_install, theme_list},
         users::{
@@ -290,6 +293,19 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_MENU_JSON_BYTES)),
         )
         .route(
+            "/api/admin/taxonomy/definitions",
+            get(taxonomy_definitions_list)
+                .post(taxonomy_definitions_create)
+                .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/taxonomy/definitions/{key}",
+            get(taxonomy_definitions_get)
+                .patch(taxonomy_definitions_patch)
+                .delete(taxonomy_definitions_delete)
+                .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/taxonomy/terms",
             get(taxonomy_list)
                 .post(taxonomy_create)
@@ -308,7 +324,13 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/taxonomy/eligibility/{content_type_key}",
-            get(taxonomy_eligibility_list),
+            get(taxonomy_eligibility_list)
+                .put(taxonomy_eligibility_put)
+                .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/taxonomy/eligibility/{content_type_key}/effective",
+            get(taxonomy_eligibility_effective),
         )
         .route(
             "/api/admin/operations/diagnostics",
