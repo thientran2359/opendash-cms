@@ -1,5 +1,11 @@
 # M8 Operations and Release — selected G2 contract
 
+> **Staging addendum 16/11/2026:** [ADR-0017](../decisions/ADR-0017-usable-beta-staging.md)
+> ưu tiên Beta nội bộ Windows trước common RC/V1 public. Không đổi bất kỳ acceptance
+> native/memory/security/data/restore/license nào của contract này. Beta PASS không
+> đóng M8 hoặc native tasks. NOT_STARTED/NOT_RUN trong header cũ là snapshot thiết kế
+> 14/11, không phải kết luận hiện trạng implementation; tra Issue/Project và evidence.
+
 **Owner:** Atlas · **Date:** 2026-11-14 · **G2:** AGREED on merge with [ADR-0015](../decisions/ADR-0015-m8-operations-release.md). **Implementation:** NOT_STARTED. **Verification:** NOT_RUN.
 Baseline `8c5b90072c231c1f0813eb593d7be4447fb0a11d`, migration0031. [G1](../../.agents/research/2026-11-14-m8-operations-release-g1.md) · [PRD](../product/PRODUCT_REQUIREMENTS.md) · [G3](../plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md). New interfaces below are future implementation contracts, not current functionality.
 

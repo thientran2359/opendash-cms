@@ -1535,6 +1535,7 @@ dependencies = [
  "http-body",
  "image",
  "lettre",
+ "libc",
  "mime_guess",
  "minijinja",
  "opendash-core",

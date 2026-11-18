@@ -35,6 +35,13 @@ pub struct ContentTypeApiItem {
 }
 
 pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
+    if key == "section" {
+        return Some(ContentTypeDefinition {
+            key: "section".into(),
+            label: "Section".into(),
+            fields: Vec::new(),
+        });
+    }
     let label = match key {
         "post" => "Bài viết",
         "page" => "Trang",
@@ -79,7 +86,7 @@ pub async fn preflight_builtin_key_collisions(
     }
     let rows: Vec<(String, String, String, Option<String>, String)> = sqlx::query_as(
         "SELECT key, definition_json, owner_kind, owner_id, provider_status
-         FROM content_types WHERE key IN ('post', 'page')",
+         FROM content_types WHERE key IN ('post', 'page', 'section')",
     )
     .fetch_all(db)
     .await?;
@@ -1617,7 +1624,7 @@ async fn load_effective_taxonomies_in_tx(
     let rows: Vec<String> = sqlx::query_scalar(
         "SELECT taxonomy_kind
          FROM content_type_taxonomy_eligibility
-         WHERE content_type_key = ? AND provider_status = 'active' AND declaration_state = 'active'
+         WHERE content_type_key = ? AND provider_status = 'active' AND declaration_state = 'declared'
          ORDER BY taxonomy_kind ASC",
     )
     .bind(type_key)

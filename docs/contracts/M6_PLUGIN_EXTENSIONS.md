@@ -55,3 +55,13 @@
 
 - Require integrated E2E covering Plugin ZIP install -> CPT/fields/taxonomy/blocks/template/settings -> edit/Save/veto/action/egress -> disable/restart/reinstall -> data/layout preservation + snapshot/matching-binary restore.
 - Release G5 for M6 requires native evidence on **both** Windows and macOS from one common source SHA (`M5 #157` macOS G5 remains independent).
+
+
+## November content foundation delta
+
+[ADR-0019](../decisions/ADR-0019-content-foundation.md) and
+[content foundation C4](CONTENT_FOUNDATION_2026_11.md) extend the D08 category/tag-only
+declaration boundary with custom taxonomy definitions and bounded rewrite defaults.
+This is the forward design contract; implementation/G5 are tracked separately in
+[M6 G3](../plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md).
+Historical category/tag verification does not prove the extended bridge.

@@ -1,0 +1,58 @@
+{
+  "id": "review-provider",
+  "name": "Admin Review Provider",
+  "description": "Deterministic isolated integration fixture; never installed on a real site.",
+  "version": "1.0.0",
+  "api_version": 1,
+  "manifest_schema": 2,
+  "entrypoint": "plugin.wasm",
+  "permissions": {
+    "content_read": ["post"]
+  },
+  "actions": [
+    {
+      "id": "inspect",
+      "title": "Inspect current row",
+      "required_role": "admin",
+      "capabilities": ["content_read"]
+    }
+  ],
+  "admin_extensions": {
+    "schema_version": 1,
+    "columns": [
+      {
+        "local_key": "review_body",
+        "label": "Plugin body",
+        "type_keys": ["post"],
+        "field_key": "body",
+        "format": "text",
+        "order": 20,
+        "action_id": "inspect"
+      }
+    ],
+    "term_panels": [
+      {
+        "local_key": "review_details",
+        "label": "Plugin Review",
+        "kind": "category",
+        "order": 20,
+        "fields": [
+          {
+            "key": "private_note",
+            "label": "Private Review Note",
+            "type": "text",
+            "required": false,
+            "min_role": "admin"
+          },
+          {
+            "key": "reviewed",
+            "label": "Reviewed",
+            "type": "boolean",
+            "required": false,
+            "min_role": "editor"
+          }
+        ]
+      }
+    ]
+  }
+}

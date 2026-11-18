@@ -7,3 +7,4 @@ pub mod id;
 pub mod plugin;
 pub mod registry;
 pub mod theme;
+pub mod admin_extensions;

@@ -1,5 +1,13 @@
 # OpenDash
 
+**Ưu tiên 17/11/2026:** [Usable Beta nội bộ macOS](docs/decisions/ADR-0017-usable-beta-staging.md)
+trước common RC/V1 public; [G3 checkpoint](docs/plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md)
+chưa có nghiệm thu runtime/human. Dev launcher/Mộc Studio là demo phát triển; không là
+installer, Beta PASS hoặc production deployment. V1 vẫn giữ Linux VPS/native multi-OS,
+backup/security và release gates. Các mô tả “chưa có” trong hiện trạng 09/11 và phần
+M3 cũ bên dưới giữ phạm vi lịch sử, không là inventory hiện tại.
+[Task Index](docs/plans/TASK_INDEX.md) dẫn tới Issue/Project live và evidence mới.
+
 CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress. Rust, SQLite, một file thực thi cho mỗi bản cài và hệ theme/plugin riêng.
 
 **Hiện trạng (09/11/2026).** M1/M2 đã được nhập từ cây nguồn đã kiểm chứng vào workspace. Xem thêm [kiểm chứng bộ khung lõi M2.5](docs/verification/2026-11-07-m2-5-core-kernel.md). Bản Windows có thiết lập Admin, đăng nhập, vai trò Editor, nhập ZIP theme một block, Preview/Lưu và plugin Wasmi chạy trong worker riêng. Xem [kiểm chứng M1/M2](docs/verification/2026-11-07-m1-m2-import.md). M3.1–M3.6 đã có CPT/custom fields, SQLite/API entry CRUD, giao diện Admin nội dung, [Media Library](docs/verification/2026-11-09-m3-5-media-library.md) và [trang CPT công khai](docs/verification/2026-11-09-m3-6-public-content-rendering.md) kiểm chứng trên macOS. Chưa có taxonomy, Builder nhiều tầng, active theme riêng, xóa media hoặc backup/restore.

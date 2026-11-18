@@ -24,20 +24,25 @@ interface SubMenuItem {
   label: string;
   hash: string;
   adminOnly?: boolean;
+  disabled?: boolean;
 }
+
+type NavigationGroup = 'content' | 'appearance' | 'customize';
 
 interface ParentMenuItem {
   id: string;
   label: string;
   icon: string;
   hash: string;
+  group?: NavigationGroup;
   adminOnly?: boolean;
+  disabled?: boolean;
   children?: SubMenuItem[];
 }
 
-function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
+function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMenuItem[] {
   const customTypes = cptTypes.filter(
-    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page',
+    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section',
   );
   return [
     { id: 'dashboard', label: 'Tổng quan', icon: 'dashboard', hash: '#/dashboard' },
@@ -46,6 +51,7 @@ function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
       label: 'Bài viết',
       icon: 'posts',
       hash: '#/posts',
+      group: 'content',
       children: [
         { label: 'Tất cả bài viết', hash: '#/posts' },
         { label: 'Viết bài mới', hash: '#/posts/new' },
@@ -58,6 +64,7 @@ function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
       label: 'Trang',
       icon: 'pages',
       hash: '#/pages',
+      group: 'content',
       children: [
         { label: 'Tất cả trang', hash: '#/pages' },
         { label: 'Thêm trang mới', hash: '#/pages/new' },
@@ -68,6 +75,7 @@ function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
       label: ct.descriptor.label,
       icon: 'content',
       hash: `#/cpt/${ct.descriptor.key}`,
+      group: 'content' as const,
       children: [
         { label: `Tất cả ${ct.descriptor.label}`, hash: `#/cpt/${ct.descriptor.key}` },
         { label: 'Thêm mới', hash: `#/cpt/${ct.descriptor.key}/new` },
@@ -75,12 +83,24 @@ function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
     })),
     {
       id: 'media',
-      label: 'Thư viện ảnh',
+      label: 'Thư viện media',
       icon: 'media',
       hash: '#/media',
+      group: 'content',
       children: [
         { label: 'Thư viện', hash: '#/media' },
         { label: 'Tải lên', hash: '#/media/upload' },
+      ],
+    },
+    {
+      id: 'sections',
+      label: 'Section',
+      icon: 'content',
+      hash: '#/sections',
+      group: 'content',
+      children: [
+        { label: 'Tất cả Section', hash: '#/sections' },
+        { label: 'Thêm Section', hash: '#/sections/new' },
       ],
     },
     {
@@ -88,27 +108,62 @@ function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
       label: 'Giao diện',
       icon: 'themes',
       hash: '#/appearance/themes',
+      group: 'appearance',
       adminOnly: true,
       children: [
         { label: 'Themes', hash: '#/appearance/themes' },
         { label: 'Menus', hash: '#/appearance/menus' },
+      ],
+    },
+    {
+      id: 'theme-customize',
+      label: 'Tùy chỉnh giao diện',
+      icon: 'themes',
+      hash: '#/appearance/options',
+      group: 'appearance',
+      adminOnly: true,
+      children: [
+        { label: 'Tùy chọn theme', hash: '#/appearance/options' },
         { label: 'Visual Builder', hash: '#/builder' },
       ],
+    },
+    {
+      id: 'content-types',
+      label: 'Loại nội dung & Trường',
+      icon: 'content',
+      hash: '#/appearance/content-types',
+      group: 'appearance',
+      adminOnly: true,
+    },
+    {
+      id: 'library',
+      label: 'Thư viện mẫu',
+      icon: 'content',
+      hash: '#/appearance/library',
+      group: 'appearance',
+      adminOnly: true,
     },
     {
       id: 'plugins',
       label: 'Plugins',
       icon: 'plugins',
       hash: '#/plugins',
+      group: 'customize',
       adminOnly: true,
+      children: [
+        { label: 'Plugins đã cài', hash: '#/plugins' },
+        { label: 'Cài plugin', hash: '#/plugins/install' },
+      ],
     },
     {
       id: 'users',
       label: 'Người dùng',
       icon: 'users',
-      hash: '#/users/profile',
+      hash: isAdmin ? '#/users' : '#/users/profile',
+      group: 'customize',
       children: [
         { label: 'Tất cả người dùng', hash: '#/users', adminOnly: true },
+        { label: 'Thêm người dùng', hash: '#/users/new', adminOnly: true },
         { label: 'Hồ sơ của tôi', hash: '#/users/profile' },
       ],
     },
@@ -117,6 +172,7 @@ function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
       label: 'Công cụ',
       icon: 'tools',
       hash: '#/tools/backup',
+      group: 'customize',
       adminOnly: true,
       children: [
         { label: 'Sao lưu & Phục hồi', hash: '#/tools/backup' },
@@ -128,12 +184,14 @@ function buildMenuTree(cptTypes: OwnedContentType[]): ParentMenuItem[] {
       id: 'settings',
       label: 'Cài đặt',
       icon: 'settings',
-      hash: '#/settings/content-types',
+      hash: '#/settings/general',
+      group: 'customize',
       adminOnly: true,
       children: [
         { label: 'Tổng quát', hash: '#/settings/general' },
-        { label: 'SEO & Liên hệ', hash: '#/settings/seo' },
-        { label: 'Loại nội dung & Trường', hash: '#/settings/content-types' },
+        { label: 'SEO', hash: '#/settings/seo' },
+        { label: 'Liên hệ', hash: '#/settings/contact' },
+        { label: 'Thông báo Email (SMTP)', hash: '#/settings/smtp' },
       ],
     },
   ];
@@ -178,6 +236,7 @@ interface AdminShellProps {
   schemaSettingsContent: React.ReactNode;
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
+  sectionsContent: React.ReactNode;
   mediaContent: React.ReactNode;
   taxonomyContent: React.ReactNode;
   dashboardContent: React.ReactNode;
@@ -187,6 +246,9 @@ interface AdminShellProps {
   toolsContent: React.ReactNode;
   settingsContent: React.ReactNode;
   themesContent: React.ReactNode;
+  menusContent: React.ReactNode;
+  themeOptionsContent: React.ReactNode;
+  libraryContent: React.ReactNode;
 }
 
 export const AdminShell: React.FC<AdminShellProps> = ({
@@ -194,13 +256,14 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   route, routeForbidden, cptTypes, onNavigateHash, hasUnsavedChanges,
   sidebarContent, previewContent, contentContent, schemaSettingsContent,
-  postsContent, pagesContent, mediaContent, taxonomyContent, dashboardContent,
+  postsContent, pagesContent, sectionsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
+  menusContent, themeOptionsContent, libraryContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const menuTree = buildMenuTree(cptTypes);
+  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin');
   const activeParentId =
     route.view === 'cpt' && route.typeKey
       ? `cpt:${route.typeKey}`
@@ -209,8 +272,12 @@ export const AdminShell: React.FC<AdminShellProps> = ({
         : route.view === 'profile'
           ? 'users'
           : route.view === 'builder'
-            ? 'themes'
-            : route.view;
+            ? 'theme-customize'
+            : route.view === 'themes'
+              ? (route.sub === 'options' ? 'theme-customize' : route.sub === 'library' ? 'library' : 'themes')
+              : route.view === 'settings' && route.sub === 'content-types'
+                ? 'content-types'
+                : route.view;
 
   useEffect(() => {
     setOpenMenuId(activeParentId);
@@ -236,10 +303,52 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     setMobileOpen(false);
   };
 
-  const activeParent = menuTree.find(m => m.id === activeParentId);
+  const visibleMenu = menuTree.filter(item => !item.adminOnly || user?.role === 'admin');
+  const groupOrder: { id: string; label: string | null; match: NavigationGroup | null }[] = [
+    { id: 'dashboard', label: null, match: null },
+    { id: 'content', label: 'Nội dung', match: 'content' },
+    { id: 'appearance', label: 'Giao diện', match: 'appearance' },
+    { id: 'customize', label: 'Tùy chỉnh', match: 'customize' },
+  ];
+  const menuGroups = groupOrder.map(group => ({
+    ...group,
+    items: visibleMenu.filter(item => (item.group ?? null) === group.match),
+  })).filter(group => group.items.length > 0);
+  const activeParent = visibleMenu.find(m => m.id === activeParentId);
+  const activeGroupLabel = groupOrder.find(g => g.match === (activeParent?.group ?? null))?.label;
+  // Legacy deep links keep rendering their canonical feature; highlighting
+  // follows the resolved route, not a potentially obsolete URL spelling.
+  const selectedNavHash =
+    route.view === 'themes' ? `#/appearance/${route.sub}` :
+    route.view === 'taxonomy' ? `#/posts/${route.sub}` :
+    route.view === 'profile' ? '#/users/profile' :
+    route.view === 'builder' ? '#/builder' :
+    route.view === 'tools' ? `#/tools/${route.sub}` :
+    route.view === 'settings' ? `#/settings/${route.sub}` :
+    route.view === 'media' ? (route.sub === 'upload' ? '#/media/upload' : '#/media') :
+    route.view === 'plugins' ? (route.sub === 'install' ? '#/plugins/install' : '#/plugins') :
+    route.view === 'users' ? (route.sub === 'new' ? '#/users/new' : '#/users') :
+    route.rawHash.split('?')[0];
+  const activeChild = activeParent?.children?.find(child => child.hash === selectedNavHash);
+  const subLabels: Record<string, string> = {
+    list: 'Danh sách', new: 'Thêm mới', edit: 'Chỉnh sửa', library: 'Thư viện',
+    general: 'Tổng quát', seo: 'SEO', contact: 'Liên hệ', smtp: 'Thông báo Email (SMTP)',
+    'content-types': 'Loại nội dung & Trường', themes: 'Themes', menus: 'Menus',
+    options: 'Tùy chọn theme', health: 'Tình trạng hệ thống',
+    'media-reconcile': 'Đối soát Media', backup: 'Sao lưu & Phục hồi',
+    install: 'Cài đặt', profile: 'Hồ sơ của tôi',
+  };
   const pageTitle = routeForbidden
     ? '403 Không có quyền truy cập'
-    : activeParent?.label ?? 'Tổng quan';
+    : route.view === 'themes' && route.sub === 'library'
+      ? 'Chưa khả dụng'
+      : activeChild?.label ?? (route.sub === 'edit' ? 'Chỉnh sửa' : subLabels[route.sub]) ?? activeParent?.label ?? 'Tổng quan';
+  const breadcrumb = [
+    'Quản trị',
+    activeGroupLabel,
+    activeParent?.label,
+    ...(pageTitle !== activeParent?.label ? [pageTitle] : []),
+  ].filter(Boolean).join(' / ');
 
   return (
     <div className="od-root min-h-screen">
@@ -272,9 +381,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           </div>
           <nav className="od-nav overflow-y-auto px-3 pb-8" aria-label="Các mục quản trị">
             <div className="flex flex-col gap-1">
-              {menuTree
-                .filter(item => !item.adminOnly || user?.role === 'admin')
-                .map(item => {
+              {menuGroups.map(group => <div key={group.id} className="od-nav-group" data-nav-group={group.id}>
+                {group.label && <p className="od-nav-group-title">{group.label}</p>}
+                {group.items.map(item => {
                   const isActiveParent = activeParentId === item.id;
                   const isExpanded = openMenuId === item.id || isActiveParent;
                   const visibleChildren = (item.children ?? []).filter(
@@ -287,16 +396,19 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                         className={'od-nav-link w-full justify-between ' + (isActiveParent ? 'od-nav-link-active' : '')}
                         data-menu-id={item.id}
                         aria-expanded={visibleChildren.length > 0 ? isExpanded : undefined}
+                        disabled={item.disabled}
+                        title={item.disabled ? 'Chưa khả dụng — sẽ được bật khi tính năng hoàn thành' : undefined}
                         onClick={() => {
                           if (visibleChildren.length > 0) {
                             setOpenMenuId(isExpanded ? null : item.id);
                           }
-                          navigate(item.hash);
+                          if (!item.disabled) navigate(item.hash);
                         }}
                       >
                         <span className="flex items-center gap-2.5">
                           <NavIcon name={item.icon} />
                           <span>{item.label}</span>
+                          {item.disabled && <span className="od-nav-coming-soon">Sắp có</span>}
                         </span>
                         {visibleChildren.length > 0 && (
                           <span className="text-xs text-slate-400" aria-hidden="true">
@@ -307,25 +419,19 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                       {visibleChildren.length > 0 && isExpanded && (
                         <div className="mt-1 ml-7 flex flex-col gap-0.5 border-l border-slate-700 pl-3">
                           {visibleChildren.map(sub => {
-                            const isSubActive = route.rawHash === sub.hash;
+                            const isSubActive = selectedNavHash === sub.hash;
                             return (
-                              <a
-                                key={sub.hash}
-                                href={sub.hash}
-                                onClick={e => {
-                                  e.preventDefault();
-                                  navigate(sub.hash);
-                                }}
-                                aria-current={isSubActive ? 'page' : undefined}
-                                className={
+                              sub.disabled
+                                ? <span key={sub.hash} className="od-nav-sub-disabled" aria-disabled="true">{sub.label} · Sắp có</span>
+                                : <a key={sub.hash} href={sub.hash}
+                                  onClick={e => { e.preventDefault(); navigate(sub.hash); }}
+                                  aria-current={isSubActive ? 'page' : undefined}
+                                  className={
                                   'rounded px-2 py-1 text-xs transition-colors ' +
                                   (isSubActive
                                     ? 'bg-slate-800 font-semibold text-white'
                                     : 'text-slate-300 hover:bg-slate-800/60 hover:text-white')
-                                }
-                              >
-                                {sub.label}
-                              </a>
+                                  }>{sub.label}</a>
                             );
                           })}
                         </div>
@@ -333,6 +439,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                     </div>
                   );
                 })}
+              </div>)}
             </div>
           </nav>
           <div className="od-sidebar-bottom px-5 py-4 text-xs text-slate-400">OpenDash · Admin</div>
@@ -346,7 +453,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               </button>
               <div className="min-w-0">
                 <p className="text-xs font-medium text-slate-500" data-testid="breadcrumb">
-                  Quản trị / {pageTitle}{route.sub && route.sub !== route.view ? ` / ${route.sub}` : ''}
+                  {breadcrumb}
                 </p>
                 <h1 className="mt-1 truncate text-xl font-bold tracking-tight text-slate-900">{pageTitle}</h1>
               </div>
@@ -396,7 +503,11 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 <section className={user && route.view === 'pages' ? 'od-editor-panel' : 'hidden'} aria-label="Trang" aria-hidden={!user || route.view !== 'pages'}>{pagesContent}</section>
                 {user && route.view === 'media' && mediaContent}
                 {user && route.view === 'taxonomy' && <main className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</main>}
-                {user?.role === 'admin' && route.view === 'themes' && <main className="od-admin-card min-w-0">{themesContent}</main>}
+                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <main className="od-admin-card min-w-0">{themesContent}</main>}
+                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'menus' && <main className="od-admin-card min-w-0">{menusContent}</main>}
+                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'options' && <main className="od-admin-card min-w-0">{themeOptionsContent}</main>}
+                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && libraryContent}
+                {user && route.view === 'sections' && sectionsContent}
 
                 <section className={user && route.view === 'builder' ? 'od-editor-panel' : 'hidden'} aria-label="Builder" aria-hidden={!user || route.view !== 'builder'}>
                   <main id="builder-main">

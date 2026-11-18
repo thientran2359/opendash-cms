@@ -1,5 +1,39 @@
 # OpenDash — Yêu cầu sản phẩm bản đầu
 
+## Delivery stages — Usable Beta (cập nhật 17/11/2026)
+
+Theo [quyết định #292](https://github.com/thientran2359/opendash-cms/issues/292#issuecomment-6917897791)
+và [ADR-0017](../decisions/ADR-0017-usable-beta-staging.md), ưu tiên **Usable Beta nội bộ
+macOS → common RC → V1 public**. Giữ nguyên Rust/SQLite/single executable, Linux VPS,
+Builder/plugin server logic và phạm vi V1. Nội dung đã xác nhận bên dưới vẫn áp dụng.
+
+Theo chỉ đạo mới của chủ dự án: Aster tự review/chốt kỹ thuật, Harbor triển khai
+các sửa lỗi Beta và technical retest; chỉ tham gia thảo luận liên-agent khi
+chủ dự án tạo thảo luận. Xem cập nhật ownership tại ADR-0017.
+
+Beta phải chứng minh site trống → bootstrap/login → Post/Page/CPT + field groups →
+media/taxonomy/menu → theme ZIP/sample import không ghi đè → Builder homepage/header/
+footer/single/archive → restart/provider changes giữ dữ liệu/layout → backup/restore
+root mới → operator kích hoạt → re-edit. Desktop editing và responsive preview/public
+không tự chứng nhận mobile authoring hoặc thiết bị thật. Semantics Lưu/Xuất bản giữ nguyên:
+draft không public, preview chưa lưu không đổi public, Save Builder cập nhật public ngay.
+
+Biên tập thường ngày qua Admin, không SQL/API thủ công/edit file. Operator được chuẩn bị
+binary/môi trường và kích hoạt restored root theo ADR-0015; không hot-swap. Beta dùng
+dữ liệu thử/site cô lập; public routes của instance nội bộ không là deploy Internet.
+Pin source/binary/fixture hashes; demo Mộc Studio hoặc capability tests không thay
+cold walkthrough. Ít nhất một người thử không viết code thực hiện kịch bản, ghi thời gian
+và trợ giúp, tách khỏi agent/automated QA. Aster điều phối người thử, không mặc định owner.
+Thiếu người thử không chặn audit/sửa lỗi nhưng chưa đạt human usability readiness.
+
+Beta exit cần tất cả hành trình bắt buộc đạt, không blocker security/data/recovery hoặc
+không hoàn thành công việc; lỗi cosmetic có Issue/owner/giới hạn, không dùng để waive
+security/data. SEO/contact/video và các capability khác vẫn giữ acceptance V1.
+Beta PASS không là M8/V1 VERIFIED: native Windows/Linux/macOS, common RC, deferred
+milestones, notices/license và owner public-release authorization vẫn bắt buộc.
+[G3 checkpoint](../plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md) quy định
+case matrix/ownership/sequence; yêu cầu này chưa là evidence nghiệm thu.
+
 **Trạng thái:** Chủ dự án đã xác nhận phạm vi sau vòng rà soát yêu cầu. Tài liệu này là đầu vào cho đánh giá tech stack và có ưu tiên cao hơn các đề xuất thiết kế trước đó.
 
 ## Đối tượng và ưu tiên
@@ -9,7 +43,7 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 ## Cài đặt, vận hành và phân phối
 
 - Dùng Rust, SQLite và phân phối CMS bằng một file thực thi. Mỗi bản cài quản lý một website.
-- Developer hoặc người quản trị máy chủ cài trên VPS Linux. Chủ website làm việc qua trình duyệt. Windows phục vụ phát triển và kiểm thử.
+- Developer hoặc người quản trị máy chủ cài trên VPS Linux. Chủ website làm việc qua trình duyệt. macOS là môi trường phát triển và thử Usable Beta ưu tiên; Windows tiếp tục được hỗ trợ và kiểm chứng ở common RC/V1.
 - Admin cho sao lưu và phục hồi thủ công, bao gồm nội dung, ảnh, cấu hình, theme và plugin.
 - Mỗi website phục vụ một ngôn ngữ nội dung. Giao diện Admin ưu tiên tiếng Việt.
 - Công khai mã nguồn. Giấy phép và mô hình thu phí còn mở.
@@ -19,7 +53,7 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 - Quản trị viên tạo loại nội dung tùy chỉnh (CPT), custom fields, danh mục có cha–con và thẻ qua giao diện. Theme/plugin có thể định nghĩa sẵn các thành phần này.
 - Các field bản đầu gồm chữ ngắn/dài, trình soạn thảo nội dung, số, bật/tắt, ngày, lựa chọn, ảnh và thư viện ảnh.
 - Người nhập liệu có thể làm việc qua form. Template lấy dữ liệu của nội dung tương ứng để hiển thị.
-- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. **Phân biệt Lưu và Xuất bản:** với `post`/`page` đang ở `draft`, **Lưu** chỉ ghi bản nháp vào DB, không làm nội dung xuất hiện trên URL công khai, archive, sitemap hoặc media public qua tham chiếu draft. Chỉ chuyển trạng thái sang `published` bằng thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một `post`/`page` đã `published` cập nhật nội dung công khai. Preview draft phải yêu cầu phiên đăng nhập/quyền hợp lệ. Với **Builder/homepage** hiện hữu, **Lưu** tiếp tục cập nhật trang công khai ngay; không tự thêm workflow draft cho Builder hoặc CPT khác. Phần trạng thái/endpoint/schema cụ thể cần G2 trước triển khai.
+- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. **Phân biệt Lưu và Xuất bản:** với `post`/`page` đang ở `draft`, **Lưu** chỉ ghi bản nháp vào DB, không làm nội dung xuất hiện trên URL công khai, archive, sitemap hoặc media public qua tham chiếu draft. Chỉ chuyển trạng thái sang `published` bằng thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một `post`/`page` đã `published` cập nhật nội dung công khai. Preview draft phải yêu cầu phiên đăng nhập/quyền hợp lệ. Với **Builder/homepage** hiện hữu, **Lưu** tiếp tục cập nhật trang công khai ngay; không tự thêm workflow draft cho Builder. Theo [ADR-0019](../decisions/ADR-0019-content-foundation.md), CPT khác có thể chọn `draft_publish`; mặc định CPT cũ vẫn immediate, chuyển chế độ không tự xuất bản draft. Phần trạng thái/endpoint/schema cụ thể cần G2 trước triển khai.
 - Hai vai trò là Quản trị viên và Biên tập viên. Quản trị viên quản lý hệ thống, cấu hình, theme và plugin. Biên tập viên quản lý và cập nhật nội dung công khai.
 
 ## Quyết định bổ sung M3 — Core CMS usable (10/11/2026)
@@ -68,3 +102,23 @@ Chủ dự án xác nhận ưu tiên hoàn thiện **Admin và điều hướng 
 ## Quyết định kỹ thuật còn mở
 
 Đánh giá framework server, thư viện quản trị và builder, template engine, runtime plugin và cơ chế đóng gói/cài đặt theo yêu cầu trên. Xem [đánh giá tech stack](../architecture/TECH_STACK.md), [kiến trúc CMS](../architecture/CMS_ARCHITECTURE.md) và [đề xuất CMS-first](../architecture/CMS_PROPOSAL.md).
+
+## Owner review follow-up — 17/11/2026
+
+Chủ dự án chốt notes01–07: Admin grouped navigation; one screen per menu destination;
+WordPress-like content list/filter/actions with controlled theme/plugin contributions;
+one taxonomy panel and explicit draft/publish/update/view actions; separate category/tag
+list/edit routes; exact Page Builder; visible image/video uploads; private Section CPT
+and local template library. See [ADR-0018](../decisions/ADR-0018-owner-admin-review.md)
+and [bounded contract](../contracts/ADMIN_REVIEW_2026_11.md). Page has no core-default
+category/tag, while existing links and explicit provider/user eligibility are preserved.
+Section insertion copies AST; synced propagation remains deferred. Cloud library and
+note08 full Builder redesign stay deferred. No Beta PASS follows from this decision.
+
+
+## Content foundation follow-up — 18/11/2026
+
+Owner ưu tiên CPT có cấu hình, custom taxonomy và liên kết CPT, permalink dùng chung,
+plugin/theme khai báo qua canonical APIs. [ADR-0019](../decisions/ADR-0019-content-foundation.md)
+và [contract](../contracts/CONTENT_FOUNDATION_2026_11.md) chốt giới hạn; thiết kế được
+chấp nhận khi merge, không đồng nghĩa đã implemented/verified hoặc WordPress parity.

@@ -34,11 +34,12 @@ use crate::{
         dashboard::dashboard_get,
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
+            entry_table_get,
             entry_composite_create, entry_composite_update, entry_preview, entry_publication,
             entry_update,
         },
         media::{
-            media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
+            media_get, media_list, media_original, media_thumbnail, media_upload,
             media_video_upload,
         },
         menu::{
@@ -57,7 +58,7 @@ use crate::{
             theme_options_put, timezones_get,
         },
         taxonomy::{
-            MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_list,
+            MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_get, taxonomy_list,
             taxonomy_patch, taxonomy_eligibility_list,
         },
         themes::{ThemeStoreRoot, theme_activate, theme_asset, theme_install, theme_list},
@@ -197,6 +198,35 @@ pub fn build_router_with_themes_root(
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", post(auth_logout))
         .route("/api/admin/dashboard", get(dashboard_get))
+        .route("/api/admin/library", get(crate::routes::themes::local_library_list))
+        .route(
+            "/api/admin/library/apply/{role}",
+            post(crate::routes::themes::local_library_apply).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/sections",
+            get(crate::routes::sections::section_list)
+                .post(crate::routes::sections::section_create)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/sections/{id}",
+            get(crate::routes::sections::section_get)
+                .put(crate::routes::sections::section_update)
+                .delete(crate::routes::sections::section_delete)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/sections/{id}/document",
+            get(crate::routes::sections::section_document_get)
+                .put(crate::routes::sections::section_document_put)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/sections/{id}/document/preview",
+            post(crate::routes::sections::section_document_preview)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
         .route(
             "/api/admin/builder/homepage",
             get(homepage_get)
@@ -266,9 +296,14 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/taxonomy/terms/{id}",
-            axum::routing::patch(taxonomy_patch)
+            get(taxonomy_get)
+                .patch(taxonomy_patch)
                 .delete(taxonomy_delete)
                 .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/taxonomy/terms/{id}/effective-editor-config",
+            get(crate::routes::taxonomy::taxonomy_effective_editor_config),
         )
         .route(
             "/api/admin/taxonomy/eligibility/{content_type_key}",
@@ -415,6 +450,19 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
         )
         .route(
+            "/api/admin/content-types/{type_key}/entry-table",
+            get(entry_table_get),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/effective-list-config",
+            get(crate::routes::entries::entry_table_effective_config),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/admin-actions/{plugin_id}/{action_id}",
+            post(crate::routes::entries::entry_table_provider_action)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
             "/api/admin/content-types/{type_key}/entries/composite",
             post(entry_composite_create)
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
@@ -475,7 +523,7 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/media/{id}",
-            get(media_get).delete(media_delete),
+            get(media_get).delete(crate::routes::sections::media_delete_section_aware),
         )
         .route("/api/admin/media/{id}/file", get(media_original))
         .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))

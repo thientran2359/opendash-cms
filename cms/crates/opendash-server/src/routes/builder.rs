@@ -209,7 +209,10 @@ fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocum
 }
 
 pub async fn homepage_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
-    require_session(&headers, &db).await?;
+    let actor = require_session(&headers, &db).await?;
+    if actor.user.role != crate::auth::Role::Admin {
+        return Err(ApiError::forbidden("Chỉ Admin mới được chỉnh homepage."));
+    }
     let current = builder_storage::read(&db).await?;
     Ok((
         builder_headers(Some(current.version)),
@@ -227,15 +230,16 @@ pub async fn homepage_preview(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
+    require_admin_with_csrf(&headers, &db).await?;
     let document = decode_document(&headers, &bytes)?;
     let current = builder_storage::read(&db).await?;
     current.validate(&document)?;
     builder_storage::check_preview_images(&db, &document).await?;
     let (bindings, lists) = builder_storage::resolve_preview(&db, &document).await?;
     let forms = crate::storage::builder::resolve_contact_forms(&db, &document).await?;
-    let rendered =
-        page_usecase::render_builder_with_lists_and_forms(&current, &document, true, &bindings, &lists, &forms)?;
+    let rendered = page_usecase::render_builder_with_lists_and_forms(
+        &current, &document, true, &bindings, &lists, &forms,
+    )?;
     Ok((builder_headers(None), Json(rendered)).into_response())
 }
 
@@ -246,7 +250,7 @@ pub async fn homepage_put(
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
+    require_admin_with_csrf(&headers, &db).await?;
     let version = parse_builder_if_match(&headers)?;
     let document = decode_document(&headers, &bytes)?;
     let (version, rendered) = builder_storage::save_and_render(
@@ -345,7 +349,12 @@ pub async fn overrides_list(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
 ) -> ApiResult<Response> {
-    require_session(&headers, &db).await?;
+    let actor = require_session(&headers, &db).await?;
+    if actor.user.role != crate::auth::Role::Admin {
+        return Err(ApiError::forbidden(
+            "Chỉ Admin mới xem được danh sách template dùng chung.",
+        ));
+    }
     let items = overrides_storage::list_overrides(&db).await?;
     Ok((builder_headers(None), Json(items)).into_response())
 }
@@ -359,11 +368,7 @@ pub async fn override_get(
     let actor = require_session(&headers, &db).await?;
     let role = overrides_storage::OverrideRole::parse(&role)?;
     let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
-    if scope.scope_entry_id.is_none() && actor.user.role != crate::auth::Role::Admin {
-        return Err(ApiError::forbidden(
-            "Chỉ Admin mới có quyền truy cập hoặc sửa template dùng chung toàn site.",
-        ));
-    }
+    check_override_permission(&scope, actor.user.role)?;
     let existing = overrides_storage::get_override(&db, &scope).await?;
     let (exists, document, version, base_theme_id, base_revision_id) = match existing {
         Some(record) => (
@@ -401,9 +406,13 @@ pub async fn override_preview(
     let actor = require_session_with_csrf(&headers, &db).await?;
     let role = overrides_storage::OverrideRole::parse(&role)?;
     let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
-    if scope.scope_entry_id.is_none() && actor.user.role != crate::auth::Role::Admin {
-        return Err(ApiError::forbidden(
-            "Chỉ Admin mới có quyền truy cập hoặc sửa template dùng chung toàn site.",
+    check_override_permission(&scope, actor.user.role)?;
+    if scope.role == overrides_storage::OverrideRole::Page
+        && scope.scope_entry_id.is_some()
+        && (query.preview_type_key.is_some() || query.preview_entry_slug.is_some())
+    {
+        return Err(ApiError::bad_request(
+            "Page Builder preview dùng đúng entry_id, không nhận preview target khác.",
         ));
     }
     let document = decode_document(&headers, &bytes)?;
@@ -430,11 +439,7 @@ pub async fn override_put(
     let actor = require_session_with_csrf(&headers, &db).await?;
     let role = overrides_storage::OverrideRole::parse(&role)?;
     let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
-    if scope.scope_entry_id.is_none() && actor.user.role != crate::auth::Role::Admin {
-        return Err(ApiError::forbidden(
-            "Chỉ Admin mới có quyền truy cập hoặc sửa template dùng chung toàn site.",
-        ));
-    }
+    check_override_permission(&scope, actor.user.role)?;
     let expected_version = parse_optional_builder_if_match(&headers)?;
     let document = decode_document(&headers, &bytes)?;
     let (saved, rendered) =
@@ -468,11 +473,7 @@ pub async fn override_reset(
     let actor = require_session_with_csrf(&headers, &db).await?;
     let role = overrides_storage::OverrideRole::parse(&role)?;
     let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
-    if scope.scope_entry_id.is_none() && actor.user.role != crate::auth::Role::Admin {
-        return Err(ApiError::forbidden(
-            "Chỉ Admin mới có quyền truy cập hoặc sửa template dùng chung toàn site.",
-        ));
-    }
+    check_override_permission(&scope, actor.user.role)?;
     let expected_version = parse_builder_if_match(&headers)?;
     overrides_storage::reset_override(&db, &scope, expected_version, body.confirm).await?;
     Ok((
@@ -480,6 +481,22 @@ pub async fn override_reset(
         Json(serde_json::json!({ "reset": true, "role": scope.role.as_str() })),
     )
         .into_response())
+}
+
+fn check_override_permission(
+    scope: &overrides_storage::OverrideScope,
+    role: crate::auth::Role,
+) -> ApiResult<()> {
+    if role == crate::auth::Role::Admin
+        || (scope.role == overrides_storage::OverrideRole::Page
+            && scope.scope_type_key.as_deref() == Some("page")
+            && scope.scope_entry_id.is_some())
+    {
+        return Ok(());
+    }
+    Err(ApiError::forbidden(
+        "Editor chỉ được chỉnh layout của Page cụ thể; template dùng chung cần Admin.",
+    ))
 }
 
 #[cfg(test)]

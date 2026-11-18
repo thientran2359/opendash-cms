@@ -22,19 +22,18 @@ use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::{require_admin, require_admin_with_csrf},
+    auth::{Role, require_admin, require_admin_with_csrf, require_session},
     error::{ApiError, ApiResult},
     package::{V2ZipError, is_valid_zip_content_type, validate_v2_relative_path},
     storage::{
         page::insert_theme_block,
+        sections,
         theme::{
             self, ActivationOutcome, RevisionActivationOutcome, RevisionInstallOutcome, ThemeItem,
             ThemeList, ThemeRevisionRecord,
         },
     },
-    theme::{
-        Theme, is_v2_theme_zip, parse_theme_zip_v2, theme_asset_mime,
-    },
+    theme::{Theme, is_v2_theme_zip, parse_theme_zip_v2, theme_asset_mime},
 };
 
 static RUN_SEQ: AtomicU64 = AtomicU64::new(1);
@@ -84,6 +83,97 @@ fn headers(version: Option<i64>) -> HeaderMap {
 
 fn response(value: ThemeList) -> Response {
     (headers(Some(value.version)), Json(value)).into_response()
+}
+
+/// #356: site-local pattern catalog. An Editor can discover only canonical
+/// private Section metadata; theme/provider descriptors remain Admin-only.
+/// Individual Section ASTs are still obtained through the scoped authenticated
+/// Section document API, never embedded in a list response.
+pub async fn local_library_list(
+    State(db): State<SqlitePool>,
+    Extension(themes_root): Extension<ThemeStoreRoot>,
+    request_headers: HeaderMap,
+) -> ApiResult<Response> {
+    let actor = require_session(&request_headers, &db).await?;
+    let sections = sections::list(&db).await?;
+    let templates = if actor.user.role == Role::Admin {
+        theme::list_local_theme_templates(&db, &themes_root.0).await?
+    } else {
+        theme::LocalThemeCatalog {
+            active_theme_id: None,
+            theme_state: "admin_only",
+            theme_templates: vec![],
+        }
+    };
+    Ok((
+        headers(None),
+        Json(serde_json::json!({
+            "sections": sections,
+            "theme_templates": templates.theme_templates,
+            "theme_state": templates.theme_state,
+            "active_theme_id": templates.active_theme_id,
+        })),
+    )
+        .into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocalTemplateApplyInput {
+    confirm: bool,
+    revision_id: String,
+    revision_digest: String,
+}
+
+/// Confirmed global override reset guarded by BOTH the override ETag and the
+/// exact active theme revision. A theme switch must not change which template
+/// a confirmation applies; Editors can neither read nor mutate this route.
+pub async fn local_library_apply(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    Extension(themes_root): Extension<ThemeStoreRoot>,
+    request_headers: HeaderMap,
+    Path(role): Path<String>,
+    Json(body): Json<LocalTemplateApplyInput>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&request_headers, &db).await?;
+    if !body.confirm {
+        return Err(ApiError::bad_request("Áp dụng template cần confirm=true."));
+    }
+    let version = request_headers
+        .get(header::IF_MATCH)
+        .ok_or_else(|| ApiError::precondition_required("Cần If-Match để áp dụng template."))?
+        .to_str()
+        .map_err(|_| ApiError::bad_request("If-Match không hợp lệ."))?
+        .strip_prefix("\"v")
+        .and_then(|s| s.strip_suffix('"'))
+        .and_then(|s| s.parse::<i64>().ok())
+        .filter(|v| *v >= 0)
+        .ok_or_else(|| ApiError::bad_request("If-Match phải có dạng \"vN\"."))?;
+    let catalog = theme::list_local_theme_templates(&db, &themes_root.0).await?;
+    if !catalog.theme_templates.iter().any(|item| {
+        item.role == role
+            && item.can_apply
+            && item.revision_id == body.revision_id
+            && item.revision_digest == body.revision_digest
+    }) {
+        return Err(ApiError::precondition_failed(
+            "Template theme không còn khả dụng hoặc đã thay đổi.",
+        ));
+    }
+    let reset = theme::reset_local_template_override_if_active(
+        &db,
+        &role,
+        version,
+        &body.revision_id,
+        &body.revision_digest,
+    )
+    .await?;
+    Ok((
+        headers(None),
+        Json(serde_json::json!({ "reset": reset, "role": role })),
+    )
+        .into_response())
 }
 
 fn parse_version(headers: &HeaderMap) -> ApiResult<i64> {
@@ -202,6 +292,9 @@ pub async fn theme_install(
         compatible_block_id: data.compatible_block_id.clone(),
     };
     insert_theme_block(&db, &data).await?;
+    // 0015 only backfills blocks present *at migration time*. Preserve the
+    // legacy ZIP install→list→CAS activation workflow for subsequent installs.
+    theme::register_installed_legacy_block(&db, &item.id).await?;
     Ok((StatusCode::CREATED, headers(None), Json(item)).into_response())
 }
 
@@ -211,7 +304,13 @@ pub async fn theme_activate(
     Extension(themes_root): Extension<ThemeStoreRoot>,
     request_headers: HeaderMap,
     State(content_registry): State<
-        Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>,
+        Arc<
+            tokio::sync::RwLock<
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
+            >,
+        >,
     >,
     input: Result<Json<ActivateInput>, JsonRejection>,
 ) -> ApiResult<Response> {
@@ -238,8 +337,7 @@ pub async fn theme_activate(
                 &rev.manifest_json,
             )
             .await?;
-            match theme::activate_revision(&db, &themes_root.0, &revision_id, Some(version))
-                .await?
+            match theme::activate_revision(&db, &themes_root.0, &revision_id, Some(version)).await?
             {
                 RevisionActivationOutcome::Activated(selection) => {
                     *content_registry.write().await =
@@ -249,9 +347,9 @@ pub async fn theme_activate(
                 RevisionActivationOutcome::NotFound => {
                     Err(ApiError::not_found("Revision theme chưa được cài đặt."))
                 }
-                RevisionActivationOutcome::MissingExpectedVersion => {
-                    Err(ApiError::precondition_required("Cần If-Match để kích hoạt theme."))
-                }
+                RevisionActivationOutcome::MissingExpectedVersion => Err(
+                    ApiError::precondition_required("Cần If-Match để kích hoạt theme."),
+                ),
                 RevisionActivationOutcome::Stale => Err(ApiError::precondition_failed(
                     "Theme đã thay đổi ở phiên khác (412). Tải lại trạng thái trước khi thử tiếp.",
                 )),

@@ -16,3 +16,9 @@ Mỗi hàng `M5-Pxx` là **task candidate**, không phải G3 approved hoặc Is
 | M5-P10 | **Theme ZIP declarations CPT/fields/taxonomy** qua canonical domain registry (không dùng plugin bridge) | THM-01 (CNT-01/02/03, FND-01) | P01, M3 core CPT/fields, M4-P09/P10 taxonomy; Full-Track G2 schema/namespace/owner/version/atomic rollback | Theme ZIP declare CPT/fields/taxonomy hợp lệ → register dưới owner theme qua core API; invalid/collision bị từ chối; disable/switch/update/restart không xóa schema/terms/entry site-owned, editor vẫn sửa được; re-activate idempotent |
 
 **Ranh giới:** General Settings và theme ZIP/list/activate cơ bản đã là M3, không làm lại M5. M5-P09 chỉ tạo **menu model/storage tối thiểu** để import mẫu an toàn; **M7-P02** mới có CRUD/navigation builder/binding. M5-P10 xử lý **declarations từ theme ZIP**, độc lập **PLG-03 plugin provider bridge ở M6**, cùng tuân canonical CNT schema/ownership. Theme Options/templates/import/update thuộc M5; SEO/navigation UI nâng cao M7, plugin manifest blocks/templates/settings M6. Không tự coi G2 schema/API đã duyệt từ task candidate.
+
+## Owner review notes01–07 — 17/11/2026
+
+[Harbor follow-up G3](slices/2026-11-17-owner-admin-review-g3.md) covers the bounded
+Admin delta under [ADR-0018](../../../decisions/ADR-0018-owner-admin-review.md).
+PLANNED, not Project Ready or runtime VERIFIED. See shared serial delivery order.

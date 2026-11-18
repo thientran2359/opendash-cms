@@ -3,6 +3,9 @@ import {
   CompositeEntrySaveResult,
   ContentEntryInput,
   ContentEntryRecord,
+  EntryTableQuery,
+  EntryTableResult,
+  EntryTableRow,
   ContentTypeDefinition,
   EditorLayoutConfigV1,
   EditorLayoutSnapshot,
@@ -13,6 +16,7 @@ import {
 } from '../features/content/types.ts';
 import { requestJson, requestText } from './client.ts';
 import { appendEntryTermFilters, type EntryTermFilters } from './taxonomy.ts';
+import type { EffectiveListConfig } from '../features/extensions/AdminContributionRenderer.tsx';
 
 const contentTypePath = (key: string): string =>
   `/api/admin/content-types/${encodeURIComponent(key)}`;
@@ -140,6 +144,63 @@ export function listContentEntries(
   appendEntryTermFilters(query, filters);
   return requestJson(`${entriesPath(typeKey)}?${query}`, {
     defaultErrorMessage: 'Không thể tải danh sách nội dung.',
+  });
+}
+
+/** The old entries API stays a bare array; table clients use this new endpoint. */
+export function queryContentEntryTable(typeKey: string, filter: EntryTableQuery = {}, signal?: AbortSignal): Promise<EntryTableResult> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filter)) {
+    if (value !== undefined && value !== null) query.set(key, String(value));
+  }
+  return requestJson(`${contentTypePath(typeKey)}/entry-table?${query}`, {
+    signal,
+    defaultErrorMessage: 'Không thể tải bảng nội dung.',
+  });
+}
+
+export function getEffectiveEntryListConfig(typeKey: string, signal?: AbortSignal): Promise<EffectiveListConfig> {
+  return requestJson(`${contentTypePath(typeKey)}/effective-list-config`, {
+    signal,
+    defaultErrorMessage: 'Không thể tải cấu hình cột provider hiệu lực.',
+  });
+}
+
+export function runEntryProviderAction(
+  typeKey: string,
+  row: EntryTableRow,
+  providerId: string,
+  actionId: string,
+  csrfToken: string,
+): Promise<{ success: boolean; data: unknown; error?: string | null }> {
+  return requestJson(
+    `${entryPath(typeKey, row.id)}/admin-actions/${encodeURIComponent(providerId)}/${encodeURIComponent(actionId)}`,
+    { method: 'POST', csrfToken, ifMatchVersion: row.version,
+      defaultErrorMessage: 'Không thể chạy action provider.' },
+  );
+}
+
+export interface ContentTypeTaxonomyEligibility {
+  content_type_key: string;
+  taxonomy_kind: 'category' | 'tag';
+  provider_status: string;
+  declaration_state: string;
+}
+
+export function listContentTypeTaxonomyEligibility(typeKey: string, signal?: AbortSignal): Promise<ContentTypeTaxonomyEligibility[]> {
+  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
+    signal,
+    defaultErrorMessage: 'Không thể kiểm tra taxonomy hiệu lực.',
+  });
+}
+
+export function changeContentEntryPublication(
+  typeKey: string, id: number, version: number, status: 'draft' | 'published', csrfToken: string,
+): Promise<ContentEntryRecord> {
+  return requestJson(`${entryPath(typeKey, id)}/publication`, {
+    method: 'POST', csrfToken, ifMatchVersion: version,
+    contentType: 'application/json', body: JSON.stringify({ status }),
+    defaultErrorMessage: 'Không thể thay đổi trạng thái xuất bản.',
   });
 }
 

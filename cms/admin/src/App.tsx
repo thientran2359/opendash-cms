@@ -25,6 +25,41 @@ import { ReconcilePanel } from './features/operations/ReconcilePanel.tsx';
 import { BackupsPanel } from './features/operations/BackupsPanel.tsx';
 import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
+import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
+import { SectionsPage } from './features/sections/SectionsPage.tsx';
+import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
+
+const HISTORY_INDEX = '__openDashAdminHistoryIndex';
+
+function draftUuidFromHash(hash: string): string | null {
+  const param = new URLSearchParams(hash.split('?')[1] ?? '').get('draft');
+  return param && /^[a-zA-Z0-9_-]{8,64}$/.test(param) ? param : null;
+}
+
+function normalizeEditorHash(hash: string): string {
+  const normalized = hash.startsWith('#') ? hash : '#' + hash;
+  if (!/^#\/(posts|pages|cpt\/[a-zA-Z0-9_-]+)\/new(?:\?|$)/.test(normalized)) return normalized;
+  if (draftUuidFromHash(normalized)) return normalized;
+  const [path, search] = normalized.split('?');
+  const params = new URLSearchParams(search ?? '');
+  // A URL identity, not draft data: new Post/Page/CPT forms never collide.
+  params.set('draft', `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`);
+  return `${path}?${params.toString()}`;
+}
+
+function editorIdentity(route: ParsedRoute, hash: string): string | null {
+  if (!['posts', 'pages', 'cpt'].includes(route.view) || !['edit', 'new'].includes(route.sub)) return null;
+  const typeKey = route.view === 'posts' ? 'post' : route.view === 'pages' ? 'page' : route.typeKey;
+  if (!typeKey) return null;
+  if (route.sub === 'edit' && route.entryId != null) return `${typeKey}:${route.entryId}`;
+  const uuid = draftUuidFromHash(hash);
+  return uuid ? `${typeKey}:new:${uuid}` : null;
+}
+
+function builderIdentity(route: ParsedRoute): string | null {
+  if (route.view !== 'builder') return null;
+  return `${route.sub}:${route.templateRole ?? 'homepage'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
+}
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -41,7 +76,27 @@ export const App: React.FC = () => {
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
+  const [sectionsDirty, setSectionsDirty] = useState(false);
+  const sectionsDirtyRef = useRef(false);
+  const markSectionsDirty = (value: boolean) => { sectionsDirtyRef.current = value; setSectionsDirty(value); };
+  const [termDirty, setTermDirty] = useState(false);
+  const termDirtyRef = useRef(false);
+  const markTermDirty = (next: boolean) => {
+    termDirtyRef.current = next;
+    setTermDirty(next);
+  };
   const [contentRevision, setContentRevision] = useState(0);
+  const acceptedHashRef = useRef(window.location.hash || '#/dashboard');
+  const historyIndexRef = useRef(0);
+  const undoingHistoryRef = useRef(false);
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const builderDirtyRef = useRef(builderDirty);
+  builderDirtyRef.current = builderDirty;
+  const lastBuilderRouteRef = useRef<ParsedRoute>(parseAdminRoute('#/builder'));
+  if (route.view === 'builder') lastBuilderRouteRef.current = route;
 
   // Auth inputs
   const [authUsername, setAuthUsername] = useState<string>('');
@@ -73,43 +128,114 @@ export const App: React.FC = () => {
     }
   }, []);
 
+  const applyAcceptedRoute = (hash: string) => {
+    const requested = parseAdminRoute(hash, window.location.pathname);
+    const next = { ...requested, rawHash: hash };
+    acceptedHashRef.current = hash;
+    routeRef.current = next;
+    setRoute(next);
+    if (requested.view === 'settings' && requested.sub === 'content-types' && requested.typeKey) {
+      setSelectedSchemaTypeKey(requested.typeKey);
+    }
+  };
+
+  const mayLeave = (destination: string): boolean => {
+    if (!userRef.current || acceptedHashRef.current === destination) return true;
+    const current = routeRef.current;
+    const next = parseAdminRoute(destination, window.location.pathname);
+    const currentEditor = editorIdentity(current, acceptedHashRef.current);
+    const nextEditor = editorIdentity(next, destination);
+    const leavingDirtyEditor = currentEditor !== null && currentEditor !== nextEditor &&
+      editorDraftStore.hasDirtyKey(currentEditor);
+    const switchingBuilderTarget = current.view === 'builder'
+      && builderIdentity(current) !== builderIdentity(next);
+    const leavingBuilder = switchingBuilderTarget && builderDirtyRef.current;
+    const leavingSection = current.view === 'sections' && current.rawHash !== destination && sectionsDirtyRef.current;
+    const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
+      && termDirtyRef.current && acceptedHashRef.current !== destination;
+    return !(leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection) ||
+      window.confirm(switchingBuilderTarget
+        ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
+        : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
+  };
+
   useEffect(() => {
-    const synchronize = () => {
-      const requested = parseAdminRoute(window.location.hash, window.location.pathname);
-      if (user && requested.isLegacyContentRedirect) {
-        const targetHash = user.role === 'admin' ? '#/settings/content-types' : '#/posts';
-        window.history.replaceState(null, '', window.location.pathname + window.location.search + targetHash);
-        setRoute(parseAdminRoute(targetHash, window.location.pathname));
+    const currentIndex = window.history.state?.[HISTORY_INDEX];
+    historyIndexRef.current = Number.isSafeInteger(currentIndex) ? currentIndex : 0;
+    window.history.replaceState({ ...(window.history.state ?? {}), [HISTORY_INDEX]: historyIndexRef.current }, '');
+
+    const synchronize = (event?: Event) => {
+      if (undoingHistoryRef.current) {
+        if (window.location.hash === acceptedHashRef.current) undoingHistoryRef.current = false;
         return;
       }
-      setRoute(requested);
-      if (requested.view === 'settings' && requested.sub === 'content-types' && requested.typeKey) {
-        setSelectedSchemaTypeKey(requested.typeKey);
+      let target = normalizeEditorHash(window.location.hash || '#/dashboard');
+      const requested = parseAdminRoute(target, window.location.pathname);
+      if (userRef.current && requested.isLegacyContentRedirect) {
+        target = userRef.current.role === 'admin' ? '#/appearance/content-types' : '#/posts';
       }
+      if (target === acceptedHashRef.current && event) return;
+      if (!mayLeave(target)) {
+        const incomingIndex = window.history.state?.[HISTORY_INDEX];
+        const delta = Number.isSafeInteger(incomingIndex) ? historyIndexRef.current - incomingIndex : 0;
+        if (event?.type === 'popstate' && delta !== 0) {
+          undoingHistoryRef.current = true;
+          window.history.go(delta);
+        } else if (event?.type === 'popstate' && !Number.isSafeInteger(incomingIndex)) {
+          // A direct location.hash assignment creates a new history entry
+          // with null state. Undo that entry, never overwrite its destination.
+          undoingHistoryRef.current = true;
+          window.history.back();
+        } else if (event?.type === 'hashchange') {
+          undoingHistoryRef.current = true;
+          window.history.back();
+        } else {
+          window.history.replaceState({ ...(window.history.state ?? {}), [HISTORY_INDEX]: historyIndexRef.current }, '',
+            window.location.pathname + window.location.search + acceptedHashRef.current);
+        }
+        return;
+      }
+      const incomingIndex = window.history.state?.[HISTORY_INDEX];
+      if (event?.type === 'popstate' && Number.isSafeInteger(incomingIndex)) {
+        historyIndexRef.current = incomingIndex;
+      } else if (target !== acceptedHashRef.current && event) {
+        historyIndexRef.current += 1;
+      }
+      // Also stamp popstate entries with null state. Without this the next
+      // rejected Back/Forward cannot compute the inverse history delta.
+      window.history.replaceState({ ...(window.history.state ?? {}), [HISTORY_INDEX]: historyIndexRef.current }, '',
+        window.location.pathname + window.location.search + target);
+      applyAcceptedRoute(target);
     };
     synchronize();
     window.addEventListener('hashchange', synchronize);
-    return () => window.removeEventListener('hashchange', synchronize);
+    window.addEventListener('popstate', synchronize);
+    return () => {
+      window.removeEventListener('hashchange', synchronize);
+      window.removeEventListener('popstate', synchronize);
+    };
   }, [user?.role]);
 
   useEffect(() => {
-    if (!(builderDirty || contentDirty || postsDirty || pagesDirty)) return;
     const guard = (event: BeforeUnloadEvent) => {
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [builderDirty, contentDirty, postsDirty, pagesDirty]);
+  }, [contentDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
 
   const navigateHash = (hash: string) => {
-    if (!user) return;
-    const normalized = hash.startsWith('#') ? hash : '#' + hash;
-    if (window.location.hash !== normalized) {
-      window.location.hash = normalized.slice(1);
-    } else {
-      setRoute(parseAdminRoute(normalized, window.location.pathname));
+    if (!userRef.current) return;
+    const target = normalizeEditorHash(hash);
+    if (!mayLeave(target)) return;
+    if (window.location.hash !== target) {
+      historyIndexRef.current += 1;
+      window.history.pushState({ ...(window.history.state ?? {}), [HISTORY_INDEX]: historyIndexRef.current }, '',
+        window.location.pathname + window.location.search + target);
     }
+    applyAcceptedRoute(target);
   };
 
   const setStatus = (msg: string, error: boolean = false) => {
@@ -191,11 +317,15 @@ export const App: React.FC = () => {
       if (res.site_instance_id && res.site_instance_id !== siteInstanceId) {
         editorDraftStore.clear();
         setSiteInstanceId(res.site_instance_id);
+        setBuilderReset(value => value + 1);
+        setBuilderDirty(false);
+        markSectionsDirty(false);
       } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         editorDraftStore.clear();
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
+        markSectionsDirty(false);
       } else {
         setAuthGeneration(g => g + 1);
       }
@@ -219,7 +349,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((contentDirty || builderDirty || postsDirty || pagesDirty) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -241,10 +371,13 @@ export const App: React.FC = () => {
       setBuilderDirty(false);
       setPostsDirty(false);
       setPagesDirty(false);
+      markSectionsDirty(false);
+      markTermDirty(false);
       lastAuthenticatedUserId.current = null;
       setRoute(parseAdminRoute('#/dashboard', window.location.pathname));
       setCptTypes([]);
       window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
+      acceptedHashRef.current = '#/dashboard';
       setStatus('Đã đăng xuất.', false);
     } catch (err) {
       handleApiError(err, 'Lỗi khi đăng xuất.');
@@ -254,6 +387,7 @@ export const App: React.FC = () => {
   };
 
   const handleOwnAccountChanged = () => {
+    editorDraftStore.quarantineAll();
     setUser(null);
     setCsrfToken(null);
     setAuthPassword('');
@@ -356,25 +490,35 @@ export const App: React.FC = () => {
       cptTypes={cptTypes}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty}
+      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
       sidebarContent={<BuilderWorkspace
+        key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
+        route={lastBuilderRouteRef.current}
+        active={route.view === 'builder' && isRouteAllowed(route, user?.role ?? 'editor')}
+        onNavigateHash={navigateHash}
         user={user} csrfToken={csrfToken} resetToken={builderReset} themeRevision={themeRevision}
         onDirtyChange={setBuilderDirty} onApiError={handleApiError}
       />}
       previewContent={null}
-      themesContent={<>
-        <ThemesPanel csrfToken={csrfToken} onApiError={handleApiError}
-          onInstalled={() => setThemeRevision(value => value + 1)}
-          onActivated={() => setThemeRevision(value => value + 1)}
-        />
-        <MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />
-      </>}
+      themesContent={<ThemesPanel mode="themes" csrfToken={csrfToken} onApiError={handleApiError}
+        onInstalled={() => setThemeRevision(value => value + 1)}
+        onActivated={() => setThemeRevision(value => value + 1)}
+      />}
+      menusContent={<MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />}
+      themeOptionsContent={<ThemesPanel mode="options" csrfToken={csrfToken} onApiError={handleApiError}
+        onInstalled={() => setThemeRevision(value => value + 1)}
+        onActivated={() => setThemeRevision(value => value + 1)}
+      />}
+      libraryContent={<TemplateLibraryPage key={`${siteInstanceId}:${user?.id ?? 'none'}:${user?.role ?? 'none'}`}
+        user={user} csrfToken={csrfToken} themeRevision={themeRevision}
+        onApiError={handleApiError} onNavigateHash={navigateHash}
+        onApplied={() => { setThemeRevision(v => v + 1); setBuilderReset(v => v + 1); }} />}
       schemaSettingsContent={
         <ContentTypeSchemaSettings
           selectedTypeKey={selectedSchemaTypeKey}
           onSelectTypeKey={key => {
             setSelectedSchemaTypeKey(key);
-            if (key) navigateHash(`#/settings/content-types/${key}`);
+            if (key) navigateHash(`#/appearance/content-types/${key}`);
           }}
           csrfToken={csrfToken}
           onApiError={handleApiError}
@@ -392,26 +536,33 @@ export const App: React.FC = () => {
           }}
         />
       }
-      toolsContent={<>
-        <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi sao lưu mã hóa.')} />
-        <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi khôi phục & safe mode.')} />
-        <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
-        <div className="mt-8 border-t border-slate-200 pt-6"><SystemStatus /></div>
-      </>}
-      settingsContent={<>
-        <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
-        <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
-        <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
-        <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cấu hình SMTP.')} />
-      </>}
+      toolsContent={route.sub === 'backup'
+        ? <>
+            <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi sao lưu mã hóa.')} />
+            <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi khôi phục & safe mode.')} />
+          </>
+        : route.sub === 'media-reconcile'
+          ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
+          : route.sub === 'health' ? <SystemStatus /> : null}
+      settingsContent={route.sub === 'general'
+        ? <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        : route.sub === 'seo'
+          ? <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
+          : route.sub === 'contact'
+            ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
+            : route.sub === 'smtp'
+              ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cấu hình SMTP.')} />
+              : null}
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}
+        mode={route.view === 'users' && route.sub === 'new' ? 'new' : 'list'}
         csrfToken={csrfToken}
         currentUserId={accountContextId}
         onApiError={handleApiError}
         onOwnAccountChanged={handleOwnAccountChanged}
       />}
       pluginsContent={<PluginsPanel
+        mode={route.view === 'plugins' && route.sub === 'install' ? 'install' : 'list'}
         plugins={plugins}
         selectedPluginId={selectedPluginId}
         pluginInputJson={pluginInputJson}
@@ -425,6 +576,7 @@ export const App: React.FC = () => {
         onRunPlugin={handleRunPlugin}
         csrfToken={csrfToken}
         onUnauthorized={() => {
+          editorDraftStore.quarantineAll();
           setUser(null);
           setCsrfToken(null);
         }}
@@ -439,6 +591,9 @@ export const App: React.FC = () => {
             user={user}
             siteInstanceId={siteInstanceId}
             authGeneration={authGeneration}
+            draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
+            routeHash={route.rawHash}
+            isActive={route.view === 'cpt'}
             csrfToken={csrfToken}
             onApiError={handleApiError}
             onDirtyChange={setContentDirty}
@@ -455,6 +610,9 @@ export const App: React.FC = () => {
           user={user}
           siteInstanceId={siteInstanceId}
           authGeneration={authGeneration}
+          draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
+          routeHash={route.view === 'posts' ? route.rawHash : '#/posts'}
+          isActive={route.view === 'posts'}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onDirtyChange={setPostsDirty}
@@ -470,14 +628,28 @@ export const App: React.FC = () => {
           user={user}
           siteInstanceId={siteInstanceId}
           authGeneration={authGeneration}
+          draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
+          routeHash={route.view === 'pages' ? route.rawHash : '#/pages'}
+          isActive={route.view === 'pages'}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onDirtyChange={setPagesDirty}
           onNavigateHash={navigateHash}
         />
       }
+      sectionsContent={
+        <SectionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}:${user?.role ?? 'none'}`}
+          route={route} user={user} csrfToken={csrfToken} onApiError={handleApiError}
+          onDirtyChange={markSectionsDirty} onNavigateHash={navigateHash} />
+      }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
-      taxonomyContent={<TaxonomyPage user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
+      taxonomyContent={route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
+        ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
+            kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
+            termId={route.entryId ?? null} user={user} csrfToken={csrfToken}
+            onApiError={handleApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
+        : <TaxonomyPage kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
+            onApiError={handleApiError} onNavigateHash={navigateHash} />}
     />
   );
 };

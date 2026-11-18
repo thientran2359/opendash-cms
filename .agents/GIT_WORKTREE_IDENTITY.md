@@ -11,6 +11,7 @@ và [agents.yaml](agents.yaml).
 | Agent | Máy/công cụ | `user.name` kỳ vọng |
 | --- | --- | --- |
 | Atlas | Codex Windows | `Atlas` |
+| Aster | Codex macOS | `Aster` |
 | Nova | Antigravity Windows | `Nova` |
 | Forge | CoS Windows | `Forge` |
 | Harbor | CoS macOS | `Harbor` |

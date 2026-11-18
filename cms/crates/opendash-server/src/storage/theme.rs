@@ -108,6 +108,16 @@ pub struct ThemeItem {
     pub compatible_block_id: Option<String>,
 }
 
+/// Admin-only projection: never serialize manifest, path, provenance or file-map metadata.
+#[derive(Debug, Serialize)]
+pub struct ThemeRevisionSummary {
+    pub revision_id: String,
+    pub theme_id: String,
+    pub version: String,
+    pub revision_digest: String,
+    pub source_format: ThemeSourceFormat,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ThemeList {
     pub items: Vec<ThemeItem>,
@@ -115,6 +125,8 @@ pub struct ThemeList {
     pub version: i64,
     /// Null means no saved homepage or no explicit activation.
     pub homepage_compatible: Option<bool>,
+    pub revisions: Vec<ThemeRevisionSummary>,
+    pub selection: ActiveThemeSelection,
 }
 
 pub enum ActivationOutcome {
@@ -237,15 +249,17 @@ pub fn ensure_themes_layout_and_quarantine_stale(themes_root: &Path) -> ApiResul
     let entries = fs::read_dir(&staging)
         .map_err(|_| ApiError::internal("Không thể đọc thư mục themes/.staging."))?;
     for entry in entries {
-        let entry = entry
-            .map_err(|_| ApiError::internal("Không thể duyệt thư mục themes/.staging."))?;
+        let entry =
+            entry.map_err(|_| ApiError::internal("Không thể duyệt thư mục themes/.staging."))?;
         let path = entry.path();
         if path.is_dir() {
-            fs::remove_dir_all(&path)
-                .map_err(|_| ApiError::internal("Không thể dọn staging cũ trong themes/.staging."))?;
+            fs::remove_dir_all(&path).map_err(|_| {
+                ApiError::internal("Không thể dọn staging cũ trong themes/.staging.")
+            })?;
         } else {
-            fs::remove_file(&path)
-                .map_err(|_| ApiError::internal("Không thể dọn file staging cũ trong themes/.staging."))?;
+            fs::remove_file(&path).map_err(|_| {
+                ApiError::internal("Không thể dọn file staging cũ trong themes/.staging.")
+            })?;
         }
         cleaned += 1;
     }
@@ -260,7 +274,9 @@ pub fn verify_revision_durability(
     if revision.source_format == ThemeSourceFormat::V1Legacy {
         return RevisionDurabilityStatus::Valid;
     }
-    let rev_dir = themes_root.join("revisions").join(&revision.revision_digest);
+    let rev_dir = themes_root
+        .join("revisions")
+        .join(&revision.revision_digest);
     if !rev_dir.is_dir() {
         return RevisionDurabilityStatus::MissingDirectory;
     }
@@ -286,7 +302,11 @@ pub fn verify_revision_durability(
     RevisionDurabilityStatus::Valid
 }
 
-fn dir_matches_revision(rev_dir: &Path, digest: &str, file_digests: &BTreeMap<String, String>) -> bool {
+fn dir_matches_revision(
+    rev_dir: &Path,
+    digest: &str,
+    file_digests: &BTreeMap<String, String>,
+) -> bool {
     let marker_path = rev_dir.join(COMPLETE_MARKER);
     let Ok(marker) = fs::read_to_string(&marker_path) else {
         return false;
@@ -419,6 +439,26 @@ pub async fn stage_and_commit_v2_revision(
     provenance_json: &str,
     files: &BTreeMap<String, Vec<u8>>,
 ) -> ApiResult<RevisionInstallOutcome> {
+    // The same bounded manifest is validated by the ZIP parser. A direct
+    // storage caller is still checked before revision filesystem publication.
+    let raw_manifest: serde_json::Value = serde_json::from_str(manifest_json)
+        .map_err(|_| ApiError::bad_request("Theme manifest JSON không hợp lệ."))?;
+    let installed_ext: Option<opendash_core::admin_extensions::AdminExtensions> = raw_manifest
+        .get("admin_extensions")
+        .cloned()
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|_| ApiError::bad_request("Theme admin_extensions không hợp lệ."))?;
+    if let Some(ext) = &installed_ext {
+        ext.validate("theme", &[]).map_err(ApiError::bad_request)?;
+    }
+    crate::storage::admin_extensions::require_capacity(
+        db,
+        "theme",
+        theme_id,
+        installed_ext.as_ref(),
+    )
+    .await?;
     if !valid_v2_theme_id(theme_id) {
         return Err(ApiError::bad_request(
             "theme_id v2 phải là lowercase kebab-case (1–64 ký tự) và không dùng tiền tố legacy.",
@@ -504,7 +544,9 @@ pub async fn stage_and_commit_v2_revision(
         })();
         if let Err(err) = write_marker {
             eprintln!("Theme .complete marker error: {err}");
-            return Err(ApiError::internal("Không thể ghi marker .complete cho revision."));
+            return Err(ApiError::internal(
+                "Không thể ghi marker .complete cho revision.",
+            ));
         }
     }
 
@@ -581,15 +623,20 @@ pub async fn stage_and_commit_v2_revision(
 }
 
 pub async fn get_active_selection(db: &SqlitePool) -> ApiResult<ActiveThemeSelection> {
-    let row: (Option<String>, Option<String>, i64, Option<String>, Option<String>) =
-        sqlx::query_as(
-            "SELECT a.revision_id, r.theme_id, a.version, r.legacy_block_id, r.source_format
+    let row: (
+        Option<String>,
+        Option<String>,
+        i64,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT a.revision_id, r.theme_id, a.version, r.legacy_block_id, r.source_format
              FROM theme_active_selection a
              LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
              WHERE a.id = 1",
-        )
-        .fetch_one(db)
-        .await?;
+    )
+    .fetch_one(db)
+    .await?;
     let source_format = row
         .4
         .as_deref()
@@ -613,16 +660,72 @@ pub async fn list_packages(db: &SqlitePool) -> ApiResult<Vec<ThemePackageRecord>
     .fetch_all(db)
     .await?;
     rows.into_iter()
-        .map(|(theme_id, display_name, source_format, is_legacy, created_at)| {
-            Ok(ThemePackageRecord {
-                theme_id,
-                display_name,
-                source_format: ThemeSourceFormat::from_db(&source_format)?,
-                is_legacy: is_legacy != 0,
-                created_at,
-            })
-        })
+        .map(
+            |(theme_id, display_name, source_format, is_legacy, created_at)| {
+                Ok(ThemePackageRecord {
+                    theme_id,
+                    display_name,
+                    source_format: ThemeSourceFormat::from_db(&source_format)?,
+                    is_legacy: is_legacy != 0,
+                    created_at,
+                })
+            },
+        )
         .collect()
+}
+
+/// Make new v1 ZIP installs visible to the canonical M5 selection pointer.
+/// Migration 0015 creates these identity rows for *existing* legacy blocks;
+/// installs after migration need the same deterministic reserved mapping.
+/// Only call after the existing legacy validation and block insert succeeded.
+pub async fn register_installed_legacy_block(db: &SqlitePool, block_id: &str) -> ApiResult<()> {
+    let mut encoded = String::with_capacity(block_id.len() * 2);
+    for byte in block_id.bytes() {
+        use std::fmt::Write as _;
+        let _ = write!(&mut encoded, "{byte:02x}");
+    }
+    let theme_id = format!("legacy-v1-{encoded}");
+    let revision_id = format!("rev-legacy-v1-{encoded}");
+    let mut tx = db.begin().await?;
+    sqlx::query(
+        "INSERT INTO theme_packages (theme_id, display_name, source_format, is_legacy)
+         VALUES (?, ?, 'v1_legacy', 1)",
+    )
+    .bind(&theme_id)
+    .bind(block_id)
+    .execute(&mut *tx)
+    .await?;
+    let inserted = sqlx::query(
+        "INSERT INTO theme_revisions (
+            revision_id, theme_id, version, revision_digest, source_format,
+            manifest_json, file_digests_json, legacy_block_id, provenance_json
+         ) SELECT ?, ?, '1.0.0-legacy', ?, 'v1_legacy',
+             json_object('legacy_block_id', id, 'compatible_block_id', compatible_block_id,
+                         'fields_json', fields_json), '{}', id,
+             json_object('installed_via', 'admin_upload', 'block_id', id)
+           FROM theme_blocks WHERE id = ?",
+    )
+    .bind(&revision_id)
+    .bind(&theme_id)
+    .bind(&theme_id)
+    .bind(block_id)
+    .execute(&mut *tx)
+    .await?;
+    if inserted.rows_affected() != 1 {
+        return Err(ApiError::internal(
+            "Legacy block vừa cài không có trong DB.",
+        ));
+    }
+    sqlx::query(
+        "INSERT INTO theme_legacy_mappings (block_id, theme_id, revision_id) VALUES (?, ?, ?)",
+    )
+    .bind(block_id)
+    .bind(&theme_id)
+    .bind(&revision_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 pub async fn list_revisions(
@@ -672,6 +775,15 @@ pub async fn activate_revision(
     } else {
         crate::theme::ThemeDeclarations::default()
     };
+    let extension_manifest: serde_json::Value = serde_json::from_str(&revision.manifest_json)
+        .map_err(|_| ApiError::internal("Theme manifest của revision bị hỏng."))?;
+    let extension_decls: Option<opendash_core::admin_extensions::AdminExtensions> =
+        extension_manifest
+            .get("admin_extensions")
+            .cloned()
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|_| ApiError::internal("Admin extensions theme revision bị hỏng."))?;
     let durability = verify_revision_durability(themes_root, &revision);
     if durability != RevisionDurabilityStatus::Valid {
         return Ok(RevisionActivationOutcome::CorruptRevision(durability));
@@ -679,10 +791,41 @@ pub async fn activate_revision(
 
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
-    if let Err(err) =
-        crate::storage::content::sync_theme_declarations_in_tx(&mut conn, &revision.theme_id, &declarations)
-            .await
+    if let Err(err) = crate::storage::content::sync_theme_declarations_in_tx(
+        &mut conn,
+        &revision.theme_id,
+        &declarations,
+    )
+    .await
     {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+        return Err(err);
+    }
+    let extension_update = async {
+        crate::storage::admin_extensions::require_capacity_in_conn(
+            &mut conn,
+            "theme",
+            &revision.theme_id,
+            extension_decls.as_ref(),
+        )
+        .await?;
+        crate::storage::admin_extensions::sync_owner_in_conn(
+            &mut conn,
+            "theme",
+            &revision.theme_id,
+            extension_decls.as_ref(),
+            "active",
+            &[],
+        )
+        .await?;
+        crate::storage::admin_extensions::set_theme_active_in_conn(
+            &mut conn,
+            Some(&revision.theme_id),
+        )
+        .await
+    }
+    .await;
+    if let Err(err) = extension_update {
         let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
         return Err(err);
     }
@@ -720,6 +863,158 @@ pub struct ActiveV2RoleTemplates {
     pub roles: BTreeMap<String, String>,
 }
 
+/// Read-only descriptors for the *active*, locally durable theme revision.
+/// Never serialize installed HTML/templates/manifest or arbitrary filesystem
+/// paths into the Admin library catalog.
+#[derive(Debug, Serialize)]
+pub struct LocalThemeTemplateDescriptor {
+    pub role: String,
+    pub theme_id: String,
+    pub revision_id: String,
+    pub revision_digest: String,
+    pub can_apply: bool,
+    pub reason: Option<&'static str>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LocalThemeCatalog {
+    pub active_theme_id: Option<String>,
+    pub theme_state: &'static str,
+    pub theme_templates: Vec<LocalThemeTemplateDescriptor>,
+}
+
+pub async fn list_local_theme_templates(
+    db: &SqlitePool,
+    themes_root: &Path,
+) -> ApiResult<LocalThemeCatalog> {
+    let selection = get_active_selection(db).await?;
+    let Some(revision_id) = selection.revision_id.as_deref() else {
+        return Ok(LocalThemeCatalog {
+            active_theme_id: None,
+            theme_state: "no_active_theme",
+            theme_templates: vec![],
+        });
+    };
+    if selection.source_format != Some(ThemeSourceFormat::V2) {
+        return Ok(LocalThemeCatalog {
+            active_theme_id: selection.theme_id,
+            theme_state: "legacy_theme_unsupported",
+            theme_templates: vec![],
+        });
+    }
+    // This accessor verifies the active manifest, file digests and complete
+    // marker before enumerating role keys. A withdrawn/corrupt provider yields
+    // a deterministic fallback, never stale or remotely fetched templates.
+    let Some(active) = load_active_v2_role_templates(db, themes_root).await? else {
+        return Ok(LocalThemeCatalog {
+            active_theme_id: selection.theme_id,
+            theme_state: "active_theme_unavailable",
+            theme_templates: vec![],
+        });
+    };
+    let theme_id = selection.theme_id.unwrap_or_default();
+    let mut theme_templates = Vec::new();
+    for role in active.roles.keys() {
+        let reason = match role.as_str() {
+            "header" | "footer" | "archive" | "taxonomy_archive" => None,
+            "page" | "single" => Some("Vai trò cần target Page/CPT cụ thể; dùng scoped Builder."),
+            "home" => Some("Homepage không hỗ trợ reset override; mẫu này chỉ để xem."),
+            _ => Some("Template role chưa được hỗ trợ trong thư viện."),
+        };
+        theme_templates.push(LocalThemeTemplateDescriptor {
+            role: role.clone(),
+            theme_id: theme_id.clone(),
+            revision_id: revision_id.to_owned(),
+            revision_digest: active.revision_digest.clone(),
+            can_apply: reason.is_none(),
+            reason,
+        });
+    }
+    Ok(LocalThemeCatalog {
+        active_theme_id: Some(theme_id),
+        theme_state: "active",
+        theme_templates,
+    })
+}
+
+/// #356: a single writer transaction protects the active-theme identity and
+/// the existing unscoped override CAS. A reset for theme A can never silently
+/// expose theme B when another admin switches the active revision.
+pub async fn reset_local_template_override_if_active(
+    db: &SqlitePool,
+    role: &str,
+    expected_override_version: i64,
+    revision_id: &str,
+    revision_digest: &str,
+) -> ApiResult<bool> {
+    if !matches!(role, "header" | "footer" | "archive" | "taxonomy_archive") {
+        return Err(ApiError::bad_request(
+            "Template role không hỗ trợ áp dụng toàn cục.",
+        ));
+    }
+    let mut conn = db.acquire().await?;
+    // SQLite BEGIN IMMEDIATE locks the writer slot before checking either CAS
+    // predicate, instead of upgrading a stale read snapshot when racing save.
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    let result: ApiResult<bool> = async {
+        let active: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+            "SELECT a.revision_id, r.revision_digest
+               FROM theme_active_selection a
+               LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
+              WHERE a.id = 1",
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        if !matches!(active, Some((Some(ref rid), Some(ref digest)))
+            if rid == revision_id && digest == revision_digest)
+        {
+            return Err(ApiError::precondition_failed(
+                "Theme đang kích hoạt đã thay đổi; không reset.",
+            ));
+        }
+        let existing: Option<(i64, i64)> = sqlx::query_as(
+            "SELECT id, version FROM template_overrides
+              WHERE role = ? AND scope_type_key IS NULL AND scope_entry_id IS NULL",
+        )
+        .bind(role)
+        .fetch_optional(&mut *conn)
+        .await?;
+        match existing {
+            None if expected_override_version == 0 => Ok(false),
+            None => Err(ApiError::precondition_failed("Override không còn tồn tại.")),
+            Some((id, version)) if version == expected_override_version => {
+                let affected =
+                    sqlx::query("DELETE FROM template_overrides WHERE id = ? AND version = ?")
+                        .bind(id)
+                        .bind(version)
+                        .execute(&mut *conn)
+                        .await?
+                        .rows_affected();
+                if affected != 1 {
+                    return Err(ApiError::precondition_failed(
+                        "Override đã thay đổi đồng thời.",
+                    ));
+                }
+                Ok(true)
+            }
+            Some(_) => Err(ApiError::precondition_failed(
+                "Override đã thay đổi; không reset.",
+            )),
+        }
+    }
+    .await;
+    match result {
+        Ok(reset) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            Ok(reset)
+        }
+        Err(err) => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            Err(err)
+        }
+    }
+}
+
 pub async fn load_active_v2_role_templates(
     db: &SqlitePool,
     themes_root: &Path,
@@ -747,10 +1042,14 @@ pub async fn load_active_v2_role_templates(
     if verify_revision_durability(themes_root, &revision) != RevisionDurabilityStatus::Valid {
         return Ok(None);
     }
-    let Ok(manifest) = serde_json::from_str::<crate::theme::ThemeV2Manifest>(&revision.manifest_json) else {
+    let Ok(manifest) =
+        serde_json::from_str::<crate::theme::ThemeV2Manifest>(&revision.manifest_json)
+    else {
         return Ok(None);
     };
-    let rev_dir = themes_root.join("revisions").join(&revision.revision_digest);
+    let rev_dir = themes_root
+        .join("revisions")
+        .join(&revision.revision_digest);
     let mut roles = BTreeMap::new();
     for (role, rel_path) in manifest.templates {
         let Ok(safe_rel) = crate::package::validate_v2_relative_path(&rel_path) else {
@@ -910,17 +1209,36 @@ pub async fn public_home(db: &SqlitePool) -> ApiResult<Option<HomeSnapshot>> {
 }
 
 pub async fn list(db: &SqlitePool) -> ApiResult<ThemeList> {
-    let (active_id, version): (Option<String>, i64) = sqlx::query_as(
-        "SELECT r.legacy_block_id, a.version
+    // All fields (including revision visibility and CAS selection) are one read
+    // snapshot. A concurrent activate/install cannot interleave two GET fields.
+    let mut tx = db.begin().await?;
+    let (revision_id, theme_id, version, active_id, source_format): (
+        Option<String>,
+        Option<String>,
+        i64,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT a.revision_id, r.theme_id, a.version, r.legacy_block_id, r.source_format
          FROM theme_active_selection a
          LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
          WHERE a.id = 1",
     )
-    .fetch_one(db)
+    .fetch_one(&mut *tx)
     .await?;
+    let selection = ActiveThemeSelection {
+        revision_id,
+        theme_id,
+        version,
+        legacy_block_id: active_id.clone(),
+        source_format: source_format
+            .as_deref()
+            .map(ThemeSourceFormat::from_db)
+            .transpose()?,
+    };
     let rows: Vec<(String, Option<String>)> =
         sqlx::query_as("SELECT id, compatible_block_id FROM theme_blocks ORDER BY id")
-            .fetch_all(db)
+            .fetch_all(&mut *tx)
             .await?;
     // Once the Builder layout is saved, the old M3 home_page is retained
     // solely for backup/restore. Its single-block compatibility must not be
@@ -930,8 +1248,28 @@ pub async fn list(db: &SqlitePool) -> ApiResult<ThemeList> {
          JOIN builder_homepage b ON b.id = 1 AND b.document_json IS NULL
          WHERE p.id = 1",
     )
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
+    let raw_revisions: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT revision_id, theme_id, version, revision_digest, source_format
+         FROM theme_revisions ORDER BY theme_id ASC, version ASC, revision_id ASC",
+    )
+    .fetch_all(&mut *tx)
+    .await?;
+    let revisions = raw_revisions
+        .into_iter()
+        .map(
+            |(revision_id, theme_id, version, revision_digest, source_format)| {
+                Ok(ThemeRevisionSummary {
+                    revision_id,
+                    theme_id,
+                    version,
+                    revision_digest,
+                    source_format: ThemeSourceFormat::from_db(&source_format)?,
+                })
+            },
+        )
+        .collect::<ApiResult<Vec<_>>>()?;
     let homepage_compatible = match (saved.as_deref(), active_id.as_deref()) {
         (Some(source), Some(id)) => Some(
             rows.iter()
@@ -951,6 +1289,8 @@ pub async fn list(db: &SqlitePool) -> ApiResult<ThemeList> {
         active_id,
         version,
         homepage_compatible,
+        revisions,
+        selection,
     })
 }
 
@@ -967,6 +1307,7 @@ pub async fn activate(db: &SqlitePool, id: &str, version: i64) -> ApiResult<Acti
         return Ok(ActivationOutcome::NotFound);
     };
     // Optimistic CAS: two tabs with same version cannot both activate.
+    let mut tx = db.begin().await?;
     let result = sqlx::query(
         "UPDATE theme_active_selection
          SET revision_id = ?, version = version + 1
@@ -974,11 +1315,13 @@ pub async fn activate(db: &SqlitePool, id: &str, version: i64) -> ApiResult<Acti
     )
     .bind(revision_id)
     .bind(version)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Ok(ActivationOutcome::Stale);
     }
+    crate::storage::admin_extensions::set_theme_active_in_conn(&mut tx, None).await?;
+    tx.commit().await?;
     Ok(ActivationOutcome::Activated(list(db).await?))
 }
 
@@ -1034,7 +1377,9 @@ pub async fn upsert_owner_template_selection_in_conn(
     ast_json: &str,
 ) -> ApiResult<OwnerTemplateSelection> {
     if owner_kind != "theme" && owner_kind != "plugin" {
-        return Err(ApiError::bad_request("owner_kind phải là 'theme' hoặc 'plugin'."));
+        return Err(ApiError::bad_request(
+            "owner_kind phải là 'theme' hoặc 'plugin'.",
+        ));
     }
     sqlx::query(
         "INSERT INTO template_overrides (role, scope_type_key, scope_entry_id, ast_json, version, base_theme_id, owner_kind, owner_id, template_selection_key)
@@ -1083,7 +1428,15 @@ pub async fn get_owner_template_selection_in_conn(
         .await?;
 
     Ok(row.map(
-        |(owner_kind, owner_id, role, scope_type_key, template_selection_key, ast_json, version)| {
+        |(
+            owner_kind,
+            owner_id,
+            role,
+            scope_type_key,
+            template_selection_key,
+            ast_json,
+            version,
+        )| {
             OwnerTemplateSelection {
                 owner_kind,
                 owner_id,

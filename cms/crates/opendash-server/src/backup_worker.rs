@@ -21,7 +21,8 @@ use crate::paths::SitePaths;
 use crate::secrets::{create_private_file, ensure_no_reparse_or_symlink, ensure_private_directory_tree};
 use crate::storage::backup::{collect_backup_inventory, vacuum_into_snapshot};
 
-pub const WORKER_MEMORY_LIMIT_BYTES: usize = 512 * 1024 * 1024;
+pub const WORKER_MEMORY_LIMIT_BYTES: usize =
+    crate::operations_worker_process::WORKER_MEMORY_LIMIT_BYTES;
 const STREAM_BUF_BYTES: usize = 64 * 1024;
 const MAX_WORKER_REQUEST_BYTES: usize = 64 * 1024;
 
@@ -84,17 +85,14 @@ pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
     #[repr(C)]
     struct RLimit {
         rlim_cur: u64,
         rlim_max: u64,
     }
-    #[cfg(target_os = "linux")]
     const RLIMIT_AS: i32 = 9;
-    #[cfg(target_os = "macos")]
-    const RLIMIT_AS: i32 = 5;
     unsafe extern "C" {
         fn setrlimit(resource: i32, rlim: *const RLimit) -> i32;
     }
@@ -107,6 +105,19 @@ pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
         return Err(format!("setrlimit(RLIMIT_AS) failed with {rc}"));
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
+    // Darwin rejects RLIMIT_AS=512 MiB (EINVAL); the parent must apply the
+    // kernel fatal Jetsam limit with posix_spawnattr_setjetsam_ext before exec.
+    // Reject unguarded direct worker entry before consuming any request.
+    crate::operations_worker_process::confirm_parent_spawn_limit()
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+pub fn enforce_native_memory_limit_512mib() -> Result<(), String> {
+    Err("Không hỗ trợ giới hạn bộ nhớ native cho nền tảng này.".to_string())
 }
 
 pub fn run_operations_worker_from_stdio() -> i32 {

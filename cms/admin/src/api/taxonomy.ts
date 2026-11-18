@@ -1,4 +1,5 @@
 import { requestJson, requestText } from './client.ts';
+import type { EffectiveTermConfig, TermExtensionValues } from '../features/extensions/AdminContributionRenderer.tsx';
 
 export type TaxonomyKind = 'category' | 'tag';
 
@@ -24,6 +25,8 @@ export interface TaxonomyTerm {
   slug: string;
   parent_id: number | null;
   version: number;
+  extensions?: TermExtensionValues;
+  schema_token?: string;
 }
 
 export interface TaxonomyTermPage {
@@ -38,10 +41,27 @@ export interface TaxonomyTermInput {
   parent_id?: number | null;
 }
 
-export type TaxonomyTermChanges = Partial<Pick<TaxonomyTerm, 'name' | 'slug' | 'parent_id'>>;
+export type TaxonomyTermChanges = Partial<Pick<TaxonomyTerm, 'name' | 'slug' | 'parent_id'>> & {
+  extensions?: TermExtensionValues;
+  schema_token?: string;
+};
 
 const termsPath = '/api/admin/taxonomy/terms';
 const termPath = (id: number): string => `${termsPath}/${id}`;
+
+export function getTaxonomyTerm(id: number, signal?: AbortSignal): Promise<TaxonomyTerm> {
+  return requestJson<TaxonomyTerm>(termPath(id), {
+    signal,
+    defaultErrorMessage: 'Không tìm thấy category/tag.',
+  });
+}
+
+export function getEffectiveTermConfig(id: number, signal?: AbortSignal): Promise<EffectiveTermConfig> {
+  return requestJson(`${termPath(id)}/effective-editor-config`, {
+    signal,
+    defaultErrorMessage: 'Không thể tải cấu hình panel mở rộng.',
+  });
+}
 
 export function listTaxonomyTerms(
   kind: TaxonomyKind,

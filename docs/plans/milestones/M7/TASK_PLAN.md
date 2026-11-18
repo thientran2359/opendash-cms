@@ -1,5 +1,15 @@
 # M7 — Task planning: Site Features
 
+## Usable Beta integration overlay — 16/11/2026
+
+[G3 M7-S14](slices/2026-11-16-usable-beta-g3.md) bổ sung bốn task evidence/planning trên
+capability đã có, không thêm candidate sản phẩm: T01 Forge audit Windows; T02 Atlas
+triage/G3 fixes; T03 Forge retest/human dogfood; T04 Atlas Beta readiness.
+T03 chờ required fixes G5 và human tester; T04 chờ candidate evidence.
+T01 không chờ full Linux/macOS closure. Product fixes phát hiện sau audit cần G3 riêng,
+exact ownership và Ready, không thuộc quyền sửa của audit. Status bên dưới là snapshot
+planning 14/11, không thay Project.
+
 `M7-Pxx` là candidates lập kế hoạch, chỉ trở thành GitHub tasks sau khi G2/G3 được review/merge, owner/reviewer và dependencies rõ. [PRD V1](../../../product/PRODUCT_REQUIREMENTS.md) · [M5 prerequisites](../M5/README.md).
 
 | Candidate | Slice / task outcome | Module primary (phối hợp) | Dependency / gate | Acceptance dự kiến |
@@ -18,3 +28,20 @@
 ## G1–G3 đã chuẩn bị cho toàn milestone (2026-11-14)
 
 [G1 inventory](../../../../.agents/research/2026-11-14-m7-site-features-g1.md) · [ADR-0014](../../../decisions/ADR-0014-m7-site-features.md) · [Contract](../../../contracts/M7_SITE_FEATURES.md) · [G3 đủ14 task](slices/2026-11-14-m7-site-features-g3.md). G2/G3 có hiệu lực sau merge design PR; mọi candidate ở bảng trên đã có task/Primary Acceptance/owner/dependency/acceptance, không candidate nào bị bỏ. Project Ready vẫn chờ M5/M6 Windows development gate và từng seam bàn giao (macOS NOT_RUN hoãn theo ADR-0014). Implementation NOT_STARTED, runtime/native/browser NOT_RUN. Không phát hành Issue hoặc dispatch từ lượt planning này.
+
+## Beta remediation disposition — 17/11/2026
+
+[Findings and M7 repair G3](slices/2026-11-16-usable-beta-fixes-g3.md) records all
+nine findings from #300. Aster owns #301 by direct owner handoff; Forge reviews.
+M7-S15-T01..T05 cover menu target array consumption, draft preservation, atomic
+published create, media picker and bounded navigation harness. M5-S11-T01 theme
+v2 discovery, M6-S09-T01 SSRF test reproducibility and M8-S10-T01/T02 recovery
+security/harness use separate milestone docs PRs; no runtime ownership is granted
+by this planning update. Mandatory fixes and harness receipts precede #302.
+F08 remains a security blocker; no Beta/native/release PASS from specs or CI.
+
+## Owner review notes01–07 — 17/11/2026
+
+[Harbor follow-up G3](slices/2026-11-17-owner-admin-review-g3.md) covers the bounded
+Admin delta under [ADR-0018](../../../decisions/ADR-0018-owner-admin-review.md).
+PLANNED, not Project Ready or runtime VERIFIED. See shared serial delivery order.

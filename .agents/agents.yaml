@@ -28,3 +28,8 @@ agents:
     host: macos
     branch: agent/orion
     role: implementer
+  aster:
+    product: Codex
+    host: macos
+    branch: agent/aster
+    role: coordinator

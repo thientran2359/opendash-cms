@@ -813,20 +813,13 @@ async fn spawn_restore_worker_process(
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> ApiResult<crate::backup_worker::RestoreWorkerResponse> {
     use std::io::Write;
-    use std::process::{Command, Stdio};
 
     let req_bytes = serde_json::to_vec(&req)
         .map_err(|_| ApiError::internal("Không tuần tự hóa được yêu cầu restore worker."))?;
     let exe = std::env::current_exe()
         .map_err(|_| ApiError::internal("Không xác định được đường dẫn thực thi."))?;
 
-    let mut child = Command::new(exe)
-        .arg("--operations-worker")
-        .arg("restore")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+    let mut child = crate::operations_worker_process::spawn(&exe, "restore")
         .map_err(|_| ApiError::internal("Không khởi chạy được restore worker."))?;
 
     let mut stdin = child

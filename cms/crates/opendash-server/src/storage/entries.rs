@@ -15,6 +15,18 @@ use crate::{
     error::{ApiError, ApiResult},
 };
 
+/// Section is a separate, strictly private canonical entry protocol. Generic
+/// content writes (including composite field/layout hooks) may not mutate it.
+fn forbid_generic_section_write(type_key: &str) -> ApiResult<()> {
+    if type_key == "section" {
+        Err(ApiError::forbidden(
+            "Section chỉ được sửa qua API riêng tư /api/admin/sections.",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ContentEntryRecord {
     pub id: i64,
@@ -295,6 +307,7 @@ pub async fn list_published_filtered(
     offset: i64,
     filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
+    if type_key == "section" { return Err(ApiError::not_found("Section là nội dung riêng tư.")); }
     list_entries_filtered(db, type_key, limit, offset, filters, true).await
 }
 
@@ -326,6 +339,9 @@ pub async fn list_published_page_in_tx(
     sort: PublishedListSort,
     filters: EntryFilters,
 ) -> ApiResult<PublishedListResult> {
+    if type_key == "section" {
+        return Ok(PublishedListResult::MissingConfig(PublishedListMissing::ContentType));
+    }
     if !(1..=100).contains(&page) || !(1..=20).contains(&page_size) {
         return Err(ApiError::bad_request(
             "Trang danh sách phải từ 1–100 và page_size từ 1–20.",
@@ -502,6 +518,7 @@ pub async fn create_entry_with_fence(
     input: &ContentEntryInput,
     fence: Option<&PluginActionFence>,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
@@ -568,6 +585,7 @@ pub async fn update_entry_with_fence(
     input: &ContentEntryInput,
     fence: Option<&PluginActionFence>,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
@@ -671,6 +689,7 @@ pub async fn create_entry_with_schema_fence(
     input: &ContentEntryInput,
     preflight_schema_token: &str,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
@@ -722,6 +741,7 @@ pub async fn update_entry_with_schema_fence(
     input: &ContentEntryInput,
     preflight_schema_token: &str,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
@@ -844,6 +864,7 @@ pub async fn prepare_composite_entry_save(
     entry_id: Option<i64>,
     input: &CompositeEntrySaveInput,
 ) -> ApiResult<CompositePreflightPlan> {
+    forbid_generic_section_write(type_key)?;
     let client_token = input
         .expected_schema_token
         .as_deref()
@@ -1006,14 +1027,16 @@ pub async fn commit_composite_entry_save(
     let values_json = serde_json::to_string(&plan.merged_input.values)?;
     let saved_id = match entry_id {
         None => {
-            let status_clause = plan
-                .publication_status
-                .as_deref()
-                .unwrap_or(if matches!(type_key, "post" | "page") {
-                    "draft"
-                } else {
-                    "published"
-                });
+            // Migration 0008 deliberately rejects a directly published INSERT
+            // for the built-in types. Keep that security trigger intact and
+            // transition to published *within this same writer transaction*.
+            // No intermediate draft can be observed or committed.
+            let is_builtin = matches!(type_key, "post" | "page");
+            let status_clause = if is_builtin {
+                "draft"
+            } else {
+                plan.publication_status.as_deref().unwrap_or("published")
+            };
             let res = sqlx::query(
                 "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
                  VALUES (?, ?, ?, ?, ?)",
@@ -1025,12 +1048,25 @@ pub async fn commit_composite_entry_save(
             .bind(status_clause)
             .execute(&mut *tx)
             .await;
-            match res {
+            let new_id = match res {
                 Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
                     return Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."));
                 }
                 other => other?.last_insert_rowid(),
+            };
+            if is_builtin && plan.publication_status.as_deref() == Some("published") {
+                // Initial create remains v1; this is one logical atomic Save,
+                // not a separate publication/CAS transition.
+                sqlx::query(
+                    "UPDATE content_entries SET publication_status = 'published'
+                     WHERE id = ? AND content_type_key = ? AND publication_status = 'draft'",
+                )
+                .bind(new_id)
+                .bind(type_key)
+                .execute(&mut *tx)
+                .await?;
             }
+            new_id
         }
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
@@ -1125,6 +1161,7 @@ pub async fn delete_entry(
     id: i64,
     expected_version: i64,
 ) -> ApiResult<()> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = db.begin().await?;
     let result = sqlx::query(
         "DELETE FROM content_entries

@@ -1,7 +1,10 @@
 //! Site-owned taxonomy. All category tree validation and writes share one
 //! SQLite writer reservation; no parent/subtree read precedes that reservation.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
+use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::{
@@ -19,6 +22,10 @@ pub struct TaxonomyTerm {
     pub slug: String,
     pub parent_id: Option<i64>,
     pub version: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<BTreeMap<String, BTreeMap<String, Value>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -37,6 +44,8 @@ fn term(row: TermRow) -> TaxonomyTerm {
         slug: row.3,
         parent_id: row.4,
         version: row.5,
+        extensions: None,
+        schema_token: None,
     }
 }
 
@@ -87,6 +96,7 @@ fn mutation_error(error: sqlx::Error) -> ApiError {
 async fn begin_admin_write<'a>(
     db: &'a SqlitePool,
     actor: &SessionContext,
+    allow_editor_extensions: bool,
 ) -> ApiResult<Transaction<'a, Sqlite>> {
     let mut tx = db.begin().await.map_err(mutation_error)?;
     sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
@@ -111,9 +121,10 @@ async fn begin_admin_write<'a>(
         Some((id, _)) if id != actor.user.id => {
             Err(ApiError::unauthorized("Phiên đăng nhập đã bị thu hồi."))
         }
-        Some((_, role)) if role != "admin" => Err(ApiError::forbidden(
-            "Chỉ quản trị viên được quản lý taxonomy.",
-        )),
+        Some((_, role)) if role != "admin" &&
+            !(allow_editor_extensions && role == "editor") => Err(ApiError::forbidden(
+                "Chỉ quản trị viên được quản lý taxonomy.",
+            )),
         Some(_) => Ok(tx),
     }
 }
@@ -270,6 +281,34 @@ pub async fn list_terms(
     })
 }
 
+/// Read one stable term ID for a dedicated editor route. Authorization belongs
+/// to the route; this projection is identical to the paged list DTO.
+pub async fn get_term(db: &SqlitePool, id: i64) -> ApiResult<Option<TaxonomyTerm>> {
+    let row: Option<TermRow> = sqlx::query_as(
+        "SELECT id, kind, name, slug, parent_id, version
+           FROM taxonomy_terms WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.map(term))
+}
+
+/// Add only role-readable effective declarations/values to the authenticated
+/// single-term projection. List DTO stays legacy-compatible and value-free.
+pub async fn term_with_effective_extensions(
+    db: &SqlitePool,
+    mut record: TaxonomyTerm,
+    role: &str,
+) -> ApiResult<TaxonomyTerm> {
+    let config = crate::storage::admin_extensions::effective_term(
+        db, record.id, &record.kind, role,
+    ).await?;
+    record.extensions = Some(config.extensions);
+    record.schema_token = Some(config.schema_token);
+    Ok(record)
+}
+
 pub async fn create_term(
     db: &SqlitePool,
     actor: &SessionContext,
@@ -292,7 +331,7 @@ pub async fn create_term(
     if kind == "tag" && parent_id.is_some() {
         return Err(ApiError::bad_request("Tag không được có category cha."));
     }
-    let mut tx = begin_admin_write(db, actor).await?;
+    let mut tx = begin_admin_write(db, actor, false).await?;
     if kind == "category" {
         check_category_parent(&mut tx, parent_id, None, 1).await?;
     }
@@ -321,6 +360,8 @@ pub async fn patch_term(
     name: Option<&str>,
     slug: Option<&str>,
     parent_id: Option<Option<i64>>,
+    extensions: Option<&BTreeMap<String, Value>>,
+    schema_token: Option<&str>,
 ) -> ApiResult<TaxonomyTerm> {
     let name = name.map(normalized_name).transpose()?;
     if slug.is_some_and(|s| !opendash_core::id::valid_kebab_segment_with_limit(s, 64)) {
@@ -328,7 +369,13 @@ pub async fn patch_term(
             "Slug phải là kebab-case, tối đa 64 ký tự.",
         ));
     }
-    let mut tx = begin_admin_write(db, actor).await?;
+    let editor_extension_only =
+        actor.user.role == crate::auth::Role::Editor &&
+        name.is_none() && slug.is_none() && parent_id.is_none() && extensions.is_some();
+    let mut tx = begin_admin_write(db, actor, editor_extension_only).await?;
+    if actor.user.role != crate::auth::Role::Admin && !editor_extension_only {
+        return Err(ApiError::forbidden("Editor không được sửa trường taxonomy lõi."));
+    }
     let existing = current_term(&mut tx, id, expected_version).await?;
     let next_parent = parent_id.unwrap_or(existing.parent_id);
     if existing.kind == "tag" && next_parent.is_some() {
@@ -337,6 +384,18 @@ pub async fn patch_term(
     if existing.kind == "category" && parent_id.is_some() {
         let height = subtree_height(&mut tx, id).await?;
         check_category_parent(&mut tx, next_parent, Some(id), height).await?;
+    }
+    if let Some(patch) = extensions {
+        let token = schema_token.ok_or_else(|| ApiError::bad_request(
+            "Thiếu schema_token để ghi extension field.",
+        ))?;
+        // All validation and writes happen inside the same writer reservation
+        // as the core version CAS, so any failed field rolls everything back.
+        crate::storage::admin_extensions::update_term_values_in_conn(
+            &mut tx, id, &existing.kind,
+            if actor.user.role == crate::auth::Role::Admin { "admin" } else { "editor" },
+            token, patch,
+        ).await?;
     }
     let updated = sqlx::query(
         "UPDATE taxonomy_terms
@@ -369,7 +428,7 @@ pub async fn delete_term(
     id: i64,
     expected_version: i64,
 ) -> ApiResult<()> {
-    let mut tx = begin_admin_write(db, actor).await?;
+    let mut tx = begin_admin_write(db, actor, false).await?;
     current_term(&mut tx, id, expected_version).await?;
     let children: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_terms WHERE parent_id = ?")

@@ -1,10 +1,11 @@
 //! Authenticated content entry CRUD for CPTs (M3.3 backend).
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    body::Bytes,
+    extract::{Path, Query, RawQuery, State},
     http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
@@ -21,7 +22,8 @@ use crate::{
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
     storage::{
-        content::load_content_type_definition, entries as entry_storage, media as media_storage,
+        content::load_content_type_definition, entries as entry_storage,
+        entry_table, media as media_storage,
         page::active_content_templates,
     },
 };
@@ -45,6 +47,177 @@ pub struct EntryPagination {
     category_id: Option<i64>,
     tag_id: Option<i64>,
     include_descendants: Option<bool>,
+}
+
+/// Unlike the legacy list extractor this intentionally rejects duplicate and
+/// unknown query keys, including invalid scalar syntax.
+pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTableFilter> {
+    let raw = raw.unwrap_or("");
+    if raw.len() > 4096 {
+        return Err(ApiError::bad_request("Truy vấn bảng nội dung quá dài."));
+    }
+    let mut filter = entry_table::EntryTableFilter::default();
+    let mut keys = BTreeSet::new();
+    for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
+        if !keys.insert(key.to_string()) {
+            return Err(ApiError::bad_request("Tham số truy vấn bảng bị trùng."));
+        }
+        let value = value.as_ref();
+        match key.as_ref() {
+            "q" => {
+                filter.q = value.trim().to_string();
+                if filter.q.chars().count() > 200 || filter.q.chars().any(char::is_control) {
+                    return Err(ApiError::bad_request("Tìm kiếm quá dài hoặc không hợp lệ."));
+                }
+            }
+            "status" if matches!(value, "all" | "draft" | "published") => {
+                filter.status = value.into();
+            }
+            "category_id" => {
+                filter.category_id = Some(value.parse::<i64>().ok()
+                    .filter(|id| *id > 0)
+                    .ok_or_else(|| ApiError::bad_request("category_id không hợp lệ."))?);
+            }
+            "tag_id" => {
+                filter.tag_id = Some(value.parse::<i64>().ok()
+                    .filter(|id| *id > 0)
+                    .ok_or_else(|| ApiError::bad_request("tag_id không hợp lệ."))?);
+            }
+            "include_descendants" if matches!(value, "true" | "false") => {
+                filter.include_descendants = value == "true";
+            }
+            "updated_month" => {
+                let bytes = value.as_bytes();
+                if bytes.len() != 7 || bytes[4] != b'-'
+                    || !bytes[..4].iter().chain(&bytes[5..]).all(u8::is_ascii_digit)
+                    || value[..4].parse::<u16>().unwrap_or(0) == 0
+                    || !(1..=12).contains(&value[5..].parse::<u8>().unwrap_or(0))
+                {
+                    return Err(ApiError::bad_request("updated_month phải là YYYY-MM."));
+                }
+                filter.updated_month = Some(value.into());
+            }
+            "sort" if matches!(value, "title" | "created_at" | "updated_at" | "id") => {
+                filter.sort = value.into();
+            }
+            "order" if matches!(value, "asc" | "desc") => {
+                filter.order = value.into();
+            }
+            "limit" => {
+                filter.limit = value.parse::<i64>().ok()
+                    .filter(|n| (1..=100).contains(n))
+                    .ok_or_else(|| ApiError::bad_request("limit phải là 1..100."))?;
+            }
+            "offset" => {
+                filter.offset = value.parse::<i64>().ok()
+                    .filter(|n| (0..=1_000_000).contains(n))
+                    .ok_or_else(|| ApiError::bad_request("offset phải là 0..1000000."))?;
+            }
+            _ => return Err(ApiError::bad_request("Tham số bảng nội dung không hợp lệ.")),
+        }
+    }
+    if filter.include_descendants && filter.category_id.is_none() {
+        return Err(ApiError::bad_request("include_descendants yêu cầu category_id."));
+    }
+    Ok(filter)
+}
+
+pub async fn entry_table_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(type_key): Path<String>,
+    RawQuery(raw): RawQuery,
+) -> ApiResult<Json<entry_table::EntryTableResult>> {
+    let actor = require_session(&headers, &db).await?;
+    valid_type_key(&type_key)?;
+    let filter = parse_table_query(raw.as_deref())?;
+    let role = match actor.user.role {
+        crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+        crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+    };
+    Ok(Json(entry_table::query(&db, &type_key, role, &filter).await?))
+}
+
+/// Declarative provider metadata for the authenticated list. The table's
+/// legacy row DTO and /entries bare array are unchanged.
+pub async fn entry_table_effective_config(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(type_key): Path<String>,
+) -> ApiResult<Response> {
+    let actor = require_session(&headers, &db).await?;
+    valid_type_key(&type_key)?;
+    let role = if actor.user.role == crate::auth::Role::Admin {
+        opendash_core::content::FieldRole::Admin
+    } else {
+        opendash_core::content::FieldRole::Editor
+    };
+    let config = crate::storage::admin_extensions::effective_list(&db, &type_key, role).await?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(config)).into_response())
+}
+
+/// An Admin contribution action is never invoked from a table read. On
+/// explicit POST the server reads the CURRENT entry, checks the registered
+/// owner/action and actor-visible column, then creates the input itself.
+/// Client row JSON or arbitrary action payloads are not accepted.
+pub async fn entry_table_provider_action(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(plugins): State<Arc<crate::plugin::PluginManager>>,
+    State(content_registry): State<Arc<tokio::sync::RwLock<
+        opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path((type_key, id, plugin_id, action_id)): Path<(String, i64, String, String)>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    if !body.is_empty() {
+        return Err(ApiError::bad_request(
+            "Row action tự đọc dữ liệu mới nhất; không chấp nhận JSON hàng do client gửi.",
+        ));
+    }
+    valid_type_key(&type_key)?;
+    if id < 1 {
+        return Err(ApiError::bad_request("ID nội dung không hợp lệ."));
+    }
+    let version = expected_version(&headers)?;
+    let role = if actor.user.role == crate::auth::Role::Admin {
+        opendash_core::content::FieldRole::Admin
+    } else {
+        opendash_core::content::FieldRole::Editor
+    };
+    let config = crate::storage::admin_extensions::effective_list(&db, &type_key, role).await?;
+    if !config.columns.iter().any(|col| col.owner_kind == "plugin" &&
+        col.owner_id == plugin_id && col.action_id.as_deref() == Some(&action_id)) {
+        return Err(ApiError::forbidden("Action không thuộc cột hiệu lực hoặc không đủ quyền."));
+    }
+    let record = entry_storage::get_entry(&db, &type_key, id).await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+    if record.version != version {
+        return Err(ApiError::precondition_failed(
+            "Nội dung đã thay đổi trước khi chạy action; hãy tải lại hàng.",
+        ));
+    }
+    // The action manager additionally applies its manifest scoped grants to
+    // top-level values and performs the role-generation fence during Wasm.
+    let input = json!({
+        "type_key": type_key,
+        "entry_id": record.id,
+        "entry_version": record.version,
+        "title": record.title,
+        "slug": record.slug,
+        "term_ids": record.term_ids,
+        "values": record.values,
+    });
+    let correlation_id = format!("row-{}", crate::auth::generate_random_token());
+    match plugins.execute_plugin_action(
+        &plugin_id, &action_id, &actor, input,
+        &content_registry, &hooks, correlation_id,
+    ).await {
+        Ok(response) => Ok((StatusCode::OK, Json(response)).into_response()),
+        Err((status, response)) => Ok((status, Json(response)).into_response()),
+    }
 }
 
 fn valid_type_key(key: &str) -> ApiResult<()> {

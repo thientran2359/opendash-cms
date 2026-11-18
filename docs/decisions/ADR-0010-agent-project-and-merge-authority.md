@@ -1,5 +1,32 @@
 # ADR-0010 — Quyền điều phối và merge của các agent
 
+## Owner directive — macOS Beta and Harbor, 2026-11-17
+
+Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt
+kỹ thuật và tự review; không cần peer review. Aster chỉ tham gia thảo luận
+liên-agent khi chủ dự án tạo cuộc thảo luận. Harbor là implementer của toàn bộ
+chín task remediation F01–F09 và thực hiện technical retest macOS; một task
+active trên `agent/harbor`, không hai writer trên cùng file. Aster chuẩn bị
+candidate và phối hợp human dogfood; automation không thay người thử thật.
+
+Chỉ đạo này thay ownership, nền tảng Beta và yêu cầu peer review cũ bên dưới.
+Các PR #310–#313 đã merge. G3 vẫn cần immutable source/base, dependencies,
+file ownership và Project Ready được xác minh trước pickup. Bằng chứng Windows
+cũ giữ nguyên; không suy thành macOS PASS. Beta yêu cầu native macOS B01–B10
+và negative regressions trên cùng candidate. Windows/Linux/native common RC và
+V1 gates vẫn riêng; không đóng chúng từ Beta PASS. F08 giữ security hold đến
+khi có giải thích provenance và kiểm chứng macOS đầy đủ; đối chiếu Windows
+vẫn là follow-up bắt buộc trước common RC. F09 cần full release suite macOS
+hai lượt và isolated run; receipt Windows thất bại vẫn giữ và phải được đối
+chiếu trước common RC, không gọi là Windows defect resolved.
+
+Thứ tự Harbor: M8-S10-T01 → M7-S15-T01 → M5-S11-T01 → M7-S15-T02 →
+M7-S15-T03 → M7-S15-T04 → M7-S15-T05 → M6-S09-T01 → M8-S10-T02.
+Mọi task sau giữ Backlog đến khi dependencies và slot đủ gate. Aster ghi
+self-review/acceptance tại head SHA, checks thực chạy và giới hạn; không waive
+security/data, CI, human test hoặc release authorization.
+
+
 **Quyết định của chủ dự án, 2026-11-11.** Áp dụng cho các milestone OpenDash. ADR này cập nhật phần phân quyền và yêu cầu review của [ADR-0003](ADR-0003-agent-consensus-governance.md), [ADR-0005](ADR-0005-m3-harbor-forge-autonomous-delivery.md) và [ADR-0008](ADR-0008-harbor-forge-autonomous-delivery.md).
 
 ## Quyền hạn
@@ -19,3 +46,17 @@ Atlas, Nova, Harbor và Forge không cần chờ một agent khác duyệt PR c�
 - Merge qua PR với expected head SHA và tuân theo branch protection. Security/data blocker và required checks chưa đạt phải được xử lý trước. Merge commit là bằng chứng tích hợp; G5 và Project Done cần bằng chứng nghiệm thu riêng.
 
 Hướng dẫn vận hành nằm tại [GitHub Workflow](../../.agents/GITHUB_WORKFLOW.md) và [Agent Operating Standard](../../.agents/AGENT_OPERATING_STANDARD.md).
+
+## Bổ sung ủy quyền Aster — 2026-11-17
+
+Chủ dự án trực tiếp đặt **Aster (Codex macOS)** vào vai trò điều phối tương
+đương Atlas và yêu cầu thiết lập môi trường làm việc. Aster có cùng quyền
+lập kế hoạch/G3, điều phối Issue/Project, chốt quyết định kỹ thuật, review và
+merge mọi PR đủ điều kiện, kể cả PR của mình. Các quy tắc dành cho Atlas
+trong workflow và manual skills áp dụng tương ứng cho Aster.
+
+Aster dùng nhánh `agent/aster`, danh tính Git theo worktree `Aster` và trailer
+`Agent: Aster`. Quyền này không thay đổi ownership của task hiện có; khi
+Atlas và Aster cùng tham gia, ghi rõ coordinator chịu trách nhiệm trên
+Issue/PR. Giữ nguyên gate G3/Ready, required CI, branch protection, bảo mật,
+bảo toàn dữ liệu và phân biệt MERGED với VERIFIED.

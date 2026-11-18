@@ -5,6 +5,7 @@ import { ZipUploadField } from '../../components/FormPrimitives.tsx';
 import { DeclarativePluginUi } from './DeclarativePluginUi.tsx';
 
 interface PluginsPanelProps {
+  mode?: 'list' | 'install';
   plugins: PluginSummary[];
   selectedPluginId: string;
   pluginInputJson: string;
@@ -37,6 +38,7 @@ function readableError(error: unknown): string {
  * read/retry UX; it never changes Wasmi endpoints, role guards or App/AdminShell.
  */
 export const PluginsPanel: React.FC<PluginsPanelProps> = ({
+  mode = 'list',
   plugins,
   selectedPluginId,
   pluginInputJson,
@@ -165,9 +167,11 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
     <div id="plugin-management-section" className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">Quản lý Plugins</h2>
+          <h2 className="text-xl font-semibold text-slate-900">{mode === 'install' ? 'Cài đặt plugin' : 'Quản lý Plugins'}</h2>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Cài gói ZIP, kiểm tra quyền và bật hoặc tắt plugin chạy trong Wasmi sandbox.
+            {mode === 'install'
+              ? 'Cài gói plugin ZIP. Gói đã cài sẽ được tự bật sau khi được xác thực.'
+              : 'Kiểm tra quyền và bật hoặc tắt plugin chạy trong Wasmi sandbox.'}
           </p>
         </div>
         <button type="button" className="btn-secondary" onClick={() => void refresh()} disabled={busy || loading}>
@@ -175,7 +179,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
         </button>
       </div>
 
-      <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5" aria-labelledby="plugin-upload-heading">
+      {mode === 'install' && <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5" aria-labelledby="plugin-upload-heading">
         <h3 id="plugin-upload-heading" className="mb-2 font-semibold text-slate-900">Cài đặt plugin</h3>
         <ZipUploadField id="plugin-zip" label="Chọn tệp plugin ZIP (tối đa 5 MiB)" onChange={upload}
           disabled={busy || loading || Boolean(loadError)} />
@@ -183,11 +187,12 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           Lưu ý: tải ZIP sẽ tự bật plugin. Nếu ID đã tồn tại, hệ thống thay thế gói cũ và bật lại plugin đó.
           Hãy kiểm tra quyền trong danh sách trước khi bật plugin đã tắt.
         </p>
-      </section>
+      </section>}
 
       {pendingAction && <p role="status" aria-live="polite" className="text-sm font-medium text-sky-800">{pendingAction}</p>}
       {notice && <p role="alert" className="text-sm text-rose-700">{notice}</p>}
 
+      {mode === 'list' && <>
       <section className="space-y-3" aria-labelledby="plugin-list-heading">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 id="plugin-list-heading" className="text-lg font-semibold text-slate-900">
@@ -285,6 +290,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           onUnauthorized={onUnauthorized ?? (() => {})}
         />
       )}
+      </>}
     </div>
   );
 };
