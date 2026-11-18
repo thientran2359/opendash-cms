@@ -322,7 +322,7 @@ dependencies require actual G5, not Issue closure.
 | Task | Scope | State |
 | --- | --- | --- |
 | [M3-S31-T01](milestones/M3/slices/2026-11-18-content-foundation-g3.md) | Cấu hình hành vi CPT và cơ chế Lưu/Xuất bản | G4 merged [#380](https://github.com/thientran2359/opendash-cms/pull/380) · [native macOS G5 VERIFIED](../verification/2026-11-18-m3-s31-t01-g5-macos.md) · [#373](https://github.com/thientran2359/opendash-cms/issues/373) |
-| [M4-S12-T01](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Đăng ký custom taxonomy và liên kết với CPT | PLANNED · [#374](https://github.com/thientran2359/opendash-cms/issues/374) |
+| [M4-S12-T01](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Đăng ký custom taxonomy và liên kết với CPT | G4 merged [#383](https://github.com/thientran2359/opendash-cms/pull/383) · [native macOS G5 VERIFIED](../verification/2026-11-18-m4-s12-t01-g5-macos.md) · [#374](https://github.com/thientran2359/opendash-cms/issues/374) |
 | [M4-S12-T02](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Quản lý taxonomy tùy chỉnh xuyên Admin và Builder | PLANNED · [#375](https://github.com/thientran2359/opendash-cms/issues/375) |
 | [M7-S17-T01](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Giải quyết permalink và redirect bằng một route authority | PLANNED · [#376](https://github.com/thientran2359/opendash-cms/issues/376) |
 | [M7-S17-T02](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Cấu hình permalink và URL xem bài trong Admin | PLANNED · [#377](https://github.com/thientran2359/opendash-cms/issues/377) |
