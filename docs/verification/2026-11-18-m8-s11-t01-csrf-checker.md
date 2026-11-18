@@ -1,0 +1,116 @@
+# M8-S11-T01 — CSRF mutation registration checker (Windows)
+
+**Task:** [#387](https://github.com/thientran2359/opendash-cms/issues/387) ·
+**agent:** Forge · **coordinator:** Aster · **status:** implementation
+PASS against amended contract; exact-head review and G5 pending.
+
+## Immutable source and scope
+
+- Initial approved G3 / PR #386 merge: `4326e759c04f104b9b1204f4878285810db5f586`.
+- **Amended G3 / PR #391 merge:** `a57482f1de422740b8df73695e2ebdc2b728f6c5`
+  (Aster-approved public-Origin and delegated-CSRF policy delta).
+- Research dependency / PR #382 merge: `042f1692e0b69cf8b91a2b9a6c98db3d82295b5c`.
+- Initial code baseline: `8ac77781a6770688d3a66d9b5b338a9de81cb106`.
+- **Tested source:** `origin/main@a57482f1de422740b8df73695e2ebdc2b728f6c5`,
+  synchronized into `task/forge-m8-s11-t01` by ordinary merge
+  `edb9570e6aae0119ebd794c582668cfca0f645bb` on Windows.
+- Owned changes: `cms/scripts/check-standards.py` and this receipt.
+  The Rust router, route handlers, authorization and other agents' files
+  are read-only inputs.
+
+## Reproduced baseline failure
+
+On the original name-only checker, a temporary repository with an otherwise
+valid guarded `post(save)` and the additional mutation registration
+`post(crate::routes::missing_unguarded_handler)` returned **exit 0**
+and `PASS: core, storage, route and Admin boundaries`. The negative
+self-test expects exit 1 and therefore failed with an `AssertionError`.
+This proves the pre-change checker silently skipped a qualified handler.
+The fixture is created under Python `TemporaryDirectory`; no runtime route
+was added to the repository.
+
+## Checker behavior implemented
+
+The checker now inventories every `post/put/patch/delete` call in
+`app.rs`, including chained method calls and qualified routing constructors.
+It expands the top-level Rust `use` trees, handles function/module aliases,
+and indexes handlers by module-qualified identity through declared
+`routes/mod.rs` children (external and nested inline modules).
+Unresolved, ambiguous, unsupported, or missing targets produce exit 1 with
+an `app.rs:<line>` diagnostic. Checks deduplicate canonical handlers while
+retaining the number of registration sites. A guard in a different function,
+local function, comment, or string does not count. Only
+`crate::routes::auth::{auth_login,auth_setup}` are exempt, after the
+definitions have been resolved.
+
+The checker self-test covers **21 original mutation scenarios**, plus
+**16 negative public-Origin** and **10 negative delegated-CSRF** scenarios
+with independent positive fixtures. All use temporary repositories.
+Existing SQL, core I/O, dependency and Admin HTTP regressions remain.
+
+## Approved admission policies and production inventory
+
+The initial checker failed for two existing routes; Aster inspected both
+and approved an exact policy amendment in
+[PR #391](https://github.com/thientran2359/opendash-cms/pull/391).
+The checker now validates:
+
+1. **`public_origin_guarded`:** only canonical
+   `crate::routes::contact::public_submit`. It checks that the registered
+   handler compares the runtime-configured trusted Origin to the actual
+   `Origin` header, awaits `check_strict_contact_origin` with error propagation,
+   and returns `FORBIDDEN` on failure before calling `submit`. The resolved
+   same-module helper must reject missing, empty and literal `"null"`
+   Origin, and compare with the listener or configured public Origin.
+   Missing helper/call/rejection, wrong header, changed comparison,
+   early submission or spoofed text fail.
+2. **`delegated_csrf_guarded`:** only canonical
+   `crate::routes::operations::upload_restore_archive`. Its body must
+   return the awaited result of the exact same-module
+   `upload_restore_archive_with_timeout(state, headers, body, 300s)` call
+   without a success bypass. The resolved helper must execute
+   `require_admin_with_csrf(&headers, &state.db).await?` at entry before
+   upload side effects. Missing/renamed helper, altered call arguments,
+   ignored guard error, changed guard, or early side effects fail.
+
+The checker reports the following on the approved current main source:
+
+```text
+CSRF mutation inventory: registrations=82 resolved_handlers=82 direct_guarded=78 delegated_csrf_guarded=1 public_origin_guarded=1 bootstrap_exemptions=2
+PASS: core, storage, route and Admin boundaries
+```
+
+All **82** registration sites resolved, with **78 direct + 1 delegated +
+1 public Origin + 2 bootstrap = 82** unique classifications. The two
+policies apply only to reviewed canonical handler/helper pairs; unrelated
+public or delegated mutations still require normal direct guards.
+
+## Commands and results
+
+Platform: Windows 11 (10.0.26200), PowerShell 5.1, Python 3.13.4.
+All commands were run from the isolated Windows worktree on the
+amended G3 source `a57482f1de422740b8df73695e2ebdc2b728f6c5`.
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `python cms/scripts/check-standards.py --self-test` | 0 | PASS, 21 existing + 16 public-Origin + 10 delegated-CSRF negative cases; both policy-positive fixtures |
+| `python cms/scripts/check-standards.py` | 0 | PASS, 82 registrations and matching classification counts |
+| `python cms/scripts/check-plans.py` | 0 | PASS |
+| `python cms/scripts/check-plans.py --self-test` | 0 | PASS, 12 fixtures |
+| `python .agents/scripts/check-agent-artifacts.py` | 0 | PASS |
+| `git diff --check` | 0 | PASS |
+| `python -m py_compile cms/scripts/check-standards.py` | 0 | PASS |
+
+The checker uses a bounded regex/brace scanner over masked Rust sources;
+future syntax (macro-generated routes, unknown import/glob forms, complex
+handler expressions) must fail with a diagnostic or receive a new
+reviewed grammar rule. It is a source policy check, not proof of runtime
+CSRF enforcement or a product security audit. No native build, browser
+test, or macOS beta/RC validation was performed for this checker-only task.
+
+**Self-review:** Forge verified the implementation against the merged
+admission-policy contract, read the two real source paths, checked that
+negative fixtures reject missing guards/calls and bypasses, and confirmed
+only the two task-owned files changed. The exact reviewed commit/head and
+CI results are recorded on PR #389. This is bounded static policy evidence;
+it does not imply runtime CSRF audit, macOS Beta or common RC verification.
