@@ -39,7 +39,7 @@ use crate::{
             entry_update,
         },
         media::{
-            media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
+            media_get, media_list, media_original, media_thumbnail, media_upload,
             media_video_upload,
         },
         menu::{
@@ -198,6 +198,30 @@ pub fn build_router_with_themes_root(
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", post(auth_logout))
         .route("/api/admin/dashboard", get(dashboard_get))
+        .route(
+            "/api/admin/sections",
+            get(crate::routes::sections::section_list)
+                .post(crate::routes::sections::section_create)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/sections/{id}",
+            get(crate::routes::sections::section_get)
+                .put(crate::routes::sections::section_update)
+                .delete(crate::routes::sections::section_delete)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/sections/{id}/document",
+            get(crate::routes::sections::section_document_get)
+                .put(crate::routes::sections::section_document_put)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/sections/{id}/document/preview",
+            post(crate::routes::sections::section_document_preview)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
         .route(
             "/api/admin/builder/homepage",
             get(homepage_get)
@@ -494,7 +518,7 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/media/{id}",
-            get(media_get).delete(media_delete),
+            get(media_get).delete(crate::routes::sections::media_delete_section_aware),
         )
         .route("/api/admin/media/{id}/file", get(media_original))
         .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))

@@ -26,6 +26,7 @@ import { BackupsPanel } from './features/operations/BackupsPanel.tsx';
 import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
+import { SectionsPage } from './features/sections/SectionsPage.tsx';
 
 const HISTORY_INDEX = '__openDashAdminHistoryIndex';
 
@@ -74,6 +75,9 @@ export const App: React.FC = () => {
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
+  const [sectionsDirty, setSectionsDirty] = useState(false);
+  const sectionsDirtyRef = useRef(false);
+  const markSectionsDirty = (value: boolean) => { sectionsDirtyRef.current = value; setSectionsDirty(value); };
   const [termDirty, setTermDirty] = useState(false);
   const termDirtyRef = useRef(false);
   const markTermDirty = (next: boolean) => {
@@ -145,9 +149,10 @@ export const App: React.FC = () => {
     const switchingBuilderTarget = current.view === 'builder'
       && builderIdentity(current) !== builderIdentity(next);
     const leavingBuilder = switchingBuilderTarget && builderDirtyRef.current;
+    const leavingSection = current.view === 'sections' && current.rawHash !== destination && sectionsDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    return !(leavingDirtyEditor || leavingBuilder || leavingTerm) ||
+    return !(leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection) ||
       window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
         : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
@@ -212,13 +217,13 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || postsDirty || pagesDirty || termDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, postsDirty, pagesDirty, termDirty]);
+  }, [contentDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -313,11 +318,13 @@ export const App: React.FC = () => {
         setSiteInstanceId(res.site_instance_id);
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
+        markSectionsDirty(false);
       } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         editorDraftStore.clear();
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
+        markSectionsDirty(false);
       } else {
         setAuthGeneration(g => g + 1);
       }
@@ -341,7 +348,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || builderDirty || postsDirty || pagesDirty || termDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -363,6 +370,7 @@ export const App: React.FC = () => {
       setBuilderDirty(false);
       setPostsDirty(false);
       setPagesDirty(false);
+      markSectionsDirty(false);
       markTermDirty(false);
       lastAuthenticatedUserId.current = null;
       setRoute(parseAdminRoute('#/dashboard', window.location.pathname));
@@ -481,7 +489,7 @@ export const App: React.FC = () => {
       cptTypes={cptTypes}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty || termDirty}
+      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
       sidebarContent={<BuilderWorkspace
         key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
         route={lastBuilderRouteRef.current}
@@ -623,6 +631,11 @@ export const App: React.FC = () => {
           onDirtyChange={setPagesDirty}
           onNavigateHash={navigateHash}
         />
+      }
+      sectionsContent={
+        <SectionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}:${user?.role ?? 'none'}`}
+          route={route} user={user} csrfToken={csrfToken} onApiError={handleApiError}
+          onDirtyChange={markSectionsDirty} onNavigateHash={navigateHash} />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
       taxonomyContent={route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'

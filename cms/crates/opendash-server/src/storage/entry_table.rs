@@ -150,6 +150,9 @@ pub async fn query(
     caller_role: FieldRole,
     filter: &EntryTableFilter,
 ) -> ApiResult<EntryTableResult> {
+    if type_key == "section" {
+        return Err(ApiError::forbidden("Section dùng bảng quản lý riêng tư."));
+    }
     let mut tx = db.begin().await?;
     let Some(effective) = content::load_effective_content_schema_in_tx(&mut tx, type_key).await?
     else {
