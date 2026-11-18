@@ -147,8 +147,8 @@ ambiguous or shadowing aliases return **nonzero** with actionable
 `app.rs:<line>` messages. Aliased constructor names are not inferred
 without an import; unrelated object methods are not counted.
 
-Self-test coverage now includes **35 mutation cases** (previous 21 plus
-14 constructor-alias cases), **16 public-Origin** and **10 delegated-CSRF**
+Self-test coverage now includes **43 mutation cases** (previous 21 plus
+22 constructor-alias and scope/path cases), **16 public-Origin** and **10 delegated-CSRF**
 negative cases, both approved policy-positive fixtures and the original
 architecture regressions. The alias fixtures demonstrate:
 
@@ -168,7 +168,7 @@ other OS product validation was performed.
 | Command | Exit | Result |
 | --- | ---: | --- |
 | `python cms/scripts/check-standards.py` | 0 | PASS, production inventory 82 registration sites / 82 resolved: 78 direct, 1 delegated, 1 public Origin, 2 bootstrap |
-| `python cms/scripts/check-standards.py --self-test` | 0 | PASS, 35 mutation + 16 public-Origin + 10 delegated-CSRF fixtures and legacy regressions |
+| `python cms/scripts/check-standards.py --self-test` | 0 | PASS, 43 mutation + 16 public-Origin + 10 delegated-CSRF fixtures and legacy regressions |
 | `python cms/scripts/check-plans.py` | 0 | PASS |
 | `python cms/scripts/check-plans.py --self-test` | 0 | PASS, 12 fixtures |
 | `python .agents/scripts/check-agent-artifacts.py` | 0 | PASS |
@@ -180,3 +180,62 @@ does not execute requests and is not a general proof of CSRF security. New
 macro-generated or exotic function-pointer routing syntax needs separate
 reviewed parser support. Follow-up commit, PR head review, exact-head CI
 and merge-head evidence are recorded on the follow-up PR/Issue.
+
+### Second Aster review of PR #392 — scoped/path-qualified aliases
+
+Aster's [review of the first #392 head](https://github.com/thientran2359/opendash-cms/pull/392)
+at `ccdfc045f0582bb3a924058ff5f5200a227a6ec4` independently confirmed
+the original alias bug fixed, but found **three further false-green inputs**:
+
+1. `fn app() { use axum::routing::post as submit; submit(...); }`
+   was skipped because the importer ignored function-local `use` statements.
+2. `use axum::routing::post as submit; self::submit(...)` was skipped
+   because the invocation scanner excluded preceding `::` tokens.
+3. `use ::axum::routing::post as submit; submit(...)` was skipped
+   because the importer did not normalize Rust's leading absolute `::`.
+
+All three had **exit 0 / registrations=0 / PASS** with a declared
+unguarded target in Aster's full-CLI probes. On the previous exact
+author head, adding the function-local negative fixture to the
+temporary-repository self-test reproduced the wrong exit 0 and caused
+the self-test to fail with `AssertionError` (negative expected exit 1).
+
+The correction is deliberately scoped:
+
+- Parse top-level `use ::axum::routing::post as submit` and grouped
+  `use ::axum::{routing::{post as submit, put as update}}` as ordinary
+  constructor imports, without changing handler identities or policies.
+- Include module-qualified `self::submit(...)` and `self::update(...)`
+  in the registration inventory, with the same checks and deduplication
+  as unqualified calls. Count distinct call sites even when they resolve
+  to a single unique handler.
+- **Fail closed** on imported mutation constructors in a function-local
+  `use` statement, with an actionable `app.rs:<line>` unsupported-scope
+  diagnostic. Do not incorrectly treat a function-local alias as a
+  globally scoped import or silently skip the registration. Grouped
+  local imports are rejected the same way.
+
+Eight additional full-checker fixtures cover all three negative
+cases; guarded self-qualified and absolute/grouped constructor aliases
+and their site counts; a grouped local import; and a literal string
+impersonating a `self::` invocation. Mutation self-test total rose
+from **35 to 43** without changing the existing 16 public-Origin,
+10 delegated-CSRF, or legacy architecture regressions.
+
+**Re-verification** on Windows 11 / Python 3.13.4, source base
+`origin/main@1b276b49d320d757cdf1ae0f140824a650b47226`:
+
+- `python cms/scripts/check-standards.py --self-test` — exit 0, PASS
+  (43 mutation + 16 public-Origin + 10 delegated-CSRF scenarios).
+- `python cms/scripts/check-standards.py` — exit 0, PASS;
+  registrations=82, resolved_handlers=82, direct_guarded=78,
+  delegated_csrf_guarded=1, public_origin_guarded=1,
+  bootstrap_exemptions=2.
+- `python cms/scripts/check-plans.py` and `--self-test` — PASS.
+- `python .agents/scripts/check-agent-artifacts.py` — PASS.
+- `python -m py_compile cms/scripts/check-standards.py` — PASS.
+- `git diff --check` — PASS.
+
+The scope remains checker and receipt only. Final author head and
+required CI are recorded in PR #392 before G5 handoff; no Rust, auth,
+storage, Harbor-owned or CI configuration files were changed.
