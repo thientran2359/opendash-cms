@@ -47,10 +47,11 @@ const getConfiguredTaxonomies = (typeKey: string, signal?: AbortSignal): Promise
   requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
     signal, defaultErrorMessage: 'Không thể tải cấu hình taxonomy đã lưu.',
   });
-// No site override means the declared provider defaults are the editable
-// starting point. An explicit override, including [], must remain verbatim.
+// Both the site override and the provider defaults are persisted selections.
+// `effective` omits inactive providers, which would otherwise be silently
+// lost when a user saves a new explicit override.
 const selectedKeys = (config: ConfiguredTaxonomies): string[] =>
-  config.has_override ? config.taxonomies : config.effective;
+  config.taxonomies;
 
 const blank = (): FormValues => ({ key: '', label: '', hierarchical: false, public: true });
 const fromDefinition = (definition: TaxonomyDefinition): FormValues => ({
@@ -78,6 +79,11 @@ function termsHash(key: string): string {
 /** Definitions and membership configuration live alongside content schema, away from the term editor. */
 export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApiError, onDirtyChange, onNavigateHash }: Props) {
   const scope = draftScope(siteInstanceId, user);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const recoveredRef = useRef<DefinitionsDraft | null>(scope ? definitionDrafts.get(scope) ?? null : null);
   const recovered = recoveredRef.current;
   const [definitions, setDefinitions] = useState<TaxonomyDefinition[]>([]);
@@ -220,6 +226,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     setBusy(true); setError('');
     try {
       const latest = await getTaxonomyDefinition(activeKey);
+      if (!mountedRef.current) return;
       const server = fromDefinition(latest);
       const changed = (Object.keys(form) as Array<keyof FormValues>)
         .filter(field => field !== 'key' && form[field] !== baseline[field]);
@@ -238,6 +245,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       setNotice(`Đã đối chiếu bản v${latest.version}. Những trường đã sửa được giữ lại; kiểm tra trước khi Lưu.`);
       recoveredRef.current = null;
     } catch (cause) {
+      if (!mountedRef.current) return;
       setError(failure(cause, 'Không thể tải phiên bản mới của taxonomy.'));
       onErrorRef.current(cause, 'Không thể tải phiên bản mới của taxonomy.');
     } finally { setBusy(false); }
@@ -248,6 +256,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     setBusy(true); setError('');
     try {
       const [nextTypes, configured] = await Promise.all([listContentTypes(), getConfiguredTaxonomies(typeKey)]);
+      if (!mountedRef.current) return;
       if (!nextTypes.some(item => item.descriptor.key === typeKey)) {
         setError('Loại nội dung không còn tồn tại; bản chọn vẫn được giữ.'); return;
       }
@@ -264,6 +273,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       setNotice('Đã đối chiếu cấu hình taxonomy mới; các lựa chọn đang sửa được áp dụng lại, hãy kiểm tra trước khi Lưu.');
       recoveredRef.current = null;
     } catch (cause) {
+      if (!mountedRef.current) return;
       setError(failure(cause, 'Không thể đối chiếu cấu hình taxonomy.'));
       onErrorRef.current(cause, 'Không thể đối chiếu cấu hình taxonomy.');
     } finally { setBusy(false); }
@@ -294,6 +304,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       const updated = isNew
         ? await createTaxonomyDefinition({ key: form.key, label, hierarchical: form.hierarchical, public: form.public }, csrfToken)
         : await updateTaxonomyDefinition(active!.key, active!.version, changes, csrfToken);
+      if (!mountedRef.current) return;
       setActiveKey(updated.key); setBaseline(fromDefinition(updated)); setForm(fromDefinition(updated));
       setDefinitions(previous => [...previous.filter(item => item.key !== updated.key), updated]);
       setNotice(`Đã lưu taxonomy ${updated.key} (v${updated.version}).`);
@@ -309,6 +320,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
         else definitionDrafts.delete(scope);
       }
     } catch (cause) {
+      if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setConflict(true);
       setError(failure(cause, 'Không thể lưu taxonomy.'));
       onErrorRef.current(cause, 'Không thể lưu taxonomy.');
@@ -321,6 +333,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     setBusy(true); setError(''); setNotice('');
     try {
       await deleteTaxonomyDefinition(active.key, active.version, csrfToken);
+      if (!mountedRef.current) return;
       setDefinitions(previous => previous.filter(item => item.key !== active.key));
       setActiveKey(''); setForm(blank()); setBaseline(blank());
       setNotice(`Đã xóa taxonomy ${active.key}.`);
@@ -334,6 +347,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
         else definitionDrafts.delete(scope);
       }
     } catch (cause) {
+      if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setConflict(true);
       setError(failure(cause, 'Không thể xóa taxonomy.'));
       onErrorRef.current(cause, 'Không thể xóa taxonomy.');
@@ -345,7 +359,9 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     setBusy(true); setError(''); setNotice('');
     try {
       await updateTaxonomyEligibility(typeKey, selectedType.version, eligible, csrfToken);
+      if (!mountedRef.current) return;
       const [nextTypes, configured] = await Promise.all([listContentTypes(), getConfiguredTaxonomies(typeKey)]);
+      if (!mountedRef.current) return;
       setTypes(nextTypes); setEligible(selectedKeys(configured)); setEligibilityBaseline(selectedKeys(configured));
       setConfiguredEffective(configured.effective);
       setNotice(`Đã cập nhật taxonomy áp dụng cho ${typeKey}.`);
@@ -361,6 +377,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
         else definitionDrafts.delete(scope);
       }
     } catch (cause) {
+      if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setEligibilityConflict(true);
       setError(failure(cause, 'Không thể cập nhật taxonomy được áp dụng.'));
       onErrorRef.current(cause, 'Không thể cập nhật taxonomy được áp dụng.');

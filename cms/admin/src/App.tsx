@@ -100,6 +100,10 @@ export const App: React.FC = () => {
   routeRef.current = route;
   const userRef = useRef(user);
   userRef.current = user;
+  // A response from a former authentication session may arrive after another
+  // account has logged in. Only the session that issued the request may react
+  // to its 401; otherwise it could log out the *new* account and lose drafts.
+  const authSessionEpochRef = useRef(0);
   const builderDirtyRef = useRef(builderDirty);
   builderDirtyRef.current = builderDirty;
   const lastBuilderRouteRef = useRef<ParsedRoute>(parseAdminRoute('#/builder'));
@@ -165,7 +169,11 @@ export const App: React.FC = () => {
     return !(leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema) ||
       window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
-        : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
+        : leavingTerm
+          ? 'Taxonomy có thay đổi chưa lưu. Rời màn hình sẽ bỏ bản nhập. Tiếp tục?'
+          : leavingSchema || leavingSection
+            ? 'Có thay đổi chưa lưu. Rời màn hình có thể làm mất bản nhập. Tiếp tục?'
+            : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
   };
 
   useEffect(() => {
@@ -257,6 +265,7 @@ export const App: React.FC = () => {
     const msg = err instanceof Error ? err.message : fallback;
     setStatus(msg, true);
     if (is401) {
+      authSessionEpochRef.current += 1;
       editorDraftStore.quarantineAll();
       setUser(null);
       setCsrfToken(null);
@@ -279,10 +288,13 @@ export const App: React.FC = () => {
     (async () => {
       try {
         const auth = await api.getAuthMe();
+        authSessionEpochRef.current += 1;
         lastAuthenticatedUserId.current = auth.user.id;
         setAccountContextId(auth.user.id);
         setAccountContextRole(auth.user.role);
-        if (auth.site_instance_id) setSiteInstanceId(auth.site_instance_id);
+        // No verified site ID must disable cross-login draft restoration,
+        // never inherit an identity from a previous site on this origin.
+        setSiteInstanceId(auth.site_instance_id ?? 'default-site');
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
@@ -322,10 +334,11 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       const res = await api.login(authUsername, authPassword);
-      const nextSiteId = res.site_instance_id ?? siteInstanceId;
-      if (res.site_instance_id && res.site_instance_id !== siteInstanceId) {
+      authSessionEpochRef.current += 1;
+      const nextSiteId = res.site_instance_id ?? 'default-site';
+      if (nextSiteId !== siteInstanceId) {
         editorDraftStore.clear();
-        setSiteInstanceId(res.site_instance_id);
+        setSiteInstanceId(nextSiteId);
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
         markSectionsDirty(false);
@@ -338,7 +351,6 @@ export const App: React.FC = () => {
       } else {
         setAuthGeneration(g => g + 1);
       }
-      if (!res.site_instance_id && nextSiteId !== siteInstanceId) setSiteInstanceId(nextSiteId);
       lastAuthenticatedUserId.current = res.user.id;
       setAccountContextId(res.user.id);
       setAccountContextRole(res.user.role);
@@ -364,6 +376,7 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       await api.logout(csrfToken);
+      authSessionEpochRef.current += 1;
       editorDraftStore.clear();
       setUser(null);
       setCsrfToken(null);
@@ -396,6 +409,7 @@ export const App: React.FC = () => {
   };
 
   const handleOwnAccountChanged = () => {
+    authSessionEpochRef.current += 1;
     editorDraftStore.quarantineAll();
     setUser(null);
     setCsrfToken(null);
@@ -481,6 +495,16 @@ export const App: React.FC = () => {
     }
   };
 
+  const requestEpoch = authSessionEpochRef.current;
+  const requestActorId = user?.id;
+  const scopedTaxonomyApiError = (error: unknown, fallback: string) => {
+    // Detached taxonomy/CPT requests may resolve after another account has
+    // authenticated. A stale 401 must never revoke that newer session.
+    if (requestActorId === undefined || userRef.current?.id !== requestActorId
+      || authSessionEpochRef.current !== requestEpoch) return;
+    handleApiError(error, fallback);
+  };
+
   return (
     <AdminShell
       user={user}
@@ -524,13 +548,15 @@ export const App: React.FC = () => {
         onApplied={() => { setThemeRevision(v => v + 1); setBuilderReset(v => v + 1); }} />}
       schemaSettingsContent={
         <ContentTypeSchemaSettings
+          user={user}
+          siteInstanceId={siteInstanceId}
           selectedTypeKey={selectedSchemaTypeKey}
           onSelectTypeKey={key => {
             if (key) navigateHash(`#/appearance/content-types/${key}`);
             else setSelectedSchemaTypeKey(null);
           }}
           csrfToken={csrfToken}
-          onApiError={handleApiError}
+          onApiError={scopedTaxonomyApiError}
           onContentTypesChanged={() => {
             void loadCptTypes();
           }}
@@ -586,6 +612,7 @@ export const App: React.FC = () => {
         onRunPlugin={handleRunPlugin}
         csrfToken={csrfToken}
         onUnauthorized={() => {
+          authSessionEpochRef.current += 1;
           editorDraftStore.quarantineAll();
           setUser(null);
           setCsrfToken(null);
@@ -655,16 +682,16 @@ export const App: React.FC = () => {
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
       taxonomyContent={route.taxonomyMode === 'definitions'
         ? <TaxonomyDefinitionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}`}
-            user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={handleApiError}
+            user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={scopedTaxonomyApiError}
             onNavigateHash={navigateHash} onDirtyChange={markTermDirty} />
         : route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
           ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
               kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
               termId={route.entryId ?? null} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
-              onApiError={handleApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
+              onApiError={scopedTaxonomyApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
           : <TaxonomyPage key={`terms-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
               kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
-              onApiError={handleApiError} onNavigateHash={navigateHash} />}
+              onApiError={scopedTaxonomyApiError} onNavigateHash={navigateHash} />}
     />
   );
 };

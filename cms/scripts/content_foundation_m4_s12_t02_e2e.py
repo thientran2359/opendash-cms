@@ -11,6 +11,7 @@ import hashlib
 import json
 import pathlib
 import platform
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -47,6 +48,49 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     api(ctx, base, 'POST', '/auth/setup', 201,
                         {'username': 'c2_t02_admin', 'password': 'Isolated-Only-C2-T02-Pass!2026'})
                     csrf = admin_login(ctx, base, 'c2_t02_admin', 'Isolated-Only-C2-T02-Pass!2026')
+                    initial_site_id = api(ctx, base, 'GET', '/auth/me')['site_instance_id']
+                    check(initial_site_id and initial_site_id != 'default-site',
+                          'site instance ID is available for scoped draft recovery')
+                    # Even two installations set up with the same username,
+                    # site title and first-admin second must have different
+                    # draft scopes. Neither uses the owner's review site.
+                    sibling = pathlib.Path(temp) / 'another-site'
+                    sibling.mkdir(mode=0o700)
+                    sibling_server, sibling_base = launch_server(binary, sibling)
+                    try:
+                        sibling_ctx = browser.new_context()
+                        try:
+                            api(sibling_ctx, sibling_base, 'POST', '/auth/setup', 201,
+                                {'username':'c2_t02_admin', 'password':'Isolated-Only-C2-T02-Pass!2026'})
+                            admin_login(sibling_ctx, sibling_base, 'c2_t02_admin',
+                                        'Isolated-Only-C2-T02-Pass!2026')
+                            with sqlite3.connect(site / 'database/opendash.sqlite') as conn:
+                                original_created = conn.execute('SELECT created_at FROM users WHERE id=1').fetchone()[0]
+                            with sqlite3.connect(sibling / 'database/opendash.sqlite') as conn:
+                                conn.execute('UPDATE users SET created_at=? WHERE id=1', (original_created,))
+                            sibling_id = api(sibling_ctx, sibling_base, 'GET', '/auth/me')['site_instance_id']
+                            check(sibling_id and sibling_id != initial_site_id,
+                                  'separate DB roots cannot share a draft site identifier')
+                            sibling_csrf = api(sibling_ctx, sibling_base, 'GET', '/auth/me')['csrf_token']
+                            api(sibling_ctx, sibling_base, 'POST', '/api/admin/users', 201,
+                                {'username': 'c2_t02_second_admin',
+                                 'password': 'Isolated-Second-Admin!2026', 'role': 'admin'}, sibling_csrf)
+                            sibling_second_ctx = browser.new_context()
+                            try:
+                                admin_login(sibling_second_ctx, sibling_base, 'c2_t02_second_admin',
+                                            'Isolated-Second-Admin!2026')
+                                with sqlite3.connect(sibling / 'database/opendash.sqlite') as conn:
+                                    conn.execute('DELETE FROM users WHERE id=1')
+                                check(api(sibling_second_ctx, sibling_base, 'GET', '/auth/me')
+                                      ['site_instance_id'] == sibling_id,
+                                      'deleting original Admin cannot change site identity')
+                            finally:
+                                sibling_second_ctx.close()
+                        finally:
+                            sibling_ctx.close()
+                    finally:
+                        stop_server(sibling_server)
+                    checks.append('distinct_site_roots_and_deleted_first_admin_keep_stable_site_ids')
                     genre = api(ctx, base, 'POST', '/api/admin/taxonomy/definitions', 201,
                         {'key': 'genre_t02', 'label': 'Genre T02', 'hierarchical': True}, csrf)
                     flat = api(ctx, base, 'POST', '/api/admin/taxonomy/definitions', 201,
@@ -176,16 +220,63 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     admin.goto(base + '/admin/#/taxonomy/definitions', wait_until='domcontentloaded')
                     admin.get_by_text('Genre T02').first.wait_for(timeout=15000)
                     admin.screenshot(path=str(artifacts / 'taxonomy-definitions-desktop.png'), full_page=True)
+                    default_cpt = api(ctx, base, 'POST', '/api/admin/content-types', 201,
+                                      {'key':'default_t02', 'label':'Default T02', 'fields':[]}, csrf)
+                    with sqlite3.connect(db) as conn:
+                        conn.execute("INSERT INTO content_type_taxonomy_eligibility"
+                                     "(content_type_key,taxonomy_kind,owner_kind,owner_id)"
+                                     " VALUES('default_t02','genre_t02','user',NULL)")
+                        conn.execute("UPDATE taxonomy_definitions SET provider_status='provider_inactive'"
+                                     " WHERE key='genre_t02'")
+                    configured = api(ctx, base, 'GET', '/api/admin/taxonomy/eligibility/default_t02/configured')
+                    check(not configured['has_override'] and configured['taxonomies'] == ['genre_t02']
+                          and configured['effective'] == [], 'dormant provider default exists without site override')
+                    # The CPT is created externally after the SPA first
+                    # loaded; refresh its list before selecting the new key.
+                    admin.get_by_role('button', name='Tải lại', exact=True).click()
+                    admin.locator('select').filter(has=admin.locator('option[value="default_t02"]')).wait_for(timeout=15000)
+                    admin.get_by_label('Loại nội dung').select_option('default_t02')
+                    dormant_checkbox = admin.get_by_role('checkbox', name=re.compile(r'Genre T02 \(genre_t02\)'))
+                    dormant_checkbox.wait_for(timeout=15000)
+                    check(dormant_checkbox.is_checked(), 'UI retains dormant default as selected')
+                    admin.get_by_role('checkbox', name=re.compile(r'Label T02 \(label_t02\)')).check()
+                    admin.get_by_role('button', name='Lưu loại được áp dụng').click()
+                    saved = api(ctx, base, 'GET', '/api/admin/taxonomy/eligibility/default_t02/configured')
+                    check(saved['has_override'] and saved['taxonomies'] == ['genre_t02','label_t02'],
+                          'UI save keeps dormant default on first override')
+                    with sqlite3.connect(db) as conn:
+                        conn.execute("UPDATE taxonomy_definitions SET provider_status='active' WHERE key='genre_t02'")
+                    check(api(ctx, base, 'GET', '/api/admin/taxonomy/eligibility/default_t02/effective')
+                          == ['genre_t02','label_t02'], 'reactivation restores default on site override')
+                    checks.append('chrome_first_override_preserves_inactive_provider_default')
+                    api(ctx, base, 'POST', '/api/admin/users', 201,
+                        {'username':'c2_t02_other', 'password':'Isolated-Other-C2-Admin!2026',
+                         'role':'admin'}, csrf)
                     # Expiring a session from the HTTP side must preserve a
                     # form in the mounted SPA, then restore it for the SAME
-                    # account and site after signing in again.
+                    # account and site after signing in again; another admin
+                    # must not see or erase the original user's RAM draft.
                     admin.get_by_role('button', name='Thêm taxonomy').click()
                     draft = admin.locator('form').filter(has=admin.get_by_role('heading', name='Tạo định nghĩa'))
                     draft.locator('input').nth(0).fill('draft_t02')
                     draft.locator('input').nth(1).fill('Taxonomy Draft C2')
+                    with sqlite3.connect(db) as conn:
+                        conn.execute("UPDATE site_general_settings SET site_title='Renamed C2 Site' WHERE id=1")
+                    check(api(ctx, base, 'GET', '/auth/me')['site_instance_id'] == initial_site_id,
+                          'renaming same site cannot change RAM draft identity')
                     fetch(ctx, base, 'POST', '/auth/logout', 204, csrf=csrf)
                     fetch(ctx, base, 'GET', '/auth/me', 401)
                     admin.get_by_role('button', name='Lưu định nghĩa').click()
+                    admin.locator('#auth-login').wait_for(timeout=15000)
+                    admin.locator('#auth-username').fill('c2_t02_other')
+                    admin.locator('#auth-password').fill('Isolated-Other-C2-Admin!2026')
+                    admin.locator('#auth-login').click()
+                    admin.get_by_role('button', name='Thêm taxonomy').wait_for(timeout=15000)
+                    check(admin.get_by_role('heading', name='Tạo định nghĩa').count() == 0,
+                          'other admin does not see original author draft')
+                    other_csrf = api(ctx, base, 'GET', '/auth/me')['csrf_token']
+                    fetch(ctx, base, 'POST', '/auth/logout', 204, csrf=other_csrf)
+                    admin.get_by_role('button', name='Tải lại', exact=True).click()
                     admin.locator('#auth-login').wait_for(timeout=15000)
                     admin.locator('#auth-username').fill('c2_t02_admin')
                     admin.locator('#auth-password').fill('Isolated-Only-C2-T02-Pass!2026')
@@ -194,13 +285,14 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     draft.locator('input').nth(0).wait_for(timeout=15000)
                     check(draft.locator('input').nth(0).input_value() == 'draft_t02'
                           and draft.locator('input').nth(1).input_value() == 'Taxonomy Draft C2',
-                          'same-site and same-account taxonomy draft restored after 401')
+                          'same-site and same-account taxonomy draft restored after cross-account 401')
                     csrf = api(ctx, base, 'GET', '/auth/me')['csrf_token']
                     admin.once('dialog', lambda dialog: dialog.accept())
                     admin.get_by_role('button', name='Tải lại', exact=True).click()
                     check(admin.get_by_role('heading', name='Tạo định nghĩa').count() == 0,
                           'explicit reload discards recovered draft')
-                    checks.append('chrome_taxonomy_draft_401_same_account_restore_explicit_discard')
+                    checks.append('chrome_taxonomy_draft_401_cross_account_isolation_restore_and_discard')
+                    checks.append('site_identity_stable_across_title_change_and_401')
                     admin.goto(base + '/admin/#/taxonomy/genre_t02/terms', wait_until='domcontentloaded')
                     admin.get_by_text('Literature').first.wait_for(timeout=15000)
                     admin.screenshot(path=str(artifacts / 'taxonomy-terms-desktop.png'), full_page=True)
@@ -223,6 +315,62 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     admin.once('dialog', lambda dialog: dialog.accept())
                     admin.get_by_role('button', name='Hủy sửa').click()
                     checks.append('chrome_term_editor_401_restore_and_discard')
+
+                    # CPT Settings is a separate mounted screen from the
+                    # taxonomy definitions editor. Its pending eligibility
+                    # choices must survive 401 for the same account and site.
+                    admin.goto(base + '/admin/#/appearance/content-types/books_t02',
+                               wait_until='domcontentloaded')
+                    taxonomy_settings = admin.get_by_role('region', name='Taxonomy áp dụng cho loại nội dung')
+                    label_choice = taxonomy_settings.get_by_role('checkbox', name=re.compile('Label T02'))
+                    label_choice.wait_for(timeout=15000)
+                    check(label_choice.is_checked(), 'CPT starts with custom label association')
+                    label_choice.uncheck()
+                    fetch(ctx, base, 'POST', '/auth/logout', 204, csrf=csrf)
+                    admin.get_by_role('button', name='Lưu taxonomy áp dụng').click()
+                    admin.locator('#auth-login').wait_for(timeout=15000)
+                    admin.locator('#auth-username').fill('c2_t02_admin')
+                    admin.locator('#auth-password').fill('Isolated-Only-C2-T02-Pass!2026')
+                    admin.locator('#auth-login').click()
+                    label_choice = admin.get_by_role('region', name='Taxonomy áp dụng cho loại nội dung') \
+                        .get_by_role('checkbox', name=re.compile('Label T02'))
+                    label_choice.wait_for(timeout=15000)
+                    check(not label_choice.is_checked(), 'CPT taxonomy checkbox recovered after same-account 401')
+                    csrf = api(ctx, base, 'GET', '/auth/me')['csrf_token']
+                    admin.get_by_role('button', name='Hủy lựa chọn chưa lưu').click()
+                    check(label_choice.is_checked(), 'explicit CPT draft discard reloads saved selection')
+                    checks.append('chrome_cpt_taxonomy_draft_401_restores_and_explicit_discard')
+
+                    # A concurrent writer changes CPT associations while the
+                    # UI has a local edit. The first save must 412, then the
+                    # explicit rebase must keep only the author's delta and
+                    # preserve the other writer's new association.
+                    label_choice.uncheck()
+                    book = api(ctx, base, 'PUT', '/api/admin/taxonomy/eligibility/books_t02', 200,
+                        {'taxonomies':['genre_t02','label_t02','tag'],
+                         'expected_version':book['version']}, csrf, book['version'])
+                    admin.get_by_role('button', name='Lưu taxonomy áp dụng').click()
+                    admin.get_by_role('button', name='Đối chiếu với máy chủ, giữ lựa chọn đang sửa') \
+                        .wait_for(timeout=15000)
+                    admin.get_by_role('button', name='Đối chiếu với máy chủ, giữ lựa chọn đang sửa').click()
+                    tag_choice = admin.get_by_role('region', name='Taxonomy áp dụng cho loại nội dung') \
+                        .locator('label').filter(has=admin.locator('code', has_text=re.compile(r'^tag$'))) \
+                        .locator('input[type="checkbox"]')
+                    tag_choice.wait_for(timeout=15000)
+                    check(not label_choice.is_checked() and tag_choice.is_checked(),
+                          '412 rebase retains local removal and concurrent taxonomy addition')
+                    with admin.expect_response(lambda response: response.request.method == 'PUT'
+                            and '/api/admin/taxonomy/eligibility/books_t02' in response.url,
+                            timeout=15000) as save_reply:
+                        admin.get_by_role('button', name='Lưu taxonomy áp dụng').click()
+                    check(save_reply.value.status == 200,
+                          f'412 rebase must save with refreshed CAS, got {save_reply.value.status}')
+                    check(api(ctx, base, 'GET', '/api/admin/taxonomy/eligibility/books_t02/configured')
+                          ['taxonomies'] == ['genre_t02','tag'],
+                          'rebase CAS persists merged taxonomy selection without silent loss')
+                    book = next(item for item in api(ctx, base, 'GET', '/api/admin/content-types')
+                                if item['descriptor']['key'] == 'books_t02')
+                    checks.append('chrome_cpt_taxonomy_412_rebase_preserves_concurrent_association')
 
                     admin.goto(base + f'/admin/#/cpt/books_t02/{tagged["id"]}/edit',
                                wait_until='domcontentloaded')

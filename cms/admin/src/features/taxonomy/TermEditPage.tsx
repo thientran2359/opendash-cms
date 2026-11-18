@@ -80,6 +80,11 @@ function allowedParents(terms: TaxonomyTerm[], targetId: number | null): Taxonom
 export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToken, onApiError,
   onDirtyChange, onNavigateHash}: TermEditProps) {
   const scope = termScope(siteInstanceId, user, kind, mode, termId);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const recoveredRef = useRef<TermDraft | null>(scope ? termDrafts.get(scope) ?? null : null);
   const recovered = recoveredRef.current;
   const [loading, setLoading] = useState(true);
@@ -204,6 +209,7 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
       const [fresh, config] = await Promise.all([
         getTaxonomyTerm(termId), getEffectiveTermConfig(termId),
       ]);
+      if (!mountedRef.current) return;
       setLatest(fresh.kind === kind ? fresh : null);
       if (fresh.kind === kind) {
         // Rebase extension data by per-field differences. Preserve only fields
@@ -223,6 +229,7 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
       }
       if (fresh.kind !== kind) setNotFound(true);
     } catch (cause) {
+      if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 404) setNotFound(true);
       else { setError(cause instanceof Error ? cause.message : 'Không thể đọc bản mới.');
         onErrorRef.current(cause, 'Không thể đọc bản mới.'); }
@@ -307,6 +314,7 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
           if (!Object.keys(changes).length) { setNotice('Không có thay đổi cần lưu.'); return; }
           saved = await updateTaxonomyTerm(current.id, version, changes, csrfToken);
         }
+        if (!mountedRef.current) return;
         const next = fromTerm(saved);
         setCurrent(saved); setVersion(saved.version); setBaseline(next); setForm(next);
         setExtensionBaseline(extensions);
@@ -319,6 +327,7 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
         setNotice(`Đã lưu term ${definition?.label ?? kind} #${saved.id} (v${saved.version}).`);
         if (mode === 'new') onNavigateHash(`${listHash}/${saved.id}/edit`);
       } catch (cause) {
+        if (!mountedRef.current) return;
         if (cause instanceof ApiClientError && (cause.status === 412 || cause.status === 409)) {
           setConflict(true);
           setError(cause.status === 412 ?
