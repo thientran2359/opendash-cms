@@ -254,6 +254,8 @@ export interface ConfiguredContentTypeTaxonomies {
   taxonomies: string[];
   effective: string[];
   has_override: boolean;
+  /** CAS version captured in the same SQLite snapshot as configured keys. */
+  type_version: number;
 }
 
 /** Full saved choice, including inactive provider keys hidden from public use. */

@@ -120,8 +120,9 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     configured = api(ctx, base, 'GET',
                         '/api/admin/taxonomy/eligibility/books_t02/configured')
                     check(configured['taxonomies'] == ['genre_t02']
-                          and configured['has_override'] and configured['effective'] == ['genre_t02'],
-                          'complete configured taxonomy selection')
+                          and configured['has_override'] and configured['effective'] == ['genre_t02']
+                          and configured['type_version'] == book['version'],
+                          'configured keys and CPT CAS version come from one snapshot')
                     fetch(ctx, base, 'PUT', '/api/admin/taxonomy/eligibility/books_t02', 412,
                         {'taxonomies': ['label_t02'], 'expected_version': book['version']-1},
                         csrf, book['version']-1)
@@ -191,6 +192,29 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                           'provider reactivation restores public Builder list')
                     checks.append('provider_inactive_full_selection_preserved_and_reactivated')
 
+                    # Aster P2: visible taxonomy columns must not show '—'
+                    # because the table only fetched the currently filtered
+                    # kind. Verify both custom memberships with and without a
+                    # genre-only filter while label remains a visible column.
+                    label_term = api(ctx, base, 'POST', '/api/admin/taxonomy/terms', 201,
+                        {'kind':'label_t02', 'name':'Featured Label T02', 'slug':'featured-label-t02'}, csrf)
+                    multi = api(ctx, base, 'POST', '/api/admin/content-types/books_t02/entries', 201,
+                        {'title':'Multi Taxonomy C2 Visible', 'slug':'multi-taxonomy-c2',
+                         'values':{}, 'term_ids':[child['id'], label_term['id']]}, csrf)
+                    table_page = ctx.new_page()
+                    try:
+                        table_page.goto(base + '/admin/#/cpt/books_t02', wait_until='domcontentloaded')
+                        multi_row = table_page.locator(f'tr[data-entry-id="{multi["id"]}"]')
+                        multi_row.get_by_role('cell', name='Speculative', exact=True).wait_for(timeout=15000)
+                        multi_row.get_by_role('cell', name='Featured Label T02', exact=True).wait_for(timeout=15000)
+                        table_page.get_by_role('combobox', name='Chọn taxonomy để lọc').select_option('genre_t02')
+                        table_page.get_by_role('combobox', name='Lọc theo Genre T02').select_option(str(child['id']))
+                        multi_row.get_by_role('cell', name='Speculative', exact=True).wait_for(timeout=15000)
+                        multi_row.get_by_role('cell', name='Featured Label T02', exact=True).wait_for(timeout=15000)
+                    finally:
+                        table_page.close()
+                    checks.append('chrome_entry_table_resolves_all_custom_column_names_with_or_without_filter')
+
                     # A valid Admin hierarchy change must not make a saved
                     # Builder list abort the public homepage with HTTP 400.
                     # Detach the child first; flat taxonomies cannot have
@@ -240,7 +264,12 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     dormant_checkbox.wait_for(timeout=15000)
                     check(dormant_checkbox.is_checked(), 'UI retains dormant default as selected')
                     admin.get_by_role('checkbox', name=re.compile(r'Label T02 \(label_t02\)')).check()
-                    admin.get_by_role('button', name='Lưu loại được áp dụng').click()
+                    with admin.expect_response(lambda response: response.request.method == 'PUT'
+                            and '/api/admin/taxonomy/eligibility/default_t02' in response.url,
+                            timeout=15000) as default_save:
+                        admin.get_by_role('button', name='Lưu loại được áp dụng').click()
+                    check(default_save.value.status == 200,
+                          'first provider-default override saves with matching snapshot CAS')
                     saved = api(ctx, base, 'GET', '/api/admin/taxonomy/eligibility/default_t02/configured')
                     check(saved['has_override'] and saved['taxonomies'] == ['genre_t02','label_t02'],
                           'UI save keeps dormant default on first override')
@@ -249,6 +278,96 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     check(api(ctx, base, 'GET', '/api/admin/taxonomy/eligibility/default_t02/effective')
                           == ['genre_t02','label_t02'], 'reactivation restores default on site override')
                     checks.append('chrome_first_override_preserves_inactive_provider_default')
+
+                    # Aster P2: force the exact invalid response ordering in
+                    # DefinitionsPage::rebaseEligibility. The configured GET
+                    # returns pre-write keys/vN while listContentTypes sees
+                    # post-write vN+1. UI must NOT attach vN+1 to old keys.
+                    old_config = api(ctx, base, 'GET',
+                        '/api/admin/taxonomy/eligibility/default_t02/configured')
+                    default_version = next(t['version'] for t in
+                        api(ctx, base, 'GET', '/api/admin/content-types')
+                        if t['descriptor']['key'] == 'default_t02')
+                    check(old_config['type_version'] == default_version,
+                          'configured response includes matching CPT version')
+                    definitions_label = admin.get_by_role('checkbox',
+                        name=re.compile(r'Label T02 \(label_t02\)'))
+                    definitions_label.uncheck()
+                    default_cpt = api(ctx, base, 'PUT',
+                        '/api/admin/taxonomy/eligibility/default_t02', 200,
+                        {'taxonomies':['genre_t02','label_t02','tag'],
+                         'expected_version':default_version}, csrf, default_version)
+                    admin.get_by_role('button', name='Lưu loại được áp dụng').click()
+                    rebase_btn = admin.get_by_role('button',
+                        name='Đối chiếu schema mới, giữ lựa chọn đã sửa')
+                    rebase_btn.wait_for(timeout=15000)
+
+                    def stale_configured(route):
+                        route.fulfill(status=200, content_type='application/json',
+                                      body=json.dumps(old_config))
+                    old_url = '**/api/admin/taxonomy/eligibility/default_t02/configured'
+                    admin.route(old_url, stale_configured)
+                    try:
+                        rebase_btn.click()
+                        admin.get_by_text('Version trong danh sách CPT không khớp snapshot taxonomy', exact=False) \
+                            .wait_for(timeout=15000)
+                        check(not definitions_label.is_checked()
+                              and admin.get_by_role('button', name='Lưu loại được áp dụng').is_disabled(),
+                              'stale configured keys plus newer CPT version cannot enable CAS')
+                    finally:
+                        admin.unroute(old_url, stale_configured)
+                    rebase_btn.click()
+                    admin.get_by_text('Đã đối chiếu cấu hình taxonomy mới', exact=False) \
+                        .wait_for(timeout=15000)
+                    tag_def = admin.get_by_role('checkbox', name=re.compile(r'Tag \(tag\)'))
+                    check(not definitions_label.is_checked() and tag_def.is_checked(),
+                          'rebase reapplies only local removal over concurrent tag addition')
+                    with admin.expect_response(lambda response: response.request.method == 'PUT'
+                            and '/api/admin/taxonomy/eligibility/default_t02' in response.url,
+                            timeout=15000) as save_response:
+                        admin.get_by_role('button', name='Lưu loại được áp dụng').click()
+                    check(save_response.value.status == 200, 'rebase uses matching CAS version')
+                    final_assoc = api(ctx, base, 'GET',
+                        '/api/admin/taxonomy/eligibility/default_t02/configured')
+                    check(final_assoc['taxonomies'] == ['genre_t02','tag']
+                          and final_assoc['type_version'] == default_cpt['version'] + 1,
+                          'concurrent unrelated taxonomy association survives rebase/save')
+                    checks.append('chrome_definitions_controlled_out_of_order_cas_snapshot_rebase')
+
+                    # Aster P2: Core Category/Tag have fixed keys and hierarchy
+                    # but their display label/public flag may be edited by
+                    # Admin, not deleted or have hierarchy mutated.
+                    core_category = api(ctx, base, 'GET',
+                        '/api/admin/taxonomy/definitions/category')
+                    core_row = admin.locator('div.rounded-lg.border.p-3').filter(
+                        has=admin.locator('span', has_text=re.compile(r'^\(category\)$')))
+                    core_row.get_by_role('button', name='Cấu hình').click()
+                    core_label = admin.get_by_role('textbox', name=re.compile('Tên hiển thị'))
+                    core_public = admin.get_by_role('checkbox', name='Cho phép hiển thị công khai')
+                    check(admin.get_by_role('checkbox', name=re.compile('Cho phép phân cấp')).is_disabled(),
+                          'Core hierarchy stays immutable')
+                    core_label.fill('Category C2 Edited')
+                    if core_category['public']:
+                        core_public.uncheck()
+                    else:
+                        core_public.check()
+                    with admin.expect_response(lambda response: response.request.method == 'PATCH'
+                            and '/api/admin/taxonomy/definitions/category' in response.url,
+                            timeout=15000) as core_edit_response:
+                        admin.get_by_role('button', name='Lưu định nghĩa').click()
+                    check(core_edit_response.value.status == 200,
+                          'Admin can save Core category label/public')
+                    changed_category = api(ctx, base, 'GET',
+                        '/api/admin/taxonomy/definitions/category')
+                    check(changed_category['label'] == 'Category C2 Edited'
+                          and changed_category['public'] != core_category['public']
+                          and changed_category['hierarchical'] == core_category['hierarchical']
+                          and changed_category['key'] == 'category',
+                          'Core writable fields changed without key/hierarchy mutation')
+                    api(ctx, base, 'PATCH', '/api/admin/taxonomy/definitions/category', 200,
+                        {'label':core_category['label'], 'public':core_category['public']},
+                        csrf, changed_category['version'])
+                    checks.append('chrome_core_category_label_public_edit_key_hierarchy_immutable')
                     api(ctx, base, 'POST', '/api/admin/users', 201,
                         {'username':'c2_t02_other', 'password':'Isolated-Other-C2-Admin!2026',
                          'role':'admin'}, csrf)
@@ -371,6 +490,50 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     book = next(item for item in api(ctx, base, 'GET', '/api/admin/content-types')
                                 if item['descriptor']['key'] == 'books_t02')
                     checks.append('chrome_cpt_taxonomy_412_rebase_preserves_concurrent_association')
+
+                    # Provider-owned CPT schemas are read-only to site Admins,
+                    # but the site-specific taxonomy association is editable.
+                    # Exercise both independent permission paths in the UI.
+                    with sqlite3.connect(db) as conn:
+                        conn.execute("UPDATE content_types SET owner_kind='plugin', owner_id='provider_t02' WHERE key='books_t02'")
+                    admin.goto(base + '/admin/#/appearance/content-types/books_t02', wait_until='domcontentloaded')
+                    # This may already be the current hash. A hash-only goto
+                    # does not necessarily remount the SPA; force a full reload
+                    # to observe the externally changed provider ownership.
+                    admin.reload(wait_until='domcontentloaded')
+                    provider_taxonomy = admin.get_by_role('region', name='Taxonomy áp dụng cho loại nội dung')
+                    provider_label = provider_taxonomy.get_by_role('checkbox', name=re.compile('Label T02'))
+                    provider_label.wait_for(timeout=15000)
+                    provider_from_api = next(t for t in api(ctx, base, 'GET', '/api/admin/content-types')
+                        if t['descriptor']['key'] == 'books_t02')
+                    check(provider_from_api['owner']['kind'] == 'plugin',
+                          f'backend must expose provider ownership, got {provider_from_api["owner"]}')
+                    current_screen = admin.get_by_test_id('content-type-schema-settings').inner_text()
+                    check('Chủ sở hữu: plugin' in current_screen,
+                          f'selected CPT must use provider ownership, UI={current_screen[:400]}')
+                    check(admin.get_by_role('button', name='Lưu cấu hình').count() == 0,
+                          f'provider-owned CPT schema stays read-only, UI={current_screen[:800]}')
+                    provider_label.check()
+                    with admin.expect_response(lambda response: response.request.method == 'PUT'
+                            and '/api/admin/taxonomy/eligibility/books_t02' in response.url,
+                            timeout=15000) as provider_save:
+                        admin.get_by_role('button', name='Lưu taxonomy áp dụng').click()
+                    check(provider_save.value.status == 200,
+                          'Admin may override provider-owned CPT taxonomy associations')
+                    provider_config = api(ctx, base, 'GET',
+                        '/api/admin/taxonomy/eligibility/books_t02/configured')
+                    check(provider_config['taxonomies'] == ['genre_t02','label_t02','tag'],
+                          'provider override persists all taxonomies')
+                    with sqlite3.connect(db) as conn:
+                        conn.execute("UPDATE content_types SET provider_status='provider_inactive' WHERE key='books_t02'")
+                    check(api(ctx, base, 'GET', '/api/admin/taxonomy/eligibility/books_t02/configured')
+                          ['taxonomies'] == ['genre_t02','label_t02','tag'],
+                          'provider deactivation preserves site association override')
+                    with sqlite3.connect(db) as conn:
+                        conn.execute("UPDATE content_types SET provider_status='active', owner_kind='user', owner_id=NULL WHERE key='books_t02'")
+                    book = next(item for item in api(ctx, base, 'GET', '/api/admin/content-types')
+                                if item['descriptor']['key'] == 'books_t02')
+                    checks.append('provider_cpt_schema_read_only_but_taxonomy_override_survives_lifecycle')
 
                     admin.goto(base + f'/admin/#/cpt/books_t02/{tagged["id"]}/edit',
                                wait_until='domcontentloaded')

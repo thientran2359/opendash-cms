@@ -13,8 +13,9 @@ at `695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d`,
 ## Implementation coverage
 
 - Admin taxonomy definitions and term routes support custom flat/hierarchical
-  kinds and retain legacy Category/Tag aliases. Core/provider-owned definitions
-  cannot be edited as site-owned user definitions. Editor can edit permitted term
+  kinds and retain legacy Category/Tag aliases. Core Category/Tag labels and
+  public flags remain Admin-editable while their keys/hierarchy and deletion
+  remain locked; provider-owned definitions remain read-only. Editor can edit permitted term
   extensions, but not definitions/new taxonomy schemas.
 - CPT Settings and the definitions screen edit the **complete configured**
   association list with CPT-version CAS, not only the filtered `effective` list.
@@ -51,7 +52,7 @@ at `695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d`,
   persisted installation generation. A persistent UUID would require a
   separately coordinated storage/migration contract change.
 
-### Bounded Design Delta, requires coordinator ownership acknowledgment
+### Bounded Design Delta — coordinator ownership ACK received
 
 The original #375 exclusive file list does not enumerate all required
 storage integrations. `storage/builder.rs` had to forward generic filters,
@@ -61,12 +62,14 @@ unfiltered configured keys required to prevent provider-association data loss.
 `storage/entries.rs` also guards hierarchical→flat saved-list transitions.
 `app.rs` is a permitted common route-wiring file under G3. These are bounded
 C2 correctness/security integrations, **not** authority to change immutable G3,
-schema migration ownership, or #376 public route contracts. Coordinator Aster
-must acknowledge the additional ownership before G4 merge; evidence must be
-recorded on the PR. Internal worker review alone is not that acknowledgment.
+schema migration ownership, or #376 public route contracts. **Coordinator Aster
+explicitly ACKed** this bounded file ownership extension, including
+`admin/builder/document.ts` and `PanelRegionRenderer.tsx`, in the review on
+[PR #390](https://github.com/thientran2359/opendash-cms/pull/390).
 The follow-up scoped `storage/auth.rs` correction ensures 401 draft recovery
 does not silently lose data after renaming a site or deleting the first Admin;
-it too is disclosed as a file-ownership Design Delta pending Aster ACK.
+it too is included in Aster's ACK. This does not waive the four P2 findings
+in that same review, required new-head CI or exact merged-source G5.
 
 ### Scope boundary with #376
 
@@ -95,7 +98,8 @@ receipts, credentials, generated sites, and binary outputs remain ignored.
 | `python3 cms/scripts/check-plans.py` and `--self-test` | PASS, 12 fixtures |
 | `git diff --check` | PASS |
 | Initial isolated Chrome/API/SQLite acceptance | **11/11 named checks PASS** on prior premerge snapshot; superseded by expanded final run |
-| Expanded native isolated Chrome/API/SQLite on latest dirty worktree | **19/19 named checks PASS**, exit 0, Chrome 158, Intel x86_64 |
+| Native isolated Chrome/API/SQLite before Aster review | **19/19 named checks PASS**, exit 0, Chrome 158, Intel x86_64 |
+| Native isolated Chrome/API/SQLite after four Aster P2 corrections | **23/23 named checks PASS**, exit 0, Chrome 158, Intel x86_64 |
 
 The expanded native acceptance runner is
 `cms/scripts/content_foundation_m4_s12_t02_e2e.py`; it exercises custom
@@ -136,14 +140,59 @@ loss/conflict (scoped in-memory recovery and rebase integrated). Subsequent
 independent review reported P2 site identity instability and stale 401/late
 success cross-account races. The last two follow-ups are corrected in
 `storage/auth.rs`, the scoped App callbacks, and unmount guards in all three
-forms. **Final read-only independent review: PASS, no actionable P1/P2** within
-this scoped current worktree; reviewer did not run tests. GitHub exact pushed
-head and coordinator acknowledgement are separate gates, not implied.
+forms. The earlier internal read-only review reported PASS within that review's
+scope, but did not replace Aster's later official review; see the four P2
+corrections and new acceptance tests below.
+
+### PR #390 — Aster review corrective round
+
+At reviewed head `818b1cedd3b43408be8c352f9399f29d73896476`, Aster
+approved the bounded ownership Design Delta but requested **four P2 fixes**
+([PR review](https://github.com/thientran2359/opendash-cms/pull/390)).
+The implementation corrections are:
+
+1. **Atomic CPT version/association snapshot:**
+   `storage/content.rs::load_configured_taxonomies` reads `type_version`,
+   persisted `taxonomies` and `effective` within one SQLite read transaction.
+   Both Admin forms retain this CAS version; a mismatched independently fetched
+   CPT version blocks save/rebase, preserving local unsaved selections until
+   retry. PUT still requires If-Match on the current version; the same response
+   supplies the new committed version. No cross-snapshot version assembly.
+2. **Provider-owned CPT overrides:** Site Admin can configure taxonomy
+   eligibility for existing plugin/theme CPTs independently of provider-owned
+   schema edit permissions; Editor/Section restrictions remain unchanged.
+   Inactive provider defaults/overrides stay preserved across reactivation.
+3. **Entry table labels:** All effective custom taxonomy columns fetch their
+   corresponding term labels via a bounded concurrency-4 queue, not just the
+   selected filter. Loading/failure states are differentiated from genuinely
+   empty associations; legacy Category/Tag and strict pair filtering persist.
+4. **Core Category/Tag definition edits:** Admin can update `label` and
+   `public` on Core definitions; `key`, `hierarchical`, and delete remain
+   prohibited for Core. Provider-owned definitions remain immutable to Admin.
+
+New Chrome/API/SQLite premerge acceptance checks exercise: deliberately
+**out-of-order configured vN/list vN+1** responses during Definitions rebase
+(Save blocked, old draft retained), successful retry preserving a concurrently
+added `tag` association, visible names for **two** custom taxonomy columns
+both unfiltered and filtered by only one, Core Category edit/reload while key
+and hierarchy stay immutable, and plugin-owned CPT site override while schema
+remains read-only and provider deactivation/reactivation preserves data.
+**Native result: 23/23 PASS** on macOS Intel, Chrome 158; ignored receipt:
+`.g5-checkouts/evidence/c2-t02-aster-review/receipt.json`, debug binary
+SHA-256 `4af1ff426b085410b3fefc9d49b811ebbc59b77136b344403b4c67e363e32f15`,
+runner SHA-256
+`7a6090ae0bde8f2a3c308fbb4a211afc181ec0d5feb4aac64c009f406357fb04`.
+Earlier failed runner receipts from premature UI reads, stale browser state
+after an external provider-owner DB change, and pre-sync embedded Admin binaries
+are retained as diagnostics, **not successful product tests**. The final 23/23
+is still on a dirty premerge worktree; it is **NOT G5**.
 
 ## G4/G5 release gates
 
-- GitHub PR, Aster bounded-ownership acknowledgment, exact-head self-review,
-  required governance CI and actual G4 merge are **NOT YET RECORDED** here.
+- GitHub [PR #390](https://github.com/thientran2359/opendash-cms/pull/390)
+  is Draft. Aster ownership ACK is **recorded** but final corrective-head
+  acceptance, new-head self-review, required governance CI, and actual G4
+  merge are **NOT YET RECORDED** here.
 - A premerge debug binary and dirty worktree acceptance are **NOT exact-source
   G5**. After merge, build release from the **actual merge SHA** with its own
   embedded Admin assets and run isolated native macOS Intel E2E and required

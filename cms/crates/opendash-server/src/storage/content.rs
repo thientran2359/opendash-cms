@@ -1737,6 +1737,9 @@ pub struct ConfiguredContentTypeTaxonomies {
     pub taxonomies: Vec<String>,
     pub has_override: bool,
     pub effective: Vec<String>,
+    /// CPT CAS version read from the *same SQLite snapshot* as taxonomies.
+    /// A client must never pair these keys with a separately fetched version.
+    pub type_version: i64,
 }
 
 pub async fn load_configured_taxonomies(
@@ -1746,21 +1749,24 @@ pub async fn load_configured_taxonomies(
     if !valid_content_type_key(type_key) || type_key == "section" {
         return Err(ApiError::bad_request("Loại nội dung không hỗ trợ taxonomy."));
     }
-    let mut conn = db.acquire().await?;
-    let exists: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM content_types WHERE key=?",
+    // Separate autocommit SELECTs can straddle a concurrent eligibility PUT:
+    // the old association list and new CPT version would allow a valid CAS
+    // write that silently removes another Admin's newly added association.
+    // A single read transaction pins BOTH to one SQLite read snapshot.
+    let mut tx = db.begin().await?;
+    let type_version: Option<i64> = sqlx::query_scalar(
+        "SELECT version FROM content_types WHERE key=?",
     )
     .bind(type_key)
-    .fetch_optional(&mut *conn)
+    .fetch_optional(&mut *tx)
     .await?;
-    if exists.is_none() {
-        return Err(ApiError::not_found("Loại nội dung không tồn tại."));
-    }
+    let type_version = type_version
+        .ok_or_else(|| ApiError::not_found("Loại nội dung không tồn tại."))?;
     let raw: Option<String> = sqlx::query_scalar(
         "SELECT taxonomies_json FROM content_type_taxonomy_overrides WHERE content_type_key=?",
     )
     .bind(type_key)
-    .fetch_optional(&mut *conn)
+    .fetch_optional(&mut *tx)
     .await?;
     let has_override = raw.is_some();
     let mut taxonomies: Vec<String> = if let Some(raw) = raw {
@@ -1775,16 +1781,18 @@ pub async fn load_configured_taxonomies(
              WHERE e.content_type_key=? ORDER BY e.taxonomy_kind",
         )
         .bind(type_key)
-        .fetch_all(&mut *conn)
+        .fetch_all(&mut *tx)
         .await?
     };
     taxonomies.sort();
     taxonomies.dedup();
-    let effective = load_effective_taxonomies_in_tx(&mut conn, type_key).await?;
+    let effective = load_effective_taxonomies_in_tx(&mut tx, type_key).await?;
+    tx.commit().await?;
     Ok(ConfiguredContentTypeTaxonomies {
         taxonomies,
         has_override,
         effective,
+        type_version,
     })
 }
 

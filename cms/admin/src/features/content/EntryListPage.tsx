@@ -25,6 +25,7 @@ interface Props {
 const control = 'min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800';
 const action = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
 const statuses = ['all', 'draft', 'published'] as const;
+const TERM_FETCH_CONCURRENCY = 4;
 type BulkAction = 'published' | 'draft' | 'delete';
 type TaxonomyTableQuery = EntryTableQuery & { taxonomy_key?: string; term_id?: number };
 
@@ -122,6 +123,7 @@ export function EntryListPage({
     categoryEnabled: boolean; tagEnabled: boolean;
     definitions: TaxonomyDefinition[];
     byKind: Record<string, TaxonomyTerm[]>;
+    failedKinds: string[];
   } | null>(null);
   const [termLoadErrors, setTermLoadErrors] = useState<string[]>([]);
   const [providerState, setProviderState] = useState<{
@@ -198,40 +200,60 @@ export function EntryListPage({
         const enabledKeys = new Set(keys);
         const definitions = allDefinitions.filter(def => enabledKeys.has(def.key)
           && def.provider_status === 'active' && def.declaration_state === 'declared');
-        // Do not enumerate terms for every custom taxonomy on every table
-        // visit (a CPT can have 64). Load only the legacy filters and the
-        // currently selected custom taxonomy, with independent failures.
-        const requested = new Set(['category', 'tag', filters.taxonomy_key || taxonomyChoice]);
-        const wanted = definitions.filter(def => requested.has(def.key));
-        const responses = await Promise.allSettled(wanted.map(def =>
-          listAllTaxonomyTerms(def.key, controller.signal)));
+        if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        // Every effective taxonomy has a visible table column. Resolve all of
+        // their terms, but keep the number of paginated requests in flight small.
+        // Legacy filters take priority so Category/Tag remain responsive.
+        const wanted = [
+          ...definitions.filter(def => def.key === 'category' || def.key === 'tag'),
+          ...definitions.filter(def => def.key !== 'category' && def.key !== 'tag'),
+        ];
         const byKind: Record<string, TaxonomyTerm[]> = {};
         const errors: string[] = [];
-        for (const [index, result] of responses.entries()) {
-          if (result.status === 'fulfilled') byKind[wanted[index].key] = result.value;
-          else if (!controller.signal.aborted) {
-            errors.push(`${wanted[index].label}: ${readableError(result.reason)}`);
-            if (result.reason instanceof ApiClientError && result.reason.status === 401) {
-              onApiError(result.reason, 'Phiên đăng nhập hết hạn khi tải taxonomy.');
+        const failedKinds: string[] = [];
+        const publish = () => {
+          if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+          setTermsState({
+            accountScope, definitions, byKind: { ...byKind }, failedKinds: [...failedKinds],
+            category: byKind.category ?? [], tag: byKind.tag ?? [],
+            categoryEnabled: definitions.some(def => def.key === 'category'),
+            tagEnabled: definitions.some(def => def.key === 'tag'),
+          });
+          setTermLoadErrors([...errors]);
+        };
+        publish();
+        let nextIndex = 0;
+        const load = async () => {
+          while (active && !controller.signal.aborted && accountScopeRef.current === accountScope) {
+            const def = wanted[nextIndex++];
+            if (!def) return;
+            try {
+              const found = await listAllTaxonomyTerms(def.key, controller.signal);
+              if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+              byKind[def.key] = found;
+            } catch (cause) {
+              if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+              if (cause instanceof ApiClientError && cause.status === 401) {
+                controller.abort();
+                onApiError(cause, 'Phiên đăng nhập hết hạn khi tải taxonomy.');
+                return;
+              }
+              failedKinds.push(def.key);
+              errors.push(`${def.label}: ${readableError(cause)}`);
             }
+            publish();
           }
-        }
-        if (active) setTermsState({
-          accountScope, definitions, byKind,
-          category: byKind.category ?? [], tag: byKind.tag ?? [],
-          categoryEnabled: definitions.some(def => def.key === 'category'),
-          tagEnabled: definitions.some(def => def.key === 'tag'),
-        });
-        if (active) setTermLoadErrors(errors);
+        };
+        await Promise.all(Array.from({ length: Math.min(TERM_FETCH_CONCURRENCY, wanted.length) }, load));
       } catch (cause) {
-        if (!active || controller.signal.aborted) return;
+        if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
         setTermsState({ accountScope, category: [], tag: [], categoryEnabled: false, tagEnabled: false,
-          definitions: [], byKind: {} });
+          definitions: [], byKind: {}, failedKinds: [] });
         onApiError(cause, 'Không thể tải bộ lọc taxonomy.');
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [accountScope, filters.taxonomy_key, taxonomyChoice, retry]);
+  }, [accountScope, retry]);
 
   useEffect(() => {
     let active = true;
@@ -350,12 +372,16 @@ export function EntryListPage({
     updateFilter({ sort: column, order: nextOrder });
   };
   const editSuffix = queryHash.includes('?') ? queryHash.slice(queryHash.indexOf('?')) : '';
-  const termLabels = new Map(Object.values(terms?.byKind ?? {}).flat()
-    .map(term => [term.id, term.name] as const));
+  const termLabelsByKind = useMemo(() => new Map(
+    Object.entries(terms?.byKind ?? {}).map(([kind, found]) =>
+      [kind, new Map(found.map(term => [term.id, term.name] as const))] as const),
+  ), [terms]);
   const namesFor = (row: EntryTableRow, kind: string) => {
-    const known = terms?.byKind[kind] ?? [];
-    const ids = new Set(known.map(term => term.id));
-    return row.term_ids.filter(id => ids.has(id)).map(id => termLabels.get(id) ?? `#${id}`).join(', ') || '—';
+    if (!row.term_ids.length) return '—';
+    const known = termLabelsByKind.get(kind);
+    if (!known) return terms?.failedKinds.includes(kind) ? 'Không tải được' : 'Đang tải…';
+    return row.term_ids.map(id => known.get(id)).filter((name): name is string => name !== undefined)
+      .join(', ') || '—';
   };
   const customDefinitions = terms?.definitions.filter(def => def.key !== 'category' && def.key !== 'tag') ?? [];
   const selectedTaxonomy = filters.taxonomy_key || taxonomyChoice;

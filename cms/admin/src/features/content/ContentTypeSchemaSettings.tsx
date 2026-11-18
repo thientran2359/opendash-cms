@@ -33,6 +33,8 @@ interface ConfiguredTaxonomies {
   taxonomies: string[];
   effective: string[];
   has_override: boolean;
+  /** Read under the same backend snapshot as taxonomies for safe CAS. */
+  type_version: number;
 }
 
 interface SavedTaxonomyDraft {
@@ -138,6 +140,10 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
     activeType.owner.kind === 'user'
     || (activeType.owner.kind === 'core' && isBuiltin)
   ));
+  // Site-owned CPT taxonomy associations are independent of provider-owned
+  // schema editing. Admin may override plugin/theme CPT eligibility without
+  // modifying the provider's schema; Section and Editors remain restricted.
+  const canEditTaxonomies = Boolean(activeType && !isSection && user?.role === 'admin');
   const canonicalSettings = activeType
     ? effectiveContentTypeSettings(activeKey, activeType.descriptor.settings)
     : null;
@@ -190,7 +196,8 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       if (!active || controller.signal.aborted) return;
       const remembered = selectedScope ? taxonomyDraftMemory.get(selectedScope) : undefined;
       if (remembered) {
-        const stale = remembered.stale || remembered.baseVersion !== activeType!.version ||
+        const stale = remembered.stale || remembered.baseVersion !== applied.type_version ||
+          activeType!.version !== applied.type_version ||
           !sameKeys(remembered.baseline, applied.taxonomies);
         setTaxonomyDraft([...remembered.selected]);
         setTaxonomyState({ identity: currentIdentity, available,
@@ -200,7 +207,11 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       } else {
         setTaxonomyDraft([...applied.taxonomies]);
         setTaxonomyState({ identity: currentIdentity, available,
-          applied: [...applied.taxonomies], baseVersion: activeType!.version, stale: false });
+          applied: [...applied.taxonomies], baseVersion: applied.type_version,
+          stale: activeType!.version !== applied.type_version });
+        if (activeType!.version !== applied.type_version) {
+          setTaxonomyNotice('CPT đã thay đổi trong lúc tải dữ liệu. Hãy đối chiếu phiên bản mới trước khi lưu.');
+        }
       }
     }).catch(error => {
       if (!active || controller.signal.aborted) return;
@@ -212,7 +223,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
 
   const handleUpdateTaxonomies = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!activeType || !taxonomyLoaded || !canEditSettings || isSection || taxonomyBusy
+    if (!activeType || !taxonomyLoaded || !canEditTaxonomies || isSection || taxonomyBusy
       || savingSettings || !csrfToken || taxonomyLoaded.stale || !taxonomyChanged) return;
     if (settingsChanged && !window.confirm(
       'Lưu taxonomy sẽ tải lại phiên bản CPT. Phần cấu hình chung chưa lưu có thể bị bỏ. Tiếp tục?',
@@ -282,6 +293,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         setTaxonomyError('Loại nội dung đã bị xóa. Bản nháp vẫn được giữ nhưng không thể lưu.');
         return;
       }
+      if (fresh.version !== configured.type_version) {
+        // These two HTTP calls may themselves straddle a concurrent edit.
+        // Never pair pre-edit associations with the post-edit CAS version.
+        setTaxonomyState(previous => previous ? { ...previous, stale: true } : previous);
+        setTaxonomyError('CPT thay đổi trong lúc đối chiếu. Bản nhập vẫn được giữ; hãy thử lại để lấy cùng một phiên bản.');
+        return;
+      }
       const selectedBefore = new Set(previousSelection);
       const baselineBefore = new Set(previousBaseline);
       // Apply just this user's membership delta onto the fresh configured
@@ -292,8 +310,8 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         ...configured.taxonomies.filter(key => !removed.has(key)), ...newlySelected,
       ])].sort();
       const nextState: LoadedTaxonomyState = {
-        identity: `${activeKey}:${fresh.version}`, available: taxonomyLoaded.available,
-        applied: [...configured.taxonomies], baseVersion: fresh.version, stale: false,
+        identity: `${activeKey}:${configured.type_version}`, available: taxonomyLoaded.available,
+        applied: [...configured.taxonomies], baseVersion: configured.type_version, stale: false,
       };
       // Update cache BEFORE changing schema identity, so the re-fetch effect
       // can safely hydrate it without overwriting the draft.
@@ -551,7 +569,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                         || taxonomyDraft.includes(def.key)).map(def => (
                         <label key={def.key} className="flex items-start gap-2 rounded border border-slate-200 p-3 text-sm text-slate-700">
                           <input type="checkbox" className="mt-1" checked={taxonomyDraft.includes(def.key)}
-                            disabled={!canEditSettings || !csrfToken || taxonomyBusy || savingSettings
+                            disabled={!canEditTaxonomies || !csrfToken || taxonomyBusy || savingSettings
                               || (!taxonomyDraft.includes(def.key) &&
                                 (def.provider_status !== 'active' || def.declaration_state !== 'declared'))}
                             onChange={event => {
@@ -571,7 +589,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                       ))}
                       {taxonomyDraft.filter(key => !taxonomyLoaded.available.some(def => def.key === key)).map(key => (
                         <label key={key} className="flex items-start gap-2 rounded border border-amber-300 p-3 text-sm">
-                          <input type="checkbox" checked disabled={!canEditSettings || taxonomyBusy || savingSettings}
+                          <input type="checkbox" checked disabled={!canEditTaxonomies || taxonomyBusy || savingSettings}
                             onChange={() => {
                               const next = taxonomyDraft.filter(value => value !== key);
                               setTaxonomyDraft(next);
@@ -581,7 +599,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                         </label>
                       ))}
                     </div>
-                    {!canEditSettings && <p className="text-xs text-slate-600">Chỉ loại nội dung có quyền cấu hình mới thay đổi taxonomy được.</p>}
+                    {!canEditTaxonomies && <p className="text-xs text-slate-600">Chỉ quản trị viên có thể thay đổi taxonomy; Section không hỗ trợ.</p>}
                     {taxonomyChanged && <p className="text-xs text-slate-600" role="status">
                       {selectedScope
                         ? 'Bản chọn taxonomy chưa lưu được giữ trong bộ nhớ phiên này theo tài khoản, website và loại nội dung khi bạn chuyển màn hình hoặc đăng nhập lại. Tải lại trang sẽ xóa bản nháp.'
@@ -599,7 +617,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                     {taxonomyError && <p role="alert" className="text-sm text-rose-700">{taxonomyError}</p>}
                     <div className="flex flex-wrap gap-2">
                       <button type="submit" className="rounded bg-slate-800 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                        disabled={!canEditSettings || !taxonomyChanged || taxonomyBusy || savingSettings || !csrfToken || taxonomyLoaded.stale}>
+                        disabled={!canEditTaxonomies || !taxonomyChanged || taxonomyBusy || savingSettings || !csrfToken || taxonomyLoaded.stale}>
                         {taxonomyBusy ? 'Đang lưu…' : 'Lưu taxonomy áp dụng'}
                       </button>
                       <button type="button" className="rounded border border-slate-300 px-3 py-2 text-sm"
