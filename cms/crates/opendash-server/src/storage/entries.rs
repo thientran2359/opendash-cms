@@ -141,6 +141,7 @@ pub enum PublishedListMissing {
     ContentType,
     Category,
     Tag,
+    Taxonomy,
 }
 
 #[derive(Debug)]
@@ -396,6 +397,16 @@ pub async fn list_published_page_in_tx(
             "include_descendants yêu cầu category_id hoặc generic taxonomy.",
         ));
     }
+    // Invalid filter shapes remain a request error. A valid persisted pair
+    // that points at a withdrawn/private/deleted taxonomy is instead a
+    // missing Builder configuration, so the public homepage still renders.
+    if filters.taxonomy_key.is_some() != filters.term_id.is_some()
+        || (filters.taxonomy_key.is_some()
+            && (filters.category_id.is_some() || filters.tag_id.is_some()))
+        || filters.term_id.is_some_and(|id| id <= 0)
+    {
+        return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
+    }
 
     let type_exists: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'
@@ -444,6 +455,28 @@ pub async fn list_published_page_in_tx(
             {
                 return Ok(PublishedListResult::MissingConfig(missing));
             }
+        }
+    }
+
+    if let (Some(kind), Some(id)) = (&filters.taxonomy_key, filters.term_id) {
+        // The same consistent transaction includes association, definition
+        // visibility and term kind. Do not expose drafts or private taxonomy
+        // membership by probing an unavailable saved Builder node.
+        let usable: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM taxonomy_terms term
+              JOIN taxonomy_definitions d ON d.key = term.kind
+             WHERE term.id = ? AND term.kind = ? AND d.public = 1
+               AND d.provider_status = 'active'
+               AND d.declaration_state = 'declared'",
+        )
+        .bind(id)
+        .bind(kind)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if usable.is_none() || !effective_taxonomies.iter().any(|enabled| enabled == kind) {
+            return Ok(PublishedListResult::MissingConfig(
+                PublishedListMissing::Taxonomy,
+            ));
         }
     }
 
@@ -1724,6 +1757,143 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(error.0, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn builder_generic_taxonomy_list_hides_drafts_and_survives_withdrawn_references() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO taxonomy_definitions(key,label,hierarchical,public,owner_kind)
+             VALUES('genre','Genre',1,1,'user')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
+             VALUES('post','[\"genre\"]')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let root = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('genre','Root','genre-root')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let child = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id)
+             VALUES('genre','Child','genre-child',?)",
+        )
+        .bind(root)
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let published = list_test_entry(&db, "post", "genre-public", true, &[child]).await;
+        list_test_entry(&db, "post", "genre-draft", false, &[child]).await;
+        let filters = EntryFilters {
+            taxonomy_key: Some("genre".into()),
+            term_id: Some(root),
+            include_descendants: true,
+            ..EntryFilters::default()
+        };
+        let page = expect_list_page(
+            list_published_page(&db, "post", 1, 1, PublishedListSort::IdDesc, filters.clone())
+                .await
+                .unwrap(),
+        );
+        assert_eq!(page.entries.iter().map(|entry| entry.id).collect::<Vec<_>>(), [published]);
+        assert!(!page.has_next, "drafts must not create a next page");
+
+        // A malformed query remains a 400, even though a withdrawn persisted
+        // Builder reference is treated as unavailable configuration.
+        let malformed = EntryFilters {
+            tag_id: Some(child),
+            ..filters.clone()
+        };
+        let error = list_published_page(
+            &db, "post", 1, 6, PublishedListSort::IdDesc, malformed,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+
+        for change in [
+            "UPDATE taxonomy_definitions SET public=0 WHERE key='genre'",
+            "UPDATE taxonomy_definitions SET provider_status='provider_inactive',public=1 WHERE key='genre'",
+            "UPDATE taxonomy_definitions SET declaration_state='withdrawn',
+                provider_status='active' WHERE key='genre'",
+        ] {
+            sqlx::query(change).execute(&db).await.unwrap();
+            let result = list_published_page(
+                &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                result,
+                PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
+            ));
+        }
+        sqlx::query(
+            "UPDATE taxonomy_definitions
+                SET public=1, provider_status='active',declaration_state='declared'
+              WHERE key='genre'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE content_type_taxonomy_overrides SET taxonomies_json='[]'
+             WHERE content_type_key='post'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let withdrawn = list_published_page(
+            &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            withdrawn,
+            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
+        ));
+        sqlx::query(
+            "UPDATE content_type_taxonomy_overrides SET taxonomies_json='[\"genre\"]'
+             WHERE content_type_key='post'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM entry_terms WHERE term_id=?")
+            .bind(child)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM taxonomy_terms WHERE id=?")
+            .bind(child)
+            .execute(&db)
+            .await
+            .unwrap();
+        let deleted = list_published_page(
+            &db, "post", 1, 6, PublishedListSort::IdDesc,
+            EntryFilters { term_id: Some(child), ..filters },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            deleted,
+            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
+        ));
     }
 
     #[tokio::test]
