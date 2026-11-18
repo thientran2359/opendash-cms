@@ -320,9 +320,16 @@ Project Ready unverified. Serial dependencies require actual G5, not Issue closu
 
 | Task | Scope | State |
 | --- | --- | --- |
-| [M3-S31-T01](milestones/M3/slices/2026-11-18-content-foundation-g3.md) | Cấu hình hành vi CPT và cơ chế Lưu/Xuất bản | PLANNED; Issue pending merged specs |
-| [M4-S12-T01](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Đăng ký custom taxonomy và liên kết với CPT | PLANNED; Issue pending merged specs |
-| [M4-S12-T02](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Quản lý taxonomy tùy chỉnh xuyên Admin và Builder | PLANNED; Issue pending merged specs |
-| [M7-S17-T01](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Giải quyết permalink và redirect bằng một route authority | PLANNED; Issue pending merged specs |
-| [M7-S17-T02](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Cấu hình permalink và URL xem bài trong Admin | PLANNED; Issue pending merged specs |
-| [M6-S11-T01](milestones/M6/slices/2026-11-18-content-foundation-g3.md) | Plugin/theme khai báo CPT taxonomy rewrite và kiểm chứng hooks | PLANNED; Issue pending merged specs |
+| [M3-S31-T01](milestones/M3/slices/2026-11-18-content-foundation-g3.md) | Cấu hình hành vi CPT và cơ chế Lưu/Xuất bản | PLANNED · [#373](https://github.com/thientran2359/opendash-cms/issues/373) |
+| [M4-S12-T01](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Đăng ký custom taxonomy và liên kết với CPT | PLANNED · [#374](https://github.com/thientran2359/opendash-cms/issues/374) |
+| [M4-S12-T02](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Quản lý taxonomy tùy chỉnh xuyên Admin và Builder | PLANNED · [#375](https://github.com/thientran2359/opendash-cms/issues/375) |
+| [M7-S17-T01](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Giải quyết permalink và redirect bằng một route authority | PLANNED · [#376](https://github.com/thientran2359/opendash-cms/issues/376) |
+| [M7-S17-T02](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Cấu hình permalink và URL xem bài trong Admin | PLANNED · [#377](https://github.com/thientran2359/opendash-cms/issues/377) |
+| [M6-S11-T01](milestones/M6/slices/2026-11-18-content-foundation-g3.md) | Plugin/theme khai báo CPT taxonomy rewrite và kiểm chứng hooks | PLANNED · [#378](https://github.com/thientran2359/opendash-cms/issues/378) |
+
+Publication source: `695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d` ([PR #372](https://github.com/thientran2359/opendash-cms/pull/372)); baseline code `2ebe51cbe1099c4721304e2b31895aa78b7c1241`.
+Six implementation Issues #373–#378 published after deduplication and successful
+Issue rendering; milestone IDs4/5/8/7 verified live. M3 milestone4 remains historically
+closed; this follow-up does not revoke prior closure or assert milestone completion.
+Project membership/status NOT_VERIFIED (CLI lacks read:project); publication does
+not grant Ready. No agent message/dispatch, no changes to #302.
