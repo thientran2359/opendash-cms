@@ -36,3 +36,12 @@ Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và 
 Không tạo thư mục/module rỗng chỉ để khớp sơ đồ. Khi nguồn mã được đưa vào, đối chiếu cây thư mục và kiểm thử trước khi sửa tài liệu trạng thái.
 
 Xem [báo cáo chuyển thư mục ngày 07/11/2026](verification/2026-11-07-layout-migration.md) cho thay đổi `cms/`, `database/` và các kiểm chứng sau di chuyển.
+
+
+### Content foundation follow-up (18/11/2026)
+
+[ADR-0019](decisions/ADR-0019-content-foundation.md) ·
+[contract](contracts/CONTENT_FOUNDATION_2026_11.md) ·
+[task index](plans/TASK_INDEX.md#content-foundation-follow-up--18112026).
+CPT configuration, custom taxonomy, shared permalink resolver and provider integration;
+design only until separately implemented/verified.

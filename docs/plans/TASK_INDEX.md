@@ -310,3 +310,19 @@ No changes to #302 Project or closure, no Beta PASS.
 | [M4-S11-T01](milestones/M4/slices/2026-11-17-owner-admin-review-g3.md) | Open and save Builder for the exact Page | **Harbor · G5 VERIFIED (macOS Intel, Chrome 16/16, Rust 3/3)**; Windows/Linux native and owner Beta signoff separate | [#354](https://github.com/thientran2359/opendash-cms/issues/354) · [PR #365](https://github.com/thientran2359/opendash-cms/pull/365) · [G5 receipt](https://github.com/thientran2359/opendash-cms/issues/354#issuecomment-6967738305) |
 | [M4-S11-T02](milestones/M4/slices/2026-11-17-owner-admin-review-g3.md) | Add site-owned private Section CPT with scoped Builder | **Harbor · G5 VERIFIED (macOS Intel, native Chrome 22/22, Rust Section 1/1)**; Windows/Linux native and owner Beta signoff separate | [#355](https://github.com/thientran2359/opendash-cms/issues/355) · [PR #367](https://github.com/thientran2359/opendash-cms/pull/367) · [G5 report](../verification/2026-11-18-m4-s11-t02-g5-macos.md) |
 | [M5-S12-T01](milestones/M5/slices/2026-11-17-owner-admin-review-g3.md) | Expose local template library and copy Sections into designs | **Harbor · G5 VERIFIED (macOS Intel, native Chrome 18/18, Section regression 22/22, Rust 8/8)**; Project #3 Done, Issue Closed Completed (2026-11-18); Windows/Linux native and owner #302 signoff separate | [#356](https://github.com/thientran2359/opendash-cms/issues/356) · [PR #369](https://github.com/thientran2359/opendash-cms/pull/369) · [G5 docs PR #370](https://github.com/thientran2359/opendash-cms/pull/370) · [G5 report](../verification/2026-11-18-m5-s12-t01-g5-macos.md) |
+
+
+## Content foundation follow-up — 18/11/2026
+
+[ADR-0019](../decisions/ADR-0019-content-foundation.md), Aster coordinator, Harbor
+implementer/self-review. Specifications complete on merge; runtime NOT_RUN, live
+Project Ready unverified. Serial dependencies require actual G5, not Issue closure.
+
+| Task | Scope | State |
+| --- | --- | --- |
+| [M3-S31-T01](milestones/M3/slices/2026-11-18-content-foundation-g3.md) | Cấu hình hành vi CPT và cơ chế Lưu/Xuất bản | PLANNED; Issue pending merged specs |
+| [M4-S12-T01](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Đăng ký custom taxonomy và liên kết với CPT | PLANNED; Issue pending merged specs |
+| [M4-S12-T02](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Quản lý taxonomy tùy chỉnh xuyên Admin và Builder | PLANNED; Issue pending merged specs |
+| [M7-S17-T01](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Giải quyết permalink và redirect bằng một route authority | PLANNED; Issue pending merged specs |
+| [M7-S17-T02](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Cấu hình permalink và URL xem bài trong Admin | PLANNED; Issue pending merged specs |
+| [M6-S11-T01](milestones/M6/slices/2026-11-18-content-foundation-g3.md) | Plugin/theme khai báo CPT taxonomy rewrite và kiểm chứng hooks | PLANNED; Issue pending merged specs |

@@ -53,7 +53,7 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 - Quản trị viên tạo loại nội dung tùy chỉnh (CPT), custom fields, danh mục có cha–con và thẻ qua giao diện. Theme/plugin có thể định nghĩa sẵn các thành phần này.
 - Các field bản đầu gồm chữ ngắn/dài, trình soạn thảo nội dung, số, bật/tắt, ngày, lựa chọn, ảnh và thư viện ảnh.
 - Người nhập liệu có thể làm việc qua form. Template lấy dữ liệu của nội dung tương ứng để hiển thị.
-- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. **Phân biệt Lưu và Xuất bản:** với `post`/`page` đang ở `draft`, **Lưu** chỉ ghi bản nháp vào DB, không làm nội dung xuất hiện trên URL công khai, archive, sitemap hoặc media public qua tham chiếu draft. Chỉ chuyển trạng thái sang `published` bằng thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một `post`/`page` đã `published` cập nhật nội dung công khai. Preview draft phải yêu cầu phiên đăng nhập/quyền hợp lệ. Với **Builder/homepage** hiện hữu, **Lưu** tiếp tục cập nhật trang công khai ngay; không tự thêm workflow draft cho Builder hoặc CPT khác. Phần trạng thái/endpoint/schema cụ thể cần G2 trước triển khai.
+- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. **Phân biệt Lưu và Xuất bản:** với `post`/`page` đang ở `draft`, **Lưu** chỉ ghi bản nháp vào DB, không làm nội dung xuất hiện trên URL công khai, archive, sitemap hoặc media public qua tham chiếu draft. Chỉ chuyển trạng thái sang `published` bằng thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một `post`/`page` đã `published` cập nhật nội dung công khai. Preview draft phải yêu cầu phiên đăng nhập/quyền hợp lệ. Với **Builder/homepage** hiện hữu, **Lưu** tiếp tục cập nhật trang công khai ngay; không tự thêm workflow draft cho Builder. Theo [ADR-0019](../decisions/ADR-0019-content-foundation.md), CPT khác có thể chọn `draft_publish`; mặc định CPT cũ vẫn immediate, chuyển chế độ không tự xuất bản draft. Phần trạng thái/endpoint/schema cụ thể cần G2 trước triển khai.
 - Hai vai trò là Quản trị viên và Biên tập viên. Quản trị viên quản lý hệ thống, cấu hình, theme và plugin. Biên tập viên quản lý và cập nhật nội dung công khai.
 
 ## Quyết định bổ sung M3 — Core CMS usable (10/11/2026)
@@ -114,3 +114,11 @@ and [bounded contract](../contracts/ADMIN_REVIEW_2026_11.md). Page has no core-d
 category/tag, while existing links and explicit provider/user eligibility are preserved.
 Section insertion copies AST; synced propagation remains deferred. Cloud library and
 note08 full Builder redesign stay deferred. No Beta PASS follows from this decision.
+
+
+## Content foundation follow-up — 18/11/2026
+
+Owner ưu tiên CPT có cấu hình, custom taxonomy và liên kết CPT, permalink dùng chung,
+plugin/theme khai báo qua canonical APIs. [ADR-0019](../decisions/ADR-0019-content-foundation.md)
+và [contract](../contracts/CONTENT_FOUNDATION_2026_11.md) chốt giới hạn; thiết kế được
+chấp nhận khi merge, không đồng nghĩa đã implemented/verified hoặc WordPress parity.
