@@ -8,7 +8,7 @@ import type { ParsedRoute } from '../shell/router.ts';
 import {
   type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type ListProps, type NodeKind, type ResponsiveAlign,
   type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
-  allNodes, appendNode, isElement, isLockedElement, locate, moveNode, preservesAnchors,
+  allNodes, appendNode, copySectionIntoDocument, isElement, isLockedElement, locate, moveNode, preservesAnchors,
   removeNode, setElementBinding, setListProps, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
@@ -119,6 +119,11 @@ export function BuilderWorkspace({
   const [conflict, setConflict] = useState(false);
   const [notice, setNotice] = useState('Mở Builder để chỉnh homepage.');
   const [error, setError] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [librarySections, setLibrarySections] = useState<sectionApi.SectionRecord[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [insertingId, setInsertingId] = useState<number | null>(null);
+  const librarySeq = useRef(0);
   const ownerRef = useRef<number | null>(null);
   const ownerRoleRef = useRef<AuthUser['role'] | null>(null);
   const loadedRef = useRef(false);
@@ -139,6 +144,11 @@ export function BuilderWorkspace({
   };
   const clear = () => {
     loadSeq.current += 1;
+    librarySeq.current += 1;
+    setLibraryOpen(false);
+    setLibrarySections([]);
+    setLibraryLoading(false);
+    setInsertingId(null);
     invalidatePreview();
     draftRef.current = EMPTY_DOCUMENT;
     setDraft(EMPTY_DOCUMENT);
@@ -160,6 +170,16 @@ export function BuilderWorkspace({
   useEffect(() => {
     onDirtyChange(revision !== savedRevision);
   }, [revision, savedRevision, onDirtyChange]);
+
+  // A pending private Section fetch may never insert into a different target,
+  // account, role, or authorization generation after navigation/re-login.
+  useEffect(() => {
+    librarySeq.current += 1;
+    setLibraryOpen(false);
+    setLibrarySections([]);
+    setLibraryLoading(false);
+    setInsertingId(null);
+  }, [route.rawHash, user?.id, user?.role, csrfToken, resetToken]);
 
   // Fetch only the accepted target. An inactive Builder must not fetch homepage
   // in the background while an Editor is working on a Page.
@@ -271,6 +291,48 @@ export function BuilderWorkspace({
     const next = appendNode(draftRef.current, parentId, kind, elementType);
     if (!next) return message('Vị trí thêm node không hợp lệ.', true);
     changeDraft(next.document, next.id);
+  };
+  const openLibrary = async () => {
+    if (!active || !user || !csrfToken || !loadedRef.current || libraryLoading) return;
+    if (libraryOpen) { librarySeq.current += 1; setLibraryOpen(false); return; }
+    const requestId = ++librarySeq.current;
+    const accountId = user.id;
+    setLibraryLoading(true);
+    try {
+      const catalog = await sectionApi.getLocalTemplateLibrary();
+      if (requestId !== librarySeq.current || ownerRef.current !== accountId) return;
+      setLibrarySections(catalog.sections);
+      setLibraryOpen(true);
+    } catch (cause) {
+      if (requestId === librarySeq.current) onApiError(cause, 'Không thể mở thư viện Section.');
+    } finally { if (requestId === librarySeq.current) setLibraryLoading(false); }
+  };
+  const insertSection = async (id: number) => {
+    if (!active || !user || !csrfToken || !loadedRef.current || loading || saving || insertingId !== null) return;
+    const requestId = ++librarySeq.current;
+    const accountId = user.id;
+    setInsertingId(id);
+    try {
+      const sourceDocument = await sectionApi.getSectionDocument(id);
+      if (requestId !== librarySeq.current || ownerRef.current !== accountId || !loadedRef.current) return;
+      const next = copySectionIntoDocument(draftRef.current, sourceDocument.document, selectedId);
+      if (!next) {
+        message('Section rỗng, vượt giới hạn hoặc vị trí chèn không hợp lệ. Không có thay đổi.', true);
+        return;
+      }
+      // Locked provider nodes are preserved in their own Section; copying an
+      // unresolved provider is not equivalent to installing it in this target.
+      const unresolved = allNodes(sourceDocument.document).some(location =>
+        location.kind === 'element' && isLockedElement(location.node as import('./document.ts').BuilderElement, registryRef.current));
+      if (unresolved) {
+        message('Section chứa block chưa resolve. Giữ bản gốc; bật lại provider trước khi chèn bản sao.', true);
+        return;
+      }
+      changeDraft(next.document, next.firstId);
+      message('Đã chèn bản SAO Section #' + id + ' với ID mới. Chỉ là nháp; cần Lưu Builder để áp dụng.');
+    } catch (cause) {
+      if (requestId === librarySeq.current) onApiError(cause, 'Không thể sao chép Section vào Builder.');
+    } finally { if (requestId === librarySeq.current) setInsertingId(null); }
   };
   const reorder = (id: string, direction: -1 | 1) => {
     const next = moveNode(draftRef.current, id, direction);
@@ -604,6 +666,24 @@ export function BuilderWorkspace({
               {ELEMENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
             </select>
           </div>
+          <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-local-library">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <strong className="text-xs">Thư viện Section cục bộ</strong>
+              <button type="button" className="btn-secondary text-xs" disabled={loading || saving || libraryLoading}
+                onClick={() => void openLibrary()}>{libraryLoading ? 'Đang tải…' : libraryOpen ? 'Đóng' : 'Chọn Section'}</button>
+            </div>
+            {libraryOpen && <div className="mt-3 space-y-2">
+              <p className="text-xs text-slate-500">Chèn bản sao với ID mới sau Section đang chọn. Không liên kết với Section gốc.</p>
+              {librarySections.length === 0 && <p className="text-xs">Chưa có Section. Tạo Section tại mục Section riêng tư.</p>}
+              {librarySections.map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs">
+                <span className="min-w-0 break-words">#{item.id} · {item.title}</span>
+                <button type="button" disabled={insertingId !== null || loading || saving}
+                  onClick={() => void insertSection(item.id)}>
+                  {insertingId === item.id ? 'Đang chèn…' : 'Chèn bản sao'}
+                </button>
+              </div>)}
+            </div>}
+          </section>
           <BuilderTree document={draft} selectedId={selectedId} elementType={elementType}
             onSelect={setSelectedId} onAdd={add} onMove={reorder} onDelete={remove} />
         </div>

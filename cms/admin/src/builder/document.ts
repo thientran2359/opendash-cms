@@ -241,8 +241,8 @@ export function preservesAnchors(
   });
 }
 
-function clone(document: BuilderDocument): BuilderDocument {
-  return JSON.parse(JSON.stringify(document)) as BuilderDocument;
+function clone<T>(document: T): T {
+  return JSON.parse(JSON.stringify(document)) as T;
 }
 
 function childrenAt(document: BuilderDocument, location: NodeLocation | undefined): BuilderNode[] | undefined {
@@ -280,6 +280,50 @@ export function appendNode(
     : { id, children: [] };
   children.push(node);
   return { document: next, id };
+}
+
+/** #356 Copy, never reference: a site-owned Section's top-level AST nodes
+ * become fresh nodes in the destination, placed after the selected Section
+ * ancestor or appended at document root. Source and its media refs do not
+ * mutate. Save/preview validation remains server-authoritative. */
+export function copySectionIntoDocument(
+  destination: BuilderDocument,
+  source: BuilderDocument,
+  selectedId: string | null,
+): { document: BuilderDocument; firstId: string } | null {
+  if (source.schema_version !== 1 || destination.schema_version !== 1
+      || source.sections.length === 0) return null;
+  const next = clone(destination);
+  const used = new Set(allNodes(next).map(location => location.node.id));
+  const fresh = (kind: NodeKind): string => {
+    let id: string;
+    do { id = newNodeId(kind, next); } while (used.has(id));
+    used.add(id);
+    return id;
+  };
+  const copies: BuilderSection[] = source.sections.map(section => ({
+    ...clone(section),
+    id: fresh('section'),
+    children: section.children.map(row => ({
+      ...clone(row),
+      id: fresh('row'),
+      children: row.children.map(column => ({
+        ...clone(column),
+        id: fresh('column'),
+        children: column.children.map(element => ({
+          ...clone(element),
+          id: fresh('element'),
+        })),
+      })),
+    })),
+  }));
+  const location = locate(destination, selectedId);
+  const insertionIndex = location ? location.path[0] + 1 : next.sections.length;
+  next.sections.splice(insertionIndex, 0, ...copies);
+  if (allNodes(next).length > 512 || JSON.stringify(next).length > 256 * 1024) return null;
+  if (allNodes(next).filter(item => item.kind === 'element'
+      && (item.node as BuilderElement).type === 'core/list').length > 8) return null;
+  return { document: next, firstId: copies[0].id };
 }
 
 /** Typed list updates; never encode filters/booleans as static string props. */

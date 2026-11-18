@@ -142,7 +142,6 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       hash: '#/appearance/library',
       group: 'appearance',
       adminOnly: true,
-      disabled: true,
     },
     {
       id: 'plugins',
@@ -249,6 +248,7 @@ interface AdminShellProps {
   themesContent: React.ReactNode;
   menusContent: React.ReactNode;
   themeOptionsContent: React.ReactNode;
+  libraryContent: React.ReactNode;
 }
 
 export const AdminShell: React.FC<AdminShellProps> = ({
@@ -258,7 +258,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   sidebarContent, previewContent, contentContent, schemaSettingsContent,
   postsContent, pagesContent, sectionsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
-  menusContent, themeOptionsContent,
+  menusContent, themeOptionsContent, libraryContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -506,11 +506,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <main className="od-admin-card min-w-0">{themesContent}</main>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'menus' && <main className="od-admin-card min-w-0">{menusContent}</main>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'options' && <main className="od-admin-card min-w-0">{themeOptionsContent}</main>}
-                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' &&
-                  <section className="od-admin-card min-w-0" data-testid="pending-library" role="status">
-                    <h2 className="text-xl font-semibold">Thư viện mẫu chưa khả dụng</h2>
-                    <p>Thư viện mẫu sẽ được mở khi các tính năng Section và thư viện cục bộ được nghiệm thu. Hiện chưa có màn hình quản lý mẫu.</p>
-                  </section>}
+                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && libraryContent}
                 {user && route.view === 'sections' && sectionsContent}
 
                 <section className={user && route.view === 'builder' ? 'od-editor-panel' : 'hidden'} aria-label="Builder" aria-hidden={!user || route.view !== 'builder'}>
