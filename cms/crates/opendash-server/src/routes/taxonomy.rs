@@ -7,10 +7,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
+use std::collections::BTreeMap;
+use serde_json::Value;
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::{require_admin_with_csrf, require_session},
+    auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     storage::taxonomy,
 };
@@ -49,6 +51,10 @@ pub struct PatchTaxonomyTerm {
     slug: Option<String>,
     #[serde(default, deserialize_with = "present_optional_parent")]
     parent_id: Option<Option<i64>>,
+    #[serde(default)]
+    extensions: Option<BTreeMap<String, Value>>,
+    #[serde(default)]
+    schema_token: Option<String>,
 }
 
 fn parse_body<T: DeserializeOwned>(payload: Result<Json<T>, JsonRejection>) -> ApiResult<T> {
@@ -128,11 +134,14 @@ pub async fn taxonomy_get(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> ApiResult<Response> {
-    require_session(&headers, &db).await?;
+    let actor = require_session(&headers, &db).await?;
     valid_id(id)?;
     let result = taxonomy::get_term(&db, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy term."))?;
+    let result = taxonomy::term_with_effective_extensions(
+        &db, result, if actor.user.role == crate::auth::Role::Admin { "admin" } else { "editor" },
+    ).await?;
     Ok(term_response(StatusCode::OK, result))
 }
 
@@ -153,6 +162,7 @@ pub async fn taxonomy_create(
         input.parent_id,
     )
     .await?;
+    let created = taxonomy::term_with_effective_extensions(&db, created, "admin").await?;
     Ok(term_response(StatusCode::CREATED, created))
 }
 
@@ -163,13 +173,14 @@ pub async fn taxonomy_patch(
     Path(id): Path<i64>,
     payload: Result<Json<PatchTaxonomyTerm>, JsonRejection>,
 ) -> ApiResult<Response> {
-    let actor = require_admin_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     valid_id(id)?;
     let version = expected_version(&headers)?;
     let input = parse_body(payload)?;
-    if input.name.is_none() && input.slug.is_none() && input.parent_id.is_none() {
+    if input.name.is_none() && input.slug.is_none() && input.parent_id.is_none()
+        && input.extensions.is_none() {
         return Err(ApiError::bad_request(
-            "Cần name, slug hoặc parent_id để cập nhật.",
+            "Cần name, slug, parent_id hoặc extensions để cập nhật.",
         ));
     }
     let updated = taxonomy::patch_term(
@@ -180,9 +191,29 @@ pub async fn taxonomy_patch(
         input.name.as_deref(),
         input.slug.as_deref(),
         input.parent_id,
+        input.extensions.as_ref(),
+        input.schema_token.as_deref(),
     )
     .await?;
+    let role = if actor.user.role == crate::auth::Role::Admin { "admin" } else { "editor" };
+    let updated = taxonomy::term_with_effective_extensions(&db, updated, role).await?;
     Ok(term_response(StatusCode::OK, updated))
+}
+
+/// Separate authenticated projection of readable panel definitions. This is
+/// never a write grant: the PATCH transaction recomputes role+schema token.
+pub async fn taxonomy_effective_editor_config(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Response> {
+    let actor = require_session(&headers, &db).await?;
+    valid_id(id)?;
+    let term = taxonomy::get_term(&db, id).await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy term."))?;
+    let role = if actor.user.role == crate::auth::Role::Admin { "admin" } else { "editor" };
+    let config = crate::storage::admin_extensions::effective_term(&db, id, &term.kind, role).await?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(config)).into_response())
 }
 
 pub async fn taxonomy_delete(

@@ -177,6 +177,8 @@ pub struct ThemeV2Manifest {
     pub declarations: Option<serde_json::Value>,
     #[serde(default)]
     pub field_groups: Option<serde_json::Value>,
+    #[serde(default)]
+    pub admin_extensions: Option<opendash_core::admin_extensions::AdminExtensions>,
 }
 
 #[derive(Debug, Clone)]
@@ -252,6 +254,10 @@ pub fn parse_theme_zip_v2(bytes: &[u8]) -> Result<ThemeV2Package, V2ZipError> {
 
     if manifest.manifest_version != 2 {
         return Err(V2ZipError::BadRequest("manifest_version phải bằng 2."));
+    }
+    if let Some(extensions) = &manifest.admin_extensions {
+        extensions.validate("theme", &[])
+            .map_err(V2ZipError::BadRequest)?;
     }
     if !valid_v2_theme_id(&manifest.theme_id) {
         return Err(V2ZipError::BadRequest(

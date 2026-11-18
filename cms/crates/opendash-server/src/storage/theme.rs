@@ -439,6 +439,20 @@ pub async fn stage_and_commit_v2_revision(
     provenance_json: &str,
     files: &BTreeMap<String, Vec<u8>>,
 ) -> ApiResult<RevisionInstallOutcome> {
+    // The same bounded manifest is validated by the ZIP parser. A direct
+    // storage caller is still checked before revision filesystem publication.
+    let raw_manifest: serde_json::Value = serde_json::from_str(manifest_json)
+        .map_err(|_| ApiError::bad_request("Theme manifest JSON không hợp lệ."))?;
+    let installed_ext: Option<opendash_core::admin_extensions::AdminExtensions> =
+        raw_manifest.get("admin_extensions").cloned()
+        .map(serde_json::from_value).transpose()
+        .map_err(|_| ApiError::bad_request("Theme admin_extensions không hợp lệ."))?;
+    if let Some(ext) = &installed_ext {
+        ext.validate("theme", &[]).map_err(ApiError::bad_request)?;
+    }
+    crate::storage::admin_extensions::require_capacity(
+        db, "theme", theme_id, installed_ext.as_ref(),
+    ).await?;
     if !valid_v2_theme_id(theme_id) {
         return Err(ApiError::bad_request(
             "theme_id v2 phải là lowercase kebab-case (1–64 ký tự) và không dùng tiền tố legacy.",
@@ -755,6 +769,13 @@ pub async fn activate_revision(
     } else {
         crate::theme::ThemeDeclarations::default()
     };
+    let extension_manifest: serde_json::Value =
+        serde_json::from_str(&revision.manifest_json)
+            .map_err(|_| ApiError::internal("Theme manifest của revision bị hỏng."))?;
+    let extension_decls: Option<opendash_core::admin_extensions::AdminExtensions> =
+        extension_manifest.get("admin_extensions").cloned()
+            .map(serde_json::from_value).transpose()
+            .map_err(|_| ApiError::internal("Admin extensions theme revision bị hỏng."))?;
     let durability = verify_revision_durability(themes_root, &revision);
     if durability != RevisionDurabilityStatus::Valid {
         return Ok(RevisionActivationOutcome::CorruptRevision(durability));
@@ -769,6 +790,21 @@ pub async fn activate_revision(
     )
     .await
     {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+        return Err(err);
+    }
+    let extension_update = async {
+        crate::storage::admin_extensions::require_capacity_in_conn(
+            &mut conn, "theme", &revision.theme_id, extension_decls.as_ref(),
+        ).await?;
+        crate::storage::admin_extensions::sync_owner_in_conn(
+            &mut conn, "theme", &revision.theme_id, extension_decls.as_ref(), "active", &[],
+        ).await?;
+        crate::storage::admin_extensions::set_theme_active_in_conn(
+            &mut conn, Some(&revision.theme_id),
+        ).await
+    }.await;
+    if let Err(err) = extension_update {
         let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
         return Err(err);
     }
@@ -1098,6 +1134,7 @@ pub async fn activate(db: &SqlitePool, id: &str, version: i64) -> ApiResult<Acti
         return Ok(ActivationOutcome::NotFound);
     };
     // Optimistic CAS: two tabs with same version cannot both activate.
+    let mut tx = db.begin().await?;
     let result = sqlx::query(
         "UPDATE theme_active_selection
          SET revision_id = ?, version = version + 1
@@ -1105,11 +1142,13 @@ pub async fn activate(db: &SqlitePool, id: &str, version: i64) -> ApiResult<Acti
     )
     .bind(revision_id)
     .bind(version)
-    .execute(db)
+    .execute(&mut *tx)
     .await?;
     if result.rows_affected() == 0 {
         return Ok(ActivationOutcome::Stale);
     }
+    crate::storage::admin_extensions::set_theme_active_in_conn(&mut tx, None).await?;
+    tx.commit().await?;
     Ok(ActivationOutcome::Activated(list(db).await?))
 }
 

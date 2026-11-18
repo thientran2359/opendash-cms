@@ -273,6 +273,10 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
         )
         .route(
+            "/api/admin/taxonomy/terms/{id}/effective-editor-config",
+            get(crate::routes::taxonomy::taxonomy_effective_editor_config),
+        )
+        .route(
             "/api/admin/taxonomy/eligibility/{content_type_key}",
             get(taxonomy_eligibility_list),
         )
@@ -419,6 +423,15 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/content-types/{type_key}/entry-table",
             get(entry_table_get),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/effective-list-config",
+            get(crate::routes::entries::entry_table_effective_config),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/admin-actions/{plugin_id}/{action_id}",
+            post(crate::routes::entries::entry_table_provider_action)
+                .layer(DefaultBodyLimit::max(4096)),
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/composite",

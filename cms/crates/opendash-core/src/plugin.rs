@@ -186,6 +186,24 @@ impl PluginManifest {
         let mut raw_val: serde_json::Value =
             serde_json::from_str(json_str).map_err(|_| "JSON manifest không hợp lệ.")?;
         if let Some(obj) = raw_val.as_object_mut() {
+            // Admin extensions are persisted in the owner-aware registry, not in
+            // the Wasm ABI manifest. Keep Rust PluginManifest literals and ABI
+            // clients backwards compatible.
+            if let Some(raw) = obj.remove("admin_extensions") {
+                let value: crate::admin_extensions::AdminExtensions =
+                    serde_json::from_value(raw)
+                        .map_err(|_| "admin_extensions không đúng cấu trúc.")?;
+                let schema = obj.get("manifest_schema").and_then(serde_json::Value::as_u64)
+                    .unwrap_or(1);
+                if schema != 2 {
+                    return Err("admin_extensions yêu cầu manifest_schema = 2.");
+                }
+                let actions = obj.get("actions").and_then(serde_json::Value::as_array)
+                    .map(|list| list.iter().filter_map(|action| action.get("id")
+                        .and_then(serde_json::Value::as_str).map(str::to_string)).collect::<Vec<_>>())
+                    .unwrap_or_default();
+                value.validate("plugin", &actions)?;
+            }
             if let Some(top_fg) = obj.remove("field_groups") {
                 let decl = obj
                     .entry("declarations")

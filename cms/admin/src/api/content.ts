@@ -5,6 +5,7 @@ import {
   ContentEntryRecord,
   EntryTableQuery,
   EntryTableResult,
+  EntryTableRow,
   ContentTypeDefinition,
   EditorLayoutConfigV1,
   EditorLayoutSnapshot,
@@ -15,6 +16,7 @@ import {
 } from '../features/content/types.ts';
 import { requestJson, requestText } from './client.ts';
 import { appendEntryTermFilters, type EntryTermFilters } from './taxonomy.ts';
+import type { EffectiveListConfig } from '../features/extensions/AdminContributionRenderer.tsx';
 
 const contentTypePath = (key: string): string =>
   `/api/admin/content-types/${encodeURIComponent(key)}`;
@@ -155,6 +157,27 @@ export function queryContentEntryTable(typeKey: string, filter: EntryTableQuery 
     signal,
     defaultErrorMessage: 'Không thể tải bảng nội dung.',
   });
+}
+
+export function getEffectiveEntryListConfig(typeKey: string, signal?: AbortSignal): Promise<EffectiveListConfig> {
+  return requestJson(`${contentTypePath(typeKey)}/effective-list-config`, {
+    signal,
+    defaultErrorMessage: 'Không thể tải cấu hình cột provider hiệu lực.',
+  });
+}
+
+export function runEntryProviderAction(
+  typeKey: string,
+  row: EntryTableRow,
+  providerId: string,
+  actionId: string,
+  csrfToken: string,
+): Promise<{ success: boolean; data: unknown; error?: string | null }> {
+  return requestJson(
+    `${entryPath(typeKey, row.id)}/admin-actions/${encodeURIComponent(providerId)}/${encodeURIComponent(actionId)}`,
+    { method: 'POST', csrfToken, ifMatchVersion: row.version,
+      defaultErrorMessage: 'Không thể chạy action provider.' },
+  );
 }
 
 export interface ContentTypeTaxonomyEligibility {

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   changeContentEntryPublication, deleteContentEntry, listContentTypeTaxonomyEligibility,
-  queryContentEntryTable,
+  queryContentEntryTable, getEffectiveEntryListConfig, runEntryProviderAction,
 } from '../../api/content.ts';
+import {
+  AdminColumnCell, type EffectiveListConfig, type ProviderColumn,
+} from '../extensions/AdminContributionRenderer.tsx';
 import { ApiClientError } from '../../api/client.ts';
 import { listAllTaxonomyTerms, type TaxonomyTerm } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
@@ -95,6 +98,8 @@ export function EntryListPage({
   const filters = useMemo(() => parseEntryTableHash(routeHash), [routeHash]);
   const queryHash = entryTableHash(base, filters);
   const accountScope = JSON.stringify([siteInstanceId, user.id, user.role, authGeneration, typeKey]);
+  const accountScopeRef = useRef(accountScope);
+  accountScopeRef.current = accountScope;
   const scope = JSON.stringify([accountScope, queryHash]);
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
@@ -111,6 +116,13 @@ export function EntryListPage({
     accountScope: string; category: TaxonomyTerm[]; tag: TaxonomyTerm[];
     categoryEnabled: boolean; tagEnabled: boolean;
   } | null>(null);
+  const [providerState, setProviderState] = useState<{
+    accountScope: string; config: EffectiveListConfig;
+  } | null>(null);
+  const [providerError, setProviderError] = useState('');
+  const [providerBusy, setProviderBusy] = useState(false);
+  const providerBusyRef = useRef(false);
+  const [providerNotice, setProviderNotice] = useState('');
   const [searchInput, setSearchInput] = useState(filters.q ?? '');
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -121,6 +133,8 @@ export function EntryListPage({
   const error = errorState?.scope === scope ? errorState.message : '';
   const loading = loadingScope === scope || (!data && !error);
   const terms = termsState?.accountScope === accountScope ? termsState : null;
+  const providerColumns = providerState?.accountScope === accountScope
+    ? providerState.config.columns : [];
 
   const updateFilter = (patch: Partial<EntryTableQuery>, resetPage = true) => {
     if (bulkBusyRef.current) return;
@@ -182,6 +196,26 @@ export function EntryListPage({
   }, [accountScope]);
 
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    setProviderState(null);
+    setProviderError('');
+    void getEffectiveEntryListConfig(typeKey, controller.signal)
+      .then(config => {
+        if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        setProviderState({ accountScope, config });
+      })
+      .catch(cause => {
+        if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
+        setProviderError(readableError(cause));
+        if (cause instanceof ApiClientError && cause.status === 401) {
+          onApiError(cause, 'Phiên đăng nhập hết hạn khi tải cột provider.');
+        }
+      });
+    return () => { active = false; controller.abort(); };
+  }, [accountScope, retry]);
+
+  useEffect(() => {
     if (data && data.total > 0 && (filters.offset ?? 0) >= data.total) {
       const limit = filters.limit ?? 20;
       updateFilter({ offset: Math.floor((data.total - 1) / limit) * limit }, false);
@@ -234,6 +268,32 @@ export function EntryListPage({
     } finally {
       bulkBusyRef.current = false;
       setBulkBusy(false);
+    }
+  };
+
+  const performProviderAction = async (column: ProviderColumn, row: EntryTableRow) => {
+    if (providerBusyRef.current || bulkBusyRef.current || !csrfToken || !column.action_id ||
+      column.owner_kind !== 'plugin') return;
+    if (!window.confirm(`Chạy action ${column.label} cho ${row.title} (#${row.id})? Action có thể thay đổi dữ liệu.`)) return;
+    const startingScope = scope;
+    providerBusyRef.current = true;
+    setProviderBusy(true);
+    setProviderNotice('');
+    try {
+      const response = await runEntryProviderAction(
+        typeKey, row, column.owner_id, column.action_id, csrfToken,
+      );
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      setProviderNotice(response.success ? `Đã chạy action cho #${row.id}.` : 'Action không thành công.');
+      setRetry(old => old + 1);
+    } catch (cause) {
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      setProviderNotice(`#${row.id}: ${readableError(cause)}`);
+      if (cause instanceof ApiClientError && cause.status === 401)
+        onApiError(cause, 'Phiên đăng nhập hết hạn khi chạy action.');
+    } finally {
+      providerBusyRef.current = false;
+      if (aliveRef.current) setProviderBusy(false);
     }
   };
 
@@ -376,6 +436,13 @@ export function EntryListPage({
         </div>
       )}
 
+      {providerNotice && <p role="status" data-testid="provider-action-result"
+        className="text-sm text-slate-700">{providerNotice}</p>}
+      {providerError && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+        Không thể tải cột mở rộng: {providerError}
+        <button type="button" className="ml-2 underline" onClick={() => setRetry(n => n + 1)}>Thử lại</button>
+      </div>}
+
       {error && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
         {error} <button type="button" className="underline" onClick={() => setRetry(prev => prev + 1)}>Thử lại</button>
       </div>}
@@ -402,6 +469,8 @@ export function EntryListPage({
               <th scope="col" className="px-3 py-3">Trạng thái</th>
               {terms?.categoryEnabled && <th scope="col" className="px-3 py-3">Danh mục</th>}
               {terms?.tagEnabled && <th scope="col" className="px-3 py-3">Thẻ</th>}
+              {providerColumns.map(column => <th key={column.key} scope="col"
+                className="min-w-[120px] px-3 py-3">{column.label}</th>)}
               <th scope="col" className="min-w-[135px] px-3 py-3">
                 <button type="button" data-testid="sort-updated" className="font-semibold underline-offset-2 hover:underline"
                   disabled={bulkBusy} aria-label="Sắp xếp theo ngày cập nhật"
@@ -414,7 +483,7 @@ export function EntryListPage({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {!loading && !error && currentRows.length === 0 && <tr>
-              <td colSpan={5 + Number(Boolean(terms?.categoryEnabled)) + Number(Boolean(terms?.tagEnabled))}
+              <td colSpan={5 + Number(Boolean(terms?.categoryEnabled)) + Number(Boolean(terms?.tagEnabled)) + providerColumns.length}
                 className="px-4 py-8 text-center text-slate-600">
                 {data?.total === 0 ? 'Không tìm thấy nội dung phù hợp. Có thể xóa bộ lọc để xem lại.' : 'Không có mục trên trang này.'}
               </td>
@@ -432,6 +501,10 @@ export function EntryListPage({
                 <td className="px-3 py-3">{row.publication_status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}</td>
                 {terms?.categoryEnabled && <td className="break-words px-3 py-3">{namesFor(row, 'category')}</td>}
                 {terms?.tagEnabled && <td className="break-words px-3 py-3">{namesFor(row, 'tag')}</td>}
+                {providerColumns.map(column => <td key={column.key} className="break-words px-3 py-3">
+                  <AdminColumnCell column={column} row={row} busy={providerBusy || bulkBusy}
+                    onRun={(col, entry) => void performProviderAction(col, entry)} />
+                </td>)}
                 <td className="whitespace-nowrap px-3 py-3">{row.updated_at.slice(0, 16)} UTC</td>
                 <td className="px-3 py-3">
                   <div className="flex flex-wrap gap-2">
