@@ -15,6 +15,18 @@ use crate::{
     error::{ApiError, ApiResult},
 };
 
+/// Section is a separate, strictly private canonical entry protocol. Generic
+/// content writes (including composite field/layout hooks) may not mutate it.
+fn forbid_generic_section_write(type_key: &str) -> ApiResult<()> {
+    if type_key == "section" {
+        Err(ApiError::forbidden(
+            "Section chỉ được sửa qua API riêng tư /api/admin/sections.",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ContentEntryRecord {
     pub id: i64,
@@ -295,6 +307,7 @@ pub async fn list_published_filtered(
     offset: i64,
     filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
+    if type_key == "section" { return Err(ApiError::not_found("Section là nội dung riêng tư.")); }
     list_entries_filtered(db, type_key, limit, offset, filters, true).await
 }
 
@@ -326,6 +339,9 @@ pub async fn list_published_page_in_tx(
     sort: PublishedListSort,
     filters: EntryFilters,
 ) -> ApiResult<PublishedListResult> {
+    if type_key == "section" {
+        return Ok(PublishedListResult::MissingConfig(PublishedListMissing::ContentType));
+    }
     if !(1..=100).contains(&page) || !(1..=20).contains(&page_size) {
         return Err(ApiError::bad_request(
             "Trang danh sách phải từ 1–100 và page_size từ 1–20.",
@@ -502,6 +518,7 @@ pub async fn create_entry_with_fence(
     input: &ContentEntryInput,
     fence: Option<&PluginActionFence>,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
@@ -568,6 +585,7 @@ pub async fn update_entry_with_fence(
     input: &ContentEntryInput,
     fence: Option<&PluginActionFence>,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
@@ -671,6 +689,7 @@ pub async fn create_entry_with_schema_fence(
     input: &ContentEntryInput,
     preflight_schema_token: &str,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
@@ -722,6 +741,7 @@ pub async fn update_entry_with_schema_fence(
     input: &ContentEntryInput,
     preflight_schema_token: &str,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
@@ -844,6 +864,7 @@ pub async fn prepare_composite_entry_save(
     entry_id: Option<i64>,
     input: &CompositeEntrySaveInput,
 ) -> ApiResult<CompositePreflightPlan> {
+    forbid_generic_section_write(type_key)?;
     let client_token = input
         .expected_schema_token
         .as_deref()
@@ -1140,6 +1161,7 @@ pub async fn delete_entry(
     id: i64,
     expected_version: i64,
 ) -> ApiResult<()> {
+    forbid_generic_section_write(type_key)?;
     let mut tx = db.begin().await?;
     let result = sqlx::query(
         "DELETE FROM content_entries

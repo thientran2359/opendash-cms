@@ -13,6 +13,7 @@ pub async fn get_by_slug(
     type_key: &str,
     slug: &str,
 ) -> ApiResult<Option<ContentEntryRecord>> {
+    if type_key == "section" { return Ok(None); }
     let row: Option<(i64, String, String, String, String, String, i64, String, String)> = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND slug = ? AND publication_status = 'published'",
@@ -31,7 +32,7 @@ pub async fn get_published_by_id(
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<(i64, String, String, String, String, String, i64, String, String)> = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
-         FROM content_entries WHERE id = ? AND publication_status = 'published'",
+         FROM content_entries WHERE id = ? AND publication_status = 'published' AND content_type_key != 'section'",
     )
     .bind(id)
     .fetch_optional(db)
@@ -48,6 +49,7 @@ pub async fn list_published(
     offset: i64,
     filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
+    if type_key == "section" { return Err(crate::error::ApiError::not_found("Section không có archive công khai.")); }
     // Share the admin/P06 taxonomy predicates. Publication, category and tag
     // restrictions all run in SQL before paging; EXISTS cannot duplicate rows.
     // Keep the saved Builder media ACL query below unchanged (Forge P02).
@@ -240,7 +242,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            FROM content_entries AS e
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN json_each(t.definition_json, '$.fields') AS f
-           WHERE e.publication_status = 'published'
+           WHERE e.publication_status = 'published' AND e.content_type_key != 'section'
              AND COALESCE(json_extract(f.value, '$.public_exposure'), 'public') = 'public'
              AND (
              (
@@ -267,7 +269,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              ON g.group_id = gt.group_id
             AND g.status IN ('active', 'provider_inactive', 'withdrawn')
            JOIN json_each(g.fields_json) AS f
-           WHERE e.publication_status = 'published'
+           WHERE e.publication_status = 'published' AND e.content_type_key != 'section'
              AND COALESCE(json_extract(f.value, '$.public_exposure'), 'private') = 'public'
              AND (
              (

@@ -100,11 +100,11 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     return { view: 'cpt', sub: 'list', typeKey, rawHash: `#/cpt/${typeKey}${tableSuffix}` };
   }
   if (first === 'sections') {
-    if (segs[1] === 'new') return { view: 'sections', sub: 'new', rawHash: '#/sections/new' };
-    if (segs[1] && segs[2] === 'edit' && /^\d+$/.test(segs[1])) {
+    if (segs[1] === 'new' && segs.length === 2) return { view: 'sections', sub: 'new', rawHash: '#/sections/new' };
+    if (segs.length === 3 && segs[2] === 'edit' && /^[1-9]\d*$/.test(segs[1]) && Number.isSafeInteger(Number(segs[1]))) {
       return { view: 'sections', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/sections/${segs[1]}/edit` };
     }
-    return { view: 'sections', sub: 'list', rawHash: '#/sections' };
+    return { view: 'sections', sub: segs.length === 1 ? 'list' : 'invalid', rawHash: hash };
   }
   if (first === 'media') {
     return { view: 'media', sub: segs[1] === 'upload' ? 'upload' : 'library', rawHash: `#/media${segs[1] === 'upload' ? '/upload' : ''}` };
@@ -134,6 +134,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const templateRole = params.get('template') ?? undefined;
     const typeKey = params.get('type') ?? undefined;
     const scopedPage = templateRole === 'page' && typeKey === 'page' && entryId !== undefined;
+    const scopedSection = templateRole === 'section' && typeKey === 'section' && entryId !== undefined;
     const noScope = !entryParam && !templateRole && !typeKey && !queryPart;
     const validGlobal = !entryParam && templateRole !== 'page' &&
       (templateRole === 'homepage' || templateRole === 'header' || templateRole === 'footer'
@@ -142,7 +143,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const validAdminScopedSingle = templateRole === 'single' && !!typeKey && entryId !== undefined;
     return {
       view: 'builder',
-      sub: scopedPage || noScope || validGlobal || validAdminScopedSingle ? 'builder' : 'invalid',
+      sub: scopedPage || scopedSection || noScope || validGlobal || validAdminScopedSingle ? 'builder' : 'invalid',
       templateRole,
       typeKey,
       entryId,
@@ -180,6 +181,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 }
 
 export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
+  if (route.view === 'sections' && route.sub === 'invalid') return false;
   if (route.view === 'builder' && route.sub !== 'builder') return false;
   if (role === 'admin') return true;
   if (route.view === 'taxonomy' && route.taxonomyMode !== 'list') return false;
@@ -187,7 +189,8 @@ export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
     return false;
   }
   if (route.view === 'builder') {
-    return route.templateRole === 'page' && route.typeKey === 'page'
+    return ((route.templateRole === 'page' && route.typeKey === 'page')
+      || (route.templateRole === 'section' && route.typeKey === 'section'))
       && Number.isSafeInteger(route.entryId) && (route.entryId ?? 0) > 0;
   }
   return true;

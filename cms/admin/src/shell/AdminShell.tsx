@@ -42,7 +42,7 @@ interface ParentMenuItem {
 
 function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMenuItem[] {
   const customTypes = cptTypes.filter(
-    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page',
+    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section',
   );
   return [
     { id: 'dashboard', label: 'Tổng quan', icon: 'dashboard', hash: '#/dashboard' },
@@ -98,10 +98,9 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       icon: 'content',
       hash: '#/sections',
       group: 'content',
-      disabled: true,
       children: [
-        { label: 'Tất cả Section', hash: '#/sections', disabled: true },
-        { label: 'Thêm Section', hash: '#/sections/new', disabled: true },
+        { label: 'Tất cả Section', hash: '#/sections' },
+        { label: 'Thêm Section', hash: '#/sections/new' },
       ],
     },
     {
@@ -238,6 +237,7 @@ interface AdminShellProps {
   schemaSettingsContent: React.ReactNode;
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
+  sectionsContent: React.ReactNode;
   mediaContent: React.ReactNode;
   taxonomyContent: React.ReactNode;
   dashboardContent: React.ReactNode;
@@ -256,7 +256,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   route, routeForbidden, cptTypes, onNavigateHash, hasUnsavedChanges,
   sidebarContent, previewContent, contentContent, schemaSettingsContent,
-  postsContent, pagesContent, mediaContent, taxonomyContent, dashboardContent,
+  postsContent, pagesContent, sectionsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
   menusContent, themeOptionsContent,
 }) => {
@@ -340,7 +340,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   };
   const pageTitle = routeForbidden
     ? '403 Không có quyền truy cập'
-    : route.view === 'sections' || (route.view === 'themes' && route.sub === 'library')
+    : route.view === 'themes' && route.sub === 'library'
       ? 'Chưa khả dụng'
       : activeChild?.label ?? (route.sub === 'edit' ? 'Chỉnh sửa' : subLabels[route.sub]) ?? activeParent?.label ?? 'Tổng quan';
   const breadcrumb = [
@@ -511,11 +511,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                     <h2 className="text-xl font-semibold">Thư viện mẫu chưa khả dụng</h2>
                     <p>Thư viện mẫu sẽ được mở khi các tính năng Section và thư viện cục bộ được nghiệm thu. Hiện chưa có màn hình quản lý mẫu.</p>
                   </section>}
-                {user && route.view === 'sections' &&
-                  <section className="od-admin-card min-w-0" data-testid="pending-sections" role="status">
-                    <h2 className="text-xl font-semibold">Section chưa khả dụng</h2>
-                    <p>Quản lý Section sẽ được mở sau khi tính năng Section được nghiệm thu. Hiện chưa thể thêm hoặc sửa Section.</p>
-                  </section>}
+                {user && route.view === 'sections' && sectionsContent}
 
                 <section className={user && route.view === 'builder' ? 'od-editor-panel' : 'hidden'} aria-label="Builder" aria-hidden={!user || route.view !== 'builder'}>
                   <main id="builder-main">
