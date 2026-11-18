@@ -39,6 +39,9 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 
   const cleaned = hash.replace(/^#\/?/, '');
   const [pathPart, queryPart] = cleaned.split('?');
+  // Preserve table filters in deep links (including direct reload and
+  // edit→Back). The router still parses only path segments for identity.
+  const tableSuffix = queryPart ? `?${queryPart}` : '';
   const segs = pathPart.split('/').filter(Boolean);
   const params = new URLSearchParams(queryPart ?? '');
   const first = segs[0] ?? 'dashboard';
@@ -69,16 +72,16 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     }
     if (segs[1] === 'new') return { view: 'posts', sub: 'new', rawHash: '#/posts/new' };
     if (segs[1] && segs[2] === 'edit' && /^\d+$/.test(segs[1])) {
-      return { view: 'posts', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/posts/${segs[1]}/edit` };
+      return { view: 'posts', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/posts/${segs[1]}/edit${tableSuffix}` };
     }
-    return { view: 'posts', sub: 'list', rawHash: '#/posts' };
+    return { view: 'posts', sub: 'list', rawHash: `#/posts${tableSuffix}` };
   }
   if (first === 'pages') {
     if (segs[1] === 'new') return { view: 'pages', sub: 'new', rawHash: '#/pages/new' };
     if (segs[1] && segs[2] === 'edit' && /^\d+$/.test(segs[1])) {
-      return { view: 'pages', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/pages/${segs[1]}/edit` };
+      return { view: 'pages', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/pages/${segs[1]}/edit${tableSuffix}` };
     }
-    return { view: 'pages', sub: 'list', rawHash: '#/pages' };
+    return { view: 'pages', sub: 'list', rawHash: `#/pages${tableSuffix}` };
   }
   if (first === 'cpt' && segs[1]) {
     const typeKey = decodeURIComponent(segs[1]);
@@ -91,10 +94,10 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
         sub: 'edit',
         typeKey,
         entryId: Number(segs[2]),
-        rawHash: `#/cpt/${typeKey}/${segs[2]}/edit`,
+        rawHash: `#/cpt/${typeKey}/${segs[2]}/edit${tableSuffix}`,
       };
     }
-    return { view: 'cpt', sub: 'list', typeKey, rawHash: `#/cpt/${typeKey}` };
+    return { view: 'cpt', sub: 'list', typeKey, rawHash: `#/cpt/${typeKey}${tableSuffix}` };
   }
   if (first === 'sections') {
     if (segs[1] === 'new') return { view: 'sections', sub: 'new', rawHash: '#/sections/new' };

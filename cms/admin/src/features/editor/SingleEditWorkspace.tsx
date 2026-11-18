@@ -3,7 +3,6 @@ import {
   createEntryComposite,
   getContentEntry,
   getEffectiveEditorConfig,
-  listContentEntries,
   updateEntryComposite,
 } from '../../api/content.ts';
 import { runPluginAction } from '../../api/plugins.ts';
@@ -11,13 +10,13 @@ import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
 import type { AuthUser } from '../../types.ts';
 import type {
-  ContentEntryRecord,
   ContentFieldValue,
   EffectiveEditorConfigProjection,
 } from '../content/types.ts';
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
 import { MediaPicker } from '../media/MediaPicker.tsx';
+import { EntryListPage, entryTableHash, parseEntryTableHash } from '../content/EntryListPage.tsx';
 
 interface FieldMediaPickerTarget {
   fieldKey: string;
@@ -35,6 +34,8 @@ interface SingleEditWorkspaceProps {
   siteInstanceId: string;
   authGeneration: number;
   draftUuid?: string;
+  routeHash?: string;
+  isActive?: boolean;
   csrfToken: string | null;
   onApiError: (error: unknown, fallback: string) => void;
   onDirtyChange: (dirty: boolean) => void;
@@ -60,13 +61,14 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   siteInstanceId,
   authGeneration,
   draftUuid,
+  routeHash,
+  isActive = true,
   csrfToken,
   onApiError,
   onDirtyChange,
   onNavigateHash,
 }) => {
   const [config, setConfig] = useState<EffectiveEditorConfigProjection | null>(null);
-  const [entries, setEntries] = useState<ContentEntryRecord[]>([]);
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [publicationStatus, setPublicationStatus] = useState<'draft' | 'published'>('draft');
@@ -205,9 +207,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     (async () => {
       try {
         if (mode === 'list') {
-          const list = await listContentEntries(typeKey, 50, 0);
-          if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
-          setEntries(list);
           baselineRef.current = null;
           draftRef.current = null;
           setDirty(false);
@@ -446,43 +445,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   };
 
   if (mode === 'list') {
-    return (
-      <section className="space-y-4" data-testid={`entry-list-${typeKey}`}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-slate-900">Danh sách ({typeKey})</h2>
-          <button
-            type="button"
-            onClick={() => onNavigateHash(`${listHashPrefix}/new`)}
-            className="rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            + Thêm mới
-          </button>
-        </div>
-        {entries.length === 0 ? (
-          <p className="text-sm text-slate-500">Chưa có nội dung nào.</p>
-        ) : (
-          <ul className="divide-y divide-slate-200 rounded-xl border border-slate-200 bg-white">
-            {entries.map(e => (
-              <li key={e.id} className="flex items-center justify-between px-4 py-3 text-sm">
-                <div>
-                  <div className="font-semibold text-slate-900">{e.title}</div>
-                  <div className="text-xs text-slate-500">
-                    /{e.slug} · {e.publication_status} · v{e.version}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onNavigateHash(`${listHashPrefix}/${e.id}/edit`)}
-                  className="rounded border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Chỉnh sửa
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    );
+    if (!isActive || !user) return null;
+    return <EntryListPage typeKey={typeKey} user={user} siteInstanceId={siteInstanceId}
+      authGeneration={authGeneration} csrfToken={csrfToken} routeHash={routeHash ?? listHashPrefix}
+      onApiError={onApiError} onNavigateHash={onNavigateHash} />;
   }
 
   if (!config) {
@@ -501,6 +467,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
   return (
     <div className="space-y-4">
+      <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        onClick={() => onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)))}>
+        ← Về danh sách
+      </button>
       {statusNote && (
         <div className={statusNote.includes('(412)')
           ? 'rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800'
