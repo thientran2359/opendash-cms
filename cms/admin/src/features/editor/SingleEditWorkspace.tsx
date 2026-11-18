@@ -584,7 +584,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             setStatusNote('Vui lòng Lưu nội dung trước khi mở Visual Builder.');
             return;
           }
-          onNavigateHash(`#/builder?template=single&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
+          onNavigateHash(`#/builder?template=${typeKey === 'page' ? 'page' : 'single'}&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
         }}
       />
       {mediaPicker && mediaPicker.scopeKey === mediaScopeKey && csrfToken && user && config

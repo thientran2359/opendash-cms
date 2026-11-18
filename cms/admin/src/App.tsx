@@ -54,6 +54,11 @@ function editorIdentity(route: ParsedRoute, hash: string): string | null {
   return uuid ? `${typeKey}:new:${uuid}` : null;
 }
 
+function builderIdentity(route: ParsedRoute): string | null {
+  if (route.view !== 'builder') return null;
+  return `${route.sub}:${route.templateRole ?? 'homepage'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
+}
+
 export const App: React.FC = () => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [csrfToken, setCsrfToken] = useState<string | null>(null);
@@ -85,6 +90,8 @@ export const App: React.FC = () => {
   userRef.current = user;
   const builderDirtyRef = useRef(builderDirty);
   builderDirtyRef.current = builderDirty;
+  const lastBuilderRouteRef = useRef<ParsedRoute>(parseAdminRoute('#/builder'));
+  if (route.view === 'builder') lastBuilderRouteRef.current = route;
 
   // Auth inputs
   const [authUsername, setAuthUsername] = useState<string>('');
@@ -135,11 +142,15 @@ export const App: React.FC = () => {
     const nextEditor = editorIdentity(next, destination);
     const leavingDirtyEditor = currentEditor !== null && currentEditor !== nextEditor &&
       editorDraftStore.hasDirtyKey(currentEditor);
-    const leavingBuilder = current.view === 'builder' && next.view !== 'builder' && builderDirtyRef.current;
+    const switchingBuilderTarget = current.view === 'builder'
+      && builderIdentity(current) !== builderIdentity(next);
+    const leavingBuilder = switchingBuilderTarget && builderDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
     return !(leavingDirtyEditor || leavingBuilder || leavingTerm) ||
-      window.confirm('Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
+      window.confirm(switchingBuilderTarget
+        ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
+        : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
   };
 
   useEffect(() => {
@@ -300,6 +311,8 @@ export const App: React.FC = () => {
       if (res.site_instance_id && res.site_instance_id !== siteInstanceId) {
         editorDraftStore.clear();
         setSiteInstanceId(res.site_instance_id);
+        setBuilderReset(value => value + 1);
+        setBuilderDirty(false);
       } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         editorDraftStore.clear();
@@ -470,6 +483,10 @@ export const App: React.FC = () => {
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty || termDirty}
       sidebarContent={<BuilderWorkspace
+        key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
+        route={lastBuilderRouteRef.current}
+        active={route.view === 'builder' && isRouteAllowed(route, user?.role ?? 'editor')}
+        onNavigateHash={navigateHash}
         user={user} csrfToken={csrfToken} resetToken={builderReset} themeRevision={themeRevision}
         onDirtyChange={setBuilderDirty} onApiError={handleApiError}
       />}

@@ -57,7 +57,9 @@ impl OverrideRole {
             "home" => Err(ApiError::bad_request(
                 "Trang chủ dùng /api/admin/builder/homepage, không tạo override riêng.",
             )),
-            _ => Err(ApiError::bad_request("Role template override không hợp lệ.")),
+            _ => Err(ApiError::bad_request(
+                "Role template override không hợp lệ.",
+            )),
         }
     }
 
@@ -107,6 +109,11 @@ impl OverrideScope {
             }
             if eid <= 0 {
                 return Err(ApiError::bad_request("scope_entry_id không hợp lệ."));
+            }
+            // Site-owned Page body overrides have exactly one identity. A
+            // post/CPT must never be addressable through the Page role.
+            if role == OverrideRole::Page && scope_type_key.as_deref() != Some("page") {
+                return Err(ApiError::bad_request("Page Builder cần type_key=page."));
             }
         }
         Ok(Self {
@@ -175,6 +182,7 @@ pub async fn get_override(
     scope: &OverrideScope,
 ) -> ApiResult<Option<TemplateOverrideRecord>> {
     let mut tx = db.begin().await?;
+    validate_scope_and_load_cpt_fields(&mut tx, scope).await?;
     let record = get_override_in_tx(&mut tx, scope).await?;
     tx.commit().await?;
     Ok(record)
@@ -241,7 +249,9 @@ async fn validate_scope_and_load_cpt_fields(
             .fetch_optional(&mut **tx)
             .await?;
     let Some(raw) = def_json else {
-        return Err(ApiError::not_found("Không tìm thấy loại nội dung cho scope."));
+        return Err(ApiError::not_found(
+            "Không tìm thấy loại nội dung cho scope.",
+        ));
     };
     let def: ContentTypeDefinition = serde_json::from_str(&raw)
         .map_err(|_| ApiError::internal("Định nghĩa loại nội dung không hợp lệ."))?;
@@ -302,7 +312,8 @@ pub async fn preview_override(
     let route_ref = effective_entry
         .as_ref()
         .map(|(t, s)| (t.as_str(), s.as_str()));
-    let bindings = builder_binding::resolve_in_tx_with_route(&mut tx, document, true, route_ref).await?;
+    let bindings =
+        builder_binding::resolve_in_tx_with_route(&mut tx, document, true, route_ref).await?;
     let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(&mut tx, document).await?;
     tx.commit().await?;
@@ -437,10 +448,13 @@ pub async fn save_override_and_render(
         .execute(&mut *tx)
         .await?;
     }
-    let bindings = builder_binding::resolve_in_tx_with_route(&mut tx, document, false, None).await?;
+    let bindings =
+        builder_binding::resolve_in_tx_with_route(&mut tx, document, false, None).await?;
     let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(&mut tx, document).await?;
-    let rendered = page::render_builder_with_lists_and_forms(&state, document, false, &bindings, &lists, &forms)?;
+    let rendered = page::render_builder_with_lists_and_forms(
+        &state, document, false, &bindings, &lists, &forms,
+    )?;
     tx.commit().await?;
     Ok((saved, rendered))
 }
@@ -457,6 +471,7 @@ pub async fn reset_override(
         ));
     }
     let mut tx = db.begin().await?;
+    validate_scope_and_load_cpt_fields(&mut tx, scope).await?;
     let existing = get_override_in_tx(&mut tx, scope)
         .await?
         .ok_or_else(|| ApiError::not_found("Không có template override để reset."))?;
@@ -493,7 +508,14 @@ pub async fn render_override_for_public(
         resolve_lists_in_tx(&mut tx, &record.document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(&mut tx, &record.document).await?;
     tx.commit().await?;
-    page::render_builder_with_lists_and_forms(&state, &record.document, false, &bindings, &lists, &forms)
+    page::render_builder_with_lists_and_forms(
+        &state,
+        &record.document,
+        false,
+        &bindings,
+        &lists,
+        &forms,
+    )
 }
 
 pub async fn resolve_and_render_header_footer(
@@ -504,19 +526,21 @@ pub async fn resolve_and_render_header_footer(
     type_key: Option<&str>,
 ) -> ApiResult<(Option<String>, Option<String>)> {
     let menus = crate::storage::menu::resolve_active_slot_menus(db).await?;
-    let header = match resolve_effective_override(db, OverrideRole::Header, type_key, None).await?
-    {
+    let header = match resolve_effective_override(db, OverrideRole::Header, type_key, None).await? {
         Some(record) => Some(render_override_for_public(db, &record, None).await?.html),
         None => active_v2
             .and_then(|v2| v2.roles.get("header"))
-            .and_then(|t| content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)),
+            .and_then(|t| {
+                content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)
+            }),
     };
-    let footer = match resolve_effective_override(db, OverrideRole::Footer, type_key, None).await?
-    {
+    let footer = match resolve_effective_override(db, OverrideRole::Footer, type_key, None).await? {
         Some(record) => Some(render_override_for_public(db, &record, None).await?.html),
         None => active_v2
             .and_then(|v2| v2.roles.get("footer"))
-            .and_then(|t| content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)),
+            .and_then(|t| {
+                content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)
+            }),
     };
     Ok((header, footer))
 }
