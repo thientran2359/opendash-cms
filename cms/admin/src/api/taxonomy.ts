@@ -100,6 +100,13 @@ export interface TaxonomyTermPage {
   total: number;
 }
 
+/** Label-only projection for term IDs referenced by the visible table rows. */
+export interface TaxonomyTermLabel {
+  id: number;
+  kind: TaxonomyKind;
+  name: string;
+}
+
 export interface TaxonomyTermInput {
   kind: TaxonomyKind;
   name: string;
@@ -114,6 +121,19 @@ export type TaxonomyTermChanges = Partial<Pick<TaxonomyTerm, 'name' | 'slug' | '
 
 const termsPath = '/api/admin/taxonomy/terms';
 const termPath = (id: number): string => `${termsPath}/${id}`;
+
+/** A single request never resolves more than 100 IDs. Missing IDs are omitted. */
+export function resolveTaxonomyTermLabels(
+  ids: number[], signal?: AbortSignal,
+): Promise<TaxonomyTermLabel[]> {
+  if (!ids.length || ids.length > 100 ||
+    new Set(ids).size !== ids.length || ids.some(id => !Number.isSafeInteger(id) || id <= 0)) {
+    return Promise.reject(new Error('Danh sách ID term phải gồm 1–100 ID nguyên dương duy nhất.'));
+  }
+  return requestJson<TaxonomyTermLabel[]>(`${termsPath}/resolve?ids=${ids.join(',')}`, {
+    signal, defaultErrorMessage: 'Không thể tải tên term trên trang.',
+  });
+}
 
 export function getTaxonomyTerm(id: number, signal?: AbortSignal): Promise<TaxonomyTerm> {
   return requestJson<TaxonomyTerm>(termPath(id), {

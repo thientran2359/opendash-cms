@@ -113,6 +113,9 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   const [eligibilityBaseline, setEligibilityBaseline] = useState<string[]>(recovered?.eligibilityBaseline ?? []);
   const [eligibilityTypeVersion, setEligibilityTypeVersion] = useState<number | null>(recovered?.typeVersion ?? null);
   const [eligibilityLoading, setEligibilityLoading] = useState(false);
+  // One publication fence for effect loads, explicit reload and rebase. A
+  // slower earlier GET must not replace newer server baseline or user edits.
+  const eligibilityRequestEpochRef = useRef(0);
   const [eligibilityConflict, setEligibilityConflict] = useState(recovered?.eligibilityConflict ?? false);
   const [configuredEffective, setConfiguredEffective] = useState<string[]>([]);
   const onErrorRef = useRef(onApiError);
@@ -198,6 +201,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   }, [user?.id, user?.role]);
 
   useEffect(() => {
+    const requestEpoch = ++eligibilityRequestEpochRef.current;
     const controller = new AbortController();
     setEligibilityLoading(true);
     const remembered = recoveredRef.current?.typeKey === typeKey ? recoveredRef.current : null;
@@ -209,7 +213,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     }
     if (!typeKey || !user) { setEligibilityLoading(false); return () => controller.abort(); }
     void getConfiguredTaxonomies(typeKey, controller.signal).then(value => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !mountedRef.current ||
+          requestEpoch !== eligibilityRequestEpochRef.current) return;
       setConfiguredEffective(value.effective);
       if (remembered) {
         // Preserve the user's input, including a stale schema CAS, until they
@@ -225,11 +230,15 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
         setEligibilityTypeVersion(value.type_version);
       }
     }).catch(cause => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || !mountedRef.current ||
+          requestEpoch !== eligibilityRequestEpochRef.current) return;
       setEligibilityConflict(true);
       setError(failure(cause, 'Không thể tải taxonomy của loại nội dung.'));
       onErrorRef.current(cause, 'Không thể tải taxonomy của loại nội dung.');
-    }).finally(() => { if (!controller.signal.aborted) setEligibilityLoading(false); });
+    }).finally(() => {
+      if (!controller.signal.aborted && mountedRef.current &&
+          requestEpoch === eligibilityRequestEpochRef.current) setEligibilityLoading(false);
+    });
     return () => controller.abort();
   }, [typeKey, user?.id, user?.role]);
 
@@ -276,21 +285,22 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   };
 
   const rebaseEligibility = async () => {
-    if (!typeKey || busy) return;
+    if (!typeKey || busy || eligibilityLoading) return;
+    const requestEpoch = ++eligibilityRequestEpochRef.current;
     setBusy(true); setError('');
     try {
       // The configured endpoint supplies the version AND associated keys from
       // one SQLite snapshot. Never pair keys with a concurrently read list
       // version: that can silently overwrite someone else's new membership.
       const configured = await getConfiguredTaxonomies(typeKey);
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
       const previous = new Set(eligibilityBaseline);
       const added = eligible.filter(key => !previous.has(key));
       const removed = new Set(eligibilityBaseline.filter(key => !eligible.includes(key)));
       const configuredKeys = selectedKeys(configured);
       const next = [...new Set([...configuredKeys.filter(key => !removed.has(key)), ...added])];
       const nextTypes = await listContentTypes();
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
       const latestType = nextTypes.find(item => item.descriptor.key === typeKey);
       if (!latestType) {
         setEligibilityConflict(true);
@@ -310,7 +320,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       setNotice('Đã đối chiếu cấu hình taxonomy mới; các lựa chọn đang sửa được áp dụng lại, hãy kiểm tra trước khi Lưu.');
       recoveredRef.current = null;
     } catch (cause) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
       setError(failure(cause, 'Không thể đối chiếu cấu hình taxonomy.'));
       onErrorRef.current(cause, 'Không thể đối chiếu cấu hình taxonomy.');
     } finally { setBusy(false); }
@@ -451,21 +461,25 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       </div>
       <button className={buttonClass} type="button" disabled={busy || loading} onClick={() => {
         if (dirty && !window.confirm('Bỏ thay đổi chưa lưu và tải lại?')) return;
+        const requestEpoch = ++eligibilityRequestEpochRef.current;
         if (scope) definitionDrafts.delete(scope);
         recoveredRef.current = null;
         setConflict(false); setEligibilityConflict(false); setActiveKey(''); setForm(blank()); setBaseline(blank());
         void reload();
         if (typeKey) { setEligibilityLoading(true); void getConfiguredTaxonomies(typeKey).then(configured => {
-          if (!mountedRef.current) return;
+          if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
           setEligible(selectedKeys(configured)); setEligibilityBaseline(selectedKeys(configured));
           setEligibilityTypeVersion(configured.type_version);
           setConfiguredEffective(configured.effective);
         }).catch(cause => {
-          if (!mountedRef.current) return;
+          if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
           setEligibilityConflict(true);
           setError(failure(cause, 'Không thể tải lại taxonomy.'));
           onErrorRef.current(cause, 'Không thể tải lại taxonomy.');
-        }).finally(() => { if (mountedRef.current) setEligibilityLoading(false); }); }
+        }).finally(() => {
+          if (mountedRef.current && requestEpoch === eligibilityRequestEpochRef.current)
+            setEligibilityLoading(false);
+        }); }
       }}>Tải lại</button>
     </header>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
@@ -550,7 +564,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
           {eligibilityLoading && <p role="status" className="text-sm">Đang tải cấu hình áp dụng…</p>}
           {!eligibilityLoading && definitions.map(item => <label key={item.key} className="flex items-start gap-2 text-sm">
             <input type="checkbox" className="mt-1" checked={eligible.includes(item.key)}
-              disabled={!typeEditable || busy || eligibilityConflict}
+              disabled={!typeEditable || busy || eligibilityLoading || eligibilityConflict}
               onChange={event => setEligible(previous => event.target.checked
                 ? [...previous, item.key] : previous.filter(key => key !== item.key))}/>
             <span>{item.label} ({item.key})
@@ -560,7 +574,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
           </label>)}
           {(eligibilityConflict || eligibilityVersionMismatch) && <div role="alert" className="space-y-2 text-sm text-amber-800">
             <p>Version CPT không khớp với snapshot taxonomy hoặc schema đã thay đổi. Bản chọn được giữ; đối chiếu trước khi lưu.</p>
-            <button type="button" className={buttonClass} disabled={busy}
+            <button type="button" className={buttonClass} disabled={busy || eligibilityLoading}
               onClick={() => void rebaseEligibility()}>Đối chiếu schema mới, giữ lựa chọn đã sửa</button>
           </div>}
           {eligible.some(key => !definitions.some(item => item.key === key)) &&

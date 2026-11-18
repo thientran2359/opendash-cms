@@ -203,11 +203,21 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                          'values':{}, 'term_ids':[child['id'], label_term['id']]}, csrf)
                     table_page = ctx.new_page()
                     try:
+                        term_requests = []
+                        table_page.on('request', lambda request: term_requests.append(request.url)
+                            if '/api/admin/taxonomy/terms' in request.url else None)
                         table_page.goto(base + '/admin/#/cpt/books_t02', wait_until='domcontentloaded')
                         multi_row = table_page.locator(f'tr[data-entry-id="{multi["id"]}"]')
                         multi_row.get_by_role('cell', name='Speculative', exact=True).wait_for(timeout=15000)
                         multi_row.get_by_role('cell', name='Featured Label T02', exact=True).wait_for(timeout=15000)
+                        projected = [url for url in term_requests if '/terms/resolve?' in url]
+                        full_scans = [url for url in term_requests if '/terms?' in url]
+                        check(1 <= len(projected) <= 2 and not full_scans,
+                              f'entry table must project current row IDs, not full taxonomy catalogs: {term_requests}')
                         table_page.get_by_role('combobox', name='Chọn taxonomy để lọc').select_option('genre_t02')
+                        table_page.get_by_role('combobox', name='Lọc theo Genre T02').focus()
+                        table_page.get_by_role('combobox', name='Lọc theo Genre T02') \
+                            .locator(f'option[value="{child["id"]}"]').wait_for(state='attached', timeout=15000)
                         table_page.get_by_role('combobox', name='Lọc theo Genre T02').select_option(str(child['id']))
                         multi_row.get_by_role('cell', name='Speculative', exact=True).wait_for(timeout=15000)
                         multi_row.get_by_role('cell', name='Featured Label T02', exact=True).wait_for(timeout=15000)
@@ -460,6 +470,167 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     check(label_choice.is_checked(), 'explicit CPT draft discard reloads saved selection')
                     checks.append('chrome_cpt_taxonomy_draft_401_restores_and_explicit_discard')
 
+                    # Aster follow-up P2: the *new* CPT creation form previously
+                    # dropped incomplete fields on route changes and 401. This
+                    # is distinct from the taxonomy association edit above.
+                    admin.get_by_role('button', name='+ Tạo loại nội dung mới').click()
+                    admin.locator('#content-type-key').fill('unsaved_cpt_t02')
+                    admin.locator('#content-type-label').fill('CPT Draft Persist T02')
+                    admin.get_by_role('button', name='+ Thêm field').click()
+                    admin.locator('[id^="schema-field-key-"]').first.fill('unsaved_field')
+                    admin.locator('[id^="schema-field-label-"]').first.fill('Field Draft T02')
+                    admin.get_by_text('Bản nhập CPT chưa lưu được giữ', exact=False).wait_for(timeout=15000)
+                    admin.once('dialog', lambda dialog: dialog.dismiss())
+                    admin.evaluate("window.location.hash = '#/dashboard'")
+                    check(admin.locator('#content-type-key').input_value() == 'unsaved_cpt_t02',
+                          'dirty create CPT route guard preserves entered key')
+                    fetch(ctx, base, 'POST', '/auth/logout', 204, csrf=csrf)
+                    admin.get_by_role('button', name='Tạo loại nội dung', exact=True).click()
+                    admin.locator('#auth-login').wait_for(timeout=15000)
+                    admin.locator('#auth-username').fill('c2_t02_other')
+                    admin.locator('#auth-password').fill('Isolated-Other-C2-Admin!2026')
+                    admin.locator('#auth-login').click()
+                    admin.get_by_role('button', name='+ Tạo loại nội dung mới').wait_for(timeout=15000)
+                    check(admin.locator('#content-type-key').count() == 0,
+                          'other Admin never inherits previous account CPT creation draft')
+                    other_csrf = api(ctx, base, 'GET', '/auth/me')['csrf_token']
+                    fetch(ctx, base, 'POST', '/auth/logout', 204, csrf=other_csrf)
+                    admin.get_by_role('button', name='Tải lại từ máy chủ (bỏ chỉnh sửa)').click()
+                    admin.locator('#auth-login').wait_for(timeout=15000)
+                    admin.locator('#auth-username').fill('c2_t02_admin')
+                    admin.locator('#auth-password').fill('Isolated-Only-C2-T02-Pass!2026')
+                    admin.locator('#auth-login').click()
+                    admin.locator('#content-type-key').wait_for(timeout=15000)
+                    check(admin.locator('#content-type-key').input_value() == 'unsaved_cpt_t02'
+                          and admin.locator('#content-type-label').input_value() == 'CPT Draft Persist T02'
+                          and admin.locator('[id^="schema-field-key-"]').first.input_value() == 'unsaved_field'
+                          and admin.locator('[id^="schema-field-label-"]').first.input_value() == 'Field Draft T02',
+                          'same-account reauth restores full incomplete CPT schema draft')
+                    admin.once('dialog', lambda dialog: dialog.accept())
+                    admin.get_by_role('button', name='Đóng form / bỏ bản nhập chưa lưu').click()
+                    check(admin.locator('#content-type-key').count() == 0,
+                          'explicit CPT draft discard closes create form')
+                    # Successful creation must not trigger a stale App dirty
+                    # prompt *after* POST 201. The newly-created CPT must be
+                    # selected automatically, exactly once.
+                    admin.get_by_role('button', name='+ Tạo loại nội dung mới').click()
+                    admin.locator('#content-type-key').fill('created_cpt_t02')
+                    admin.locator('#content-type-label').fill('Created CPT T02')
+                    with admin.expect_response(lambda response: response.request.method == 'POST'
+                            and response.url.endswith('/api/admin/content-types'), timeout=15000) as created_response:
+                        admin.get_by_role('button', name='Tạo loại nội dung', exact=True).click()
+                    check(created_response.value.status == 201, 'creating CPT must succeed once')
+                    admin.get_by_text('Thông tin Schema: Created CPT T02').wait_for(timeout=15000)
+                    check(admin.url.endswith('#/appearance/content-types/created_cpt_t02'),
+                          'committed CPT navigates without stale create-dirty prompt')
+                    admin.goto(base + '/admin/#/appearance/content-types/books_t02',
+                               wait_until='domcontentloaded')
+                    csrf = api(ctx, base, 'GET', '/auth/me')['csrf_token']
+                    checks.append('chrome_new_cpt_draft_navigation_401_cross_account_and_discard')
+                    checks.append('chrome_create_cpt_201_navigates_without_post_commit_dirty_prompt')
+
+                    # Hold the create response until another settings input
+                    # becomes dirty. Once POST commits, the handler must not
+                    # bypass App.mayLeave and discard this *newer* edit.
+                    held_create = []
+                    create_route = '**/api/admin/content-types'
+                    def hold_create_post(route):
+                        if route.request.method == 'POST':
+                            held_create.append(route)
+                        else:
+                            route.continue_()
+                    admin.route(create_route, hold_create_post)
+                    try:
+                        admin.get_by_role('button', name='+ Tạo loại nội dung mới').click()
+                        admin.locator('#content-type-key').fill('late_created_cpt_t02')
+                        admin.locator('#content-type-label').fill('Late Created CPT T02')
+                        admin.get_by_role('button', name='Tạo loại nội dung', exact=True).click()
+                        admin.get_by_role('form', name='Cấu hình loại nội dung') \
+                            .get_by_role('textbox', name='Tên hiển thị').fill('Books Edited During Create')
+                        check(held_create, 'create POST must actually remain delayed')
+                        held_create[0].continue_()
+                        admin.get_by_role('status').filter(
+                            has_text='Đã tạo CPT late_created_cpt_t02, nhưng có thay đổi khác chưa lưu.',
+                        ).wait_for(timeout=15000)
+                        check(admin.url.endswith('#/appearance/content-types/books_t02')
+                              and admin.get_by_role('form', name='Cấu hình loại nội dung')
+                                  .get_by_role('textbox', name='Tên hiển thị').input_value() == 'Books Edited During Create',
+                              'newly entered settings survive late successful create response')
+                        check(any(t['descriptor']['key'] == 'late_created_cpt_t02'
+                                  for t in api(ctx, base, 'GET', '/api/admin/content-types')),
+                              'concurrent CPT POST committed despite retaining later settings draft')
+                        admin.get_by_role('button', name='Tải lại từ máy chủ (bỏ chỉnh sửa)').click()
+                    finally:
+                        admin.unroute(create_route, hold_create_post)
+                    checks.append('chrome_late_create_201_never_discards_concurrent_settings_edit')
+
+                    # CPT *settings* are a separate draft from both taxonomy
+                    # overrides and new-CPT creation. Retain field values on
+                    # 401, reject an old CAS after remote edit, then rebase
+                    # only the locally changed keys onto the new CPT version.
+                    settings_form = admin.get_by_role('form', name='Cấu hình loại nội dung')
+                    settings_label = settings_form.get_by_role('textbox', name='Tên hiển thị')
+                    settings_label.wait_for(timeout=15000)
+                    settings_label.fill('Books Local Draft T02')
+                    settings_form.get_by_role('checkbox', name='Công khai nội dung (public)').uncheck()
+                    fetch(ctx, base, 'POST', '/auth/logout', 204, csrf=csrf)
+                    settings_form.get_by_role('button', name='Lưu cấu hình').click()
+                    admin.locator('#auth-login').wait_for(timeout=15000)
+                    admin.locator('#auth-username').fill('c2_t02_other')
+                    admin.locator('#auth-password').fill('Isolated-Other-C2-Admin!2026')
+                    admin.locator('#auth-login').click()
+                    other_settings = admin.get_by_role('form', name='Cấu hình loại nội dung')
+                    other_settings.get_by_role('textbox', name='Tên hiển thị').wait_for(timeout=15000)
+                    check(other_settings.get_by_role('textbox', name='Tên hiển thị').input_value() != 'Books Local Draft T02',
+                          'other Admin must not inherit saved-in-RAM settings draft')
+                    other_csrf = api(ctx, base, 'GET', '/auth/me')['csrf_token']
+                    fetch(ctx, base, 'POST', '/auth/logout', 204, csrf=other_csrf)
+                    other_settings.get_by_role('button', name='Tải lại từ máy chủ (bỏ chỉnh sửa)').click()
+                    admin.locator('#auth-login').wait_for(timeout=15000)
+                    admin.locator('#auth-username').fill('c2_t02_admin')
+                    admin.locator('#auth-password').fill('Isolated-Only-C2-T02-Pass!2026')
+                    admin.locator('#auth-login').click()
+                    settings_form = admin.get_by_role('form', name='Cấu hình loại nội dung')
+                    settings_label = settings_form.get_by_role('textbox', name='Tên hiển thị')
+                    settings_label.wait_for(timeout=15000)
+                    check(settings_label.input_value() == 'Books Local Draft T02'
+                          and not settings_form.get_by_role('checkbox', name='Công khai nội dung (public)').is_checked(),
+                          'same-account settings label/public draft restored after 401')
+                    csrf = api(ctx, base, 'GET', '/auth/me')['csrf_token']
+                    checks.append('chrome_existing_cpt_settings_401_same_account_and_cross_account_guard')
+
+                    remote_def = {**book['descriptor'],
+                        'settings':{**book['descriptor']['settings'], 'has_archive': False}}
+                    book = api(ctx, base, 'PUT', '/api/admin/content-types/books_t02', 200,
+                        remote_def, csrf, book['version'])
+                    with admin.expect_response(lambda response: response.request.method == 'PUT'
+                            and '/api/admin/content-types/books_t02' in response.url, timeout=15000) as stale_save:
+                        settings_form.get_by_role('button', name='Lưu cấu hình').click()
+                    check(stale_save.value.status == 412, 'stale CPT settings CAS must reject concurrent edit')
+                    settings_form.get_by_role('button', name='Đối chiếu CPT mới, giữ thay đổi đang nhập').click()
+                    check(settings_label.input_value() == 'Books Local Draft T02'
+                          and not settings_form.get_by_role('checkbox', name='Công khai nội dung (public)').is_checked()
+                          and not settings_form.get_by_role('checkbox', name='Cho phép trang danh sách (has_archive)').is_checked(),
+                          'settings rebase retains local label/public and remote archive change')
+                    with admin.expect_response(lambda response: response.request.method == 'PUT'
+                            and '/api/admin/content-types/books_t02' in response.url, timeout=15000) as rebased_save:
+                        settings_form.get_by_role('button', name='Lưu cấu hình').click()
+                    check(rebased_save.value.status == 200, 'rebase persists merged settings with latest CAS')
+                    saved_book = next(t for t in api(ctx, base, 'GET', '/api/admin/content-types')
+                                      if t['descriptor']['key'] == 'books_t02')
+                    check(saved_book['descriptor']['label'] == 'Books Local Draft T02'
+                          and saved_book['descriptor']['settings']['public'] is False
+                          and saved_book['descriptor']['settings']['has_archive'] is False,
+                          'saved settings merge preserves both writers')
+                    restored_def = {**saved_book['descriptor'], 'label':'Books T02',
+                        'settings':{**saved_book['descriptor']['settings'],
+                                    'public':True, 'has_archive':True}}
+                    book = api(ctx, base, 'PUT', '/api/admin/content-types/books_t02', 200,
+                        restored_def, csrf, saved_book['version'])
+                    admin.reload(wait_until='domcontentloaded')
+                    admin.get_by_role('form', name='Cấu hình loại nội dung').wait_for(timeout=15000)
+                    checks.append('chrome_existing_cpt_settings_412_rebase_preserves_unrelated_remote_edit')
+
                     # A concurrent writer changes CPT associations while the
                     # UI has a local edit. The first save must 412, then the
                     # explicit rebase must keep only the author's delta and
@@ -524,6 +695,43 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         '/api/admin/taxonomy/eligibility/books_t02/configured')
                     check(provider_config['taxonomies'] == ['genre_t02','label_t02','tag'],
                           'provider override persists all taxonomies')
+
+                    # Provider-owned CPT has no editable schema settings form.
+                    # A successful create response must still be visible if an
+                    # independent provider-CPT taxonomy draft becomes dirty
+                    # while POST is in flight; no silent navigation or loss.
+                    held_provider_create = []
+                    provider_create_pattern = '**/api/admin/content-types'
+                    def hold_provider_create(route):
+                        if route.request.method == 'POST':
+                            held_provider_create.append(route)
+                        else:
+                            route.continue_()
+                    admin.route(provider_create_pattern, hold_provider_create)
+                    try:
+                        admin.get_by_role('button', name='+ Tạo loại nội dung mới').click()
+                        admin.locator('#content-type-key').fill('provider_late_cpt_t02')
+                        admin.locator('#content-type-label').fill('Provider Late CPT T02')
+                        admin.get_by_role('button', name='Tạo loại nội dung', exact=True).click()
+                        provider_label.uncheck()
+                        check(bool(held_provider_create), 'provider-owned create POST was held')
+                        held_provider_create[0].continue_()
+                        admin.get_by_role('status').filter(
+                            has_text='Đã tạo CPT provider_late_cpt_t02, nhưng có thay đổi khác chưa lưu.'
+                        ).wait_for(timeout=15000)
+                        check(admin.url.endswith('#/appearance/content-types/books_t02')
+                              and not provider_label.is_checked(),
+                              'provider taxonomy draft stays unsaved after completed CPT create')
+                        check(any(t['descriptor']['key'] == 'provider_late_cpt_t02'
+                                  for t in api(ctx, base, 'GET', '/api/admin/content-types')),
+                              'provider create operation committed exactly one visible CPT')
+                        admin.get_by_role('button', name='Hủy lựa chọn chưa lưu').click()
+                        provider_label.wait_for(timeout=15000)
+                        check(provider_label.is_checked(),
+                              'explicitly discarding provider taxonomy draft restores association')
+                    finally:
+                        admin.unroute(provider_create_pattern, hold_provider_create)
+                    checks.append('chrome_provider_cpt_create_201_notice_preserves_late_taxonomy_draft')
                     with sqlite3.connect(db) as conn:
                         conn.execute("UPDATE content_types SET provider_status='provider_inactive' WHERE key='books_t02'")
                     check(api(ctx, base, 'GET', '/api/admin/taxonomy/eligibility/books_t02/configured')
@@ -534,6 +742,57 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     book = next(item for item in api(ctx, base, 'GET', '/api/admin/content-types')
                                 if item['descriptor']['key'] == 'books_t02')
                     checks.append('provider_cpt_schema_read_only_but_taxonomy_override_survives_lifecycle')
+
+                    # Two configured GETs may overlap if an Admin presses
+                    # Reload while the first selection is still loading.
+                    # Release the older reply last; it must not restore an
+                    # outdated baseline/checkbox or drop the latest version.
+                    race_page = ctx.new_page()
+                    try:
+                        race_page.goto(base + '/admin/#/taxonomy/definitions', wait_until='domcontentloaded')
+                        race_page.get_by_label('Loại nội dung').wait_for(timeout=15000)
+                        # The first alphabetical CPT may already be books_t02;
+                        # switch to Post before intercepting the books request.
+                        race_page.get_by_label('Loại nội dung').select_option('post')
+                        race_page.get_by_role('checkbox', name=re.compile(r'Category \(category\)')).wait_for(timeout=15000)
+                        stale_snapshot = api(ctx, base, 'GET',
+                            '/api/admin/taxonomy/eligibility/books_t02/configured')
+                        held = []
+                        seen = []
+                        def hold_first(route):
+                            seen.append(len(seen) + 1)
+                            if len(seen) == 1:
+                                held.append(route)
+                            else:
+                                route.continue_()
+                        race_pattern = '**/api/admin/taxonomy/eligibility/books_t02/configured'
+                        race_page.route(race_pattern, hold_first)
+                        with race_page.expect_request(lambda request:
+                                '/api/admin/taxonomy/eligibility/books_t02/configured' in request.url,
+                                timeout=15000):
+                            race_page.get_by_label('Loại nội dung').select_option('books_t02')
+                        race_page.wait_for_timeout(200)
+                        check(held, 'first configured request was actually delayed')
+                        updated_race_cpt = api(ctx, base, 'PUT',
+                            '/api/admin/taxonomy/eligibility/books_t02', 200,
+                            {'taxonomies':stale_snapshot['taxonomies'] + ['category'],
+                             'expected_version':book['version']}, csrf, book['version'])
+                        race_page.get_by_role('button', name='Tải lại', exact=True).click()
+                        race_page.get_by_role('checkbox', name=re.compile(r'Category \(category\)')).wait_for(timeout=15000)
+                        check(race_page.get_by_role('checkbox', name=re.compile(r'Category \(category\)')).is_checked(),
+                              'new refresh received updated provider association')
+                        held[0].fulfill(status=200, content_type='application/json',
+                                        body=json.dumps(stale_snapshot))
+                        race_page.wait_for_timeout(200)
+                        # A fast current request must win even if a slow old
+                        # reply arrives after it.
+                        check(race_page.get_by_role('checkbox', name=re.compile(r'Category \(category\)')).is_checked(),
+                              'stale configured GET cannot overwrite newer eligibility selection')
+                        race_page.unroute(race_pattern, hold_first)
+                        book = updated_race_cpt
+                    finally:
+                        race_page.close()
+                    checks.append('chrome_eligibility_late_initial_get_cannot_overwrite_refresh')
 
                     admin.goto(base + f'/admin/#/cpt/books_t02/{tagged["id"]}/edit',
                                wait_until='domcontentloaded')

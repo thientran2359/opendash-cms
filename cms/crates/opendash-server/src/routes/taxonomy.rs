@@ -33,6 +33,34 @@ pub struct TaxonomyPagination {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct TaxonomyTermResolveQuery {
+    ids: String,
+}
+
+fn parse_term_resolve_ids(raw: &str) -> ApiResult<Vec<i64>> {
+    if raw.is_empty() || raw.len() > 2000 {
+        return Err(ApiError::bad_request("Tối đa 100 ID term mỗi lần tra cứu."));
+    }
+    let mut ids = Vec::new();
+    let mut unique = std::collections::HashSet::new();
+    for raw_id in raw.split(',') {
+        if ids.len() == 100 || raw_id.is_empty() || raw_id.starts_with('0')
+            || !raw_id.bytes().all(|digit| digit.is_ascii_digit())
+        {
+            return Err(ApiError::bad_request("Danh sách ID term không hợp lệ hoặc vượt 100 ID."));
+        }
+        let id = raw_id.parse::<i64>()
+            .map_err(|_| ApiError::bad_request("ID term không hợp lệ."))?;
+        if id <= 0 || !unique.insert(id) {
+            return Err(ApiError::bad_request("Danh sách ID term không hợp lệ hoặc trùng."));
+        }
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NewTaxonomyTerm {
     kind: String,
     name: String,
@@ -199,6 +227,19 @@ pub async fn taxonomy_list(
     }
     let page = taxonomy::list_terms(&db, query.kind.as_deref(), limit, offset).await?;
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(page)).into_response())
+}
+
+/// Resolve names by IDs referenced in visible entry-table rows. One bounded
+/// read replaces scanning up to 64 independently paginated term catalogs.
+pub async fn taxonomy_terms_resolve(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Query(query): Query<TaxonomyTermResolveQuery>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    let ids = parse_term_resolve_ids(&query.ids)?;
+    let result = taxonomy::resolve_term_labels(&db, &ids).await?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(result)).into_response())
 }
 
 pub async fn taxonomy_get(
@@ -409,5 +450,18 @@ mod tests {
         let child: PatchTaxonomyTerm = serde_json::from_str(r#"{"parent_id":42}"#).unwrap();
         assert_eq!(child.parent_id, Some(Some(42)));
         assert!(serde_json::from_str::<PatchTaxonomyTerm>(r#"{"kind":"tag"}"#).is_err());
+    }
+
+    #[test]
+    fn bulk_term_resolve_has_hard_id_cap_and_strict_ids() {
+        let hundred = (1..=100).map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+        assert_eq!(parse_term_resolve_ids(&hundred).unwrap().len(), 100);
+        let hundred_one = format!("{hundred},101");
+        assert_eq!(parse_term_resolve_ids(&hundred_one).unwrap_err().0, StatusCode::BAD_REQUEST);
+        for invalid in ["", "0", "01", "1,", ",1", "1,,2", "1,1", "1,-2", "1,+2", "1, 2",
+            "1,9223372036854775808", "1;DROP TABLE taxonomy_terms"] {
+            assert_eq!(parse_term_resolve_ids(invalid).unwrap_err().0, StatusCode::BAD_REQUEST,
+                "must reject {invalid:?}");
+        }
     }
 }

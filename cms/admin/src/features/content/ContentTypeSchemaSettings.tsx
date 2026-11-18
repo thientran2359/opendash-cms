@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createContentType,
   effectiveContentTypeSettings,
@@ -13,7 +13,10 @@ import {
 import { ApiClientError, requestJson } from '../../api/client.ts';
 import { listTaxonomyDefinitions, type TaxonomyDefinition } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
-import { ContentTypeForm } from './ContentTypeForm.tsx';
+import {
+  ContentTypeForm, isContentTypeCreationDraftDirty,
+  type ContentTypeCreationDraft,
+} from './ContentTypeForm.tsx';
 import { EditorLayoutConfigurator } from './EditorLayoutConfigurator.tsx';
 import { FieldGroupsManager } from './FieldGroupsManager.tsx';
 
@@ -45,15 +48,36 @@ interface SavedTaxonomyDraft {
   stale: boolean;
 }
 
+interface SavedCptSettingsDraft {
+  /** Version of the server CPT before the user's unsaved edits. */
+  baseVersion: number;
+  baselineLabel: string;
+  baselineSettings: ContentTypeSettings;
+  label: string;
+  settings: ContentTypeSettings;
+  stale: boolean;
+}
+
 // Module-level RAM only, never browser storage. A 401 removes the component
 // without clearing this map; re-login to another site/account/role cannot read
 // another identity's drafts. Include CPT key to safely switch CPTs and return.
 const taxonomyDraftMemory = new Map<string, SavedTaxonomyDraft>();
+const settingsDraftMemory = new Map<string, SavedCptSettingsDraft>();
 const scopeKey = (siteId: string | undefined, user: AuthUser | null | undefined, typeKey: string): string | null =>
   siteId && siteId !== 'default-site' && user?.id && user.role === 'admin' && typeKey
     ? JSON.stringify([siteId, user.id, user.role, typeKey]) : null;
+// A newly created CPT has no type key yet. Its entire incomplete form lives in
+// transient RAM, isolated by verified site/account/role, never localStorage.
+const createCptDraftMemory = new Map<string, ContentTypeCreationDraft>();
 const sameKeys = (left: string[], right: string[]): boolean =>
   [...left].sort().join('\u0000') === [...right].sort().join('\u0000');
+const copySettings = (value: ContentTypeSettings): ContentTypeSettings =>
+  ({ ...value, supports: [...value.supports] });
+const settingsDiffer = (
+  label: string, value: ContentTypeSettings, baselineLabel: string, baseline: ContentTypeSettings,
+): boolean => label !== baselineLabel || value.public !== baseline.public ||
+  value.has_archive !== baseline.has_archive || value.publication !== baseline.publication ||
+  !sameKeys(value.supports, baseline.supports);
 
 // This worker owns one TSX file only. Prime has equivalent helpers in its newer
 // api/content.ts; use the canonical routes here without changing shared APIs.
@@ -89,15 +113,32 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   onContentTypesChanged,
   onDirtyChange,
 }) => {
+  const createScope = scopeKey(siteInstanceId, user, '__new_cpt__');
+  const latestCreateScopeRef = useRef(createScope);
+  latestCreateScopeRef.current = createScope;
   const [contentTypes, setContentTypes] = useState<OwnedContentTypeWithSettings[]>([]);
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createOpenState, setCreateOpenState] = useState(() => ({
+    scope: createScope, open: Boolean(createScope && createCptDraftMemory.has(createScope)),
+  }));
+  const showCreateForm = createOpenState.scope === createScope ? createOpenState.open
+    : Boolean(createScope && createCptDraftMemory.has(createScope));
+  const [createDirtyState, setCreateDirtyState] = useState(() => ({
+    scope: createScope, dirty: Boolean(createScope && createCptDraftMemory.has(createScope)),
+  }));
+  const createDirty = createDirtyState.scope === createScope ? createDirtyState.dirty
+    : Boolean(createScope && createCptDraftMemory.has(createScope));
   const [editLabel, setEditLabel] = useState('');
   const [editSettings, setEditSettings] = useState<ContentTypeSettings>(
     effectiveContentTypeSettings('post'),
   );
   const [draftIdentity, setDraftIdentity] = useState('');
   const [savingSettings, setSavingSettings] = useState(false);
+  const [settingsStale, setSettingsStale] = useState(false);
   const [settingsError, setSettingsError] = useState('');
+  const [createNoticeState, setCreateNoticeState] = useState<{
+    scope: string | null; message: string;
+  } | null>(null);
+  const createNotice = createNoticeState?.scope === createScope ? createNoticeState.message : '';
   const [revision, setRevision] = useState(0);
   const [taxonomyState, setTaxonomyState] = useState<LoadedTaxonomyState | null>(null);
   const [taxonomyDraft, setTaxonomyDraft] = useState<string[]>([]);
@@ -107,10 +148,43 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   const latestScopeRef = useRef<string | null>(null);
   const latestTypeRef = useRef<string>('');
   const mountedRef = useRef(true);
+  const createFormEpochRef = useRef(0);
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+
+  const onCreateDraftChange = useCallback((snapshot: ContentTypeCreationDraft) => {
+    if (!mountedRef.current || latestCreateScopeRef.current !== createScope) return;
+    const dirty = isContentTypeCreationDraftDirty(snapshot);
+    if (createScope) {
+      if (dirty) createCptDraftMemory.set(createScope, snapshot);
+      else createCptDraftMemory.delete(createScope);
+    }
+    setCreateDirtyState({ scope: createScope, dirty });
+  }, [createScope]);
+
+  const onCreateFormDirty = useCallback((dirty: boolean) => {
+    if (!mountedRef.current || latestCreateScopeRef.current !== createScope) return;
+    setCreateDirtyState(previous => previous.scope === createScope && previous.dirty === dirty
+      ? previous : { scope: createScope, dirty });
+  }, [createScope]);
+
+  const toggleCreateForm = () => {
+    if (!showCreateForm) {
+      setCreateNoticeState(null);
+      createFormEpochRef.current += 1;
+      setCreateOpenState({ scope: createScope, open: true });
+      return;
+    }
+    if (createDirty && !window.confirm('Bỏ bản nhập tạo loại nội dung mới chưa lưu?')) return;
+    createFormEpochRef.current += 1;
+    // Explicit close/discard is destructive; a 401 unmount deliberately does
+    // not call this handler so same-account reauthentication can restore.
+    if (createScope) createCptDraftMemory.delete(createScope);
+    setCreateDirtyState({ scope: createScope, dirty: false });
+    setCreateOpenState({ scope: createScope, open: false });
+  };
 
   const load = async () => {
     try {
@@ -147,15 +221,41 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   const canonicalSettings = activeType
     ? effectiveContentTypeSettings(activeKey, activeType.descriptor.settings)
     : null;
-  const settingsChanged = draftIdentity === currentIdentity && canonicalSettings !== null && (
-    editLabel !== activeType?.descriptor.label
-    || editSettings.public !== canonicalSettings.public
-    || editSettings.has_archive !== canonicalSettings.has_archive
-    || editSettings.publication !== canonicalSettings.publication
-    || [...editSettings.supports].sort().join(',') !== [...canonicalSettings.supports].sort().join(',')
-  );
+  const settingsChanged = draftIdentity.startsWith(`${activeKey}:`) && canonicalSettings !== null &&
+    settingsDiffer(editLabel, editSettings, activeType?.descriptor.label ?? '', canonicalSettings);
   const taxonomyLoaded = taxonomyState?.identity === currentIdentity ? taxonomyState : null;
   const taxonomyChanged = Boolean(taxonomyLoaded && !sameKeys(taxonomyDraft, taxonomyLoaded.applied));
+  const settingsDirtyRef = useRef(false);
+  settingsDirtyRef.current = Boolean(settingsChanged || taxonomyChanged);
+
+  const persistSettingsInput = (nextLabel: string, nextSettings: ContentTypeSettings) => {
+    if (!selectedScope || !activeType || !canonicalSettings) return;
+    const previous = settingsDraftMemory.get(selectedScope);
+    const changed = settingsDiffer(nextLabel, nextSettings, activeType.descriptor.label, canonicalSettings);
+    // This synchronous guard also protects a create POST that resolves in the
+    // same turn as an unrelated settings input, before React has re-rendered.
+    settingsDirtyRef.current = changed || settingsStale || taxonomyChanged;
+    if (!changed && !settingsStale) {
+      settingsDraftMemory.delete(selectedScope);
+      return;
+    }
+    settingsDraftMemory.set(selectedScope, {
+      baseVersion: previous?.baseVersion ?? activeType.version,
+      baselineLabel: previous?.baselineLabel ?? activeType.descriptor.label,
+      baselineSettings: copySettings(previous?.baselineSettings ?? canonicalSettings),
+      label: nextLabel, settings: copySettings(nextSettings),
+      stale: previous?.stale ?? settingsStale,
+    });
+  };
+  const changeEditLabel = (label: string) => {
+    persistSettingsInput(label, editSettings);
+    setEditLabel(label); setSettingsError('');
+  };
+  const changeEditSettings = (patch: Partial<ContentTypeSettings>) => {
+    const next = { ...editSettings, ...patch };
+    persistSettingsInput(editLabel, next);
+    setEditSettings(next); setSettingsError('');
+  };
 
   const rememberTaxonomyDraft = (state: LoadedTaxonomyState, next: string[], scope = selectedScope) => {
     if (!scope) return;
@@ -174,9 +274,9 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   }, [selectedScope, taxonomyLoaded, taxonomyDraft]);
 
   useEffect(() => {
-    onDirtyChange?.(settingsChanged || taxonomyChanged);
+    onDirtyChange?.(createDirty || settingsChanged || taxonomyChanged);
     return () => onDirtyChange?.(false);
-  }, [settingsChanged, taxonomyChanged, onDirtyChange]);
+  }, [createDirty, settingsChanged, taxonomyChanged, onDirtyChange]);
 
   useEffect(() => {
     if (!currentIdentity || !activeKey || isSection) {
@@ -345,37 +445,95 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
 
   useEffect(() => {
     if (activeType) {
-      setDraftIdentity(`${activeType.descriptor.key}:${activeType.version}`);
-      setEditLabel(activeType.descriptor.label);
-      setEditSettings(effectiveContentTypeSettings(activeType.descriptor.key, activeType.descriptor.settings));
-      setSettingsError('');
+      const saved = selectedScope ? settingsDraftMemory.get(selectedScope) : null;
+      if (saved) {
+        // 401 unmount must not throw away incomplete settings changes. A CPT
+        // version change cannot silently borrow a new CAS token for old input.
+        setDraftIdentity(`${activeType.descriptor.key}:${saved.baseVersion}`);
+        setEditLabel(saved.label);
+        setEditSettings({ ...saved.settings, supports: [...saved.settings.supports] });
+        const stale = saved.stale || saved.baseVersion !== activeType.version;
+        setSettingsStale(stale);
+        if (stale) setSettingsError('Phiên bản CPT đã thay đổi. Bản nhập được giữ; đối chiếu phiên bản trước khi lưu.');
+      } else {
+        setDraftIdentity(`${activeType.descriptor.key}:${activeType.version}`);
+        setEditLabel(activeType.descriptor.label);
+        setEditSettings(effectiveContentTypeSettings(activeType.descriptor.key, activeType.descriptor.settings));
+        setSettingsStale(false);
+        setSettingsError('');
+      }
     }
-  }, [activeType?.descriptor.key, activeType?.version]);
+  }, [activeType?.descriptor.key, activeType?.version, selectedScope]);
 
   const handleCreate = async (def: ContentTypeDefinitionWithSettings): Promise<boolean> => {
     if (!csrfToken) return false;
-    const created = await createContentType(def, csrfToken);
-    setShowCreateForm(false);
-    setRevision(r => r + 1);
-    onContentTypesChanged();
-    onSelectTypeKey(created.descriptor.key);
-    return true;
+    // The post-create navigation must not discard unrelated edits in the
+    // currently selected CPT. Refuse before the POST rather than prompting
+    // after the server has already committed the new CPT.
+    if (settingsChanged || taxonomyChanged) {
+      setSettingsError('Hãy lưu hoặc hủy các thay đổi CPT/taxonomy hiện tại trước khi tạo loại nội dung mới.');
+      return false;
+    }
+    const requestScope = createScope;
+    const requestFormEpoch = createFormEpochRef.current;
+    const submittedSnapshot = requestScope ? createCptDraftMemory.get(requestScope) : undefined;
+    try {
+      const created = await createContentType(def, csrfToken);
+      // A detached create response must not erase a newer draft typed after a
+      // form close/reopen or a different account's login.
+      const sameSubmittedDraft = !requestScope || createCptDraftMemory.get(requestScope) === submittedSnapshot;
+      if (requestScope && sameSubmittedDraft)
+        createCptDraftMemory.delete(requestScope);
+      if (!mountedRef.current || latestCreateScopeRef.current !== requestScope ||
+          createFormEpochRef.current !== requestFormEpoch) return false;
+      setRevision(r => r + 1);
+      onContentTypesChanged();
+      // A second Admin edit or new form input can occur while the POST is in
+      // flight. Never clear that newer draft or bypass App's dirty guard after
+      // the server has committed the create. Preserve all in-progress edits
+      // and make the successful server mutation explicit in the UI.
+      if (!sameSubmittedDraft || settingsDirtyRef.current) {
+        if (sameSubmittedDraft) {
+          setCreateDirtyState({ scope: requestScope, dirty: false });
+          setCreateOpenState({ scope: requestScope, open: false });
+        }
+        const message = `Đã tạo CPT ${created.descriptor.key}, nhưng có thay đổi khác chưa lưu. Bản nhập được giữ; hãy lưu hoặc bỏ thay đổi trước khi chuyển màn hình.`;
+        setSettingsError(message);
+        // Provider-owned CPTs have no editable schema form; show the receipt
+        // outside that branch so the post-201 success cannot be invisible.
+        setCreateNoticeState({ scope: requestScope, message });
+        return sameSubmittedDraft;
+      }
+      setCreateDirtyState({ scope: requestScope, dirty: false });
+      setCreateOpenState({ scope: requestScope, open: false });
+      // App.mayLeave consults schemaDirtyRef synchronously. React has not yet
+      // committed the state change above, so clear only the completed create
+      // draft now, before navigating to the newly committed CPT.
+      onDirtyChange?.(false);
+      setCreateNoticeState({ scope: requestScope, message: `Đã tạo CPT ${created.descriptor.key}.` });
+      onSelectTypeKey(created.descriptor.key);
+      return true;
+    } catch (cause) {
+      if (mountedRef.current && latestCreateScopeRef.current === requestScope &&
+          cause instanceof ApiClientError && cause.status === 401) {
+        onApiError(cause, 'Phiên đăng nhập đã hết hạn khi tạo CPT; bản nhập chưa lưu được giữ.');
+      }
+      throw cause;
+    }
   };
 
   const toggleSupport = (support: ContentSupport, enabled: boolean) => {
-    setEditSettings(previous => ({
-      ...previous,
-      supports: enabled
-        ? Array.from(new Set([...previous.supports, support]))
-        : previous.supports.filter(item => item !== support),
-    }));
-    setSettingsError('');
+    changeEditSettings({ supports: enabled
+      ? Array.from(new Set([...editSettings.supports, support]))
+      : editSettings.supports.filter(item => item !== support) });
   };
 
   const handleUpdateSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeType || !canEditSettings || draftIdentity !== currentIdentity
-      || !csrfToken || savingSettings || taxonomyBusy) return;
+      || settingsStale || !csrfToken || savingSettings || taxonomyBusy) return;
+    const requestScope = selectedScope;
+    const savedAtSubmit = requestScope ? settingsDraftMemory.get(requestScope) : undefined;
     setSavingSettings(true);
     setSettingsError('');
     try {
@@ -395,10 +553,20 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         },
         csrfToken,
       );
+      if (requestScope && settingsDraftMemory.get(requestScope) === savedAtSubmit)
+        settingsDraftMemory.delete(requestScope);
+      if (!mountedRef.current || latestScopeRef.current !== requestScope) return;
+      setSettingsStale(false);
       setRevision(r => r + 1);
       onContentTypesChanged();
     } catch (err) {
+      if (!mountedRef.current || latestScopeRef.current !== requestScope) return;
       if (err instanceof ApiClientError && err.status === 412) {
+        setSettingsStale(true);
+        if (requestScope) {
+          const saved = settingsDraftMemory.get(requestScope);
+          if (saved) settingsDraftMemory.set(requestScope, { ...saved, stale: true });
+        }
         setSettingsError('Cấu hình đã thay đổi ở nơi khác (412). Bản nhập vẫn được giữ; tải phiên bản mới trước khi lưu lại.');
       } else if (err instanceof ApiClientError && err.status === 409) {
         setSettingsError(`Xung đột cấu hình (409): ${err.message}. Cấu hình đang nhập vẫn được giữ.`);
@@ -406,7 +574,70 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         onApiError(err, 'Không thể cập nhật loại nội dung.');
       }
     } finally {
-      setSavingSettings(false);
+      if (mountedRef.current && latestScopeRef.current === requestScope) setSavingSettings(false);
+    }
+  };
+
+  const rebaseSettingsDraft = async () => {
+    if (!activeType || !settingsStale || savingSettings || !selectedScope) return;
+    const requestScope = selectedScope;
+    setSavingSettings(true);
+    try {
+      const types = await listContentTypes();
+      if (!mountedRef.current || latestScopeRef.current !== requestScope) return;
+      const fresh = types.find(item => item.descriptor.key === activeKey);
+      if (!fresh) {
+        setSettingsError('CPT đã bị xóa; bản nhập vẫn được giữ để sao chép.');
+        return;
+      }
+      const saved = settingsDraftMemory.get(requestScope);
+      if (!saved) {
+        setSettingsError('Không còn bản nhập CPT để đối chiếu; hãy dùng Tải lại từ máy chủ.');
+        return;
+      }
+      const newSettings = effectiveContentTypeSettings(activeKey, fresh.descriptor.settings);
+      const prev = saved.baselineSettings;
+      const changed = {
+        label: saved.label !== saved.baselineLabel,
+        public: saved.settings.public !== prev.public,
+        has_archive: saved.settings.has_archive !== prev.has_archive,
+        publication: saved.settings.publication !== prev.publication,
+        supports: !sameKeys(saved.settings.supports, prev.supports),
+      };
+      const conflicts = [
+        ...(changed.label && fresh.descriptor.label !== saved.baselineLabel ? ['label'] : []),
+        ...(changed.public && newSettings.public !== prev.public ? ['public'] : []),
+        ...(changed.has_archive && newSettings.has_archive !== prev.has_archive ? ['has_archive'] : []),
+        ...(changed.publication && newSettings.publication !== prev.publication ? ['publication'] : []),
+        ...(changed.supports && !sameKeys(newSettings.supports, prev.supports) ? ['supports'] : []),
+      ];
+      if (conflicts.length && !window.confirm(
+        `Máy chủ cũng thay đổi ${conflicts.join(', ')}. Giữ các giá trị bạn đang nhập khi đối chiếu CPT mới?`,
+      )) return;
+      const mergedSettings: ContentTypeSettings = {
+        public: changed.public ? saved.settings.public : newSettings.public,
+        has_archive: changed.has_archive ? saved.settings.has_archive : newSettings.has_archive,
+        publication: changed.publication ? saved.settings.publication : newSettings.publication,
+        supports: [...(changed.supports ? saved.settings.supports : newSettings.supports)],
+      };
+      const mergedLabel = changed.label ? saved.label : fresh.descriptor.label;
+      settingsDraftMemory.set(requestScope, {
+        baseVersion: fresh.version, baselineLabel: fresh.descriptor.label,
+        baselineSettings: copySettings(newSettings), label: mergedLabel,
+        settings: copySettings(mergedSettings), stale: false,
+      });
+      setContentTypes(types);
+      setEditLabel(mergedLabel); setEditSettings(mergedSettings);
+      setDraftIdentity(`${activeKey}:${fresh.version}`);
+      setSettingsStale(false);
+      setSettingsError('Đã đối chiếu phiên bản CPT mới; các thay đổi đang nhập được giữ. Kiểm tra trước khi lưu.');
+    } catch (cause) {
+      if (!mountedRef.current || latestScopeRef.current !== requestScope) return;
+      setSettingsError(cause instanceof Error ? cause.message : 'Không thể đối chiếu phiên bản CPT.');
+      if (cause instanceof ApiClientError && cause.status === 401)
+        onApiError(cause, 'Phiên đăng nhập hết hạn khi đối chiếu cấu hình CPT.');
+    } finally {
+      if (mountedRef.current && latestScopeRef.current === requestScope) setSavingSettings(false);
     }
   };
 
@@ -421,20 +652,34 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
         </div>
         <button
           type="button"
-          onClick={() => setShowCreateForm(v => !v)}
+          onClick={toggleCreateForm}
           className="rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
         >
           {showCreateForm ? 'Đóng form tạo CPT' : '+ Tạo loại nội dung mới'}
         </button>
       </div>
 
+      {createNotice && <p role="status" className="rounded border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+        {createNotice}
+      </p>}
+
       {showCreateForm && (
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <ContentTypeForm
+            key={createScope ?? 'unverified-identity'}
             disabled={!csrfToken}
             onCreate={handleCreate}
-            onDirtyChange={() => {}}
+            initialDraft={createScope ? createCptDraftMemory.get(createScope) ?? null : null}
+            onDraftChange={onCreateDraftChange}
+            onDirtyChange={onCreateFormDirty}
           />
+          {createDirty && <p role="status" className="mt-3 text-xs text-slate-600">
+            {createScope
+              ? 'Bản nhập CPT chưa lưu được giữ trong RAM theo website và tài khoản khi hết phiên đăng nhập. Tải lại trình duyệt sẽ xóa nháp.'
+              : 'Không xác minh được website/tài khoản để khôi phục nháp; hãy lưu trước khi rời màn hình.'}
+          </p>}
+          <button type="button" className="mt-3 rounded border border-slate-300 px-3 py-2 text-sm"
+            onClick={toggleCreateForm}>Đóng form / bỏ bản nhập chưa lưu</button>
         </div>
       )}
 
@@ -484,7 +729,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                   <label className="block text-sm font-medium text-slate-800">
                     Tên hiển thị
                     <input type="text" value={editLabel} required maxLength={100}
-                      disabled={!csrfToken || savingSettings} onChange={event => setEditLabel(event.target.value)}
+                      disabled={!csrfToken || savingSettings} onChange={event => changeEditLabel(event.target.value)}
                       className="mt-1 block w-full max-w-md rounded border border-slate-300 px-3 py-2" />
                   </label>
                 )}
@@ -493,22 +738,22 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={editSettings.public}
                       disabled={!csrfToken || savingSettings}
-                      onChange={event => setEditSettings(prev => ({ ...prev, public: event.target.checked }))} />
+                      onChange={event => changeEditSettings({ public: event.target.checked })} />
                     Công khai nội dung (public)
                   </label>
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={editSettings.has_archive}
                       disabled={!csrfToken || savingSettings}
-                      onChange={event => setEditSettings(prev => ({ ...prev, has_archive: event.target.checked }))} />
+                      onChange={event => changeEditSettings({ has_archive: event.target.checked })} />
                     Cho phép trang danh sách (has_archive)
                   </label>
                   <label className="block text-sm font-medium">
                     Cơ chế xuất bản
                     <select className="mt-1 block w-full max-w-md rounded border border-slate-300 px-3 py-2"
                       value={editSettings.publication} disabled={!csrfToken || savingSettings || isBuiltin}
-                      onChange={event => setEditSettings(prev => ({
-                        ...prev, publication: event.target.value as ContentPublicationPolicy,
-                      }))}>
+                      onChange={event => changeEditSettings({
+                        publication: event.target.value as ContentPublicationPolicy,
+                      })}>
                       <option value="immediate">Lưu là xuất bản (immediate)</option>
                       <option value="draft_publish">Lưu nháp / Xuất bản (draft_publish)</option>
                     </select>
@@ -532,14 +777,28 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                   <p className="text-xs text-slate-600">Tắt thành phần không xóa dữ liệu hay ảnh đã lưu.</p>
                 </fieldset>
                 {settingsError && <p className="text-sm text-rose-700" role="alert">{settingsError}</p>}
+                {settingsStale && <div role="alert" className="space-y-2 text-sm text-amber-800">
+                  <p>Phiên bản CPT đã thay đổi. Bản nhập được giữ nhưng không thể lưu bằng CAS cũ.</p>
+                  <button type="button" className="rounded border border-amber-400 px-3 py-2"
+                    disabled={savingSettings || taxonomyBusy} onClick={() => void rebaseSettingsDraft()}>
+                    Đối chiếu CPT mới, giữ thay đổi đang nhập
+                  </button>
+                </div>}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="submit" disabled={!settingsChanged || !csrfToken || savingSettings || taxonomyBusy}
+                  <button type="submit" disabled={!settingsChanged || settingsStale || !csrfToken || savingSettings || taxonomyBusy}
                     className="rounded bg-slate-800 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
                     {savingSettings ? 'Đang lưu...' : 'Lưu cấu hình'}
                   </button>
                   <button type="button" disabled={savingSettings || taxonomyBusy}
                     className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
                     onClick={() => {
+                      if (selectedScope) settingsDraftMemory.delete(selectedScope);
+                      setSettingsStale(false);
+                      if (activeType && canonicalSettings) {
+                        setEditLabel(activeType.descriptor.label);
+                        setEditSettings(copySettings(canonicalSettings));
+                        setDraftIdentity(currentIdentity);
+                      }
                       setRevision(r => r + 1);
                       setSettingsError('');
                     }}>
