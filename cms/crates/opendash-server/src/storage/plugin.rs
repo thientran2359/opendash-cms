@@ -43,10 +43,26 @@ impl std::fmt::Display for PluginStorageError {
 }
 
 pub fn compute_plugin_revision_digest(manifest_json: &str, wasm_bytes: &[u8]) -> String {
+    compute_plugin_revision_digest_with_extensions(manifest_json, wasm_bytes, None)
+}
+
+/// A v2 admin declaration is part of the immutable installed revision, even
+/// though the Wasm ABI's parsed PluginManifest intentionally does not expose
+/// this UI-only data. Changing only declarations must conflict with an already
+/// installed plugin ID/version rather than silently replacing its registry.
+pub fn compute_plugin_revision_digest_with_extensions(
+    manifest_json: &str,
+    wasm_bytes: &[u8],
+    extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(manifest_json.as_bytes());
     hasher.update([0u8]);
     hasher.update(wasm_bytes);
+    if let Some(ext) = extensions {
+        hasher.update(b"\0admin_extensions\0");
+        hasher.update(serde_json::to_vec(ext).expect("validated admin declarations serialize"));
+    }
     hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -94,7 +110,23 @@ pub fn verify_plugin_revision_durability(
         .map_err(|_| "Revision plugin thiếu manifest.json trên đĩa.".to_string())?;
     let wasm_bytes = fs::read(rev_dir.join("plugin.wasm"))
         .map_err(|_| "Revision plugin thiếu plugin.wasm trên đĩa.".to_string())?;
-    if compute_plugin_revision_digest(&manifest_json, &wasm_bytes) != revision_digest {
+    let ext_path = rev_dir.join("admin-extensions.json");
+    let extension = if ext_path.exists() {
+        let raw = fs::read(&ext_path)
+            .map_err(|_| "Revision plugin không đọc được admin-extensions.json.".to_string())?;
+        let parsed: opendash_core::admin_extensions::AdminExtensions =
+            serde_json::from_slice(&raw)
+                .map_err(|_| "Admin extension revision không hợp lệ.".to_string())?;
+        let canonical = serde_json::to_vec(&parsed)
+            .map_err(|_| "Admin extension revision không serialize được.".to_string())?;
+        if raw != canonical {
+            return Err("Admin extension revision không còn canonical.".into());
+        }
+        Some(parsed)
+    } else {
+        None
+    };
+    if compute_plugin_revision_digest_with_extensions(&manifest_json, &wasm_bytes, extension.as_ref()) != revision_digest {
         return Err("Nội dung revision plugin trên đĩa bị hỏng hoặc lệch digest.".to_string());
     }
     Ok(())
@@ -117,6 +149,19 @@ pub fn stage_and_publish_plugin_revision(
     manifest_json: &str,
     wasm_bytes: &[u8],
 ) -> Result<(), String> {
+    stage_and_publish_plugin_revision_with_extensions(
+        plugins_root, run_uuid, revision_digest, manifest_json, wasm_bytes, None,
+    )
+}
+
+pub fn stage_and_publish_plugin_revision_with_extensions(
+    plugins_root: &Path,
+    run_uuid: &str,
+    revision_digest: &str,
+    manifest_json: &str,
+    wasm_bytes: &[u8],
+    extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
+) -> Result<(), String> {
     if run_uuid.is_empty()
         || run_uuid.contains('/')
         || run_uuid.contains('\\')
@@ -135,6 +180,13 @@ pub fn stage_and_publish_plugin_revision(
         .map_err(|e| format!("Không thể tạo thư mục staging plugin: {e}"))?;
     if let Err(err) = write_durable_file(&staging_dir.join("manifest.json"), manifest_json.as_bytes())
         .and_then(|_| write_durable_file(&staging_dir.join("plugin.wasm"), wasm_bytes))
+        .and_then(|_| match extensions {
+            Some(ext) => {
+                let raw = serde_json::to_vec(ext).map_err(|e| e.to_string())?;
+                write_durable_file(&staging_dir.join("admin-extensions.json"), &raw)
+            }
+            None => Ok(()),
+        })
     {
         let _ = fs::remove_dir_all(&staging_dir);
         return Err(err);
@@ -170,8 +222,17 @@ pub async fn install_plugin_revision(
     manifest: &PluginManifest,
     manifest_json: &str,
     wasm_bytes: &[u8],
+    extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
 ) -> Result<i64, PluginStorageError> {
-    let revision_digest = compute_plugin_revision_digest(manifest_json, wasm_bytes);
+    // Fail combined-cap checks before publishing a durable ZIP revision.
+    crate::storage::admin_extensions::require_capacity(db_pool, "plugin", &manifest.id, extensions)
+        .await
+        .map_err(|e| if e.0 == axum::http::StatusCode::CONFLICT {
+            PluginStorageError::Conflict(e.1.into_owned())
+        } else { PluginStorageError::Internal(e.1.into_owned()) })?;
+    let revision_digest = compute_plugin_revision_digest_with_extensions(
+        manifest_json, wasm_bytes, extensions,
+    );
     let run_uuid = crate::auth::generate_random_token();
 
     // Check version collision before staging on disk
@@ -193,12 +254,13 @@ pub async fn install_plugin_revision(
         }
     }
 
-    stage_and_publish_plugin_revision(
+    stage_and_publish_plugin_revision_with_extensions(
         plugins_root,
         &run_uuid,
         &revision_digest,
         manifest_json,
         wasm_bytes,
+        extensions,
     )
     .map_err(PluginStorageError::Internal)?;
 
@@ -280,6 +342,13 @@ pub async fn install_plugin_revision(
     )
     .await
     .map_err(map_cnt_err)?;
+    crate::storage::admin_extensions::require_capacity_in_conn(
+        &mut tx, "plugin", &manifest.id, extensions,
+    ).await.map_err(map_cnt_err)?;
+    crate::storage::admin_extensions::sync_owner_in_conn(
+        &mut tx, "plugin", &manifest.id, extensions, "active",
+        &manifest.actions.iter().map(|action| action.id.clone()).collect::<Vec<_>>(),
+    ).await.map_err(map_cnt_err)?;
 
     tx.commit()
         .await
@@ -409,18 +478,27 @@ pub async fn set_plugin_enabled(
     id: &str,
     enabled: bool,
 ) -> Result<(), String> {
+    let mut tx = db_pool.begin().await.map_err(|e| e.to_string())?;
     let flag: i64 = if enabled { 1 } else { 0 };
     let res =
-        sqlx::query("UPDATE plugins SET enabled = ?, revision_generation = revision_generation + 1, cas_version = cas_version + 1, updated_at = datetime('now') WHERE id = ?")
+        sqlx::query("UPDATE plugins SET enabled = ?, last_error = CASE WHEN ? = 1 THEN NULL ELSE last_error END, revision_generation = revision_generation + 1, cas_version = cas_version + 1, updated_at = datetime('now') WHERE id = ?")
+            .bind(flag)
             .bind(flag)
             .bind(id)
-            .execute(db_pool)
+            .execute(&mut *tx)
             .await
             .map_err(|e| format!("Lỗi cập nhật trạng thái plugin: {e}"))?;
 
     if res.rows_affected() == 0 {
         return Err("Plugin không tồn tại.".to_string());
     }
+    crate::storage::admin_extensions::set_owner_status_in_conn(&mut tx, "plugin", id, enabled)
+        .await.map_err(|e| e.1.into_owned())?;
+    if enabled {
+        crate::storage::admin_extensions::require_capacity_in_conn(&mut tx, "plugin", id, None)
+            .await.map_err(|e| e.1.into_owned())?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -455,8 +533,9 @@ pub async fn set_plugin_enabled_cas(
 
     let flag: i64 = if enabled { 1 } else { 0 };
     sqlx::query(
-        "UPDATE plugins SET enabled = ?, revision_generation = revision_generation + 1, cas_version = cas_version + 1, updated_at = datetime('now') WHERE id = ?",
+        "UPDATE plugins SET enabled = ?, last_error = CASE WHEN ? = 1 THEN NULL ELSE last_error END, revision_generation = revision_generation + 1, cas_version = cas_version + 1, updated_at = datetime('now') WHERE id = ?",
     )
+    .bind(flag)
     .bind(flag)
     .bind(id)
     .execute(&mut *tx)
@@ -466,6 +545,14 @@ pub async fn set_plugin_enabled_cas(
     crate::storage::content::set_plugin_cnt_provider_status_in_tx(&mut tx, id, enabled)
         .await
         .map_err(map_cnt_err)?;
+    crate::storage::admin_extensions::set_owner_status_in_conn(
+        &mut tx, "plugin", id, enabled,
+    ).await.map_err(map_cnt_err)?;
+    if enabled {
+        crate::storage::admin_extensions::require_capacity_in_conn(
+            &mut tx, "plugin", id, None,
+        ).await.map_err(map_cnt_err)?;
+    }
 
     let next_cas: i64 = sqlx::query_scalar("SELECT cas_version FROM plugins WHERE id = ?")
         .bind(id)

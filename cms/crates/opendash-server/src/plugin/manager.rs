@@ -494,6 +494,7 @@ impl PluginManager {
             &package.manifest,
             &manifest_json,
             &package.wasm_bytes,
+            package.admin_extensions.as_ref(),
         )
         .await?;
 

@@ -1,0 +1,47 @@
+{
+  "manifest_version": 2,
+  "theme_id": "review-theme",
+  "name": "Admin Review Theme",
+  "version": "1.0.0",
+  "templates": {
+    "home": "templates/home.html"
+  },
+  "admin_extensions": {
+    "schema_version": 1,
+    "columns": [
+      {
+        "local_key": "theme_body",
+        "label": "Theme badge",
+        "type_keys": ["post"],
+        "field_key": "body",
+        "format": "badge",
+        "order": 10
+      },
+      {
+        "local_key": "same_origin_link",
+        "label": "Theme link",
+        "type_keys": ["post"],
+        "field_key": "body",
+        "format": "link",
+        "order": 15
+      }
+    ],
+    "term_panels": [
+      {
+        "local_key": "theme_notes",
+        "label": "Theme Notes",
+        "kind": "category",
+        "order": 10,
+        "fields": [
+          {
+            "key": "caption",
+            "label": "Caption",
+            "type": "textarea",
+            "required": false,
+            "min_role": "admin"
+          }
+        ]
+      }
+    ]
+  }
+}

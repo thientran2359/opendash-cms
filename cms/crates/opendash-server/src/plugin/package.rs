@@ -13,6 +13,7 @@ pub const MAX_PLUGIN_FILES: usize = 10;
 #[derive(Debug)]
 pub struct PluginPackage {
     pub manifest: PluginManifest,
+    pub admin_extensions: Option<opendash_core::admin_extensions::AdminExtensions>,
     pub wasm_bytes: Vec<u8>,
 }
 
@@ -100,6 +101,13 @@ impl PluginPackage {
         let wasm_bytes = wasm_content.ok_or("ZIP thiếu file plugin.wasm.")?;
 
         let manifest = PluginManifest::from_json_str(&manifest_text)?;
+        let raw: serde_json::Value = serde_json::from_str(&manifest_text)
+            .map_err(|_| "admin_extensions không đúng JSON.")?;
+        let admin_extensions = match raw.get("admin_extensions") {
+            Some(value) => Some(serde_json::from_value(value.clone())
+                .map_err(|_| "admin_extensions không đúng cấu trúc.")?),
+            None => None,
+        };
 
         // Validate Wasm module structure using Wasmi
         let module = Module::new(engine, &wasm_bytes)
@@ -197,6 +205,7 @@ impl PluginPackage {
 
         Ok(Self {
             manifest,
+            admin_extensions,
             wasm_bytes,
         })
     }
