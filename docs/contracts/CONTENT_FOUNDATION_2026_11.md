@@ -45,6 +45,7 @@ Section is immutable private and uses its existing dedicated editor/document pol
 settings cannot expose it. Post/page immutable publication mode. No entry hierarchy
 in this increment; custom fields are not an alternative hidden parent relationship.
 
+Use current CPT schema token/CAS mechanism for settings; no parallel version counter.
 Admin-only schema mutation with existing auth/CSRF/Origin and CAS; stale version
 412. Editor reads effective configuration and edits allowed entries only. Existing
 save/publish endpoints and ContentSave use the same effective publication policy.

@@ -80,6 +80,9 @@ Không có task mới chặn; baseline0037 và ADR-0019 đã merge. Các common 
 - `cms/crates/opendash-server/src/storage/content.rs`
 - `cms/crates/opendash-server/src/storage/entries.rs`
 - `cms/crates/opendash-server/src/storage/public_content.rs`
+- `cms/crates/opendash-server/src/storage/seo.rs`
+- `cms/crates/opendash-server/src/storage/sitemap.rs`
+- `cms/crates/opendash-server/src/routes/public_content.rs`
 - `cms/crates/opendash-server/src/storage/media.rs`
 - `cms/crates/opendash-server/src/storage/entry_table.rs`
 - `cms/crates/opendash-server/src/routes/content.rs`
