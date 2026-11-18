@@ -232,6 +232,17 @@ Issue/Project là nguồn live; snapshot 17/11/2026 dưới đây không tự c�
 Backlog; #284 Done. #242/#245 hiện do Forge phụ trách theo owner transfer.
 Nova assignment ở bảng 14/11 là lịch sử, không dùng để nhận task. Beta NOT_RUN.
 
+## Coding audit follow-up — 18/11/2026
+
+[Research PR #382](https://github.com/thientran2359/opendash-cms/pull/382) đã merge;
+[Aster coordination #385](https://github.com/thientran2359/opendash-cms/issues/385)
+giữ disposition cho CS-01–CS-13. Harbor đang triển khai #375 và giữ ownership
+App/Menu/Builder; các correction trùng file chờ bàn giao và đối chiếu source mới.
+
+| Task | Responsible | Status / source | Issue |
+| --- | --- | --- | --- |
+| [M8-S11-T01](milestones/M8/slices/2026-11-18-csrf-checker-g3.md) | Forge | G3 specified; implementation NOT_STARTED, verification NOT_RUN; live Project Ready pending verification | Chưa phát hành trước spec merge |
+
 ## Task thực tế không thuộc 9 milestone CMS
 
 | GitHub task | Công việc | Trạng thái ghi nhận | GitHub Issue |
