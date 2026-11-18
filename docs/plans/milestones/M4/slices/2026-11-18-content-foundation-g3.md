@@ -165,6 +165,7 @@ M4-S12-T01 merged và G5 VERIFIED. Các common gates ở đầu tài liệu bắ
 - `cms/admin/src/api/content.ts`
 - `cms/admin/src/api/taxonomy.ts`
 - `cms/admin/src/features/content/ContentTypeSchemaSettings.tsx`
+- `cms/admin/src/features/content/ContentTypeForm.tsx`
 - `cms/admin/src/features/content/EntryListPage.tsx`
 - `cms/admin/src/features/editor/SingleEditWorkspace.tsx`
 - `cms/admin/src/features/taxonomy/TaxonomyPage.tsx`
@@ -172,6 +173,8 @@ M4-S12-T01 merged và G5 VERIFIED. Các common gates ở đầu tài liệu bắ
 - `cms/admin/src/features/taxonomy/TermPicker.tsx`
 - `cms/admin/src/features/menus/MenusPanel.tsx`
 - `cms/admin/src/builder/BuilderListFields.tsx`
+- `cms/admin/src/builder/document.ts`
+- `cms/admin/src/features/editor/PanelRegionRenderer.tsx`
 - `cms/admin/src/shell/AdminShell.tsx`
 - `cms/admin/src/shell/router.ts`
 - `cms/admin/src/App.tsx`
@@ -179,6 +182,24 @@ M4-S12-T01 merged và G5 VERIFIED. Các common gates ở đầu tài liệu bắ
 - `cms/crates/opendash-core/src/builder.rs`
 - `cms/crates/opendash-server/src/storage/builder_binding.rs`
 - `cms/crates/opendash-server/src/content_render.rs`
+- `cms/crates/opendash-server/src/routes/taxonomy.rs`
+- `cms/crates/opendash-server/src/storage/auth.rs`
+- `cms/crates/opendash-server/src/storage/builder.rs`
+- `cms/crates/opendash-server/src/storage/content.rs`
+- `cms/crates/opendash-server/src/storage/entries.rs`
+- `cms/crates/opendash-server/src/storage/taxonomy.rs`
+- `cms/scripts/m7_s16_t06_entry_table_e2e.py`
+
+Aster corrective ownership addendum, 19/11/2026, reviewed head
+`9017b9cb2af9b71c8b6975a88c69db6209f160d7`: the added integration files above
+are exclusive to Harbor for this task. ContentTypeForm changes preserve creation
+drafts across401/late responses; auth identity retains the previously documented
+filesystem-generation limits. The existing M7 runner changes only focus/wait for
+lazy filter options and preserve its semantic expectations. New C2 read DTOs,
+bounded term-label projection and provider CAS corrections follow the
+[contract clarification](../../../../contracts/CONTENT_FOUNDATION_2026_11.md#c2-corrective-read-projections-and-cas-clarification--19112026).
+Forge's checker/receipt task has no overlapping write ownership. Successor pickup
+still requires task-local exact merged-source G5 and an explicit file handoff.
 
 Thêm focused tests/runner/fixtures và wiring theo shared ownership ở đầu. DTO/API,
 transaction/error behavior theo contract; mở rộng file ngoài quyền cần coordinator.
