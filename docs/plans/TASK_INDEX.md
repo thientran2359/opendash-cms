@@ -315,12 +315,13 @@ No changes to #302 Project or closure, no Beta PASS.
 ## Content foundation follow-up — 18/11/2026
 
 [ADR-0019](../decisions/ADR-0019-content-foundation.md), Aster coordinator, Harbor
-implementer/self-review. Specifications complete on merge; runtime NOT_RUN, live
-Project Ready unverified. Serial dependencies require actual G5, not Issue closure.
+implementer/self-review. Specifications complete on merge; at original
+publication, runtime was NOT_RUN and live Project Ready unverified. Serial
+dependencies require actual G5, not Issue closure.
 
 | Task | Scope | State |
 | --- | --- | --- |
-| [M3-S31-T01](milestones/M3/slices/2026-11-18-content-foundation-g3.md) | Cấu hình hành vi CPT và cơ chế Lưu/Xuất bản | PLANNED · [#373](https://github.com/thientran2359/opendash-cms/issues/373) |
+| [M3-S31-T01](milestones/M3/slices/2026-11-18-content-foundation-g3.md) | Cấu hình hành vi CPT và cơ chế Lưu/Xuất bản | G4 merged [#380](https://github.com/thientran2359/opendash-cms/pull/380) · [native macOS G5 VERIFIED](../verification/2026-11-18-m3-s31-t01-g5-macos.md) · [#373](https://github.com/thientran2359/opendash-cms/issues/373) |
 | [M4-S12-T01](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Đăng ký custom taxonomy và liên kết với CPT | PLANNED · [#374](https://github.com/thientran2359/opendash-cms/issues/374) |
 | [M4-S12-T02](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Quản lý taxonomy tùy chỉnh xuyên Admin và Builder | PLANNED · [#375](https://github.com/thientran2359/opendash-cms/issues/375) |
 | [M7-S17-T01](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Giải quyết permalink và redirect bằng một route authority | PLANNED · [#376](https://github.com/thientran2359/opendash-cms/issues/376) |
