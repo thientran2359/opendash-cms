@@ -27,6 +27,7 @@ import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
 import { SectionsPage } from './features/sections/SectionsPage.tsx';
+import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
 
 const HISTORY_INDEX = '__openDashAdminHistoryIndex';
 
@@ -508,6 +509,10 @@ export const App: React.FC = () => {
         onInstalled={() => setThemeRevision(value => value + 1)}
         onActivated={() => setThemeRevision(value => value + 1)}
       />}
+      libraryContent={<TemplateLibraryPage key={`${siteInstanceId}:${user?.id ?? 'none'}:${user?.role ?? 'none'}`}
+        user={user} csrfToken={csrfToken} themeRevision={themeRevision}
+        onApiError={handleApiError} onNavigateHash={navigateHash}
+        onApplied={() => { setThemeRevision(v => v + 1); setBuilderReset(v => v + 1); }} />}
       schemaSettingsContent={
         <ContentTypeSchemaSettings
           selectedTypeKey={selectedSchemaTypeKey}

@@ -198,6 +198,11 @@ pub fn build_router_with_themes_root(
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", post(auth_logout))
         .route("/api/admin/dashboard", get(dashboard_get))
+        .route("/api/admin/library", get(crate::routes::themes::local_library_list))
+        .route(
+            "/api/admin/library/apply/{role}",
+            post(crate::routes::themes::local_library_apply).layer(DefaultBodyLimit::max(4096)),
+        )
         .route(
             "/api/admin/sections",
             get(crate::routes::sections::section_list)
