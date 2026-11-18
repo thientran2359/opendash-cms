@@ -562,6 +562,8 @@ export const App: React.FC = () => {
             siteInstanceId={siteInstanceId}
             authGeneration={authGeneration}
             draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
+            routeHash={route.rawHash}
+            isActive={route.view === 'cpt'}
             csrfToken={csrfToken}
             onApiError={handleApiError}
             onDirtyChange={setContentDirty}
@@ -579,6 +581,8 @@ export const App: React.FC = () => {
           siteInstanceId={siteInstanceId}
           authGeneration={authGeneration}
           draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
+          routeHash={route.view === 'posts' ? route.rawHash : '#/posts'}
+          isActive={route.view === 'posts'}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onDirtyChange={setPostsDirty}
@@ -595,6 +599,8 @@ export const App: React.FC = () => {
           siteInstanceId={siteInstanceId}
           authGeneration={authGeneration}
           draftUuid={draftUuidFromHash(route.rawHash) ?? undefined}
+          routeHash={route.view === 'pages' ? route.rawHash : '#/pages'}
+          isActive={route.view === 'pages'}
           csrfToken={csrfToken}
           onApiError={handleApiError}
           onDirtyChange={setPagesDirty}
