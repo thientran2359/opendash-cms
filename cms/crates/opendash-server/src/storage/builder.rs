@@ -120,6 +120,7 @@ pub async fn resolve_lists_in_tx(
                         category_id: props.category_id,
                         tag_id: props.tag_id,
                         include_descendants: props.include_descendants,
+                        ..EntryFilters::default()
                     };
                     let sort = match props.sort {
                         opendash_core::builder::ListSort::IdDesc => PublishedListSort::IdDesc,

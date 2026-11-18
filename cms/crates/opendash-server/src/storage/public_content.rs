@@ -95,7 +95,12 @@ pub async fn canonical_entry_by_id(db: &SqlitePool, id: i64) -> ApiResult<Option
 
 pub async fn canonical_term_by_id(db: &SqlitePool, id: i64) -> ApiResult<Option<String>> {
     let row: Option<(String, String)> =
-        sqlx::query_as("SELECT kind, slug FROM taxonomy_terms WHERE id = ?")
+        sqlx::query_as(
+            "SELECT t.kind,t.slug FROM taxonomy_terms t
+             JOIN taxonomy_definitions d ON d.key=t.kind
+             WHERE t.id=? AND d.public=1 AND d.provider_status='active'
+               AND d.declaration_state='declared'",
+        )
             .bind(id)
             .fetch_optional(db)
             .await?;
@@ -125,8 +130,12 @@ pub async fn taxonomy_public_page(
     offset: i64,
 ) -> ApiResult<Option<(PublicTerm, TaxonomyPublishedPage)>> {
     let mut tx = db.begin().await?;
-    let row: Option<(i64, String, String)> =
-        sqlx::query_as("SELECT id, name, slug FROM taxonomy_terms WHERE kind = ? AND slug = ?")
+    let row: Option<(i64, String, String)> = sqlx::query_as(
+        "SELECT t.id, t.name, t.slug FROM taxonomy_terms t
+         JOIN taxonomy_definitions d ON d.key=t.kind
+         WHERE t.kind=? AND t.slug=? AND d.public=1
+           AND d.provider_status='active' AND d.declaration_state='declared'",
+    )
             .bind(kind.as_str())
             .bind(slug)
             .fetch_optional(&mut *tx)
@@ -141,8 +150,11 @@ pub async fn taxonomy_public_page(
         (filters.tag_id, TaxonomyKind::Tag),
     ] {
         if let Some(filter_id) = filter_id {
-            let exists: Option<i64> =
-                sqlx::query_scalar("SELECT 1 FROM taxonomy_terms WHERE id = ? AND kind = ?")
+            let exists: Option<i64> = sqlx::query_scalar(
+                "SELECT 1 FROM taxonomy_terms t JOIN taxonomy_definitions d ON d.key=t.kind
+                 WHERE t.id=? AND t.kind=? AND d.public=1
+                   AND d.provider_status='active' AND d.declaration_state='declared'",
+            )
                     .bind(filter_id)
                     .bind(filter_kind.as_str())
                     .fetch_optional(&mut *tx)
@@ -152,6 +164,26 @@ pub async fn taxonomy_public_page(
                     "Bộ lọc taxonomy không hợp lệ.",
                 ));
             }
+        }
+    }
+    if filters.taxonomy_key.is_some() != filters.term_id.is_some()
+        || (filters.taxonomy_key.is_some()
+            && (filters.category_id.is_some() || filters.tag_id.is_some()))
+    {
+        return Err(crate::error::ApiError::bad_request("Generic taxonomy filter thiếu cặp hoặc trộn aliases."));
+    }
+    if let (Some(key), Some(id)) = (&filters.taxonomy_key, filters.term_id) {
+        let record: Option<(i64, i64)> = sqlx::query_as(
+            "SELECT d.hierarchical,d.public FROM taxonomy_terms t
+             JOIN taxonomy_definitions d ON d.key=t.kind
+             WHERE t.id=? AND t.kind=? AND d.provider_status='active'
+               AND d.declaration_state='declared'",
+        ).bind(id).bind(key).fetch_optional(&mut *tx).await?;
+        let Some((hierarchical, public)) = record else {
+            return Err(crate::error::ApiError::bad_request("Generic taxonomy filter không hợp lệ."));
+        };
+        if public == 0 || (filters.descendants && hierarchical == 0) {
+            return Err(crate::error::ApiError::bad_request("Taxonomy private hoặc không phân cấp."));
         }
     }
     let page = list_taxonomy_published_in_tx(&mut tx, kind, id, filters, limit, offset).await?;
@@ -199,11 +231,19 @@ async fn list_taxonomy_published_in_tx(
             SELECT child.id, category_scope.depth + 1
               FROM taxonomy_terms child JOIN category_scope ON child.parent_id = category_scope.id
              WHERE category_scope.depth < 8 AND ? = 1
+        ), generic_scope(id, depth) AS (
+            SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = ?
+            UNION ALL
+            SELECT child.id, generic_scope.depth + 1 FROM taxonomy_terms child
+            JOIN generic_scope ON child.parent_id=generic_scope.id
+            WHERE generic_scope.depth < 8 AND ? = 1
         )
         SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                e.publication_status, e.version, e.created_at, e.updated_at
           FROM content_entries e
           JOIN content_types t ON t.key = e.content_type_key
+          LEFT JOIN content_type_taxonomy_overrides override
+            ON override.content_type_key=e.content_type_key
          WHERE e.publication_status = 'published'
            AND e.content_type_key != 'section'
            AND t.provider_status = 'active'
@@ -220,10 +260,35 @@ async fn list_taxonomy_published_in_tx(
            ))
            AND (? IS NULL OR EXISTS (
                 SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id AND et.term_id = ?
-           ))";
+           ))
+           AND (? IS NULL OR EXISTS (
+                SELECT 1 FROM entry_terms et WHERE et.entry_id=e.id
+                  AND et.term_id IN (SELECT id FROM generic_scope)
+           ))
+           AND NOT EXISTS (
+                SELECT 1 FROM json_each(json_array(
+                    ?, CASE WHEN ? IS NOT NULL THEN 'category' END,
+                    CASE WHEN ? IS NOT NULL THEN 'tag' END, ?
+                )) requested
+                WHERE requested.value IS NOT NULL AND NOT (
+                    (override.content_type_key IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM json_each(override.taxonomies_json) selected
+                        WHERE selected.value=requested.value
+                    )) OR (override.content_type_key IS NULL AND EXISTS (
+                        SELECT 1 FROM content_type_taxonomy_eligibility eligible
+                        WHERE eligible.content_type_key=e.content_type_key
+                          AND eligible.taxonomy_kind=requested.value
+                          AND eligible.provider_status='active'
+                          AND eligible.declaration_state='declared'
+                    ))
+                )
+           )";
     let count_sql = format!("SELECT COUNT(*) FROM ({FILTERED}) AS published");
     let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(count_sql))
         .bind(root_category)
+        .bind(i64::from(filters.descendants))
+        .bind(filters.term_id)
+        .bind(&filters.taxonomy_key)
         .bind(i64::from(filters.descendants))
         .bind(root_category)
         .bind(root_tag)
@@ -232,6 +297,11 @@ async fn list_taxonomy_published_in_tx(
         .bind(extra_category)
         .bind(extra_tag)
         .bind(extra_tag)
+        .bind(filters.term_id)
+        .bind(filters.taxonomy_key.as_deref())
+        .bind(filters.category_id)
+        .bind(filters.tag_id)
+        .bind(&filters.taxonomy_key)
         .fetch_one(&mut **tx)
         .await?;
     let page_sql = format!("{FILTERED} ORDER BY e.id DESC LIMIT ? OFFSET ?");
@@ -248,6 +318,9 @@ async fn list_taxonomy_published_in_tx(
     )> = sqlx::query_as(sqlx::AssertSqlSafe(page_sql))
         .bind(root_category)
         .bind(i64::from(filters.descendants))
+        .bind(filters.term_id)
+        .bind(&filters.taxonomy_key)
+        .bind(i64::from(filters.descendants))
         .bind(root_category)
         .bind(root_tag)
         .bind(root_tag)
@@ -255,6 +328,11 @@ async fn list_taxonomy_published_in_tx(
         .bind(extra_category)
         .bind(extra_tag)
         .bind(extra_tag)
+        .bind(filters.term_id)
+        .bind(filters.taxonomy_key.as_deref())
+        .bind(filters.category_id)
+        .bind(filters.tag_id)
+        .bind(&filters.taxonomy_key)
         .bind(limit)
         .bind(offset)
         .fetch_all(&mut **tx)
@@ -466,6 +544,11 @@ mod m5_public_context_tests {
         .execute(&db)
         .await
         .unwrap();
+        // C2: these types explicitly opt into term association; Page alone
+        // remains unassociated under the Core default migration.
+        sqlx::query("INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
+                     VALUES('page','[\"category\",\"tag\"]'),('news','[\"category\",\"tag\"]')")
+            .execute(&db).await.unwrap();
 
         let root = sqlx::query(
             "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Sea','sea')",
@@ -685,7 +768,7 @@ mod m5_public_context_tests {
             descendants: true,
             ..PublicFilters::default()
         };
-        let first = taxonomy_public_page(&db, TaxonomyKind::Category, "a", flags, 20, 0)
+        let first = taxonomy_public_page(&db, TaxonomyKind::Category, "a", flags.clone(), 20, 0)
             .await
             .unwrap()
             .unwrap()
@@ -725,6 +808,8 @@ mod m5_public_context_tests {
         .execute(&db)
         .await
         .unwrap();
+        sqlx::query("INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
+                     VALUES('news','[\"tag\"]')").execute(&db).await.unwrap();
         let hero_id = "a".repeat(64);
         let seo_image_id = "b".repeat(64);
         for id in [&hero_id, &seo_image_id] {

@@ -216,20 +216,7 @@ async fn compute_schema_token_in_tx(
     conn: &mut SqliteConnection,
     schema: &EffectiveContentSchema,
 ) -> ApiResult<String> {
-    let taxonomies: Vec<String> = if table_exists_in_tx(conn, "content_type_taxonomy_eligibility")
-        .await?
-    {
-        sqlx::query_scalar(
-            "SELECT taxonomy_kind FROM content_type_taxonomy_eligibility
-             WHERE content_type_key = ? AND provider_status = 'active' AND declaration_state = 'declared'
-             ORDER BY taxonomy_kind ASC",
-        )
-        .bind(&schema.base.descriptor.key)
-        .fetch_all(&mut *conn)
-        .await?
-    } else {
-        Vec::new()
-    };
+    let taxonomies = load_effective_taxonomies_in_tx(conn, &schema.base.descriptor.key).await?;
 
     let active_theme_revision_id: Option<String> =
         if table_exists_in_tx(conn, "theme_active_selection").await? {
@@ -1688,23 +1675,134 @@ pub struct EditorLayoutSnapshot {
     pub version: i64,
 }
 
-async fn load_effective_taxonomies_in_tx(
+pub(crate) async fn load_effective_taxonomies_in_tx(
     conn: &mut SqliteConnection,
     type_key: &str,
 ) -> ApiResult<Vec<String>> {
     if !table_exists_in_tx(conn, "content_type_taxonomy_eligibility").await? {
         return Ok(Vec::new());
     }
-    let rows: Vec<String> = sqlx::query_scalar(
-        "SELECT taxonomy_kind
-         FROM content_type_taxonomy_eligibility
-         WHERE content_type_key = ? AND provider_status = 'active' AND declaration_state = 'declared'
-         ORDER BY taxonomy_kind ASC",
-    )
-    .bind(type_key)
-    .fetch_all(&mut *conn)
-    .await?;
+    let overrides_exist = table_exists_in_tx(conn, "content_type_taxonomy_overrides").await?;
+    if overrides_exist {
+        let override_keys: Option<String> = sqlx::query_scalar(
+            "SELECT taxonomies_json FROM content_type_taxonomy_overrides WHERE content_type_key=?",
+        ).bind(type_key).fetch_optional(&mut *conn).await?;
+        if let Some(raw) = override_keys {
+            let keys: Vec<String> = serde_json::from_str(&raw)
+                .map_err(|_| ApiError::internal("Danh sách taxonomy override bị hỏng."))?;
+            let mut enabled = Vec::new();
+            for key in keys {
+                let exists: Option<i64> = sqlx::query_scalar(
+                    "SELECT 1 FROM taxonomy_definitions WHERE key=?
+                     AND provider_status='active' AND declaration_state='declared'",
+                ).bind(&key).fetch_optional(&mut *conn).await?;
+                if exists.is_some() { enabled.push(key); }
+            }
+            enabled.sort();
+            return Ok(enabled);
+        }
+    }
+    let rows: Vec<String> = if table_exists_in_tx(conn, "taxonomy_definitions").await? {
+        sqlx::query_scalar(
+            "SELECT e.taxonomy_kind FROM content_type_taxonomy_eligibility e
+             JOIN taxonomy_definitions d ON d.key=e.taxonomy_kind
+             WHERE e.content_type_key=? AND e.provider_status='active'
+               AND e.declaration_state='declared' AND d.provider_status='active'
+               AND d.declaration_state='declared' ORDER BY e.taxonomy_kind",
+        ).bind(type_key).fetch_all(&mut *conn).await?
+    } else {
+        sqlx::query_scalar(
+            "SELECT taxonomy_kind FROM content_type_taxonomy_eligibility
+             WHERE content_type_key=? AND provider_status='active'
+               AND declaration_state='declared' ORDER BY taxonomy_kind",
+        ).bind(type_key).fetch_all(&mut *conn).await?
+    };
     Ok(rows)
+}
+
+/// C2 canonical effective site/provider eligibility used by schema tokens,
+/// entry writes, Admin table, public lists, and future Builder selectors.
+pub async fn load_effective_taxonomies(
+    db: &SqlitePool, type_key: &str,
+) -> ApiResult<Vec<String>> {
+    let mut conn = db.acquire().await?;
+    load_effective_taxonomies_in_tx(&mut conn, type_key).await
+}
+
+pub async fn put_site_taxonomy_eligibility(
+    db: &SqlitePool, actor: &crate::auth::SessionContext, type_key: &str,
+    expected_version: i64, taxonomies: &[String],
+) -> ApiResult<ContentTypeApiItem> {
+    if !opendash_core::content::valid_content_type_key(type_key) || type_key == "section" {
+        return Err(ApiError::bad_request("Không thể cấu hình taxonomy cho Section."));
+    }
+    if taxonomies.len() > 64 {
+        return Err(ApiError::bad_request("Tối đa 64 taxonomy cho mỗi CPT."));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for key in taxonomies {
+        if !opendash_core::content::valid_content_type_key(key) || !seen.insert(key) {
+            return Err(ApiError::bad_request("Danh sách taxonomy chứa khóa không hợp lệ hoặc trùng."));
+        }
+    }
+    let mut tx = begin_content_write_tx(db).await?;
+    // Auth at route entry is not a sufficient write fence: a concurrent admin
+    // can revoke/demote the actor while this request waits for the writer.
+    // Check session expiry, identity and current admin role *after* claiming
+    // the SQLite writer and before changing any eligibility or CPT version.
+    let current_actor: Option<(i64, String)> = sqlx::query_as(
+        "SELECT u.id,u.role FROM sessions s JOIN users u ON u.id=s.user_id
+         WHERE s.token_hash=? AND s.expires_at > ?",
+    )
+    .bind(&actor.token_hash)
+    .bind(crate::auth::current_time_secs())
+    .fetch_optional(&mut *tx).await?;
+    match current_actor {
+        Some((id, role)) if id == actor.user.id && role == "admin" => {},
+        Some(_) => return Err(ApiError::forbidden("Tài khoản không còn quyền quản trị.")),
+        None => return Err(ApiError::unauthorized("Phiên đăng nhập đã bị thu hồi.")),
+    }
+    let version: Option<i64> = sqlx::query_scalar(
+        "SELECT version FROM content_types WHERE key=?",
+    ).bind(type_key).fetch_optional(&mut *tx).await?;
+    let Some(version) = version else {
+        return Err(ApiError::not_found("Loại nội dung không tồn tại."));
+    };
+    if version != expected_version {
+        return Err(ApiError::precondition_failed("Schema CPT đã thay đổi; hãy tải lại."));
+    }
+    for key in taxonomies {
+        let exists: Option<i64> = sqlx::query_scalar(
+            "SELECT 1 FROM taxonomy_definitions WHERE key=?",
+        ).bind(key).fetch_optional(&mut *tx).await?;
+        if exists.is_none() {
+            return Err(ApiError::bad_request("Taxonomy được chọn không tồn tại."));
+        }
+    }
+    let canonical = {
+        let mut sorted = taxonomies.to_vec();
+        sorted.sort();
+        serde_json::to_string(&sorted)?
+    };
+    sqlx::query(
+        "INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
+         VALUES (?,?) ON CONFLICT(content_type_key) DO UPDATE SET
+           taxonomies_json=excluded.taxonomies_json,updated_at=datetime('now')",
+    ).bind(type_key).bind(&canonical).execute(&mut *tx).await?;
+    let count = sqlx::query("UPDATE content_types SET version=version+1,
+        updated_at=datetime('now') WHERE key=? AND version=?")
+        .bind(type_key).bind(expected_version).execute(&mut *tx).await?.rows_affected();
+    if count != 1 {
+        return Err(ApiError::precondition_failed("Schema CPT đã thay đổi; hãy tải lại."));
+    }
+    let effective = load_effective_content_schema_in_tx(&mut tx, type_key).await?
+        .ok_or_else(|| ApiError::internal("Không thể tải schema CPT."))?;
+    tx.commit().await?;
+    Ok(ContentTypeApiItem {
+        base: effective.base,
+        version: effective.base_version,
+        schema_token: effective.schema_token,
+    })
 }
 
 async fn load_plugin_action_panels_for_type_in_tx(

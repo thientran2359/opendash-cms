@@ -25,14 +25,16 @@ impl TaxonomyKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PublicFilters {
     pub category_id: Option<i64>,
     pub tag_id: Option<i64>,
+    pub taxonomy_key: Option<String>,
+    pub term_id: Option<i64>,
     pub descendants: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicQuery {
     pub page: i64,
     pub filters: PublicFilters,
@@ -67,7 +69,8 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
     for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
         let recognized = matches!(
             key.as_ref(),
-            "page" | "category_id" | "tag_id" | "include_descendants" | "descendants"
+            "page" | "category_id" | "tag_id" | "taxonomy_key" | "term_id"
+                | "include_descendants" | "descendants"
         );
         if !recognized {
             continue;
@@ -100,6 +103,15 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
             "tag_id" if !matches!(scope, QueryScope::Single) => {
                 query.filters.tag_id = Some(numeric()?);
             }
+            "taxonomy_key" if !matches!(scope, QueryScope::Single) => {
+                if !valid_content_type_key(&value) {
+                    return Err("taxonomy_key không hợp lệ.");
+                }
+                query.filters.taxonomy_key = Some(value.into_owned());
+            }
+            "term_id" if !matches!(scope, QueryScope::Single) => {
+                query.filters.term_id = Some(numeric()?);
+            }
             "include_descendants" if matches!(scope, QueryScope::ContentArchive) => {
                 query.filters.descendants = boolean()?;
             }
@@ -109,16 +121,26 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
             _ => return Err("Tham số query không dùng được trên route này."),
         }
     }
+    if query.filters.taxonomy_key.is_some() != query.filters.term_id.is_some() {
+        return Err("taxonomy_key và term_id phải dùng cùng nhau.");
+    }
+    if query.filters.taxonomy_key.is_some()
+        && (query.filters.category_id.is_some() || query.filters.tag_id.is_some())
+    {
+        return Err("Không được trộn generic taxonomy filter với category/tag aliases.");
+    }
     match scope {
         QueryScope::ContentArchive
-            if query.filters.descendants && query.filters.category_id.is_none() =>
+            if query.filters.descendants && query.filters.category_id.is_none()
+                && query.filters.taxonomy_key.is_none() =>
         {
-            Err("include_descendants yêu cầu category_id.")
+            Err("include_descendants yêu cầu category_id hoặc taxonomy_key + term_id.")
         }
         QueryScope::TaxonomyArchive(TaxonomyKind::Tag)
-            if query.filters.descendants && query.filters.category_id.is_none() =>
+            if query.filters.descendants && query.filters.category_id.is_none()
+                && query.filters.taxonomy_key.is_none() =>
         {
-            Err("descendants yêu cầu category_id trên tag archive.")
+            Err("descendants yêu cầu category_id hoặc hierarchical generic taxonomy.")
         }
         _ => Ok(query),
     }
@@ -228,6 +250,10 @@ impl CanonicalUrlBuilder {
         }
         if let Some(id) = query.filters.tag_id {
             pairs.append_pair("tag_id", &id.to_string());
+        }
+        if let (Some(key), Some(id)) = (&query.filters.taxonomy_key, query.filters.term_id) {
+            pairs.append_pair("taxonomy_key", key);
+            pairs.append_pair("term_id", &id.to_string());
         }
         if query.filters.descendants {
             let key = if matches!(scope, QueryScope::ContentArchive) {

@@ -3,6 +3,10 @@
 
 use std::collections::BTreeMap;
 
+use opendash_core::{
+    content::{TaxonomyDefinition, TaxonomyDefinitionInput, TaxonomyDefinitionPatch},
+    registry::{DeclarationState, ProviderStatus, ResourceOwner},
+};
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::{Sqlite, SqlitePool, Transaction};
@@ -47,6 +51,162 @@ fn term(row: TermRow) -> TaxonomyTerm {
         extensions: None,
         schema_token: None,
     }
+}
+
+type DefinitionRow = (
+    String, String, i64, i64, i64, String, Option<String>, String, String,
+);
+
+fn definition(row: DefinitionRow) -> ApiResult<TaxonomyDefinition> {
+    let (key, label, hierarchical, public, version, owner_kind, owner_id, provider, state) = row;
+    let owner = match (owner_kind.as_str(), owner_id) {
+        ("core", None) => ResourceOwner::Core,
+        ("user", None) => ResourceOwner::User,
+        ("plugin", Some(id)) => ResourceOwner::Plugin(id),
+        ("theme", Some(id)) => ResourceOwner::Theme(id),
+        _ => return Err(ApiError::internal("Chủ sở hữu taxonomy không hợp lệ.")),
+    };
+    let provider_status = match provider.as_str() {
+        "active" => ProviderStatus::Active,
+        "provider_inactive" => ProviderStatus::ProviderInactive,
+        _ => return Err(ApiError::internal("Trạng thái provider taxonomy không hợp lệ.")),
+    };
+    let declaration_state = match state.as_str() {
+        "declared" => DeclarationState::Declared,
+        "withdrawn" => DeclarationState::Withdrawn,
+        _ => return Err(ApiError::internal("Trạng thái khai báo taxonomy không hợp lệ.")),
+    };
+    Ok(TaxonomyDefinition {
+        key, label, hierarchical: hierarchical != 0, public: public != 0,
+        version, owner, provider_status, declaration_state,
+    })
+}
+
+async fn definition_in_write(
+    tx: &mut Transaction<'_, Sqlite>, key: &str,
+) -> ApiResult<Option<TaxonomyDefinition>> {
+    let row: Option<DefinitionRow> = sqlx::query_as(
+        "SELECT key, label, hierarchical, public, version, owner_kind, owner_id,
+                provider_status, declaration_state FROM taxonomy_definitions WHERE key = ?",
+    )
+    .bind(key).fetch_optional(&mut **tx).await.map_err(mutation_error)?;
+    row.map(definition).transpose()
+}
+
+pub async fn list_definitions(db: &SqlitePool) -> ApiResult<Vec<TaxonomyDefinition>> {
+    let rows: Vec<DefinitionRow> = sqlx::query_as(
+        "SELECT key, label, hierarchical, public, version, owner_kind, owner_id,
+                provider_status, declaration_state FROM taxonomy_definitions ORDER BY key",
+    ).fetch_all(db).await?;
+    rows.into_iter().map(definition).collect()
+}
+
+pub async fn get_definition(db: &SqlitePool, key: &str) -> ApiResult<Option<TaxonomyDefinition>> {
+    let row: Option<DefinitionRow> = sqlx::query_as(
+        "SELECT key, label, hierarchical, public, version, owner_kind, owner_id,
+                provider_status, declaration_state FROM taxonomy_definitions WHERE key = ?",
+    ).bind(key).fetch_optional(db).await?;
+    row.map(definition).transpose()
+}
+
+pub async fn create_definition(
+    db: &SqlitePool, actor: &SessionContext, input: &TaxonomyDefinitionInput,
+) -> ApiResult<TaxonomyDefinition> {
+    input.validate().map_err(ApiError::bad_request)?;
+    let mut tx = begin_admin_write(db, actor, false).await?;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_definitions")
+        .fetch_one(&mut *tx).await.map_err(mutation_error)?;
+    if count >= 64 {
+        return Err(ApiError::conflict("Website đạt giới hạn 64 taxonomy."));
+    }
+    if definition_in_write(&mut tx, &input.key).await?.is_some() {
+        return Err(ApiError::conflict("Khóa taxonomy đã được đăng ký."));
+    }
+    sqlx::query(
+        "INSERT INTO taxonomy_definitions (key,label,hierarchical,public,owner_kind)
+         VALUES (?,?,?,?, 'user')",
+    )
+    .bind(&input.key).bind(&input.label)
+    .bind(i64::from(input.hierarchical)).bind(i64::from(input.public))
+    .execute(&mut *tx).await.map_err(mutation_error)?;
+    let created = definition_in_write(&mut tx, &input.key).await?
+        .ok_or_else(|| ApiError::internal("Không thể đọc taxonomy vừa tạo."))?;
+    tx.commit().await.map_err(mutation_error)?;
+    Ok(created)
+}
+
+pub async fn patch_definition(
+    db: &SqlitePool, actor: &SessionContext, key: &str,
+    expected_version: i64, input: &TaxonomyDefinitionPatch,
+) -> ApiResult<TaxonomyDefinition> {
+    input.validate().map_err(ApiError::bad_request)?;
+    let mut tx = begin_admin_write(db, actor, false).await?;
+    let current = definition_in_write(&mut tx, key).await?
+        .ok_or_else(|| ApiError::not_found("Taxonomy không tồn tại."))?;
+    if current.version != expected_version {
+        return Err(ApiError::precondition_failed("Taxonomy đã thay đổi, hãy tải lại."));
+    }
+    if !matches!(current.owner, ResourceOwner::Core | ResourceOwner::User) {
+        return Err(ApiError::conflict("Taxonomy thuộc provider, không thể sửa từ site."));
+    }
+    let hierarchical = input.hierarchical.unwrap_or(current.hierarchical);
+    if matches!(current.owner, ResourceOwner::Core) && hierarchical != current.hierarchical {
+        return Err(ApiError::conflict("Category/Tag có chế độ phân cấp bất biến."));
+    }
+    if current.hierarchical && !hierarchical {
+        let parents: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM taxonomy_terms WHERE kind=? AND parent_id IS NOT NULL",
+        ).bind(key).fetch_one(&mut *tx).await.map_err(mutation_error)?;
+        if parents != 0 {
+            return Err(ApiError::conflict("Taxonomy còn term có parent."));
+        }
+    }
+    let label = input.label.as_deref().unwrap_or(&current.label);
+    let public = input.public.unwrap_or(current.public);
+    let rows = sqlx::query(
+        "UPDATE taxonomy_definitions
+            SET label=?, hierarchical=?, public=?, version=version+1
+          WHERE key=? AND version=?",
+    )
+    .bind(label).bind(i64::from(hierarchical)).bind(i64::from(public))
+    .bind(key).bind(expected_version)
+    .execute(&mut *tx).await.map_err(mutation_error)?.rows_affected();
+    if rows != 1 {
+        return Err(ApiError::precondition_failed("Taxonomy đã thay đổi, hãy tải lại."));
+    }
+    let updated = definition_in_write(&mut tx, key).await?
+        .ok_or_else(|| ApiError::internal("Không thể tải taxonomy vừa sửa."))?;
+    tx.commit().await.map_err(mutation_error)?;
+    Ok(updated)
+}
+
+pub async fn delete_definition(
+    db: &SqlitePool, actor: &SessionContext, key: &str, expected_version: i64,
+) -> ApiResult<()> {
+    let mut tx = begin_admin_write(db, actor, false).await?;
+    let current = definition_in_write(&mut tx, key).await?
+        .ok_or_else(|| ApiError::not_found("Taxonomy không tồn tại."))?;
+    if current.version != expected_version {
+        return Err(ApiError::precondition_failed("Taxonomy đã thay đổi, hãy tải lại."));
+    }
+    if current.owner != ResourceOwner::User {
+        return Err(ApiError::conflict("Không thể xóa taxonomy Core/provider."));
+    }
+    let dependencies: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM taxonomy_terms WHERE kind=?) +
+                (SELECT COUNT(*) FROM content_type_taxonomy_eligibility WHERE taxonomy_kind=?) +
+                (SELECT COUNT(*) FROM content_type_taxonomy_overrides
+                  WHERE EXISTS (SELECT 1 FROM json_each(taxonomies_json) WHERE value=?))",
+    ).bind(key).bind(key).bind(key)
+    .fetch_one(&mut *tx).await.map_err(mutation_error)?;
+    if dependencies > 0 {
+        return Err(ApiError::conflict("Taxonomy đang được dùng bởi term hoặc content type."));
+    }
+    sqlx::query("DELETE FROM taxonomy_definitions WHERE key=? AND version=?")
+        .bind(key).bind(expected_version)
+        .execute(&mut *tx).await.map_err(mutation_error)?;
+    tx.commit().await.map_err(mutation_error)?;
+    Ok(())
 }
 
 pub fn valid_kind(kind: &str) -> bool {
@@ -182,8 +342,9 @@ async fn subtree_height(tx: &mut Transaction<'_, Sqlite>, id: i64) -> ApiResult<
 
 /// Check the candidate parent and all its ancestors while holding the writer.
 /// A moving node anywhere in that lineage means the requested edge is cyclic.
-async fn check_category_parent(
+async fn check_taxonomy_parent(
     tx: &mut Transaction<'_, Sqlite>,
+    taxonomy_key: &str,
     parent_id: Option<i64>,
     moving_id: Option<i64>,
     moving_height: i64,
@@ -205,10 +366,10 @@ async fn check_category_parent(
         .await
         .map_err(mutation_error)?;
     match parent {
-        Some((kind,)) if kind == "category" => {}
+        Some((kind,)) if kind == taxonomy_key => {}
         _ => {
             return Err(ApiError::bad_request(
-                "Category cha không tồn tại hoặc sai loại.",
+                "Term cha không tồn tại hoặc thuộc taxonomy khác.",
             ));
         }
     }
@@ -317,10 +478,8 @@ pub async fn create_term(
     slug: &str,
     parent_id: Option<i64>,
 ) -> ApiResult<TaxonomyTerm> {
-    if !valid_kind(kind) {
-        return Err(ApiError::bad_request(
-            "Loại term phải là category hoặc tag.",
-        ));
+    if !opendash_core::content::valid_content_type_key(kind) {
+        return Err(ApiError::bad_request("Khóa taxonomy không hợp lệ."));
     }
     let name = normalized_name(name)?;
     if !opendash_core::id::valid_kebab_segment_with_limit(slug, 64) {
@@ -328,12 +487,19 @@ pub async fn create_term(
             "Slug phải là kebab-case, tối đa 64 ký tự.",
         ));
     }
-    if kind == "tag" && parent_id.is_some() {
-        return Err(ApiError::bad_request("Tag không được có category cha."));
-    }
     let mut tx = begin_admin_write(db, actor, false).await?;
-    if kind == "category" {
-        check_category_parent(&mut tx, parent_id, None, 1).await?;
+    let taxonomy = definition_in_write(&mut tx, kind).await?
+        .ok_or_else(|| ApiError::bad_request("Taxonomy không tồn tại."))?;
+    if taxonomy.provider_status != ProviderStatus::Active
+        || taxonomy.declaration_state != DeclarationState::Declared
+    {
+        return Err(ApiError::conflict("Taxonomy không còn khả dụng."));
+    }
+    if !taxonomy.hierarchical && parent_id.is_some() {
+        return Err(ApiError::bad_request("Taxonomy không phân cấp không nhận parent."));
+    }
+    if taxonomy.hierarchical {
+        check_taxonomy_parent(&mut tx, kind, parent_id, None, 1).await?;
     }
     let id =
         sqlx::query("INSERT INTO taxonomy_terms(kind, name, slug, parent_id) VALUES (?, ?, ?, ?)")
@@ -378,12 +544,14 @@ pub async fn patch_term(
     }
     let existing = current_term(&mut tx, id, expected_version).await?;
     let next_parent = parent_id.unwrap_or(existing.parent_id);
-    if existing.kind == "tag" && next_parent.is_some() {
-        return Err(ApiError::bad_request("Tag không được có category cha."));
+    let definition = definition_in_write(&mut tx, &existing.kind).await?
+        .ok_or_else(|| ApiError::bad_request("Taxonomy không tồn tại."))?;
+    if !definition.hierarchical && next_parent.is_some() {
+        return Err(ApiError::bad_request("Taxonomy không phân cấp không nhận parent."));
     }
-    if existing.kind == "category" && parent_id.is_some() {
+    if definition.hierarchical && parent_id.is_some() {
         let height = subtree_height(&mut tx, id).await?;
-        check_category_parent(&mut tx, next_parent, Some(id), height).await?;
+        check_taxonomy_parent(&mut tx, &existing.kind, next_parent, Some(id), height).await?;
     }
     if let Some(patch) = extensions {
         let token = schema_token.ok_or_else(|| ApiError::bad_request(
