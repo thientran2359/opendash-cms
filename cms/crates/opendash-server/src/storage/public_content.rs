@@ -15,8 +15,13 @@ pub async fn get_by_slug(
 ) -> ApiResult<Option<ContentEntryRecord>> {
     if type_key == "section" { return Ok(None); }
     let row: Option<(i64, String, String, String, String, String, i64, String, String)> = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
-         FROM content_entries WHERE content_type_key = ? AND slug = ? AND publication_status = 'published'",
+        "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
+                e.publication_status, e.version, e.created_at, e.updated_at
+         FROM content_entries e
+         JOIN content_types t ON t.key = e.content_type_key
+         WHERE e.content_type_key = ? AND e.slug = ? AND e.publication_status = 'published'
+           AND t.provider_status = 'active'
+           AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(type_key)
     .bind(slug)
@@ -31,13 +36,38 @@ pub async fn get_published_by_id(
     id: i64,
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<(i64, String, String, String, String, String, i64, String, String)> = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
-         FROM content_entries WHERE id = ? AND publication_status = 'published' AND content_type_key != 'section'",
+        "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
+                e.publication_status, e.version, e.created_at, e.updated_at
+         FROM content_entries e
+         JOIN content_types t ON t.key = e.content_type_key
+         WHERE e.id = ? AND e.publication_status = 'published'
+           AND e.content_type_key != 'section' AND t.provider_status = 'active'
+           AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(id)
     .fetch_optional(db)
     .await?;
     row.map(decode_row).transpose()
+}
+
+/// Deny public archives independently from entry visibility. Legacy CPTs
+/// without settings retain their existing public archive behavior.
+pub async fn require_public_archive(db: &SqlitePool, type_key: &str) -> ApiResult<()> {
+    let visible: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+            SELECT 1 FROM content_types
+            WHERE key = ? AND key != 'section' AND provider_status = 'active'
+              AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1
+              AND COALESCE(json_extract(definition_json, '$.settings.has_archive'), 1) = 1
+        )",
+    )
+    .bind(type_key)
+    .fetch_one(db)
+    .await?;
+    if visible == 0 {
+        return Err(crate::error::ApiError::not_found("Archive nội dung không tồn tại."));
+    }
+    Ok(())
 }
 
 /// Publication filtering happens in SQL before paging, so a draft never
@@ -49,7 +79,7 @@ pub async fn list_published(
     offset: i64,
     filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
-    if type_key == "section" { return Err(crate::error::ApiError::not_found("Section không có archive công khai.")); }
+    require_public_archive(db, type_key).await?;
     // Share the admin/P06 taxonomy predicates. Publication, category and tag
     // restrictions all run in SQL before paging; EXISTS cannot duplicate rows.
     // Keep the saved Builder media ACL query below unchanged (Forge P02).
@@ -173,7 +203,11 @@ async fn list_taxonomy_published_in_tx(
         SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                e.publication_status, e.version, e.created_at, e.updated_at
           FROM content_entries e
+          JOIN content_types t ON t.key = e.content_type_key
          WHERE e.publication_status = 'published'
+           AND e.content_type_key != 'section'
+           AND t.provider_status = 'active'
+           AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
            AND (? IS NULL OR EXISTS (
                 SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id
                   AND et.term_id IN (SELECT id FROM category_scope)
@@ -243,6 +277,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN json_each(t.definition_json, '$.fields') AS f
            WHERE e.publication_status = 'published' AND e.content_type_key != 'section'
+             AND t.provider_status = 'active'
+             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND COALESCE(json_extract(f.value, '$.public_exposure'), 'public') = 'public'
              AND (
              (
@@ -262,6 +298,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
          ) OR EXISTS (
            SELECT 1
            FROM content_entries AS e
+           JOIN content_types AS t ON t.key = e.content_type_key
            JOIN content_field_group_targets AS gt
              ON gt.type_key = e.content_type_key
             AND gt.association_state IN ('declared', 'withdrawn')
@@ -270,6 +307,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
             AND g.status IN ('active', 'provider_inactive', 'withdrawn')
            JOIN json_each(g.fields_json) AS f
            WHERE e.publication_status = 'published' AND e.content_type_key != 'section'
+             AND t.provider_status = 'active'
+             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND COALESCE(json_extract(f.value, '$.public_exposure'), 'private') = 'public'
              AND (
              (
@@ -312,6 +351,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            WHERE sm.media_id = ?
              AND e.publication_status = 'published'
              AND t.provider_status = 'active'
+             AND e.content_type_key != 'section'
+             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
          ) OR EXISTS (
            SELECT 1
            FROM seo_public_media_refs AS sm
@@ -333,6 +374,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                  AND EXISTS (
                    SELECT 1 FROM content_types AS t
                    WHERE t.key = ov.scope_type_key AND t.provider_status = 'active'
+                     AND t.key != 'section'
+                     AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                  )
                )
                OR (
@@ -344,6 +387,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                    WHERE e.id = ov.scope_entry_id
                      AND e.publication_status = 'published'
                      AND t.provider_status = 'active'
+                     AND e.content_type_key != 'section'
+                     AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                  )
                )
              )
@@ -662,6 +707,184 @@ mod m5_public_context_tests {
                 .iter()
                 .chain(second.entries.iter())
                 .all(|e| e.id != draft)
+        );
+    }
+
+    #[tokio::test]
+    async fn c1_visibility_hides_single_archive_taxonomy_media_seo_and_sitemap() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            r#"INSERT INTO content_types(key,definition_json,owner_kind)
+               VALUES('news', '{"key":"news","label":"News","fields":[{"key":"hero","label":"Hero","type":"image"}],"settings":{"public":false,"has_archive":false,"publication":"draft_publish","supports":["editor","featured_image"]}}', 'user')"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let hero_id = "a".repeat(64);
+        let seo_image_id = "b".repeat(64);
+        for id in [&hero_id, &seo_image_id] {
+            sqlx::query(
+                "INSERT INTO media_assets(id,kind,filename,mime_type,extension,byte_size,width,height,thumb_width,thumb_height)
+                 VALUES(?, 'image', 'public-visibility.png', 'image/png', 'png', 128, 10, 10, 10, 10)",
+            )
+            .bind(id)
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+        let term_id = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Visibility','visibility')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let entry_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES('news','hidden-news','Hidden', json_object('hero', ?), 'published')",
+        )
+        .bind(&hero_id)
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query("INSERT INTO entry_terms(entry_id,term_id) VALUES(?,?)")
+            .bind(entry_id)
+            .bind(term_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?, '/hidden-news')")
+            .bind(entry_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO seo_public_media_refs(source_kind,source_id,media_id)
+             VALUES('entry_seo', ?, ?)",
+        )
+        .bind(entry_id)
+        .bind(&seo_image_id)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        assert!(get_by_slug(&db, "news", "hidden-news").await.unwrap().is_none());
+        assert!(get_published_by_id(&db, entry_id).await.unwrap().is_none());
+        assert_eq!(
+            list_published(&db, "news", 10, 0, EntryFilters::default())
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
+        );
+        let page = taxonomy_public_page(
+            &db,
+            TaxonomyKind::Tag,
+            "visibility",
+            PublicFilters::default(),
+            10,
+            0,
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .1;
+        assert_eq!(page.total, 0);
+        assert!(page.entries.is_empty());
+        assert!(!media_is_referenced(&db, &hero_id).await.unwrap());
+        assert!(!media_is_referenced(&db, &seo_image_id).await.unwrap());
+        assert_eq!(canonical_entry_by_id(&db, entry_id).await.unwrap(), None);
+        assert!(matches!(
+            crate::storage::seo::resolve_custom_or_redirect_path(&db, "/hidden-news")
+                .await
+                .unwrap(),
+            crate::storage::seo::PublicRouteResolution::NotFound
+        ));
+        let mut conn = db.acquire().await.unwrap();
+        let routes = crate::storage::sitemap::list_indexable_routes_in_tx(
+            &mut conn,
+            "https://example.com",
+            0,
+            100,
+        )
+        .await
+        .unwrap();
+        assert!(!routes.routes.iter().any(|route| {
+            route.path.contains("news") || route.path.contains("visibility")
+        }));
+        drop(conn);
+
+        // Toggling back to public must restore singles, taxonomy and media,
+        // but the separately disabled archive must remain 404.
+        sqlx::query(
+            "UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.public', json('true')) WHERE key='news'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        assert!(get_by_slug(&db, "news", "hidden-news").await.unwrap().is_some());
+        assert!(get_published_by_id(&db, entry_id).await.unwrap().is_some());
+        assert_eq!(
+            list_published(&db, "news", 10, 0, EntryFilters::default())
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            taxonomy_public_page(&db, TaxonomyKind::Tag, "visibility", PublicFilters::default(), 10, 0)
+                .await
+                .unwrap()
+                .unwrap()
+                .1
+                .total,
+            1
+        );
+        assert!(media_is_referenced(&db, &hero_id).await.unwrap());
+        assert!(media_is_referenced(&db, &seo_image_id).await.unwrap());
+        assert_eq!(
+            canonical_entry_by_id(&db, entry_id).await.unwrap().as_deref(),
+            Some("/hidden-news")
+        );
+        let mut conn = db.acquire().await.unwrap();
+        let routes = crate::storage::sitemap::list_indexable_routes_in_tx(
+            &mut conn,
+            "https://example.com",
+            0,
+            100,
+        )
+        .await
+        .unwrap();
+        assert!(routes.routes.iter().any(|route| route.path == "/hidden-news"));
+        assert!(!routes.routes.iter().any(|route| route.path == "/content/news"));
+        drop(conn);
+
+        sqlx::query(
+            "UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.has_archive', json('true')) WHERE key='news'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        assert_eq!(
+            list_published(&db, "news", 10, 0, EntryFilters::default())
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(get_by_slug(&db, "section", "hidden-news").await.unwrap().is_none());
+        assert_eq!(
+            list_published(&db, "section", 10, 0, EntryFilters::default())
+                .await
+                .unwrap_err()
+                .0,
+            StatusCode::NOT_FOUND
         );
     }
 }

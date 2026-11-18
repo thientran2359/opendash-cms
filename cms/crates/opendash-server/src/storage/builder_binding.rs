@@ -90,7 +90,11 @@ pub async fn resolve_in_tx_with_route(
                                  LEFT JOIN entry_public_paths p ON p.entry_id = e.id
                               WHERE e.content_type_key = ? AND e.slug = ?
                                 AND t.provider_status = 'active'
-                                AND (? = 1 OR e.publication_status = 'published')",
+                                AND (? = 1 OR (
+                                    e.publication_status = 'published'
+                                    AND e.content_type_key != 'section'
+                                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+                                ))",
                         )
                         .bind(&key.0)
                         .bind(&key.1)

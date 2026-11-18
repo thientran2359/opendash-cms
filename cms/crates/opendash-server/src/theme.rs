@@ -345,6 +345,8 @@ pub struct ThemeContentTypeDeclaration {
     pub fields: Vec<opendash_core::content::ContentFieldDefinition>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<opendash_core::content::ContentTypeSettings>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -385,10 +387,13 @@ pub fn parse_theme_declarations(manifest_json: &str) -> Result<ThemeDeclarations
         if !seen_keys.insert(ct.key.as_str()) {
             return Err("Khóa content_type bị trùng lặp trong declarations.");
         }
+        let mut settings = ct.settings.clone().unwrap_or_default();
+        settings.validate_and_normalize()?;
         let def = opendash_core::content::ContentTypeDefinition {
             key: ct.key.clone(),
             label: ct.label.clone(),
             fields: ct.fields.clone(),
+            settings,
         };
         def.validate()?;
         for tax in &ct.taxonomies {

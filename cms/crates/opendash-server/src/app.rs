@@ -27,7 +27,8 @@ use crate::{
         },
         content::{
             MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list,
-            content_type_update, editor_layout_get, editor_layout_put,
+            content_type_update, content_entry_publication, content_entry_preview,
+            editor_layout_get, editor_layout_put,
             effective_editor_config_get, field_group_create, field_group_delete,
             field_group_list, field_group_update,
         },
@@ -35,7 +36,7 @@ use crate::{
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
             entry_table_get,
-            entry_composite_create, entry_composite_update, entry_preview, entry_publication,
+            entry_composite_create, entry_composite_update,
             entry_update,
         },
         media::{
@@ -487,11 +488,11 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/{id}/publication",
-            post(entry_publication).layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+            post(content_entry_publication).layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/{id}/preview",
-            get(entry_preview),
+            get(content_entry_preview),
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/{id}/route",

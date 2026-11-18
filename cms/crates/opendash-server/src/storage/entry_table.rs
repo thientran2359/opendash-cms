@@ -244,6 +244,9 @@ pub async fn query(
                     && field.definition.public_exposure == PublicExposure::Public
             })
         });
+        // SEO's public resolver checks provider state and CPT visibility as
+        // well as publication, so a private CPT remains editable without
+        // giving its Admin row a misleading public View link.
         let public_url = if record.publication_status == "published" {
             seo::resolve_public_entry_path_in_tx(&mut tx, record.id).await?
         } else {
@@ -272,4 +275,54 @@ pub async fn query(
         limit: filter.limit,
         offset: filter.offset,
     })
+}
+
+#[cfg(test)]
+mod c1_public_url_tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn published_private_cpt_remains_in_admin_without_view_url() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            r#"INSERT INTO content_types(key,definition_json,owner_kind)
+               VALUES('news','{"key":"news","label":"News","fields":[],"settings":{"public":false,"has_archive":true,"publication":"immediate","supports":["editor","featured_image"]}}','user')"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES('news','hidden-article','Hidden Article','{}','published')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+
+        let hidden = query(&db, "news", FieldRole::Admin, &EntryTableFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(hidden.total, 1);
+        assert_eq!(hidden.status_counts.published, 1);
+        assert_eq!(hidden.items[0].id, id);
+        assert!(hidden.items[0].public_url.is_none());
+
+        sqlx::query(
+            "UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.public', json('true')) WHERE key='news'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let visible = query(&db, "news", FieldRole::Admin, &EntryTableFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(visible.items[0].public_url.as_deref(), Some("/content/news/hidden-article"));
+    }
 }

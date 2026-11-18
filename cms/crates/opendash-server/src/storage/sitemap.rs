@@ -40,7 +40,9 @@ WITH indexable AS (
       LEFT JOIN entry_public_paths p ON p.entry_id = e.id
       LEFT JOIN entry_seo s ON s.entry_id = e.id
      WHERE e.publication_status = 'published'
+       AND e.content_type_key != 'section'
        AND t.provider_status = 'active'
+       AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
        AND COALESCE(s.noindex, 0) = 0
        AND (s.canonical_url IS NULL OR s.canonical_url = ?1 OR s.canonical_url LIKE (?1 || '/%'))
 
@@ -52,6 +54,9 @@ WITH indexable AS (
            NULL AS lastmod
       FROM content_types t
      WHERE t.provider_status = 'active'
+       AND t.key != 'section'
+       AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+       AND COALESCE(json_extract(t.definition_json, '$.settings.has_archive'), 1) = 1
        AND EXISTS (
            SELECT 1 FROM content_entries e
             WHERE e.content_type_key = t.key
@@ -76,6 +81,8 @@ WITH indexable AS (
           WHERE et.term_id = tm.id
             AND e.publication_status = 'published'
             AND ct.provider_status = 'active'
+            AND e.content_type_key != 'section'
+            AND COALESCE(json_extract(ct.definition_json, '$.settings.public'), 1) = 1
      )
 )
 "#;
