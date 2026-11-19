@@ -93,6 +93,19 @@ M4 binding (`ADR-0009`) resolves one exact `type_key,entry_slug`; for single/pag
 - Persist canonical definitions with immutable `ResourceOwner::Theme(theme_id)`, separate from runtime template availability. Other-owner collision stays 409 even if that owner is inactive/withdrawn. Core post/page are never claimable.
 - State axes: declaration declared/withdrawn; provider active/inactive/missing/invalid. Switching theme changes availability, not declaration ownership. Updating a revision to omit a declaration marks it withdrawn, retaining schema/values. Explicit same-owner re-declaration requires compatibility checks; bulk `activate_owner` is not that operation.
 - Runtime block/template execution requires active eligible provider. Admin/Editor entry and field-value editing uses retained valid schema independent of provider availability. Content/public fallback follows published policy without resurrecting inactive theme code. Do not globally hide all published content merely because the original theme is inactive.
+- **Content Foundation clarification, Aster Final Decision 19/11/2026:** the
+  statement above preserves public site/core-owned content across theme changes
+  and safe template fallback for otherwise eligible content. A CPT owned by an
+  inactive provider follows the existing active-provider public guard: archive
+  and single routes return404 while inactive; matching-owner reactivation
+  restores200 only for content still eligible by publication/public policy.
+  Canonical definitions, IDs, values, memberships and authenticated editing stay
+  available as specified. This distinction follows
+  [C3/C4](CONTENT_FOUNDATION_2026_11.md#4-permalinks-and-route-authority-c3) and
+  was already implemented at pre-C3 baseline
+  `49fcd730be526fee17b5a5f240d58f1cc919d626`. Old preservation tests must assert
+  both inactive public denial and authenticated retention, then successful public
+  restoration after reactivation; template fallback cannot bypass CPT eligibility.
 - Same-owner label/help/default-only changes may be compatible. Optional new fields preserve old entries. Removal/type change/key rename/required tightening/select-option removal is rejected if it invalidates retained data; no automatic dropping. Content-type withdrawal retains valid fields and entry editability. Destructive changes require another explicit migration/rollback contract.
 - S10 builds canonical transaction-aware CNT registration/evolution APIs in server storage, using core validators and owned registry; they are future work, not current APIs. In-memory registry is refreshed only from committed canonical DB state, not published before commit.
 - Taxonomy eligibility declarations only refer to core category/tag and a compatible owned type. Terms and entry links stay site-owned; core term kinds and existing user types cannot be taken over. Withdrawal does not remove existing term membership or prevent editing retained content.
