@@ -127,28 +127,32 @@ pub async fn list_indexable_routes_in_tx(
     limit: i64,
 ) -> ApiResult<SitemapRouteList> {
     let sql = format!(
-        "{INDEXABLE_ROUTES_UNION} SELECT route_kind, stable_id, path, lastmod FROM indexable ORDER BY route_kind ASC, stable_id ASC LIMIT ?2 OFFSET ?3"
+        "{INDEXABLE_ROUTES_UNION}
+         SELECT CASE WHEN page.route_kind = 1 THEN '/' ELSE claims.path END AS canonical_path,
+                page.lastmod
+           FROM (
+             SELECT route_kind, stable_id, path, lastmod FROM indexable
+              ORDER BY route_kind ASC, stable_id ASC LIMIT ?2 OFFSET ?3
+           ) AS page
+           LEFT JOIN permalink_route_claims claims
+             ON claims.target_kind = CASE page.route_kind
+                  WHEN 2 THEN 'entry' WHEN 3 THEN 'archive'
+                  WHEN 4 THEN 'term' ELSE 'home' END
+            AND claims.target_id = CASE page.route_kind
+                  WHEN 3 THEN page.path ELSE CAST(page.stable_id AS TEXT) END
+          ORDER BY page.route_kind ASC, page.stable_id ASC"
     );
-    let rows: Vec<(i64, i64, Option<String>, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+    // One bounded, snapshot-consistent claim projection per sitemap part.
+    // The indexable CTE owns ACL/noindex/publication filtering and stable
+    // pagination; every non-home path comes directly from C3 route claims.
+    let rows: Vec<(Option<String>, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(public_origin)
         .bind(limit)
         .bind(offset)
         .fetch_all(&mut *conn)
         .await?;
     let mut routes = Vec::with_capacity(rows.len());
-    for (kind, id, key_or_path, lastmod) in rows {
-        // Resolve every URL from the authoritative storage route projection
-        // within the sitemap read snapshot; only the home path is fixed.
-        let path = match kind {
-            1 => Some("/".to_owned()),
-            2 => crate::storage::permalinks::canonical_entry_path_in_tx(conn, id).await?,
-            3 => match key_or_path {
-                Some(key) => crate::storage::permalinks::canonical_archive_path_in_tx(conn, &key).await?,
-                None => None,
-            },
-            4 => crate::storage::permalinks::canonical_term_path_in_tx(conn, id).await?,
-            _ => None,
-        };
+    for (path, lastmod) in rows {
         if let Some(path) = path {
             routes.push(SitemapRoute { path, lastmod });
         }

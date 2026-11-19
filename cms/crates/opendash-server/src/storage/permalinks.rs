@@ -639,19 +639,38 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     // namespace. A URL owned by post cannot shadow another CPT's generated
     // /base/{slug} pattern even if that CPT has no entries yet. Keep aliases
     // inside their own dynamic family; an owner's canonical reclaim was
-    // already removed from historical above. For deleted stable target IDs,
-    // only the protected /taxonomy/{kind}/{slug} or /content/{type}/{slug}
-    // spelling can prove the family; all other orphan aliases fail closed.
+    // already removed from historical above.
+    //
+    // A deleted stable ID has no row in target_families. Its C3-generated
+    // protected legacy alias (/content/{type}/{slug} or
+    // /taxonomy/{kind}/{slug}) is nevertheless retained for that exact ID,
+    // including when its former canonical URL used a custom rewrite base.
+    // Recover the family only from such owner-matched protected aliases, not
+    // from the custom/rewrite URL itself. Conflicting proofs fail closed.
+    let mut orphan_families = BTreeMap::<Claim, Option<String>>::new();
+    for (path, owner) in &historical {
+        if target_families.contains_key(owner) {
+            continue;
+        }
+        if let Some(family) = legacy_family_of_deleted_target(path, &owner.0) {
+            orphan_families
+                .entry(owner.clone())
+                .and_modify(|known| {
+                    if known.as_deref() != Some(family) {
+                        *known = None;
+                    }
+                })
+                .or_insert_with(|| Some(family.to_owned()));
+        }
+    }
     for (path, owner) in &historical {
         for pattern in &patterns {
             if pattern.matches(path)
                 && !(owner.0 == pattern.kind
                     && match target_families.get(owner) {
                         Some(family) => family == &pattern.family,
-                        None => {
-                            legacy_family_of_deleted_target(path, &owner.0)
-                                == Some(pattern.family.as_str())
-                        }
+                        None => orphan_families.get(owner).and_then(Option::as_deref)
+                            == Some(pattern.family.as_str()),
                     })
             {
                 return Err(ApiError::conflict(format!(
@@ -1404,6 +1423,125 @@ mod tests {
                 .unwrap(),
             None,
         );
+    }
+
+    #[tokio::test]
+    async fn deleted_rewritten_post_retains_dead_aliases_without_blocking_delete() {
+        let db = site().await;
+        let original = get_settings(&db).await.unwrap();
+        let mut blog = original.input();
+        blog.post_structure = "/blog/%postname%".to_owned();
+        put_settings(&db, original.version, &blog).await.unwrap();
+        let post_id = add_post(&db, "gone", true).await;
+        assert_eq!(
+            resolve_public_path(&db, "/blog/gone")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Entry(post_id),
+        );
+
+        let mut tx = db.begin().await.unwrap();
+        sqlx::query("DELETE FROM content_entries WHERE id=?")
+            .bind(post_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(resolve_public_path(&db, "/blog/gone").await.unwrap(), None);
+        assert_eq!(
+            resolve_public_path(&db, "/content/post/gone").await.unwrap(),
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn deleted_rewritten_term_retains_dead_aliases_without_blocking_delete() {
+        let db = site().await;
+        let original = get_settings(&db).await.unwrap();
+        let mut genres = original.input();
+        genres
+            .taxonomy_bases
+            .insert("category".to_owned(), Some("genres".to_owned()));
+        put_settings(&db, original.version, &genres)
+            .await
+            .unwrap();
+        let term_id = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Gone','gone')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let mut tx = db.begin().await.unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(
+            resolve_public_path(&db, "/genres/gone")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Term(term_id),
+        );
+
+        let mut tx = db.begin().await.unwrap();
+        sqlx::query("DELETE FROM taxonomy_terms WHERE id=?")
+            .bind(term_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(resolve_public_path(&db, "/genres/gone").await.unwrap(), None);
+        assert_eq!(
+            resolve_public_path(&db, "/taxonomy/category/gone")
+                .await
+                .unwrap(),
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn dead_rewritten_post_alias_cannot_shadow_foreign_cpt_family() {
+        let db = site().await;
+        let original = get_settings(&db).await.unwrap();
+        let mut blog = original.input();
+        blog.post_structure = "/blog/%postname%".to_owned();
+        let blog_saved = put_settings(&db, original.version, &blog).await.unwrap();
+        let post_id = add_post(&db, "gone", true).await;
+        let mut tx = db.begin().await.unwrap();
+        sqlx::query("DELETE FROM content_entries WHERE id=?")
+            .bind(post_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let mut news = blog.clone();
+        news.post_structure = "/news/%postname%".to_owned();
+        let news_saved = put_settings(&db, blog_saved.version, &news).await.unwrap();
+        sqlx::query(
+            "INSERT INTO content_types(key,definition_json,owner_kind,owner_id,provider_status,declaration_state,version)
+             SELECT 'books',definition_json,'user',NULL,'active','declared',1
+               FROM content_types WHERE key='post'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let mut conflicting = news.clone();
+        conflicting
+            .content_type_bases
+            .insert("books".into(), Some("blog".into()));
+        let err = put_settings(&db, news_saved.version, &conflicting)
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, axum::http::StatusCode::CONFLICT, "{err:?}");
+        assert_eq!(get_settings(&db).await.unwrap(), news_saved);
+        assert_eq!(resolve_public_path(&db, "/blog/gone").await.unwrap(), None);
     }
 
     #[tokio::test]
