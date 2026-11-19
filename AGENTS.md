@@ -108,6 +108,8 @@ security/data, CI, human test hoặc release authorization.
   Chỉ yêu cầu Aster review khi thực sự cần; không biến peer review thành gate
   bắt buộc cho mọi Issue. Nếu không thể nhập an toàn vào cửa sổ đang mở, giữ
   nguyên bản nháp và dùng Issue/PR để ghi handoff chờ xử lý.
+  **Khi tin nhắn đã gửi thành công, báo `SENT` và kết thúc lượt Harbor ngay;**
+  không chờ Codex/Aster trả lời hoặc theo dõi kết quả trong cùng lượt.
   Tin nhắn chat **không** thay verdict trên GitHub, required CI, review/merge
   gates hoặc G5; không tự kích hoạt automation/chạy nền.
 - Branch names in `.agents/agents.yaml` describe desired agent identities,
