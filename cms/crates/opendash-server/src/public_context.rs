@@ -150,6 +150,21 @@ pub fn validate_single_query(raw: Option<&str>) -> Result<(), &'static str> {
     parse_query(raw, QueryScope::Single).map(|_| ())
 }
 
+/// Validate the original HTTP request path *before* matching any history
+/// claim. A decoded/normalized alternate spelling must never alias a route.
+/// Canonical path segments in C3 are unescaped and slash-separated.
+pub fn validate_public_request_path(path: &str) -> Result<(), &'static str> {
+    if !path.starts_with('/')
+        || path.contains('%')
+        || path.contains('#')
+        || path.chars().any(char::is_control)
+        || (path != "/" && path.split('/').skip(1).any(|s| s.is_empty() || s == "." || s == ".."))
+    {
+        return Err("Đường dẫn công khai không hợp lệ.");
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublicRequestContext {
     Home {
@@ -169,6 +184,13 @@ pub enum PublicRequestContext {
     TaxonomyArchive {
         term_id: i64,
         kind: TaxonomyKind,
+        slug: String,
+        query: PublicQuery,
+        canonical_path: String,
+    },
+    GenericTaxonomyArchive {
+        term_id: i64,
+        kind_key: String,
         slug: String,
         query: PublicQuery,
         canonical_path: String,
@@ -240,7 +262,9 @@ impl CanonicalUrlBuilder {
         ))
     }
 
-    fn with_query(base: String, query: PublicQuery, scope: QueryScope) -> String {
+    /// Serialize only typed, validated query fields against a canonical base
+    /// returned by storage. Public consumers must not reconstruct that base.
+    pub fn with_query(base: String, query: PublicQuery, scope: QueryScope) -> String {
         let mut pairs = url::form_urlencoded::Serializer::new(String::new());
         if query.page > 1 {
             pairs.append_pair("page", &query.page.to_string());
@@ -321,5 +345,32 @@ impl CanonicalUrlBuilder {
             ),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod request_path_tests {
+    use super::*;
+
+    #[test]
+    fn reject_encoded_and_non_canonical_request_paths() {
+        for path in [
+            "/blog/%2fprivate", "/blog/%252fprivate", "/blog/%2e%2e/private",
+            "/blog/../private", "/blog/./post", "/blog//post", "/blog/post/",
+            "//blog/post", "/blog/post#fragment", "/blog/post\0",
+        ] {
+            assert!(validate_public_request_path(path).is_err(), "{path}");
+        }
+        for path in ["/", "/blog/post", "/content/post/hello", "/genres/fiction"] {
+            assert!(validate_public_request_path(path).is_ok(), "{path}");
+        }
+    }
+
+    #[test]
+    fn canonical_pagination_uses_storage_base_not_legacy_prefix() {
+        let query = parse_query(Some("page=2&category_id=5&utm_campaign=x"), QueryScope::ContentArchive)
+            .expect("valid bounded query");
+        let href = CanonicalUrlBuilder::with_query("/blog".into(), query, QueryScope::ContentArchive);
+        assert_eq!(href, "/blog?page=2&category_id=5");
     }
 }

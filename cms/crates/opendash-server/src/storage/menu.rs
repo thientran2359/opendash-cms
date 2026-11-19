@@ -8,7 +8,6 @@ use url::Url;
 
 use crate::{
     error::{ApiError, ApiResult},
-    public_context::{CanonicalUrlBuilder, TaxonomyKind},
 };
 
 pub const MAX_MENU_ITEMS: usize = 200;
@@ -714,23 +713,21 @@ pub async fn list_slot_assignments_in_tx(
 }
 
 async fn resolve_entry_url_in_tx(conn: &mut SqliteConnection, entry_id: i64) -> ApiResult<Option<String>> {
-    crate::storage::seo::resolve_public_entry_path_in_tx(conn, entry_id).await
+    // The SEO public guard is authoritative for publication, Section,
+    // provider and CPT visibility; canonical path lookup alone may serve Admin.
+    if crate::storage::seo::resolve_public_entry_path_in_tx(conn, entry_id)
+        .await?
+        .is_none()
+    {
+        return Ok(None);
+    }
+    crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
 async fn resolve_term_url_in_tx(conn: &mut SqliteConnection, term_id: i64) -> ApiResult<Option<String>> {
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT kind, slug FROM taxonomy_terms WHERE id = ?")
-            .bind(term_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    Ok(row.and_then(|(kind, slug)| {
-        let kind = match kind.as_str() {
-            "category" => TaxonomyKind::Category,
-            "tag" => TaxonomyKind::Tag,
-            _ => return None,
-        };
-        CanonicalUrlBuilder::term_from_id(term_id, kind, &slug)
-    }))
+    // Term canonical resolution enforces taxonomy declaration, public and
+    // provider guards; do not emit links to withdrawn/private terms.
+    crate::storage::permalinks::canonical_term_path_in_tx(conn, term_id).await
 }
 
 pub async fn resolve_menu_view_in_tx(

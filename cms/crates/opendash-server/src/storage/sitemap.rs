@@ -33,11 +33,10 @@ WITH indexable AS (
 
     SELECT 2 AS route_kind,
            e.id AS stable_id,
-           COALESCE(p.path, '/content/' || e.content_type_key || '/' || e.slug) AS path,
+           NULL AS path,
            e.updated_at AS lastmod
       FROM content_entries e
       JOIN content_types t ON t.key = e.content_type_key
-      LEFT JOIN entry_public_paths p ON p.entry_id = e.id
       LEFT JOIN entry_seo s ON s.entry_id = e.id
      WHERE e.publication_status = 'published'
        AND e.content_type_key != 'section'
@@ -50,7 +49,7 @@ WITH indexable AS (
 
     SELECT 3 AS route_kind,
            t.rowid AS stable_id,
-           '/content/' || t.key AS path,
+           t.key AS path,
            NULL AS lastmod
       FROM content_types t
      WHERE t.provider_status = 'active'
@@ -67,15 +66,11 @@ WITH indexable AS (
 
     SELECT 4 AS route_kind,
            tm.id AS stable_id,
-           CASE tm.kind
-               WHEN 'category' THEN '/taxonomy/category/' || tm.slug
-               ELSE '/taxonomy/tag/' || tm.slug
-           END AS path,
+           NULL AS path,
            NULL AS lastmod
       FROM taxonomy_terms tm
       JOIN taxonomy_definitions td ON td.key = tm.kind
-     WHERE tm.kind IN ('category', 'tag')
-       AND td.public = 1
+     WHERE td.public = 1
        AND td.provider_status = 'active'
        AND td.declaration_state = 'declared'
        AND EXISTS (
@@ -132,17 +127,31 @@ pub async fn list_indexable_routes_in_tx(
     limit: i64,
 ) -> ApiResult<SitemapRouteList> {
     let sql = format!(
-        "{INDEXABLE_ROUTES_UNION} SELECT path, lastmod FROM indexable ORDER BY route_kind ASC, stable_id ASC LIMIT ?2 OFFSET ?3"
+        "{INDEXABLE_ROUTES_UNION} SELECT route_kind, stable_id, path, lastmod FROM indexable ORDER BY route_kind ASC, stable_id ASC LIMIT ?2 OFFSET ?3"
     );
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+    let rows: Vec<(i64, i64, Option<String>, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(public_origin)
         .bind(limit)
         .bind(offset)
         .fetch_all(&mut *conn)
         .await?;
-    let routes = rows
-        .into_iter()
-        .map(|(path, lastmod)| SitemapRoute { path, lastmod })
-        .collect();
+    let mut routes = Vec::with_capacity(rows.len());
+    for (kind, id, key_or_path, lastmod) in rows {
+        // Resolve every URL from the authoritative storage route projection
+        // within the sitemap read snapshot; only the home path is fixed.
+        let path = match kind {
+            1 => Some("/".to_owned()),
+            2 => crate::storage::permalinks::canonical_entry_path_in_tx(conn, id).await?,
+            3 => match key_or_path {
+                Some(key) => crate::storage::permalinks::canonical_archive_path_in_tx(conn, &key).await?,
+                None => None,
+            },
+            4 => crate::storage::permalinks::canonical_term_path_in_tx(conn, id).await?,
+            _ => None,
+        };
+        if let Some(path) = path {
+            routes.push(SitemapRoute { path, lastmod });
+        }
+    }
     Ok(SitemapRouteList { routes })
 }
