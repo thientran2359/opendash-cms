@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""One-shot Atlas -> CoS transport. No GitHub task selection or background worker.
+"""Guarded Atlas/Aster -> CoS transport with append-only Issue resume generations.
+
+No GitHub task selection or background worker.
 
 Run on Atlas Windows; Harbor calls are executed inside the Mac over SSH.
 All CoS credentials and receipts remain on the destination computer.
@@ -7,6 +9,7 @@ All CoS credentials and receipts remain on the destination computer.
 
 import argparse
 import base64
+import datetime
 import hashlib
 import json
 import os
@@ -18,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
@@ -433,8 +437,8 @@ def receipt_file(target, request_id):
 
 def issue_lock_file(target, issue, task_id):
     # The first RUN of this assigned Issue/task wins, even when the source
-    # or base SHA later changes. Explicit re-dispatch needs a reviewed new
-    # generation rather than a new UUID or amended GitHub source.
+    # or base SHA later changes. Only resume-issue can append an authorized
+    # successor; a new send-issue UUID or SHA cannot bypass this root lock.
     material = [target, issue, task_id]
     identifier = hashlib.sha256(json.dumps(material, separators=(",", ":")).encode("utf-8")).hexdigest()
     return storage_root() / "receipts" / ("task-" + identifier + ".json")
@@ -670,6 +674,175 @@ def send(target, request_id, mode, issue=None, task_id=None, source_sha=None, ba
             "duplicate": False, "input_id": input_id}
 
 
+def resume_lock_file(target, issue, task_id, previous_request):
+    material = [target, issue, task_id, previous_request]
+    key = hashlib.sha256(json.dumps(material, separators=(",", ":")).encode()).hexdigest()
+    return storage_root() / "receipts" / ("resume-" + key + ".json")
+
+
+def latest_task_record(target, issue, task_id):
+    """Walk append-only generations; an incomplete reservation is never skipped."""
+    path = issue_lock_file(target, issue, task_id)
+    seen = set()
+    for _ in range(1000):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            request = record["request_id"]
+            if (record.get("target") != target or record.get("issue") != issue or
+                    record.get("task_id") != task_id or
+                    str(uuid.UUID(request)) != request or request in seen):
+                raise ValueError("invalid chain")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise Blocked("RESUME_CHAIN_INCOMPLETE_RECONCILE") from exc
+        seen.add(request)
+        child = resume_lock_file(target, issue, task_id, request)
+        if not child.exists():
+            return record
+        path = child
+    raise Blocked("RESUME_CHAIN_TOO_LONG")
+
+
+def resume_sessions(config, previous_input):
+    """Complete metadata pagination, never transcript; fail closed on omissions."""
+    cursor = None
+    seen = set()
+    previous = None
+    for _ in range(200):
+        path = "/v1/sessions?limit=50"
+        if cursor:
+            path += "&cursor=" + urllib.parse.quote(cursor, safe="")
+        _, data = call_api("GET", path)
+        if not isinstance(data, dict) or not isinstance(data.get("sessions"), list):
+            raise Blocked("RESUME_SESSION_METADATA_INVALID")
+        for row in data["sessions"]:
+            if not isinstance(row, dict):
+                raise Blocked("RESUME_SESSION_METADATA_INVALID")
+            if row.get("projectId") != config["project_id"]:
+                continue
+            if row.get("activeTurnId") or (not row.get("endedAt") and
+                    row.get("lastTurnOutcome") not in ("completed", "stopped", "interrupted")):
+                raise Blocked("BLOCKED_AGENT_SLOT")
+            if row.get("id") == previous_input:
+                if previous is not None:
+                    raise Blocked("RESUME_SESSION_METADATA_INVALID")
+                previous = row
+        cursor = data.get("nextCursor")
+        if cursor is None:
+            break
+        if not isinstance(cursor, str) or not cursor or cursor in seen:
+            raise Blocked("RESUME_SESSION_PAGINATION_INVALID")
+        seen.add(cursor)
+    else:
+        raise Blocked("RESUME_SESSION_PAGINATION_INCOMPLETE")
+    if (not previous or previous.get("lastTurnOutcome") not in ("completed", "stopped", "interrupted")
+            or type(previous.get("lastTurnEndAt")) not in (int, float)
+            or previous["lastTurnEndAt"] <= 0):
+        raise Blocked("PREVIOUS_TURN_END_NOT_CONFIRMED")
+    return previous["lastTurnEndAt"]
+
+
+def check_resume(target, issue, task_id, source_sha, base_sha, pr, head_sha, ack_id, previous):
+    config = load_config(target)
+    previous_status = status(target, previous["request_id"])
+    if previous_status.get("outcome") != "ACCEPTED" or previous_status.get("outbox_delivery") != "sent":
+        raise Blocked("PREVIOUS_DELIVERY_NOT_CONFIRMED")
+    ended_ms = resume_sessions(config, previous_status["input_id"])
+    prefix = "repos/" + REPOSITORY
+    item = github_json(prefix + "/issues/" + str(issue))
+    pull = github_json(prefix + "/pulls/" + str(pr))
+    ack = github_json(prefix + "/issues/comments/" + str(ack_id))
+    try:
+        if (item["state"] != "open" or not any(x.get("name") == "agent:" + target for x in item["labels"])
+                or task_id not in item.get("body", "") or source_sha not in item.get("body", "")):
+            raise Blocked("RESUME_ISSUE_NOT_OWNED_OR_OPEN")
+        name = target.title()
+        if (pull["number"] != pr or pull["state"] != "open" or pull.get("merged") is not False
+                or pull["head"]["repo"]["full_name"] != REPOSITORY
+                or pull["base"]["repo"]["full_name"] != REPOSITORY
+                or pull["head"]["ref"] != BRANCHES[target] or pull["base"]["ref"] != "main"
+                or pull["head"]["sha"] != head_sha or pull["base"]["sha"] != base_sha
+                or not re.search(r"Agent:\s*" + name + r"\b", pull.get("body", ""))
+                or task_id not in pull.get("body", "")
+                or not re.search(r"(?<![0-9])#" + str(issue) + r"(?![0-9])", pull.get("body", ""))):
+            raise Blocked("RESUME_PR_PINS_OR_OWNERSHIP_CHANGED")
+        if (ack["id"] != ack_id or ack["user"]["login"] != REPOSITORY.split("/")[0]
+                or ack["issue_url"] != "https://api.github.com/" + prefix + "/issues/" + str(issue)):
+            raise Blocked("RESUME_ACK_NOT_AUTHORIZED")
+        body = ack.get("body", "")
+        matches = re.findall(r"<!-- opendash-resume-v1\s*\n(.*?)\n-->", body, re.DOTALL)
+        if len(matches) != 1:
+            raise Blocked("RESUME_ACK_MARKER_REQUIRED")
+        expected = dict(repository=REPOSITORY, target=target, issue=issue, task_id=task_id,
+                        source_sha=source_sha, base_sha=base_sha, pr=pr, head_sha=head_sha,
+                        intent="RESUME_CURRENT")
+        marker = json.loads(matches[0])
+        coordinator = marker.get("coordinator")
+        if (coordinator not in ("Aster", "Atlas") or
+                not re.search(r"Agent:\s*" + coordinator + r"\b", body) or
+                any(marker.get(k) != v for k, v in expected.items())):
+            raise Blocked("RESUME_ACK_PINS_OR_SIGNATURE_INVALID")
+        created = datetime.datetime.fromisoformat(ack["created_at"].replace("Z", "+00:00"))
+        if created.tzinfo is None or created.timestamp() * 1000 <= ended_ms:
+            raise Blocked("RESUME_ACK_MUST_FOLLOW_PREVIOUS_TURN")
+        if previous.get("source_sha") != source_sha:
+            raise Blocked("RESUME_SOURCE_CHANGED_REQUIRES_HANDOFF")
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise Blocked("RESUME_GITHUB_RESPONSE_INVALID") from exc
+    return config
+
+
+def resume_issue(target, request_id, issue, task_id, source_sha, base_sha, pr, head_sha, ack_id):
+    if (target not in BRANCHES or str(uuid.UUID(request_id)) != request_id or
+            type(issue) is not int or issue < 1 or type(pr) is not int or pr < 1 or
+            type(ack_id) is not int or ack_id < 1 or not TASK_RE.fullmatch(task_id or "") or
+            any(not SHA_RE.fullmatch(x or "") for x in (source_sha, base_sha, head_sha))):
+        raise Blocked("INVALID_RESUME_ARGUMENTS")
+    safe, reason = security_check()
+    if not safe:
+        raise Blocked("HOST_NOT_AUTHORIZED_" + reason)
+    digest = hashlib.sha256(json.dumps([target, request_id, issue, task_id, source_sha,
+                                       base_sha, pr, head_sha, ack_id]).encode()).hexdigest()
+    path = receipt_file(target, request_id)
+    if path.exists():
+        old = json.loads(path.read_text(encoding="utf-8"))
+        if old.get("payload_hash") != digest:
+            raise Blocked("DISPATCH_ID_REUSED_FOR_DIFFERENT_TASK")
+        return dict(target=target, request_id=request_id, outcome=old["outcome"],
+                    input_id=old["input_id"], duplicate=True)
+    details = probe(target)
+    if not details.get("can_send"):
+        raise Blocked("HOST_NOT_AUTHORIZED")
+    previous = latest_task_record(target, issue, task_id)
+    check_resume(target, issue, task_id, source_sha, base_sha, pr, head_sha, ack_id, previous)
+    input_id = str(uuid.uuid4())
+    record = dict(target=target, request_id=request_id, mode="resume", issue=issue,
+                  task_id=task_id, source_sha=source_sha, base_sha=base_sha, pr=pr,
+                  head_sha=head_sha, ack_id=ack_id, previous_request_id=previous["request_id"],
+                  input_id=input_id, payload_hash=digest, outcome="UNKNOWN")
+    create_private_dir(path.parent)
+    lock = resume_lock_file(target, issue, task_id, previous["request_id"])
+    try:
+        atomic_private_json(lock, record, exclusive=True)
+        atomic_private_json(path, record, exclusive=True)
+    except FileExistsError as exc:
+        raise Blocked("CONCURRENT_RESUME_RECONCILE_EXISTING_REQUEST") from exc
+    try:
+        config = check_resume(target, issue, task_id, source_sha, base_sha, pr, head_sha, ack_id, previous)
+        text = (prompt(target, "issue", issue, task_id, source_sha, base_sha) +
+                " RESUME_CURRENT only, existing PR #" + str(pr) + " head " + head_sha +
+                "; coordinator Issue comment ID " + str(ack_id) +
+                ". Re-fetch that exact comment and PR before edits. Apply only its bounded "
+                "ACK/feedback within task ownership. Do not pick a new task, change Project "
+                "to Ready, or bypass pending security/data/CI/G5 gates. Stop on pin drift.")
+        code, _ = call_api("POST", "/v1/inputs", dict(id=input_id, projectId=config["project_id"], text=text))
+        record["outcome"] = "ACCEPTED" if code == 202 else "UNKNOWN"
+    except Blocked as exc:
+        record["error_code"] = str(exc)
+    atomic_private_json(path, record)
+    return dict(target=target, request_id=request_id, outcome=record["outcome"],
+                input_id=input_id, duplicate=False)
+
+
 def send_pr(target, request_id, pr, head_sha, base_sha, review_id):
     return send(target, request_id, "pr", base_sha=base_sha,
                 pr=pr, head_sha=head_sha, review_id=review_id)
@@ -685,7 +858,7 @@ def status(target, request_id):
         # writing the request receipt. Report UNKNOWN without resending.
         folder = path.parent
         if folder.is_dir():
-            for task_lock in (*folder.glob("task-*.json"), *folder.glob("pr-*.json")):
+            for task_lock in (*folder.glob("task-*.json"), *folder.glob("pr-*.json"), *folder.glob("resume-*.json")):
                 try:
                     found = json.loads(task_lock.read_text(encoding="utf-8"))
                 except (OSError, ValueError):
@@ -701,7 +874,7 @@ def status(target, request_id):
     return {k: checked.get(k) for k in ("target", "request_id", "mode", "outcome",
                                        "input_id", "outbox_delivery", "assistant_turn_ended",
                                        "pong_verified", "unexpected_tool_calls", "pr", "head_sha",
-                                       "base_sha", "review_id", "error_code") if k in checked}
+                                       "base_sha", "review_id", "ack_id", "previous_request_id", "error_code") if k in checked}
 
 
 def status_task(target, issue, task_id, source_sha):
@@ -725,7 +898,8 @@ def status_task(target, issue, task_id, source_sha):
     request_id = record.get("request_id")
     if not isinstance(request_id, str):
         raise Blocked("TASK_LOCK_INCOMPLETE")
-    result = status(target, request_id)
+    record = latest_task_record(target, issue, task_id)
+    result = status(target, record["request_id"])
     result.update(issue=issue, task_id=task_id)
     if record.get("source_sha") != source_sha:
         result["source_sha_changed_since_dispatch"] = True
@@ -766,6 +940,9 @@ def execute_local(args):
         return probe(args.target)
     if args.command == "send-pong":
         return send(args.target, args.request_id, "pong")
+    if args.command == "resume-issue":
+        return resume_issue(args.target, args.request_id, args.issue, args.task_id,
+                            args.source_sha, args.base_sha, args.pr, args.head_sha, args.ack_id)
     if args.command == "send-issue":
         return send(args.target, args.request_id, "issue", args.issue,
                     args.task_id, args.source_sha, args.base_sha)
@@ -789,11 +966,13 @@ def run_remote(args):
     command = ["python3", "-", "--local", args.command, args.target]
     if args.command == "bootstrap":
         command.extend(["--worktree", args.worktree])
-    if args.command in ("send-pong", "send-issue", "send-pr", "status"):
+    if args.command in ("send-pong", "send-issue", "send-pr", "resume-issue", "status"):
         command.extend(["--request-id", args.request_id])
-    if args.command == "send-issue":
+    if args.command in ("send-issue", "resume-issue"):
         command.extend(["--issue", str(args.issue), "--task-id", args.task_id,
                         "--source-sha", args.source_sha, "--base-sha", args.base_sha])
+    if args.command == "resume-issue":
+        command.extend(["--pr", str(args.pr), "--head-sha", args.head_sha, "--ack-id", str(args.ack_id)])
     if args.command == "status-task":
         command.extend(["--issue", str(args.issue), "--task-id", args.task_id,
                         "--source-sha", args.source_sha])
@@ -831,18 +1010,22 @@ def main():
     parser.add_argument("--ssh-host", default=DEFAULT_MAC_SSH)
     sub = parser.add_subparsers(dest="command", required=True)
     for verb in ("bootstrap", "probe", "send-pong", "send-issue", "status", "status-task",
-                 "check-pr", "send-pr", "status-pr"):
+                 "check-pr", "send-pr", "status-pr", "resume-issue"):
         p = sub.add_parser(verb)
         p.add_argument("target", choices=tuple(BRANCHES))
         if verb == "bootstrap":
             p.add_argument("--worktree", required=True)
-        if verb in ("send-pong", "send-issue", "send-pr", "status"):
+        if verb in ("send-pong", "send-issue", "send-pr", "resume-issue", "status"):
             p.add_argument("--request-id", type=str, required=True)
-        if verb == "send-issue":
+        if verb in ("send-issue", "resume-issue"):
             p.add_argument("--issue", type=int, required=True)
             p.add_argument("--task-id", required=True)
             p.add_argument("--source-sha", required=True)
             p.add_argument("--base-sha", required=True)
+        if verb == "resume-issue":
+            p.add_argument("--pr", type=int, required=True)
+            p.add_argument("--head-sha", required=True)
+            p.add_argument("--ack-id", type=int, required=True)
         if verb == "status-task":
             p.add_argument("--issue", type=int, required=True)
             p.add_argument("--task-id", required=True)
