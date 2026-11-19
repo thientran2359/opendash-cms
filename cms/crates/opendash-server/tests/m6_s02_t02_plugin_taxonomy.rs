@@ -358,7 +358,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
         .unwrap();
     assert_eq!(elig_disabled[0]["provider_status"], "provider_inactive");
 
-    // Entry still retains term_ids and can be edited
+    // Entry still retains term_ids and can be edited. While its plugin-provided
+    // eligibility is inactive, explicit term selection must fail atomically,
+    // but an ordinary title/value update must preserve prior memberships.
     let fetched_entry: Value = client
         .get(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
         .header("Cookie", &cookie)
@@ -370,6 +372,37 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
         .unwrap();
     assert_eq!(fetched_entry["term_ids"], json!([cat_id, tag_id]));
 
+    let blocked_selection = client
+        .put(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .header("Cookie", &cookie)
+        .header("Origin", &base_url)
+        .header("x-csrf-token", &csrf)
+        .header("If-Match", "\"v1\"")
+        .json(&json!({
+            "slug": "published-listing",
+            "title": "Must Not Save Inactive Membership",
+            "values": {},
+            "term_ids": [cat_id]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let blocked_status = blocked_selection.status();
+    let blocked_body = blocked_selection.text().await.unwrap();
+    assert_eq!(blocked_status, 400, "inactive term selection: {blocked_body}");
+    let after_blocked: Value = client
+        .get(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(after_blocked["title"], fetched_entry["title"]);
+    assert_eq!(after_blocked["term_ids"], fetched_entry["term_ids"]);
+    assert_eq!(after_blocked["version"], fetched_entry["version"]);
+
     let upd = client
         .put(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
         .header("Cookie", &cookie)
@@ -377,15 +410,27 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
         .header("x-csrf-token", &csrf)
         .header("If-Match", "\"v1\"")
         .json(&json!({
-            "slug": "draft-listing",
+            "slug": "published-listing",
             "title": "Updated Listing",
-            "values": {},
-            "term_ids": [cat_id]
+            "values": {}
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(upd.status(), 200);
+    let update_status = upd.status();
+    let update_body = upd.text().await.unwrap();
+    assert_eq!(update_status, 200, "inactive title edit: {update_body}");
+    let after_update: Value = client
+        .get(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(after_update["title"], "Updated Listing");
+    assert_eq!(after_update["term_ids"], json!([cat_id, tag_id]));
 
     // 6. Upgrade plugin to v1.1.0 withdrawing `tag`, then disable/re-enable -> `tag` stays withdrawn
     let listing_v1_1 = json!({
@@ -446,6 +491,35 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
         .unwrap();
     assert_eq!(en2.status(), 200);
 
+    // With `category` eligibility active again, explicitly changing membership
+    // is allowed; withdrawn `tag` membership stays until this deliberate unlink.
+    let choose_active = client
+        .put(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .header("Cookie", &cookie)
+        .header("Origin", &base_url)
+        .header("x-csrf-token", &csrf)
+        .header("If-Match", "\"v2\"")
+        .json(&json!({
+            "slug": "published-listing", "title": "Updated Listing", "values": {},
+            "term_ids": [cat_id]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let active_status = choose_active.status();
+    let active_body = choose_active.text().await.unwrap();
+    assert_eq!(active_status, 200, "active term selection: {active_body}");
+    let after_active: Value = client
+        .get(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(after_active["term_ids"], json!([cat_id]));
+
     // 7. Restart server and verify `category` is active/declared, `tag` stayed withdrawn, no duplicate terms
     drop(server.take());
     let port2 = free_port();
@@ -494,4 +568,15 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     assert_eq!(cat_row["provider_status"], "active");
     assert_eq!(tag_row["declaration_state"], "withdrawn");
     assert_eq!(tag_row["provider_status"], "provider_inactive");
+    let persisted_entry: Value = client
+        .get(format!("{base_url2}/api/admin/content-types/listing/entries/{entry_id}"))
+        .header("Cookie", &cookie2)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(persisted_entry["title"], "Updated Listing");
+    assert_eq!(persisted_entry["term_ids"], json!([cat_id]));
 }
