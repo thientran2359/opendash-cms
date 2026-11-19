@@ -351,4 +351,4 @@ not grant Ready. No agent message/dispatch, no changes to #302.
 
 | Task | Scope | State | GitHub |
 | --- | --- | --- | --- |
-| [M7-S14-T05](milestones/M7/slices/2026-11-20-beta-technical-retest-g3.md) | Native macOS integrated B01–B10, Content Foundation and security/data negatives | Harbor · G3 prepared; runtime NOT_RUN; publication after spec merge | [Beta tracker #304](https://github.com/thientran2359/opendash-cms/issues/304) |
+| [M7-S14-T05](milestones/M7/slices/2026-11-20-beta-technical-retest-g3.md) | Native macOS integrated B01–B10, Content Foundation and security/data negatives | Harbor · G3 merged [#409](https://github.com/thientran2359/opendash-cms/pull/409); runtime NOT_RUN; live Project gates apply | [#410](https://github.com/thientran2359/opendash-cms/issues/410) |
