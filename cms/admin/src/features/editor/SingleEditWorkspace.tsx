@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEntryComposite,
+  contentEntryPreviewPath,
   effectiveContentTypeSettings,
   getContentEntry,
   getEffectiveEditorConfig,
@@ -21,7 +22,7 @@ import type {
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
 import { MediaPicker } from '../media/MediaPicker.tsx';
-import { EntryListPage, entryTableHash, parseEntryTableHash } from '../content/EntryListPage.tsx';
+import { EntryListPage, entryTableHash, parseEntryTableHash, safePublicPath } from '../content/EntryListPage.tsx';
 
 interface FieldMediaPickerTarget {
   fieldKey: string;
@@ -143,6 +144,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const saveInFlightRef = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [confirmedPublicLink, setConfirmedPublicLink] = useState<{
+    scope: string; version: number; path: string | null;
+  } | null>(null);
   const [mediaPicker, setMediaPicker] = useState<FieldMediaPickerTarget | null>(null);
   const baselineRef = useRef<EditorDraftPayload | null>(null);
   const draftRef = useRef<EditorDraftPayload | null>(null);
@@ -254,6 +258,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   }, [dirty, onDirtyChange]);
 
   useEffect(() => {
+    setConfirmedPublicLink(null);
     if (!user) {
       setConfig(null);
       baselineRef.current = null;
@@ -287,6 +292,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
         const emptySeo = { title: null, description: null, og_image_id: null, canonical_url: null, noindex: false };
         let baseline: EditorDraftPayload;
+        let serverPublicPath: string | null = null;
         let routeReadable = true;
         let seoReadable = true;
         if (mode === 'edit' && entryId !== null) {
@@ -307,6 +313,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
           routeReadable = routeSnap !== null;
           seoReadable = seoSnap !== null;
+          if (rec.publication_status === 'published' && routeSnap?.entry_version === rec.version) {
+            serverPublicPath = safePublicPath(routeSnap.public_url);
+          }
           const allowedValues = Object.fromEntries(
             Object.entries(rec.values).filter(([key]) => key in freshCfg.effective_fields),
           );
@@ -335,6 +344,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         );
         if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
         baselineRef.current = baseline;
+        setConfirmedPublicLink({
+          scope: mediaScopeKey, version: baseline.version ?? 0, path: serverPublicPath,
+        });
         draftRef.current = restored?.payload ?? baseline;
         schemaTokenRef.current = restored?.schema_token_at_edit ?? freshCfg.schema_token;
         canWriteRouteRef.current = routeReadable;
@@ -475,6 +487,29 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         } : snapshot.seo,
       };
       baselineRef.current = saved;
+      // A committed slug, route or publication change can invalidate the old
+      // link. Require a matching server response before exposing another URL.
+      setConfirmedPublicLink(null);
+      if (entryId !== null && saved.publication_status === 'published') {
+        void getEntryRoute(typeKey, res.entry.id).then(routeSnap => {
+          if (requestEpoch !== editorDraftStore.getSessionEpoch() ||
+              activeDraftKeyRef.current !== draftKey ||
+              activeMediaScopeRef.current !== mediaScopeKey) return;
+          if (routeSnap.entry_version !== res.entry.version) return;
+          setConfirmedPublicLink({
+            scope: mediaScopeKey,
+            version: res.entry.version,
+            path: safePublicPath(routeSnap.public_url),
+          });
+        }).catch(error => {
+          if (requestEpoch === editorDraftStore.getSessionEpoch() &&
+              activeDraftKeyRef.current === draftKey &&
+              activeMediaScopeRef.current === mediaScopeKey &&
+              error instanceof ApiClientError && error.status === 401) {
+            onApiError(error, 'Phiên đăng nhập hết hạn khi tải URL công khai.');
+          }
+        });
+      }
       schemaTokenRef.current = config.schema_token;
       editorDraftStore.delete(draftKey);
       const hasNewerChanges = editRevisionRef.current !== submittedRevision;
@@ -534,16 +569,18 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     return <p className="text-sm text-slate-600">Đang tải cấu hình trình chỉnh sửa...</p>;
   }
 
-  // Link from the last server-confirmed version, never a dirty custom-path
-  // draft. A draft has no public URL and must not get a public View link.
+  // Public URLs must come from the server route authority. Never derive a URL
+  // from the slug/custom path or from an unsaved editor draft.
   const confirmed = baselineRef.current;
-  const confirmedCustomPath = confirmed?.custom_path;
   const publicPath = settings?.public && typeKey !== 'section'
     && confirmed?.id === entryId && confirmed?.publication_status === 'published'
-    ? confirmedCustomPath?.startsWith('/') && !confirmedCustomPath.startsWith('//')
-      ? confirmedCustomPath
-      : `/content/${encodeURIComponent(typeKey)}/${encodeURIComponent(confirmed.slug)}`
+    && confirmedPublicLink?.scope === mediaScopeKey
+    && confirmedPublicLink.version === confirmed.version
+    ? confirmedPublicLink.path
     : null;
+  const draftPreviewPath = typeKey !== 'section' && confirmed?.id === entryId
+    && confirmed.publication_status === 'draft' && entryId !== null
+    ? contentEntryPreviewPath(typeKey, entryId) : null;
   const isBuiltIn = typeKey === 'post' || typeKey === 'page';
   const isDraftPublishCpt = !isBuiltIn && typeKey !== 'section'
     && settings?.publication === 'draft_publish';
@@ -561,6 +598,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           role={statusNote.includes('(412)') || statusNote.includes('(409)') ? 'alert' : 'status'}>
           {statusNote}
         </div>
+      )}
+      {draftPreviewPath && (
+        <a href={draftPreviewPath} target="_blank" rel="noopener noreferrer"
+          className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
+          Xem trước bản nháp đã lưu (yêu cầu đăng nhập)
+        </a>
       )}
       {isDraftPublishCpt && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3"

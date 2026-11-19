@@ -3,6 +3,8 @@ import { requestJson } from './client.ts';
 export interface EntryRouteSnapshot {
   entry_version: number;
   custom_path: string | null;
+  /** Server-resolved canonical public path; absent until backend DTO supports it. */
+  public_url?: string | null;
 }
 
 export interface SeoMetadataInput {

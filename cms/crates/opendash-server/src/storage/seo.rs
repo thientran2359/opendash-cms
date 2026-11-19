@@ -32,6 +32,7 @@ pub fn validate_c3_custom_entry_path(raw: &str) -> Result<String, &'static str> 
 pub struct EntryRouteSnapshot {
     pub entry_version: i64,
     pub custom_path: Option<String>,
+    pub public_url: Option<String>,
 }
 
 pub enum PublicRouteResolution {
@@ -257,7 +258,7 @@ pub async fn record_slug_change_redirect_in_tx(
 
 /// Sets or clears `entry_public_paths` inside an active transaction, enforcing ENTRY CAS
 /// and cross-table uniqueness, and capturing old custom path in `entry_redirects`.
-pub async fn set_entry_route_in_tx(
+async fn set_entry_route_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
     expected_entry_version: i64,
@@ -292,6 +293,7 @@ pub async fn set_entry_route_in_tx(
         return Ok(EntryRouteSnapshot {
             entry_version: current_ver,
             custom_path: old_custom,
+            public_url: None,
         });
     }
 
@@ -347,6 +349,7 @@ pub async fn set_entry_route_in_tx(
     Ok(EntryRouteSnapshot {
         entry_version: expected_entry_version + 1,
         custom_path: normalized_new,
+        public_url: None,
     })
 }
 
@@ -355,6 +358,9 @@ pub async fn get_entry_route(
     type_key: &str,
     entry_id: i64,
 ) -> ApiResult<EntryRouteSnapshot> {
+    // Both the entry token and canonical claim must come from one SQLite
+    // snapshot. A separate pool query could mix a stale token with a new URL.
+    let mut tx = db.begin().await?;
     let row: Option<(i64, Option<String>)> = sqlx::query_as(
         "SELECT e.version, p.path
            FROM content_entries e
@@ -363,14 +369,17 @@ pub async fn get_entry_route(
     )
     .bind(type_key)
     .bind(entry_id)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some((entry_version, custom_path)) = row else {
         return Err(ApiError::not_found("Không tìm thấy nội dung."));
     };
+    let public_url = resolve_public_entry_path_in_tx(&mut tx, entry_id).await?;
+    tx.commit().await?;
     Ok(EntryRouteSnapshot {
         entry_version,
         custom_path,
+        public_url,
     })
 }
 
@@ -394,8 +403,11 @@ pub async fn put_entry_route(
         if exists.is_none() {
             return Err(ApiError::not_found("Không tìm thấy nội dung."));
         }
-        let result = set_entry_route_in_tx(&mut conn, entry_id, expected_entry_version, custom_path).await?;
+        let mut result = set_entry_route_in_tx(&mut conn, entry_id, expected_entry_version, custom_path).await?;
         crate::storage::permalinks::sync_claims_in_tx(&mut conn).await?;
+        // Resolve only after the canonical claims have been synchronized. The
+        // response remains within this writer transaction and matches its ETag.
+        result.public_url = resolve_public_entry_path_in_tx(&mut conn, entry_id).await?;
         Ok(result)
     }
     .await;
