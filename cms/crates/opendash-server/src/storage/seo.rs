@@ -12,6 +12,22 @@ use crate::{
     storage::entries::ContentEntryRecord,
 };
 
+// C3 extends the legacy validator's protected namespace. Centralize the
+// additional roots here so all storage claims enforce one policy.
+pub fn is_reserved_route_root(root: &str) -> bool {
+    matches!(root, "uploads" | "static" | "favicon.ico")
+        || crate::seo::validate_custom_entry_path(&format!("/{root}")).is_err()
+}
+
+pub fn validate_c3_custom_entry_path(raw: &str) -> Result<String, &'static str> {
+    let path = validate_custom_entry_path(raw)?;
+    let root = path[1..].split('/').next().unwrap_or("");
+    if matches!(root, "uploads" | "static" | "favicon.ico") {
+        return Err("Đường dẫn dùng tiền tố hệ thống được bảo vệ.");
+    }
+    Ok(path)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EntryRouteSnapshot {
     pub entry_version: i64,
@@ -35,19 +51,7 @@ pub async fn resolve_entry_path_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
 ) -> ApiResult<Option<String>> {
-    let row: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT e.content_type_key, e.slug, p.path
-           FROM content_entries e
-           JOIN content_types t ON t.key = e.content_type_key
-           LEFT JOIN entry_public_paths p ON p.entry_id = e.id
-          WHERE e.id = ? AND t.provider_status = 'active'",
-    )
-    .bind(entry_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    Ok(row.and_then(|(type_key, slug, custom)| {
-        custom.or_else(|| CanonicalUrlBuilder::entry_from_id(entry_id, &type_key, &slug))
-    }))
+    crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
 /// Resolves the canonical public path ONLY if the entry is published and its CPT is active.
@@ -55,23 +59,15 @@ pub async fn resolve_public_entry_path_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
 ) -> ApiResult<Option<String>> {
-    let row: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT e.content_type_key, e.slug, p.path
-           FROM content_entries e
-           JOIN content_types t ON t.key = e.content_type_key
-           LEFT JOIN entry_public_paths p ON p.entry_id = e.id
-          WHERE e.id = ?
-            AND e.publication_status = 'published'
-            AND e.content_type_key != 'section'
-            AND t.provider_status = 'active'
-            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
-    )
-    .bind(entry_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    Ok(row.and_then(|(type_key, slug, custom)| {
-        custom.or_else(|| CanonicalUrlBuilder::entry_from_id(entry_id, &type_key, &slug))
-    }))
+    let visible: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM content_entries e
+           JOIN content_types t ON t.key=e.content_type_key
+           WHERE e.id=? AND e.publication_status='published'
+             AND e.content_type_key!='section' AND t.provider_status='active'
+             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)",
+    ).bind(entry_id).fetch_one(&mut *conn).await?;
+    if visible == 0 { return Ok(None); }
+    crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
 pub async fn resolve_public_entry_paths_by_ids(
@@ -100,7 +96,7 @@ pub async fn validate_route_claim_in_tx(
     raw_path: &str,
     owner_entry_id: Option<i64>,
 ) -> ApiResult<String> {
-    let path = validate_custom_entry_path(raw_path).map_err(ApiError::bad_request)?;
+    let path = validate_c3_custom_entry_path(raw_path).map_err(ApiError::bad_request)?;
     let first_seg = path[1..].split('/').next().unwrap_or("");
     let cpt_conflict: Option<String> = sqlx::query_scalar(
         "SELECT key FROM content_types WHERE key = ? AND provider_status = 'active' LIMIT 1",
@@ -136,6 +132,27 @@ pub async fn validate_route_claim_in_tx(
         return Err(ApiError::conflict(
             "Đường dẫn đang được giữ làm redirect cho một bài viết khác.",
         ));
+    }
+
+    let claim_owner: Option<(String, String)> = sqlx::query_as(
+        "SELECT target_kind,target_id FROM permalink_route_claims WHERE path=?",
+    ).bind(&path).fetch_optional(&mut *conn).await?;
+    if let Some((kind,id)) = claim_owner
+        && (kind != "entry" || id.parse::<i64>().ok() != owner_entry_id)
+    {
+        return Err(ApiError::conflict(format!(
+            "permalink_collision:path={path} existing={kind}:{id}",
+        )));
+    }
+    let historical_owner: Option<(String, String)> = sqlx::query_as(
+        "SELECT target_kind,target_id FROM permalink_route_redirects WHERE source_path=?",
+    ).bind(&path).fetch_optional(&mut *conn).await?;
+    if let Some((kind,id)) = historical_owner
+        && (kind != "entry" || id.parse::<i64>().ok() != owner_entry_id)
+    {
+        return Err(ApiError::conflict(format!(
+            "permalink_collision:path={path} redirect_owner={kind}:{id}",
+        )));
     }
 
     Ok(path)
@@ -377,7 +394,9 @@ pub async fn put_entry_route(
         if exists.is_none() {
             return Err(ApiError::not_found("Không tìm thấy nội dung."));
         }
-        set_entry_route_in_tx(&mut conn, entry_id, expected_entry_version, custom_path).await
+        let result = set_entry_route_in_tx(&mut conn, entry_id, expected_entry_version, custom_path).await?;
+        crate::storage::permalinks::sync_claims_in_tx(&mut conn).await?;
+        Ok(result)
     }
     .await;
     match res {

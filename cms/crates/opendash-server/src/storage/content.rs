@@ -404,6 +404,7 @@ pub async fn insert_user_content_type(
                 .ok_or_else(|| ApiError::internal("Không thể tải schema vừa tạo."))?;
             verify_effective_schema_transition(None, &effective, false)
                 .map_err(|e| map_transition_error(e, true))?;
+            crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
             tx.commit().await?;
             Ok(ContentTypeApiItem {
                 base: effective.base,
@@ -513,6 +514,7 @@ pub async fn update_user_content_type(
     verify_effective_schema_transition(Some(&old_effective), &new_effective, has_entries)
         .map_err(|e| map_transition_error(e, true))?;
 
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(ContentTypeApiItem {
         base: new_effective.base,
@@ -1130,7 +1132,8 @@ pub async fn sync_theme_declarations_in_tx(
             .collect(),
         field_groups: declarations.field_groups.clone(),
     };
-    sync_owner_cnt_declarations_in_tx(conn, "theme", theme_id, &neutral, false).await
+    sync_owner_cnt_declarations_in_tx(conn, "theme", theme_id, &neutral, false).await?;
+    crate::storage::permalinks::sync_claims_in_tx(conn).await
 }
 
 /// Synchronizes a plugin's CNT declarations (`content_types`, `taxonomy_eligibility`, and `field_groups`)
@@ -1143,7 +1146,8 @@ pub async fn sync_plugin_cnt_declarations_in_tx(
     if declarations.is_empty() && !table_exists_in_tx(conn, "content_types").await? {
         return Ok(());
     }
-    sync_owner_cnt_declarations_in_tx(conn, "plugin", plugin_id, declarations, true).await
+    sync_owner_cnt_declarations_in_tx(conn, "plugin", plugin_id, declarations, true).await?;
+    crate::storage::permalinks::sync_claims_in_tx(conn).await
 }
 
 /// Updates `provider_status` for all CNT declarations owned by a plugin without deleting schema or entries.
@@ -1237,6 +1241,7 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
         }
     }
     bump_provider_cpt_cas_in_tx(conn, changed_keys).await?;
+    crate::storage::permalinks::sync_claims_in_tx(conn).await?;
     Ok(())
 }
 
@@ -1958,6 +1963,7 @@ pub async fn put_site_taxonomy_eligibility(
     }
     let effective = load_effective_content_schema_in_tx(&mut tx, type_key).await?
         .ok_or_else(|| ApiError::internal("Không thể tải schema CPT."))?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(ContentTypeApiItem {
         base: effective.base,

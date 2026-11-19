@@ -140,6 +140,7 @@ pub async fn create_definition(
     .execute(&mut *tx).await.map_err(mutation_error)?;
     let created = definition_in_write(&mut tx, &input.key).await?
         .ok_or_else(|| ApiError::internal("Không thể đọc taxonomy vừa tạo."))?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
     Ok(created)
 }
@@ -185,6 +186,7 @@ pub async fn patch_definition(
     }
     let updated = definition_in_write(&mut tx, key).await?
         .ok_or_else(|| ApiError::internal("Không thể tải taxonomy vừa sửa."))?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
     Ok(updated)
 }
@@ -214,6 +216,7 @@ pub async fn delete_definition(
     sqlx::query("DELETE FROM taxonomy_definitions WHERE key=? AND version=?")
         .bind(key).bind(expected_version)
         .execute(&mut *tx).await.map_err(mutation_error)?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
     Ok(())
 }
@@ -546,6 +549,7 @@ pub async fn create_term(
     let created = term_in_write(&mut tx, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải term vừa tạo."))?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
     Ok(created)
 }
@@ -618,6 +622,7 @@ pub async fn patch_term(
     let record = term_in_write(&mut tx, id)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải term vừa cập nhật."))?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
     Ok(record)
 }
@@ -675,6 +680,7 @@ pub async fn delete_term(
             "Term đã thay đổi, hãy tải lại.",
         ));
     }
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await.map_err(mutation_error)?;
     Ok(())
 }
