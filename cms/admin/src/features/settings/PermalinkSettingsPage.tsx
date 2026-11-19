@@ -46,6 +46,11 @@ function sameDraft(left: PermalinkSettingsDraft, right: PermalinkSettingsDraft):
     && sameBases(left.taxonomy_bases, right.taxonomy_bases);
 }
 
+function baseChoice(bases: Record<string, string | null>, name: string): 'inherit' | 'legacy' | 'custom' {
+  if (!Object.prototype.hasOwnProperty.call(bases, name)) return 'inherit';
+  return bases[name] === null ? 'legacy' : 'custom';
+}
+
 export function discardPermalinkDraft(siteId: string, userId: number): void {
   pendingDrafts.delete(`${siteId}:${userId}`);
 }
@@ -179,6 +184,18 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
       const originalVersion = pendingDrafts.get(key)?.baselineVersion ?? saved.version;
       pendingDrafts.set(key, { baselineVersion: originalVersion, draft: next });
     }
+  }
+
+  function updateBaseChoice(
+    kind: 'content_type_bases' | 'taxonomy_bases',
+    name: string,
+    value: string | null | undefined,
+  ) {
+    if (!draft) return;
+    const bases = { ...draft[kind] };
+    if (value === undefined) delete bases[name];
+    else bases[name] = value;
+    updateDraft({ ...draft, [kind]: bases });
   }
 
   function resetDraft() {
@@ -327,13 +344,14 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
           </div>
           <div>
             <h3 className="text-sm font-semibold text-slate-800">Đường dẫn cơ sở cho Custom Post Type</h3>
-            <p className="mb-3 text-xs text-slate-600">Để trống để sử dụng URL cũ. Base gồm 1–3 đoạn kebab-case, không có dấu / ở đầu/cuối.</p>
+            <p className="mb-3 text-xs text-slate-600">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc dùng đường dẫn legacy. Base tùy chỉnh gồm 1–3 đoạn kebab-case, không có dấu / ở đầu/cuối.</p>
             {typeKeys.length === 0 && <p className="text-sm text-slate-500">Chưa có CPT công khai có thể cấu hình.</p>}
             <div className="grid gap-3 sm:grid-cols-2">
               {typeKeys.map(keyName => {
                 const available = typeOptions.find(type => type.descriptor.key === keyName);
                 const hasPendingChange = !available &&
                   draft.content_type_bases[keyName] !== saved.content_type_bases[keyName];
+                const choice = baseChoice(draft.content_type_bases, keyName);
                 return <div key={keyName} className="text-sm text-slate-800">
                   <label htmlFor={`permalink-cpt-${keyName}`}>
                     {available?.descriptor.label ?? keyName} <span className="text-slate-500">({keyName})</span>
@@ -342,10 +360,23 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                   <input id={`permalink-cpt-${keyName}`} className="mt-1 w-full rounded-lg border border-slate-300 p-2 font-mono"
                     aria-label={`CPT base ${keyName}`} disabled={!available || loading}
                     value={draft.content_type_bases[keyName] ?? ''}
-                    onChange={event => updateDraft({
-                      ...draft, content_type_bases: { ...draft.content_type_bases, [keyName]: event.target.value || null },
-                    })}
+                    onChange={event => updateBaseChoice('content_type_bases', keyName, event.target.value || null)}
                     placeholder="VD: projects" />
+                  <p className="mt-1 text-xs text-slate-600" data-testid={`cpt-base-mode-${keyName}`}>
+                    {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng URL legacy.'
+                      : choice === 'legacy' ? 'Đang chọn đường dẫn legacy riêng cho website.'
+                        : 'Đang dùng base tùy chỉnh của website.'}
+                  </p>
+                  {available && <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" disabled={loading || choice === 'legacy'}
+                      onClick={() => updateBaseChoice('content_type_bases', keyName, null)}
+                      className="rounded border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
+                      aria-label={`Dùng đường dẫn legacy cho CPT ${keyName}`}>Dùng đường dẫn legacy</button>
+                    <button type="button" disabled={loading || choice === 'inherit'}
+                      onClick={() => updateBaseChoice('content_type_bases', keyName, undefined)}
+                      className="rounded border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
+                      aria-label={`Kế thừa mặc định cho CPT ${keyName}`}>Kế thừa mặc định</button>
+                  </div>}
                   {hasPendingChange && <button type="button" disabled={loading} onClick={() => revertInactiveBase('content_type_bases', keyName)}
                     className="mt-1 text-xs font-semibold text-sky-800 underline">
                     Bỏ thay đổi chưa lưu của CPT này
@@ -356,13 +387,14 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
           </div>
           <div>
             <h3 className="text-sm font-semibold text-slate-800">Đường dẫn cơ sở cho Taxonomy</h3>
-            <p className="mb-3 text-xs text-slate-600">Để trống để giữ URL taxonomy mặc định. Không cấu hình đường dẫn term phân cấp.</p>
+            <p className="mb-3 text-xs text-slate-600">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc dùng đường dẫn legacy. Không cấu hình đường dẫn term phân cấp.</p>
             {taxonomyKeys.length === 0 && <p className="text-sm text-slate-500">Chưa có taxonomy công khai có thể cấu hình.</p>}
             <div className="grid gap-3 sm:grid-cols-2">
               {taxonomyKeys.map(keyName => {
                 const available = taxonomyOptions.find(type => type.key === keyName);
                 const hasPendingChange = !available &&
                   draft.taxonomy_bases[keyName] !== saved.taxonomy_bases[keyName];
+                const choice = baseChoice(draft.taxonomy_bases, keyName);
                 return <div key={keyName} className="text-sm text-slate-800">
                   <label htmlFor={`permalink-taxonomy-${keyName}`}>
                     {available?.label ?? keyName} <span className="text-slate-500">({keyName})</span>
@@ -371,10 +403,23 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                   <input id={`permalink-taxonomy-${keyName}`} className="mt-1 w-full rounded-lg border border-slate-300 p-2 font-mono"
                     aria-label={`Taxonomy base ${keyName}`} disabled={!available || loading}
                     value={draft.taxonomy_bases[keyName] ?? ''}
-                    onChange={event => updateDraft({
-                      ...draft, taxonomy_bases: { ...draft.taxonomy_bases, [keyName]: event.target.value || null },
-                    })}
+                    onChange={event => updateBaseChoice('taxonomy_bases', keyName, event.target.value || null)}
                     placeholder="VD: genres" />
+                  <p className="mt-1 text-xs text-slate-600" data-testid={`taxonomy-base-mode-${keyName}`}>
+                    {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng URL legacy.'
+                      : choice === 'legacy' ? 'Đang chọn đường dẫn legacy riêng cho website.'
+                        : 'Đang dùng base tùy chỉnh của website.'}
+                  </p>
+                  {available && <div className="mt-2 flex flex-wrap gap-2">
+                    <button type="button" disabled={loading || choice === 'legacy'}
+                      onClick={() => updateBaseChoice('taxonomy_bases', keyName, null)}
+                      className="rounded border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
+                      aria-label={`Dùng đường dẫn legacy cho Taxonomy ${keyName}`}>Dùng đường dẫn legacy</button>
+                    <button type="button" disabled={loading || choice === 'inherit'}
+                      onClick={() => updateBaseChoice('taxonomy_bases', keyName, undefined)}
+                      className="rounded border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
+                      aria-label={`Kế thừa mặc định cho Taxonomy ${keyName}`}>Kế thừa mặc định</button>
+                  </div>}
                   {hasPendingChange && <button type="button" disabled={loading} onClick={() => revertInactiveBase('taxonomy_bases', keyName)}
                     className="mt-1 text-xs font-semibold text-sky-800 underline">
                     Bỏ thay đổi chưa lưu của taxonomy này

@@ -1,9 +1,10 @@
 # M6-S11-T01 / #378 — C4 provider CPT, taxonomy, rewrite and Wasmi (G4 candidate)
 
 Date: 2026-11-19. Agent: Harbor. Host: macOS 15.8.2 (Darwin 24.6.0), Intel x86_64.
-**Status: implementation candidate, not G4/G5 accepted.** One actionable Admin UI
-P2 requires additional coordinator file ownership. Do not merge or close this
-task on the strength of this premerge report.
+**Status: implementation candidate, not G4/G5 accepted.** The Admin UI P2 was
+corrected under Aster's bounded Issue #378 ACK 7014797743 and RESUME_CURRENT
+authorization 7015143039. Exact-head PR CI/self-review and separate merged-source
+native G5 remain independently gated; do not close this Issue from this report.
 
 ## Authority and source
 
@@ -23,6 +24,12 @@ task on the strength of this premerge report.
   and optional forward migration cms/migrations/0041_provider_rewrite_defaults.sql.
   This implements [C4](../contracts/CONTENT_FOUNDATION_2026_11.md) without
   changing the approved G2 contract or historical migration 0040.
+- Aster's subsequent [bounded Admin ownership ACK](https://github.com/thientran2359/opendash-cms/issues/378#issuecomment-7014797743)
+  permits exactly cms/admin/src/features/settings/PermalinkSettingsPage.tsx,
+  this task's Chrome runner, and verification evidence. The
+  [resume authorization](https://github.com/thientran2359/opendash-cms/issues/378#issuecomment-7015143039)
+  pinned Draft PR #406 head f66ba19d24f6a1d3990336b03a3e41b5c9ab4693
+  and base cb76f21a2094ad8a1807addc1fe3187e8480475e before editing.
 
 ## Implementation and design delta
 
@@ -62,7 +69,7 @@ loopback ports. The owner live site and port 18964 were not touched.
 | npm run build --prefix cms/admin | PASS, 98 modules; existing JS chunk warning |
 | cargo build --manifest-path cms/Cargo.toml --locked | PASS, native x86_64 Mach-O debug binary |
 | python3.13 -m py_compile cms/scripts/content_foundation_m6_s11_t01_e2e.py | PASS |
-| Locally isolated Playwright Chrome runner with --binary, --admin-dist and --artifact-dir | PASS 15/15 native Admin/API/SQLite/restart; four screenshots, byte-for-byte embedded Admin index, JS and CSS |
+| Initial locally isolated Playwright Chrome runner with --binary, --admin-dist and --artifact-dir | PASS 15/15 native Admin/API/SQLite/restart; four screenshots, byte-for-byte embedded Admin index, JS and CSS. Superseded by the bounded UI acceptance below. |
 | .g5-checkouts/evidence/c4-playwright-venv/bin/python cms/scripts/content_foundation_m6_s11_t01_backup_e2e.py --binary cms/target/debug/opendash --artifact-dir .g5-checkouts/evidence/c4-native-backup | PASS 6/6 isolated C4 encrypted backup/restore: provider-default CPT/term, snapshot, post-snapshot site mutation, recovery activation, preserved canonical URL/ownership and re-edit |
 | rustfmt --edition 2024 --check on the new focused Rust test, plus git diff --check | PASS |
 
@@ -76,10 +83,10 @@ If-Match with 412, and stable-ID redirects do not form chains. The runner stores
 ignored receipt at .g5-checkouts/evidence/c4-native-browser/receipt.json with
 status PASS, port_18964_used false and four image hashes.
 
-Latest native candidate binary SHA-256: d2a2d569fa576aba7d5dbd1730c280cf3546ee5897f6dba50f9a27a3d1dde81b.
-Admin index SHA-256: a918cace6a5e68e94c1da3bc56f4d9879167e66c3d2a83bfc610d28170178fe2.
-Admin JS index-CBZKbQ9J.js: 33978d59d94b6997f2a243901a1060a00e3494a7c8d30e2919e4b77a96ec965c.
-Admin CSS index-FE7M3lRd.css: ec113de7634d17c72b958b1944400c65060760846eabcd135bb93e50d1b8b292.
+Pre-UI candidate binary SHA-256: d2a2d569fa576aba7d5dbd1730c280cf3546ee5897f6dba50f9a27a3d1dde81b.
+Pre-UI Admin index SHA-256: a918cace6a5e68e94c1da3bc56f4d9879167e66c3d2a83bfc610d28170178fe2.
+Pre-UI Admin JS index-CBZKbQ9J.js: 33978d59d94b6997f2a243901a1060a00e3494a7c8d30e2919e4b77a96ec965c.
+Pre-UI Admin CSS index-FE7M3lRd.css: ec113de7634d17c72b958b1944400c65060760846eabcd135bb93e50d1b8b292.
 Migration 0041 SHA-256: 7c4b8eb52262f5d19f734899e606ba2d63ac20250673d8ed691260fc6cd8322b.
 The pre-existing sample plugin ZIP remains unchanged at SHA-256
 b04306779e1a76381ec0ce3e00d416d7b98ce2da045b59845cefb30cdaab2a37.
@@ -109,24 +116,100 @@ locator, corrected and rerun PASS; one new test initially supplied malformed
 If-Match and was corrected and rerun PASS. Generated binaries, screenshots,
 site DBs and credentials are intentionally excluded from the Git commit.
 
+## Bounded Admin UI correction — native macOS acceptance
+
+After ACK 7014797743, the Admin CPT/taxonomy rows distinguish three *site*
+choices using own-property membership in each sparse draft map:
+
+- Absent key: inherit the active provider rewrite default, or the legacy
+  family when the provider has no applicable default.
+- Present `null`: explicitly opt out of provider default and use the legacy
+  family for this site.
+- Present nonempty string: use the site's custom base.
+
+The UI has separate keyboard-accessible **Dùng đường dẫn legacy** and
+**Kế thừa mặc định** controls per active row; inheritance removes only its own
+key from a cloned draft object with `delete`. Inactive-provider rows remain
+uneditable and expose only the existing pending-draft revert action. No new
+HTTP DELETE operation, DTO, schema, historical migration, or API change.
+Existing 401 draft RAM scope, 409/412 stale guards, dirty comparison and
+full-form C3 PUT remain authoritative.
+
+The following results were observed on the candidate macOS Intel host, each
+using isolated root/SQLite and random loopback port:
+
+| Exact command / scope | Observed result |
+| --- | --- |
+| `npm run typecheck --prefix cms/admin` | PASS, exit 0 |
+| `npm run build --prefix cms/admin` | PASS, 98 modules, existing chunk size advisory |
+| `cargo build --manifest-path cms/Cargo.toml --locked` | PASS, debug x86_64 server with compiled Admin |
+| `python3.13 -m py_compile cms/scripts/content_foundation_m6_s11_t01_e2e.py` | PASS |
+| `.g5-checkouts/evidence/c4-playwright-venv/bin/python cms/scripts/content_foundation_m6_s11_t01_e2e.py --binary cms/target/debug/opendash --admin-dist cms/admin/dist --artifact-dir .g5-checkouts/evidence/c4-native-browser-ui` | **PASS 23/23**, six native Chrome screenshots and byte-exact embedded assets; `port_18964_used=false` |
+| `cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test content_foundation_m6_s11_t01 -- --test-threads=1` | **PASS 9/9**, C4 provider/Wasm/migration HTTP/SQLite |
+| `cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --bin opendash storage::permalinks::tests:: -- --test-threads=1` | **PASS 18/18**, C3 CAS/claims/history/50k-claims |
+| `.g5-checkouts/evidence/c4-playwright-venv/bin/python cms/scripts/content_foundation_m7_s17_t02_e2e.py --binary cms/target/debug/opendash --admin-dist cms/admin/dist --artifact-dir .g5-checkouts/evidence/c4-native-c3-regression` | **PASS**, eight C3 API/native checks and ten independent Chrome checks, including published/draft privacy and stale/409 retained drafts |
+| `.g5-checkouts/evidence/c4-playwright-venv/bin/python cms/scripts/content_foundation_m6_s11_t01_backup_e2e.py --binary cms/target/debug/opendash --artifact-dir .g5-checkouts/evidence/c4-native-backup-ui` | **PASS 6/6**, encrypted backup/restore/recovery on same candidate generation |
+| `git diff --check` | PASS |
+
+Chrome verified both CPT and taxonomy flows: inherited→explicit legacy→inherited
+and custom→inherited, absent/null/nonempty JSON choices, unrelated Post save
+retaining sparse maps, unchanged public URLs before Save, stable-ID redirects
+after Save, browser reload and process restart, no-provider legacy fallback,
+provider upgrade, native keyboard and 390 px controls. Its 409 test confirms
+no conflicting route/site mutation and retains the form draft; its 412 test
+confirms newer provider CAS cannot be bypassed by toggling choices or rechecking
+the server version. A real expired session recovers the same user's RAM draft
+after login and does not disclose it to another account. Inactive provider
+changes retain or revert safely.
+
+The runner also starts **two concurrent HTTP connections** behind a
+`threading.Barrier`: one full-form settings PUT and one provider package
+upgrade. The observed status was settings **200**, provider **201**; in either
+valid ordering a stale settings 412 is also acceptable. Assertions inspect
+the whole final sparse/explicit map, provider ownership provenance in SQLite,
+integrity and foreign keys, canonical routes and redirects, and post-restart
+URLs. The race exercised real writer overlap but does not prove every scheduler
+interleaving. C4 uninstall through a separate public endpoint remains
+untested; package update/disable/re-enable/theme switches were exercised.
+
+Final corrected-UI native candidate (rebuilt and browser-tested after all
+Cargo tests), all hashes SHA-256:
+
+- Binary `cms/target/debug/opendash`:
+  `c03a86c03dcbb0fc62ad5ddef93d6082f2576cc2b70e7e06585a4464d94b983d`.
+- Admin `cms/admin/dist/index.html`:
+  `2abb70657de1a07b18cc6433da35ef4c4fcffce6f0292ca15b4bacd27feea1b8`.
+- Admin JS `index-BpgMsRsS.js`:
+  `6a7c76e661b0af4904068db7eb91d0a2b9f60666e54c66fc74c102167406225a`.
+- Admin CSS `index-FE7M3lRd.css`:
+  `ec113de7634d17c72b958b1944400c65060760846eabcd135bb93e50d1b8b292`.
+- Final six browser screenshots recorded in receipt:
+  `c4-taxonomy-browser.png` (`8dc7b3f5cbfa137791560b342d9aa8ef3ce94b6841d23cc89e41ce6f115632fa`),
+  `c4-permalink-default.png` (`3e0d34f60d296be7f33d769fa01235d315937c56f528b48ee611bfa25e7a1bd4`),
+  `c4-explicit-null-saved.png` (`e01897a9d7901cfab9083ec248dd5c26d0ab59e9b750721c287dfb32d344b767`),
+  `c4-permalink-mobile-390.png` (`431a90d8b6814e91c16c58484ee3ed74d09f374472f0198f9b78b3ecd5fd3ff8`),
+  `c4-ui-stale-412.png` (`cdf1792bf1f3ad8843d62bbe11b226e81a9c790219937635ade86a2aa2895782`),
+  `c4-ui-conflict-409.png` (`6d5a0b089dc01b127fa1632898aea52bf1773ae035811819831ad53a94997a59`).
+
+Local ignored receipts:
+`.g5-checkouts/evidence/c4-native-browser-ui/receipt.json`,
+`.g5-checkouts/evidence/c4-native-c3-regression/`, and
+`.g5-checkouts/evidence/c4-native-backup-ui/`. Screenshots and site databases
+are not committed. Exact merged-source release G5 still requires a separate
+native test and receipt after merge.
+
 ## Independent reviews and remaining gates
 
 - Worker-1 read-only static C4 provider/theme/taxonomy audit: PASS, no
   actionable P1/P2 confirmed in examined backend.
-- Worker-2 independent C3/consumer audit found one actionable P2 at
-  cms/admin/src/features/settings/PermalinkSettingsPage.tsx around lines
-  329–381. An inherited provider default (site key absent) and a saved
-  explicit null both render a blank textbox; the UI incorrectly says blank
-  means legacy and provides no action to delete a saved key and restore
-  provider inheritance. Fix requires distinguishing inherited versus explicit
-  legacy and adding a remove-key control. This UI file is not within the
-  current approved Issue #378 ownership. **Await explicit bounded Aster ACK**
-  before editing. The native Chrome runner now proves null→inherited through
-  existing sparse API semantics; the Admin UI has no control to perform it.
-- Encrypted C4-specific backup→restore→re-edit is now PASS on a matching
-  candidate binary. Provider/C3 concurrent writer pressure and independent
-  exact-merged macOS release G5 remain NOT_RUN; the full M8 suite alone does
-  not replace those separate receipts.
+- Worker-2 identified the inherited/explicit-null Admin UI ambiguity.
+  Aster approved bounded ownership in Issue comment 7014797743; the UI
+  correction and full native Chrome acceptance above address that finding.
+  Final exact-head independent review and CI are separate gates.
+- Encrypted C4-specific backup→restore→re-edit is PASS on an isolated
+  candidate binary. Provider/C3 concurrent writer acceptance was exercised,
+  including the observed 200/201 successful overlap. Independent exact-merged
+  macOS release G5 remains NOT_RUN; the full M8 suite alone does not replace it.
   A distinct public plugin-uninstall API was not exercised; package updates,
   disable/re-enable, theme switch and reactivation were.
 - PR-head governance CI, exact-head self-review, G4 merge, exact-merged G5

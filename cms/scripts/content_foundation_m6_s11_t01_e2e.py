@@ -18,6 +18,10 @@ import sqlite3
 import tempfile
 import traceback
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
 from m7_beta_menu_picker_e2e import admin_login, launch_server, stop_server
@@ -144,6 +148,28 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                     no_redirect(ctx, base, "/genres-browser/fiction-browser", 200)
                     checks.append("custom_cpt_term_and_draft_publish_canonical_provider_urls")
 
+                    # A site-owned CPT/taxonomy has no provider rewrite
+                    # declaration. Missing map keys must use legacy routes.
+                    local_type = api(ctx, base, "POST", "/api/admin/content-types", 201,
+                                     {"key": "site_only_c4", "label": "Site Only C4",
+                                      "fields": []}, csrf)
+                    api(ctx, base, "POST", "/api/admin/taxonomy/definitions", 201,
+                        {"key": "topic_site_c4", "label": "Site Topic C4",
+                         "hierarchical": False, "public": True}, csrf)
+                    local_term = api(ctx, base, "POST", "/api/admin/taxonomy/terms", 201,
+                                     {"kind": "topic_site_c4", "name": "Local Topic",
+                                      "slug": "local-topic"}, csrf)
+                    api(ctx, base, "PUT", "/api/admin/taxonomy/eligibility/site_only_c4", 200,
+                        {"taxonomies": ["topic_site_c4"],
+                         "expected_version": local_type["version"]},
+                        csrf, local_type["version"])
+                    api(ctx, base, "POST", "/api/admin/content-types/site_only_c4/entries", 201,
+                        {"title": "Local entry", "slug": "local-entry", "values": {},
+                         "term_ids": [local_term["id"]]}, csrf)
+                    no_redirect(ctx, base, "/content/site_only_c4/local-entry", 200)
+                    no_redirect(ctx, base, "/taxonomy/topic_site_c4/local-topic", 200)
+                    checks.append("absent_provider_default_falls_back_to_legacy_cpt_and_taxonomy_urls")
+
                     page = ctx.new_page()
                     page.goto(base + "/admin/#/taxonomy/definitions", wait_until="domcontentloaded")
                     expect(page.get_by_text("Genre Browser C4").first).to_be_visible(timeout=20000)
@@ -155,28 +181,43 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                     expect(form).to_be_visible(timeout=20000)
                     cpt_base = page.get_by_role("textbox", name="CPT base listing_browser_c4")
                     tax_base = page.get_by_role("textbox", name="Taxonomy base genre_browser_c4")
+                    cpt_mode = page.get_by_test_id("cpt-base-mode-listing_browser_c4")
+                    tax_mode = page.get_by_test_id("taxonomy-base-mode-genre_browser_c4")
+                    cpt_legacy = page.get_by_role("button", name="Dùng đường dẫn legacy cho CPT listing_browser_c4")
+                    tax_legacy = page.get_by_role("button", name="Dùng đường dẫn legacy cho Taxonomy genre_browser_c4")
+                    cpt_inherit = page.get_by_role("button", name="Kế thừa mặc định cho CPT listing_browser_c4")
+                    tax_inherit = page.get_by_role("button", name="Kế thừa mặc định cho Taxonomy genre_browser_c4")
                     expect(cpt_base).to_have_value("")
                     expect(tax_base).to_have_value("")
+                    expect(cpt_mode).to_contain_text("Đang kế thừa")
+                    expect(tax_mode).to_contain_text("Đang kế thừa")
+                    expect(page.get_by_test_id("cpt-base-mode-site_only_c4")).to_contain_text("Đang kế thừa")
+                    expect(page.get_by_test_id("taxonomy-base-mode-topic_site_c4")).to_contain_text("Đang kế thừa")
+                    assert cpt_inherit.is_disabled() and tax_inherit.is_disabled()
                     save = page.get_by_role("button", name="Lưu permalink")
                     assert save.is_disabled()
-                    checks.append("native_chrome_c4_taxonomy_and_sparse_settings_form")
+                    checks.append("native_chrome_c4_inherited_modes_and_sparse_settings_form")
                     image_file = artifacts / "c4-permalink-default.png"
                     page.screenshot(path=str(image_file), full_page=True)
                     shots[image_file.name] = digest(image_file)
 
-                    # An unchanged full-form save must not materialize provider
-                    # defaults into site overrides. Explicit null is tested by
-                    # typing and clearing the corresponding Admin form input.
-                    cpt_base.fill("temporary-choice")
-                    cpt_base.fill("")
-                    tax_base.fill("temporary-choice")
-                    tax_base.fill("")
+                    # Two explicit actions write JSON null, with no change to
+                    # the public site until the complete draft is saved.
+                    cpt_legacy.click()
+                    tax_legacy.click()
+                    expect(cpt_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    expect(tax_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    no_redirect(ctx, base, "/listings-browser/browser-entry", 200)
+                    no_redirect(ctx, base, "/genres-browser/fiction-browser", 200)
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks") == full_form
                     expect(save).to_be_enabled()
                     save.click()
                     expect(save).to_be_disabled(timeout=20000)
                     explicit_null = api(ctx, base, "GET", "/api/admin/settings/permalinks")
                     assert explicit_null["content_type_bases"]["listing_browser_c4"] is None
                     assert explicit_null["taxonomy_bases"]["genre_browser_c4"] is None
+                    expect(cpt_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    expect(tax_mode).to_contain_text("Đang chọn đường dẫn legacy")
                     no_redirect(ctx, base, "/content/listing_browser_c4/browser-entry", 200)
                     no_redirect(ctx, base, "/taxonomy/genre_browser_c4/fiction-browser", 200)
                     no_redirect(ctx, base, "/listings-browser/browser-entry", 301,
@@ -187,6 +228,8 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                     shots[image_file.name] = digest(image_file)
                     page.set_viewport_size({"width": 390, "height": 844})
                     expect(form).to_be_visible()
+                    expect(cpt_inherit).to_be_visible()
+                    expect(tax_inherit).to_be_visible()
                     image_file = artifacts / "c4-permalink-mobile-390.png"
                     page.screenshot(path=str(image_file), full_page=True)
                     shots[image_file.name] = digest(image_file)
@@ -232,17 +275,24 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                         assert owner == ("plugin", "browser-c4-provider", "new-listings-c4"), owner
                     checks.append("sqlite_integrity_owner_and_default_provenance")
 
-                    # Site explicit null -> inherited provider defaults.  The
-                    # only difference on the wire is the ABSENCE of the keys;
-                    # JSON null would continue to force the legacy paths.
-                    inherited_input = full_permalink_input(unchanged)
-                    inherited_input["content_type_bases"].pop("listing_browser_c4")
-                    inherited_input["taxonomy_bases"].pop("genre_browser_c4")
-                    inherited = api(ctx, base, "PUT", "/api/admin/settings/permalinks", 200,
-                                    inherited_input, csrf, unchanged["version"])
+                    # UI buttons remove the keys from cloned draft maps. Before
+                    # Save, legacy remains the canonical route.
+                    cpt_inherit.click()
+                    tax_inherit.click()
+                    expect(cpt_mode).to_contain_text("Đang kế thừa")
+                    expect(tax_mode).to_contain_text("Đang kế thừa")
+                    no_redirect(ctx, base, "/content/listing_browser_c4/browser-entry", 200)
+                    no_redirect(ctx, base, "/taxonomy/genre_browser_c4/fiction-browser", 200)
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks") == unchanged
+                    save.click()
+                    expect(save).to_be_disabled(timeout=20000)
+                    inherited = api(ctx, base, "GET", "/api/admin/settings/permalinks")
                     assert inherited["version"] == unchanged["version"] + 1
                     assert inherited["content_type_bases"] == {}
                     assert inherited["taxonomy_bases"] == {}
+                    page.reload(wait_until="domcontentloaded")
+                    expect(cpt_mode).to_contain_text("Đang kế thừa", timeout=20000)
+                    expect(tax_mode).to_contain_text("Đang kế thừa")
                     no_redirect(ctx, base, "/new-listings-c4/browser-entry", 200)
                     no_redirect(ctx, base, "/new-genres-c4/fiction-browser", 200)
                     no_redirect(ctx, base, "/content/listing_browser_c4/browser-entry",
@@ -251,15 +301,19 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                                 301, "/new-genres-c4/fiction-browser")
                     no_redirect(ctx, base, "/listings-browser/browser-entry",
                                 301, "/new-listings-c4/browser-entry")
-                    checks.append("site_explicit_null_to_inherit_restores_provider_defaults")
+                    checks.append("chrome_explicit_null_to_inherit_removes_both_keys_and_restores_provider_urls")
 
                     # A non-null site choice wins over the package; removing
                     # that key, not setting it to null, restores inheritance.
-                    chosen_input = full_permalink_input(inherited)
-                    chosen_input["content_type_bases"]["listing_browser_c4"] = "site-listings-c4"
-                    chosen_input["taxonomy_bases"]["genre_browser_c4"] = "site-genres-c4"
-                    chosen = api(ctx, base, "PUT", "/api/admin/settings/permalinks", 200,
-                                 chosen_input, csrf, inherited["version"])
+                    cpt_base.fill("site-listings-c4")
+                    tax_base.fill("site-genres-c4")
+                    expect(cpt_mode).to_contain_text("base tùy chỉnh")
+                    expect(tax_mode).to_contain_text("base tùy chỉnh")
+                    no_redirect(ctx, base, "/new-listings-c4/browser-entry", 200)
+                    no_redirect(ctx, base, "/new-genres-c4/fiction-browser", 200)
+                    save.click()
+                    expect(save).to_be_disabled(timeout=20000)
+                    chosen = api(ctx, base, "GET", "/api/admin/settings/permalinks")
                     assert chosen["content_type_bases"]["listing_browser_c4"] == "site-listings-c4"
                     assert chosen["taxonomy_bases"]["genre_browser_c4"] == "site-genres-c4"
                     no_redirect(ctx, base, "/site-listings-c4/browser-entry", 200)
@@ -268,13 +322,19 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                                 301, "/site-listings-c4/browser-entry")
                     no_redirect(ctx, base, "/new-genres-c4/fiction-browser",
                                 301, "/site-genres-c4/fiction-browser")
-                    checks.append("site_non_null_base_wins_over_provider_defaults")
+                    checks.append("chrome_custom_base_wins_over_provider_defaults_for_cpt_and_taxonomy")
 
-                    cleared_input = full_permalink_input(chosen)
-                    del cleared_input["content_type_bases"]["listing_browser_c4"]
-                    del cleared_input["taxonomy_bases"]["genre_browser_c4"]
-                    cleared = api(ctx, base, "PUT", "/api/admin/settings/permalinks", 200,
-                                  cleared_input, csrf, chosen["version"])
+                    cpt_inherit.focus()
+                    page.keyboard.press("Enter")
+                    tax_inherit.focus()
+                    page.keyboard.press("Enter")
+                    expect(cpt_mode).to_contain_text("Đang kế thừa")
+                    expect(tax_mode).to_contain_text("Đang kế thừa")
+                    no_redirect(ctx, base, "/site-listings-c4/browser-entry", 200)
+                    no_redirect(ctx, base, "/site-genres-c4/fiction-browser", 200)
+                    save.click()
+                    expect(save).to_be_disabled(timeout=20000)
+                    cleared = api(ctx, base, "GET", "/api/admin/settings/permalinks")
                     assert cleared["content_type_bases"] == {}
                     assert cleared["taxonomy_bases"] == {}
                     no_redirect(ctx, base, "/new-listings-c4/browser-entry", 200)
@@ -283,15 +343,15 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                                 301, "/new-listings-c4/browser-entry")
                     no_redirect(ctx, base, "/site-genres-c4/fiction-browser",
                                 301, "/new-genres-c4/fiction-browser")
-                    checks.append("site_non_null_override_removed_restores_inheritance")
+                    checks.append("chrome_keyboard_custom_to_inherit_deletes_both_draft_keys")
 
                     # With both maps sparse again, a provider update changes
                     # the *effective* URLs and MUST advance the C3 CAS version.
                     # A concurrent settings editor holding the prior full-form
                     # snapshot must receive 412, never clobber that update.
                     prior_version = cleared["version"]
-                    install(ctx, base, csrf,
-                            provider_zip("1.0.2", "latest-listings-c4", "latest-genres-c4"))
+                    latest_plugin = install(ctx, base, csrf,
+                                            provider_zip("1.0.2", "latest-listings-c4", "latest-genres-c4"))
                     latest = api(ctx, base, "GET", "/api/admin/settings/permalinks")
                     assert latest["version"] == prior_version + 1, (cleared, latest)
                     assert latest["content_type_bases"] == {}
@@ -308,6 +368,223 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                     no_redirect(ctx, base, "/content/listing_browser_c4/browser-entry",
                                 301, "/latest-listings-c4/browser-entry")
                     checks.append("inherited_provider_update_bumps_c3_cas_and_rejects_stale_put")
+
+                    # UI has the prior baseline. A provider update must make
+                    # a later toggle/Save stale; even another toggle + fresh
+                    # GET must not silently grant that draft a newer version.
+                    cpt_legacy.click()
+                    expect(cpt_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    save.click()
+                    expect(form.get_by_role("alert")).to_contain_text("412", timeout=20000)
+                    expect(cpt_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    tax_legacy.click()
+                    expect(tax_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    expect(save).to_be_disabled()
+                    page.get_by_role("button", name="Kiểm tra phiên bản mới").click()
+                    expect(form.get_by_text("Cấu hình trên máy chủ mới hơn", exact=False)).to_be_visible()
+                    expect(cpt_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    expect(tax_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    expect(save).to_be_disabled()
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks") == latest
+                    image_file = artifacts / "c4-ui-stale-412.png"
+                    page.screenshot(path=str(image_file), full_page=True)
+                    shots[image_file.name] = digest(image_file)
+                    page.get_by_role("button", name="Bỏ nháp, dùng phiên bản mới").click()
+                    expect(cpt_mode).to_contain_text("Đang kế thừa", timeout=20000)
+                    expect(tax_mode).to_contain_text("Đang kế thừa")
+                    expect(save).to_be_disabled()
+                    checks.append("chrome_provider_cas_412_toggle_and_refresh_keep_draft_until_discard")
+
+                    # An existing published Page claims the proposed CPT
+                    # route; a rejected UI override must retain the form
+                    # without touching site choices or active public URLs.
+                    blocker = api(ctx, base, "POST",
+                                  "/api/admin/content-types/page/entries", 201,
+                                  {"title": "C4 route blocker", "slug": "c4-conflict-page",
+                                   "values": {}}, csrf)
+                    blocker = api(ctx, base, "PUT",
+                                  f"/api/admin/content-types/page/entries/{blocker['id']}/route",
+                                  200, {"custom_path": "/c4-conflict/browser-entry"},
+                                  csrf, blocker["version"])
+                    cpt_base.fill("c4-conflict")
+                    expect(cpt_mode).to_contain_text("base tùy chỉnh")
+                    no_redirect(ctx, base, "/latest-listings-c4/browser-entry", 200)
+                    save.click()
+                    expect(form.get_by_role("alert")).to_contain_text("409", timeout=20000)
+                    expect(cpt_base).to_have_value("c4-conflict")
+                    expect(save).to_be_enabled()
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks") == latest
+                    no_redirect(ctx, base, "/latest-listings-c4/browser-entry", 200)
+                    image_file = artifacts / "c4-ui-conflict-409.png"
+                    page.screenshot(path=str(image_file), full_page=True)
+                    shots[image_file.name] = digest(image_file)
+                    page.get_by_role("button", name="Bỏ thay đổi", exact=True).click()
+                    expect(cpt_mode).to_contain_text("Đang kế thừa")
+                    expect(save).to_be_disabled()
+                    checks.append("chrome_conflicting_cpt_base_409_rolls_back_and_keeps_draft")
+
+                    # A draft belonging to a provider that becomes inactive
+                    # must be restorable but not editable/savable while inactive.
+                    cpt_base.fill("pending-disabled-c4")
+                    tax_base.fill("pending-disabled-tax-c4")
+                    response = ctx.request.fetch(
+                        base + "/api/admin/plugins/browser-c4-provider/disable",
+                        method="POST", timeout=30000,
+                        headers={"X-CSRF-Token": csrf, "Origin": base,
+                                 "If-Match": str(latest_plugin["cas_version"])},
+                    )
+                    assert response.status == 200, (response.status, response.text())
+                    disabled = response.json()
+                    save.click()
+                    expect(form.get_by_role("alert")).to_contain_text("412", timeout=20000)
+                    page.get_by_role("button", name="Kiểm tra phiên bản mới").click()
+                    expect(cpt_base).to_be_disabled()
+                    expect(tax_base).to_be_disabled()
+                    expect(page.get_by_role("button", name="Kế thừa mặc định cho CPT listing_browser_c4")).to_have_count(0)
+                    page.get_by_role("button", name="Bỏ thay đổi chưa lưu của CPT này").click()
+                    page.get_by_role("button", name="Bỏ thay đổi chưa lưu của taxonomy này").click()
+                    expect(cpt_mode).to_have_count(0)
+                    expect(tax_mode).to_have_count(0)
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks")["content_type_bases"] == {}
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks")["taxonomy_bases"] == {}
+                    page.get_by_role("button", name="Bỏ nháp, dùng phiên bản mới").click()
+                    expect(cpt_mode).to_have_count(0)
+                    enabled = ctx.request.fetch(
+                        base + "/api/admin/plugins/browser-c4-provider/enable",
+                        method="POST", timeout=30000,
+                        headers={"X-CSRF-Token": csrf, "Origin": base,
+                                 "If-Match": str(disabled["cas_version"])},
+                    )
+                    assert enabled.status == 200, (enabled.status, enabled.text())
+                    page.reload(wait_until="domcontentloaded")
+                    expect(cpt_mode).to_contain_text("Đang kế thừa", timeout=20000)
+                    expect(tax_mode).to_contain_text("Đang kế thừa")
+                    expect(save).to_be_disabled()
+                    no_redirect(ctx, base, "/latest-listings-c4/browser-entry", 200)
+                    checks.append("chrome_inactive_provider_prevents_edits_and_reverts_pending_drafts")
+
+                    # Real server-side session expiration, followed by the
+                    # same account signing in again, must retain the draft.
+                    cpt_legacy.click()
+                    expect(cpt_mode).to_contain_text("Đang chọn đường dẫn legacy")
+                    fetch(ctx, base, "POST", "/auth/logout", 204, csrf=csrf)
+                    save.click()
+                    expect(page.locator("#guest-panel")).to_be_visible(timeout=20000)
+                    fetch(ctx, base, "GET", "/api/admin/settings/permalinks", 401)
+                    page.locator("#auth-username").fill("c4_browser")
+                    page.locator("#auth-password").fill("C4-Browser-Isolated-Password!2026")
+                    page.locator("#auth-login").click()
+                    expect(cpt_mode).to_contain_text("Đang chọn đường dẫn legacy", timeout=20000)
+                    expect(tax_mode).to_contain_text("Đang kế thừa")
+                    expect(save).to_be_enabled()
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks")["content_type_bases"] == {}
+                    page.get_by_role("button", name="Bỏ thay đổi", exact=True).click()
+                    expect(save).to_be_disabled()
+                    checks.append("chrome_real_401_same_account_reauth_restores_unsaved_choice")
+
+                    # Another administrator must not receive the first
+                    # account's pending RAM-only permalink draft.
+                    csrf = api(ctx, base, "GET", "/auth/me")["csrf_token"]
+                    api(ctx, base, "POST", "/api/admin/users", 201,
+                        {"username": "c4_other", "password": "C4-Other-Isolated-Password!2026",
+                         "role": "admin"}, csrf)
+                    tax_legacy.click()
+                    fetch(ctx, base, "POST", "/auth/logout", 204, csrf=csrf)
+                    save.click()
+                    expect(page.locator("#guest-panel")).to_be_visible(timeout=20000)
+                    page.locator("#auth-username").fill("c4_other")
+                    page.locator("#auth-password").fill("C4-Other-Isolated-Password!2026")
+                    page.locator("#auth-login").click()
+                    expect(cpt_mode).to_contain_text("Đang kế thừa", timeout=20000)
+                    expect(tax_mode).to_contain_text("Đang kế thừa")
+                    expect(save).to_be_disabled()
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks")["taxonomy_bases"] == {}
+                    checks.append("chrome_real_401_cross_account_draft_isolation")
+
+                    # Changing an unrelated Post preset must leave provider
+                    # site-choice maps sparse in the full-form PUT.
+                    page.locator("#permalink-post-preset").select_option("/blog/%postname%")
+                    expect(save).to_be_enabled()
+                    save.click()
+                    expect(save).to_be_disabled(timeout=20000)
+                    unrelated = api(ctx, base, "GET", "/api/admin/settings/permalinks")
+                    assert unrelated["post_structure"] == "/blog/%postname%"
+                    assert unrelated["content_type_bases"] == {}
+                    assert unrelated["taxonomy_bases"] == {}
+                    no_redirect(ctx, base, "/latest-listings-c4/browser-entry", 200)
+                    no_redirect(ctx, base, "/latest-genres-c4/fiction-browser", 200)
+                    checks.append("chrome_unrelated_post_save_retains_absent_provider_site_choices")
+
+                    # Two independent HTTP writer connections race on the
+                    # same persisted DB: settings vN versus provider v1.0.3.
+                    # Both outcomes are valid only if the winner's complete
+                    # map and canonical routes are visible atomically.
+                    csrf = api(ctx, base, "GET", "/auth/me")["csrf_token"]
+                    race_snapshot = api(ctx, base, "GET", "/api/admin/settings/permalinks")
+                    assert race_snapshot["content_type_bases"] == {}
+                    assert race_snapshot["taxonomy_bases"] == {}
+                    cookie = "; ".join(
+                        item["name"] + "=" + item["value"] for item in ctx.cookies(base)
+                    )
+                    gate = Barrier(2)
+                    def race_writer(kind: str) -> int:
+                        if kind == "settings":
+                            payload = full_permalink_input(race_snapshot)
+                            payload["content_type_bases"]["listing_browser_c4"] = None
+                            payload["taxonomy_bases"]["genre_browser_c4"] = None
+                            request = Request(
+                                base + "/api/admin/settings/permalinks",
+                                method="PUT", data=json.dumps(payload).encode(),
+                                headers={"Origin": base, "Cookie": cookie,
+                                         "X-CSRF-Token": csrf, "Content-Type": "application/json",
+                                         "If-Match": f'\"v{race_snapshot["version"]}\"'},
+                            )
+                        else:
+                            request = Request(
+                                base + "/api/admin/plugins", method="POST",
+                                data=provider_zip("1.0.3", "race-listings-c4", "race-genres-c4"),
+                                headers={"Origin": base, "Cookie": cookie,
+                                         "X-CSRF-Token": csrf, "Content-Type": "application/zip"},
+                            )
+                        gate.wait(timeout=8)
+                        try:
+                            with urlopen(request, timeout=30) as response:
+                                return response.status
+                        except HTTPError as error:
+                            return error.code
+                    with ThreadPoolExecutor(max_workers=2) as pool:
+                        outcomes = dict(zip(("settings", "provider"),
+                                            pool.map(race_writer, ("settings", "provider"))))
+                    assert outcomes["provider"] == 201, outcomes
+                    assert outcomes["settings"] in (200, 412), outcomes
+                    race_saved = api(ctx, base, "GET", "/api/admin/settings/permalinks")
+                    with sqlite3.connect(root / "database/opendash.sqlite") as connection:
+                        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+                        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+                        defaults = dict(connection.execute(
+                            "SELECT resource_kind,rewrite_base FROM provider_rewrite_defaults "
+                            "WHERE resource_key IN ('listing_browser_c4','genre_browser_c4')"
+                        ).fetchall())
+                        assert defaults == {"content_type": "race-listings-c4",
+                                            "taxonomy": "race-genres-c4"}, defaults
+                    if outcomes["settings"] == 200:
+                        assert race_saved["content_type_bases"] == {"listing_browser_c4": None}
+                        assert race_saved["taxonomy_bases"] == {"genre_browser_c4": None}
+                        restart_cpt = "/content/listing_browser_c4/browser-entry"
+                        restart_tax = "/taxonomy/genre_browser_c4/fiction-browser"
+                    else:
+                        assert race_saved["content_type_bases"] == {}
+                        assert race_saved["taxonomy_bases"] == {}
+                        restart_cpt = "/race-listings-c4/browser-entry"
+                        restart_tax = "/race-genres-c4/fiction-browser"
+                    no_redirect(ctx, base, restart_cpt, 200)
+                    no_redirect(ctx, base, restart_tax, 200)
+                    no_redirect(ctx, base, "/latest-listings-c4/browser-entry", 301, restart_cpt)
+                    no_redirect(ctx, base, "/latest-genres-c4/fiction-browser", 301, restart_tax)
+                    checks.append(
+                        f"simultaneous_settings_{outcomes['settings']}_provider_{outcomes['provider']}"
+                        "_atomic_cas_and_canonical"
+                    )
                 finally:
                     browser.close()
         finally:
@@ -316,13 +593,11 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
         try:
             assert base.startswith("http://127.0.0.1:") and not base.endswith(":18964")
             # Provider and site choices are durable across process restart.
-            import urllib.error
-            import urllib.request
-            with urllib.request.urlopen(base + "/latest-listings-c4/browser-entry") as res:
+            with urlopen(base + restart_cpt) as res:
                 assert res.status == 200
-            with urllib.request.urlopen(base + "/latest-genres-c4/fiction-browser") as res:
+            with urlopen(base + restart_tax) as res:
                 assert res.status == 200
-            with urllib.request.urlopen(base + "/content/listing_browser_c4/browser-entry") as res:
+            with urlopen(base + "/content/listing_browser_c4/browser-entry") as res:
                 assert res.status == 200
             checks.append("restart_preserves_sparse_site_choices_and_provider_declarations")
         finally:
