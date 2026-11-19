@@ -70,6 +70,17 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> list[str]:
                     post = api(ctx, base, "POST",
                                f'/api/admin/content-types/post/entries/{post["id"]}/publication',
                                200, {"status": "published"}, csrf, post["version"])
+                    route_path = f'/api/admin/content-types/post/entries/{post["id"]}/route'
+                    fetch(guest, base, "GET", route_path, 401)
+                    route_resp = fetch(ctx, base, "GET", route_path, 200)
+                    route_snapshot = route_resp.json()
+                    assert route_resp.headers.get("cache-control") == "no-store"
+                    assert route_resp.headers.get("etag") == f'"v{post["version"]}"'
+                    assert route_snapshot == {"entry_version": post["version"],
+                                              "custom_path": None, "public_url": "/content/post/t02-live"}
+                    draft_route = api(ctx, base, "GET",
+                                      f'/api/admin/content-types/post/entries/{draft["id"]}/route')
+                    assert draft_route["public_url"] is None
                     assert_row(ctx, base, "post", post["id"], "/content/post/t02-live")
                     assert_row(ctx, base, "post", draft["id"], None)
                     preview_path = f'/api/admin/content-types/post/entries/{draft["id"]}/preview'
@@ -79,6 +90,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> list[str]:
                     assert "T02 Private" in preview.text()
                     no_redirect(ctx, base, "/content/post/t02-private", 404)
                     checks.append("server_resolved_row_urls_and_authenticated_draft_preview")
+                    checks.append("exact_entry_get_matches_version_and_respects_draft_privacy")
 
                     proposal = permalink_input(settings, post="/blog/%postname%")
                     no_redirect(ctx, base, "/blog/t02-live", 404)
@@ -95,6 +107,9 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> list[str]:
                     no_redirect(ctx, base, "/content/post/t02-live", 301, "/blog/t02-live")
                     assert_row(ctx, base, "post", post["id"], "/blog/t02-live")
                     assert_row(ctx, base, "post", draft["id"], None)
+                    assert api(ctx, base, "GET", route_path) == {
+                        "entry_version": post["version"], "custom_path": None,
+                        "public_url": "/blog/t02-live"}
                     no_redirect(ctx, base, "/blog/t02-private", 404)
                     checks.append("not_saved_does_not_change_public_and_saved_updates_table")
 
@@ -327,6 +342,33 @@ def run_admin_ui(binary: pathlib.Path, artifacts: pathlib.Path,
                         assert api(ctx, base, "GET", "/api/admin/settings/permalinks") == remote
                         page.screenshot(path=str(artifacts / "t02-ui-stale-recheck-edit.png"), full_page=True)
                         checks.append("ui_stale_check_new_version_and_edit_cannot_bypass_cas")
+
+                        # A direct editor reload must use its own version-matched
+                        # server route snapshot, not an entry-table page lookup.
+                        published_editor = ctx.new_page()
+                        try:
+                            published_editor.goto(
+                                base + f'/admin/#/posts/{post["id"]}/edit',
+                                wait_until="domcontentloaded",
+                            )
+                            views = published_editor.get_by_role("link", name="Xem bài viết")
+                            expect(views.first).to_be_visible(timeout=20000)
+                            assert views.count() >= 1
+                            assert all(views.nth(index).get_attribute("href") == "/remote/ui-live"
+                                       for index in range(views.count()))
+                            with published_editor.expect_popup(timeout=15000) as opened:
+                                views.first.click()
+                            expect(opened.value).to_have_url(
+                                re.compile(r"/remote/ui-live$"), timeout=15000,
+                            )
+                            opened.value.close()
+                            published_editor.screenshot(
+                                path=str(artifacts / "t02-ui-published-editor-canonical.png"),
+                                full_page=True,
+                            )
+                            checks.append("chrome_direct_published_editor_view_uses_canonical_route")
+                        finally:
+                            published_editor.close()
 
                         # Native Chrome verifies editor's authenticated preview
                         # target and a guest's inability to use the same URL.
