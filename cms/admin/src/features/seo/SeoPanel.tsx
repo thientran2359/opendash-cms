@@ -8,6 +8,7 @@ import {
   putEntrySeo,
   putHomeSeo,
 } from '../../api/seo.ts';
+import { safePublicPath } from '../content/EntryListPage.tsx';
 
 interface SeoPanelProps {
   csrfToken: string | null;
@@ -189,13 +190,21 @@ export function EntryRouteSeoCard({
   const [noindex, setNoindex] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [confirmedRoute, setConfirmedRoute] = useState<{
+    version: number; path: string | null;
+  } | null>(null);
 
   useEffect(() => {
     let active = true;
     setNotice(null);
+    setConfirmedRoute(null);
     Promise.all([getEntryRoute(typeKey, entryId), getEntrySeo(typeKey, entryId)])
       .then(([routeSnap, seoSnap]) => {
         if (!active) return;
+        setConfirmedRoute({
+          version: routeSnap.entry_version,
+          path: safePublicPath(routeSnap.public_url),
+        });
         setCustomPath(routeSnap.custom_path ?? '');
         setTitle(seoSnap.title ?? '');
         setDescription(seoSnap.description ?? '');
@@ -224,6 +233,10 @@ export function EntryRouteSeoCard({
         csrfToken,
       );
       onVersionUpdated(saved.entry_version);
+      setConfirmedRoute({
+        version: saved.entry_version,
+        path: safePublicPath(saved.public_url),
+      });
       setNotice(`Đã lưu đường dẫn tùy chỉnh (v${saved.entry_version}).`);
     } catch (error) {
       onApiError(error);
@@ -251,6 +264,8 @@ export function EntryRouteSeoCard({
         csrfToken,
       );
       onVersionUpdated(saved.entry_version);
+      setConfirmedRoute(previous => previous && previous.version === entryVersion
+        ? { ...previous, version: saved.entry_version } : null);
       setNotice(`Đã lưu SEO entry (v${saved.entry_version}).`);
     } catch (error) {
       onApiError(error);
@@ -263,6 +278,12 @@ export function EntryRouteSeoCard({
     <div className="mt-6 rounded border border-slate-200 p-4" aria-label="Đường dẫn và SEO entry">
       <h4 className="font-semibold text-slate-900">Đường dẫn tùy chỉnh &amp; SEO (v{entryVersion})</h4>
       {notice && <p className="mt-2 text-sm text-emerald-800">{notice}</p>}
+      {confirmedRoute?.version === entryVersion && confirmedRoute.path && (
+        <a href={confirmedRoute.path} target="_blank" rel="noopener noreferrer"
+          className="mt-2 inline-block text-sm text-sky-700 hover:underline">
+          Xem công khai (đường dẫn máy chủ đã lưu)
+        </a>
+      )}
       <div className="mt-3 grid gap-2">
         <label className="grid gap-1 text-sm">
           <span>Custom path (ví dụ /gioi-thieu)</span>

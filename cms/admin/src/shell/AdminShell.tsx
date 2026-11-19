@@ -197,6 +197,7 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       adminOnly: true,
       children: [
         { label: 'Tổng quát', hash: '#/settings/general' },
+        { label: 'Đường dẫn tĩnh', hash: '#/settings/permalinks' },
         { label: 'SEO', hash: '#/settings/seo' },
         { label: 'Liên hệ', hash: '#/settings/contact' },
         { label: 'Thông báo Email (SMTP)', hash: '#/settings/smtp' },
@@ -343,7 +344,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const activeChild = activeParent?.children?.find(child => child.hash === selectedNavHash);
   const subLabels: Record<string, string> = {
     list: 'Danh sách', new: 'Thêm mới', edit: 'Chỉnh sửa', library: 'Thư viện',
-    general: 'Tổng quát', seo: 'SEO', contact: 'Liên hệ', smtp: 'Thông báo Email (SMTP)',
+    general: 'Tổng quát', permalinks: 'Đường dẫn tĩnh', seo: 'SEO', contact: 'Liên hệ', smtp: 'Thông báo Email (SMTP)',
     'content-types': 'Loại nội dung & Trường', themes: 'Themes', menus: 'Menus',
     definitions: 'Taxonomy tùy chỉnh', terms: 'Các term',
     options: 'Tùy chọn theme', health: 'Tình trạng hệ thống',

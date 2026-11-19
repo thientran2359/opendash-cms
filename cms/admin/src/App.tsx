@@ -8,6 +8,7 @@ import { ContentTypeSchemaSettings } from './features/content/ContentTypeSchemaS
 import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
+import { clearPermalinkDrafts, discardPermalinkDraft, PermalinkSettingsPage } from './features/settings/PermalinkSettingsPage.tsx';
 import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
@@ -72,6 +73,8 @@ export const App: React.FC = () => {
   const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
   const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
   const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
+  const siteInstanceIdRef = useRef(siteInstanceId);
+  siteInstanceIdRef.current = siteInstanceId;
   const [authGeneration, setAuthGeneration] = useState<number>(1);
   const [contentDirty, setContentDirty] = useState(false);
   const [schemaDirty, setSchemaDirty] = useState(false);
@@ -79,6 +82,12 @@ export const App: React.FC = () => {
   const markSchemaDirty = useCallback((value: boolean) => {
     schemaDirtyRef.current = value;
     setSchemaDirty(value);
+  }, []);
+  const [permalinkDirty, setPermalinkDirty] = useState(false);
+  const permalinkDirtyRef = useRef(false);
+  const markPermalinkDirty = useCallback((value: boolean) => {
+    permalinkDirtyRef.current = value;
+    setPermalinkDirty(value);
   }, []);
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
@@ -164,16 +173,24 @@ export const App: React.FC = () => {
     const leavingSection = current.view === 'sections' && current.rawHash !== destination && sectionsDirtyRef.current;
     const leavingSchema = current.view === 'settings' && current.sub === 'content-types'
       && schemaDirtyRef.current && acceptedHashRef.current !== destination;
+    const leavingPermalinks = current.view === 'settings' && current.sub === 'permalinks'
+      && acceptedHashRef.current !== destination && permalinkDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    return !(leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema) ||
-      window.confirm(switchingBuilderTarget
+    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema || leavingPermalinks;
+    if (!hasDirty) return true;
+    const approved = window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
         : leavingTerm
           ? 'Taxonomy có thay đổi chưa lưu. Rời màn hình sẽ bỏ bản nhập. Tiếp tục?'
-          : leavingSchema || leavingSection
+          : leavingSchema || leavingSection || leavingPermalinks
             ? 'Có thay đổi chưa lưu. Rời màn hình có thể làm mất bản nhập. Tiếp tục?'
             : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
+    if (approved && leavingPermalinks && userRef.current) {
+      discardPermalinkDraft(siteInstanceIdRef.current, userRef.current.id);
+      markPermalinkDirty(false);
+    }
+    return approved;
   };
 
   useEffect(() => {
@@ -235,13 +252,13 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, schemaDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
+  }, [contentDirty, schemaDirty, permalinkDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -370,7 +387,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -378,6 +395,7 @@ export const App: React.FC = () => {
       await api.logout(csrfToken);
       authSessionEpochRef.current += 1;
       editorDraftStore.clear();
+      clearPermalinkDrafts();
       setUser(null);
       setCsrfToken(null);
       setAuthUsername('');
@@ -390,6 +408,7 @@ export const App: React.FC = () => {
       setBuilderReset(value => value + 1);
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
+      markPermalinkDirty(false);
       setBuilderDirty(false);
       setPostsDirty(false);
       setPagesDirty(false);
@@ -523,7 +542,7 @@ export const App: React.FC = () => {
       cptTypes={cptTypes}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || schemaDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
       sidebarContent={<BuilderWorkspace
         key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
         route={lastBuilderRouteRef.current}
@@ -582,6 +601,11 @@ export const App: React.FC = () => {
           : route.sub === 'health' ? <SystemStatus /> : null}
       settingsContent={route.sub === 'general'
         ? <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        : route.sub === 'permalinks'
+          ? <PermalinkSettingsPage key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
+              user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+              onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cài đặt permalink.')}
+              onDirtyChange={markPermalinkDirty} />
         : route.sub === 'seo'
           ? <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
           : route.sub === 'contact'

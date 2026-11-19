@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   changeContentEntryPublication, deleteContentEntry, getEffectiveContentTypeTaxonomies,
-  queryContentEntryTable, getEffectiveEntryListConfig, runEntryProviderAction,
+  queryContentEntryTable, getEffectiveEntryListConfig, runEntryProviderAction, contentEntryPreviewPath,
 } from '../../api/content.ts';
 import {
   AdminColumnCell, type EffectiveListConfig, type ProviderColumn,
@@ -89,7 +89,7 @@ export function entryTableHash(base: string, filter: TaxonomyTableQuery): string
 }
 
 /** Never render a user-supplied URL with a protocol or scheme-relative origin. */
-function safePublicPath(path: string | null): string | null {
+export function safePublicPath(path: string | null | undefined): string | null {
   return path && path.startsWith('/') && !path.startsWith('//') && !/[\\\u0000-\u001f\u007f]/.test(path)
     ? path : null;
 }
@@ -695,6 +695,11 @@ export function EntryListPage({
                       onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}>Chỉnh sửa</button>
                     {path && <a href={path} target="_blank" rel="noopener noreferrer" className="text-sky-700 hover:underline"
                       aria-label={`Xem công khai ${row.title}`}>Xem</a>}
+                    {row.publication_status === 'draft' && (
+                      <a href={contentEntryPreviewPath(typeKey, row.id)}
+                        target="_blank" rel="noopener noreferrer" className="text-sky-700 hover:underline"
+                        aria-label={`Xem trước bản nháp đã lưu ${row.title}`}>Xem trước bản nháp</a>
+                    )}
                   </div>
                 </td>
               </tr>;

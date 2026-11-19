@@ -27,6 +27,10 @@ const entriesPath = (key: string): string =>
 const entryPath = (key: string, id: number): string =>
   `${entriesPath(key)}/${id}`;
 
+/** Authenticated, saved-entry HTML preview. Never expose as a public permalink. */
+export const contentEntryPreviewPath = (key: string, id: number): string =>
+  `${entryPath(key, id)}/preview`;
+
 /** C1 settings extend the existing schema DTO without changing legacy callers. */
 export type ContentSupport = 'editor' | 'featured_image';
 export type ContentPublicationPolicy = 'immediate' | 'draft_publish';
