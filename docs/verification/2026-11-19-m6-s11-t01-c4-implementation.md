@@ -62,18 +62,21 @@ loopback ports. The owner live site and port 18964 were not touched.
 | npm run build --prefix cms/admin | PASS, 98 modules; existing JS chunk warning |
 | cargo build --manifest-path cms/Cargo.toml --locked | PASS, native x86_64 Mach-O debug binary |
 | python3.13 -m py_compile cms/scripts/content_foundation_m6_s11_t01_e2e.py | PASS |
-| Locally isolated Playwright Chrome runner with --binary, --admin-dist and --artifact-dir | PASS 10/10 native Admin/API/SQLite/restart; four screenshots, byte-for-byte embedded Admin index, JS and CSS |
+| Locally isolated Playwright Chrome runner with --binary, --admin-dist and --artifact-dir | PASS 15/15 native Admin/API/SQLite/restart; four screenshots, byte-for-byte embedded Admin index, JS and CSS |
 | .g5-checkouts/evidence/c4-playwright-venv/bin/python cms/scripts/content_foundation_m6_s11_t01_backup_e2e.py --binary cms/target/debug/opendash --artifact-dir .g5-checkouts/evidence/c4-native-backup | PASS 6/6 isolated C4 encrypted backup/restore: provider-default CPT/term, snapshot, post-snapshot site mutation, recovery activation, preserved canonical URL/ownership and re-edit |
 | rustfmt --edition 2024 --check on the new focused Rust test, plus git diff --check | PASS |
 
 The C4 Chrome runner covers 1280 px and mobile 390 px viewports, isolated Admin,
 provider declared CPT and terms, draft and published canonical routes, site's
 explicit null override, package update, disable/re-enable, SQLite integrity
-and FK validation, owner retention, and restart. The runner stores a local
+and FK validation, owner retention, and restart. Five additional API checks
+prove a full-form GET→PUT keeps absent site keys sparse, explicit null→inherit,
+site non-null choice→inherit, provider update increments C3 CAS and rejects stale
+If-Match with 412, and stable-ID redirects do not form chains. The runner stores a local
 ignored receipt at .g5-checkouts/evidence/c4-native-browser/receipt.json with
 status PASS, port_18964_used false and four image hashes.
 
-Native binary SHA-256: 40fec6ca7f997921e14ac70c612be1a869adf75e486c7469e265c0e7b04844a8.
+Latest native candidate binary SHA-256: d2a2d569fa576aba7d5dbd1730c280cf3546ee5897f6dba50f9a27a3d1dde81b.
 Admin index SHA-256: a918cace6a5e68e94c1da3bc56f4d9879167e66c3d2a83bfc610d28170178fe2.
 Admin JS index-CBZKbQ9J.js: 33978d59d94b6997f2a243901a1060a00e3494a7c8d30e2919e4b77a96ec965c.
 Admin CSS index-FE7M3lRd.css: ec113de7634d17c72b958b1944400c65060760846eabcd135bb93e50d1b8b292.
@@ -94,9 +97,9 @@ exact-merged G5.
 Receipt screenshot hashes:
 
 - c4-taxonomy-browser.png: 1f97626faa22a4640c12a565ab48bb80315a7fdece363b2ebb40f664c9c6da0a
-- c4-permalink-default.png: a6c9ba21500810c99da00651a4be128e6676b505fd3bdd5174fa0e4bd3783808
-- c4-explicit-null-saved.png: 09beafed9fea9a9fc66e879635374f2d28de9d16ad8bd600a5af038911f9b2d6
-- c4-permalink-mobile-390.png: 152a2272d4358858d78fa64dfa42394987a70f645e799f48c8fd5a8d1ad2b577
+- c4-permalink-default.png: 551383f79d60b31a749b1e1a8025b85ec2233bbb424c4d141cc8d69d3d19ae0b
+- c4-explicit-null-saved.png: 011d1362171fbda6fab05bfd046bae915e5b785276d5ed8a52c89d54270f0094
+- c4-permalink-mobile-390.png: 25c540a86e25493f58255c191b4515e1bf7c00df4db3813e3544fe09d71c7ca1
 
 Initial failures were not counted as passing evidence: original full Rust unit
 run had 108 pass/9 fail due macOS /var symlink and temp-root ACL, corrected
@@ -118,8 +121,8 @@ site DBs and credentials are intentionally excluded from the Git commit.
   provider inheritance. Fix requires distinguishing inherited versus explicit
   legacy and adding a remove-key control. This UI file is not within the
   current approved Issue #378 ownership. **Await explicit bounded Aster ACK**
-  before editing. The current native Chrome runner proves inherited→null,
-  not null→inherited.
+  before editing. The native Chrome runner now proves null→inherited through
+  existing sparse API semantics; the Admin UI has no control to perform it.
 - Encrypted C4-specific backup→restore→re-edit is now PASS on a matching
   candidate binary. Provider/C3 concurrent writer pressure and independent
   exact-merged macOS release G5 remain NOT_RUN; the full M8 suite alone does

@@ -69,6 +69,19 @@ def install(ctx, base: str, csrf: str, data: bytes, status: int = 201):
     return response.json() if response.body() else {}
 
 
+def full_permalink_input(snapshot: dict) -> dict:
+    """The C3 PUT is a full-form replacement, never a JSON merge-patch.
+
+    Copy both *sparse* site-choice maps verbatim. Missing keys inherit the
+    current active provider defaults; explicit null opts out to legacy URLs.
+    """
+    return {
+        "post_structure": snapshot["post_structure"],
+        "content_type_bases": dict(snapshot["content_type_bases"]),
+        "taxonomy_bases": dict(snapshot["taxonomy_bases"]),
+    }
+
+
 def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
     checks: list[str] = []
     shots: dict[str, str] = {}
@@ -97,6 +110,17 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                     assert settings["content_type_bases"] == {}
                     assert settings["taxonomy_bases"] == {}
                     checks.append("provider_defaults_do_not_occupy_site_choice_maps")
+
+                    # Even a full-form C3 PUT with unchanged values must NOT
+                    # materialize package rewrite defaults into site choices.
+                    # ETag/version may advance for a successful full PUT.
+                    full_form = api(ctx, base, "PUT", "/api/admin/settings/permalinks", 200,
+                                    full_permalink_input(settings), csrf, settings["version"])
+                    assert full_form["version"] == settings["version"] + 1, full_form
+                    assert full_form["content_type_bases"] == {}
+                    assert full_form["taxonomy_bases"] == {}
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks") == full_form
+                    checks.append("provider_active_full_form_noop_put_keeps_site_maps_sparse")
 
                     taxonomy = api(ctx, base, "GET", "/api/admin/taxonomy/definitions")
                     match = next(tax for tax in taxonomy if tax["key"] == "genre_browser_c4")
@@ -207,6 +231,83 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
                         ).fetchone()
                         assert owner == ("plugin", "browser-c4-provider", "new-listings-c4"), owner
                     checks.append("sqlite_integrity_owner_and_default_provenance")
+
+                    # Site explicit null -> inherited provider defaults.  The
+                    # only difference on the wire is the ABSENCE of the keys;
+                    # JSON null would continue to force the legacy paths.
+                    inherited_input = full_permalink_input(unchanged)
+                    inherited_input["content_type_bases"].pop("listing_browser_c4")
+                    inherited_input["taxonomy_bases"].pop("genre_browser_c4")
+                    inherited = api(ctx, base, "PUT", "/api/admin/settings/permalinks", 200,
+                                    inherited_input, csrf, unchanged["version"])
+                    assert inherited["version"] == unchanged["version"] + 1
+                    assert inherited["content_type_bases"] == {}
+                    assert inherited["taxonomy_bases"] == {}
+                    no_redirect(ctx, base, "/new-listings-c4/browser-entry", 200)
+                    no_redirect(ctx, base, "/new-genres-c4/fiction-browser", 200)
+                    no_redirect(ctx, base, "/content/listing_browser_c4/browser-entry",
+                                301, "/new-listings-c4/browser-entry")
+                    no_redirect(ctx, base, "/taxonomy/genre_browser_c4/fiction-browser",
+                                301, "/new-genres-c4/fiction-browser")
+                    no_redirect(ctx, base, "/listings-browser/browser-entry",
+                                301, "/new-listings-c4/browser-entry")
+                    checks.append("site_explicit_null_to_inherit_restores_provider_defaults")
+
+                    # A non-null site choice wins over the package; removing
+                    # that key, not setting it to null, restores inheritance.
+                    chosen_input = full_permalink_input(inherited)
+                    chosen_input["content_type_bases"]["listing_browser_c4"] = "site-listings-c4"
+                    chosen_input["taxonomy_bases"]["genre_browser_c4"] = "site-genres-c4"
+                    chosen = api(ctx, base, "PUT", "/api/admin/settings/permalinks", 200,
+                                 chosen_input, csrf, inherited["version"])
+                    assert chosen["content_type_bases"]["listing_browser_c4"] == "site-listings-c4"
+                    assert chosen["taxonomy_bases"]["genre_browser_c4"] == "site-genres-c4"
+                    no_redirect(ctx, base, "/site-listings-c4/browser-entry", 200)
+                    no_redirect(ctx, base, "/site-genres-c4/fiction-browser", 200)
+                    no_redirect(ctx, base, "/new-listings-c4/browser-entry",
+                                301, "/site-listings-c4/browser-entry")
+                    no_redirect(ctx, base, "/new-genres-c4/fiction-browser",
+                                301, "/site-genres-c4/fiction-browser")
+                    checks.append("site_non_null_base_wins_over_provider_defaults")
+
+                    cleared_input = full_permalink_input(chosen)
+                    del cleared_input["content_type_bases"]["listing_browser_c4"]
+                    del cleared_input["taxonomy_bases"]["genre_browser_c4"]
+                    cleared = api(ctx, base, "PUT", "/api/admin/settings/permalinks", 200,
+                                  cleared_input, csrf, chosen["version"])
+                    assert cleared["content_type_bases"] == {}
+                    assert cleared["taxonomy_bases"] == {}
+                    no_redirect(ctx, base, "/new-listings-c4/browser-entry", 200)
+                    no_redirect(ctx, base, "/new-genres-c4/fiction-browser", 200)
+                    no_redirect(ctx, base, "/site-listings-c4/browser-entry",
+                                301, "/new-listings-c4/browser-entry")
+                    no_redirect(ctx, base, "/site-genres-c4/fiction-browser",
+                                301, "/new-genres-c4/fiction-browser")
+                    checks.append("site_non_null_override_removed_restores_inheritance")
+
+                    # With both maps sparse again, a provider update changes
+                    # the *effective* URLs and MUST advance the C3 CAS version.
+                    # A concurrent settings editor holding the prior full-form
+                    # snapshot must receive 412, never clobber that update.
+                    prior_version = cleared["version"]
+                    install(ctx, base, csrf,
+                            provider_zip("1.0.2", "latest-listings-c4", "latest-genres-c4"))
+                    latest = api(ctx, base, "GET", "/api/admin/settings/permalinks")
+                    assert latest["version"] == prior_version + 1, (cleared, latest)
+                    assert latest["content_type_bases"] == {}
+                    assert latest["taxonomy_bases"] == {}
+                    fetch(ctx, base, "PUT", "/api/admin/settings/permalinks", 412,
+                          full_permalink_input(cleared), csrf, prior_version)
+                    assert api(ctx, base, "GET", "/api/admin/settings/permalinks") == latest
+                    no_redirect(ctx, base, "/latest-listings-c4/browser-entry", 200)
+                    no_redirect(ctx, base, "/latest-genres-c4/fiction-browser", 200)
+                    no_redirect(ctx, base, "/new-listings-c4/browser-entry",
+                                301, "/latest-listings-c4/browser-entry")
+                    no_redirect(ctx, base, "/new-genres-c4/fiction-browser",
+                                301, "/latest-genres-c4/fiction-browser")
+                    no_redirect(ctx, base, "/content/listing_browser_c4/browser-entry",
+                                301, "/latest-listings-c4/browser-entry")
+                    checks.append("inherited_provider_update_bumps_c3_cas_and_rejects_stale_put")
                 finally:
                     browser.close()
         finally:
@@ -217,9 +318,13 @@ def run(binary: pathlib.Path, dist: pathlib.Path, artifacts: pathlib.Path):
             # Provider and site choices are durable across process restart.
             import urllib.error
             import urllib.request
+            with urllib.request.urlopen(base + "/latest-listings-c4/browser-entry") as res:
+                assert res.status == 200
+            with urllib.request.urlopen(base + "/latest-genres-c4/fiction-browser") as res:
+                assert res.status == 200
             with urllib.request.urlopen(base + "/content/listing_browser_c4/browser-entry") as res:
                 assert res.status == 200
-            checks.append("restart_preserves_site_override_and_provider_declarations")
+            checks.append("restart_preserves_sparse_site_choices_and_provider_declarations")
         finally:
             stop_server(proc)
     return checks, shots
