@@ -335,15 +335,21 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     drop(srv);
 
     let srv2 = spawn_server_at(site_root.clone(), false).await;
+    // C3/C4: persisted provider CPT data remains in Admin, but anonymous
+    // archive and single routes are unavailable until that provider returns.
+    assert_eq!(
+        client.get(format!("{}/content/portfolio", srv2.base_url))
+            .send().await.unwrap().status(),
+        404
+    );
     let pub_single = client
         .get(format!("{}/content/portfolio/e2e-work", srv2.base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(pub_single.status(), 200);
-    assert!(pub_single.text().await.unwrap().contains("E2E Work"));
+    assert_eq!(pub_single.status(), 404);
 
-    let (cookie2, _) = login(&client, &srv2.base_url).await;
+    let (cookie2, csrf2) = login(&client, &srv2.base_url).await;
     let entries: Value = client
         .get(format!("{}/api/admin/content-types/portfolio/entries", srv2.base_url))
         .header("Cookie", &cookie2)
@@ -354,6 +360,32 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
         .await
         .unwrap();
     assert!(entries.as_array().unwrap().iter().any(|e| e["id"] == entry_id));
+
+    // Restore the identical provider revision; the existing row (same ID)
+    // becomes public again without a re-import or content rewrite.
+    assert_eq!(
+        client
+            .put(format!("{}/api/admin/themes/active", srv2.base_url))
+            .header("Cookie", &cookie2)
+            .header("Origin", &srv2.base_url)
+            .header("X-CSRF-Token", &csrf2)
+            .header("If-Match", "\"v3\"")
+            .json(&json!({ "revision_id": rev_a }))
+            .send().await.unwrap().status(),
+        200
+    );
+    let restored_archive = client.get(format!("{}/content/portfolio", srv2.base_url))
+        .send().await.unwrap();
+    assert_eq!(restored_archive.status(), 200);
+    let restored_single = client.get(format!("{}/content/portfolio/e2e-work", srv2.base_url))
+        .send().await.unwrap();
+    assert_eq!(restored_single.status(), 200);
+    assert!(restored_single.text().await.unwrap().contains("E2E Work"));
+    let entries_after: Value = client
+        .get(format!("{}/api/admin/content-types/portfolio/entries", srv2.base_url))
+        .header("Cookie", &cookie2)
+        .send().await.unwrap().json().await.unwrap();
+    assert!(entries_after.as_array().unwrap().iter().any(|e| e["id"] == entry_id));
 
     drop(srv2);
     let _ = fs::remove_dir_all(&site_root);
