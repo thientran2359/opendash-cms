@@ -410,6 +410,9 @@ fn add_claim(
 pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     let settings = read_settings(conn).await?;
     let mut proposed = BTreeMap::<String, ProposedClaim>::new();
+    // Historical routes carry only stable target IDs. Resolve their family
+    // from the current rows when checking dynamic routes, not from the path.
+    let mut target_families = BTreeMap::<Claim, String>::new();
     let mut legacy_aliases = Vec::<(String, Claim)>::new();
     add_claim(&mut proposed, "/".into(), "home", "site".into(), None, true)?;
 
@@ -463,6 +466,7 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     .fetch_all(&mut *conn)
     .await?;
     for (id, key, slug, custom) in entries {
+        target_families.insert(("entry".to_owned(), id.to_string()), key.clone());
         if let Some(custom) = &custom {
             crate::storage::seo::validate_c3_custom_entry_path(custom)
                 .map_err(|e| ApiError::conflict(format!("invalid_custom_path:entry:{id}: {e}",)))?;
@@ -498,6 +502,7 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
             .fetch_all(&mut *conn)
             .await?;
     for (id, kind, slug) in terms {
+        target_families.insert(("term".to_owned(), id.to_string()), kind.clone());
         let current_path = term_path(&settings, id, &kind, &slug);
         let old_path = format!("/taxonomy/{kind}/{slug}");
         if current_path != old_path {
@@ -611,6 +616,23 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
                 return Err(ApiError::conflict(format!(
                     "permalink_collision:path={path} new={}:{} redirect_owner={}:{}",
                     candidate.kind, candidate.id, owner.0, owner.1,
+                )));
+            }
+        }
+    }
+    // Redirects and legacy fallbacks also occupy the complete route
+    // namespace. A URL owned by post cannot shadow another CPT's generated
+    // /base/{slug} pattern even if that CPT has no entries yet. Keep aliases
+    // inside their own dynamic family; an owner's canonical reclaim was
+    // already removed from historical above.
+    for (path, owner) in &historical {
+        for pattern in &patterns {
+            if pattern.matches(path)
+                && !(owner.0 == pattern.kind && target_families.get(owner) == Some(&pattern.family))
+            {
+                return Err(ApiError::conflict(format!(
+                    "permalink_pattern_collision:redirect={path} owner={}:{} pattern={}:{}",
+                    owner.0, owner.1, pattern.kind, pattern.family,
                 )));
             }
         }
@@ -992,6 +1014,115 @@ mod tests {
             PublicRouteTarget::Entry(id),
         );
         assert_eq!(resolve_public_path(&db, "/admin").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn historical_post_redirect_cannot_shadow_new_cpt_dynamic_family() {
+        let db = site().await;
+        let post_id = add_post(&db, "alpha", true).await;
+        let original = get_settings(&db).await.unwrap();
+        let mut blog = original.input();
+        blog.post_structure = "/blog/%postname%".to_owned();
+        let updated = put_settings(&db, original.version, &blog).await.unwrap();
+        let mut news = blog.clone();
+        news.post_structure = "/news/%postname%".to_owned();
+        let latest = put_settings(&db, updated.version, &news).await.unwrap();
+
+        // /blog/alpha remains a 301 alias after moving the post to /news.
+        assert_eq!(
+            resolve_public_path(&db, "/blog/alpha").await.unwrap(),
+            Some(ResolvedPublicRoute {
+                target: PublicRouteTarget::Entry(post_id),
+                canonical_path: "/news/alpha".into(),
+                redirect: true,
+            })
+        );
+        sqlx::query(
+            "INSERT INTO content_types(key,definition_json,owner_kind,owner_id,provider_status,declaration_state,version)
+             SELECT 'books',definition_json,'user',NULL,'active','declared',1
+               FROM content_types WHERE key='post'",
+        ).execute(&db).await.unwrap();
+        let mut conflicting = news.clone();
+        conflicting
+            .content_type_bases
+            .insert("books".into(), Some("blog".into()));
+
+        // /blog itself can host an archive, but /blog/{slug} is already
+        // occupied by a historical post redirect belonging to another family.
+        let err = put_settings(&db, latest.version, &conflicting)
+            .await
+            .unwrap_err();
+        assert_eq!(err.0, axum::http::StatusCode::CONFLICT, "{err:?}");
+        assert_eq!(get_settings(&db).await.unwrap(), latest);
+        assert_eq!(
+            resolve_public_path(&db, "/blog/alpha").await.unwrap(),
+            Some(ResolvedPublicRoute {
+                target: PublicRouteTarget::Entry(post_id),
+                canonical_path: "/news/alpha".into(),
+                redirect: true,
+            })
+        );
+        assert_eq!(resolve_public_path(&db, "/blog").await.unwrap(), None);
+
+        // Reclaiming the same old path for its original post restores a
+        // direct canonical route; the pre-upgrade URL remains a one-hop 301.
+        let reclaimed = put_settings(&db, latest.version, &blog).await.unwrap();
+        assert_eq!(reclaimed.post_structure, "/blog/%postname%");
+        assert_eq!(
+            resolve_public_path(&db, "/blog/alpha").await.unwrap(),
+            Some(ResolvedPublicRoute {
+                target: PublicRouteTarget::Entry(post_id),
+                canonical_path: "/blog/alpha".into(),
+                redirect: false,
+            })
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/content/post/alpha")
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical_path,
+            "/blog/alpha"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_migration_redirect_cannot_shadow_foreign_dynamic_family() {
+        let db = site().await;
+        let post_id = add_post(&db, "alpha", true).await;
+        let mut config = get_settings(&db).await.unwrap();
+        let mut news = config.input();
+        news.post_structure = "/news/%postname%".into();
+        config = put_settings(&db, config.version, &news).await.unwrap();
+
+        // Migration 0027 redirects are still a source of truth when
+        // permalink claims are rebuilt by later settings/CPT mutations.
+        sqlx::query("INSERT INTO entry_redirects(source_path,entry_id) VALUES('/books/alpha', ?)")
+            .bind(post_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO content_types(key,definition_json,owner_kind,owner_id,provider_status,declaration_state,version)
+             SELECT 'novels',definition_json,'user',NULL,'active','declared',1
+               FROM content_types WHERE key='post'",
+        ).execute(&db).await.unwrap();
+
+        let mut bad = config.input();
+        bad.content_type_bases
+            .insert("novels".into(), Some("books".into()));
+        let error = put_settings(&db, config.version, &bad).await.unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::CONFLICT, "{error:?}");
+        assert_eq!(get_settings(&db).await.unwrap(), config);
+        assert_eq!(
+            resolve_public_path(&db, "/news/alpha")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Entry(post_id)
+        );
+        assert_eq!(resolve_public_path(&db, "/books").await.unwrap(), None);
     }
 
     #[test]
