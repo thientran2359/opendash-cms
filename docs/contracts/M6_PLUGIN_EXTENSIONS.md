@@ -21,6 +21,19 @@
 - **Owner-Neutral CNT Adapter:** Generalize `theme_cnt_declarations` / CNT declaration lifecycle to `ResourceOwner` (`Site`, `Theme(theme_id)`, `Plugin(plugin_id)`). Theme switching/withdrawal never mutates `Plugin(id)` declarations; plugin disable/uninstall/withdrawal marks its declarations `provider_inactive` or `withdrawn` without deleting canonical `content_types`, `content_fields`, `content_entries`, or `content_entry_values`.
 - **Built-in & Cross-Owner Protection:** Built-in `post`/`page` and other owners' CPT keys cannot be claimed or overwritten (`409 Conflict`). Admin and Editor retain full CRUD on entries of `provider_inactive`/`withdrawn` CPTs.
 - **Taxonomy Eligibility (`D08`):** Only core `category` and `tag` taxonomy kinds are supported in M6 (no custom taxonomy kinds). A plugin may declare `category`/`tag` eligibility only for its own canonical CPTs inside its declaration transaction. Terms and `entry_terms` links remain site-owned and editable by Editor/Admin even when the provider is inactive or withdrawn; re-enabling reuses canonical IDs without duplicating terms or reviving explicitly withdrawn eligibility.
+- **Content Foundation clarification, Aster Final Decision 19/11/2026:** current
+  [C2](CONTENT_FOUNDATION_2026_11.md#3-taxonomy-definitions-and-membership-c2)
+  extends the historical kinds above with canonical custom definitions and
+  effective eligibility. Site ownership of retained links does not bypass the
+  current selection rule. An update omitting `term_ids` preserves memberships
+  while the provider is inactive; explicitly supplied IDs must be currently
+  eligible. Membership-edit coverage must exercise reactivation or an authorized
+  active site override, while inactive title/value editing and link retention
+  remain tested. Preserve the successful-update200 expectation using the valid
+  omitted-field contract, and test rejected ineligible explicit selection with
+  unchanged persisted state. Core-key collision fixtures must first provide a
+  valid declaration, including `draft_publish` settings for `post`/`page`, so they
+  reach the intended409 ownership check instead of earlier input validation.
 
 ## 3. ContentBeforeSave, ContentAfterSave & Actions (`P01`, `D04`, `D05`)
 
