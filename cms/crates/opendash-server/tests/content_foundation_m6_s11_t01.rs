@@ -1259,10 +1259,11 @@ async fn c4_hierarchy_downgrade_rejected_without_replacing_active_revision() {
         StatusCode::OK,
     )
     .await;
-    let version_before = before["items"]
+    let version_before = before
         .as_array()
         .and_then(|items| items.iter().find(|row| row["id"] == "c4-provider"))
-        .map(|row| row["version"].clone());
+        .map(|row| row["version"].clone())
+        .expect("installed provider must appear in list snapshot");
 
     let mut downgrade = hierarchical;
     downgrade["version"] = json!("1.0.1");
@@ -1318,10 +1319,11 @@ async fn c4_hierarchy_downgrade_rejected_without_replacing_active_revision() {
         StatusCode::OK,
     )
     .await;
-    let version_after = after["items"]
+    let version_after = after
         .as_array()
         .and_then(|items| items.iter().find(|row| row["id"] == "c4-provider"))
-        .map(|row| row["version"].clone());
+        .map(|row| row["version"].clone())
+        .expect("rejected revision must preserve previously installed provider");
     assert_eq!(
         version_before, version_after,
         "rejected provider revision must not activate an incompatible schema"
