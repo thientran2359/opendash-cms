@@ -362,6 +362,21 @@ fn pattern_for(path: &str, kind: &str, family: &str) -> DynamicPattern {
     }
 }
 
+/// Deleted stable targets no longer have an entry/term row from which to read
+/// their family. The protected fixed legacy routes encode that family in the
+/// URL, and therefore remain safe to retain as dead (404) redirects. Never
+/// infer ownership from arbitrary custom URLs or rewrite bases.
+fn legacy_family_of_deleted_target<'a>(path: &'a str, target_kind: &str) -> Option<&'a str> {
+    let parts: Vec<_> = path.split('/').collect();
+    if parts.len() != 4 || parts[0] != "" || parts[2].is_empty() || parts[3].is_empty() {
+        return None;
+    }
+    match (target_kind, parts[1]) {
+        ("entry", "content") | ("term", "taxonomy") => Some(parts[2]),
+        _ => None,
+    }
+}
+
 fn add_claim(
     all: &mut BTreeMap<String, ProposedClaim>,
     path: String,
@@ -624,11 +639,20 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     // namespace. A URL owned by post cannot shadow another CPT's generated
     // /base/{slug} pattern even if that CPT has no entries yet. Keep aliases
     // inside their own dynamic family; an owner's canonical reclaim was
-    // already removed from historical above.
+    // already removed from historical above. For deleted stable target IDs,
+    // only the protected /taxonomy/{kind}/{slug} or /content/{type}/{slug}
+    // spelling can prove the family; all other orphan aliases fail closed.
     for (path, owner) in &historical {
         for pattern in &patterns {
             if pattern.matches(path)
-                && !(owner.0 == pattern.kind && target_families.get(owner) == Some(&pattern.family))
+                && !(owner.0 == pattern.kind
+                    && match target_families.get(owner) {
+                        Some(family) => family == &pattern.family,
+                        None => {
+                            legacy_family_of_deleted_target(path, &owner.0)
+                                == Some(pattern.family.as_str())
+                        }
+                    })
             {
                 return Err(ApiError::conflict(format!(
                     "permalink_pattern_collision:redirect={path} owner={}:{} pattern={}:{}",
@@ -1319,6 +1343,102 @@ mod tests {
             PublicRouteTarget::Entry(post_id)
         );
         assert_eq!(resolve_public_path(&db, "/books").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn deleted_term_legacy_alias_remains_404_without_blocking_atomic_delete() {
+        let db = site().await;
+        let term_id = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Parent','parent')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let mut tx = db.begin().await.unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let mut tx = db.begin().await.unwrap();
+        sqlx::query("DELETE FROM taxonomy_terms WHERE id=?")
+            .bind(term_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        // Before the fix, the former canonical URL is turned into a redirect
+        // whose target ID no longer has a row: missing target_families wrongly
+        // triggers a conflict with the category family's own legacy pattern.
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(
+            resolve_public_path(&db, "/taxonomy/category/parent")
+                .await
+                .unwrap(),
+            None,
+        );
+        let historical: Option<(String, String)> = sqlx::query_as(
+            "SELECT target_kind,target_id FROM permalink_route_redirects
+              WHERE source_path='/taxonomy/category/parent'",
+        )
+        .fetch_optional(&db)
+        .await
+        .unwrap();
+        assert_eq!(historical, Some(("term".to_owned(), term_id.to_string())));
+    }
+
+    #[tokio::test]
+    async fn deleted_post_legacy_alias_remains_404_without_blocking_atomic_delete() {
+        let db = site().await;
+        let post_id = add_post(&db, "old-post", true).await;
+        let mut tx = db.begin().await.unwrap();
+        sqlx::query("DELETE FROM content_entries WHERE id=?")
+            .bind(post_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(
+            resolve_public_path(&db, "/content/post/old-post")
+                .await
+                .unwrap(),
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_target_with_unproven_family_must_not_shadow_foreign_rewrite() {
+        let db = site().await;
+        sqlx::query(
+            "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id)
+             VALUES('/books/orphan','entry','999999')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO content_types(key,definition_json,owner_kind,owner_id,provider_status,declaration_state,version)
+             SELECT 'books',definition_json,'user',NULL,'active','declared',1
+               FROM content_types WHERE key='post'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let initial = get_settings(&db).await.unwrap();
+        let mut attempted = initial.input();
+        attempted
+            .content_type_bases
+            .insert("books".to_owned(), Some("books".to_owned()));
+        let error = put_settings(&db, initial.version, &attempted)
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::CONFLICT, "{error:?}");
+        assert_eq!(get_settings(&db).await.unwrap(), initial);
+        assert_eq!(
+            resolve_public_path(&db, "/books/orphan").await.unwrap(),
+            None
+        );
     }
 
     #[test]
