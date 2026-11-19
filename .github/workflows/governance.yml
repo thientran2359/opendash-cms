@@ -34,6 +34,9 @@ jobs:
       - name: GitHub Issue handoff tests
         run: python -m unittest discover -s .agents/scripts -p test_prepare_github_issue.py -v
 
+      - name: CoS dispatch and resume tests
+        run: python -m unittest discover -s .agents/scripts -p "test_cos_*.py" -v
+
       - name: Planning documentation consistency
         run: python cms/scripts/check-plans.py
 

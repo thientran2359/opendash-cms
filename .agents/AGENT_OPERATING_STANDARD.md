@@ -65,12 +65,12 @@ và [hợp đồng adapter](skills/atlas-task-dispatch/references/direct-adapter
    Báo đúng mức đã xác minh và blocker, không nhờ chủ dự án chuyển lời khi đường
    gửi được phép còn hoạt động.
 
-**Giới hạn hiện tại:** adapter khóa một lần theo target + Issue + Task, và riêng
-PR tài liệu theo target + PR. Chưa có cơ chế dispatch generation/release lock
-đã duyệt. Vì vậy yêu cầu tiếp tục sau mọi vòng review cùng task chưa được transport
-này hỗ trợ. Khi gặp lock cũ, ghi feedback trên GitHub và báo giới hạn; không xóa lock,
-không gửi vào chat cũ hay dùng worker để vòng qua adapter. Cần thiết kế/kiểm chứng
-cơ chế resume riêng trước khi tuyên bố hỗ trợ đầy đủ chu trình lặp.
+**Resume sau review:** giữ nguyên khóa gửi lần đầu. Khi cùng task còn In progress/
+In review và có ACK/feedback mới, dùng mục **RESUME Issue** trong skill dispatch.
+Lệnh `resume-issue` yêu cầu structured coordinator ACK pin PR/head/base, lượt trước
+ACCEPTED/sent và đã kết thúc, project không active turn; tạo một successor duy nhất.
+Không xóa lock hoặc dùng UUID mới để né UNKNOWN. `status-task` theo receipt mới nhất.
+Xem [thiết kế và cách kiểm chứng](research/2026-11-19-cos-resume.md).
 
 **Thử trực tiếp 19/11/2026:** xem [bằng chứng Mac](research/2026-11-19-aster-cos-post-review.md).
 
