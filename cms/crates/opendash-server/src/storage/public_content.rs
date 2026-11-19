@@ -538,6 +538,18 @@ mod m5_public_context_tests {
     use axum::http::StatusCode;
     use sqlx::sqlite::SqlitePoolOptions;
 
+    /// Older fixtures seed site rows directly through SQLite. In C3, those
+    /// fixtures must explicitly build the same canonical claims that normal
+    /// API writers build inside their transaction; public readers never
+    /// fabricate URLs from unsynchronized legacy tables.
+    async fn synchronize_direct_sql_fixture(db: &SqlitePool) {
+        let mut tx = db.begin().await.unwrap();
+        crate::storage::permalinks::sync_claims_in_tx(&mut tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
+
     async fn add_entry(
         db: &SqlitePool,
         type_key: &str,
@@ -732,6 +744,7 @@ mod m5_public_context_tests {
         add_entry(&db, "news", "news-other", true, &[child, other_tag]).await;
         let draft = add_entry(&db, "post", "draft-a", false, &[root, child, tag]).await;
         add_entry(&db, "news", "no-terms", true, &[]).await;
+        synchronize_direct_sql_fixture(&db).await;
         let exact = taxonomy_public_page(
             &db,
             TaxonomyKind::Category,
@@ -844,6 +857,7 @@ mod m5_public_context_tests {
             .execute(&db)
             .await
             .unwrap();
+        synchronize_direct_sql_fixture(&db).await;
         assert!(get_by_slug(&db, "post", "post-a").await.unwrap().is_none());
         assert!(get_by_slug(&db, "post", "draft-a").await.unwrap().is_none());
         assert_eq!(
@@ -856,6 +870,7 @@ mod m5_public_context_tests {
             .execute(&db)
             .await
             .unwrap();
+        synchronize_direct_sql_fixture(&db).await;
         assert_eq!(
             canonical_term_by_id(&db, root).await.unwrap().as_deref(),
             Some("/taxonomy/category/sea-new")
@@ -1005,6 +1020,7 @@ mod m5_public_context_tests {
         .execute(&db)
         .await
         .unwrap();
+        synchronize_direct_sql_fixture(&db).await;
 
         assert!(get_by_slug(&db, "news", "hidden-news").await.unwrap().is_none());
         assert!(get_published_by_id(&db, entry_id).await.unwrap().is_none());
