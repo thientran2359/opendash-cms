@@ -77,6 +77,12 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     check(snapshot.headers.get("cache-control") == "no-store", "no-store")
                     check(snapshot.headers.get("etag") == f'"v{state["version"]}"', "version ETag")
                     checks.append("legacy_default_auth_and_etag")
+                    public_settings = api(ctx, base, "GET", "/api/admin/settings/public")
+                    api(ctx, base, "PUT", "/api/admin/settings/public", 200,
+                        {"public_origin": base,
+                         "content_language": public_settings["content_language"],
+                         "indexing_enabled": True},
+                        csrf, public_settings["version"])
 
                     post = api(ctx, base, "POST", "/api/admin/content-types/post/entries", 201,
                                {"title": "C3 Alpha", "slug": "alpha", "values": {}}, csrf)
@@ -135,6 +141,22 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     no_redirect(ctx, base, "/taxonomy/genre_c3/fiction", 301, "/genres/fiction")
                     no_redirect(ctx, base, "/blog/private", 404)
                     checks.append("post_cpt_term_direct_canonical_redirect_and_privacy")
+                    article_html = no_redirect(ctx, base, "/blog/alpha", 200).text()
+                    check(f'<link rel="canonical" href="{base}/blog/alpha"' in article_html,
+                          "entry SEO canonical must use configured post URL")
+                    check(f'<meta property="og:url" content="{base}/blog/alpha"' in article_html,
+                          "OG URL must equal canonical resolver")
+                    sitemap_index = no_redirect(ctx, base, "/sitemap.xml", 200).text()
+                    check("sitemaps/1.xml" in sitemap_index, "sitemap index must include first part")
+                    sitemap_part = no_redirect(ctx, base, "/sitemaps/1.xml", 200).text()
+                    for path in ("/blog/alpha", "/projects/novel", "/genres/fiction"):
+                        check(f"{base}{path}" in sitemap_part,
+                              f"sitemap must use C3 canonical path {path}")
+                    check(f"{base}/content/post/alpha" not in sitemap_part,
+                          "sitemap must not list legacy redirect source")
+                    check(f"{base}/blog/private" not in sitemap_part,
+                          "sitemap must not list draft")
+                    checks.append("entry_seo_og_and_sitemap_share_canonical_authority")
 
                     term = api(ctx, base, "PATCH",
                                f'/api/admin/taxonomy/terms/{term["id"]}', 200,
