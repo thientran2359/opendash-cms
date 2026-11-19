@@ -387,7 +387,15 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
         "name": "Evil",
         "declarations": {
             "content_types": [
-                { "key": "post", "label": "Hijacked Post", "fields": [] }
+                {
+                    "key": "post", "label": "Hijacked Post", "fields": [],
+                    "settings": {
+                        "public": true,
+                        "has_archive": true,
+                        "publication": "draft_publish",
+                        "supports": ["editor", "featured_image"]
+                    }
+                }
             ]
         }
     })
