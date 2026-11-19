@@ -56,9 +56,9 @@ loopback ports. The owner live site and port 18964 were not touched.
 | Check | Observed result |
 | --- | --- |
 | cargo test --manifest-path cms/Cargo.toml --locked -p opendash-core (worker core tree) | PASS 44/44, including legacy serialization |
-| cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test content_foundation_m6_s11_t01 -- --test-threads=1 | PASS 7/7, real native Wasmi/HTTP/SQLite: old ZIP/ContentSave, Allow/Veto/after-save, custom taxonomy, CAS, generation fence, collisions, theme switch and hierarchy downgrade |
+| cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --test content_foundation_m6_s11_t01 -- --test-threads=1 | PASS 9/9 in Harbor prime and independent worker; real native Wasmi/HTTP/SQLite: old ZIP/ContentSave, Allow/Veto/after-save, custom taxonomy, CAS, generation fence, collisions, theme switch, hierarchy downgrade, provider rewrite add/change/remove with 409 rollback and retained redirects, and populated on-disk 0040→0041 upgrade |
 | cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server --bin opendash storage::permalinks::tests:: -- --test-threads=1 | PASS 18/18, migration, sparse/null defaults, provider updates, C3 route claims and 50k boundary |
-| TMPDIR set to a private canonical 0700 directory; cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server -- --test-threads=1 | PASS, exit 0; full existing server integration suite, including M8 backup/restore. This run predated the final additional C4 tests and narrow provider-status adjustment, so it is not exact-head full-suite proof |
+| TMPDIR set to a private canonical 0700 directory; cargo test --manifest-path cms/Cargo.toml --locked -p opendash-server -- --test-threads=1 | PASS, exit 0; full existing server suite on the final C4 production source, including M8 backup/restore. The two subsequently added C4 test-only cases were separately executed with focused target 9/9 PASS. Full log: .g5-checkouts/evidence/c4-full-suite-head.log (ignored local receipt) |
 | npm run build --prefix cms/admin | PASS, 98 modules; existing JS chunk warning |
 | cargo build --manifest-path cms/Cargo.toml --locked | PASS, native x86_64 Mach-O debug binary |
 | python3.13 -m py_compile cms/scripts/content_foundation_m6_s11_t01_e2e.py | PASS |

@@ -3,6 +3,7 @@
 
 use reqwest::{Client, Response, StatusCode};
 use serde_json::{Value, json};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::{
     fs,
     io::Write,
@@ -1328,4 +1329,623 @@ async fn c4_hierarchy_downgrade_rejected_without_replacing_active_revision() {
         version_before, version_after,
         "rejected provider revision must not activate an incompatible schema"
     );
+}
+
+/// No site map entry means that the package base is inherited, not frozen as
+/// an override. Exercise real published routes, stable-ID redirects, and
+/// same-owner update rollback at the HTTP boundary.
+#[tokio::test]
+async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
+    let site = Site::new();
+    let port = vacant_port();
+    let _server = serve(&site.0, port).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = Client::new();
+    let raw_client = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let (cookie, csrf) = auth(&client, &base).await;
+
+    async fn settings(client: &Client, base: &str, cookie: &str) -> Value {
+        expect_json(
+            client
+                .get(format!("{base}/api/admin/settings/permalinks"))
+                .header("Cookie", cookie)
+                .send()
+                .await
+                .unwrap(),
+            StatusCode::OK,
+        )
+        .await
+    }
+    async fn route(
+        client: &Client,
+        base: &str,
+        path: &str,
+        expected: StatusCode,
+        location: Option<&str>,
+    ) {
+        let response = client.get(format!("{base}{path}")).send().await.unwrap();
+        assert_eq!(response.status(), expected, "route: {path}");
+        if let Some(location) = location {
+            assert_eq!(
+                response
+                    .headers()
+                    .get(reqwest::header::LOCATION)
+                    .and_then(|value| value.to_str().ok()),
+                Some(location),
+                "redirect must target the current canonical path, not a chain: {path}",
+            );
+        }
+    }
+
+    // Same-owner installation with no declared rewrite keeps the C3 legacy
+    // routes and leaves the explicit site maps empty.
+    let mut manifest = provider_manifest();
+    manifest["declarations"]["content_types"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("rewrite_base");
+    manifest["declarations"]["taxonomy_definitions"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("rewrite_base");
+    install(
+        &client,
+        &base,
+        &cookie,
+        &csrf,
+        manifest.clone(),
+        wasm_output(r#"{"decision":"allow"}"#),
+    )
+    .await;
+    let term_id = add_term(&client, &base, &cookie, &csrf).await;
+    let created = expect_json(
+        client
+            .post(format!("{base}/api/admin/content-types/{CPT}/entries"))
+            .header("Cookie", &cookie)
+            .header("Origin", &base)
+            .header("x-csrf-token", &csrf)
+            .json(
+                &json!({"title":"Inherited route C4","slug":"inherited-entry",
+                "values":{},"term_ids":[term_id]}),
+            )
+            .send()
+            .await
+            .unwrap(),
+        StatusCode::CREATED,
+    )
+    .await;
+    let entry_id = created["id"].as_i64().unwrap();
+    let published = expect_json(
+        client
+            .post(format!(
+                "{base}/api/admin/content-types/{CPT}/entries/{entry_id}/publication"
+            ))
+            .header("Cookie", &cookie)
+            .header("Origin", &base)
+            .header("x-csrf-token", &csrf)
+            .header(
+                "if-match",
+                format!("\"v{}\"", created["version"].as_i64().unwrap()),
+            )
+            .json(&json!({"status":"published"}))
+            .send()
+            .await
+            .unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(published["publication_status"], "published");
+    let legacy_entry = format!("/content/{CPT}/inherited-entry");
+    let legacy_term = format!("/taxonomy/{TAX}/fiction-c4");
+    route(&raw_client, &base, &legacy_entry, StatusCode::OK, None).await;
+    route(&raw_client, &base, &legacy_term, StatusCode::OK, None).await;
+    let initial = settings(&client, &base, &cookie).await;
+    assert_eq!(initial["content_type_bases"], json!({}));
+    assert_eq!(initial["taxonomy_bases"], json!({}));
+
+    // Add provider defaults; no site PUT is made. The original canonical
+    // routes become stable-ID aliases to new URLs, with no redirect chaining.
+    manifest["version"] = json!("1.0.1");
+    manifest["declarations"]["content_types"][0]["rewrite_base"] = json!("catalog-c4");
+    manifest["declarations"]["taxonomy_definitions"][0]["rewrite_base"] = json!("topics-c4");
+    install(
+        &client,
+        &base,
+        &cookie,
+        &csrf,
+        manifest.clone(),
+        wasm_output(r#"{"decision":"allow"}"#),
+    )
+    .await;
+    let added = settings(&client, &base, &cookie).await;
+    assert_eq!(
+        added["version"].as_i64(),
+        Some(initial["version"].as_i64().unwrap() + 1)
+    );
+    assert_eq!(added["content_type_bases"], json!({}));
+    assert_eq!(added["taxonomy_bases"], json!({}));
+    route(
+        &raw_client,
+        &base,
+        "/catalog-c4/inherited-entry",
+        StatusCode::OK,
+        None,
+    )
+    .await;
+    route(
+        &raw_client,
+        &base,
+        "/topics-c4/fiction-c4",
+        StatusCode::OK,
+        None,
+    )
+    .await;
+    route(
+        &raw_client,
+        &base,
+        &legacy_entry,
+        StatusCode::MOVED_PERMANENTLY,
+        Some("/catalog-c4/inherited-entry"),
+    )
+    .await;
+    route(
+        &raw_client,
+        &base,
+        &legacy_term,
+        StatusCode::MOVED_PERMANENTLY,
+        Some("/topics-c4/fiction-c4"),
+    )
+    .await;
+
+    // Change both bases. Both legacy aliases and the prior provider URLs
+    // redirect directly to the latest stable-ID canonical destinations.
+    manifest["version"] = json!("1.0.2");
+    manifest["declarations"]["content_types"][0]["rewrite_base"] = json!("library-c4");
+    manifest["declarations"]["taxonomy_definitions"][0]["rewrite_base"] = json!("genres-c4-next");
+    install(
+        &client,
+        &base,
+        &cookie,
+        &csrf,
+        manifest.clone(),
+        wasm_output(r#"{"decision":"allow"}"#),
+    )
+    .await;
+    let changed = settings(&client, &base, &cookie).await;
+    assert_eq!(
+        changed["version"].as_i64(),
+        Some(added["version"].as_i64().unwrap() + 1)
+    );
+    assert_eq!(changed["content_type_bases"], json!({}));
+    assert_eq!(changed["taxonomy_bases"], json!({}));
+    route(
+        &raw_client,
+        &base,
+        "/library-c4/inherited-entry",
+        StatusCode::OK,
+        None,
+    )
+    .await;
+    route(
+        &raw_client,
+        &base,
+        "/genres-c4-next/fiction-c4",
+        StatusCode::OK,
+        None,
+    )
+    .await;
+    for old in [&legacy_entry[..], "/catalog-c4/inherited-entry"] {
+        route(
+            &raw_client,
+            &base,
+            old,
+            StatusCode::MOVED_PERMANENTLY,
+            Some("/library-c4/inherited-entry"),
+        )
+        .await;
+    }
+    for old in [&legacy_term[..], "/topics-c4/fiction-c4"] {
+        route(
+            &raw_client,
+            &base,
+            old,
+            StatusCode::MOVED_PERMANENTLY,
+            Some("/genres-c4-next/fiction-c4"),
+        )
+        .await;
+    }
+
+    // A conflicting update by the *same owner* must leave the previous
+    // installed revision, configuration version, canonical routes and links.
+    let mut collision = manifest.clone();
+    collision["version"] = json!("1.0.3");
+    collision["declarations"]["content_types"][0]["rewrite_base"] = json!("genres-c4-next");
+    let rejected = client
+        .post(format!("{base}/api/admin/plugins"))
+        .header("Cookie", &cookie)
+        .header("Origin", &base)
+        .header("x-csrf-token", &csrf)
+        .header("content-type", "application/zip")
+        .body(plugin_zip(
+            &collision,
+            &wasm_output(r#"{"decision":"allow"}"#),
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        rejected.status(),
+        StatusCode::CONFLICT,
+        "failed same-owner rewrite update: {}",
+        rejected.text().await.unwrap()
+    );
+    assert_eq!(settings(&client, &base, &cookie).await, changed);
+    let installed = expect_json(
+        client
+            .get(format!("{base}/api/admin/plugins"))
+            .header("Cookie", &cookie)
+            .send()
+            .await
+            .unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    let active = installed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "c4-provider")
+        .unwrap();
+    assert_eq!(active["version"], "1.0.2");
+    route(
+        &raw_client,
+        &base,
+        "/library-c4/inherited-entry",
+        StatusCode::OK,
+        None,
+    )
+    .await;
+    route(
+        &raw_client,
+        &base,
+        "/genres-c4-next/fiction-c4",
+        StatusCode::OK,
+        None,
+    )
+    .await;
+    assert_eq!(
+        entry(&client, &base, &cookie, entry_id).await["term_ids"],
+        json!([term_id])
+    );
+
+    // Withdraw only the rewrite defaults in a compatible newer revision.
+    // The provider owns the same CPT and term; legacy paths are canonical
+    // again, prior rewrite bases remain historical direct-to-target aliases.
+    manifest["version"] = json!("1.0.4");
+    manifest["declarations"]["content_types"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("rewrite_base");
+    manifest["declarations"]["taxonomy_definitions"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("rewrite_base");
+    install(
+        &client,
+        &base,
+        &cookie,
+        &csrf,
+        manifest,
+        wasm_output(r#"{"decision":"allow"}"#),
+    )
+    .await;
+    let removed = settings(&client, &base, &cookie).await;
+    assert_eq!(
+        removed["version"].as_i64(),
+        Some(changed["version"].as_i64().unwrap() + 1)
+    );
+    assert_eq!(removed["content_type_bases"], json!({}));
+    assert_eq!(removed["taxonomy_bases"], json!({}));
+    route(&raw_client, &base, &legacy_entry, StatusCode::OK, None).await;
+    route(&raw_client, &base, &legacy_term, StatusCode::OK, None).await;
+    for old in ["/catalog-c4/inherited-entry", "/library-c4/inherited-entry"] {
+        route(
+            &raw_client,
+            &base,
+            old,
+            StatusCode::MOVED_PERMANENTLY,
+            Some(&legacy_entry),
+        )
+        .await;
+    }
+    for old in ["/topics-c4/fiction-c4", "/genres-c4-next/fiction-c4"] {
+        route(
+            &raw_client,
+            &base,
+            old,
+            StatusCode::MOVED_PERMANENTLY,
+            Some(&legacy_term),
+        )
+        .await;
+    }
+    assert_eq!(
+        entry(&client, &base, &cookie, entry_id).await["term_ids"],
+        json!([term_id])
+    );
+
+    // Verify durable C3 claim/redirect targets point to stable database IDs,
+    // not to another URL string that can form a redirect chain.
+    let db = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(site.0.join("database/opendash.sqlite"))
+                .read_only(true),
+        )
+        .await
+        .unwrap();
+    for (path, target_kind, stable_id) in [
+        (legacy_entry.as_str(), "entry", entry_id),
+        (legacy_term.as_str(), "term", term_id),
+    ] {
+        let actual: (String, String) =
+            sqlx::query_as("SELECT target_kind,target_id FROM permalink_route_claims WHERE path=?")
+                .bind(path)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(actual, (target_kind.to_owned(), stable_id.to_string()));
+    }
+    for (path, target_kind, stable_id) in [
+        ("/catalog-c4/inherited-entry", "entry", entry_id),
+        ("/library-c4/inherited-entry", "entry", entry_id),
+        ("/topics-c4/fiction-c4", "term", term_id),
+        ("/genres-c4-next/fiction-c4", "term", term_id),
+    ] {
+        let actual: (String, String) = sqlx::query_as(
+            "SELECT target_kind,target_id FROM permalink_route_redirects WHERE source_path=?",
+        )
+        .bind(path)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(actual, (target_kind.to_owned(), stable_id.to_string()));
+    }
+    let defaults: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT resource_kind,rewrite_base FROM provider_rewrite_defaults
+         WHERE owner_kind='plugin' AND owner_id='c4-provider' ORDER BY resource_kind",
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        defaults,
+        vec![
+            ("content_type".to_owned(), None),
+            ("taxonomy".to_owned(), None)
+        ]
+    );
+}
+
+/// Upgrade a populated, *actual* 0040 database in-place through the native
+/// server startup migrator. Previously selected non-null and explicit-null
+/// site bases, published canonical claims, and stable-ID redirect history must
+/// survive 0041 verbatim (no inferred provider ownership/backfill).
+#[tokio::test]
+async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history() {
+    let site = Site::new();
+    let db_dir = site.0.join("database");
+    fs::create_dir_all(&db_dir).unwrap();
+    let db_path = db_dir.join("opendash.sqlite");
+    let db = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true)
+                .foreign_keys(true),
+        )
+        .await
+        .unwrap();
+    sqlx::migrate!("../../migrations")
+        .run_to(40, &db)
+        .await
+        .unwrap();
+
+    let type_key = "legacy_books_c4";
+    let kind = "legacy_genre_c4";
+    let definition = json!({
+        "key":type_key,"label":"Historical Books","fields":[],
+        "settings":{"public":true,"has_archive":true,
+            "publication":"draft_publish","supports":["editor"]}
+    });
+    sqlx::query("INSERT INTO content_types(key,definition_json,owner_kind) VALUES(?,?,'user')")
+        .bind(type_key)
+        .bind(definition.to_string())
+        .execute(&db)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO taxonomy_definitions(key,label,hierarchical,public,owner_kind)
+         VALUES(?,'Legacy genre',0,1,'user')",
+    )
+    .bind(kind)
+    .execute(&db)
+    .await
+    .unwrap();
+    let entry_id = sqlx::query(
+        "INSERT INTO content_entries
+         (content_type_key,slug,title,values_json,publication_status)
+         VALUES(?,'historic-book','Historical book','{}','published')",
+    )
+    .bind(type_key)
+    .execute(&db)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let term_id = sqlx::query(
+        "INSERT INTO taxonomy_terms(kind,name,slug) VALUES(?,'Historical genre','historic-term')",
+    )
+    .bind(kind)
+    .execute(&db)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query(
+        "UPDATE site_permalink_settings SET content_type_bases_json=?,taxonomy_bases_json=?
+         WHERE id=1",
+    )
+    .bind(json!({(type_key):"issues-c4"}).to_string())
+    .bind(json!({(kind):Value::Null}).to_string())
+    .execute(&db)
+    .await
+    .unwrap();
+    let canonical_entry = "/issues-c4/historic-book";
+    let canonical_term = format!("/taxonomy/{kind}/historic-term");
+    for (path, target_kind, target_id) in [
+        (canonical_entry.to_owned(), "entry", entry_id.to_string()),
+        ("/issues-c4".to_owned(), "archive", type_key.to_owned()),
+        (canonical_term.clone(), "term", term_id.to_string()),
+    ] {
+        sqlx::query("INSERT INTO permalink_route_claims(path,target_kind,target_id) VALUES(?,?,?)")
+            .bind(path)
+            .bind(target_kind)
+            .bind(target_id)
+            .execute(&db)
+            .await
+            .unwrap();
+    }
+    let legacy_entry = format!("/content/{type_key}/historic-book");
+    for (path, target_kind, target_id) in [
+        (legacy_entry.clone(), "entry", entry_id.to_string()),
+        (
+            "/earlier-books-c4/historic-book".to_owned(),
+            "entry",
+            entry_id.to_string(),
+        ),
+        (
+            "/earlier-genres-c4/historic-term".to_owned(),
+            "term",
+            term_id.to_string(),
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id)
+             VALUES(?,?,?)",
+        )
+        .bind(path)
+        .bind(target_kind)
+        .bind(target_id)
+        .execute(&db)
+        .await
+        .unwrap();
+    }
+    // Pin the exact 0040 ledger and route history independently of the
+    // server's HTTP resolver; the 0041 migration is additive-only.
+    let claims_before: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT path,target_kind,target_id FROM permalink_route_claims ORDER BY path",
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    let redirects_before: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT source_path,target_kind,target_id FROM permalink_route_redirects ORDER BY source_path",
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    drop(db);
+
+    let port = vacant_port();
+    let _server = serve(&site.0, port).await;
+    let base = format!("http://127.0.0.1:{port}");
+    let client = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let (cookie, _) = auth(&client, &base).await;
+    let settings = expect_json(
+        client
+            .get(format!("{base}/api/admin/settings/permalinks"))
+            .header("Cookie", cookie)
+            .send()
+            .await
+            .unwrap(),
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(settings["content_type_bases"][type_key], "issues-c4");
+    assert_eq!(settings["taxonomy_bases"][kind], Value::Null);
+    assert_eq!(settings["version"], 1);
+    assert_eq!(
+        client
+            .get(format!("{base}{canonical_entry}"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}{canonical_term}"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+    );
+    for (old, new) in [
+        (legacy_entry.as_str(), canonical_entry),
+        ("/earlier-books-c4/historic-book", canonical_entry),
+        ("/earlier-genres-c4/historic-term", canonical_term.as_str()),
+    ] {
+        let response = client.get(format!("{base}{old}")).send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY, "{old}");
+        assert_eq!(
+            response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some(new),
+            "0041 must retain stable-ID redirect to original canonical URL",
+        );
+    }
+    let db = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(&db_path)
+                .read_only(true),
+        )
+        .await
+        .unwrap();
+    let migration_version: i64 =
+        sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations WHERE success=1")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(migration_version, 41);
+    let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(defaults, 0, "0041 must never infer defaults from site maps");
+    let claims_after: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT path,target_kind,target_id FROM permalink_route_claims ORDER BY path",
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    let redirects_after: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT source_path,target_kind,target_id FROM permalink_route_redirects ORDER BY source_path",
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(claims_after, claims_before);
+    assert_eq!(redirects_after, redirects_before);
 }
