@@ -38,3 +38,38 @@ Không có một bước preflight riêng hoặc tiến trình chạy nền; đ�
 Áp dụng [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md): ghi Final Decision dựa trên bằng chứng. Atlas chốt quyết định liên task và phân xử bất đồng khi cần. Agent tự chủ triển khai task đủ contract; các gate về quyền, bảo mật và validation vẫn áp dụng.
 
 Theo [discussion-turn-responder](skills/discussion-turn-responder/SKILL.md), kiểm metadata lượt GitHub PR/Issue và `.agents/discussions/`; chỉ phản hồi một lần nếu role/`Next agent` rõ và đến lượt, re-fetch trước POST. Tài khoản GitHub dùng chung không xác định được danh tính agent; khi mơ hồ báo `AMBIGUOUS`, không tự tạo vòng hội thoại.
+
+
+## 4. Aster bàn giao sau review qua Chat On Steroids
+
+**Owner authorization, 19/11/2026:** sau khi Aster review Issue/PR của Harbor,
+Aster chủ động gửi yêu cầu tiếp tục trong cùng lượt chat khi còn hành động hợp lệ,
+để chủ dự án không phải chuyển lời. Áp dụng [skill RUN/STATUS](skills/atlas-task-dispatch/SKILL.md)
+và [hợp đồng adapter](skills/atlas-task-dispatch/references/direct-adapter-contract.md).
+
+1. Re-fetch Issue/Project, PR head/review/CI và nguồn G3 đã merge. Ghi kết luận,
+   ownership ACK và việc cần làm trên GitHub trước khi gửi. Issue đã Done không
+   được kích hoạt lại; task chờ quyền/contract chưa duyệt giữ blocker.
+2. Kiểm đúng project/worktree/branch bằng probe và đọc hết các trang metadata
+   sessions. Không gửi khi có active turn, trạng thái mơ hồ hoặc công việc xung đột.
+   Chỉ đọc metadata để kiểm slot, không cần transcript.
+3. Dùng adapter được xác minh trên đúng host. Aster chạy ngay trên Mac có thể dùng
+   `python3.13 .agents/scripts/cos_dispatch.py --local probe harbor` và tương tự
+   `--local status-task`, `send-issue`, `status`. Atlas Windows dùng SSH theo skill.
+   Không sao chép endpoint/token, không sửa bảo vệ filesystem để làm probe xanh.
+4. Kiểm receipt trước khi gửi. Chỉ gửi một lần khi NOT_SENT và các gate đủ;
+   pin Issue/Task/source/base. Với implementation, dùng luồng Issue;
+   luồng send-pr hiện chỉ dành cho sửa PR Markdown tài liệu đủ điều kiện.
+5. Kiểm riêng ACCEPTED, outbox sent, assistant turn ended và GitHub kết quả thực.
+   Timeout/UNKNOWN cần reconcile; không đổi UUID hoặc SHA để né lock.
+   Báo đúng mức đã xác minh và blocker, không nhờ chủ dự án chuyển lời khi đường
+   gửi được phép còn hoạt động.
+
+**Giới hạn hiện tại:** adapter khóa một lần theo target + Issue + Task, và riêng
+PR tài liệu theo target + PR. Chưa có cơ chế dispatch generation/release lock
+đã duyệt. Vì vậy yêu cầu tiếp tục sau mọi vòng review cùng task chưa được transport
+này hỗ trợ. Khi gặp lock cũ, ghi feedback trên GitHub và báo giới hạn; không xóa lock,
+không gửi vào chat cũ hay dùng worker để vòng qua adapter. Cần thiết kế/kiểm chứng
+cơ chế resume riêng trước khi tuyên bố hỗ trợ đầy đủ chu trình lặp.
+
+**Thử trực tiếp 19/11/2026:** xem [bằng chứng Mac](research/2026-11-19-aster-cos-post-review.md).
