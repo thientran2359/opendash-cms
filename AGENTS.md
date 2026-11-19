@@ -58,6 +58,13 @@ security/data, CI, human test hoặc release authorization.
 - Atlas (Codex Win), Nova (Antigravity Win), Forge (CoS Win), Harbor (CoS
   macOS) and Orion (Antigravity macOS) work in separate local folders, on
   `agent/<name>` branches of the same `thientran2359/opendash-cms` Git remote.
+- **Owner xác nhận ngày 2026-11-19:** với mọi agent (gồm Aster), dùng
+  `agent/<name>` làm **nhánh triển khai mặc định cho task mới**. Sau khi PR
+  và G5 được bàn giao, fetch/sync an toàn từ `origin/main` trước task sau;
+  chỉ tạo `task/*` khi cần cô lập thật và ghi lý do trên Issue/PR. Không
+  reset/rebase/force-push, không né branch đang có PR hoặc worktree dirty.
+  Xem quyết định [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)
+  và [GitHub workflow](.agents/GITHUB_WORKFLOW.md). Nhánh/PR lịch sử giữ nguyên.
 - Draft technical research, discussions and task handoffs belong in `.agents/`
   (see `.agents/README.md` and `.agents/agents.yaml`). **Agent-concluded and peer-reviewed**
   decisions, plans/contracts and actual verification belong in `docs/` after PR merge.
