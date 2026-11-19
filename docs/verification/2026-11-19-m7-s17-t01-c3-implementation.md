@@ -2,6 +2,12 @@
 
 Date: 2026-11-19. Agent: Harbor. Platform: macOS 15.8.2 Intel x86_64.
 
+**Status update:** G4 [PR #398](https://github.com/thientran2359/opendash-cms/pull/398)
+subsequently merged as `9c463e9`; native G5 on that exact merged SHA is
+[independently verified here](2026-11-19-m7-s17-t01-g5-macos.md).
+The below failed runs/open blockers document the *earlier* G4 investigation,
+not the final live test status.
+
 ## Source and scope
 
 - Issue: [#376](https://github.com/thientran2359/opendash-cms/issues/376), Project #3 In progress.
