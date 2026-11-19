@@ -98,6 +98,18 @@ security/data, CI, human test hoặc release authorization.
   pushes on their branch, and the reviewer rechecks the updated PR. If GitHub
   comments are unavailable, relay findings to the author to record on the PR.
   A reviewer edits files only with explicit file/branch ownership reassignment.
+- **Harbor → Aster (owner instruction, 2026-11-19):** khi một Issue/PR thực sự
+  cần Aster review hoặc chốt file ownership, Harbor chủ động bàn giao qua
+  **cửa sổ chat Codex/ChatGPT đang mở** trên macOS bằng CoS Desktop, sau khi
+  chuẩn bị PR/SHA/CI/test/blockers. **Không cần xác minh chat đích theo
+  Aster/project cho chiều CoS → Codex**; guard chống gửi nhầm đó chỉ áp dụng
+  chiều Codex → CoS. Vẫn tránh gửi trùng và bảo toàn nội dung đang soạn theo
+  [Agent Operating Standard — Harbor → Aster](.agents/AGENT_OPERATING_STANDARD.md#5-handoff-harbor-aster-qua-codex-macos).
+  Chỉ yêu cầu Aster review khi thực sự cần; không biến peer review thành gate
+  bắt buộc cho mọi Issue. Nếu không thể nhập an toàn vào cửa sổ đang mở, giữ
+  nguyên bản nháp và dùng Issue/PR để ghi handoff chờ xử lý.
+  Tin nhắn chat **không** thay verdict trên GitHub, required CI, review/merge
+  gates hoặc G5; không tự kích hoạt automation/chạy nền.
 - Branch names in `.agents/agents.yaml` describe desired agent identities,
   not proof that remote branches or AI sessions are configured.
 - Assign one responsible implementer and one coordinator per task, with issue
