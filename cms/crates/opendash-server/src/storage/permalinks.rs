@@ -809,6 +809,202 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn upgrade_0039_custom_page_keeps_default_slug_redirect_without_blanket_aliases() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let migrator = sqlx::migrate!("../../migrations");
+        migrator.run_to(39, &db).await.unwrap();
+
+        let page_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES ('page','upgrade-page','Upgrade','{}','draft')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query("UPDATE content_entries SET publication_status='published' WHERE id=?")
+            .bind(page_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?, '/old-page-custom')")
+            .bind(page_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        let untouched = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES ('post','untouched-post','Untouched','{}','draft')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query("UPDATE content_entries SET publication_status='published' WHERE id=?")
+            .bind(untouched)
+            .execute(&db)
+            .await
+            .unwrap();
+
+        migrator.run(&db).await.unwrap();
+        assert_eq!(
+            resolve_public_path(&db, "/content/page/upgrade-page")
+                .await
+                .unwrap(),
+            Some(ResolvedPublicRoute {
+                target: PublicRouteTarget::Entry(page_id),
+                canonical_path: "/old-page-custom".to_owned(),
+                redirect: true,
+            }),
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/old-page-custom").await.unwrap(),
+            Some(ResolvedPublicRoute {
+                target: PublicRouteTarget::Entry(page_id),
+                canonical_path: "/old-page-custom".to_owned(),
+                redirect: false,
+            }),
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/content/post/untouched-post")
+                .await
+                .unwrap(),
+            Some(ResolvedPublicRoute {
+                target: PublicRouteTarget::Entry(untouched),
+                canonical_path: "/content/post/untouched-post".to_owned(),
+                redirect: false,
+            }),
+        );
+        let redirect_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM permalink_route_redirects WHERE target_kind='entry'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(
+            redirect_count, 1,
+            "no blanket aliases for untouched entries"
+        );
+    }
+
+    #[tokio::test]
+    async fn upgrade_0039_custom_page_alias_collision_fails_closed_without_partial_migration() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let migrator = sqlx::migrate!("../../migrations");
+        migrator.run_to(39, &db).await.unwrap();
+
+        let page_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES('page','upgrade-page','Upgrade','{}','draft')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?,'/old-page-custom')")
+            .bind(page_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        // Different Page claims exactly the old implicit URL of page_id.
+        let other_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES('page','other-page','Other','{}','draft')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO entry_public_paths(entry_id,path) VALUES(?,'/content/page/upgrade-page')",
+        )
+        .bind(other_id)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let err = migrator.run(&db).await.unwrap_err();
+        assert!(
+            err.to_string().contains("CHECK constraint failed"),
+            "expected fail-closed canonical/alias collision: {err:?}"
+        );
+        let migrated_0040: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version=40 AND success=1",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(migrated_0040, 0);
+        let claims_table: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='permalink_route_claims'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(
+            claims_table, 0,
+            "failed migration must not leave partial 0040 tables"
+        );
+        let existing_path: String =
+            sqlx::query_scalar("SELECT path FROM entry_public_paths WHERE entry_id=?")
+                .bind(other_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(existing_path, "/content/page/upgrade-page");
+    }
+
+    #[tokio::test]
+    async fn upgrade_0039_reuses_same_owner_redirect_preserving_original_timestamp() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let migrator = sqlx::migrate!("../../migrations");
+        migrator.run_to(39, &db).await.unwrap();
+        let page_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES('page','upgrade-page','Upgrade','{}','draft')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?,'/old-page-custom')")
+            .bind(page_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO entry_redirects(source_path,entry_id,created_at)
+             VALUES('/content/page/upgrade-page',?,'2026-11-18T01:23:45Z')",
+        )
+        .bind(page_id)
+        .execute(&db)
+        .await
+        .unwrap();
+        migrator.run(&db).await.unwrap();
+        let (owner, created_at): (String, String) = sqlx::query_as(
+            "SELECT target_id,created_at FROM permalink_route_redirects
+              WHERE source_path='/content/page/upgrade-page'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(owner, page_id.to_string());
+        assert_eq!(created_at, "2026-11-18T01:23:45Z");
+    }
+
+    #[tokio::test]
     async fn legacy_draft_is_private_and_redirect_tracks_stable_entry_id() {
         let db = site().await;
         let id = add_post(&db, "first", false).await;

@@ -57,3 +57,46 @@ SELECT r.source_path, 'entry', CAST(r.entry_id AS TEXT), r.created_at
  WHERE NOT EXISTS (
    SELECT 1 FROM permalink_route_claims c WHERE c.path = r.source_path
  );
+
+-- Before migration 0040, the public slug route for an entry with an explicit
+-- custom path redirected to that custom path. Preserve that *specific*
+-- implicit alias; untouched entries already have a canonical claim and must
+-- not receive a blanket redirect.
+--
+-- Another entry/term/archive may already claim the former slug path. That
+-- cannot preserve both old meanings: abort the whole migration rather than
+-- silently skipping the alias or shadowing the other canonical URL.
+CREATE TEMP TABLE _permalink_0040_custom_alias_guard (
+    valid INTEGER NOT NULL CHECK (valid = 1)
+);
+INSERT INTO _permalink_0040_custom_alias_guard (valid)
+SELECT CASE WHEN EXISTS (
+    SELECT 1
+      FROM content_entries e
+      JOIN entry_public_paths p ON p.entry_id = e.id
+      JOIN permalink_route_claims c
+        ON c.path = '/content/' || e.content_type_key || '/' || e.slug
+     WHERE e.content_type_key != 'section'
+       AND p.path != '/content/' || e.content_type_key || '/' || e.slug
+       AND (c.target_kind != 'entry' OR c.target_id != CAST(e.id AS TEXT))
+) THEN 0 ELSE 1 END;
+DROP TABLE _permalink_0040_custom_alias_guard;
+
+-- Stable entry IDs make redirects survive later slug or permalink changes.
+-- Migration0027 history may already contain this exact alias for the same
+-- entry, in which case leave its original created_at intact. An alias owned
+-- by a *different* entry fails on the redirect primary key (no OR IGNORE).
+INSERT INTO permalink_route_redirects (source_path, target_kind, target_id)
+SELECT '/content/' || e.content_type_key || '/' || e.slug,
+       'entry', CAST(e.id AS TEXT)
+  FROM content_entries e
+  JOIN entry_public_paths p ON p.entry_id = e.id
+ WHERE e.content_type_key != 'section'
+   AND p.path != '/content/' || e.content_type_key || '/' || e.slug
+   AND NOT EXISTS (
+       SELECT 1
+         FROM permalink_route_redirects r
+        WHERE r.source_path = '/content/' || e.content_type_key || '/' || e.slug
+          AND r.target_kind = 'entry'
+          AND r.target_id = CAST(e.id AS TEXT)
+   );
