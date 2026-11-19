@@ -63,6 +63,7 @@ loopback ports. The owner live site and port 18964 were not touched.
 | cargo build --manifest-path cms/Cargo.toml --locked | PASS, native x86_64 Mach-O debug binary |
 | python3.13 -m py_compile cms/scripts/content_foundation_m6_s11_t01_e2e.py | PASS |
 | Locally isolated Playwright Chrome runner with --binary, --admin-dist and --artifact-dir | PASS 10/10 native Admin/API/SQLite/restart; four screenshots, byte-for-byte embedded Admin index, JS and CSS |
+| .g5-checkouts/evidence/c4-playwright-venv/bin/python cms/scripts/content_foundation_m6_s11_t01_backup_e2e.py --binary cms/target/debug/opendash --artifact-dir .g5-checkouts/evidence/c4-native-backup | PASS 6/6 isolated C4 encrypted backup/restore: provider-default CPT/term, snapshot, post-snapshot site mutation, recovery activation, preserved canonical URL/ownership and re-edit |
 | rustfmt --edition 2024 --check on the new focused Rust test, plus git diff --check | PASS |
 
 The C4 Chrome runner covers 1280 px and mobile 390 px viewports, isolated Admin,
@@ -79,6 +80,16 @@ Admin CSS index-FE7M3lRd.css: ec113de7634d17c72b958b1944400c65060760846eabcd135b
 Migration 0041 SHA-256: 7c4b8eb52262f5d19f734899e606ba2d63ac20250673d8ed691260fc6cd8322b.
 The pre-existing sample plugin ZIP remains unchanged at SHA-256
 b04306779e1a76381ec0ce3e00d416d7b98ce2da045b59845cefb30cdaab2a37.
+
+The separate C4 encrypted backup/restore receipt at
+`.g5-checkouts/evidence/c4-native-backup/receipt.json` records PASS, six named
+checks and `port_18964_used=false` with a matching native candidate
+binary SHA-256 `d2a2d569fa576aba7d5dbd1730c280cf3546ee5897f6dba50f9a27a3d1dde81b`.
+The new test runner uses isolated source and restore targets, verifies that a
+post-snapshot explicit-null site override disappears after encrypted restore,
+then confirms provider-owned term memberships and successful edit on the
+restored site after safe-mode recovery. This is candidate evidence, not
+exact-merged G5.
 
 Receipt screenshot hashes:
 
@@ -109,9 +120,10 @@ site DBs and credentials are intentionally excluded from the Git commit.
   current approved Issue #378 ownership. **Await explicit bounded Aster ACK**
   before editing. The current native Chrome runner proves inherited→null,
   not null→inherited.
-- Actual encrypted C4-specific backup→restore→re-edit, provider/C3 concurrent
-  writer pressure and independent exact-merged macOS release G5 remain
-  NOT_RUN. The existing full M8 suite PASS does not replace those receipts.
+- Encrypted C4-specific backup→restore→re-edit is now PASS on a matching
+  candidate binary. Provider/C3 concurrent writer pressure and independent
+  exact-merged macOS release G5 remain NOT_RUN; the full M8 suite alone does
+  not replace those separate receipts.
   A distinct public plugin-uninstall API was not exercised; package updates,
   disable/re-enable, theme switch and reactivation were.
 - PR-head governance CI, exact-head self-review, G4 merge, exact-merged G5
