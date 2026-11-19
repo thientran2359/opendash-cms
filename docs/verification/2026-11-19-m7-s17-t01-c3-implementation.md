@@ -63,7 +63,16 @@ Negative test history was preserved: system Python lacked Playwright, so the exi
 
 The initially failing eight older integration targets were investigated, independently reproduced where Aster required baseline proof, then changed **only inside the eight extra test-only files granted by merged G3 PR #399**. The earlier historical failure inventory and ownership-request paragraphs below are intentionally retained to preserve original evidence; they do **not** describe currently unresolved regression failures. Runtime code, schema 0040 and public ACL were not weakened to accommodate stale test fixtures. The complete corrected macOS Intel Rust server suite is GREEN: **211/211 tests, 67 test result groups including 66 integration targets, zero ignored, exit 0**.
 
-The remaining gates at this stage are refreshed native release and old→new→restored-old→new receipts from final code, required governance CI and final-head G4 review, then merge followed by a **separate native G5 on exact merged source**. Do not treat earlier premerge release receipts as exact-merge G5, do not mark #376 Done or modify the owner Beta site before these gates close.
+### Final premerge G4 native release and governance source
+
+- Clean Harbor `agent/harbor` source commit `9a1ccd16804333f9e0b5e16a2894f8072088c8d9`, includes merged G3 coordinator decision PR #399, full corrected test fixtures and independent no-P1/P2 review. `git status --porcelain` empty when building/running. Mac **15.8.2 x86_64**.
+- Required GitHub governance [run 44498809025](https://github.com/thientran2359/opendash-cms/actions/runs/44498809025) at exact `9a1ccd1`: **Ubuntu SUCCESS and Windows SUCCESS**.
+- `cargo build --manifest-path cms/Cargo.toml --locked --release -p opendash-server --bin opendash`: **PASS**, Mach-O x86_64 release binary SHA-256 `0212963931d40408df8de1eb1453a13d05d53e9f0a8001b3ef0de4de8ee1ae55`, full build log `tmp/release-9a1ccd1-build.log`.
+- `.g5-checkouts/evidence/venv/bin/python cms/scripts/content_foundation_m7_s17_t01_e2e.py --binary cms/target/release/opendash --artifact-dir ../../opendash-tasks/harbor-m7-s17-t01-evidence/release-9a1ccd1`: **PASS exit 0, 16/16** native Chrome 158.0.8127.36 / API / SQLite / SEO / Builder / restart; receipt `release-9a1ccd1/receipt.json`, clean source SHA, no port 18964, original screenshot SHA preserved.
+- `.g5-checkouts/evidence/venv/bin/python cms/scripts/content_foundation_m7_s17_t01_upgrade_g5.py --old-binary .g5-checkouts/evidence/c2-t02-g5-6eb8357/opendash-merged-6eb8357 --new-binary cms/target/release/opendash --artifact-dir ../../opendash-tasks/harbor-m7-s17-t01-evidence/upgrade-9a1ccd1`: **PASS exit 0, 6/6** 0039→0040→snapshot-restored 0039→0040 on isolated SQLite+uploads, receipt `upgrade-9a1ccd1/upgrade-receipt.json`; historical old Intel binary SHA-256 `d4d7050020534a187d9ab79a1017feba374b0346fa0c80bdbc1d9d1c326bb755`, new SHA above, `port_18964_used=false`. Never attempted in-place migration downgrade.
+- Final-head review/merge, then **separate native G5 at exact merged SHA**, remain required. Previous `c8d49be` receipts and historical pre-PR399 FAILs remain unchanged.
+
+Do not treat this **premerge** evidence as exact-merge G5, do not mark #376 Done or modify the owner Beta site before those gates close.
 
 ## Remaining gates and limitation — historical pre-PR399 inventory
 
