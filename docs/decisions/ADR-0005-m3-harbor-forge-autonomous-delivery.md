@@ -1,6 +1,6 @@
 # ADR-0005 — M3 thực hiện tự chủ bởi Harbor và Forge
 
-> **Cập nhật phân quyền:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md) là nguồn hiện hành về vai trò, tự chủ triển khai, review và merge. Các quy định cũ dưới đây được giữ làm lịch sử quyết định.
+> **Cập nhật phân quyền và nhánh:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md) là nguồn hiện hành. Yêu cầu cũ tại mục 3 và luồng M3 về mặc định `task/*` đã được owner thay thế ngày 2026-11-19 bằng nhánh `agent/<name>` mặc định, `task/*` chỉ khi cần cô lập có lý do/ownership rõ. Giữ nguyên lịch sử M3 dưới đây, không sửa hồi tố commit/PR.
 
 - **Trạng thái:** **AGREED — owner direct, 2026-11-11**, áp dụng sau khi tài liệu này merge vào `main`.
 - **Phạm vi:** chỉ **M3 — Core CMS & WordPress-like Admin** và các PR/tác vụ M3 phát hành sau quyết định này; không sửa hồi tố hồ sơ, không ủy quyền thay đổi các dự án/phase khác.
