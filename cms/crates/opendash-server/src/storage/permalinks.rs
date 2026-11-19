@@ -78,6 +78,192 @@ pub async fn get_settings(db: &SqlitePool) -> ApiResult<PermalinkSettings> {
     read_settings(&mut conn).await
 }
 
+/// An immutable-owner package declaration. `None` withdraws the default base,
+/// but never creates or overwrites a site-level selection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderRewriteDeclaration {
+    pub resource_kind: &'static str,
+    pub resource_key: String,
+    pub rewrite_base: Option<String>,
+}
+
+/// The external C3 settings DTO contains only explicit site selections. Its
+/// sparse maps intentionally distinguish an omitted key from an explicit null.
+/// Overlay active provider defaults privately for canonical routing only.
+async fn read_effective_settings(conn: &mut SqliteConnection) -> ApiResult<PermalinkSettings> {
+    let mut settings = read_settings(conn).await?;
+    let provider_rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT resource_kind, resource_key, rewrite_base
+           FROM provider_rewrite_defaults
+          WHERE rewrite_base IS NOT NULL AND provider_status='active'
+            AND declaration_state='declared' ORDER BY resource_kind,resource_key",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    for (kind, key, base) in provider_rows {
+        match kind.as_str() {
+            "content_type" if !settings.content_type_bases.contains_key(&key) => {
+                settings.content_type_bases.insert(key, Some(base));
+            }
+            "taxonomy" if !settings.taxonomy_bases.contains_key(&key) => {
+                settings.taxonomy_bases.insert(key, Some(base));
+            }
+            _ => {}
+        }
+    }
+    Ok(settings)
+}
+
+async fn invalidate_if_effective_changed(
+    conn: &mut SqliteConnection,
+    before: &PermalinkSettings,
+) -> ApiResult<()> {
+    let after = read_effective_settings(conn).await?;
+    if before.post_structure != after.post_structure
+        || before.content_type_bases != after.content_type_bases
+        || before.taxonomy_bases != after.taxonomy_bases
+    {
+        sqlx::query("UPDATE site_permalink_settings SET version=version+1 WHERE id=1")
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// The caller holds the same write transaction that installs/activates the
+/// package and rebuilds all C3 claims. Owner identity is immutable even after
+/// withdrawal, disable and provider reinstall.
+pub async fn sync_provider_rewrite_defaults_in_tx(
+    conn: &mut SqliteConnection,
+    owner_kind: &str,
+    owner_id: &str,
+    declarations: &[ProviderRewriteDeclaration],
+) -> ApiResult<()> {
+    if !matches!(owner_kind, "plugin" | "theme") || owner_id.is_empty() {
+        return Err(ApiError::bad_request("Provider rewrite owner không hợp lệ."));
+    }
+    let before = read_effective_settings(conn).await?;
+    let mut incoming = std::collections::BTreeSet::new();
+    for item in declarations {
+        if !matches!(item.resource_kind, "content_type" | "taxonomy")
+            || !valid_content_type_key(&item.resource_key)
+            || (item.resource_kind == "content_type"
+                && matches!(item.resource_key.as_str(), "post" | "page" | "section"))
+            || item.rewrite_base.as_deref().is_some_and(|base| !valid_base(base))
+        {
+            return Err(ApiError::bad_request("Provider rewrite_base không hợp lệ."));
+        }
+        if !incoming.insert((item.resource_kind, item.resource_key.as_str())) {
+            return Err(ApiError::bad_request("Provider rewrite khai báo key trùng."));
+        }
+        let (existing_owner, existing_id): (String, Option<String>) = match item.resource_kind {
+            "content_type" => sqlx::query_as(
+                "SELECT owner_kind, owner_id FROM content_types WHERE key=?",
+            )
+            .bind(&item.resource_key)
+            .fetch_optional(&mut *conn)
+            .await?,
+            _ => sqlx::query_as(
+                "SELECT owner_kind, owner_id FROM taxonomy_definitions WHERE key=?",
+            )
+            .bind(&item.resource_key)
+            .fetch_optional(&mut *conn)
+            .await?,
+        }
+        .ok_or_else(|| ApiError::conflict("Provider rewrite target chưa được khai báo."))?;
+        if existing_owner != owner_kind || existing_id.as_deref() != Some(owner_id) {
+            return Err(ApiError::conflict("Provider rewrite key thuộc owner khác."));
+        }
+        let owner_of_default: Option<(String, String)> = sqlx::query_as(
+            "SELECT owner_kind,owner_id FROM provider_rewrite_defaults
+             WHERE resource_kind=? AND resource_key=?",
+        )
+        .bind(item.resource_kind)
+        .bind(&item.resource_key)
+        .fetch_optional(&mut *conn)
+        .await?;
+        if owner_of_default
+            .as_ref()
+            .is_some_and(|(kind, id)| kind != owner_kind || id != owner_id)
+        {
+            return Err(ApiError::conflict("Provider rewrite key đã thuộc owner khác."));
+        }
+        sqlx::query(
+            "INSERT INTO provider_rewrite_defaults
+               (resource_kind,resource_key,owner_kind,owner_id,rewrite_base)
+             VALUES (?,?,?,?,?)
+             ON CONFLICT(resource_kind,resource_key) DO UPDATE SET
+               rewrite_base=excluded.rewrite_base,provider_status='active',
+               declaration_state='declared'",
+        )
+        .bind(item.resource_kind)
+        .bind(&item.resource_key)
+        .bind(owner_kind)
+        .bind(owner_id)
+        .bind(&item.rewrite_base)
+        .execute(&mut *conn)
+        .await?;
+    }
+    let old_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT resource_kind,resource_key FROM provider_rewrite_defaults
+         WHERE owner_kind=? AND owner_id=?",
+    )
+    .bind(owner_kind)
+    .bind(owner_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    for (kind, key) in old_rows {
+        if !incoming.contains(&(kind.as_str(), key.as_str())) {
+            sqlx::query(
+                "UPDATE provider_rewrite_defaults
+                 SET declaration_state='withdrawn' WHERE resource_kind=? AND resource_key=?",
+            )
+            .bind(kind)
+            .bind(key)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    invalidate_if_effective_changed(conn, &before).await
+}
+
+pub async fn set_provider_rewrite_status_in_tx(
+    conn: &mut SqliteConnection,
+    owner_kind: &str,
+    owner_id: &str,
+    active: bool,
+) -> ApiResult<()> {
+    let before = read_effective_settings(conn).await?;
+    let status = if active { "active" } else { "provider_inactive" };
+    sqlx::query(
+        "UPDATE provider_rewrite_defaults SET provider_status=?
+         WHERE owner_kind=? AND owner_id=?
+           AND (?=0 OR declaration_state='declared')",
+    )
+    .bind(status)
+    .bind(owner_kind)
+    .bind(owner_id)
+    .bind(i64::from(active))
+    .execute(&mut *conn)
+    .await?;
+    invalidate_if_effective_changed(conn, &before).await
+}
+
+pub async fn deactivate_other_theme_rewrites_in_tx(
+    conn: &mut SqliteConnection,
+    active_theme_id: &str,
+) -> ApiResult<()> {
+    let before = read_effective_settings(conn).await?;
+    sqlx::query(
+        "UPDATE provider_rewrite_defaults SET provider_status='provider_inactive'
+         WHERE owner_kind='theme' AND owner_id!=?",
+    )
+    .bind(active_theme_id)
+    .execute(&mut *conn)
+    .await?;
+    invalidate_if_effective_changed(conn, &before).await
+}
+
 fn valid_base(base: &str) -> bool {
     let segs: Vec<_> = base.split('/').collect();
     !segs.is_empty()
@@ -423,7 +609,7 @@ fn add_claim(
 /// reservation. Any failure (including a namespace conflict) rolls back the
 /// caller's data mutation as well as the proposed claims.
 pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
-    let settings = read_settings(conn).await?;
+    let settings = read_effective_settings(conn).await?;
     let mut proposed = BTreeMap::<String, ProposedClaim>::new();
     // Historical routes carry only stable target IDs. Resolve their family
     // from the current rows when checking dynamic routes, not from the path.
@@ -849,6 +1035,122 @@ mod tests {
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         id
+    }
+
+    #[tokio::test]
+    async fn upgrade_0040_preserves_explicit_site_null_and_absent_choices() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let migrator = sqlx::migrate!("../../migrations");
+        migrator.run_to(40, &db).await.unwrap();
+        sqlx::query(
+            r#"UPDATE site_permalink_settings
+             SET content_type_bases_json='{"books":null,"magazines":"issues"}',
+                 taxonomy_bases_json='{"genre":null}' WHERE id=1"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let before = get_settings(&db).await.unwrap();
+        migrator.run(&db).await.unwrap();
+        let after = get_settings(&db).await.unwrap();
+        assert_eq!(after, before, "migration must not infer provider ownership");
+        assert_eq!(after.content_type_bases.get("books"), Some(&None));
+        assert!(!after.content_type_bases.contains_key("not_selected"));
+        assert_eq!(after.taxonomy_bases.get("genre"), Some(&None));
+        let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        assert_eq!(defaults, 0);
+    }
+
+    #[tokio::test]
+    async fn provider_default_respects_site_choice_and_c3_version() {
+        let db = site().await;
+        let schema = serde_json::to_string(&opendash_core::content::ContentTypeDefinition {
+            key: "books".to_owned(),
+            label: "Books".to_owned(),
+            fields: vec![],
+            settings: Default::default(),
+        })
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO content_types(key,definition_json,owner_kind,owner_id)
+             VALUES('books',?,'plugin','books_plugin')",
+        )
+        .bind(schema)
+        .execute(&db)
+        .await
+        .unwrap();
+        let before = get_settings(&db).await.unwrap();
+        let declaration = ProviderRewriteDeclaration {
+            resource_kind: "content_type",
+            resource_key: "books".to_owned(),
+            rewrite_base: Some("library".to_owned()),
+        };
+        let mut tx = db.begin().await.unwrap();
+        sync_provider_rewrite_defaults_in_tx(&mut tx, "plugin", "books_plugin", &[declaration.clone()])
+            .await
+            .unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let enabled = get_settings(&db).await.unwrap();
+        assert_eq!(enabled.version, before.version + 1);
+        assert!(!enabled.content_type_bases.contains_key("books"));
+        let mut conn = db.acquire().await.unwrap();
+        let effective = read_effective_settings(&mut conn).await.unwrap();
+        assert_eq!(effective.content_type_bases["books"], Some("library".into()));
+        drop(conn);
+
+        let mut changed = declaration.clone();
+        changed.rewrite_base = Some("catalog".into());
+        let mut tx = db.begin().await.unwrap();
+        sync_provider_rewrite_defaults_in_tx(&mut tx, "plugin", "books_plugin", &[changed.clone()])
+            .await.unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let modified = get_settings(&db).await.unwrap();
+        assert_eq!(modified.version, enabled.version + 1,
+            "updating an effective provider default invalidates an older site editor CAS");
+        assert!(!modified.content_type_bases.contains_key("books"));
+        let mut conn = db.acquire().await.unwrap();
+        assert_eq!(read_effective_settings(&mut conn).await.unwrap().content_type_bases["books"],
+            Some("catalog".to_owned()));
+        drop(conn);
+
+        let mut explicit_legacy = get_settings(&db).await.unwrap().input();
+        explicit_legacy.content_type_bases.insert("books".into(), None);
+        let saved = put_settings(&db, modified.version, &explicit_legacy)
+            .await
+            .unwrap();
+        let mut tx = db.begin().await.unwrap();
+        changed.rewrite_base = Some("reading".into());
+        sync_provider_rewrite_defaults_in_tx(&mut tx, "plugin", "books_plugin", &[changed])
+            .await
+            .unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let final_site = get_settings(&db).await.unwrap();
+        assert_eq!(final_site.version, saved.version, "provider defaults hidden by site choice");
+        assert_eq!(final_site.content_type_bases.get("books"), Some(&None));
+        let mut conn = db.acquire().await.unwrap();
+        assert_eq!(read_effective_settings(&mut conn).await.unwrap().content_type_bases["books"], None);
+        drop(conn);
+        let mut tx = db.begin().await.unwrap();
+        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", false).await.unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(get_settings(&db).await.unwrap().version, saved.version);
+        let mut tx = db.begin().await.unwrap();
+        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", true).await.unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(get_settings(&db).await.unwrap().version, saved.version,
+            "explicit null must survive disable and re-enable");
     }
 
     #[tokio::test]
