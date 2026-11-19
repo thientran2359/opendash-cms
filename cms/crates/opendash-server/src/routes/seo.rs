@@ -13,12 +13,16 @@ use crate::{
     auth::{Role, require_admin, require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     routes::{
-        public_content::render_single_entry_response,
+        public_content::{
+            redirect_canonical_taxonomy, render_canonical_archive, render_canonical_taxonomy,
+            render_single_entry_response,
+        },
         settings::{no_store_headers, parse_if_match},
         themes::ThemeStoreRoot,
     },
-    storage::seo::{self, EntryRouteSnapshot, PublicRouteResolution},
+    storage::{permalinks::{self, PublicRouteTarget}, public_content, seo::{self, EntryRouteSnapshot}},
     content_render,
+    public_context::{CanonicalUrlBuilder, QueryScope, parse_query, validate_public_request_path, validate_single_query},
 };
 
 pub const MAX_SEO_JSON_BYTES: usize = 16 * 1024;
@@ -87,18 +91,53 @@ pub async fn public_fallback(
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
     let path = uri.path();
-    match seo::resolve_custom_or_redirect_path(&db, path).await? {
-        PublicRouteResolution::Entry {
-            record,
-            canonical_path,
-        } => render_single_entry_response(&db, themes_root, record, Some(canonical_path)).await,
-        PublicRouteResolution::Redirect { location } => Ok((
-            StatusCode::MOVED_PERMANENTLY,
-            [(header::LOCATION, location)],
-            "",
-        )
-            .into_response()),
-        PublicRouteResolution::NotFound => Ok((
+    validate_public_request_path(path).map_err(ApiError::bad_request)?;
+    let resolved = permalinks::resolve_public_path(&db, path).await?;
+    let Some(resolved) = resolved else {
+        return missing_public_page();
+    };
+    let raw = uri.query();
+    match resolved.target {
+        PublicRouteTarget::Entry(id) => {
+            validate_single_query(raw).map_err(ApiError::bad_request)?;
+            let record = public_content::get_published_by_id(&db, id).await?
+                .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+            if resolved.redirect {
+                return Ok(permanent_public_redirect(resolved.canonical_path));
+            }
+            render_single_entry_response(&db, themes_root, record, Some(resolved.canonical_path)).await
+        }
+        PublicRouteTarget::Archive(type_key) => {
+            let query = parse_query(raw, QueryScope::ContentArchive).map_err(ApiError::bad_request)?;
+            public_content::require_public_archive(&db, &type_key).await?;
+            if resolved.redirect {
+                return Ok(permanent_public_redirect(CanonicalUrlBuilder::with_query(
+                    resolved.canonical_path, query, QueryScope::ContentArchive,
+                )));
+            }
+            render_canonical_archive(
+                db, themes_root, type_key, resolved.canonical_path, raw.map(str::to_owned),
+            ).await
+        }
+        PublicRouteTarget::Term(term_id) => {
+            if resolved.redirect {
+                return redirect_canonical_taxonomy(&db, term_id, resolved.canonical_path, raw).await;
+            }
+            render_canonical_taxonomy(
+                &db, themes_root.map(|Extension(root)| root), term_id,
+                resolved.canonical_path, raw, None,
+            ).await
+        }
+        PublicRouteTarget::Home => missing_public_page(),
+    }
+}
+
+fn permanent_public_redirect(location: String) -> Response {
+    (StatusCode::MOVED_PERMANENTLY, [(header::LOCATION, location)], "").into_response()
+}
+
+fn missing_public_page() -> ApiResult<Response> {
+    Ok((
             StatusCode::NOT_FOUND,
             axum::response::Html(
                 content_render::compose_document_with_seo(
@@ -109,8 +148,7 @@ pub async fn public_fallback(
                 )?,
             ),
         )
-            .into_response()),
-    }
+        .into_response())
 }
 
 pub async fn get_entry_seo(

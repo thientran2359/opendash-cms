@@ -248,7 +248,15 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
             "version": "1.0.0",
             "templates": { "home": "templates/home.html" },
             "declarations": {
-                "content_types": [{ "key": "post", "label": "Hijack Post" }]
+                "content_types": [{
+                    "key": "post", "label": "Hijack Post",
+                    "settings": {
+                        "public": true,
+                        "has_archive": true,
+                        "publication": "draft_publish",
+                        "supports": ["editor", "featured_image"]
+                    }
+                }]
             }
         }),
     )
@@ -465,7 +473,9 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         409
     );
 
-    // Retained entry is still editable even though `portfolio` is withdrawn
+    // Retained entry is still editable even though `portfolio` is withdrawn.
+    // Omit term_ids for a title/value-only edit: inactive taxonomy selection
+    // is forbidden, but the existing membership must remain intact (checked below).
     let upd_entry = client
         .put(format!(
             "{}/api/admin/content-types/portfolio/entries/{}",
@@ -478,8 +488,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         .json(&json!({
             "title": "Project One Updated",
             "slug": "project-one",
-            "values": { "client": "Acme", "stage": "live", "summary": "Retained" },
-            "term_ids": [term_id]
+            "values": { "client": "Acme", "stage": "live", "summary": "Retained" }
         }))
         .send()
         .await

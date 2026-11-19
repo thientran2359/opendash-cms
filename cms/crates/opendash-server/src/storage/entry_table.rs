@@ -331,6 +331,12 @@ mod c1_public_url_tests {
         .execute(&db)
         .await
         .unwrap();
+        // This legacy fixture writes directly to SQLite instead of using the
+        // normal content-type writer. Rebuild C3 claims in the same serialized
+        // transaction the production writer would use after its mutation.
+        let mut tx = db.begin().await.unwrap();
+        super::super::permalinks::sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
         let visible = query(&db, "news", FieldRole::Admin, &EntryTableFilter::default())
             .await
             .unwrap();

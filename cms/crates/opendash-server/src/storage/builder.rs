@@ -40,11 +40,14 @@ pub struct HomeState {
     pub active_template: Option<String>,
 }
 
-/// Only public-safe title and slug leave the list storage resolver.
+/// Only public-safe display text and a canonical, storage-resolved href leave
+/// the list resolver. IDs remain stable when a slug or permalink changes.
 #[derive(Debug, Clone)]
 pub struct ListItem {
+    pub entry_id: i64,
     pub title: String,
     pub slug: String,
+    pub href: Option<String>,
 }
 
 #[derive(Debug)]
@@ -137,19 +140,34 @@ pub async fn resolve_lists_in_tx(
                     )
                     .await?;
                     let rendered = match result {
-                        PublishedListResult::Page(result) => ResolvedList::Page {
-                            page,
-                            out_of_range: page > 1 && result.entries.is_empty(),
-                            items: result
-                                .entries
-                                .into_iter()
-                                .map(|entry| ListItem {
+                        PublishedListResult::Page(result) => {
+                            // Keep every URL lookup in the very same read
+                            // snapshot as the list page and published guards.
+                            let mut items = Vec::with_capacity(result.entries.len());
+                            for entry in result.entries {
+                                let href = if crate::storage::seo::resolve_public_entry_path_in_tx(
+                                    &mut **tx, entry.id,
+                                ).await?.is_some() {
+                                    crate::storage::permalinks::canonical_entry_path_in_tx(
+                                        &mut **tx, entry.id,
+                                    ).await?
+                                } else {
+                                    None
+                                };
+                                items.push(ListItem {
+                                    entry_id: entry.id,
                                     title: entry.title,
                                     slug: entry.slug,
-                                })
-                                .collect(),
-                            has_next: result.has_next,
-                        },
+                                    href,
+                                });
+                            }
+                            ResolvedList::Page {
+                                page,
+                                out_of_range: page > 1 && items.is_empty(),
+                                items,
+                                has_next: result.has_next,
+                            }
+                        }
                         PublishedListResult::MissingConfig(_) => ResolvedList::MissingConfig,
                     };
                     results.insert(element.id.clone(), rendered);

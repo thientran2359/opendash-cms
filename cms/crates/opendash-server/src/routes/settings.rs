@@ -1,4 +1,4 @@
-//! Admin-only SITE-01 API, with ETag/CAS and no-store responses.
+//! Admin-only SITE-01/C3 API, with ETag/CAS and no-store responses.
 use axum::{
     Json,
     extract::{Path, State, rejection::JsonRejection},
@@ -13,6 +13,7 @@ use sqlx::SqlitePool;
 use crate::{
     auth::{require_admin, require_admin_with_csrf},
     error::{ApiError, ApiResult},
+    storage::permalinks::{self, PermalinkSettings, PermalinkSettingsInput},
     storage::settings::{
         self, GeneralSettings, GeneralSettingsInput, PublicSaveOutcome, PublicSiteSettings,
         PublicSiteSettingsInput, SaveOutcome, ThemeOptionsOutcome, ThemeOptionsSnapshot,
@@ -139,6 +140,41 @@ pub async fn public_put(
             "Cài đặt công khai đã thay đổi ở một tab khác. Form chưa lưu vẫn được giữ lại.",
         )),
     }
+}
+
+fn permalink_settings_response(snapshot: PermalinkSettings) -> Response {
+    (no_store_headers(Some(snapshot.version)), Json(snapshot)).into_response()
+}
+
+/// SITE-02/C3: always return a server-owned, versioned permalink snapshot.
+pub async fn permalinks_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let snapshot = permalinks::get_settings(&db).await?;
+    Ok(permalink_settings_response(snapshot))
+}
+
+/// Persist format and bases atomically alongside canonical/redirect claims.
+/// The storage writer owns collision checks and the 50,000-claim limit.
+pub async fn permalinks_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    input: Result<Json<PermalinkSettingsInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let expected = parse_if_match(&headers)?;
+    let Json(input) = input.map_err(|error| {
+        if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError(StatusCode::PAYLOAD_TOO_LARGE, "Cấu hình permalink vượt quá 16 KiB.".into())
+        } else {
+            ApiError::bad_request("Cấu hình permalink không hợp lệ.")
+        }
+    })?;
+    let saved = permalinks::put_settings(&db, expected, &input).await?;
+    Ok(permalink_settings_response(saved))
 }
 
 #[derive(Debug, Deserialize)]

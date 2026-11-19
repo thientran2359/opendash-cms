@@ -716,6 +716,7 @@ pub async fn create_entry_with_fence(
     .fetch_one(&mut *tx)
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(record)
 }
@@ -801,6 +802,7 @@ pub async fn update_entry_with_fence(
             .fetch_one(&mut *tx)
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
+            crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
             tx.commit().await?;
             Ok(record)
         }
@@ -890,6 +892,7 @@ pub async fn create_entry_with_schema_fence(
     .fetch_one(&mut *tx)
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(record)
 }
@@ -959,6 +962,7 @@ pub async fn update_entry_with_schema_fence(
             .fetch_one(&mut *tx)
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
+            crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
             tx.commit().await?;
             Ok(record)
         }
@@ -1320,6 +1324,7 @@ pub async fn commit_composite_entry_save(
     )
     .await?;
 
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
 
@@ -1355,6 +1360,7 @@ pub async fn delete_entry(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -1394,6 +1400,7 @@ pub async fn set_publication_status(
         return Err(missing_or_stale(db, type_key, id).await?);
     }
     crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     get_entry(db, type_key, id)
         .await?

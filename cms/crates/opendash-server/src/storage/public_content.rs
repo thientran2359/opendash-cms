@@ -5,7 +5,7 @@ use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use super::entries::{self, ContentEntryRecord, EntryFilters, decode_row};
 use crate::error::ApiResult;
-use crate::public_context::{CanonicalUrlBuilder, PublicFilters, TaxonomyKind};
+use crate::public_context::{PublicFilters, TaxonomyKind};
 
 /// Slug is unique within each CPT; lookup never relies on a numeric admin ID.
 pub async fn get_by_slug(
@@ -94,24 +94,8 @@ pub async fn canonical_entry_by_id(db: &SqlitePool, id: i64) -> ApiResult<Option
 }
 
 pub async fn canonical_term_by_id(db: &SqlitePool, id: i64) -> ApiResult<Option<String>> {
-    let row: Option<(String, String)> =
-        sqlx::query_as(
-            "SELECT t.kind,t.slug FROM taxonomy_terms t
-             JOIN taxonomy_definitions d ON d.key=t.kind
-             WHERE t.id=? AND d.public=1 AND d.provider_status='active'
-               AND d.declaration_state='declared'",
-        )
-            .bind(id)
-            .fetch_optional(db)
-            .await?;
-    Ok(row.and_then(|(kind, slug)| {
-        let kind = match kind.as_str() {
-            "category" => TaxonomyKind::Category,
-            "tag" => TaxonomyKind::Tag,
-            _ => return None,
-        };
-        CanonicalUrlBuilder::term_from_id(id, kind, &slug)
-    }))
+    let mut conn = db.acquire().await?;
+    crate::storage::permalinks::canonical_term_path_in_tx(&mut conn, id).await
 }
 
 #[derive(Debug, Clone)]
@@ -186,9 +170,65 @@ pub async fn taxonomy_public_page(
             return Err(crate::error::ApiError::bad_request("Taxonomy private hoặc không phân cấp."));
         }
     }
-    let page = list_taxonomy_published_in_tx(&mut tx, kind, id, filters, limit, offset).await?;
+    let page = list_taxonomy_published_in_tx(&mut tx, kind.as_str(), id, filters, limit, offset).await?;
     tx.commit().await?;
     Ok(Some((PublicTerm { id, name, slug }, page)))
+}
+
+/// Resolve a term archive by its stable ID, including site-defined taxonomies.
+/// The permission guard is inside the same snapshot used by the list query.
+/// Legacy category/tag routes keep their existing filter behavior.
+pub async fn taxonomy_public_page_by_id(
+    db: &SqlitePool,
+    term_id: i64,
+    filters: PublicFilters,
+    limit: i64,
+    offset: i64,
+) -> ApiResult<Option<(String, PublicTerm, TaxonomyPublishedPage)>> {
+    let mut tx = db.begin().await?;
+    let row: Option<(String, String, String, i64)> = sqlx::query_as(
+        "SELECT t.kind, t.name, t.slug, d.hierarchical
+           FROM taxonomy_terms t
+           JOIN taxonomy_definitions d ON d.key=t.kind
+          WHERE t.id=? AND d.public=1 AND d.provider_status='active'
+            AND d.declaration_state='declared'",
+    )
+    .bind(term_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((kind, name, slug, hierarchical)) = row else {
+        return Ok(None);
+    };
+    if kind == "category" || kind == "tag" {
+        tx.commit().await?;
+        let builtin_kind = if kind == "category" {
+            TaxonomyKind::Category
+        } else {
+            TaxonomyKind::Tag
+        };
+        // The legacy reader matches by slug. If another writer renames this
+        // term and reuses its old slug between snapshots, never render the
+        // replacement under the original stable-ID route claim.
+        let result = taxonomy_public_page(db, builtin_kind, &slug, filters, limit, offset).await?;
+        return Ok(match result {
+            Some((term, page)) if term.id == term_id => Some((kind, term, page)),
+            _ => None,
+        });
+    }
+    // C3 introduces custom taxonomy archives without inheriting another
+    // taxonomy's query language. Its own root term is the only generic filter;
+    // rejecting extra recognized filters avoids silently dropping constraints.
+    if filters.category_id.is_some() || filters.tag_id.is_some()
+        || filters.taxonomy_key.is_some() || filters.term_id.is_some()
+        || (filters.descendants && hierarchical == 0)
+    {
+        return Err(crate::error::ApiError::bad_request(
+            "Bộ lọc trang taxonomy tùy chỉnh không hợp lệ.",
+        ));
+    }
+    let page = list_taxonomy_published_in_tx(&mut tx, &kind, term_id, filters, limit, offset).await?;
+    tx.commit().await?;
+    Ok(Some((kind, PublicTerm { id: term_id, name, slug }, page)))
 }
 
 pub struct TaxonomyPublishedPage {
@@ -202,28 +242,33 @@ pub struct TaxonomyPublishedPage {
 /// nor page boundaries. Read COUNT and page under one SQLite snapshot.
 async fn list_taxonomy_published_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
-    kind: TaxonomyKind,
+    kind: &str,
     term_id: i64,
     filters: PublicFilters,
     limit: i64,
     offset: i64,
 ) -> ApiResult<TaxonomyPublishedPage> {
-    let root_category = if kind == TaxonomyKind::Category {
+    let root_category = if kind == "category" {
         Some(term_id)
     } else {
         filters.category_id
     };
-    let root_tag = if kind == TaxonomyKind::Tag {
+    let root_tag = if kind == "tag" {
         Some(term_id)
     } else {
         filters.tag_id
     };
-    let extra_category = (kind == TaxonomyKind::Category)
+    let extra_category = (kind == "category")
         .then_some(filters.category_id)
         .flatten();
-    let extra_tag = (kind == TaxonomyKind::Tag)
+    let extra_tag = (kind == "tag")
         .then_some(filters.tag_id)
         .flatten();
+    let (generic_term_id, generic_kind) = if kind == "category" || kind == "tag" {
+        (filters.term_id, filters.taxonomy_key.clone())
+    } else {
+        (Some(term_id), Some(kind.to_owned()))
+    };
     // Every input below is a bind parameter. The statement is fixed source.
     const FILTERED: &str = "WITH RECURSIVE category_scope(id, depth) AS (
             SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = 'category'
@@ -287,8 +332,8 @@ async fn list_taxonomy_published_in_tx(
     let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(count_sql))
         .bind(root_category)
         .bind(i64::from(filters.descendants))
-        .bind(filters.term_id)
-        .bind(&filters.taxonomy_key)
+        .bind(generic_term_id)
+        .bind(&generic_kind)
         .bind(i64::from(filters.descendants))
         .bind(root_category)
         .bind(root_tag)
@@ -297,8 +342,8 @@ async fn list_taxonomy_published_in_tx(
         .bind(extra_category)
         .bind(extra_tag)
         .bind(extra_tag)
-        .bind(filters.term_id)
-        .bind(kind.as_str()) // Root archive taxonomy is always required.
+        .bind(generic_term_id)
+        .bind(kind) // Root archive taxonomy is always required.
         .bind(filters.category_id)
         .bind(filters.tag_id)
         .bind(&filters.taxonomy_key)
@@ -318,8 +363,8 @@ async fn list_taxonomy_published_in_tx(
     )> = sqlx::query_as(sqlx::AssertSqlSafe(page_sql))
         .bind(root_category)
         .bind(i64::from(filters.descendants))
-        .bind(filters.term_id)
-        .bind(&filters.taxonomy_key)
+        .bind(generic_term_id)
+        .bind(&generic_kind)
         .bind(i64::from(filters.descendants))
         .bind(root_category)
         .bind(root_tag)
@@ -328,8 +373,8 @@ async fn list_taxonomy_published_in_tx(
         .bind(extra_category)
         .bind(extra_tag)
         .bind(extra_tag)
-        .bind(filters.term_id)
-        .bind(kind.as_str()) // Root archive taxonomy is always required.
+        .bind(generic_term_id)
+        .bind(kind) // Root archive taxonomy is always required.
         .bind(filters.category_id)
         .bind(filters.tag_id)
         .bind(&filters.taxonomy_key)
@@ -492,6 +537,18 @@ mod m5_public_context_tests {
     use super::*;
     use axum::http::StatusCode;
     use sqlx::sqlite::SqlitePoolOptions;
+
+    /// Older fixtures seed site rows directly through SQLite. In C3, those
+    /// fixtures must explicitly build the same canonical claims that normal
+    /// API writers build inside their transaction; public readers never
+    /// fabricate URLs from unsynchronized legacy tables.
+    async fn synchronize_direct_sql_fixture(db: &SqlitePool) {
+        let mut tx = db.begin().await.unwrap();
+        crate::storage::permalinks::sync_claims_in_tx(&mut tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
 
     async fn add_entry(
         db: &SqlitePool,
@@ -687,6 +744,7 @@ mod m5_public_context_tests {
         add_entry(&db, "news", "news-other", true, &[child, other_tag]).await;
         let draft = add_entry(&db, "post", "draft-a", false, &[root, child, tag]).await;
         add_entry(&db, "news", "no-terms", true, &[]).await;
+        synchronize_direct_sql_fixture(&db).await;
         let exact = taxonomy_public_page(
             &db,
             TaxonomyKind::Category,
@@ -799,6 +857,7 @@ mod m5_public_context_tests {
             .execute(&db)
             .await
             .unwrap();
+        synchronize_direct_sql_fixture(&db).await;
         assert!(get_by_slug(&db, "post", "post-a").await.unwrap().is_none());
         assert!(get_by_slug(&db, "post", "draft-a").await.unwrap().is_none());
         assert_eq!(
@@ -811,6 +870,7 @@ mod m5_public_context_tests {
             .execute(&db)
             .await
             .unwrap();
+        synchronize_direct_sql_fixture(&db).await;
         assert_eq!(
             canonical_term_by_id(&db, root).await.unwrap().as_deref(),
             Some("/taxonomy/category/sea-new")
@@ -960,6 +1020,7 @@ mod m5_public_context_tests {
         .execute(&db)
         .await
         .unwrap();
+        synchronize_direct_sql_fixture(&db).await;
 
         assert!(get_by_slug(&db, "news", "hidden-news").await.unwrap().is_none());
         assert!(get_published_by_id(&db, entry_id).await.unwrap().is_none());

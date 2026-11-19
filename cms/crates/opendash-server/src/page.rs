@@ -368,11 +368,9 @@ pub fn render_builder_with_lists_and_forms(
                                     } else {
                                         list_html.push_str("<ul>");
                                         for item in items {
-                                            // Neither title nor slug is ever treated as raw HTML.
-                                            if let Some(path) = CanonicalUrlBuilder::entry(
-                                                &props.type_key,
-                                                &item.slug,
-                                            ) {
+                                            // Never manufacture a legacy link; the
+                                            // href comes from the snapshot resolver.
+                                            if let Some(path) = &item.href {
                                                 list_html.push_str(&format!(
                                                     "<li><a href=\"{}\">{}</a></li>",
                                                     escape_html(&path),
@@ -1057,5 +1055,70 @@ mod m6_s05_tests {
         .expect("disabled fallback render must not fail");
         assert!(rendered_disabled.html.contains("builder-block-unavailable"));
         assert_eq!(rendered_disabled.diagnostics[0].code, "plugin_block_unavailable");
+    }
+
+    #[test]
+    fn builder_list_uses_snapshot_canonical_href_not_legacy_slug() {
+        let props: opendash_core::builder::ListProps =
+            serde_json::from_value(serde_json::json!({"type_key": "post"})).unwrap();
+        let doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-1".into(),
+                responsive: None,
+                children: vec![RowNode {
+                    id: "row-1".into(),
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "col-1".into(),
+                        responsive: None,
+                        children: vec![ElementNode {
+                            id: "list-1".into(),
+                            content: ElementContent::Known(KnownElement::List(props)),
+                        }],
+                    }],
+                }],
+            }],
+        };
+        let state = HomeState {
+            version: 1,
+            saved: Some(doc.clone()),
+            legacy: None,
+            themes: BTreeMap::new(),
+            active_id: None,
+            active_alias: None,
+            active_template: None,
+        };
+        let mut lists = ListResults::new();
+        lists.insert(
+            "list-1".into(),
+            ResolvedList::Page {
+                page: 1,
+                items: vec![
+                    crate::storage::builder::ListItem {
+                        entry_id: 17,
+                        title: "<unsafe>".into(),
+                        slug: "old-slug".into(),
+                        href: Some("/blog/new-slug".into()),
+                    },
+                    crate::storage::builder::ListItem {
+                        entry_id: 18,
+                        title: "Unlinked".into(),
+                        slug: "hidden".into(),
+                        href: None,
+                    },
+                ],
+                has_next: false,
+                out_of_range: false,
+            },
+        );
+        let rendered = render_builder_with_lists(
+            &state, &doc, false, &BTreeMap::new(), &lists,
+        ).unwrap();
+        assert!(rendered.html.contains("/blog/new-slug"));
+        assert!(!rendered.html.contains("/content/post/old-slug"));
+        assert!(!rendered.html.contains("href=\"/content/post/hidden\""));
+        assert!(rendered.html.contains("&lt;unsafe&gt;"));
+        assert!(!rendered.html.contains("<unsafe>"));
     }
 }

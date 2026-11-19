@@ -131,6 +131,29 @@ async fn login(client: &Client, base: &str, username: &str, password: &str) -> (
     (cookie, body["csrf_token"].as_str().unwrap().to_string())
 }
 
+// C1 includes the private Section builtin, not just the original Post/Page.
+// Keep the schema/CAS checks for every core key and fail if Section becomes public.
+fn assert_core_builtins(cts: &[Value]) {
+    let keys = cts
+        .iter()
+        .map(|ct| ct["descriptor"]["key"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(keys, ["page", "post", "section"]);
+    for ct in cts {
+        assert_eq!(ct["version"], 1);
+        assert!(ct["schema_token"].as_str().unwrap().starts_with("sha256:"));
+        assert_eq!(ct["owner"]["kind"], "core");
+    }
+    let section = &cts[2];
+    assert_eq!(section["descriptor"]["settings"], json!({
+        "public": false,
+        "has_archive": false,
+        "publication": "draft_publish",
+        "supports": []
+    }));
+    assert_eq!(section["status"], "active");
+}
+
 #[tokio::test]
 async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     let dir = TempDirGuard::new("main-flow");
@@ -154,7 +177,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     assert_eq!(ed_resp.status(), StatusCode::CREATED);
     let (ed_cookie, ed_csrf) = login(&client, &srv.base_url, "editor1", "EditorPassword123!").await;
 
-    // 1. Check GET /api/admin/content-types returns version & schema_token for builtin post/page
+    // 1. Check GET /api/admin/content-types includes immutable private Section.
     let cts: Vec<Value> = client
         .get(format!("{}/api/admin/content-types", srv.base_url))
         .header("Cookie", &admin_cookie)
@@ -164,16 +187,20 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .json()
         .await
         .unwrap();
-    assert_eq!(cts.len(), 2);
-    for ct in &cts {
-        assert_eq!(ct["version"], 1);
-        assert!(
-            ct["schema_token"]
-                .as_str()
-                .unwrap()
-                .starts_with("sha256:")
-        );
-    }
+    assert_core_builtins(&cts);
+    let mutate_section = client
+        .put(format!("{}/api/admin/content-types/section", srv.base_url))
+        .header("Cookie", &admin_cookie)
+        .header("Origin", &srv.base_url)
+        .header("X-CSRF-Token", &admin_csrf)
+        .header("If-Match", "\"v1\"")
+        .json(&json!({"key":"section", "label":"Public Section", "fields":[],
+            "settings":{"public":true,"has_archive":true,"publication":"draft_publish",
+                "supports":["editor","featured_image"]}}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(mutate_section.status(), StatusCode::FORBIDDEN);
 
     // 2. AC-05a Case 1: Base CPT field missing public_exposure -> normalized to "public"
     let create_cpt = client
@@ -928,8 +955,7 @@ async fn migration_0034_upgrades_legacy_0001_fixture_preserving_existing_data() 
         .json()
         .await
         .unwrap();
-    assert_eq!(cts.len(), 2);
-    assert!(cts.iter().all(|c| c["version"] == 1));
+    assert_core_builtins(&cts);
     drop(srv);
 
     let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db_path))

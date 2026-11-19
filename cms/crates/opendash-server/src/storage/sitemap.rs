@@ -33,11 +33,10 @@ WITH indexable AS (
 
     SELECT 2 AS route_kind,
            e.id AS stable_id,
-           COALESCE(p.path, '/content/' || e.content_type_key || '/' || e.slug) AS path,
+           NULL AS path,
            e.updated_at AS lastmod
       FROM content_entries e
       JOIN content_types t ON t.key = e.content_type_key
-      LEFT JOIN entry_public_paths p ON p.entry_id = e.id
       LEFT JOIN entry_seo s ON s.entry_id = e.id
      WHERE e.publication_status = 'published'
        AND e.content_type_key != 'section'
@@ -50,7 +49,7 @@ WITH indexable AS (
 
     SELECT 3 AS route_kind,
            t.rowid AS stable_id,
-           '/content/' || t.key AS path,
+           t.key AS path,
            NULL AS lastmod
       FROM content_types t
      WHERE t.provider_status = 'active'
@@ -67,15 +66,11 @@ WITH indexable AS (
 
     SELECT 4 AS route_kind,
            tm.id AS stable_id,
-           CASE tm.kind
-               WHEN 'category' THEN '/taxonomy/category/' || tm.slug
-               ELSE '/taxonomy/tag/' || tm.slug
-           END AS path,
+           NULL AS path,
            NULL AS lastmod
       FROM taxonomy_terms tm
       JOIN taxonomy_definitions td ON td.key = tm.kind
-     WHERE tm.kind IN ('category', 'tag')
-       AND td.public = 1
+     WHERE td.public = 1
        AND td.provider_status = 'active'
        AND td.declaration_state = 'declared'
        AND EXISTS (
@@ -132,17 +127,35 @@ pub async fn list_indexable_routes_in_tx(
     limit: i64,
 ) -> ApiResult<SitemapRouteList> {
     let sql = format!(
-        "{INDEXABLE_ROUTES_UNION} SELECT path, lastmod FROM indexable ORDER BY route_kind ASC, stable_id ASC LIMIT ?2 OFFSET ?3"
+        "{INDEXABLE_ROUTES_UNION}
+         SELECT CASE WHEN page.route_kind = 1 THEN '/' ELSE claims.path END AS canonical_path,
+                page.lastmod
+           FROM (
+             SELECT route_kind, stable_id, path, lastmod FROM indexable
+              ORDER BY route_kind ASC, stable_id ASC LIMIT ?2 OFFSET ?3
+           ) AS page
+           LEFT JOIN permalink_route_claims claims
+             ON claims.target_kind = CASE page.route_kind
+                  WHEN 2 THEN 'entry' WHEN 3 THEN 'archive'
+                  WHEN 4 THEN 'term' ELSE 'home' END
+            AND claims.target_id = CASE page.route_kind
+                  WHEN 3 THEN page.path ELSE CAST(page.stable_id AS TEXT) END
+          ORDER BY page.route_kind ASC, page.stable_id ASC"
     );
-    let rows: Vec<(String, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+    // One bounded, snapshot-consistent claim projection per sitemap part.
+    // The indexable CTE owns ACL/noindex/publication filtering and stable
+    // pagination; every non-home path comes directly from C3 route claims.
+    let rows: Vec<(Option<String>, Option<String>)> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(public_origin)
         .bind(limit)
         .bind(offset)
         .fetch_all(&mut *conn)
         .await?;
-    let routes = rows
-        .into_iter()
-        .map(|(path, lastmod)| SitemapRoute { path, lastmod })
-        .collect();
+    let mut routes = Vec::with_capacity(rows.len());
+    for (path, lastmod) in rows {
+        if let Some(path) = path {
+            routes.push(SitemapRoute { path, lastmod });
+        }
+    }
     Ok(SitemapRouteList { routes })
 }

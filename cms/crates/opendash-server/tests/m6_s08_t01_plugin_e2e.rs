@@ -559,6 +559,7 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     assert_eq!(get_entry.status().as_u16(), 200);
     let entry_before: Value = get_entry.json().await.unwrap();
     assert_eq!(entry_before["title"], "Rust Systems Engineer");
+    assert_eq!(entry_before["term_ids"], json!([cat_id]));
 
     // Disabled plugin action is blocked
     let blocked_action = client
@@ -572,7 +573,41 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .unwrap();
     assert_ne!(blocked_action.status().as_u16(), 200);
 
-    // Mutate entry (to be rolled back by snapshot restore)
+    // Explicit term selection is rejected while the provider is inactive, and
+    // must not mutate title, version, or the prior category association.
+    let inactive_selection = client
+        .put(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .header("Cookie", &editor_cookie2)
+        .header("Origin", &base_url2)
+        .header("X-CSRF-Token", &editor_csrf2)
+        .header("If-Match", "\"v1\"")
+        .json(&json!({
+            "title": "Must Not Save With Inactive Selection",
+            "slug": "rust-systems-engineer",
+            "values": { "company": "OpenDash", "salary": 190000 },
+            "term_ids": [cat_id]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let inactive_status = inactive_selection.status().as_u16();
+    let inactive_body = inactive_selection.text().await.unwrap();
+    assert_eq!(inactive_status, 400, "inactive selection should be rejected: {inactive_body}");
+    let unchanged: Value = client
+        .get(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .header("Cookie", &editor_cookie2)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unchanged["title"], entry_before["title"]);
+    assert_eq!(unchanged["term_ids"], entry_before["term_ids"]);
+    assert_eq!(unchanged["version"], entry_before["version"]);
+
+    // Mutate only entry title/value while retaining existing memberships;
+    // the snapshot restore below must roll this title edit back.
     let update_entry = client
         .put(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
         .header("Cookie", &editor_cookie2)
@@ -582,13 +617,25 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .json(&json!({
             "title": "Mutated Title Before Rollback",
             "slug": "rust-systems-engineer",
-            "values": { "company": "OpenDash", "salary": 190000 },
-            "term_ids": [cat_id]
+            "values": { "company": "OpenDash", "salary": 190000 }
         }))
         .send()
         .await
         .unwrap();
-    assert_eq!(update_entry.status().as_u16(), 200);
+    let update_status = update_entry.status().as_u16();
+    let update_body = update_entry.text().await.unwrap();
+    assert_eq!(update_status, 200, "inactive title/value update: {update_body}");
+    let preserved: Value = client
+        .get(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .header("Cookie", &editor_cookie2)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(preserved["term_ids"], json!([cat_id]));
+    assert_eq!(preserved["title"], "Mutated Title Before Rollback");
 
     // Re-enable e2e-suite & verify action works again
     let enable_suite = client
@@ -600,6 +647,47 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .await
         .unwrap();
     assert_eq!(enable_suite.status().as_u16(), 200);
+
+    // Membership changes become legal again once the declaring plugin is active.
+    let second_category = client
+        .post(format!("{base_url2}/api/admin/taxonomy/terms"))
+        .header("Cookie", &admin_cookie2)
+        .header("Origin", &base_url2)
+        .header("X-CSRF-Token", &admin_csrf2)
+        .json(&json!({"kind":"category", "name":"Platform", "slug":"platform"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(second_category.status().as_u16(), 201);
+    let second_cat_id = second_category.json::<Value>().await.unwrap()["id"]
+        .as_i64().unwrap();
+    let select_after_enable = client
+        .put(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .header("Cookie", &editor_cookie2)
+        .header("Origin", &base_url2)
+        .header("X-CSRF-Token", &editor_csrf2)
+        .header("If-Match", "\"v2\"")
+        .json(&json!({
+            "title": "Mutated Title Before Rollback", "slug": "rust-systems-engineer",
+            "values": { "company": "OpenDash", "salary": 190000 },
+            "term_ids": [cat_id, second_cat_id]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let select_status = select_after_enable.status().as_u16();
+    let select_body = select_after_enable.text().await.unwrap();
+    assert_eq!(select_status, 200, "reactivated membership edit: {select_body}");
+    let selected: Value = client
+        .get(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .header("Cookie", &editor_cookie2)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(selected["term_ids"], json!([cat_id, second_cat_id]));
 
     let action_after_enable = client
         .post(format!("{base_url2}/api/admin/plugins/e2e-suite/actions/sync_jobs"))
@@ -630,6 +718,7 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .await
         .unwrap();
     assert_eq!(restored_entry["title"], "Rust Systems Engineer");
+    assert_eq!(restored_entry["term_ids"], json!([cat_id]));
 
     drop(srv3);
     let pool = SqlitePoolOptions::new()

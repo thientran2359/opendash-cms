@@ -56,7 +56,7 @@ use crate::{
         public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
         settings::{
             general_get, general_put, public_get, public_put, theme_options_get,
-            theme_options_put, timezones_get,
+            theme_options_put, timezones_get, permalinks_get, permalinks_put,
         },
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_get, taxonomy_list,
@@ -269,6 +269,12 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/settings/timezones", get(timezones_get))
+        .route(
+            "/api/admin/settings/permalinks",
+            get(permalinks_get)
+                .put(permalinks_put)
+                .layer(DefaultBodyLimit::max(16 * 1024)),
+        )
         .route(
             "/api/admin/menus",
             get(menus_list)
