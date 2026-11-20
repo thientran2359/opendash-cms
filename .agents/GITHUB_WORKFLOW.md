@@ -81,6 +81,28 @@ qua CI, ownership hoặc gate. **Atlas, Nova, Harbor và Forge áp dụng ADR-00
 được tự kiểm tra và merge PR đủ gates; ghi `Self-review: <Agent> — reviewed head <SHA>`
 và validation thật trong PR. Không tạo review giả từ một tài khoản chung.
 
+## EGM và handoff tương thích — 2026-11-20
+
+[EGM workflow](../docs/plans/EGM_WORKFLOW.md) quy định cách thiết kế và bàn giao;
+Issue/Project/PR tiếp tục giữ trạng thái vận hành. Bản thiết kế EGM chính giữ
+quyết định kỹ thuật; task section theo mẫu SLICE_TASK trong module/milestone
+plans giữ scope/files/acceptance của task và link về thiết kế. Không duy trì
+hai định nghĩa kiến trúc hoặc coi bản nháp là quyền triển khai.
+
+Trong giai đoạn này generator/adapter **không đổi**: task mới vẫn có ID
+`Mx-Sxx-Txx`, metadata G2/G3/track/module/capability và tám mục hiện hành trong
+nguồn plans được hỗ trợ đã merge. Pin source SHA chứa handoff, revision thiết kế
+đã chấp nhận và code baseline. Sau đó dùng generator read-only và publish payload
+đã đối chiếu bằng Connector/API theo các bước bên dưới. Không truyền trực tiếp
+`docs/designs/` cho generator; không mở manual implementation bypass mới.
+Route không hỗ trợ ID/actor/format thì chặn route đó, không đổi danh tính để né.
+
+Task đã Ready giữ source đã duyệt và kiểm lại gate trước pickup; task đang làm
+giữ In progress/In review và ownership/receipt. Docs/design theo chỉ đạo owner
+hoặc Final Decision đủ evidence dùng luồng PR tài liệu của ADR-0010, không giả
+implementation Ready. Phân quyền kỹ thuật theo adaptation trong ADR-0010;
+không biến mọi technical checkpoint thành yêu cầu owner trả lời.
+
 ## Nguồn sự thật cho task và tài liệu
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |

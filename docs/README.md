@@ -17,6 +17,14 @@ Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc
 
 ## Tra cứu theo mục đích
 
+**Điểm vào phát triển với EGM (20/11/2026):** [OpenDash EGM workflow](plans/EGM_WORKFLOW.md)
+quy định chọn luồng theo công việc, phân quyền, một bản thiết kế chính và handoff
+giữa agent. Aster chịu trách nhiệm integration trong [#414](https://github.com/thientran2359/opendash-cms/issues/414).
+Primary draft mới ở `.agents/research/` đến khi chấp nhận rồi promote qua PR;
+`docs/designs/BUILDER_THEME_CONTENT.md` Proposed là ngoại lệ lịch sử và pilot
+được đề xuất, chưa cấp implementation Ready. Research/report hỗ trợ không là
+nguồn quyết định cạnh tranh; Issue/Project vẫn giữ task state.
+
 Bổ sung ngày 19/11/2026: [Builder template và content](product/BUILDER_TEMPLATE_AND_CONTENT.md)
 phân biệt template/thành phần dùng lại với content từng bản ghi có đăng ký Builder;
 hierarchy tham chiếu WordPress, nguồn theme/database và home/archive tách biệt; bỏ yêu cầu chuyển homepage legacy thành Page. Yêu cầu đã xác nhận, chưa là API/schema G2, G3 hay runtime evidence.
