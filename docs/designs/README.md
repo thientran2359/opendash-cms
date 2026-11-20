@@ -10,11 +10,14 @@ Thư mục này là nơi lưu trữ các đặc tả thiết kế kỹ thuật (
    - **Elephant** nạp ngữ cảnh dự án (qua skill [`.agents/skills/opendash-elephant/SKILL.md`](../../.agents/skills/opendash-elephant/SKILL.md)) và soạn từng mục của `design_draft.md` với cổng phê duyệt của chủ dự án.
    - Sau khi hoàn tất, đặc tả được ghi vào `docs/designs/<feature>.md` và đăng ký vào [`SITEMAP.md`](SITEMAP.md).
 3. **Review Độc lập bằng Goldfish (`/egm-review` / `/egm-review-loop` + `/egm-resolve`):**
-   - Các subagent **Goldfish** trong ngữ cảnh mới hoàn toàn (`egm-zoom-out`, `egm-inventive-catalyst`, `egm-comprehension`, `egm-design`, `egm-structural`, `egm-style`, `egm-implementation-readiness`, `egm-codebase-details`) kiểm tra tài liệu đối chiếu với mã nguồn thật trong `cms/` và 3 hợp đồng nền tảng ([`CORE_FOUNDATION.md`](../contracts/CORE_FOUNDATION.md), [`PLUGIN_ABI.md`](../contracts/PLUGIN_ABI.md), [`M8_WRITER_INVENTORY.md`](../contracts/M8_WRITER_INVENTORY.md)).
-   - **Elephant** phân loại các phát hiện (`PROPOSE FIX` vs `CONTEST`), trình chủ dự án quyết định và cập nhật trực tiếp vào file thiết kế (`Status: Approved`).
+   - Các subagent **Goldfish** trong ngữ cảnh mới hoàn toàn kiểm tra tài liệu đối chiếu với mã nguồn thật trong `cms/` và 3 hợp đồng nền tảng ([`CORE_FOUNDATION.md`](../contracts/CORE_FOUNDATION.md), [`PLUGIN_ABI.md`](../contracts/PLUGIN_ABI.md), [`M8_WRITER_INVENTORY.md`](../contracts/M8_WRITER_INVENTORY.md)):
+     - **Full Swarm (6–8 Goldfish — tính năng kiến trúc lớn):** `egm-zoom-out`, `egm-inventive-catalyst`, `egm-comprehension`, `egm-design`, `egm-structural`, `egm-style`, `egm-implementation-readiness`, `egm-codebase-details`.
+     - **Fast Review (3 Goldfish lõi — tính năng nhỏ/vừa hoặc bản sửa lỗi có phạm vi thiết kế):** `egm-design`, `egm-codebase-details`, `egm-implementation-readiness`.
+   - **Elephant** phân loại các phát hiện (`PROPOSE FIX` vs `CONTEST`), trình chủ dự án quyết định và cập nhật trực tiếp vào file thiết kế (`Status: Approved`). CI (`check-plans.py`) tự động chặn spec `Approved` còn thiếu `Detailed Implementation Plan` / `Verification Plan` hoặc còn `Open Questions` / `TODO` / `TBD`.
 4. **Triển khai & Kiểm chứng (Implement & Verify):**
-   - Chỉ bắt đầu viết code sau khi Design Spec đã được duyệt.
+   - Chỉ bắt đầu viết code sau khi Design Spec đã được duyệt (`Status: Approved`). Với spec lớn, chia nhỏ bằng heading `### Slice S01: <Tên slice>` trong `## Detailed Implementation Plan` và tạo GitHub Issue từng slice qua `python .agents/scripts/prepare-github-issue.py --source docs/designs/<feature>.md --slice S01`.
    - Triển khai bám sát mục `## Detailed Implementation Plan` trong file thiết kế, chạy đầy đủ `python cms/scripts/check-standards.py`, `cargo test --manifest-path cms/Cargo.toml --workspace --release --locked` cùng các bài test E2E liên quan, và ghi bằng chứng thực chạy vào [`docs/verification/`](../verification/README.md).
+   - **Đóng vòng đời sau khi merge PR triển khai:** cập nhật `Status` trong [`SITEMAP.md`](SITEMAP.md) theo lộ trình `Approved` → `Implemented` → `**Verified**` (kèm link trực tiếp tới `docs/verification/*.md`); nếu đặc tả thay thế một phần hợp đồng nền tảng cũ trong `docs/contracts/`, gắn ghi chú `> Superseded by docs/designs/<feature>.md` tại mục bị thay thế và chạy `node cms/scripts/codegraph-index-docs.mjs`.
 5. **Đối chiếu Chống trôi Tài liệu (`/egm-drift-report`):**
    - Định kỳ chạy `/egm-drift-report` trên `docs/` đối chiếu với `cms/` để phát hiện và xử lý kịp thời mọi khác biệt giữa thiết kế và mã nguồn.
 

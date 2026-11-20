@@ -43,6 +43,10 @@ CHECKBOX = re.compile(r"(?m)^\s*[-*]\s+\[ \]\s+\S")
 CHECKED = re.compile(r"(?mi)^\s*[-*]\s+\[[xX]\]\s+")
 PLACEHOLDER = re.compile(r"\.\.\.|…|\bTODO\b|\bTBD\b|<[^>]+>", re.I)
 EGM_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD)\b", re.I)
+SLICE_HEADING = re.compile(
+    r"^(#{3,4})\s+Slice\s+([A-Za-z0-9][A-Za-z0-9_-]*)\s*[-–—:]\s*(.+?)\s*$", re.I
+)
+UNRESOLVED_OQ = re.compile(r"(?:\bOQ-\d+\b|^\s*[-*]\s+\[ \])", re.M)
 
 SECTIONS = (
     "Tổng quan và giá trị",
@@ -201,7 +205,52 @@ def parse_egm_design(document: str) -> dict[str, object]:
     if "### Verification Plan" not in impl_plan:
         raise TaskError("Detailed Implementation Plan phải có mục '### Verification Plan'")
 
+    open_questions = sections.get("Open Questions", "")
+    if open_questions and UNRESOLVED_OQ.search(open_questions):
+        raise TaskError("EGM Design Spec đã Approved không được còn Open Questions chưa chốt (OQ-xx / checkbox trống)")
+
     return {"title": title, "metadata": metadata, "sections": sections}
+
+
+def extract_egm_slice(impl_plan: str, slice_id: str) -> tuple[str, str, str]:
+    """Extract a specific '### Slice <ID>: <Title>' subsection from Detailed Implementation Plan."""
+    lines = impl_plan.splitlines()
+    matches: list[tuple[int, int, str, str]] = []
+    for idx, line in enumerate(lines):
+        m = SLICE_HEADING.match(line)
+        if m and m.group(2).casefold() == slice_id.casefold():
+            matches.append((idx, len(m.group(1)), m.group(2), m.group(3).strip()))
+    if len(matches) != 1:
+        raise TaskError(
+            f"Phải có đúng một heading '### Slice {slice_id}: ...' trong Detailed Implementation Plan; thấy {len(matches)}"
+        )
+    start, level, matched_id, slice_title = matches[0]
+    stop = len(lines)
+    for idx in range(start + 1, len(lines)):
+        heading = HEADING.match(lines[idx])
+        if heading and len(heading.group(1)) <= level:
+            stop = idx
+            break
+    slice_body = "\n".join(lines[start:stop]).strip()
+
+    # Append document-level Verification Plan if not already inside the slice
+    if "### Verification Plan" not in slice_body:
+        vp_start = None
+        for idx, line in enumerate(lines):
+            if line.strip() == "### Verification Plan":
+                vp_start = idx
+                break
+        if vp_start is not None:
+            vp_stop = len(lines)
+            for idx in range(vp_start + 1, len(lines)):
+                heading = HEADING.match(lines[idx])
+                if heading and len(heading.group(1)) <= 3:
+                    vp_stop = idx
+                    break
+            vp_block = "\n".join(lines[vp_start:vp_stop]).strip()
+            slice_body = f"{slice_body}\n\n{vp_block}"
+
+    return matched_id, slice_title, slice_body
 
 
 def egm_issue_payload(
@@ -211,6 +260,7 @@ def egm_issue_payload(
     baseline_sha: str,
     agent: str | None,
     task_id: str | None = None,
+    slice_id: str | None = None,
 ) -> dict[str, object]:
     title = str(design["title"])
     metadata = design["metadata"]
@@ -218,7 +268,14 @@ def egm_issue_payload(
     assert isinstance(metadata, dict) and isinstance(sections, dict)
 
     stem = PurePosixPath(source).stem
-    resolved_task_id = task_id or f"EGM-{stem}"
+    impl_body = str(sections["Detailed Implementation Plan"])
+    slice_suffix = ""
+    if slice_id:
+        matched_id, slice_title, impl_body = extract_egm_slice(impl_body, slice_id)
+        resolved_task_id = task_id or f"EGM-{stem}-{matched_id.upper()}"
+        slice_suffix = f" — Slice {matched_id}: {slice_title}"
+    else:
+        resolved_task_id = task_id or f"EGM-{stem}"
     url = f"https://github.com/{REPOSITORY}/blob/{source_sha}/{source}"
 
     body = [
@@ -240,7 +297,7 @@ def egm_issue_payload(
         [
             "## Detailed Implementation Plan",
             "",
-            str(sections["Detailed Implementation Plan"]),
+            impl_body,
             "",
             "## Nguồn chính thức và phân công",
             "",
@@ -262,7 +319,12 @@ def egm_issue_payload(
     if agent:
         labels.append(f"agent:{agent}")
 
-    issue_title = f"[{task_id}] {title}" if task_id else f"[EGM] {title}"
+    if task_id:
+        issue_title = f"[{task_id}] {title}{slice_suffix}"
+    elif slice_id:
+        issue_title = f"[{resolved_task_id}] {title}{slice_suffix}"
+    else:
+        issue_title = f"[EGM] {title}"
     return {
         "repository_full_name": REPOSITORY,
         "title": issue_title,
@@ -451,6 +513,10 @@ def main(argv: list[str] | None = None) -> int:
         "--task-id",
         help="Task ID (tùy chọn cho EGM Design Spec; bắt buộc cho file G3 cũ, ví dụ M3-S07-T01)",
     )
+    parser.add_argument(
+        "--slice",
+        help="Tùy chọn cho EGM Design Spec: tách riêng một '### Slice <ID>: ...' thành Issue độc lập (ví dụ S01)",
+    )
     parser.add_argument("--ref", default="origin/main", help="Commit đã duyệt chứa đặc tả (mặc định origin/main)")
     parser.add_argument("--base-ref", help="Commit source code nền để agent thực hiện (mặc định --ref)")
     parser.add_argument("--agent", choices=["atlas", "aster", "nova", "forge", "harbor", "orion"])
@@ -462,8 +528,12 @@ def main(argv: list[str] | None = None) -> int:
         base_sha = resolve_revision(args.base_ref) if args.base_ref else source_sha
         if is_egm_design_path(path):
             design = parse_egm_design(document)
-            payload = egm_issue_payload(design, path, source_sha, base_sha, args.agent, args.task_id)
+            payload = egm_issue_payload(
+                design, path, source_sha, base_sha, args.agent, args.task_id, args.slice
+            )
         else:
+            if args.slice:
+                raise TaskError("--slice chỉ hỗ trợ nguồn EGM Design Spec (docs/designs/*.md)")
             if not args.task_id:
                 raise TaskError("Nguồn G3 cũ bắt buộc phải truyền --task-id")
             task = parse_task(document, args.task_id)

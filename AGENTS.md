@@ -14,16 +14,15 @@ OpenDash áp dụng quy trình **EGM (Elephant soạn spec → Goldfish review �
    - Lưu đặc tả hoàn chỉnh vào [`docs/designs/<feature>.md`](docs/designs/README.md) và đăng ký vào [`docs/designs/SITEMAP.md`](docs/designs/SITEMAP.md).
    - Phần `## Detailed Implementation Plan` ở nửa dưới file phải liệt kê đầy đủ từng file sẽ tạo/sửa trong `cms/` và `docs/`, lý do thay đổi, chữ ký hàm/schema/API và kế hoạch kiểm chứng (`### Verification Plan`), không để lại quyết định thiết kế mơ hồ cho lúc code.
 4. **Bước 3 — Review Độc lập bằng Goldfish (`/egm-review` / `/egm-review-loop` + `/egm-resolve`):**
-   - Khởi chạy các subagent **Goldfish** trong ngữ cảnh mới hoàn toàn (zero-context) để kiểm tra đặc tả tại `docs/designs/<feature>.md`:
-     - Đánh giá kiến trúc & độ phức tạp (`egm-zoom-out`, `egm-inventive-catalyst`).
-     - Kiểm tra tính tự chứa & dễ hiểu (`egm-comprehension`).
-     - Phản biện thiết kế, cấu trúc & văn phong (`egm-design`, `egm-structural`, `egm-style`).
-     - Kiểm tra mức độ sẵn sàng triển khai & đối chiếu từng symbol/file với codebase thật (`egm-implementation-readiness`, `egm-codebase-details`).
+   - Khởi chạy các subagent **Goldfish** trong ngữ cảnh mới hoàn toàn (zero-context) để kiểm tra đặc tả tại `docs/designs/<feature>.md` theo **2 mức độ**:
+     - **Full Swarm (6–8 Goldfish — tính năng kiến trúc lớn):** `egm-zoom-out`, `egm-inventive-catalyst`, `egm-comprehension`, `egm-design`, `egm-structural`, `egm-style`, `egm-implementation-readiness`, `egm-codebase-details`.
+     - **Fast Review (3 Goldfish lõi — tính năng nhỏ/vừa hoặc bản sửa lỗi có phạm vi thiết kế):** `egm-design`, `egm-codebase-details`, `egm-implementation-readiness`.
    - Luôn nạp `GoldfishContext` chuẩn gồm: [`docs/product/PRODUCT_REQUIREMENTS.md`](docs/product/PRODUCT_REQUIREMENTS.md), [`docs/contracts/CORE_FOUNDATION.md`](docs/contracts/CORE_FOUNDATION.md), [`docs/contracts/PLUGIN_ABI.md`](docs/contracts/PLUGIN_ABI.md), [`docs/contracts/M8_WRITER_INVENTORY.md`](docs/contracts/M8_WRITER_INVENTORY.md) và các file mã nguồn `cms/` liên quan.
-   - **Elephant** chạy `/egm-resolve` để phân loại findings (`PROPOSE FIX` vs `CONTEST`), nhận quyết định từ chủ dự án và cập nhật trực tiếp vào `docs/designs/<feature>.md`.
+   - **Elephant** chạy `/egm-resolve` để phân loại findings (`PROPOSE FIX` vs `CONTEST`), nhận quyết định từ chủ dự án và cập nhật trực tiếp vào `docs/designs/<feature>.md` (`Status: Approved`, không còn `Open Questions` mở hay `TODO`/`TBD`).
 5. **Bước 4 — Triển khai & Kiểm chứng (`Implement & Verify`):**
-   - Chỉ bắt đầu viết code sau khi chủ dự án duyệt Design Spec đã qua Goldfish review.
+   - Chỉ bắt đầu viết code sau khi chủ dự án duyệt Design Spec đã qua Goldfish review (`Status: Approved`). Với Design Spec lớn, có thể chia `### Slice S01: ...` trong `## Detailed Implementation Plan` và tạo Issue từng slice bằng `prepare-github-issue.py --source docs/designs/<feature>.md --slice S01`.
    - Sau khi triển khai, bắt buộc chạy bộ kiểm tra chuẩn và ghi nhận kết quả thực tế (kèm giới hạn nếu có); với các đợt kiểm chứng lớn hoặc release, lưu biên bản tại [`docs/verification/`](docs/verification/README.md).
+   - Khi hoàn tất merge & kiểm chứng thực tế: cập nhật `Status` trong [`docs/designs/SITEMAP.md`](docs/designs/SITEMAP.md) (`Approved` → `Implemented` → `Verified`), gắn ghi chú `Superseded by docs/designs/<feature>.md` tại mục bị thay thế ở contract nền tảng cũ (nếu có) và chạy `node cms/scripts/codegraph-index-docs.mjs`.
 6. **Bước 5 — Duy trì Ngữ cảnh & Chống Trôi Tài liệu (`/egm-bootstrap` & `/egm-drift-report`):**
    - Dùng `/egm-bootstrap` để cập nhật hệ thống `README.md` theo cấu trúc cây trong `cms/`.
    - Định kỳ dùng `/egm-drift-report` để kiểm tra `docs/` đối chiếu với codebase thật trong `cms/`, kịp thời cập nhật tài liệu hoặc sửa code khi có độ lệch.

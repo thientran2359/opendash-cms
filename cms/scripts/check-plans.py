@@ -28,6 +28,9 @@ from urllib.parse import unquote, urlsplit
 MARKDOWN_LINK = re.compile(r"\]\(([^)]+)\)")
 FENCE = re.compile(r"^\s*(?:`{3,}|~{3,})")
 STATUS_BOLD = re.compile(r"^\*\*([^*]+)\*\*")
+EGM_STATUS_LINE = re.compile(r"^\s*(?:[-*]\s+)?\*\*Status:\*\*\s*(.+?)\s*$", re.I)
+EGM_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD)\b", re.I)
+EGM_UNRESOLVED_OQ = re.compile(r"(?:\bOQ-\d+\b|^\s*[-*]\s+\[ \])", re.M)
 
 
 def content_lines(file: Path) -> list[tuple[int, str]]:
@@ -156,7 +159,47 @@ def check(root: Path) -> list[str]:
             errors.append(
                 f"{design_file.relative_to(root)}: design document not registered in docs/designs/SITEMAP.md"
             )
+        if design_file.name != "README.md":
+            errors.extend(check_egm_design_structure(design_file, root))
 
+    return errors
+
+
+def check_egm_design_structure(design_file: Path, root: Path) -> list[str]:
+    """Enforce EGM Approved gate: Approved specs must have Detailed Implementation Plan, Verification Plan, and no open TODO/TBD/OQ."""
+    errors: list[str] = []
+    rel = design_file.relative_to(root)
+    active_lines = [line for _, line in content_lines(design_file)]
+    status = ""
+    for line in active_lines:
+        if line.startswith("## "):
+            break
+        match = EGM_STATUS_LINE.match(line)
+        if match:
+            status = match.group(1).strip()
+            break
+    if status.casefold() != "approved":
+        return errors
+
+    text = "\n".join(active_lines)
+    if "## Detailed Implementation Plan" not in text:
+        errors.append(f"{rel}: Approved EGM design missing '## Detailed Implementation Plan'")
+    if "### Verification Plan" not in text:
+        errors.append(f"{rel}: Approved EGM design missing '### Verification Plan'")
+    if EGM_PLACEHOLDER.search(text):
+        errors.append(f"{rel}: Approved EGM design contains unresolved TODO/TBD placeholder")
+
+    # Check Open Questions section if present
+    in_oq = False
+    oq_lines: list[str] = []
+    for line in active_lines:
+        if line.startswith("## "):
+            in_oq = line.strip().casefold() == "## open questions"
+            continue
+        if in_oq:
+            oq_lines.append(line)
+    if oq_lines and EGM_UNRESOLVED_OQ.search("\n".join(oq_lines)):
+        errors.append(f"{rel}: Approved EGM design still has unresolved Open Questions (OQ-xx / unchecked items)")
     return errors
 
 
@@ -168,7 +211,8 @@ def fixture(root: Path) -> None:
     (verification / "test.md").write_text("# Real test evidence\n", encoding="utf-8")
     (designs / "README.md").write_text("# EGM Designs Guide\n", encoding="utf-8")
     (designs / "feature-a.md").write_text(
-        "# Feature A\n\n## Detailed Implementation Plan\n", encoding="utf-8"
+        "# Feature A\n\n* **Status:** Approved\n\n## Detailed Implementation Plan\n\n### Verification Plan\n\n- Run tests\n",
+        encoding="utf-8",
     )
     (designs / "SITEMAP.md").write_text(
         "# Design Sitemap\n\n"
@@ -193,12 +237,16 @@ def self_test() -> None:
         ("broken_link", "broken Markdown link"),
         ("absolute_link", "absolute Markdown link"),
         ("missing_evidence", "missing direct docs/verification"),
+        ("approved_missing_impl", "missing '## Detailed Implementation Plan'"),
+        ("approved_missing_verify", "missing '### Verification Plan'"),
+        ("approved_open_oq", "unresolved Open Questions"),
     ]
     for name, expected in cases:
         with tempfile.TemporaryDirectory(prefix="opendash-check-plans-") as tmp:
             root = Path(tmp)
             fixture(root)
             sitemap = root / "docs/designs/SITEMAP.md"
+            feature = root / "docs/designs/feature-a.md"
             if name == "missing_sitemap":
                 sitemap.unlink()
             elif name == "empty_sitemap":
@@ -217,6 +265,15 @@ def self_test() -> None:
                     sitemap.read_text(encoding="utf-8").replace(
                         " [test](../verification/test.md)", ""
                     ),
+                    encoding="utf-8",
+                )
+            elif name == "approved_missing_impl":
+                feature.write_text("# Feature A\n\n* **Status:** Approved\n\n## Overview\n\nText.\n", encoding="utf-8")
+            elif name == "approved_missing_verify":
+                feature.write_text("# Feature A\n\n* **Status:** Approved\n\n## Detailed Implementation Plan\n\nFiles.\n", encoding="utf-8")
+            elif name == "approved_open_oq":
+                feature.write_text(
+                    "# Feature A\n\n* **Status:** Approved\n\n## Open Questions\n\n| OQ-01 | Unresolved |\n\n## Detailed Implementation Plan\n\n### Verification Plan\n\nTests.\n",
                     encoding="utf-8",
                 )
             errors = check(root)
