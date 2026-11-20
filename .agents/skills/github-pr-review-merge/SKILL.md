@@ -11,8 +11,8 @@ description: "Dùng khi Atlas, Aster hoặc Nova được yêu cầu review ho�
 
 ## Chế độ hoạt động
 
-- **`REVIEW_ONLY`:** Người dùng chỉ yêu cầu "review PR #N" hoặc "kiểm tra diff" ⇒ review, đăng findings/verdict; **không merge**.
-- **`REVIEW_AND_MERGE`:** Người dùng gọi rõ `$github-pr-review-merge` hoặc yêu cầu "review và merge PR đủ điều kiện" ⇒ rà soát, review và **tự merge các PR đủ toàn bộ gate** (cả PR Design Spec EGM lẫn PR code triển khai của Forge/Harbor).
+- **`REVIEW_ONLY` (Mặc định):** Gọi `$github-pr-review-merge` hoặc yêu cầu "review PR #N" / "kiểm tra diff" ⇒ chỉ review, đăng findings/verdict; **không tự động merge**.
+- **`REVIEW_AND_MERGE` (Chỉ khi có ý định merge tường minh):** Chỉ kích hoạt khi người dùng yêu cầu rõ ràng có hành động merge (ví dụ: *"review và merge PR #N nếu đủ gate"*), hoặc khi agent thực hiện self-review & self-merge chính PR của mình theo [ADR-0010](../../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) sau khi toàn bộ CI (`governance-*`, `cms-ci`) và `Verification Plan` đều PASS.
 
 ## 1. Chọn PR trong một lượt
 

@@ -66,6 +66,9 @@ def egm_example(*, status="Approved", overview="Bao gồm plugin revisions khi t
 *   **Author:** Nova
 *   **Status:** {status}
 *   **Date:** 2026-11-20
+*   **Approved By:** Owner
+*   **Approval Evidence:** Owner chat 2026-11-20 + PR #424
+*   **Goldfish Review:** 5-agent swarm · 2026-11-20 · reviewed main@e47d5d3
 
 ## Overview
 
@@ -89,8 +92,12 @@ def egm_example(*, status="Approved", overview="Bao gồm plugin revisions khi t
 
 ### Verification Plan
 
-*   `python cms/scripts/check-standards.py`
-*   `cargo test --manifest-path cms/Cargo.toml --workspace --release --locked`
+```powershell
+python cms/scripts/check-standards.py
+cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
+```
+
+- Global S02-only acceptance: restore SMTP secrets end-to-end.
 """
 
 
@@ -233,6 +240,11 @@ class EgmDesignTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.TaskError, "Open Questions"):
             MODULE.parse_egm_design(doc)
 
+    def test_egm_design_refuses_missing_provenance(self):
+        no_prov = egm_example().replace("*   **Goldfish Review:** 5-agent swarm · 2026-11-20 · reviewed main@e47d5d3\n", "")
+        with self.assertRaisesRegex(MODULE.TaskError, "provenance"):
+            MODULE.parse_egm_design(no_prov)
+
     def test_egm_design_slice_extracts_target_slice_and_verification(self):
         sliced = (
             egm_example()
@@ -240,9 +252,15 @@ class EgmDesignTests(unittest.TestCase):
                 "### Target Files to Create/Modify",
                 "### Target Files to Create/Modify\n\n"
                 "### Slice S01: Theme Manifest & Resolver\n\n"
-                "- `cms/crates/opendash-server/src/theme.rs` (Modify): Parse v3 manifest.\n\n"
+                "- **Dependencies:** None\n"
+                "- **File Ownership:** `cms/crates/opendash-server/src/theme.rs`\n"
+                "- **Acceptance Criteria:**\n  - [ ] Parse v3 manifest.\n"
+                "- **Rollback:** Revert commit.\n\n"
                 "### Slice S02: Page Layouts\n\n"
-                "- `cms/crates/opendash-server/src/routes/public.rs` (Modify): Render page layouts.\n",
+                "- **Dependencies:** S01\n"
+                "- **File Ownership:** `cms/crates/opendash-server/src/routes/public.rs`\n"
+                "- **Acceptance Criteria:**\n  - [ ] Render page layouts.\n"
+                "- **Rollback:** Revert commit.\n",
             )
         )
         design = MODULE.parse_egm_design(sliced)
@@ -261,7 +279,9 @@ class EgmDesignTests(unittest.TestCase):
         )
         self.assertIn("theme.rs", payload["body"])
         self.assertNotIn("Slice S02", payload["body"])
-        self.assertIn("### Verification Plan", payload["body"])
+        self.assertIn("### Verification Commands (Standard Gate)", payload["body"])
+        self.assertIn("cargo test", payload["body"])
+        self.assertNotIn("Global S02-only acceptance", payload["body"])
 
         with self.assertRaisesRegex(MODULE.TaskError, "Slice S99"):
             MODULE.egm_issue_payload(
@@ -271,6 +291,20 @@ class EgmDesignTests(unittest.TestCase):
                 "b" * 40,
                 "forge",
                 slice_id="S99",
+            )
+
+        incomplete_slice = egm_example().replace(
+            "### Target Files to Create/Modify",
+            "### Target Files to Create/Modify\n\n### Slice S01: Incomplete\n\n- Missing contract fields\n",
+        )
+        with self.assertRaisesRegex(MODULE.TaskError, "contract"):
+            MODULE.egm_issue_payload(
+                MODULE.parse_egm_design(incomplete_slice),
+                "docs/designs/builder-theme.md",
+                "a" * 40,
+                "b" * 40,
+                "forge",
+                slice_id="S01",
             )
 
     def test_egm_cli_reads_approved_blob_without_task_id(self):

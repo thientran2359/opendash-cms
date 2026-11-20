@@ -1,5 +1,7 @@
 # ADR-0010 — Quyền điều phối và merge của các agent
 
+> **Ánh xạ quy trình EGM (cập nhật 2026-11-21):** OpenDash đã chuyển chuẩn phát triển sang **EGM** ([`AGENTS.md`](../../AGENTS.md)). Các thuật ngữ lịch sử trong phần bên dưới được ánh xạ tương đương cho mọi task mới: `G2/G3 READY` → Design Spec trong `docs/designs/<feature>.md` đạt `Status: Approved` (đủ `Approved By`, `Approval Evidence`, `Goldfish Review` và Slice Contract); `G5 VERIFIED` → hoàn tất `Verification Plan` sau merge kèm bằng chứng tại `docs/verification/` và cập nhật `docs/designs/SITEMAP.md`. Quyền tự chủ, nhánh mặc định `agent/<name>` và phân quyền 3 tầng (Owner cho PRD/kiến trúc lõi/breaking · Atlas/Aster ủy quyền chốt Design Spec trong PRD · Implementer self-review/self-merge PR của mình khi đủ CI) giữ nguyên hiệu lực.
+
 ## Owner directive — nhánh agent mặc định, 2026-11-19
 
 Chủ dự án xác nhận **mỗi agent triển khai tuần tự các task trên nhánh cố định

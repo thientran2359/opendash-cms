@@ -1,37 +1,37 @@
-name: "Research / design (G1–G2)"
-description: "Theo dõi việc khảo sát và quyết định thiết kế; không phải implementation task G3 READY."
-title: "[Research/Design] "
+name: "Research / EGM Design Draft"
+description: "Theo dõi bài toán khám phá (/egm-brainstorm) hoặc soạn đặc tả (/egm-draft) trước khi đạt Status: Approved."
+title: "[EGM Design] "
 body:
   - type: markdown
     attributes:
       value: |
-        Chỉ dùng để theo dõi nghiên cứu/thiết kế chưa qua G3. Không cấp hoặc tái sử dụng
-        Task ID triển khai `M*-S*-T*` và không tự giao code từ Issue này.
+        Chỉ dùng để theo dõi nghiên cứu hoặc soạn thảo Design Spec trong `docs/designs/`.
+        Không cấp Task ID triển khai `EGM-<slug>-Sxx` và không giao coding agent triển khai khi spec chưa đạt `Status: Approved` và chưa merge vào `main`.
   - type: input
-    id: module
+    id: target_spec
     attributes:
-      label: Module / capability liên quan
-      placeholder: "CNT-03 / CNT-03.1"
+      label: Đường dẫn Design Spec dự kiến
+      placeholder: "docs/designs/<feature>.md"
     validations:
       required: true
   - type: textarea
     id: problem
     attributes:
-      label: Vấn đề cần nghiên cứu hoặc quyết định
-      placeholder: "Hiện trạng, mục tiêu và vì sao cần G1/G2..."
+      label: Bài toán & Bối cảnh
+      placeholder: "Hiện trạng trong cms/, vấn đề cần giải quyết và ràng buộc sản phẩm..."
     validations:
       required: true
   - type: textarea
     id: deliverable
     attributes:
       label: Kết quả cần bàn giao
-      placeholder: "Báo cáo source/CodeGraph, phương án A/B, rủi ro, đề xuất contract..."
+      placeholder: "concepts_brief.md, Design Spec đầy đủ FeatureRange + Detailed Implementation Plan, Goldfish review & /egm-resolve..."
     validations:
       required: true
   - type: textarea
     id: references
     attributes:
-      label: Tài liệu và dependency
-      placeholder: "Roadmap, module brief, PRD, contracts, lịch sử thảo luận..."
+      label: Tài liệu nền tảng & GoldfishContext liên quan
+      placeholder: "PRODUCT_REQUIREMENTS.md, CORE_FOUNDATION.md, SITEMAP.md, file mã nguồn cms/..."
     validations:
       required: true

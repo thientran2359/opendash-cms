@@ -43,6 +43,12 @@ jobs:
       - name: Planning checker self-test
         run: python cms/scripts/check-plans.py --self-test
 
+      - name: Architecture and security standards check
+        run: python cms/scripts/check-standards.py
+
+      - name: Standards checker self-test
+        run: python cms/scripts/check-standards.py --self-test
+
       - name: Agent artifacts and obvious secret guard
         run: python .agents/scripts/check-agent-artifacts.py
 
