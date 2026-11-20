@@ -9,7 +9,7 @@ use opendash_core::{
 };
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use crate::{
     auth::{self, SessionContext},
@@ -116,6 +116,153 @@ pub async fn get_definition(db: &SqlitePool, key: &str) -> ApiResult<Option<Taxo
                 provider_status, declaration_state FROM taxonomy_definitions WHERE key = ?",
     ).bind(key).fetch_optional(db).await?;
     row.map(definition).transpose()
+}
+
+/// Reconcile provider-owned custom taxonomy declarations in the same writer
+/// transaction as its CPTs, settings and permalink claims. Withdrawal and
+/// disable are state transitions: they never delete terms or memberships.
+pub async fn sync_provider_definitions_in_tx(
+    conn: &mut SqliteConnection,
+    owner_kind: &str,
+    owner_id: &str,
+    declarations: &[opendash_core::content::TaxonomyDeclaration],
+) -> ApiResult<()> {
+    if !matches!(owner_kind, "theme" | "plugin") || owner_id.is_empty() {
+        return Err(ApiError::bad_request("Provider taxonomy owner không hợp lệ."));
+    }
+    let mut declared = std::collections::BTreeSet::new();
+    for taxonomy in declarations {
+        let input = TaxonomyDefinitionInput {
+            key: taxonomy.key.clone(),
+            label: taxonomy.label.clone(),
+            hierarchical: taxonomy.hierarchical,
+            public: taxonomy.public,
+        };
+        input.validate().map_err(ApiError::bad_request)?;
+        if !declared.insert(taxonomy.key.as_str()) {
+            return Err(ApiError::bad_request("Provider khai báo taxonomy trùng key."));
+        }
+        let existing: Option<DefinitionRow> = sqlx::query_as(
+            "SELECT key,label,hierarchical,public,version,owner_kind,owner_id,
+                    provider_status,declaration_state FROM taxonomy_definitions WHERE key=?",
+        )
+        .bind(&taxonomy.key)
+        .fetch_optional(&mut *conn)
+        .await?;
+        if let Some(row) = existing {
+            let current = definition(row)?;
+            if current.owner != match owner_kind {
+                "theme" => ResourceOwner::Theme(owner_id.to_owned()),
+                _ => ResourceOwner::Plugin(owner_id.to_owned()),
+            } {
+                return Err(ApiError::conflict("Taxonomy key đã thuộc owner khác."));
+            }
+            if current.hierarchical && !taxonomy.hierarchical {
+                let children: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM taxonomy_terms WHERE kind=? AND parent_id IS NOT NULL",
+                )
+                .bind(&taxonomy.key)
+                .fetch_one(&mut *conn)
+                .await?;
+                if children != 0 {
+                    return Err(ApiError::conflict("Taxonomy còn term có parent."));
+                }
+            }
+            let changed = current.label != taxonomy.label
+                || current.hierarchical != taxonomy.hierarchical
+                || current.public != taxonomy.public
+                || current.provider_status != ProviderStatus::Active
+                || current.declaration_state != DeclarationState::Declared;
+            if changed {
+                sqlx::query(
+                    "UPDATE taxonomy_definitions SET label=?,hierarchical=?,public=?,
+                     provider_status='active',declaration_state='declared',version=version+1
+                     WHERE key=?",
+                )
+                .bind(&taxonomy.label)
+                .bind(i64::from(taxonomy.hierarchical))
+                .bind(i64::from(taxonomy.public))
+                .bind(&taxonomy.key)
+                .execute(&mut *conn)
+                .await?;
+            }
+        } else {
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_definitions")
+                .fetch_one(&mut *conn)
+                .await?;
+            if count >= 64 {
+                return Err(ApiError::conflict("Website đạt giới hạn 64 taxonomy."));
+            }
+            sqlx::query(
+                "INSERT INTO taxonomy_definitions
+                 (key,label,hierarchical,public,owner_kind,owner_id)
+                 VALUES (?,?,?,?,?,?)",
+            )
+            .bind(&taxonomy.key)
+            .bind(&taxonomy.label)
+            .bind(i64::from(taxonomy.hierarchical))
+            .bind(i64::from(taxonomy.public))
+            .bind(owner_kind)
+            .bind(owner_id)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    let owned: Vec<String> = sqlx::query_scalar(
+        "SELECT key FROM taxonomy_definitions WHERE owner_kind=? AND owner_id=?",
+    )
+    .bind(owner_kind)
+    .bind(owner_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    for key in owned {
+        if !declared.contains(key.as_str()) {
+            sqlx::query(
+                "UPDATE taxonomy_definitions SET declaration_state='withdrawn',
+                 version=version+1 WHERE key=? AND declaration_state!='withdrawn'",
+            )
+            .bind(key)
+            .execute(&mut *conn)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn set_provider_definitions_status_in_tx(
+    conn: &mut SqliteConnection,
+    owner_kind: &str,
+    owner_id: &str,
+    active: bool,
+) -> ApiResult<()> {
+    let status = if active { "active" } else { "provider_inactive" };
+    sqlx::query(
+        "UPDATE taxonomy_definitions SET provider_status=?,version=version+1
+         WHERE owner_kind=? AND owner_id=? AND provider_status!=?
+           AND (?=0 OR declaration_state='declared')",
+    )
+    .bind(status)
+    .bind(owner_kind)
+    .bind(owner_id)
+    .bind(status)
+    .bind(i64::from(active))
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+pub async fn deactivate_other_theme_definitions_in_tx(
+    conn: &mut SqliteConnection,
+    active_theme_id: &str,
+) -> ApiResult<()> {
+    sqlx::query(
+        "UPDATE taxonomy_definitions SET provider_status='provider_inactive',version=version+1
+         WHERE owner_kind='theme' AND owner_id!=? AND provider_status!='provider_inactive'",
+    )
+    .bind(active_theme_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 pub async fn create_definition(

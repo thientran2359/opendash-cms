@@ -492,6 +492,9 @@ pub async fn set_plugin_enabled(
     if res.rows_affected() == 0 {
         return Err("Plugin không tồn tại.".to_string());
     }
+    crate::storage::content::set_plugin_cnt_provider_status_in_tx(&mut tx, id, enabled)
+        .await
+        .map_err(|error| error.1.into_owned())?;
     crate::storage::admin_extensions::set_owner_status_in_conn(&mut tx, "plugin", id, enabled)
         .await.map_err(|e| e.1.into_owned())?;
     if enabled {

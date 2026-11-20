@@ -1066,6 +1066,8 @@ pub async fn sync_theme_declarations_in_tx(
     theme_id: &str,
     declarations: &ThemeDeclarations,
 ) -> ApiResult<()> {
+    crate::storage::taxonomy::deactivate_other_theme_definitions_in_tx(conn, theme_id).await?;
+    crate::storage::permalinks::deactivate_other_theme_rewrites_in_tx(conn, theme_id).await?;
     // 1. Mark other themes' declared/withdrawn resources as provider_inactive (preserving ownership & declaration_state)
     let mut changed_keys: BTreeSet<String> = sqlx::query_scalar(
         "SELECT key FROM content_types WHERE owner_kind='theme' AND owner_id != ?
@@ -1120,6 +1122,7 @@ pub async fn sync_theme_declarations_in_tx(
                 fields: ct.fields.clone(),
                 taxonomies: ct.taxonomies.clone(),
                 settings: ct.settings.clone(),
+                rewrite_base: ct.rewrite_base.clone(),
             })
             .collect(),
         taxonomy_eligibility: declarations
@@ -1130,6 +1133,7 @@ pub async fn sync_theme_declarations_in_tx(
                 taxonomies: e.taxonomies.clone(),
             })
             .collect(),
+        taxonomy_definitions: declarations.taxonomy_definitions.clone(),
         field_groups: declarations.field_groups.clone(),
     };
     sync_owner_cnt_declarations_in_tx(conn, "theme", theme_id, &neutral, false).await?;
@@ -1240,6 +1244,14 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
             .await?;
         }
     }
+    crate::storage::taxonomy::set_provider_definitions_status_in_tx(
+        conn, "plugin", plugin_id, active,
+    )
+    .await?;
+    crate::storage::permalinks::set_provider_rewrite_status_in_tx(
+        conn, "plugin", plugin_id, active,
+    )
+    .await?;
     bump_provider_cpt_cas_in_tx(conn, changed_keys).await?;
     crate::storage::permalinks::sync_claims_in_tx(conn).await?;
     Ok(())
@@ -1255,6 +1267,14 @@ async fn sync_owner_cnt_declarations_in_tx(
     declarations
         .validate()
         .map_err(map_input_validation_error)?;
+
+    crate::storage::taxonomy::sync_provider_definitions_in_tx(
+        conn,
+        owner_kind_str,
+        owner_id_str,
+        &declarations.taxonomy_definitions,
+    )
+    .await?;
 
     let has_fg_tables = table_exists_in_tx(conn, "content_field_groups").await?
         && table_exists_in_tx(conn, "content_field_group_targets").await?;
@@ -1438,10 +1458,25 @@ async fn sync_owner_cnt_declarations_in_tx(
     }
 
     for (ct_key, tax_kind) in &declared_eligibility {
-        if tax_kind != "category" && tax_kind != "tag" {
-            return Err(ApiError::bad_request(
-                "Chỉ hỗ trợ taxonomy eligibility cho category hoặc tag lõi.",
-            ));
+        let taxonomy_owner: Option<(String, Option<String>, String, String)> = sqlx::query_as(
+            "SELECT owner_kind,owner_id,provider_status,declaration_state
+             FROM taxonomy_definitions WHERE key=?",
+        )
+        .bind(tax_kind)
+        .fetch_optional(&mut *conn)
+        .await?;
+        match taxonomy_owner {
+            Some((kind, id, provider_status, state))
+                if (kind == "core" || kind == "user"
+                    || (kind == owner_kind_str && id.as_deref() == Some(owner_id_str)))
+                    && provider_status == "active"
+                    && state == "declared" => {}
+            Some(_) => {
+                return Err(ApiError::conflict(
+                    "Không thể liên kết taxonomy thuộc provider khác hoặc không hoạt động.",
+                ));
+            }
+            None => return Err(ApiError::bad_request("Taxonomy eligibility chưa được định nghĩa.")),
         }
         if builtin_definition(ct_key).is_some() {
             return Err(ApiError::conflict(
@@ -1717,6 +1752,27 @@ async fn sync_owner_cnt_declarations_in_tx(
                 .map_err(|e| map_transition_error(e, incompat_as_conflict))?;
         }
     }
+
+    let rewrites: Vec<crate::storage::permalinks::ProviderRewriteDeclaration> = declarations
+        .content_types
+        .iter()
+        .map(|ct| crate::storage::permalinks::ProviderRewriteDeclaration {
+            resource_kind: "content_type",
+            resource_key: ct.key.clone(),
+            rewrite_base: ct.rewrite_base.clone(),
+        })
+        .chain(declarations.taxonomy_definitions.iter().map(|tax| {
+            crate::storage::permalinks::ProviderRewriteDeclaration {
+                resource_kind: "taxonomy",
+                resource_key: tax.key.clone(),
+                rewrite_base: tax.rewrite_base.clone(),
+            }
+        }))
+        .collect();
+    crate::storage::permalinks::sync_provider_rewrite_defaults_in_tx(
+        conn, owner_kind_str, owner_id_str, &rewrites,
+    )
+    .await?;
 
     Ok(())
 }
@@ -2197,7 +2253,9 @@ mod eligibility_provider_cas_tests {
                 fields: vec![],
                 taxonomies: taxonomies.iter().map(|s| (*s).to_owned()).collect(),
                 settings: None,
+                rewrite_base: None,
             }],
+            taxonomy_definitions: vec![],
             taxonomy_eligibility: vec![],
             field_groups: vec![],
         }
@@ -2306,6 +2364,7 @@ mod eligibility_provider_cas_tests {
         // needs a version bump to reject a stale Admin site override.
         let eligibility_only = CntDeclarations {
             content_types: vec![],
+            taxonomy_definitions: vec![],
             taxonomy_eligibility: vec![TaxonomyEligibilityDeclaration {
                 content_type: "provider_books_cas".into(),
                 taxonomies: vec!["category".into(), "tag".into()],

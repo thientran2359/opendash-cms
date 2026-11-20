@@ -345,3 +345,10 @@ Issue rendering; milestone IDs4/5/8/7 verified live. M3 milestone4 remains histo
 closed; this follow-up does not revoke prior closure or assert milestone completion.
 Project membership/status NOT_VERIFIED (CLI lacks read:project); publication does
 not grant Ready. No agent message/dispatch, no changes to #302.
+
+
+## Beta technical retest — 20/11/2026
+
+| Task | Scope | State | GitHub |
+| --- | --- | --- | --- |
+| [M7-S14-T05](milestones/M7/slices/2026-11-20-beta-technical-retest-g3.md) | Native macOS integrated B01–B10, Content Foundation and security/data negatives | Harbor · G3 merged [#409](https://github.com/thientran2359/opendash-cms/pull/409); runtime NOT_RUN; live Project gates apply | [#410](https://github.com/thientran2359/opendash-cms/issues/410) |
