@@ -356,3 +356,44 @@ CREATE TABLE template_override_media_refs (
    - **Resolver 2 trục & Visual Builder Overrides:** Theme-specific (`single-project.html`) thắng DB-generic (`single`); DB `ast_json` cùng candidate thắng theme; `core/content_slot` & `core/template_part` hoạt động đúng; mất `page_layout_key`/`custom_template_key` giữ reference khi save (`PatchField::Keep`), báo Admin và fallback nhánh thường.
    - **Reading Settings & Route Authority:** Chọn 2 Page khác nhau (từ chối trùng ID, draft, non-page; `428`/`412` CAS); gán/đổi/bỏ chọn `posts_page_id` không gây `409 permalink_collision`; `/` render Homepage qua `home → PageLayout → page`; Posts Page render `archive-post → archive` và giữ nguyên `values_json` Page; xóa hoặc chuyển sang draft trả `404` + `X-Robots-Tag: noindex`; sitemap không lặp `/`.
    - **Reset & Backup/Restore v3:** `POST .../reset` kiểm `If-Match` CAS và trả đúng `next_effective_source`; theme `A → B → A` giữ overrides; `backup_worker.rs` sao chép đầy đủ revision `v3` và restore giữ nguyên `site_reading_settings`, `page_layout_key`, `custom_template_key`, `template_overrides`.
+
+
+## Design Delta D01 — Explicit static assets (#426)
+
+**Status:** Proposed — not implementation authority until independent EGM review, delegated approval and merge.
+**Coordinator:** Aster. **Baseline:** `284f000333b32d38629297c0368584761d54d67f`.
+
+### Problem and selected direction
+
+Goal 1 requires explicit declarations of all resources, but the manifest omits general CSS, font and image declarations. Preserve that boundary; do not implicitly allow every file under `assets/`. This delta concerns the unreleased v3 format, not SQLite, public routing, publication or content migration. Existing S01 approval does not approve this delta.
+
+### Exact proposed schema and semantics
+
+Add `#[serde(default)] pub assets: Vec<String>` to `ThemeV3Manifest`. Each string is a unique canonical package-relative file path below `assets/`; an omitted field means an empty set. No glob, directory, URL or executable declaration is accepted. `deny_unknown_fields` remains effective. Example: `"assets": ["assets/styles.css", "assets/images/hero.png"]`.
+
+Canonical asset paths have at most 240 ASCII bytes after `assets/`. Each directory component matches `[a-z0-9_-]+`; the final filename uses only `[a-z0-9_.-]`, starts with a non-dot character, has an allowed lowercase extension, and contains no `..`. Core and server must use the same acceptance grammar, including rejection of `assets/icons.v2/logo.png` and `assets/a..b.png`, and tests must verify boundary agreement. Core validation rejects duplicates, empty components, dot/dot-dot and hidden components, backslashes, absolute paths, control characters and URI syntax; paths use case-sensitive forward slashes without normalization. Retain the package path validator and package extraction protections; server performs byte/existence checks, never I/O in core. Allowed extensions match the current safe package policy: css/txt, png/jpg/jpeg/webp/gif and woff2. No HTML, SVG, JavaScript, Wasm or additional executable type is introduced.
+
+Every declared asset must exist as a regular validated ZIP member. Every ZIP regular file under assets/ must be declared. A pattern preview must name a declared raster image that exists, not merely a path with an allowed prefix. Existing template/part/layout/pattern declarations remain the authority for their own files. Reject duplicate regular ZIP members, traversal and hidden regular-file paths with the package safeguards before constructing a valid package. Empty ZIP directory entries remain subject to the shared reader path-safety validation and are ignored; they are not manifest resources and are not materialized or served. A hidden empty directory entry may be ignored, but any regular file beneath it is rejected by v3 validation. No shared package-reader change is authorized. Existing compressed/uncompressed aggregate, file-count and per-file size limits remain mandatory; manifest declarations never increase limits.
+
+CSS continues through `validate_safe_css` before package acceptance; this delta does not relax CSS URLs, C-SEC, CSP or enable templating of asset bytes. Assets remain inert bytes served by the existing asset route. The manifest is an archive allowlist, not a new HTML/CSS dependency crawler or auto-enqueue feature.
+
+### Detailed Implementation Plan
+
+S01 ownership remains Harbor's existing five implementation files plus the prior bounded `page.rs` ACK. Within `cms/crates/opendash-core/src/theme.rs`, add the field and pure validation with in-file tests. Within `cms/crates/opendash-server/src/theme.rs`, enforce declared/existing asset set equality, preview membership and type, existing safe CSS checks and invoke `parse_theme_declarations` so malformed declarations/field_groups fail before ZIP acceptance; add focused in-file tests. Update S01 fixture literals in these owned files to carry assets as needed. No extra runtime file ownership is granted by this proposal. Any other fixture or caller needs an explicit exact-path handoff before editing.
+
+Aster owns this spec amendment, review/provenance record and design index update. Only after review/approval and merge will Aster pin the new source SHA on #426 and issue the exact schema/file handoff. Harbor preserves existing task commits and dirty worktrees while blocked; no reset or force push.
+
+### Verification Plan
+
+Core tests: missing/empty assets accepted, valid declarations accepted, duplicate/invalid paths and unsupported extensions rejected. ZIP tests: declared CSS/image/font accepted, missing declaration rejected, missing declared file rejected, undeclared/hidden/traversal/duplicate regular ZIP members rejected, safe empty directory entries ignored with hidden child regular files rejected, preview missing or non-raster rejected, unsafe CSS and over-limit members rejected, malformed declarations/field_groups rejected. Preserve v2 behavior during additive S01. Run standards/plans checks and self-tests, artifact validation, fmt, locked build and full workspace release tests, plus all required CI at implementation head. This proposal records no tests as PASS before execution.
+
+### Rollback and completion
+
+Before implementation, revert only the documentation delta. After implementation, revert the bounded code changes through a protected PR; do not delete site data. No migration is introduced. D01 is complete only after independent EGM review findings are resolved, delegated approval is recorded, required CI passes, the delta merges and the exact source/schema/ownership handoff is posted on #426. Implementation verification remains separate.
+
+
+### D01 independent review and disposition — 2026-11-21
+
+Independent fresh-context reviewer `delta_review` read this amendment against the actual core/server theme validators and package-reader boundary. Initial verdict CHANGES_REQUESTED: two P2 findings, core/server path grammar mismatch and directory entries bypassing the v3 callback. Both were resolved by specifying the identical ASCII/length grammar and explicitly preserving safe empty directory entries while rejecting hidden regular files. Re-review verdict PASS: no remaining actionable P0/P1/P2. This review does not assert implementation verification.
+
+Actual documentation validation: check-plans PASS; check-plans self-test 13 fixtures PASS; check-agent-artifacts PASS; standards and self-test PASS using Python 3.9 with a temporary pip-vendored tomli compatibility module, including child processes; diff whitespace PASS. CodeGraph indexing attempted but unavailable because the engine is not installed in this worktree. No CMS runtime files changed, and Rust/runtime/native tests were not run for this documentation-only delta. Required remote CI and delegated approval remain merge preconditions.
