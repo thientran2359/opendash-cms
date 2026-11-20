@@ -44,8 +44,8 @@ Theo [discussion-turn-responder](archive/skills/discussion-turn-responder/SKILL.
 
 **Owner authorization, 19/11/2026:** sau khi Aster review Issue/PR của Harbor,
 Aster chủ động gửi yêu cầu tiếp tục trong cùng lượt chat khi còn hành động hợp lệ,
-để chủ dự án không phải chuyển lời. Áp dụng [skill RUN/STATUS](archive/skills/atlas-task-dispatch/SKILL.md)
-và [hợp đồng adapter](archive/skills/atlas-task-dispatch/references/direct-adapter-contract.md).
+để chủ dự án không phải chuyển lời. Áp dụng [skill RUN/STATUS](skills/atlas-task-dispatch/SKILL.md)
+và [hợp đồng adapter](skills/atlas-task-dispatch/references/direct-adapter-contract.md).
 
 1. Re-fetch Issue/Project, PR head/review/CI và nguồn G3 đã merge. Ghi kết luận,
    ownership ACK và việc cần làm trên GitHub trước khi gửi. Issue đã Done không

@@ -3,7 +3,7 @@
 - **Task:** [Issue #11](https://github.com/thientran2359/opendash-cms/issues/11), process task requested directly by the owner, 10/11/2026 (Asia/Bangkok).
 - **Implementer:** Atlas, `agent/atlas`; independent reviewer requested: Nova.
 - **Baseline:** `b16ec77b1920f9594dd8da98b07aa54231b03a5c` (PR #10 merged).
-- **Scope:** [github-pr-review-merge](../../.agents/archive/skills/github-pr-review-merge/SKILL.md), discovery instructions, delegated merge rule in the GitHub workflow, one exact checker allowlist entry.
+- **Scope:** [github-pr-review-merge](../../.agents/skills/github-pr-review-merge/SKILL.md), discovery instructions, delegated merge rule in the GitHub workflow, one exact checker allowlist entry.
 - **State:** implemented locally and checked as below; PR review/merge pending. No live merge, pickup, discussion-reply, CoS API, watcher/PONG, ACL or ruleset action was performed while validating this skill.
 
 ## Contract and implementation

@@ -331,7 +331,7 @@ review. Sau khi giao sửa, kiểm lại head và áp dụng quyền review/merg
 
 ## Review và merge implementation PR được ủy quyền
 
-Theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas có quyền review và merge mọi PR đủ gate, kể cả PR của Atlas. Nova, Harbor và Forge tự review và merge PR thuộc task mình sở hữu mà không cần agent khác phê duyệt. Khi tác giả là Orion, Atlas review/merge. Luồng [github-pr-review-merge](archive/skills/github-pr-review-merge/SKILL.md) áp dụng khi Atlas được gọi review/merge PR; yêu cầu chỉ review giữ nguyên phạm vi.
+Theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas có quyền review và merge mọi PR đủ gate, kể cả PR của Atlas. Nova, Harbor và Forge tự review và merge PR thuộc task mình sở hữu mà không cần agent khác phê duyệt. Khi tác giả là Orion, Atlas review/merge. Luồng [github-pr-review-merge](skills/github-pr-review-merge/SKILL.md) áp dụng khi Atlas được gọi review/merge PR; yêu cầu chỉ review giữ nguyên phạm vi.
 
 - Xác minh tác giả bằng Issue, branch và signed evidence. Tác giả tự review ghi
   self-review cùng head SHA và validation. Atlas review PR của agent khác ghi

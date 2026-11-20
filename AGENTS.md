@@ -28,6 +28,16 @@ OpenDash áp dụng quy trình **EGM (Elephant soạn spec → Goldfish review �
    - Dùng `/egm-bootstrap` để cập nhật hệ thống `README.md` theo cấu trúc cây trong `cms/`.
    - Định kỳ dùng `/egm-drift-report` để kiểm tra `docs/` đối chiếu với codebase thật trong `cms/`, kịp thời cập nhật tài liệu hoặc sửa code khi có độ lệch.
 
+### 1.2. Phối hợp Đa-Agent (`Atlas / Nova / Aster → Forge / Harbor`)
+
+EGM phụ trách **tạo và review đặc tả kỹ thuật**, còn việc triển khai và kiểm chứng đa nền tảng (Windows / macOS) tiếp tục tận dụng đội ngũ agent độc lập thông qua GitHub Issues/PR và 3 skill điều phối đã chuẩn hóa theo EGM:
+
+- **Nghiên cứu, soạn spec & điều phối (`Atlas`, `Nova`, `Aster`):** Đóng vai **Elephant** chạy `/egm-brainstorm` → `/egm-draft` → `/egm-review` + `/egm-resolve` để chốt `docs/designs/<feature>.md` (`Status: Approved`), mở GitHub Issue trỏ thẳng tới `## Detailed Implementation Plan` và `source_sha` trên `origin/main`.
+- **Giao việc sang subagent (`atlas-task-dispatch`):** `Atlas` (Windows) hoặc `Aster` (macOS) dùng [`.agents/skills/atlas-task-dispatch/SKILL.md`](.agents/skills/atlas-task-dispatch/SKILL.md) để `RUN` / `RESUME` / `STATUS` các Issue giao cho **Forge** (Windows) và **Harbor** (macOS) qua `cos_dispatch.py`.
+- **Nhận việc & triển khai (`github-task-pickup`):** **Forge** và **Harbor** dùng [`.agents/skills/github-task-pickup/SKILL.md`](.agents/skills/github-task-pickup/SKILL.md) để nhận Issue trên nhánh mặc định `agent/<name>`, triển khai đúng `## Detailed Implementation Plan`, chạy đủ kiểm chứng native và mở PR.
+- **Review & Merge PR (`github-pr-review-merge`):** `Atlas`, `Aster`, `Nova` dùng [`.agents/skills/github-pr-review-merge/SKILL.md`](.agents/skills/github-pr-review-merge/SKILL.md) để review diff đối chiếu với Design Spec EGM, kiểm tra required CI checks và merge với `expected_head_sha` (theo thẩm quyền [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)).
+- Các quy định về định danh agent và vận hành GitHub/CoS đặt tại [`.agents/agents.yaml`](.agents/agents.yaml), [`.agents/AGENT_OPERATING_STANDARD.md`](.agents/AGENT_OPERATING_STANDARD.md) và [`.agents/GITHUB_WORKFLOW.md`](.agents/GITHUB_WORKFLOW.md).
+
 ---
 
 ## 2. Ngữ cảnh Hệ thống và Ranh giới Kỹ thuật Bắt buộc

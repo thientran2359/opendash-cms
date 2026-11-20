@@ -15,7 +15,7 @@ Windows-to-Mac Python source/output is explicitly UTF-8. A failing regression te
 
 ## PR correction contract
 
-[Active skill](../../.agents/archive/skills/atlas-task-dispatch/SKILL.md) and [transport contract](../../.agents/archive/skills/atlas-task-dispatch/references/direct-adapter-contract.md) define the workflow. New commands are `check-pr`, `send-pr`, `status-pr`.
+[Active skill](../../.agents/skills/atlas-task-dispatch/SKILL.md) and [transport contract](../../.agents/skills/atlas-task-dispatch/references/direct-adapter-contract.md) define the workflow. New commands are `check-pr`, `send-pr`, `status-pr`.
 
 Live GitHub CLI checks require an open same-repo PR to main, exact head/base SHA, target-owned branch plus agent marker, PR/review from the authorized shared account, an actionable Atlas-signed review at that head, and 1–100 added/modified Markdown files under docs or .agents/research. Code, scripts, skills, rename/delete, foreign signatures, stale review and incomplete files fail before dispatch reservation. Proposed/draft design may be corrected as documentation; it is not implementation eligibility.
 
