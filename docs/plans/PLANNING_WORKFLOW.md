@@ -1,27 +1,5 @@
 # Quy trình quản lý roadmap, module và task của OpenDash
 
-## Điểm vào EGM và phần nghĩa vụ giữ lại — 2026-11-20
-
-Với thiết kế mới, dùng [EGM workflow](EGM_WORKFLOW.md) để chọn luồng và tìm
-nguồn quyết định. Guide đó ưu tiên về trình tự soạn/review thiết kế; các quy tắc
-ID, module/milestone, Full-Track theo rủi ro và điều kiện triển khai ở đây vẫn
-có hiệu lực. G0–G5 được ánh xạ sang scope/research/design/handoff/implementation/
-acceptance trong guide; không yêu cầu hai bộ tài liệu hoặc hai vòng ký duyệt.
-
-Primary draft ở `.agents/research/` cho tới khi chấp nhận; bản chính được promote
-qua PR sang `docs/designs/`, draft cũ thành pointer/snapshot. Quyết định sản phẩm
-và contract dùng link tới nguồn có thẩm quyền, không chép thành bản độc lập.
-Builder Proposed đã có trong docs/designs được giữ như ngoại lệ lịch sử,
-không là bằng chứng đã chấp nhận hoặc mẫu đặt mọi draft mới.
-
-Để không đổi công cụ trong slice này, handoff task EGM mới vẫn nằm trong module
-hoặc milestone plans hiện có, đúng SLICE_TASK, ID `Mx-Sxx-Txx`, G2/G3 và metadata
-được generator hỗ trợ. Handoff giữ scope/files/acceptance và link bản thiết kế;
-khác biệt hai nguồn phải xử lý trước publication. Merge thiết kế/handoff, pin
-source/base và kiểm dependencies/ownership/live Ready trước implementation.
-Docs/design có Final Decision dùng luồng tài liệu của ADR-0010; không fake task
-implementation. Task legacy Ready/resume giữ nguồn, ID và gate như GitHub workflow.
-
 **Trạng thái tài liệu:** Quy trình planning V1 được chủ dự án cho áp dụng sau [5 lượt thảo luận Codex ↔ Antigravity](../discussions/threads/2026-11-07-roadmap-module-planning-workflow.md) (`CONSENSUS_REACHED` **cho quy trình**, không phải cho thiết kế M3). **Hiện hành:** [ADR-0010](../decisions/ADR-0010-agent-project-and-merge-authority.md) giao Atlas điều phối và chốt kỹ thuật, đồng thời cho Nova, Harbor và Forge tự chủ với task đủ contract. Quy ước ID, gates và status không thay thế [yêu cầu sản phẩm](../product/PRODUCT_REQUIREMENTS.md), [hợp đồng kỹ thuật](../contracts/CORE_FOUNDATION.md) hoặc ADR.
 
 **Triển khai tự chủ:** Atlas, Nova, Harbor và Forge có quyền self-review và merge PR đủ gate theo ADR-0010. Project Ready, ownership, required CI, security/data và G5 vẫn cần bằng chứng.
