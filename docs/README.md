@@ -17,6 +17,10 @@ Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc
 
 ## Tra cứu theo mục đích
 
+Bổ sung ngày 19/11/2026: [Builder template và content](product/BUILDER_TEMPLATE_AND_CONTENT.md)
+phân biệt template/thành phần dùng lại với content từng bản ghi có đăng ký Builder;
+hierarchy tham chiếu WordPress, nguồn theme/database và home/archive tách biệt; bỏ yêu cầu chuyển homepage legacy thành Page. Yêu cầu đã xác nhận, chưa là API/schema G2, G3 hay runtime evidence.
+
 Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và bố cục màn hình chỉnh sửa](product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) — menu/submenu, vùng đăng ký panel và vị trí nhóm custom fields; [ADR-0016](decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) đã đạt `G2 AGREED` và merge tại `main@2808e3e` ([receipt #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) · [#268](https://github.com/thientran2359/opendash-cms/issues/268)); đặc tả [G3 (`M7-S09-T01`–`M7-S13-T02`)](plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md) đã soạn xong (`Implementation NOT_STARTED / Verification NOT_RUN`, chưa cấp `Project Ready`).
 
 | Mục đích | Vị trí | Quy ước |
@@ -45,3 +49,12 @@ Xem [báo cáo chuyển thư mục ngày 07/11/2026](verification/2026-11-07-lay
 [task index](plans/TASK_INDEX.md#content-foundation-follow-up--18112026).
 CPT configuration, custom taxonomy, shared permalink resolver and provider integration;
 design only until separately implemented/verified.
+
+### Builder resolver follow-up (19/11/2026)
+
+[ADR-0020](decisions/ADR-0020-builder-template-resolver.md) ·
+[Resolver G2](contracts/BUILDER_TEMPLATE_RESOLVER.md): hierarchy trước, nguồn
+database/theme sau; parts/content riêng; Settings chọn Page Trang chủ và Page
+Blog làm archive post. Không convert homepage legacy thành Page content.
+Final Decision của Atlas trong working tree, contract hiệu lực sau merge;
+G3/API/schema tổng thể chưa hoàn chỉnh, runtime NOT_RUN.
