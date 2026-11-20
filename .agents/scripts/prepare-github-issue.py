@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Render a readable GitHub Issue from an approved G3 task at a Git commit.
+"""Render a readable GitHub Issue from an approved EGM Design Spec (or legacy G3 task) at a Git commit.
 
 No network calls, GitHub writes, worktree changes or permission grants occur.
-Muse can consume the JSON and perform duplicate checks / publishing separately.
+Coordinators (Atlas / Aster / Nova) can consume the JSON/Markdown to publish
+implementation Issues for Forge / Harbor.
 """
 
 from __future__ import annotations
@@ -37,10 +38,11 @@ HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 TASK_HEADING = re.compile(
     r"^\[?(M\d+(?:\.\d+)?-S\d{2}-T\d{2})\]?\s*[-–—:]\s*(.+?)\s*$"
 )
-METADATA = re.compile(r"^\s*(?:[-*]\s+)?\*\*([^*]+):\*\*\s*(.*?)\s*$")
+METADATA = re.compile(r"^\s*(?:[-*]\s+)?\*\*([^*:]+):\*\*\s*(.*?)\s*$")
 CHECKBOX = re.compile(r"(?m)^\s*[-*]\s+\[ \]\s+\S")
 CHECKED = re.compile(r"(?mi)^\s*[-*]\s+\[[xX]\]\s+")
 PLACEHOLDER = re.compile(r"\.\.\.|…|\bTODO\b|\bTBD\b|<[^>]+>", re.I)
+EGM_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD)\b", re.I)
 
 SECTIONS = (
     "Tổng quan và giá trị",
@@ -53,9 +55,20 @@ SECTIONS = (
     "Kiểm thử, rủi ro và rollback",
 )
 
+EGM_REQUIRED_SECTIONS = (
+    "Overview",
+    "Goals",
+    "Detailed Implementation Plan",
+)
+
 
 class TaskError(ValueError):
-    """Invalid or unapproved task; safe to show to coordinator."""
+    """Invalid or unapproved task/design; safe to show to coordinator."""
+
+
+def is_egm_design_path(path_str: str) -> bool:
+    path = PurePosixPath(path_str.replace("\\", "/"))
+    return path.parts[:2] == ("docs", "designs")
 
 
 def source_path(raw: str) -> str:
@@ -65,12 +78,36 @@ def source_path(raw: str) -> str:
         or ".." in path.parts
         or "." in path.parts
         or path.suffix.lower() != ".md"
-        or path.parts[:2] != ("docs", "plans")
-        or len(path.parts) < 4
-        or path.parts[2] not in {"modules", "milestones", "tasks"}
     ):
-        raise TaskError("Nguồn task phải là Markdown trong docs/plans/modules|milestones|tasks, không chứa traversal")
-    return path.as_posix()
+        raise TaskError("Nguồn task phải là file Markdown tương đối hợp lệ, không chứa traversal")
+
+    # EGM Design Spec: docs/designs/<feature>.md (excluding README.md and SITEMAP.md)
+    if path.parts[:2] == ("docs", "designs"):
+        if len(path.parts) < 3 or path.name.upper() in {"README.MD", "SITEMAP.MD"}:
+            raise TaskError(
+                "Nguồn EGM Design Spec phải là docs/designs/<feature>.md (không phải README.md hay SITEMAP.md)"
+            )
+        return path.as_posix()
+
+    # Legacy G3 task source: docs/plans/... or docs/archive/plans/...
+    if (
+        path.parts[:2] == ("docs", "plans")
+        and len(path.parts) >= 4
+        and path.parts[2] in {"modules", "milestones", "tasks"}
+    ):
+        return path.as_posix()
+
+    if (
+        path.parts[:3] == ("docs", "archive", "plans")
+        and len(path.parts) >= 5
+        and path.parts[3] in {"modules", "milestones", "tasks"}
+    ):
+        return path.as_posix()
+
+    raise TaskError(
+        "Nguồn task phải là EGM Design Spec trong docs/designs/<feature>.md "
+        "hoặc tài liệu G3 trong docs/plans/modules|milestones|tasks, không chứa traversal"
+    )
 
 
 def git_output(*args: str) -> str:
@@ -98,6 +135,146 @@ def resolve_revision(ref: str) -> str:
 def read_task_source(path: str, ref: str) -> tuple[str, str]:
     sha = resolve_revision(ref)
     return git_output("show", f"{sha}:{source_path(path)}"), sha
+
+
+def parse_egm_design(document: str) -> dict[str, object]:
+    """Parse and validate an approved EGM Design Specification (docs/designs/<feature>.md)."""
+    lines = document.splitlines()
+    title: str | None = None
+    metadata: dict[str, str] = {}
+    sections: dict[str, str] = {}
+    active_section: str | None = None
+    pending: list[str] = []
+    in_fence = False
+
+    def save_section() -> None:
+        if active_section is not None:
+            if active_section in sections:
+                raise TaskError(f"Heading section bị lặp trong Design Spec: {active_section}")
+            sections[active_section] = "\n".join(pending).strip()
+
+    for line in lines:
+        if re.match(r"^\s*(?:`{3,}|~{3,})", line):
+            in_fence = not in_fence
+            if active_section is not None:
+                pending.append(line)
+            continue
+        if not in_fence:
+            heading = HEADING.match(line)
+            if heading:
+                level = len(heading.group(1))
+                text = heading.group(2).strip()
+                if level == 1 and title is None:
+                    title = text
+                    continue
+                if level == 2:
+                    save_section()
+                    active_section = text
+                    pending = []
+                    continue
+        if active_section is None:
+            match = METADATA.match(line)
+            if match:
+                key = match.group(1).strip().casefold()
+                metadata[key] = match.group(2).strip()
+        else:
+            pending.append(line)
+    save_section()
+
+    if not title or EGM_PLACEHOLDER.search(title):
+        raise TaskError("Thiếu tiêu đề H1 hợp lệ trong EGM Design Spec")
+
+    status = metadata.get("status", "")
+    if status.casefold() != "approved":
+        raise TaskError(
+            f"EGM Design Spec phải có '**Status:** Approved' trước khi tạo Issue (hiện tại: {status or 'trống'})"
+        )
+
+    for required in EGM_REQUIRED_SECTIONS:
+        value = sections.get(required, "")
+        if not value or EGM_PLACEHOLDER.search(value):
+            raise TaskError(f"Thiếu hoặc còn placeholder ở section bắt buộc: {required}")
+
+    impl_plan = sections["Detailed Implementation Plan"]
+    if "### Target Files to Create/Modify" not in impl_plan:
+        raise TaskError("Detailed Implementation Plan phải có mục '### Target Files to Create/Modify'")
+    if "### Verification Plan" not in impl_plan:
+        raise TaskError("Detailed Implementation Plan phải có mục '### Verification Plan'")
+
+    return {"title": title, "metadata": metadata, "sections": sections}
+
+
+def egm_issue_payload(
+    design: dict[str, object],
+    source: str,
+    source_sha: str,
+    baseline_sha: str,
+    agent: str | None,
+    task_id: str | None = None,
+) -> dict[str, object]:
+    title = str(design["title"])
+    metadata = design["metadata"]
+    sections = design["sections"]
+    assert isinstance(metadata, dict) and isinstance(sections, dict)
+
+    stem = PurePosixPath(source).stem
+    resolved_task_id = task_id or f"EGM-{stem}"
+    url = f"https://github.com/{REPOSITORY}/blob/{source_sha}/{source}"
+
+    body = [
+        f"> **EGM Implementation Issue** · Spec: [{source}@{source_sha[:12]}]({url}) · Status: `Approved`",
+        "",
+        "## Overview",
+        "",
+        str(sections["Overview"]),
+        "",
+        "## Goals",
+        "",
+        str(sections["Goals"]),
+        "",
+    ]
+    if sections.get("Non-Goals") and not EGM_PLACEHOLDER.search(str(sections["Non-Goals"])):
+        body.extend(["## Non-Goals", "", str(sections["Non-Goals"]), ""])
+
+    body.extend(
+        [
+            "## Detailed Implementation Plan",
+            "",
+            str(sections["Detailed Implementation Plan"]),
+            "",
+            "## Nguồn chính thức và phân công",
+            "",
+            f"- **Task ID:** `{resolved_task_id}`",
+            f"- **Design Spec (EGM Approved):** [{source}@{source_sha[:12]}]({url})",
+            f"- **Source commit SHA:** `{source_sha}`",
+            f"- **Baseline code SHA:** `{baseline_sha}`",
+            f"- **Agent thực hiện:** `{agent}`" if agent else "- **Agent thực hiện:** Chưa phân công",
+            "",
+            "## Bàn giao và kiểm chứng",
+            "",
+            "Triển khai đúng `## Detailed Implementation Plan` trên nhánh `agent/<name>`, "
+            "chạy đủ `### Verification Plan`, `check-standards.py`, `check-plans.py` và `cargo test --workspace --release --locked`. "
+            "Sau khi merge và kiểm chứng thực tế PASS, cập nhật trạng thái trong `docs/designs/SITEMAP.md`.",
+        ]
+    )
+
+    labels = ["type:implementation", "egm"]
+    if agent:
+        labels.append(f"agent:{agent}")
+
+    issue_title = f"[{task_id}] {title}" if task_id else f"[EGM] {title}"
+    return {
+        "repository_full_name": REPOSITORY,
+        "title": issue_title,
+        "body": "\n".join(body) + "\n",
+        "labels": labels,
+        "project_url": PROJECT_URL,
+        "task_id": resolved_task_id,
+        "source_path": source,
+        "source_sha": source_sha,
+        "base_sha": baseline_sha,
+        "agent": agent,
+    }
 
 
 def parse_task(document: str, expected_id: str) -> dict[str, object]:
@@ -244,8 +421,6 @@ def issue_payload(
             "sửa đặc tả trong repo qua review trước rồi đồng bộ Issue.",
         ]
     )
-    # GitHub Milestone tracks the roadmap; GitHub Project Status tracks execution.
-    # Do not duplicate either one into status:* or milestone:* labels.
     labels = ["type:implementation", f"module:{metadata['module']}"]
     if agent:
         labels.append(f"agent:{agent}")
@@ -267,19 +442,32 @@ def issue_payload(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", required=True, help="Đường dẫn repo-relative đến module brief/task brief")
-    parser.add_argument("--task-id", required=True, help="Task ID đã qua G3, ví dụ M3-S07-T01")
+    parser.add_argument(
+        "--source",
+        required=True,
+        help="Đường dẫn repo-relative đến EGM Design Spec (docs/designs/<feature>.md) hoặc file G3 cũ",
+    )
+    parser.add_argument(
+        "--task-id",
+        help="Task ID (tùy chọn cho EGM Design Spec; bắt buộc cho file G3 cũ, ví dụ M3-S07-T01)",
+    )
     parser.add_argument("--ref", default="origin/main", help="Commit đã duyệt chứa đặc tả (mặc định origin/main)")
     parser.add_argument("--base-ref", help="Commit source code nền để agent thực hiện (mặc định --ref)")
-    parser.add_argument("--agent", choices=["atlas", "nova", "forge", "harbor", "orion"])
+    parser.add_argument("--agent", choices=["atlas", "aster", "nova", "forge", "harbor", "orion"])
     parser.add_argument("--format", choices=["json", "markdown"], default="json")
     args = parser.parse_args(argv)
     try:
         path = source_path(args.source)
         document, source_sha = read_task_source(path, args.ref)
-        task = parse_task(document, args.task_id)
         base_sha = resolve_revision(args.base_ref) if args.base_ref else source_sha
-        payload = issue_payload(task, path, source_sha, base_sha, args.agent)
+        if is_egm_design_path(path):
+            design = parse_egm_design(document)
+            payload = egm_issue_payload(design, path, source_sha, base_sha, args.agent, args.task_id)
+        else:
+            if not args.task_id:
+                raise TaskError("Nguồn G3 cũ bắt buộc phải truyền --task-id")
+            task = parse_task(document, args.task_id)
+            payload = issue_payload(task, path, source_sha, base_sha, args.agent)
     except TaskError as exc:
         print(f"BLOCKED: {exc}", file=sys.stderr)
         return 2
