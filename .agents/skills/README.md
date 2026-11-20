@@ -1,5 +1,12 @@
 # Active skills
 
+[OpenDash EGM workflow](../../docs/plans/EGM_WORKFLOW.md) supplies design,
+drafting and independent critique; these four project skills handle GitHub
+task operations. Their bodies and tool contracts are unchanged in the docs
+integration. New EGM tasks use the supported plans handoff/metadata; a guide
+pointer cannot grant unsupported dispatch or bypass Ready/ownership. See the
+guide's per-skill compatibility disposition before selecting an operation.
+
 Four **on-demand** project skills live here (no cronjob or background loop;
 direct CoS dispatch requires separately verified, authorized host adapters):
 

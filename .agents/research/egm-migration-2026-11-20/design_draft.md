@@ -1,11 +1,16 @@
 # OpenDash official EGM adoption
 
 * **Author:** Atlas
-* **Status:** Draft — Overview & Goals and authority adaptation approved by owner; Technical Plan drafted, detailed plan/review pending
+* **Status:** Draft — owner-approved direction and authority adaptation; documentation operating guide and integration plan added by Aster; full migration detail/review pending
 * **Date:** 2026-11-20
 * **Predecessor:** [Refined concepts brief](concepts_brief.md), grounded in the owner's already approved scope.
 * **Candidate under evaluation:** `e1a239126829a64c40df1ed86605dadb9ca2320c`.
 * **Main baseline:** `ff957054d10077b5adc0cf1b704457319ba7a6c4`.
+
+Documentation slice successor: [OpenDash EGM workflow](../../../docs/plans/EGM_WORKFLOW.md),
+owned by Aster in [#414](https://github.com/thientran2359/opendash-cms/issues/414).
+This migration draft remains the working design for the larger unfinished
+tooling/process migration; it is not a competing operational guide.
 
 ## Overview
 
@@ -126,9 +131,100 @@ Atlas owns this design preparation and the owner-approved Builder document conve
 
 Before an executable plan: specify the exact provenance/section contract and fixtures; semantic status/evidence handling; the document inventory/index mechanism; the current-task/legacy admission mapping; the exact files and dependency sequence for preserving and repairing Nova's candidate; pilot acceptance and rollback receipts. This draft does not authorize those source changes or mark the whole migration Approved.
 
+### 8. Owner follow-up: documentation and agent coordination first
+
+On 2026-11-20 in the Aster chat, the owner explicitly prioritized documentation
+and development coordination over concentrating on testing, then approved the
+proposal for one entry guide, work-sized procedures, delegated authority, one
+primary design, gradual migration and bounded review. This preserves existing
+acceptance requirements while selecting documentation integration as the next
+deliverable. It does not approve every detail of the historical Nova candidate.
+
+Aster prepared the [operating guide](operating-guide.md) as the concrete draft.
+It keeps the official plugin unchanged and uses the existing authority adaptation.
+The guide is not yet an active replacement for repository entry instructions.
+Atlas's migration source and Nova's candidate retain their historical authorship
+and ownership; this follow-up grants no write access to their other checkouts.
+
+## Alternatives Considered
+
+The alternatives below derive from the concepts brief and the approved follow-up.
+These dispositions are coordinator technical decisions within the approved scope.
+
+| Alternative | Disposition and reason |
+| --- | --- |
+| Wholesale rewrite and hard cutover | Do not select: changing all records together can strand ongoing work and obscure authority. Adopt the documented workflow gradually. |
+| Full design review for every edit | Do not select: faithful wording edits and bounded changes need proportionate procedures. Keep the actual selected skill's requirements. |
+| Modify the installed EGM plugin | Do not select: updates would obscure project-specific policy. Keep the adaptation in versioned project documentation. |
+| Derive a new task ID from each design filename | Do not select: document identity is separate from dispatch identity; preserve assigned task IDs. |
+| Separate workflow/approval database | Do not select: GitHub already owns live state. Committed design decisions provide provenance. |
+| New documentation sitemap immediately | Defer: use the existing docs index for the pilot; create another inventory only if an observed navigation need warrants it. |
+
+## Detailed Implementation — documentation integration slice
+
+This is the bounded plan for documentation integration, not the executable plan
+for all generator/transport/indexer repairs in the larger migration. Aster is the
+proposed responsible coordinator/author for this slice. Before execution, record
+the owning Issue, immutable reviewed source/base, current ownership and applicable
+admission evidence. Recheck Atlas coordination on overlapping migration files.
+
+| Order | Exact target | Planned change and reason |
+| --- | --- | --- |
+| 1 | `docs/plans/EGM_WORKFLOW.md` (create) | Promote the reviewed operating guide as the single entry guide; link back to decision authority and distinguish historical continuity. |
+| 2 | `AGENTS.md` | Add a short entry pointer and workflow selection rule; reconcile active terminology without dropping existing task obligations or duplicating the guide. |
+| 3 | `docs/decisions/ADR-0010-agent-project-and-merge-authority.md` | Record the approved EGM authority adaptation and its actual scope/provenance; preserve product/release authority. |
+| 4 | `.agents/GITHUB_WORKFLOW.md` | Link the EGM design-to-task handoff, stable identities and current/resume distinction while retaining live GitHub state and merge rules. |
+| 5 | `.agents/AGENT_OPERATING_STANDARD.md` | Point to the guide for decision ownership, task context and bounded handoff; retain host/branch/data/dispatch protections. |
+| 6 | `docs/plans/PLANNING_WORKFLOW.md` | Explain the entry cutover for new designs and the source-preserving mapping for ongoing G0–G5 tasks. |
+| 7 | `docs/README.md` and `docs/plans/README.md` | Register the primary guide and clarify the roles of product/design/contracts/research/evidence. |
+| 8 | `.agents/README.md` and `.agents/skills/README.md` | Explain that EGM supplies design/critique and the four project skills supply task operations; retain the current tool contract. |
+| 9 | This draft and `operating-guide.md` | Record final review/dispositions and the successor guide link, retaining historical source evidence. |
+
+No deletions, mass document moves, plugin modifications, task renaming, runtime
+edits or generator/adapter/indexer changes belong to this slice. Review the four
+project skill bodies as read-only inputs: `.agents/skills/github-task-pickup/SKILL.md`,
+`.agents/skills/discussion-turn-responder/SKILL.md`,
+`.agents/skills/github-pr-review-merge/SKILL.md` and
+`.agents/skills/atlas-task-dispatch/SKILL.md`. No body edits, including pointers,
+are authorized in this slice. Record compatible-unchanged versus blocking-conflict
+for each; a conflict disables the affected new route pending an owned correction.
+
+Promotion is a transformation, not a blind copy. At `docs/plans/EGM_WORKFLOW.md`,
+replace draft-only activation language with the accepted Issue #414 policy and
+replace the future self-integration instruction with the next pilot step. Rebase
+links to `../../.agents/research/egm-migration-2026-11-20/design_draft.md` and
+`concepts_brief.md`, `../decisions/ADR-0010-agent-project-and-merge-authority.md`,
+`../../.agents/GITHUB_WORKFLOW.md`, `../../.agents/AGENT_OPERATING_STANDARD.md`,
+`../designs/BUILDER_THEME_CONTENT.md` and destination-relative planning/template
+links. Retain the research guide only as a non-editable historical snapshot with
+a successor pointer. New working primary designs stay in `.agents/research/`
+until accepted; the existing Proposed Builder transcription is an explicit
+historical exception, not general permission for duplicate draft sources.
+
+The guide's interim admission section and G0–G5 mapping are the selected technical
+contract: EGM owns design, supported module/milestone task sections retain the
+existing template/metadata and generator path. No new manual bypass is enabled.
+Full-Track risk criteria apply to new work as well as existing tasks. Existing
+Ready and resume cases retain their pins and current-state checks.
+
+Acceptance: one authoritative guide is reachable from AGENTS and both indexes;
+authority statements agree; the handoff supplies source/base, owner, dependency,
+files, acceptance and next action; the three work classes are distinguishable;
+legacy tasks/receipts and all existing security/data/release requirements remain
+usable; no pilot or Goldfish result is invented. Run the plans checker, its
+self-test, `python .agents/scripts/check-agent-artifacts.py` and `git diff --check`;
+check links in the destination context and review semantic consistency directly. Runtime
+tests are outside this documentation slice.
+
+After that source is merged, confirm ownership of the existing Builder/theme
+specification and select a bounded design-to-task pilot. Any script compatibility
+changes remain separate, dependency-ordered work with their own exact files and
+acceptance. A completed documentation slice does not declare the whole migration
+complete.
+
 ---
 
-Drafted with official EGM `egm-draft` under the owner-approved OpenDash authority adaptation. Overview & Goals were approved by the owner on 2026-11-20. Authority adaptation v1 was approved in the subsequent “mình đồng ý” reply. The technical ID selection is Atlas's decision within that delegation, not a claimed owner selection. Technical Plan has been drafted; Alternatives and Detailed Implementation are still pending. The separate five-stage specification review has not run. No production implementation, Project Ready, integration merge or release is claimed.
+Drafted with official EGM `egm-draft` under the owner-approved OpenDash authority adaptation. Overview & Goals and authority adaptation v1 retain their original owner approval. Aster added the documentation-first follow-up, alternatives and a bounded documentation integration plan after the owner's later approval. The technical ID selection remains Atlas's decision within delegation. The complete generator/transport migration plan and separate five-stage specification review remain pending. No production implementation, Project Ready, integration merge or release is claimed.
 
 ## Owner-authorized Builder document conversion — follow-up 2026-11-20
 

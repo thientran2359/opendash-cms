@@ -1,5 +1,14 @@
 # Chuẩn thao tác chung cho 5 agent OpenDash (thủ công trong chat)
 
+**EGM, 20/11/2026:** bắt đầu thiết kế/chia việc từ
+[guide chính](../docs/plans/EGM_WORKFLOW.md). Mỗi topic ghi một coordinator,
+một primary design và handoff đủ source/base/files/dependencies/acceptance.
+Goldfish là reviewer tạm thời đọc-only trong context mới; không thay owner task
+hoặc required PR review. G0–G5 còn là nghĩa vụ/trường tương thích; task mới dùng
+nguồn plans đúng mẫu hiện có, task resume không làm lại pickup. Phân quyền
+section/findings kỹ thuật thuộc coordinator theo ADR-0010, không hỏi owner lại
+cho nội dung đã được ủy quyền. Các thao tác host/Git/GitHub dưới đây giữ nguyên.
+
 > **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao Atlas điều phối và merge mọi PR đủ gate. Nova, Harbor và Forge tự nhận, tự review và merge task đủ điều kiện. G3/Issue/Project Ready, acceptance, required CI và security/data cần bằng chứng. G5 Done cần kiểm chứng riêng.
 
 > **Áp dụng:** Atlas, Nova, Forge, Harbor, Orion. Đây là hướng dẫn cho **chính agent đang được người dùng gọi**, không phải Agent Preflight Check, agent thứ sáu, script, cronjob hoặc Task Watcher. [AGENTS.md](../AGENTS.md) và [GitHub workflow](GITHUB_WORKFLOW.md) là các quy định nền tảng; quyền review/merge tuân theo ADR-0010 và workflow.
