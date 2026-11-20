@@ -167,14 +167,6 @@ under content-types/{type_key}; sanitize at server and render with shared compon
 
 ## Page Builder (05)
 
-**Owner follow-up 19/11/2026:** [Builder template và content](../product/BUILDER_TEMPLATE_AND_CONTENT.md)
-requires entry content Builder for registered content types, WordPress-inspired
-template hierarchy and distinct theme/database template sources. Homepage-to-Page
-migration is explicitly outside the requested scope. The Page-only interfaces below
-remain the existing bounded contract; they do not implement the new generic
-registration or hierarchy. A separate G2/G3 delta
-must specify those changes without retroactively changing completed task acceptance.
-
 Reuse existing site-owned overrides keyed (page,page,entry_id); never global single
 or homepage. Pass validated immutable target through open/preview/save/reset/reload,
 401 recovery, media picker and public link. Editor may edit exact existing Page;
