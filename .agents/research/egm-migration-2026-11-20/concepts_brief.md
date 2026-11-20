@@ -63,17 +63,23 @@ These alternatives were evaluated by reviewers; none is attributed to an upstrea
 
 Official EGM adoption is the destination. Coordinator technical autonomy, active ownership and Ready/dependency checks remain. Product-scope changes and public release remain owner decisions. Preserve F08 security/provenance obligations, F09 failed Windows receipts/follow-up, same-candidate macOS B01–B10 and negative regressions, human dogfood and separate common RC/V1 requirements. The candidate's macOS retest explicitly records TECHNICAL_BLOCKED and NOT_GRANTED; it must not be promoted by documentation edits.
 
-Preserve all eight dirty Builder files and the user's input concept. Do not edit or push Nova without handoff. Review uses the detached exact-SHA checkout. Implementation requires recorded ownership and an eligible task; this concept does not create Ready status or an Issue.
+The initial review preserved all eight dirty Builder files and the user's input concept. The owner subsequently authorized their commit and EGM conversion: sources are pinned at `4a334f0224866108002e8586b04f5643da0798c9`, and the Proposed feature specification is in `fccada1`. Do not edit or push Nova without handoff. Review uses the detached exact-SHA checkout. Implementation requires recorded ownership and an eligible task; this concept does not create Ready status or an Issue.
+
+### Owner-approved authority adaptation — follow-up 2026-11-20
+
+The owner approved OpenDash's explicit adaptation separating the EGM procedure from project authority: owner product scope/priorities/release; coordinator technical decisions, decomposition and ownership inside approved scope; implementer details inside contract; independent Goldfish criticism; eligible review/merge under ADR-0010. Technical findings/section decisions go to the authorized coordinator rather than creating a default owner bottleneck. Unchanged transcriptions retain original approval provenance. Record this as an OpenDash adaptation, keep the upstream plugin/personas/standards unchanged and preserve Ready, protection, CI, security/data/native/human/release gates. See the [Technical Plan](design_draft.md) for the recorded matrix and actual approval provenance.
+
+Under that delegated authority, Atlas selected retaining assigned stable task IDs rather than deriving `EGM-<filename>` identifiers from document format. This is a coordinator technical selection, not an invented owner decision. Exact validation and admission fixtures remain part of the detailed plan.
 
 ### New design decisions still open
 
-- Exact approver matrix and wording of any upstream EGM adaptation that preserves coordinator authority.
-- Stable assigned task IDs versus a new tested namespace; source renames, multiple tasks per spec and collision behavior.
+- Exact implementation of approval provenance and the now-approved authority adaptation across the owning project documents.
+- Validation/admission fixtures for the selected stable task-ID approach, including actual historical ID coverage, source moves and receipt continuity.
 - Admission rules for continuing active legacy tasks, formerly Ready legacy tasks and entirely new EGM tasks.
 - Provenance fields, meaningful-section contract, semantic states and evidence bindings.
 - Canonical documentation inventory/CodeGraph synchronization, cutover stop conditions and rollback.
 
-Proceed with official egm-draft. The user already selected drafting; do not ask that selection again. Draft Overview & Goals first and present the actual section for approval. Draft remaining sections only after their corresponding checkpoints, then perform the separate five-stage egm-review and concrete egm-resolve process. Seven brainstorm lenses are not a completed specification review. Implementation and merge follow only when their gates are met.
+Proceed with official egm-draft under the subsequent owner-approved authority adaptation. The user already approved Overview & Goals and the authority policy; do not ask those again. Authorized coordinator technical checkpoints use that adaptation, while new product-scope choices and release authorization remain owner decisions. Perform the separate five-stage egm-review and concrete egm-resolve process. Seven brainstorm lenses are not a completed specification review. Implementation and merge follow only when their gates are met.
 
 ## Reviewer Completion and Evidence
 
