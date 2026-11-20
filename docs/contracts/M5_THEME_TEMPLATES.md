@@ -5,15 +5,6 @@
 [Decision authority, source SHAs and G3 corrections](../decisions/ADR-0012-m5-theme-templates.md).
 This file records Atlas selections for review; it does not publish G3 or authorize Project Ready.
 
-## Owner directive — 20/11/2026
-
-The owner confirms no released older product exists. New design does not require
-backward compatibility with experimental theme/API/schema formats. See the
-[PRD directive](../product/PRODUCT_REQUIREMENTS.md) and [resolver](BUILDER_TEMPLATE_RESOLVER.md).
-Legacy adapters/conversion/upgrade acceptance below are historical, not requirements
-for this new baseline. Future content preservation across theme changes, security
-and backup/restore remain product requirements. No data deletion is authorized.
-
 ## 1. Package identity, revisions and selection (A)
 
 - New v2 package `theme_id` is a stable lowercase kebab identifier (1–64 characters), unrelated to display name/version. Ownership uses `ResourceOwner::Theme(theme_id)`. Full block IDs stay namespaced; never infer package ownership from their prefix.
@@ -57,15 +48,6 @@ Canonical revision files must be fully validated and durably published before an
 **Acceptance:** old M3 URLs; slug-change/new canonical; reserved/encoded paths; duplicate query/invalid bounds; private/missing targets; filters across pages; no draft displacement/count leak.
 
 ## 3. Templates and overrides (C/H)
-
-**Follow-up 19/11/2026:** [ADR-0020](../decisions/ADR-0020-builder-template-resolver.md)
-and [resolver G2](BUILDER_TEMPLATE_RESOLVER.md) replace the resolution order below
-when merged: candidate hierarchy first, DB/theme priority within each candidate.
-New role meanings are home=homepage, single/archive for all
-content types; owner follow-up 20/11 selects page as the default Page layout
-with explicit page-layouts choices. Post archive uses
-archive-post then archive. No blog or front-page role. The old
-role list/text remains historical; no implementation/acceptance is retroactively changed.
 
 Select roles `home|page|header|footer|archive|single|taxonomy_archive`. Context selects page for built-in Page, single for other content, and the corresponding archive role. Selector identity uses role + optional validated type/entry scope; a display variant is not a new route.
 

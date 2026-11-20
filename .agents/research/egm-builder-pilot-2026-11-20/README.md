@@ -19,7 +19,7 @@ readability pilot; the larger design-to-implementation pilot is not complete.
 
 ## Source and ownership
 
-The [primary specification](../../../docs/designs/BUILDER_THEME_CONTENT.md)
+The [primary specification](https://github.com/thientran2359/opendash-cms/blob/d897c66/docs/designs/BUILDER_THEME_CONTENT.md)
 was read at the workflow merge SHA above; file blob
 `b69cacf33378cc3163d3350acfcc6e18e5bcc098`. It remains Proposed and Atlas-authored.
 No primary-design ownership transfer was found or assumed. The absence of an
