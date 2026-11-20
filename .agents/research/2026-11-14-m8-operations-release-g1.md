@@ -2,7 +2,7 @@
 
 **Agent:** Atlas · **Date:** 2026-11-14 · **Baseline:** `main@8c5b90072c231c1f0813eb593d7be4447fb0a11d` (migration0031).
 **Scope:** all8 M8 candidates; source/official documentation inspection, not an implementation benchmark or native test.
-Promotion: [ADR-0015](../../docs/decisions/ADR-0015-m8-operations-release.md), [normative contract](../../docs/contracts/M8_OPERATIONS_RELEASE.md), [full G3](../../docs/plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md). Canonical authority takes effect on merged docs PR.
+Promotion: [ADR-0015](../../docs/decisions/ADR-0015-m8-operations-release.md), [normative contract](../../docs/contracts/M8_OPERATIONS_RELEASE.md), [full G3](../../docs/archive/plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md). Canonical authority takes effect on merged docs PR.
 
 ## Actual source evidence
 

@@ -2,7 +2,7 @@
 
 **Agent:** Harbor (implementation/self-review); **coordinator:** Aster. **Date:** 2026-11-18.
 **Governance:** [Issue #375](https://github.com/thientran2359/opendash-cms/issues/375),
-[immutable G3](../plans/milestones/M4/slices/2026-11-18-content-foundation-g3.md)
+[immutable G3](../archive/plans/milestones/M4/slices/2026-11-18-content-foundation-g3.md)
 at `695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d`,
 [ADR-0019](../decisions/ADR-0019-content-foundation.md),
 [C2 contract](../contracts/CONTENT_FOUNDATION_2026_11.md).

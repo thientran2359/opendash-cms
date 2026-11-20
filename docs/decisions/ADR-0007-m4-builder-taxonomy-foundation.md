@@ -1,6 +1,6 @@
 # ADR-0007 — Nền tảng Visual Builder và Taxonomy M4
 
-**Quyết định G2:** Chủ dự án chọn hướng đề xuất G1 ngày 2026-11-11. Áp dụng khi [PR #66](https://github.com/thientran2359/opendash-cms/pull/66) merge vào `main`. **Baseline:** `326ef65a0f8fa482c99d7d8f5883023bfbc907f0`. [Nghiên cứu G1](../../.agents/research/2026-11-11-m4-builder-taxonomy-g1.md) · [Kế hoạch M4](../plans/milestones/M4/TASK_PLAN.md) · [PRD](../product/PRODUCT_REQUIREMENTS.md).
+**Quyết định G2:** Chủ dự án chọn hướng đề xuất G1 ngày 2026-11-11. Áp dụng khi [PR #66](https://github.com/thientran2359/opendash-cms/pull/66) merge vào `main`. **Baseline:** `326ef65a0f8fa482c99d7d8f5883023bfbc907f0`. [Nghiên cứu G1](../../.agents/research/2026-11-11-m4-builder-taxonomy-g1.md) · [Kế hoạch M4](../archive/plans/milestones/M4/TASK_PLAN.md) · [PRD](../product/PRODUCT_REQUIREMENTS.md).
 
 Phạm vi quyết định gồm P01/P02 và P09/P10. P03–P08 tiêu thụ các hợp đồng ở đây. Chi tiết tương tác canvas, responsive và binding thuộc các lát cắt tương ứng. Template composition và URL taxonomy công khai thuộc M5. Theme/plugin registration tiếp tục theo M5/M6.
 

@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
-"""Validate OpenDash planning Markdown without duplicating its source of truth.
+"""Validate OpenDash EGM documentation and design sitemap consistency.
 
 Python 3.11+ standard library only. Run from any directory:
     python cms/scripts/check-plans.py
     python cms/scripts/check-plans.py --self-test
 
-This is a structural consistency check, not a substitute for G2/design review.
+Checks:
+1. All active Markdown links across README.md, AGENTS.md, docs/ and .agents/
+   (excluding .agents/archive/) are relative and resolve to existing paths.
+2. docs/designs/SITEMAP.md exists, contains valid design table rows, and every
+   design document in docs/designs/*.md (except SITEMAP.md) is registered in
+   docs/designs/SITEMAP.md.
+3. Bold '**...verified...**' status claims in SITEMAP.md or catalog tables link
+   directly to docs/verification/*.md evidence when claiming verified status.
 """
 
 from __future__ import annotations
@@ -18,20 +25,9 @@ import tempfile
 from urllib.parse import unquote, urlsplit
 
 
-MODULE_ROW = re.compile(r"^\|\s*\*\*([A-Z]{3,5}-\d{2})\*\*\s*\|")
-MODULE_REF = re.compile(
-    r"(?<![\w])([A-Z]{3,5})-(\d{2})"
-    r"(?:(?:[–-]|\.\.)(\d{2})|((?:/\d{2})+))?(?![\w])"
-)
 MARKDOWN_LINK = re.compile(r"\]\(([^)]+)\)")
-MODULE_COUNT_CLAIM = re.compile(r"(?<![\d–-])(\d+)\s+modules?\b", re.IGNORECASE)
-STATUS_BOLD = re.compile(r"^\*\*([^*]+)\*\*")
-MILESTONE = re.compile(r"^\*\*M\d+(?:\.\d+)?\*\*")
 FENCE = re.compile(r"^\s*(?:`{3,}|~{3,})")
-TASK_PLAN_ROW = re.compile(r"^\|\s*(M\d+(?:\.\d+)?-P\d{2})\s*\|")
-TASK_INDEX_ROW = re.compile(
-    r"^\|\s*\[(M\d+(?:\.\d+)?-P\d{2})\]\(milestones/([^)/]+)/TASK_PLAN\.md\)\s*\|"
-)
+STATUS_BOLD = re.compile(r"^\*\*([^*]+)\*\*")
 
 
 def content_lines(file: Path) -> list[tuple[int, str]]:
@@ -50,12 +46,23 @@ def content_lines(file: Path) -> list[tuple[int, str]]:
 def table_cells(line: str) -> list[str]:
     if not line.startswith("|"):
         return []
-    # Split only on unescaped pipe characters (pipe inside a code span should be escaped).
-    return [cell.replace(r"\|", "|").strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+    return [
+        cell.replace(r"\|", "|").strip()
+        for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))
+    ]
 
 
 def links_in(text: str) -> list[str]:
-    return [match.group(1).strip().split(" ", 1)[0].strip("<>") for match in MARKDOWN_LINK.finditer(text)]
+    return [
+        match.group(1).strip().split(" ", 1)[0].strip("<>")
+        for match in MARKDOWN_LINK.finditer(text)
+    ]
+
+
+def claims_verified(cell: str) -> bool:
+    """Only a bold status label containing 'verified' requires a verification link."""
+    match = STATUS_BOLD.match(cell)
+    return bool(match and "verified" in match.group(1).lower())
 
 
 def is_verification_link(file: Path, row: str, root: Path) -> bool:
@@ -70,60 +77,24 @@ def is_verification_link(file: Path, row: str, root: Path) -> bool:
     return False
 
 
-def claims_verified(cell: str) -> bool:
-    """Only the bold status label counts, not 'verified' in a Partial explanation."""
-    match = STATUS_BOLD.match(cell)
-    return bool(match and "verified" in match.group(1).lower())
-
-
-def referenced_module_ids(text: str) -> set[str]:
-    ids: set[str] = set()
-    for match in MODULE_REF.finditer(text):
-        domain, start_text, end_text, slash_endings = match.groups()
-        start = int(start_text)
-        ids.add(f"{domain}-{start:02d}")
-        if end_text is not None:
-            end = int(end_text)
-            if start <= end <= 99:
-                ids.update(f"{domain}-{number:02d}" for number in range(start, end + 1))
-            else:
-                # The caller separately flags inverted ranges.
-                ids.add(f"{domain}-{end:02d}")
-        if slash_endings:
-            ids.update(f"{domain}-{int(n):02d}" for n in slash_endings.split("/") if n)
-    return ids
-
-
 def check(root: Path) -> list[str]:
     root = root.resolve()
     docs = root / "docs"
-    plans = docs / "plans"
-    catalog = plans / "MODULE_CATALOG_V1.md"
-    roadmap = plans / "ROADMAP_V1.md"
+    designs_dir = docs / "designs"
+    sitemap = designs_dir / "SITEMAP.md"
     errors: list[str] = []
-    if not catalog.is_file() or not roadmap.is_file():
-        return ["Missing docs/plans/MODULE_CATALOG_V1.md or ROADMAP_V1.md"]
 
-    catalog_lines = content_lines(catalog)
-    catalog_rows: list[tuple[int, str, str]] = []
-    for number, line in catalog_lines:
-        match = MODULE_ROW.match(line)
-        if match:
-            catalog_rows.append((number, match.group(1), line))
-    if not catalog_rows:
-        errors.append("No module table rows found in MODULE_CATALOG_V1.md")
-    seen: set[str] = set()
-    for number, module_id, _ in catalog_rows:
-        if module_id in seen:
-            errors.append(f"{catalog.relative_to(root)}:{number}: duplicate module ID {module_id}")
-        seen.add(module_id)
+    if not sitemap.is_file():
+        return ["Missing docs/designs/SITEMAP.md"]
 
-    # Check official docs, active agent guidance and repository entry points.
-    # Retired skills and legacy handoffs are intentionally excluded: those are
-    # historical snapshots with stale links, not current operational guidance.
+    # 1. Check Markdown links in official docs, active agent guidance and root entry points.
     agent_dir = root / ".agents"
     agent_files = (
-        [file for file in agent_dir.rglob("*.md") if "archive" not in file.relative_to(agent_dir).parts]
+        [
+            file
+            for file in agent_dir.rglob("*.md")
+            if "archive" not in file.relative_to(agent_dir).parts
+        ]
         if agent_dir.is_dir()
         else []
     )
@@ -138,189 +109,116 @@ def check(root: Path) -> list[str]:
                 if parsed.scheme or parsed.netloc or not parsed.path:
                     continue
                 if parsed.path.startswith("/"):
-                    errors.append(f"{file.relative_to(root)}:{number}: absolute Markdown link {link}")
+                    errors.append(
+                        f"{file.relative_to(root)}:{number}: absolute Markdown link {link}"
+                    )
                     continue
                 target = (file.parent / unquote(parsed.path)).resolve()
                 if not target.exists():
-                    errors.append(f"{file.relative_to(root)}:{number}: broken Markdown link {link}")
-
-    # Check all module references in the canonical catalog, roadmap and opened briefs.
-    reference_files = [catalog, roadmap, *sorted((plans / "modules").glob("*.md"))]
-    for file in reference_files:
-        for number, line in content_lines(file):
-            for match in MODULE_REF.finditer(line):
-                if match.group(3) is not None and int(match.group(2)) > int(match.group(3)):
                     errors.append(
-                        f"{file.relative_to(root)}:{number}: inverted module range {match.group(0)}"
+                        f"{file.relative_to(root)}:{number}: broken Markdown link {link}"
                     )
-            for module_id in sorted(referenced_module_ids(line)):
-                if module_id not in seen:
-                    errors.append(f"{file.relative_to(root)}:{number}: unknown module ID {module_id}")
 
-    # Human-readable count claims must agree with the table (never hardcode 27).
-    for file in [root / "README.md", plans / "README.md", catalog, roadmap, plans / "PLANNING_WORKFLOW.md"]:
-        if not file.is_file():
+    # 2. Check SITEMAP.md table rows and ensure all docs/designs/*.md are registered.
+    sitemap_targets: set[Path] = set()
+    sitemap_rows = 0
+    for number, line in content_lines(sitemap):
+        cells = table_cells(line)
+        if len(cells) < 4:
             continue
-        for number, line in content_lines(file):
-            for match in MODULE_COUNT_CLAIM.finditer(line):
-                claimed = int(match.group(1))
-                if claimed != len(seen):
-                    errors.append(
-                        f"{file.relative_to(root)}:{number}: module count claim {claimed} "
-                        f"does not match {len(seen)} catalog IDs"
-                    )
-
-    # Check evidence in the specific table row, not in an unrelated paragraph.
-    for number, module_id, line in catalog_rows:
-        cells = table_cells(line)
-        if len(cells) >= 4 and claims_verified(cells[3]):
-            if not is_verification_link(catalog, cells[3], root):
+        if cells[0].lower() in {"design document", "baseline specification / contract"} or set(cells[0]) <= {"-", " "}:
+            continue
+        row_links = links_in(cells[0])
+        if not row_links:
+            errors.append(
+                f"{sitemap.relative_to(root)}:{number}: table row missing Markdown link in first column"
+            )
+            continue
+        sitemap_rows += 1
+        for link in row_links:
+            parsed = urlsplit(link)
+            if not parsed.scheme and not parsed.netloc and parsed.path and not parsed.path.startswith("/"):
+                sitemap_targets.add((sitemap.parent / unquote(parsed.path)).resolve())
+        for cell in cells[1:]:
+            if claims_verified(cell) and not is_verification_link(sitemap, line, root):
                 errors.append(
-                    f"{catalog.relative_to(root)}:{number}: {module_id} verified status "
-                    "missing direct docs/verification/*.md evidence link"
-                )
-    for number, line in content_lines(roadmap):
-        cells = table_cells(line)
-        if len(cells) >= 4 and MILESTONE.match(cells[0]) and claims_verified(cells[3]):
-            if not is_verification_link(roadmap, cells[3], root):
-                errors.append(
-                    f"{roadmap.relative_to(root)}:{number}: {cells[0]} verified status "
+                    f"{sitemap.relative_to(root)}:{number}: verified status "
                     "missing direct docs/verification/*.md evidence link"
                 )
 
-    # The current M3 status register prevents a new agent from relying on
-    # obsolete G1/G2 planning claims as the present implementation state.
-    m3_status = plans / "M3_STATUS_2026-11-09.md"
-    if m3_status.is_file():
-        for file in (root / "README.md", plans / "README.md", roadmap, catalog):
-            if file.is_file() and m3_status.name not in file.read_text(encoding="utf-8-sig"):
-                errors.append(f"{file.relative_to(root)}: missing current M3 status reference")
+    if sitemap_rows == 0:
+        errors.append("No design table rows found in docs/designs/SITEMAP.md")
 
-    # The owner-facing task index is a snapshot, not a second task ledger.
-    # It must list every milestone planning candidate exactly once; G3 task rows
-    # are allowed beneath candidates, but are owned by GitHub Issue/Project.
-    milestone_plans = sorted((plans / "milestones").glob("M*/TASK_PLAN.md"))
-    index = plans / "TASK_INDEX.md"
-    if milestone_plans and not index.is_file():
-        errors.append("docs/plans/TASK_INDEX.md: missing task index")
-    if index.is_file():
-        source_ids: dict[str, str] = {}
-        indexed_ids: set[str] = set()
-        for plan in milestone_plans:
-            for number, line in content_lines(plan):
-                match = TASK_PLAN_ROW.match(line)
-                if match:
-                    task_id = match.group(1)
-                    if task_id in source_ids:
-                        errors.append(f"{plan.relative_to(root)}:{number}: duplicate task candidate {task_id}")
-                    source_ids[task_id] = plan.parent.name
-        for number, line in content_lines(index):
-            match = TASK_INDEX_ROW.match(line)
-            if match:
-                task_id, milestone = match.groups()
-                if task_id in indexed_ids:
-                    errors.append(f"{index.relative_to(root)}:{number}: duplicate task candidate {task_id}")
-                indexed_ids.add(task_id)
-                if source_ids.get(task_id) != milestone:
-                    errors.append(f"{index.relative_to(root)}:{number}: invalid task candidate source {task_id}")
-        for task_id in sorted(source_ids.keys() - indexed_ids):
-            errors.append(f"{index.relative_to(root)}: missing task candidate {task_id}")
+    for design_file in sorted(designs_dir.glob("*.md")):
+        if design_file.name == "SITEMAP.md":
+            continue
+        if design_file.resolve() not in sitemap_targets:
+            errors.append(
+                f"{design_file.relative_to(root)}: design document not registered in docs/designs/SITEMAP.md"
+            )
 
     return errors
 
 
 def fixture(root: Path) -> None:
-    plans = root / "docs" / "plans"
-    (plans / "modules").mkdir(parents=True, exist_ok=True)
+    designs = root / "docs" / "designs"
+    designs.mkdir(parents=True, exist_ok=True)
     verification = root / "docs" / "verification"
     verification.mkdir(parents=True, exist_ok=True)
     (verification / "test.md").write_text("# Real test evidence\n", encoding="utf-8")
-    (plans / "MODULE_CATALOG_V1.md").write_text(
-        "# Catalog\n"
-        "| ID | Scope | Dependencies | Status | Research |\n"
-        "| --- | --- | --- | --- | --- |\n"
-        "| **CNT-01** | CPT | FND-01 | **Baseline verified** [test](../verification/test.md) | — |\n"
-        "| **FND-01** | Kernel | none | **Planned** | — |\n",
+    (designs / "README.md").write_text("# EGM Designs Guide\n", encoding="utf-8")
+    (designs / "feature-a.md").write_text(
+        "# Feature A\n\n## Detailed Implementation Plan\n", encoding="utf-8"
+    )
+    (designs / "SITEMAP.md").write_text(
+        "# Design Sitemap\n\n"
+        "| Design Document | Date | Author | Status | Components | Description |\n"
+        "| --- | --- | --- | --- | --- | --- |\n"
+        "| [Guide](README.md) | 2026-11-20 | Owner | Approved | `docs/designs/` | Guide |\n"
+        "| [Feature A](feature-a.md) | 2026-11-20 | Owner | **Verified** [test](../verification/test.md) | `cms/` | Spec |\n",
         encoding="utf-8",
     )
-    (plans / "ROADMAP_V1.md").write_text(
-        "| Milestone | Scope | Module | Status |\n"
-        "| --- | --- | --- | --- |\n"
-        "| **M1** | baseline | CNT-01 | **Baseline verified** [test](../verification/test.md) |\n",
-        encoding="utf-8",
-    )
-    (plans / "modules" / "CNT-01-content.md").write_text(
-        "# CNT-01\nUses FND-01 and M1-S01\n",
-        encoding="utf-8",
-    )
-    (plans / "README.md").write_text("The project has 2 module IDs.\n", encoding="utf-8")
     (root / "README.md").write_text(
-        "[Roadmap](docs/plans/ROADMAP_V1.md)\n", encoding="utf-8"
+        "[Sitemap](docs/designs/SITEMAP.md)\n", encoding="utf-8"
     )
 
 
 def self_test() -> None:
     cases = [
-        ("valid", None, None),
-        ("valid_task_index", None, "task_index_valid"),
-        ("duplicate", "duplicate module ID", "catalog"),
-        ("unknown", "unknown module ID", "roadmap"),
-        ("range", "inverted module range", "inverted_range"),
-        ("count", "module count claim", "plans_readme"),
-        ("link", "broken Markdown link", "readme"),
-        ("evidence", "missing direct docs/verification", "catalog"),
-        ("roadmap_evidence", "missing direct docs/verification", "roadmap_evidence"),
-        ("task_index_missing", "missing task index", "task_index_missing"),
-        ("task_index_omits_row", "missing task candidate", "task_index_omits"),
-        ("task_index_duplicate", "duplicate task candidate", "task_index_duplicate"),
+        ("valid", None),
+        ("missing_sitemap", "Missing docs/designs/SITEMAP.md"),
+        ("empty_sitemap", "No design table rows found"),
+        ("unregistered_design", "not registered in docs/designs/SITEMAP.md"),
+        ("missing_row_link", "table row missing Markdown link"),
+        ("broken_link", "broken Markdown link"),
+        ("absolute_link", "absolute Markdown link"),
+        ("missing_evidence", "missing direct docs/verification"),
     ]
-    for name, expected, location in cases:
+    for name, expected in cases:
         with tempfile.TemporaryDirectory(prefix="opendash-check-plans-") as tmp:
             root = Path(tmp)
             fixture(root)
-            catalog = root / "docs/plans/MODULE_CATALOG_V1.md"
-            roadmap = root / "docs/plans/ROADMAP_V1.md"
-            if location == "catalog" and name == "duplicate":
-                with catalog.open("a", encoding="utf-8") as out:
-                    out.write("| **CNT-01** | duplicate | — | Planned | — |\n")
-            elif location == "roadmap":
-                with roadmap.open("a", encoding="utf-8") as out:
-                    out.write("Unknown dependency CNT-99\n")
-            elif location == "inverted_range":
-                with roadmap.open("a", encoding="utf-8") as out:
-                    out.write("Inverted dependency CNT-05–01\n")
-            elif location == "plans_readme":
-                (root / "docs/plans/README.md").write_text("There are 25 modules.\n", encoding="utf-8")
-            elif location == "readme":
+            sitemap = root / "docs/designs/SITEMAP.md"
+            if name == "missing_sitemap":
+                sitemap.unlink()
+            elif name == "empty_sitemap":
+                sitemap.write_text("# Empty Sitemap\n", encoding="utf-8")
+            elif name == "unregistered_design":
+                (root / "docs/designs/orphan.md").write_text("# Orphan\n", encoding="utf-8")
+            elif name == "missing_row_link":
+                with sitemap.open("a", encoding="utf-8") as out:
+                    out.write("| Plain text without link | 2026-11-20 | Owner | Draft | `cms/` | — |\n")
+            elif name == "broken_link":
                 (root / "README.md").write_text("[Missing](docs/no-such-file.md)\n", encoding="utf-8")
-            elif location == "catalog" and name == "evidence":
-                catalog.write_text(
-                    catalog.read_text(encoding="utf-8").replace(
+            elif name == "absolute_link":
+                (root / "README.md").write_text("[Abs](/docs/designs/SITEMAP.md)\n", encoding="utf-8")
+            elif name == "missing_evidence":
+                sitemap.write_text(
+                    sitemap.read_text(encoding="utf-8").replace(
                         " [test](../verification/test.md)", ""
                     ),
                     encoding="utf-8",
                 )
-            elif location == "roadmap_evidence":
-                roadmap.write_text(
-                    roadmap.read_text(encoding="utf-8").replace(
-                        " [test](../verification/test.md)", ""
-                    ),
-                    encoding="utf-8",
-                )
-            elif location is not None and location.startswith("task_index_"):
-                milestone_dir = root / "docs/plans/milestones/M1"
-                milestone_dir.mkdir(parents=True, exist_ok=True)
-                (milestone_dir / "TASK_PLAN.md").write_text(
-                    "| M1-P01 | Bootstrap | FND-01 | — | — |\n", encoding="utf-8"
-                )
-                if location != "task_index_missing":
-                    row = "| [M1-P01](milestones/M1/TASK_PLAN.md) | Bootstrap | Chưa G3 | — |\n"
-                    (root / "docs/plans/TASK_INDEX.md").write_text(
-                        "# Task index\n"
-                        + ("" if location == "task_index_omits" else row)
-                        + (row if location == "task_index_duplicate" else ""),
-                        encoding="utf-8",
-                    )
             errors = check(root)
             if expected is None and errors:
                 raise AssertionError(f"{name}: expected clean fixture, got {errors}")
@@ -343,7 +241,7 @@ def main() -> int:
             print(f"FAIL {problem}", file=sys.stderr)
         print(f"FAIL check-plans: {len(problems)} issue(s)", file=sys.stderr)
         return 1
-    print("PASS check-plans: markdown links, module IDs/counts, verified evidence, task index coverage")
+    print("PASS check-plans: markdown links, EGM design sitemap coverage, verified evidence")
     return 0
 
 

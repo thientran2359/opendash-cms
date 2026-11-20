@@ -4,7 +4,7 @@
 
 ## Baseline, contracts, and ownership
 
-- [ADR-0006 § P13](../decisions/ADR-0006-m3-admin-and-release-contracts.md) and [G3 Users/Settings](../plans/milestones/M3/slices/2026-11-11-m3-users-settings-g3.md) approved at source SHA d5d206afa75256e51ad52fd60ba8d9f966873e4e.
+- [ADR-0006 § P13](../decisions/ADR-0006-m3-admin-and-release-contracts.md) and [G3 Users/Settings](../archive/plans/milestones/M3/slices/2026-11-11-m3-users-settings-g3.md) approved at source SHA d5d206afa75256e51ad52fd60ba8d9f966873e4e.
 - Task branch: task/harbor-m3-s25-t01, worktree separate from agent/harbor, baseline origin/main at 6d6f4b5a9e9420d6aba4d72311391c24c12fa3b0.
 - [Forge Users #48](https://github.com/thientran2359/opendash-cms/issues/48) landed via [PR #56](https://github.com/thientran2359/opendash-cms/pull/56): main merge SHA **cef71f3bc534dbe28ff6719d00f30cf8327f0f33**, Users head 93d1f59439c0ffd78fcf2185b5823a3434b0b7d2. Forge's Issue comment explicitly **handed shared-file integration ownership to Harbor**. Harbor merged this main into the task branch as **9377810** (no force/rebase), retaining standalone Settings commit **94e2cdb712a18a1acb21551c9abb1bfe642695ef**.
 - Shared integration changes now **on the real task branch**: `app.rs`, `routes/mod.rs`, `storage/mod.rs`, `App.tsx`, `AdminShell.tsx`. No modifications to Forge-owned Users/auth logic or migration `0009_users_version.sql`. Settings migration **0010** is after merged Users **0009** and both apply on fresh/upgrade.

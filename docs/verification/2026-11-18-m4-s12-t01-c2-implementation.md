@@ -2,7 +2,7 @@
 
 **Agent:** Harbor (self-review); **coordinator:** Aster. **Date:** 2026-11-18.
 **Governance:** Issue [#374](https://github.com/thientran2359/opendash-cms/issues/374); immutable
-G3 [2026-11-18-content-foundation-g3.md](../plans/milestones/M4/slices/2026-11-18-content-foundation-g3.md),
+G3 [2026-11-18-content-foundation-g3.md](../archive/plans/milestones/M4/slices/2026-11-18-content-foundation-g3.md),
 merged with PR #372; ADR-0019 and
 [Content Foundation contract C2](../contracts/CONTENT_FOUNDATION_2026_11.md).
 **Prerequisite:** #373 task-local native macOS Intel G5 Verified; #373 closed and Project #3 Done.

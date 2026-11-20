@@ -1,7 +1,11 @@
 # M7 Site Features — G2 selected contract
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0025`–`0031`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
+> **Điểm cập nhật đối chiếu codebase:** Thẩm quyền phân giải URL (`D03`) đã chuyển sang `storage::permalinks` (`0040`–`0041`, [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md)); lưu SEO/route gộp vào `CompositeEntrySaveInput` (`0034`); trong `0028_contact_forms.sql`, tên bảng/cột thực tế là `contact_site_state`, `contact_forms(slug, status)`, `contact_submissions(created_at)`, `contact_submission_dedup`, `contact_rate_buckets(expires_at)`.
+
 **Owner:** Atlas · **Date:** 2026-11-14 · **G2:** AGREED on merge with [ADR-0014](../decisions/ADR-0014-m7-site-features.md). **Implementation:** NOT_STARTED. **Verification:** NOT_RUN.
-Baseline `main@4b60388683a01df8d6332c88449b4fa6821ef5fc`; [G1](../../.agents/research/2026-11-14-m7-site-features-g1.md), [PRD](../product/PRODUCT_REQUIREMENTS.md), [G3](../plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). New interfaces below are specifications, not existing APIs.
+Baseline `main@4b60388683a01df8d6332c88449b4fa6821ef5fc`; [G1](../../.agents/research/2026-11-14-m7-site-features-g1.md), [PRD](../product/PRODUCT_REQUIREMENTS.md), [G3](../archive/plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). New interfaces below are specifications, not existing APIs.
 
 ## 1. Global constraints and persistence
 
@@ -89,7 +93,7 @@ Reuse `/api/admin/media/{id}/file` and `/media/{id}/file`, canonical MediaStore 
 
 ## 9. Release and operations boundary
 
-All8 candidates covered by [14 G3 tasks](../plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Owner-approved [macOS deferral](../decisions/ADR-0014-m7-site-features.md#owner-directed-macos-deferral--2026-11-14) replaces full predecessor multi-OS closure with the Windows development gate below for implementation pickup only.
+All8 candidates covered by [14 G3 tasks](../archive/plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Owner-approved [macOS deferral](../decisions/ADR-0014-m7-site-features.md#owner-directed-macos-deferral--2026-11-14) replaces full predecessor multi-OS closure with the Windows development gate below for implementation pickup only.
 
 M7 G5 common immutable source on native Windows x64 and macOS, binary hashes/commands, fresh+pre-M7 upgrade, old image/import/theme/plugin regression, menus/SEO/forms/SMTP TLS fixture/video playback/Range, concurrency/CAS/abuse/cancel/crash, restart and complete pre-M7 snapshot restore using matching old binary. CI governance Ubuntu/Windows not native/browser proof. Local deterministic SMTP fixtures/no real recipients, tiny valid MP4 fixtures/isolated sites; each OS separate evidence file. Product bugs fixed separately then repin common SHA and rerun affected gates on both. M8 owns Linux deployment, full backup engine, media delete/reconcile and secret-retention tooling.
 

@@ -4,7 +4,7 @@
 
 ## Pinned source, binary and environment
 
-- **G3/contract:** [ADR-0011](../decisions/ADR-0011-m4-builder-editor-responsive-list.md), [G3 brief](../plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md), G3 source SHA `690dfa1167f11fba701cf8a0cfa4c36cc5ed29a0`.
+- **G3/contract:** [ADR-0011](../decisions/ADR-0011-m4-builder-editor-responsive-list.md), [G3 brief](../archive/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md), G3 source SHA `690dfa1167f11fba701cf8a0cfa4c36cc5ed29a0`.
 - **Implementation:** [PR #119](https://github.com/thientran2359/opendash-cms/pull/119), head `38774a7981a5eed4f1b4d4bd9fa65696b93f87bb`, baseline `c42bbc1381d88d2c895eab3653110f4614e424b5`, merged into `main@1f66afd12b21f9017f47e46906bd7edc3619aa08`.
 - **G5:** separate clean worktree initially detached at **`1f66afd12b21f9017f47e46906bd7edc3619aa08`**. Both `git rev-parse HEAD` and `origin/main` matched at test time. No product code was changed during G5.
 - **Environment:** native Windows, Rust 1.99.1, Node v22.16.0, Python 3.13.4, Vite 6.4.6, installed Google Chrome through Playwright.
@@ -36,6 +36,6 @@ The new responsive object remains optional in Builder v1, no new SQLite migratio
 
 **NOT_RUN / outside Issue #103:** original pre-M4 binary restore; M4-S10 macOS/Windows full release parity, responsive visibility, arbitrary CSS, grid spans and production deployment. The snapshot restore test used the new binary to open the isolated pre-metadata database; no claim is made for a historical binary.
 
-After merging this evidence, reconcile Project #3 Done and Issue #103 Closed/completed and then sync the [TASK_INDEX](../plans/TASK_INDEX.md) row in a separate PR. This document alone is evidence, not a GitHub status change.
+After merging this evidence, reconcile Project #3 Done and Issue #103 Closed/completed and then sync the [TASK_INDEX](../archive/plans/TASK_INDEX.md) row in a separate PR. This document alone is evidence, not a GitHub status change.
 
 Agent: **Forge · Chat On Steroids Windows** · 2026-11-12.

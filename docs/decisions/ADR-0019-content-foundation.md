@@ -17,9 +17,9 @@ CPT hierarchy, hierarchical Page URLs, date/category tokens and arbitrary filter
 are deferred with explicit limits, rather than implied implemented parity.
 
 G1 findings and G2 API/schema/ownership/error decisions are in the contract. G3:
-[M3 settings](../plans/milestones/M3/slices/2026-11-18-content-foundation-g3.md),
-[M4 taxonomy](../plans/milestones/M4/slices/2026-11-18-content-foundation-g3.md),
-[M7 permalinks](../plans/milestones/M7/slices/2026-11-18-content-foundation-g3.md),
-[M6 providers](../plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md).
+[M3 settings](../archive/plans/milestones/M3/slices/2026-11-18-content-foundation-g3.md),
+[M4 taxonomy](../archive/plans/milestones/M4/slices/2026-11-18-content-foundation-g3.md),
+[M7 permalinks](../archive/plans/milestones/M7/slices/2026-11-18-content-foundation-g3.md),
+[M6 providers](../archive/plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md).
 Design approval is not implementation, Project Ready, G5 or dispatch. Current
 implementation NOT_STARTED, runtime NOT_RUN; #302 and Beta remain separate.

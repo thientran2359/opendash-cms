@@ -1,5 +1,9 @@
 # M6 Plugin Extensions — Selected Contracts (G2 AGREED)
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0022`–`0024`, `0036`, `0041`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md) và [`PLUGIN_ABI.md`](PLUGIN_ABI.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
+> **Điểm cập nhật đối chiếu codebase:** Bảng `plugins` (`0022`) dùng tên cột `active_revision_id` và `cas_version`; giới hạn `category`/`tag` (`D08`) đã được mở rộng sang custom taxonomy & provider `rewrite_base` trong [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md); quyền private field trong hooks dùng `ScopedFieldGrant` từ [`ADMIN_NAVIGATION_AND_SINGLE_EDIT.md`](ADMIN_NAVIGATION_AND_SINGLE_EDIT.md).
+
 **Owner:** Nova (tiếp nhận hoàn tất thay Atlas) · **Date:** 2026-11-13 · **Design status:** **G2 AGREED** (`D01–D10` resolved).
 **Decision authority:** [ADR-0013](../decisions/ADR-0013-m6-plugin-extensions.md) · **Baseline:** `main@176b469` (migration `0021_theme_import_journal.sql`).
 **Implementation/verification:** `NOT_STARTED / NOT_RUN` until G3 slices are implemented and verified.
@@ -76,5 +80,5 @@
 [content foundation C4](CONTENT_FOUNDATION_2026_11.md) extend the D08 category/tag-only
 declaration boundary with custom taxonomy definitions and bounded rewrite defaults.
 This is the forward design contract; implementation/G5 are tracked separately in
-[M6 G3](../plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md).
+[M6 G3](../archive/plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md).
 Historical category/tag verification does not prove the extended bridge.

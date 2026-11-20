@@ -1,7 +1,7 @@
 # M4-S06-T01 — Homepage Tree / Canvas / Inspector (Windows G4)
 
 - **Task:** [Issue #102](https://github.com/thientran2359/opendash-cms/issues/102), BLD-03 / BLD-03.1, Forge (CoS Windows).
-- **Approved contract:** [ADR-0011](../decisions/ADR-0011-m4-builder-editor-responsive-list.md) and [G3 slice](../plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md), immutable source/base SHA 690dfa1167f11fba701cf8a0cfa4c36cc5ed29a0.
+- **Approved contract:** [ADR-0011](../decisions/ADR-0011-m4-builder-editor-responsive-list.md) and [G3 slice](../archive/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md), immutable source/base SHA 690dfa1167f11fba701cf8a0cfa4c36cc5ed29a0.
 - **Implementation worktree:** task/forge-m4-s06-t01, created from that exact origin/main commit. Final implementation/CI SHA is recorded in the task PR after push.
 - **Status:** G4 local **PASS**; G5 on merged release SHA **NOT_RUN**. Issue and Project Done require separate G5.
 

@@ -6,7 +6,7 @@ Date: 2026-11-19. Agent: Harbor. Host: macOS 15.8.2, Intel x86_64.
 ## Governance and source
 
 - [Issue #377](https://github.com/thientran2359/opendash-cms/issues/377), GitHub Project #3: moved Backlog → Ready after dependency proof, then In progress at pickup.
-- Immutable [G3](../plans/milestones/M7/slices/2026-11-18-content-foundation-g3.md) source `695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d`, approved baseline `2ebe51cbe1099c4721304e2b31895aa78b7c1241`.
+- Immutable [G3](../archive/plans/milestones/M7/slices/2026-11-18-content-foundation-g3.md) source `695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d`, approved baseline `2ebe51cbe1099c4721304e2b31895aa78b7c1241`.
 - Dependency [#376](https://github.com/thientran2359/opendash-cms/issues/376): G4 merged in PR #398 and native macOS Intel exact-merged G5 [VERIFIED](2026-11-19-m7-s17-t01-g5-macos.md). Main checkout baseline `abb9eabbe873c18388026bd96ae7cb21000ae0c2`.
 - Harbor `agent/harbor`: implementation `c352dcd75828f3854910b6017808bc60e5a1ec57`; expanded native browser runner `55943b62230991d7e9f2bad9f02133835130f84e`; [Draft PR #401](https://github.com/thientran2359/opendash-cms/pull/401). No `task/*` branch.
 - Aster's [recorded #377 ownership ACK](https://github.com/thientran2359/opendash-cms/issues/377#issuecomment-7007884380) extends Harbor's file scope to `storage/seo.rs` and `routes/seo.rs` for the exact-entry route DTO only. `routes/seo.rs` already forwards the snapshot and no-store/ETag; the implementation needed a change only in `storage/seo.rs`.

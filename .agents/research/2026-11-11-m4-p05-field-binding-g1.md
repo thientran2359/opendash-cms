@@ -2,7 +2,7 @@
 
 ## Nguồn đã đối chiếu
 
-- [M4 task plan](../../docs/plans/milestones/M4/TASK_PLAN.md) P05, [ADR-0007](../../docs/decisions/ADR-0007-m4-builder-taxonomy-foundation.md) P01/P02/P10, [G3 foundation](../../docs/plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md).
+- [M4 task plan](../../docs/archive/plans/milestones/M4/TASK_PLAN.md) P05, [ADR-0007](../../docs/decisions/ADR-0007-m4-builder-taxonomy-foundation.md) P01/P02/P10, [G3 foundation](../../docs/archive/plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md).
 - `cms/crates/opendash-core/src/builder.rs`: Builder document v1 `schema_version`, `ElementContent::Known` with Heading, Text, Image, Button and Legacy typed props, 512 nodes/256KiB, no binding.
 - `cms/crates/opendash-core/src/content.rs`: `ContentTypeDefinition` and 9 field kinds; Post/Page/CPT share entries; `title` and `slug` are built-ins; no URL-specific field kind; rich text is stored as string (not sanitized HTML).
 - `cms/crates/opendash-server/src/storage/public_content.rs`: get by type/slug SQL enforces `publication_status='published'`; shared field schema stored in `content_types`, media ACL permits published entry image and saved layout image references only.

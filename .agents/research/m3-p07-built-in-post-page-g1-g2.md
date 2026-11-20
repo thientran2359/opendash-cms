@@ -4,7 +4,7 @@
 - **Source baseline:** `main@dfdcae2ebf9f06cd8d94b7ca3141c88d7dcd6005` (PR #18 đã merge); `agent/harbor` fast-forward tới đúng SHA này trước khảo sát
 - **Gate:** G0 `AGREED` (phương án A); **G1 source audit thực hiện, chờ peer review**; **G2 `PROPOSED`, chưa `AGREED`**; G3 `NOT_STARTED`, G4/G5 `NOT_RUN`
 - **Module/candidate:** `CNT-01/02`, `FND-01/03`, `M3-P07`; phụ thuộc tích hợp `M3-P08/P16`
-- **Nguồn:** [PRD V1 — Lưu/Xuất bản](../../docs/product/PRODUCT_REQUIREMENTS.md), [M3 plan](../../docs/plans/milestones/M3/TASK_PLAN.md), [Living Brief CNT-01 (G2 cũ là lịch sử)](../../docs/plans/modules/CNT-01-content-types.md), [Planning Workflow](../../docs/plans/PLANNING_WORKFLOW.md), [ADR-0003](../../docs/decisions/ADR-0003-agent-consensus-governance.md)
+- **Nguồn:** [PRD V1 — Lưu/Xuất bản](../../docs/product/PRODUCT_REQUIREMENTS.md), [M3 plan](../../docs/archive/plans/milestones/M3/TASK_PLAN.md), [Living Brief CNT-01 (G2 cũ là lịch sử)](../../docs/archive/plans/modules/CNT-01-content-types.md), [Planning Workflow](../../docs/archive/plans/PLANNING_WORKFLOW.md), [ADR-0003](../../docs/decisions/ADR-0003-agent-consensus-governance.md)
 - **Phạm vi:** research/design **không đổi code, migration, API/ABI, contract đã chốt, Project Status**, không tạo `M3-Sxx-Txx` hay Issue `Ready`.
 
 ## 1. Mục tiêu G0 và invariant

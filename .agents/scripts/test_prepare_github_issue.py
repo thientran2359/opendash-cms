@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Tests for offline GitHub Issue rendering and gate validation."""
+"""Tests for offline GitHub Issue rendering and gate validation (EGM & legacy G3)."""
 
 from __future__ import annotations
 
 import importlib.util
+import io
+import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 FILE = Path(__file__).with_name("prepare-github-issue.py")
@@ -54,6 +57,40 @@ Người quản trị có thể tạo danh mục có cha–con trong Admin.
 
 #### Kiểm thử, rủi ro và rollback
 - Test HTTP/SQLite trên DB fixture và kiểm tra negative cases.
+"""
+
+
+def egm_example(*, status="Approved", overview="Bao gồm plugin revisions khi tạo backup mã hóa."):
+    return f"""# Backup Plugin Revisions & Restore Path Alignment
+
+*   **Author:** Nova
+*   **Status:** {status}
+*   **Date:** 2026-11-20
+
+## Overview
+
+{overview}
+
+## Goals
+
+*   Đóng gói đầy đủ `plugins/revisions/<digest>/` trong snapshot backup.
+*   Đồng bộ đường dẫn `database/secrets/smtp/` khi restore sang site root mới.
+
+## Non-Goals
+
+*   Không thay đổi định dạng mã hóa `age` hiện tại.
+
+## Detailed Implementation Plan
+
+### Target Files to Create/Modify
+
+1. `cms/crates/opendash-server/src/storage/backup.rs` (Modify): Truy vấn thêm `plugin_revisions`.
+2. `cms/crates/opendash-server/src/restore.rs` (Modify): Ghi SMTP secrets về `database/secrets/smtp/`.
+
+### Verification Plan
+
+*   `python cms/scripts/check-standards.py`
+*   `cargo test --manifest-path cms/Cargo.toml --workspace --release --locked`
 """
 
 
@@ -112,10 +149,18 @@ class ParseTaskTests(unittest.TestCase):
             MODULE.parse_task(example().replace("- [ ] Có thể", "- [x] Có thể"), "M3-S07-T01")
 
     def test_source_path_must_be_planning_markdown(self):
-        for source in ("../secrets.env", "docs/README.md", "docs/plans/templates/SLICE_TASK.md", "/tmp/task.md"):
+        for source in (
+            "../secrets.env",
+            "docs/README.md",
+            "docs/plans/templates/SLICE_TASK.md",
+            "docs/designs/README.md",
+            "docs/designs/SITEMAP.md",
+            "/tmp/task.md",
+        ):
             with self.subTest(source=source), self.assertRaises(MODULE.TaskError):
                 MODULE.source_path(source)
         self.assertEqual(MODULE.source_path(r"docs\plans\modules\CNT-03-taxonomy.md"), "docs/plans/modules/CNT-03-taxonomy.md")
+        self.assertEqual(MODULE.source_path(r"docs\designs\backup-restore-fixes.md"), "docs/designs/backup-restore-fixes.md")
 
     def test_fast_track_requires_reason_when_no_g2(self):
         doc = example().replace("**Track:** Full-Track", "**Track:** Fast-Track").replace("**G2:** AGREED", "**G2:** NOT_APPLICABLE")
@@ -145,6 +190,72 @@ class ParseTaskTests(unittest.TestCase):
                 self.assertIn("**G3:** READY", content)
                 self.assertNotIn("**G3:** PROPOSED", content)
                 MODULE.parse_task(content, "M3-S07-T01")
+            finally:
+                MODULE.ROOT = previous
+
+
+class EgmDesignTests(unittest.TestCase):
+    def test_egm_design_renders_readable_issue_payload(self):
+        design = MODULE.parse_egm_design(egm_example())
+        payload = MODULE.egm_issue_payload(
+            design,
+            "docs/designs/backup-restore-fixes.md",
+            "a" * 40,
+            "b" * 40,
+            "harbor",
+        )
+        self.assertEqual(payload["title"], "[EGM] Backup Plugin Revisions & Restore Path Alignment")
+        self.assertEqual(payload["task_id"], "EGM-backup-restore-fixes")
+        self.assertEqual(payload["labels"], ["type:implementation", "egm", "agent:harbor"])
+        self.assertIn("## Detailed Implementation Plan", payload["body"])
+        self.assertIn("### Verification Plan", payload["body"])
+        self.assertIn("blob/" + "a" * 40 + "/docs/designs/backup-restore-fixes.md", payload["body"])
+
+    def test_egm_design_refuses_unapproved_status(self):
+        for status in ("Draft", "Proposed", "In Review", ""):
+            with self.subTest(status=status), self.assertRaisesRegex(MODULE.TaskError, "Approved"):
+                MODULE.parse_egm_design(egm_example(status=status))
+
+    def test_egm_design_refuses_missing_implementation_or_verification_plan(self):
+        no_targets = egm_example().replace("### Target Files to Create/Modify", "### Files")
+        with self.assertRaisesRegex(MODULE.TaskError, "Target Files"):
+            MODULE.parse_egm_design(no_targets)
+        no_verify = egm_example().replace("### Verification Plan", "### Tests")
+        with self.assertRaisesRegex(MODULE.TaskError, "Verification Plan"):
+            MODULE.parse_egm_design(no_verify)
+
+    def test_egm_design_refuses_placeholders(self):
+        with self.assertRaisesRegex(MODULE.TaskError, "placeholder"):
+            MODULE.parse_egm_design(egm_example(overview="TODO fill this in"))
+
+    def test_egm_cli_reads_approved_blob_without_task_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "docs" / "designs" / "backup-restore-fixes.md"
+            path.parent.mkdir(parents=True)
+            path.write_text(egm_example(), encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(root), "add", "docs/designs/backup-restore-fixes.md"], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.org", "commit", "-qm", "approved EGM spec"],
+                check=True, capture_output=True,
+            )
+            # Dirty unapproved worktree edit must not leak into blob read
+            path.write_text(egm_example(status="Draft"), encoding="utf-8")
+            previous = MODULE.ROOT
+            buf = io.StringIO()
+            try:
+                MODULE.ROOT = root
+                with mock.patch("sys.stdout", buf):
+                    rc = MODULE.main([
+                        "--source", "docs/designs/backup-restore-fixes.md",
+                        "--ref", "HEAD",
+                        "--agent", "forge",
+                    ])
+                self.assertEqual(rc, 0)
+                parsed = json.loads(buf.getvalue())
+                self.assertEqual(parsed["agent"], "forge")
+                self.assertEqual(parsed["labels"], ["type:implementation", "egm", "agent:forge"])
             finally:
                 MODULE.ROOT = previous
 
