@@ -7,7 +7,7 @@ description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tụ
 
 ## Kích hoạt, vai trò và nguồn sự thật
 
-- Chạy **một lần trong lượt chat hiện tại** khi người dùng yêu cầu lấy/làm task; không tự lên lịch, không gọi Task Watcher, không lặp nền, không gửi input tới CoS Local Control API.
+- Chạy **một lần trong lượt chat hiện tại** khi người dùng yêu cầu lấy/làm task, **hoặc chạy theo lịch định kỳ được chủ dự án cấu hình (Scheduled Auto-Pickup, ví dụ 1 giờ/lần cho Harbor và Forge)** theo đúng khóa an toàn ở mục **Scheduled Auto-Pickup** bên dưới. Không gọi Task Watcher cũ, không gửi input tới CoS Local Control API.
 - Đọc [`AGENTS.md`](../../../AGENTS.md), [`.agents/skills/opendash-elephant/SKILL.md`](../opendash-elephant/SKILL.md), [Agent Operating Standard](../../AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../GITHUB_WORKFLOW.md), [agents.yaml](../../agents.yaml) và metadata Git của **workspace đang thao tác**. Định danh agent bằng ngữ cảnh người dùng + worktree + cấu hình (ví dụ Forge ⇒ label `agent:forge`, branch `agent/forge`; Harbor ⇒ `agent:harbor`, `agent/harbor`).
 - **Nguồn sự thật:**
   - **GitHub Issues và Project #3 Status:** trạng thái thực thi live (`Backlog`, `Ready`, `In progress`, `In review`, `Done`) và người phụ trách.
@@ -29,6 +29,19 @@ description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tụ
 6. **Nếu không có task đang giao và branch rảnh:** tìm tối đa 3 candidate **open**, `Ready`, có Design Spec `Approved` và dependencies clear để đề xuất hoặc tự nhận (nếu chưa có owner và đúng vai trò/OS theo ADR-0010).
 7. **Cập nhật [`docs/designs/SITEMAP.md`](../../../docs/designs/SITEMAP.md) sau khi hoàn tất:**
    - Khi PR code đã merge và kiểm chứng thực tế PASS, coordinator hoặc agent đóng task cập nhật trạng thái dòng tương ứng trong `docs/designs/SITEMAP.md` sang `Implemented` hoặc `**Verified**` (kèm link trực tiếp tới [`docs/verification/<report>.md`](../../../docs/verification/README.md)). Không ghi `Verified` khi chưa có bằng chứng thực chạy.
+
+## Scheduled Auto-Pickup (Owner Directive 2026-11-21)
+
+Chủ dự án cho phép **Harbor** và **Forge** chạy skill này theo lịch định kỳ (ví dụ 1 giờ/lần, khuyến nghị lệch phút `:00` và `:30`) với **4 khóa an toàn bắt buộc**:
+
+1. **Chỉ nhận Issue đã gắn đúng nhãn `agent:<current-agent>`:** Trong chế độ chạy theo lịch, **tuyệt đối không** tự nhận Issue chưa có nhãn `agent:*` hoặc mang nhãn của agent khác (triệt tiêu race condition giữa Harbor và Forge).
+2. **4 điều kiện rảnh bắt buộc trước `PICK_NEW`:**
+   - Không có phiên làm việc nào khác của chính agent đang chạy.
+   - Worktree `agent/<name>` sạch (`git status --porcelain` trống) và đồng bộ được `git merge --ff-only origin/main` (nếu phân kỳ ⇒ `BLOCKED`, không tự `reset`/`rebase`/`force-push`).
+   - Không có PR nào đang mở từ nhánh `agent/<name>`.
+   - Không có Issue nào gắn `agent:<current-agent>` đang ở trạng thái `In progress` hoặc `In review` (nếu có ⇒ chỉ chạy nhánh `RESUME_CURRENT` hoặc dừng `WAITING` nếu đang chờ CI/reviewer).
+3. **Tự mở khóa slice kế tiếp (`Backlog → Ready`):** Khi mọi slice/Issue phụ thuộc trong mục `**Dependencies:**` của Issue tiếp theo đã **merge vào `main` với đủ required CI (`governance-*`, `cms-ci`) PASS + self-review receipt**, agent được phép tự chuyển Issue đó từ `Backlog → Ready → In progress` và triển khai. Kiểm chứng E2E tổng thể (cross-OS) và `/egm-drift-report` thực hiện khi hoàn tất slice cuối của Design Spec.
+4. **Circuit Breaker (chống đốt quota):** Nếu cùng một Issue bị CI fail hoặc gặp lỗi/conflict **2 lượt liên tiếp** mà chưa khắc phục được, agent phải comment rõ nguyên nhân + nhãn/ghi chú `BLOCKED` trên Issue và **dừng**; các lượt chạy định kỳ sau thấy `BLOCKED` chưa có phản hồi gỡ chặn từ Owner/Coordinator sẽ kết thúc ngay (`NO_OP`).
 
 ## Các trường hợp không được lách
 
