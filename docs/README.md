@@ -1,7 +1,7 @@
 # OpenDash — Mục lục tài liệu
 
 **Checkpoint ưu tiên 16/11/2026:** [ADR-0017 — Usable Beta staging](decisions/ADR-0017-usable-beta-staging.md)
-và [G3 M7-S14](plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md).
+và [G3 M7-S14](archive/plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md).
 Dev demo, internal Beta và V1 public là ba phạm vi khác nhau; thiết kế không chứng minh
 runtime/human usability. V1/native/security/license gates giữ nguyên.
 
@@ -21,7 +21,7 @@ Bổ sung ngày 19/11/2026: [Builder template và content](product/BUILDER_TEMPL
 phân biệt template/thành phần dùng lại với content từng bản ghi có đăng ký Builder;
 hierarchy tham chiếu WordPress, nguồn theme/database và home/archive tách biệt; bỏ yêu cầu chuyển homepage legacy thành Page. Yêu cầu đã xác nhận, chưa là API/schema G2, G3 hay runtime evidence.
 
-Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và bố cục màn hình chỉnh sửa](product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) — menu/submenu, vùng đăng ký panel và vị trí nhóm custom fields; [ADR-0016](decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) đã đạt `G2 AGREED` và merge tại `main@2808e3e` ([receipt #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) · [#268](https://github.com/thientran2359/opendash-cms/issues/268)); đặc tả [G3 (`M7-S09-T01`–`M7-S13-T02`)](plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md) đã soạn xong (`Implementation NOT_STARTED / Verification NOT_RUN`, chưa cấp `Project Ready`).
+Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và bố cục màn hình chỉnh sửa](product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) — menu/submenu, vùng đăng ký panel và vị trí nhóm custom fields; [ADR-0016](decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) đã đạt `G2 AGREED` và merge tại `main@2808e3e` ([receipt #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) · [#268](https://github.com/thientran2359/opendash-cms/issues/268)); đặc tả [G3 (`M7-S09-T01`–`M7-S13-T02`)](archive/plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md) đã soạn xong (`Implementation NOT_STARTED / Verification NOT_RUN`, chưa cấp `Project Ready`).
 
 | Mục đích | Vị trí | Quy ước |
 | --- | --- | --- |
@@ -30,12 +30,12 @@ Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và 
 | Nghiên cứu, thảo luận chưa duyệt | [`.agents/research/`](../.agents/research/README.md) và [`.agents/discussions/`](../.agents/discussions/README.md) | Lưu bản nháp ngoài `docs/`; tài liệu lịch sử còn giữ để truy vết nguồn |
 | Giao diện kỹ thuật giữa các phần | [`contracts/`](contracts/CORE_FOUNDATION.md) — [Core Foundation](contracts/CORE_FOUNDATION.md) · [Plugin ABI](contracts/PLUGIN_ABI.md) · [Admin Navigation & Single Edit (G2 AGREED)](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) | Contract có version, trạng thái `AGREED` khác `verified` |
 | Quyết định kiến trúc & điều phối | [`decisions/`](decisions/ADR-0001-workspace-layout.md) — [ADR-0001](decisions/ADR-0001-workspace-layout.md) · [ADR-0002](decisions/ADR-0002-core-extension-contract.md) · [ADR-0003](decisions/ADR-0003-agent-consensus-governance.md) · [ADR-0005](decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) · [ADR-0008](decisions/ADR-0008-harbor-forge-autonomous-delivery.md) · [ADR-0010](decisions/ADR-0010-agent-project-and-merge-authority.md) · [ADR-0016](decisions/ADR-0016-admin-navigation-and-single-edit.md) | ADR có bối cảnh, quyết định, hệ quả, reviewer nếu cần và trạng thái |
-| Roadmap và danh mục module | [Roadmap V1](plans/ROADMAP_V1.md) · [Module Catalog](plans/MODULE_CATALOG_V1.md) · [Quy trình](plans/PLANNING_WORKFLOW.md) | Hai trục chức năng và tiến độ, ID module, research/design gates, mẫu task |
-| Kế hoạch triển khai | [`plans/`](plans/README.md) · [Milestones](plans/milestones/README.md) · [M3/Slices](plans/milestones/M3/README.md) | Milestone quy định điều kiện đóng mốc; slice là phần thực hiện, không phân thư mục theo trạng thái Ready/Done |
-| Module/Capability xuyên milestone | [`plans/modules/`](plans/modules/README.md) · [Module Catalog](plans/MODULE_CATALOG_V1.md) | Nguồn mô tả chức năng, G0–G3 và dependency; module có thể thuộc nhiều milestone |
+| Roadmap và danh mục module | [Roadmap V1](archive/plans/ROADMAP_V1.md) · [Module Catalog](archive/plans/MODULE_CATALOG_V1.md) · [Quy trình](archive/plans/PLANNING_WORKFLOW.md) | Hai trục chức năng và tiến độ, ID module, research/design gates, mẫu task |
+| Kế hoạch triển khai | [`plans/`](archive/plans/README.md) · [Milestones](archive/plans/milestones/README.md) · [M3/Slices](archive/plans/milestones/M3/README.md) | Milestone quy định điều kiện đóng mốc; slice là phần thực hiện, không phân thư mục theo trạng thái Ready/Done |
+| Module/Capability xuyên milestone | [`plans/modules/`](archive/plans/modules/README.md) · [Module Catalog](archive/plans/MODULE_CATALOG_V1.md) | Nguồn mô tả chức năng, G0–G3 và dependency; module có thể thuộc nhiều milestone |
 | Hồ sơ lịch sử | [`archive/`](archive/README.md) | Chỉ lưu hồ sơ lịch sử/retired, không tự archive một task chỉ vì đã triển khai code |
 | Bằng chứng thực thi | [`verification/`](verification/README.md) | Chỉ ghi `verified` khi có lệnh, môi trường và kết quả thực tế |
-| Điều phối agent | [Giao thức hiện hành](discussions/PROTOCOL.md) · [Quy trình GitHub](../.agents/GITHUB_WORKFLOW.md) · [Handoff cũ](discussions/AGENT_COORDINATION.md) | Handoff trước đây chỉ để tham khảo, không còn là cơ chế hoạt động |
+| Điều phối agent | [Giao thức hiện hành](archive/discussions/PROTOCOL.md) · [Quy trình GitHub](../.agents/GITHUB_WORKFLOW.md) · [Handoff cũ](archive/discussions/AGENT_COORDINATION.md) | Handoff trước đây chỉ để tham khảo, không còn là cơ chế hoạt động |
 
 Không tạo thư mục/module rỗng chỉ để khớp sơ đồ. Khi nguồn mã được đưa vào, đối chiếu cây thư mục và kiểm thử trước khi sửa tài liệu trạng thái.
 
@@ -46,7 +46,7 @@ Xem [báo cáo chuyển thư mục ngày 07/11/2026](verification/2026-11-07-lay
 
 [ADR-0019](decisions/ADR-0019-content-foundation.md) ·
 [contract](contracts/CONTENT_FOUNDATION_2026_11.md) ·
-[task index](plans/TASK_INDEX.md#content-foundation-follow-up--18112026).
+[task index](archive/plans/TASK_INDEX.md#content-foundation-follow-up--18112026).
 CPT configuration, custom taxonomy, shared permalink resolver and provider integration;
 design only until separately implemented/verified.
 
@@ -67,3 +67,10 @@ kèm cấu trúc thư mục theme, Page layouts, Section, candidate matrix và b
 Trạng thái **Proposed** của bản chuyển tài liệu không hủy các quyết định sản phẩm đã duyệt;
 chưa là Goldfish-review PASS, contract API/schema hoàn chỉnh, implementation Ready hay runtime evidence.
 Các nguồn gốc vẫn giữ nguyên để truy vết; không tự đổi ownership/Issue/Project hoặc triển khai CMS.
+
+## Candidate migration EGM của Nova
+
+[Design guide](designs/README.md) và [Sitemap](designs/SITEMAP.md) được nhập từ Nova;
+đối chiếu [#413](https://github.com/thientran2359/opendash-cms/pull/413) và
+[báo cáo tích hợp](../.agents/research/egm-nova-integration-2026-11-20/README.md)
+trước khi chấp nhận. Candidate còn findings chặn merge; bản nháp không cấp implementation Ready.

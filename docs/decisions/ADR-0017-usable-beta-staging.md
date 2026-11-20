@@ -59,7 +59,7 @@ Preview chưa lưu không đổi public. Đổi theme/tắt plugin bảo toàn d
 
 ## Acceptance and work ownership
 
-[G3 checkpoint](../plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md)
+[G3 checkpoint](../archive/plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md)
 quy định đủ bốn task: Forge audit Windows; Atlas triage/G3 fixes; Forge QA + human
 dogfood; Atlas Beta readiness. Nova là responsible mặc định cho UX fixes được giao
 G3 riêng. Harbor giữ #188 và phần macOS; Forge giữ #242/#245. Một task active mỗi

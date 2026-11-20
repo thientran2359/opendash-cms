@@ -1,6 +1,6 @@
 # ADR-0011 — Editor, responsive và danh sách homepage M4
 
-**Final Decision: Atlas · AGREED khi merge · Baseline `7b7e2201f475950d5a17bde7b0d417eb6a19351a`.** Theo [ADR-0010](ADR-0010-agent-project-and-merge-authority.md). Nguồn gồm [PRD](../product/PRODUCT_REQUIREMENTS.md), [ADR-0007](ADR-0007-m4-builder-taxonomy-foundation.md), [ADR-0009](ADR-0009-m4-core-element-field-binding.md), [thử nghiệm Atlas](../../.agents/research/2026-11-11-m4-p03-builder-editor-g2.md) và [đề xuất Forge](https://github.com/thientran2359/opendash-cms/pull/96). Phạm vi homepage Builder M4. [Bộ handoff G3](../plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md).
+**Final Decision: Atlas · AGREED khi merge · Baseline `7b7e2201f475950d5a17bde7b0d417eb6a19351a`.** Theo [ADR-0010](ADR-0010-agent-project-and-merge-authority.md). Nguồn gồm [PRD](../product/PRODUCT_REQUIREMENTS.md), [ADR-0007](ADR-0007-m4-builder-taxonomy-foundation.md), [ADR-0009](ADR-0009-m4-core-element-field-binding.md), [thử nghiệm Atlas](../../.agents/research/2026-11-11-m4-p03-builder-editor-g2.md) và [đề xuất Forge](https://github.com/thientran2359/opendash-cms/pull/96). Phạm vi homepage Builder M4. [Bộ handoff G3](../archive/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md).
 
 ## M4-P03 · Editor và Preview
 

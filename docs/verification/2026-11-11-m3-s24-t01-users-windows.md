@@ -10,7 +10,7 @@
 - Windows 11 Pro; Rust/Cargo 1.99.1; Node 22.16.0; npm 10.9.2; Python 3.13.4; Chrome 157.0.8103.50.
 - Compiler profile \`dev\`; Admin \`vite build\` được nhúng bằng RustEmbed trong \`target/debug/opendash.exe\`.
 - SQLite thật qua file \`site.sqlite\` tạm, WAL/foreign keys theo runtime; server chạy \`OPENDASH_PORT=0\`, \`OPENDASH_SITE_ROOT\`/DB riêng từng fixture.
-- Contract: [ADR-0006](../decisions/ADR-0006-m3-admin-and-release-contracts.md#p12--users-fnd-02fnd-05-full-track); [G3 Users](../plans/milestones/M3/slices/2026-11-11-m3-users-settings-g3.md); migration tăng tiến \`0009_users_version.sql\`.
+- Contract: [ADR-0006](../decisions/ADR-0006-m3-admin-and-release-contracts.md#p12--users-fnd-02fnd-05-full-track); [G3 Users](../archive/plans/milestones/M3/slices/2026-11-11-m3-users-settings-g3.md); migration tăng tiến \`0009_users_version.sql\`.
 
 ## Hành vi được triển khai
 

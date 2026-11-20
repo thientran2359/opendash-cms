@@ -2,7 +2,7 @@
 
 **Agent:** Atlas · **Date:** 2026-11-14 · **Baseline:** `main@4b60388683a01df8d6332c88449b4fa6821ef5fc`.
 **Research:** source inspection complete for planning; M7 runtime/prototype/benchmark NOT_RUN.
-**Promotion:** [ADR-0014](../../docs/decisions/ADR-0014-m7-site-features.md), [contract](../../docs/contracts/M7_SITE_FEATURES.md), [G3](../../docs/plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Only merged decisions are authoritative.
+**Promotion:** [ADR-0014](../../docs/decisions/ADR-0014-m7-site-features.md), [contract](../../docs/contracts/M7_SITE_FEATURES.md), [G3](../../docs/archive/plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md). Only merged decisions are authoritative.
 
 ## Source evidence
 

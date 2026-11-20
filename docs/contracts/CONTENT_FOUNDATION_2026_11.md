@@ -1,5 +1,8 @@
 # Content foundation — November 2026
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0038`–`0041`, bao gồm `0041_provider_rewrite_defaults.sql` cho C4; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `implementation NOT_STARTED, verification NOT_RUN` bên dưới là snapshot lịch sử lúc chốt thiết kế.
+
 Decision owner/coordinator: Aster. Implementer: Harbor. Effective after merged
 ADR-0019; design AGREED then, implementation NOT_STARTED, verification NOT_RUN.
 This is a bounded extension of CNT-01/03/04, SITE-02 and PLG-03, not WordPress API compatibility.

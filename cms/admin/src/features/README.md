@@ -1,13 +1,24 @@
-# Feature modules
+# Feature modules (`cms/admin/src/features/`)
 
-Mỗi chức năng thực tế dùng thư mục riêng dưới `src/features/` (và component dùng chung đặt tại `src/components/`) **chỉ khi bắt đầu triển khai mã thực tế**, không tạo sẵn thư mục hay component giữ chỗ:
+Các phân hệ giao diện của React Admin sử dụng chung HTTP client [`src/api/client.ts`](../api/client.ts) và [`FormPrimitives.tsx`](../components/FormPrimitives.tsx):
 
-- `system/` — Hiện minh họa cách gọi Health API qua `src/api/client.ts`.
-- `users/` — Panel tạo tài khoản Editor. Đăng nhập và hiển thị phiên nằm trong `shell/`.
-- `builder/` ở cấp `src/` xử lý nhập ZIP theme một block. Màn Theme Options thuộc mốc sau.
-- `plugins/` — Cài đặt plugin ZIP, hiển thị quyền theo [Plugin ABI v1](../../../../docs/contracts/PLUGIN_ABI.md), bật/tắt và báo lỗi runtime Wasmi (nhập từ M2).
-- `content/` — (M3.4–M3.6) Danh sách CPT/entry, tạo CPT và custom fields, form 9 kiểu dữ liệu, ETag/If-Match, Media Picker và link xem archive/single công khai. Taxonomy và Builder nâng cao thuộc các bước sau.
-- `media/` — (M3.5) Thư viện ảnh, upload JPEG/PNG/WebP, xem thumbnail, chọn single/gallery; chưa xóa media khỏi thư viện.
-- `settings/` — Cài đặt website, SMTP, SEO và backup/restore theo phạm vi V1.
+- `dashboard/`: `DashboardPage.tsx` — Tổng quan và lối tắt quản trị.
+- `posts/`: `PostPageWorkspace.tsx` — Quản lý Bài viết (`post`) và Trang (`page`).
+- `content/`: `ContentWorkspace.tsx`, `EntryListPage.tsx`, `ContentTypeForm.tsx`, `ContentTypeSchemaSettings.tsx`, `FieldGroupsManager.tsx`, `EditorLayoutConfigurator.tsx`, `FieldValueInput.tsx` — Bảng danh sách entry, cấu hình CPT, nhóm custom fields và bố cục Single Edit.
+- `editor/`: `SingleEditWorkspace.tsx`, `EditorDraftStore.ts`, `PanelRegionRenderer.tsx` — Màn hình chỉnh sửa đơn nhất theo vùng (`header_bar`, `main_top`, `main_primary`, `main_bottom`, `sidebar`) và bảo toàn draft khi `401`/`412`.
+- `sections/`: `SectionsPage.tsx` — Quản lý private Section CPT.
+- `media/`: `MediaLibraryPage.tsx`, `MediaPicker.tsx` — Thư viện media (upload ảnh JPEG/PNG/WebP và video MP4 độc lập, picker single/gallery).
+- `taxonomy/`: `TaxonomyDefinitionsPage.tsx`, `TaxonomyPage.tsx`, `TermEditPage.tsx`, `TermPicker.tsx` — Quản lý custom taxonomy definitions, chuyên mục, thẻ và term picker.
+- `themes/`: `ThemesPanel.tsx`, `ThemeOptionsForm.tsx` — Cài đặt Theme ZIP v2, kích hoạt, Theme Options và selective sample import.
+- `menus/`: `MenusPanel.tsx` — Quản lý menu đa cấp và gán menu slots theo theme.
+- `library/`: `TemplateLibraryPage.tsx` — Thư viện mẫu cục bộ và chèn Section vào thiết kế.
+- `plugins/`: `PluginsPanel.tsx`, `DeclarativePluginUi.tsx` — Cài plugin ZIP, bật/tắt, quyền và UI khai báo.
+- `extensions/`: `AdminContributionRenderer.tsx` — Hiển thị columns, row actions và term panels do theme/plugin đăng ký.
+- `users/`: `UsersPanel.tsx`, `UserProfilePanel.tsx` — Quản lý tài khoản Admin/Editor và hồ sơ cá nhân.
+- `contact/`: `ContactPanel.tsx`, `SmtpSettingsPanel.tsx` — Form liên hệ, submissions và cấu hình SMTP.
+- `seo/`: `SeoPanel.tsx` — Cấu hình SEO website (`robots`, OG, canonical).
+- `settings/`: `PermalinkSettingsPage.tsx` — Cấu hình cấu trúc đường dẫn tĩnh (permalinks) và rewrite base.
+- `operations/`: `BackupsPanel.tsx`, `RestorePanel.tsx`, `ReconcilePanel.tsx` — Sao lưu mã hóa, phục hồi sang site root mới và đối soát/xóa media.
+- `system/`: `GeneralSettingsPanel.tsx`, `SystemStatus.tsx` — Cài đặt tổng quát và tình trạng hệ thống.
 
-Các thao tác ghi (Save/Preview) phải tuân thủ quyền và contract trong [yêu cầu V1](../../../../docs/product/PRODUCT_REQUIREMENTS.md); UI không được tự coi kết quả local state là dữ liệu đã được lưu trên server.
+(Không gian làm việc Visual Builder nằm tại `src/builder/`, khung điều hướng và định tuyến nằm tại `src/shell/`).

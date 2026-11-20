@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Re-index the project decisions/contracts in CodeGraph's local docs store.
+// Re-index the project decisions/contracts/designs in CodeGraph's local docs store.
 // Run from any directory: node cms/scripts/codegraph-index-docs.mjs
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -20,36 +20,32 @@ const engine = process.env.CODEGRAPH_ENGINE_PATH || join(
   process.platform === 'win32' ? 'codegraph-server-win32-x64.exe' : 'codegraph-server-linux-x64',
 );
 
-// Only official documents belong in the canonical CodeGraph docs index.
+// Only official active documents belong in the canonical CodeGraph docs index.
 // Do not index .agents/ drafts, historical proposal threads or retired skills.
 const sources = [
+  'docs/README.md',
+  'docs/designs/README.md',
+  'docs/designs/SITEMAP.md',
   'docs/product/PRODUCT_REQUIREMENTS.md',
+  'docs/product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md',
   'docs/architecture/TECH_STACK.md',
   'docs/architecture/CMS_ARCHITECTURE.md',
   'docs/contracts/CORE_FOUNDATION.md',
   'docs/contracts/PLUGIN_ABI.md',
-  'docs/decisions/ADR-0002-core-extension-contract.md',
-  'docs/verification/2026-11-07-m1-m2-import.md',
-  'docs/plans/ROADMAP_V1.md',
-  'docs/plans/MODULE_CATALOG_V1.md',
+  'docs/contracts/M5_THEME_TEMPLATES.md',
+  'docs/contracts/M6_PLUGIN_EXTENSIONS.md',
   'docs/contracts/M7_SITE_FEATURES.md',
-  'docs/decisions/ADR-0014-m7-site-features.md',
-  'docs/plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md',
-  'docs/plans/modules/SITE-01-settings-navigation.md',
-  'docs/plans/modules/SITE-02-seo.md',
-  'docs/plans/modules/SITE-03-contact.md',
   'docs/contracts/M8_OPERATIONS_RELEASE.md',
+  'docs/contracts/M8_WRITER_INVENTORY.md',
+  'docs/contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md',
+  'docs/contracts/ADMIN_REVIEW_2026_11.md',
+  'docs/contracts/CONTENT_FOUNDATION_2026_11.md',
+  'docs/decisions/ADR-0002-core-extension-contract.md',
+  'docs/decisions/ADR-0014-m7-site-features.md',
   'docs/decisions/ADR-0015-m8-operations-release.md',
-  'docs/plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md',
-  'docs/plans/modules/OPS-01-backup-restore.md',
-  'docs/plans/modules/OPS-02-linux-release.md',
-  'docs/plans/M3_STATUS_2026-11-09.md',
-  'docs/verification/2026-11-08-m3-1-content-domain.md',
-  'docs/verification/2026-11-08-m3-2-content-types-backend.md',
-  'docs/verification/2026-11-08-m3-3-content-entry-crud.md',
-  'docs/verification/2026-11-08-m3-4-admin-content-ui.md',
-  'docs/verification/2026-11-09-m3-5-media-library.md',
-  'docs/verification/2026-11-09-m3-6-public-content-rendering.md',
+  'docs/decisions/ADR-0016-admin-navigation-and-single-edit.md',
+  'docs/decisions/ADR-0018-owner-admin-review.md',
+  'docs/decisions/ADR-0019-content-foundation.md',
 ];
 
 // Safe verification, with no installed CodeGraph engine required:

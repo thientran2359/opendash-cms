@@ -2,7 +2,7 @@
 
 **Ngày kiểm chứng:** 2026-11-20 (Asia/Bangkok). **Agent:** Harbor. **Verdict: TECHNICAL_BLOCKED** đối với *toàn bộ* ma trận Beta B01–B10; các kiểm chứng thành phần được giữ riêng bên dưới. **Human: NOT_RUN. Beta: NOT_GRANTED. Common RC/V1: NOT_GRANTED.** Không có kết luận product Beta PASS từ báo cáo này.
 
-Đây là audit chỉ ghi evidence cho [Issue #410](https://github.com/thientran2359/opendash-cms/issues/410), theo [G3 M7-S14-T05](../plans/milestones/M7/slices/2026-11-20-beta-technical-retest-g3.md) (PR [#409](https://github.com/thientran2359/opendash-cms/pull/409), G3 source SHA 639f3f2823f22a3365f18527fd949760d0689dfe). Không sửa mã sản phẩm, harness, SDK, schema, migration hoặc fixture nguồn. Các tập dữ liệu, script thăm dò cục bộ, ZIP, binary, log, JSON receipt và ảnh chụp được giữ ngoài Git.
+Đây là audit chỉ ghi evidence cho [Issue #410](https://github.com/thientran2359/opendash-cms/issues/410), theo [G3 M7-S14-T05](../archive/plans/milestones/M7/slices/2026-11-20-beta-technical-retest-g3.md) (PR [#409](https://github.com/thientran2359/opendash-cms/pull/409), G3 source SHA 639f3f2823f22a3365f18527fd949760d0689dfe). Không sửa mã sản phẩm, harness, SDK, schema, migration hoặc fixture nguồn. Các tập dữ liệu, script thăm dò cục bộ, ZIP, binary, log, JSON receipt và ảnh chụp được giữ ngoài Git.
 
 ## Candidate, quyền sở hữu và môi trường
 

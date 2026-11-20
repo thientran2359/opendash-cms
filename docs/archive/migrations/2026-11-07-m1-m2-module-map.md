@@ -2,7 +2,7 @@
 
 > **Hồ sơ lịch sử:** việc nhập mã đã hoàn tất; xem [báo cáo kiểm chứng tại đích](../../verification/2026-11-07-m1-m2-import.md). Những đề xuất và mốc Git trong tài liệu phản ánh thời điểm trước khi nhập mã.
 
-Ngày 07/11/2026. Đây là đề xuất triển khai cho bước 3 của [kế hoạch nhập mã](../../plans/README.md). Phạm vi gồm M1 Auth/Builder, M2 plugin ABI v1, dữ liệu nâng cấp và binary Windows. CPT/Media M3, builder nhiều tầng, chuyển kho gói sang filesystem, nâng dependency và phát hành nằm ngoài lượt nhập này.
+Ngày 07/11/2026. Đây là đề xuất triển khai cho bước 3 của [kế hoạch nhập mã](../../archive/plans/README.md). Phạm vi gồm M1 Auth/Builder, M2 plugin ABI v1, dữ liệu nâng cấp và binary Windows. CPT/Media M3, builder nhiều tầng, chuyển kho gói sang filesystem, nâng dependency và phát hành nằm ngoài lượt nhập này.
 
 ## Hai mốc đối chiếu
 

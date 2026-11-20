@@ -1,3 +1,15 @@
-# SQLite migrations
+# SQLite migrations (`0001`–`0041`)
 
-SQLx giữ nguyên ba migration gốc: 0001 lưu trang và theme block, 0002 thêm users/sessions/bootstrap, 0003 thêm plugin, KV và log. 0004 bổ sung bảng `content_types` lưu định nghĩa CPT, custom fields và trạng thái provider; 0005 bổ sung `content_entries` lưu giá trị field, slug và phiên bản cập nhật; 0006 thêm metadata `media_assets` cho ảnh lưu trong `uploads/media/`; 0007 bổ sung hai cột tùy chọn `content_list_template` và `content_single_template` trong `theme_blocks` cho theme ZIP mới. Không xóa dây chuyền khi theme/plugin bị tắt. Giữ nguyên nội dung và LF của migrations lịch sử để bảo toàn checksum. Dùng migration mới cho thay đổi schema tiếp theo.
+Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (40 file, đánh số từ `0001` đến `0041`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
+
+| Nhóm / Mốc | Migrations | Nội dung chính |
+| --- | --- | --- |
+| **M1–M2 Baseline** | `0001_builder_slice.sql` – `0003_plugins.sql` | `theme_blocks`, `home_page`, `users`/`sessions`/`bootstrap`, `plugins`/`plugin_kv`/`plugin_logs`. |
+| **M3 Core CMS & Media** | `0004_content_types.sql` – `0011_theme_activation.sql` | `content_types`, `content_entries`, `media_assets`, `content_templates`, `post`/`page` publication, `users.version`, `site_general_settings`, `theme_activation`. |
+| **M4 Builder & Taxonomy** | `0012_taxonomy_terms.sql` – `0014_entry_terms.sql` | `taxonomy_terms` (`category`/`tag`), `builder_homepage` + `builder_homepage_media`, `entry_terms`. |
+| **M5 Theme & Templates** | `0015_theme_packages_revisions.sql`, `0017_theme_options.sql` – `0021_theme_import_journal.sql` | `theme_packages`/`theme_revisions`/`theme_active_selection`, `theme_option_*`, `template_overrides`, `site_menus`/`site_menu_items`/`site_menu_slot_assignments`, `content_type_taxonomy_eligibility`, `import_runs`/`import_provenance`/`import_tombstones`. |
+| **M6 Plugin Extensions** | `0022_plugin_revisions.sql` – `0024_owner_neutral_domain_bridge.sql` | `plugin_revisions`, `plugins.active_revision_id`/`revision_generation`/`cas_version`, owner-neutral CNT & domain bridge. |
+| **M7 Site Features & Video** | `0025_site_public_settings.sql` – `0031_video_builder_refs.sql` | `site_public_settings`, `site_menu_slot_versions`, `entry_public_paths`/`entry_redirects`/`entry_seo`/`site_home_seo`/`seo_public_media_refs`, `contact_*`, `site_smtp_settings`/`contact_notification_attempts`, rebuild `media_assets` cho MP4 video, `builder_homepage_video_refs`/`template_override_media_refs`. |
+| **M8 Operations & Lifecycle** | `0032_operations_jobs.sql`, `0033_media_lifecycle.sql` | `operation_jobs`, `maintenance_generation`, `media_generations`, `media_delete_jobs` và trạng thái `lifecycle_state`. |
+| **Admin Nav & Review** | `0034_field_groups_and_editor_layout.sql` – `0037_section_documents.sql` | `content_field_groups`/`content_field_group_targets`/`content_editor_layouts`, bỏ default taxonomy khỏi `page`, `admin_extensions`/`term_extension_values`, `section_documents`/`section_document_media_refs`. |
+| **Content Foundation** | `0038_content_type_settings.sql` – `0041_provider_rewrite_defaults.sql` | `content_types` settings (`public`, `has_archive`, `publication`, `supports`), `taxonomy_definitions`/`content_type_taxonomy_overrides`, `site_permalink_settings`/`permalink_route_claims`/`permalink_route_redirects`, `provider_rewrite_defaults`. |

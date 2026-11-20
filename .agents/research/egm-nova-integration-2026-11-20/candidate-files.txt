@@ -1,0 +1,228 @@
+M	.agents/AGENT_OPERATING_STANDARD.md
+M	.agents/GITHUB_WORKFLOW.md
+M	.agents/README.md
+R100	.agents/skills/discussion-turn-responder/SKILL.md	.agents/archive/skills/discussion-turn-responder/SKILL.md
+M	.agents/discussions/README.md
+M	.agents/research/2026-11-11-atlas-m3-remaining-g1-g2.md
+M	.agents/research/2026-11-11-m4-builder-taxonomy-g1.md
+M	.agents/research/2026-11-11-m4-p03-tree-canvas-inspector-g1-g2.md
+M	.agents/research/2026-11-11-m4-p05-field-binding-g1.md
+M	.agents/research/2026-11-11-m4-remaining-implementation-handoffs.md
+M	.agents/research/2026-11-14-m7-site-features-g1.md
+M	.agents/research/2026-11-14-m8-operations-release-g1.md
+M	.agents/research/README.md
+M	.agents/research/m3-p07-built-in-post-page-g1-g2.md
+M	.agents/research/m3-post-page-integrated-g2-g3-proposal.md
+M	.agents/research/muse-cos-win-orchestrator-poc.md
+M	.agents/research/muse-cos-win-poc-test-matrix.md
+M	.agents/scripts/check-agent-artifacts.py
+M	.agents/scripts/prepare-github-issue.py
+M	.agents/scripts/test_prepare_github_issue.py
+M	.agents/skills/README.md
+M	.agents/skills/atlas-task-dispatch/SKILL.md
+M	.agents/skills/github-pr-review-merge/SKILL.md
+M	.agents/skills/github-task-pickup/SKILL.md
+A	.agents/skills/opendash-elephant/SKILL.md
+M	AGENTS.md
+M	README.md
+M	cms/README.md
+A	cms/admin/src/api/README.md
+A	cms/admin/src/builder/README.md
+A	cms/admin/src/components/README.md
+M	cms/admin/src/features/README.md
+A	cms/admin/src/shell/README.md
+M	cms/crates/opendash-core/README.md
+A	cms/crates/opendash-server/README.md
+M	cms/crates/opendash-server/src/plugin/README.md
+A	cms/crates/opendash-server/src/routes/README.md
+A	cms/crates/opendash-server/src/storage/README.md
+M	cms/migrations/README.md
+M	cms/scripts/check-plans.py
+M	cms/scripts/codegraph-index-docs.mjs
+M	docs/README.md
+M	docs/architecture/CMS_ARCHITECTURE.md
+M	docs/architecture/TECH_STACK.md
+M	docs/archive/README.md
+R094	docs/discussions/AGENT_COORDINATION.md	docs/archive/discussions/AGENT_COORDINATION.md
+R094	docs/discussions/PROTOCOL.md	docs/archive/discussions/PROTOCOL.md
+R090	docs/discussions/README.md	docs/archive/discussions/README.md
+R084	docs/discussions/threads/2026-11-07-m3-g1-content-types-media-research.md	docs/archive/discussions/threads/2026-11-07-m3-g1-content-types-media-research.md
+R074	docs/discussions/threads/2026-11-07-pre-m3-codegraph-readiness.md	docs/archive/discussions/threads/2026-11-07-pre-m3-codegraph-readiness.md
+R095	docs/discussions/threads/2026-11-07-roadmap-module-planning-workflow.md	docs/archive/discussions/threads/2026-11-07-roadmap-module-planning-workflow.md
+R097	docs/discussions/threads/2026-11-08-m3-g2-content-types-media-design.md	docs/archive/discussions/threads/2026-11-08-m3-g2-content-types-media-design.md
+R089	docs/discussions/threads/README.md	docs/archive/discussions/threads/README.md
+M	docs/archive/migrations/2026-11-07-m1-m2-module-map.md
+R069	docs/plans/M3_STATUS_2026-11-09.md	docs/archive/plans/M3_STATUS_2026-11-09.md
+R073	docs/plans/MODULE_CATALOG_V1.md	docs/archive/plans/MODULE_CATALOG_V1.md
+R095	docs/plans/PLANNING_WORKFLOW.md	docs/archive/plans/PLANNING_WORKFLOW.md
+R081	docs/plans/README.md	docs/archive/plans/README.md
+R085	docs/plans/ROADMAP_V1.md	docs/archive/plans/ROADMAP_V1.md
+R087	docs/plans/TASK_INDEX.md	docs/archive/plans/TASK_INDEX.md
+R092	docs/plans/milestones/COVERAGE_MATRIX.md	docs/archive/plans/milestones/COVERAGE_MATRIX.md
+R075	docs/plans/milestones/M1/README.md	docs/archive/plans/milestones/M1/README.md
+R071	docs/plans/milestones/M1/TASK_PLAN.md	docs/archive/plans/milestones/M1/TASK_PLAN.md
+R092	docs/plans/milestones/M2.5-core-foundation.md	docs/archive/plans/milestones/M2.5-core-foundation.md
+R065	docs/plans/milestones/M2.5/README.md	docs/archive/plans/milestones/M2.5/README.md
+R083	docs/plans/milestones/M2.5/TASK_PLAN.md	docs/archive/plans/milestones/M2.5/TASK_PLAN.md
+R068	docs/plans/milestones/M2/README.md	docs/archive/plans/milestones/M2/README.md
+R093	docs/plans/milestones/M2/TASK_PLAN.md	docs/archive/plans/milestones/M2/TASK_PLAN.md
+R069	docs/plans/milestones/M3/README.md	docs/archive/plans/milestones/M3/README.md
+R085	docs/plans/milestones/M3/TASK_PLAN.md	docs/archive/plans/milestones/M3/TASK_PLAN.md
+R087	docs/plans/milestones/M3/slices/2026-11-08-m3-2-content-types-backend.md	docs/archive/plans/milestones/M3/slices/2026-11-08-m3-2-content-types-backend.md
+R091	docs/plans/milestones/M3/slices/2026-11-08-m3-3-content-entry-crud.md	docs/archive/plans/milestones/M3/slices/2026-11-08-m3-3-content-entry-crud.md
+R087	docs/plans/milestones/M3/slices/2026-11-08-m3-4-admin-content-ui.md	docs/archive/plans/milestones/M3/slices/2026-11-08-m3-4-admin-content-ui.md
+R084	docs/plans/milestones/M3/slices/2026-11-08-m3-content-types-and-fields.md	docs/archive/plans/milestones/M3/slices/2026-11-08-m3-content-types-and-fields.md
+R089	docs/plans/milestones/M3/slices/2026-11-09-m3-5-media-library.md	docs/archive/plans/milestones/M3/slices/2026-11-09-m3-5-media-library.md
+R090	docs/plans/milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md	docs/archive/plans/milestones/M3/slices/2026-11-09-m3-6-public-content-rendering.md
+R085	docs/plans/milestones/M3/slices/2026-11-10-post-page-publication-g3.md	docs/archive/plans/milestones/M3/slices/2026-11-10-post-page-publication-g3.md
+R092	docs/plans/milestones/M3/slices/2026-11-11-m3-autonomous-first-tasks.md	docs/archive/plans/milestones/M3/slices/2026-11-11-m3-autonomous-first-tasks.md
+R098	docs/plans/milestones/M3/slices/2026-11-11-m3-remaining-g3.md	docs/archive/plans/milestones/M3/slices/2026-11-11-m3-remaining-g3.md
+R097	docs/plans/milestones/M3/slices/2026-11-11-m3-users-settings-g3.md	docs/archive/plans/milestones/M3/slices/2026-11-11-m3-users-settings-g3.md
+R097	docs/plans/milestones/M3/slices/2026-11-18-content-foundation-g3.md	docs/archive/plans/milestones/M3/slices/2026-11-18-content-foundation-g3.md
+A	docs/archive/plans/milestones/M4/README.md
+R087	docs/plans/milestones/M4/TASK_PLAN.md	docs/archive/plans/milestones/M4/TASK_PLAN.md
+R097	docs/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md	docs/archive/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md
+R100	docs/plans/milestones/M4/slices/2026-11-11-m4-field-binding-g3.md	docs/archive/plans/milestones/M4/slices/2026-11-11-m4-field-binding-g3.md
+R092	docs/plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md	docs/archive/plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md
+R098	docs/plans/milestones/M4/slices/2026-11-17-owner-admin-review-g3.md	docs/archive/plans/milestones/M4/slices/2026-11-17-owner-admin-review-g3.md
+R097	docs/plans/milestones/M4/slices/2026-11-18-content-foundation-g3.md	docs/archive/plans/milestones/M4/slices/2026-11-18-content-foundation-g3.md
+R057	docs/plans/milestones/M5/README.md	docs/archive/plans/milestones/M5/README.md
+R095	docs/plans/milestones/M5/TASK_PLAN.md	docs/archive/plans/milestones/M5/TASK_PLAN.md
+R095	docs/plans/milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md	docs/archive/plans/milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md
+R099	docs/plans/milestones/M5/slices/2026-11-17-beta-remediation-g3.md	docs/archive/plans/milestones/M5/slices/2026-11-17-beta-remediation-g3.md
+R098	docs/plans/milestones/M5/slices/2026-11-17-owner-admin-review-g3.md	docs/archive/plans/milestones/M5/slices/2026-11-17-owner-admin-review-g3.md
+R089	docs/plans/milestones/M6/README.md	docs/archive/plans/milestones/M6/README.md
+R091	docs/plans/milestones/M6/TASK_PLAN.md	docs/archive/plans/milestones/M6/TASK_PLAN.md
+R088	docs/plans/milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md	docs/archive/plans/milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md
+R098	docs/plans/milestones/M6/slices/2026-11-17-beta-remediation-g3.md	docs/archive/plans/milestones/M6/slices/2026-11-17-beta-remediation-g3.md
+R098	docs/plans/milestones/M6/slices/2026-11-17-owner-admin-review-g3.md	docs/archive/plans/milestones/M6/slices/2026-11-17-owner-admin-review-g3.md
+R097	docs/plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md	docs/archive/plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md
+R083	docs/plans/milestones/M7/README.md	docs/archive/plans/milestones/M7/README.md
+R084	docs/plans/milestones/M7/TASK_PLAN.md	docs/archive/plans/milestones/M7/TASK_PLAN.md
+R096	docs/plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md	docs/archive/plans/milestones/M7/slices/2026-11-14-m7-site-features-g3.md
+R096	docs/plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md	docs/archive/plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md
+R098	docs/plans/milestones/M7/slices/2026-11-16-usable-beta-fixes-g3.md	docs/archive/plans/milestones/M7/slices/2026-11-16-usable-beta-fixes-g3.md
+R099	docs/plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md	docs/archive/plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md
+R099	docs/plans/milestones/M7/slices/2026-11-17-owner-admin-review-g3.md	docs/archive/plans/milestones/M7/slices/2026-11-17-owner-admin-review-g3.md
+R097	docs/plans/milestones/M7/slices/2026-11-18-content-foundation-g3.md	docs/archive/plans/milestones/M7/slices/2026-11-18-content-foundation-g3.md
+R097	docs/plans/milestones/M7/slices/2026-11-20-beta-technical-retest-g3.md	docs/archive/plans/milestones/M7/slices/2026-11-20-beta-technical-retest-g3.md
+R084	docs/plans/milestones/M8/README.md	docs/archive/plans/milestones/M8/README.md
+R079	docs/plans/milestones/M8/TASK_PLAN.md	docs/archive/plans/milestones/M8/TASK_PLAN.md
+R096	docs/plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md	docs/archive/plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md
+R099	docs/plans/milestones/M8/slices/2026-11-17-beta-remediation-g3.md	docs/archive/plans/milestones/M8/slices/2026-11-17-beta-remediation-g3.md
+R097	docs/plans/milestones/M8/slices/2026-11-18-csrf-checker-g3.md	docs/archive/plans/milestones/M8/slices/2026-11-18-csrf-checker-g3.md
+R097	docs/plans/milestones/README.md	docs/archive/plans/milestones/README.md
+R082	docs/plans/modules/CNT-01-content-types.md	docs/archive/plans/modules/CNT-01-content-types.md
+R083	docs/plans/modules/CNT-05-media.md	docs/archive/plans/modules/CNT-05-media.md
+R090	docs/plans/modules/OPS-01-backup-restore.md	docs/archive/plans/modules/OPS-01-backup-restore.md
+R090	docs/plans/modules/OPS-02-linux-release.md	docs/archive/plans/modules/OPS-02-linux-release.md
+R089	docs/plans/modules/README.md	docs/archive/plans/modules/README.md
+R087	docs/plans/modules/SITE-01-settings-navigation.md	docs/archive/plans/modules/SITE-01-settings-navigation.md
+R087	docs/plans/modules/SITE-02-seo.md	docs/archive/plans/modules/SITE-02-seo.md
+R087	docs/plans/modules/SITE-03-contact.md	docs/archive/plans/modules/SITE-03-contact.md
+R092	docs/plans/muse-cos-win-phase1-g2.md	docs/archive/plans/muse-cos-win-phase1-g2.md
+R100	docs/plans/templates/MODULE_BRIEF.md	docs/archive/plans/templates/MODULE_BRIEF.md
+R100	docs/plans/templates/SLICE_TASK.md	docs/archive/plans/templates/SLICE_TASK.md
+M	docs/contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md
+M	docs/contracts/ADMIN_REVIEW_2026_11.md
+M	docs/contracts/CONTENT_FOUNDATION_2026_11.md
+M	docs/contracts/CORE_FOUNDATION.md
+M	docs/contracts/M5_THEME_TEMPLATES.md
+M	docs/contracts/M6_PLUGIN_EXTENSIONS.md
+M	docs/contracts/M7_SITE_FEATURES.md
+M	docs/contracts/M8_OPERATIONS_RELEASE.md
+M	docs/contracts/M8_WRITER_INVENTORY.md
+M	docs/contracts/PLUGIN_ABI.md
+M	docs/decisions/ADR-0001-workspace-layout.md
+M	docs/decisions/ADR-0002-core-extension-contract.md
+M	docs/decisions/ADR-0004-m3-post-page-publication-boundary.md
+M	docs/decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md
+M	docs/decisions/ADR-0006-m3-admin-and-release-contracts.md
+M	docs/decisions/ADR-0007-m4-builder-taxonomy-foundation.md
+M	docs/decisions/ADR-0009-m4-core-element-field-binding.md
+M	docs/decisions/ADR-0011-m4-builder-editor-responsive-list.md
+M	docs/decisions/ADR-0013-m6-plugin-extensions.md
+M	docs/decisions/ADR-0014-m7-site-features.md
+M	docs/decisions/ADR-0015-m8-operations-release.md
+M	docs/decisions/ADR-0016-admin-navigation-and-single-edit.md
+M	docs/decisions/ADR-0017-usable-beta-staging.md
+M	docs/decisions/ADR-0018-owner-admin-review.md
+M	docs/decisions/ADR-0019-content-foundation.md
+A	docs/designs/README.md
+A	docs/designs/SITEMAP.md
+D	docs/plans/milestones/M4/README.md
+M	docs/product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md
+M	docs/product/PRODUCT_REQUIREMENTS.md
+M	docs/verification/2026-11-07-m1-m2-source-baseline.md
+M	docs/verification/2026-11-07-m2-5-core-kernel.md
+M	docs/verification/2026-11-08-m3-1-content-domain.md
+M	docs/verification/2026-11-08-m3-2-content-types-backend.md
+M	docs/verification/2026-11-08-m3-3-content-entry-crud.md
+M	docs/verification/2026-11-08-m3-4-admin-content-ui.md
+M	docs/verification/2026-11-09-agent-documentation-reconciliation.md
+M	docs/verification/2026-11-09-m3-5-media-library.md
+M	docs/verification/2026-11-09-m3-6-public-content-rendering.md
+M	docs/verification/2026-11-11-m3-s20-t01-post-page-publication-macos.md
+M	docs/verification/2026-11-11-m3-s24-t01-users-windows.md
+M	docs/verification/2026-11-11-m3-s25-t01-settings-macos.md
+M	docs/verification/2026-11-11-m4-release.md
+M	docs/verification/2026-11-11-m4-s01-t01-builder-core.md
+M	docs/verification/2026-11-11-m4-s02-t01-builder-homepage.md
+M	docs/verification/2026-11-11-m4-s03-t01-taxonomy-terms.md
+M	docs/verification/2026-11-11-m4-s04-t01-entry-terms.md
+M	docs/verification/2026-11-11-m4-s05-t01-field-binding.md
+M	docs/verification/2026-11-11-m4-s06-t01-builder-editor-windows.md
+M	docs/verification/2026-11-11-m4-s09-t01-builder-integration.md
+M	docs/verification/2026-11-11-m4-s10-t01-macos.md
+M	docs/verification/2026-11-11-m4-s10-t02-windows.md
+M	docs/verification/2026-11-12-m4-s05-t02-g5-macos.md
+M	docs/verification/2026-11-12-m4-s06-t01-g5-windows.md
+M	docs/verification/2026-11-12-m4-s07-t01-responsive-g5-windows.md
+M	docs/verification/2026-11-12-m4-s07-t01-responsive-windows.md
+M	docs/verification/2026-11-12-m4-s08-t01-g5-macos.md
+M	docs/verification/2026-11-12-m4-s08-t02-g5-macos.md
+M	docs/verification/2026-11-12-m4-s09-t01-g5-macos.md
+M	docs/verification/2026-11-12-m4-s10-t01-g5-macos.md
+M	docs/verification/2026-11-12-m4-s10-t02-g5-windows.md
+M	docs/verification/2026-11-13-m5-g5-macos.md
+M	docs/verification/2026-11-13-m5-s02-t01-public-context-windows.md
+M	docs/verification/2026-11-14-m7-planning.md
+M	docs/verification/2026-11-14-m7-s01-t01-g5.md
+M	docs/verification/2026-11-14-m7-s02-t01-g5.md
+M	docs/verification/2026-11-14-m7-s03-t01-g5.md
+M	docs/verification/2026-11-14-m7-s03-t02-g5.md
+M	docs/verification/2026-11-14-m7-s07-t01-g5.md
+M	docs/verification/2026-11-14-m8-planning.md
+M	docs/verification/2026-11-14-m8-s03-t01-g5.md
+M	docs/verification/2026-11-14-m8-s04-t01-g5.md
+M	docs/verification/2026-11-14-m8-s04-t02-g5.md
+M	docs/verification/2026-11-14-m8-s05-t01-g5.md
+M	docs/verification/2026-11-16-m6-g5-macos.md
+M	docs/verification/2026-11-16-m6-g5-windows.md
+M	docs/verification/2026-11-16-m6-s08-t01-g5-closure.md
+M	docs/verification/2026-11-16-m7-s09-t01-g5.md
+M	docs/verification/2026-11-16-m7-s09-t02-g5.md
+M	docs/verification/2026-11-17-m5-s11-t01-g5-macos.md
+M	docs/verification/2026-11-17-m6-s09-t01-g5-macos.md
+M	docs/verification/2026-11-17-m7-s15-t01-g5-macos.md
+M	docs/verification/2026-11-17-m7-s15-t03-g5-macos.md
+M	docs/verification/2026-11-17-m7-s15-t04-g5-macos.md
+M	docs/verification/2026-11-17-m7-s15-t05-g5-macos.md
+M	docs/verification/2026-11-17-m8-s10-t01-g5-macos.md
+M	docs/verification/2026-11-17-m8-s10-t02-g5-macos.md
+M	docs/verification/2026-11-18-m3-s31-t01-c1-implementation.md
+M	docs/verification/2026-11-18-m4-s11-t02-g4-macos.md
+M	docs/verification/2026-11-18-m4-s11-t02-g5-macos.md
+M	docs/verification/2026-11-18-m4-s12-t01-c2-implementation.md
+M	docs/verification/2026-11-18-m4-s12-t01-g5-macos.md
+M	docs/verification/2026-11-18-m4-s12-t02-c2-implementation.md
+M	docs/verification/2026-11-18-m5-s12-t01-g4-macos.md
+M	docs/verification/2026-11-18-m5-s12-t01-g5-macos.md
+M	docs/verification/2026-11-19-m4-s12-t02-g5-macos.md
+M	docs/verification/2026-11-19-m6-s11-t01-c4-implementation.md
+M	docs/verification/2026-11-19-m6-s11-t01-g5-macos.md
+M	docs/verification/2026-11-19-m7-s17-t01-g5-macos.md
+M	docs/verification/2026-11-19-m7-s17-t02-admin-implementation.md
+M	docs/verification/2026-11-19-m7-s17-t02-g5-macos.md
+M	docs/verification/2026-11-19-m8-s11-t01-checker-acceptance.md
+M	docs/verification/2026-11-20-beta-technical-retest-macos.md

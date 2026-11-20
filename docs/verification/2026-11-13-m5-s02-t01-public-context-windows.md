@@ -4,7 +4,7 @@
 
 - [Issue #147](https://github.com/thientran2359/opendash-cms/issues/147), approved source/base SHA: 904960e3cb44c3fb90d42c116bc63f18865be0e8.
 - Branch: task/forge-m5-s02-t01 in an isolated worktree.
-- References: [M5 URL contract](../contracts/M5_THEME_TEMPLATES.md), [approved M5 G3](../plans/milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md).
+- References: [M5 URL contract](../contracts/M5_THEME_TEMPLATES.md), [approved M5 G3](../archive/plans/milestones/M5/slices/2026-11-13-m5-theme-templates-g3.md).
 
 ## Implemented
 

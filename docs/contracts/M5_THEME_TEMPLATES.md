@@ -1,5 +1,9 @@
 # M5 Theme & Templates — selected contracts and blocked sub-contracts
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0015`, `0017`–`0021`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
+> **Điểm đã được mở rộng/thay thế:** Quy tắc URL công khai & 404 khi đổi slug (Mục 2) và giới hạn taxonomy `category`/`tag` (Mục 5) đã được mở rộng bởi [`M7_SITE_FEATURES.md`](M7_SITE_FEATURES.md) (`0027`) và [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md) (`0039`–`0041`, 301 redirect, custom taxonomy và provider `rewrite_base`).
+
 **Owner:** Atlas / Nova · **Date:** 2026-11-13 · **Design status:** G2 AGREED (sub-contracts `C-SEC`, `route-context binding`, `A-DURABILITY`, `G-RECOVERY` resolved).
 **Implementation/verification:** NOT_STARTED / NOT_RUN.
 [Decision authority, source SHAs and G3 corrections](../decisions/ADR-0012-m5-theme-templates.md).

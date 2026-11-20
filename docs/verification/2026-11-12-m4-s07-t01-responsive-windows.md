@@ -1,7 +1,7 @@
 # M4-S07-T01 — Responsive homepage, Windows G4 implementation
 
 - **Issue:** [#103](https://github.com/thientran2359/opendash-cms/issues/103), BLD-04 / BLD-04.1, Forge, Full-Track.
-- **Approved source:** [ADR-0011](../decisions/ADR-0011-m4-builder-editor-responsive-list.md) and [G3 brief](../plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md), immutable G3 SHA `690dfa1167f11fba701cf8a0cfa4c36cc5ed29a0`.
+- **Approved source:** [ADR-0011](../decisions/ADR-0011-m4-builder-editor-responsive-list.md) and [G3 brief](../archive/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md), immutable G3 SHA `690dfa1167f11fba701cf8a0cfa4c36cc5ed29a0`.
 - **Implementation baseline:** `origin/main@c42bbc1381d88d2c895eab3653110f4614e424b5`, clean dedicated worktree `task/forge-m4-s07-t01`. Implementation PR records the final head SHA after push.
 - **Verdict:** **G4 local implementation and acceptance PASS**; **G5 independent post-merge verification NOT_RUN at this point**. Project Done and issue closure need separate verified merge evidence.
 

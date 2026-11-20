@@ -2,7 +2,7 @@
 
 - **State:** AGREED for owner-requested Harbor design/implementation workflow, 2026-11-11; effective when the reviewed PR is merged into `main`.
 - **Candidate:** [#73](https://github.com/thientran2359/opendash-cms/issues/73) / M4-P05 / BLD-05.1, Full-Track.
-- **Evidence/inputs:** [G1](../../.agents/research/2026-11-11-m4-p05-field-binding-g1.md), [ADR-0007](ADR-0007-m4-builder-taxonomy-foundation.md) and [M4 TASK_PLAN](../plans/milestones/M4/TASK_PLAN.md). All security/ownership gates of [ADR-0008](ADR-0008-harbor-forge-autonomous-delivery.md) remain in force.
+- **Evidence/inputs:** [G1](../../.agents/research/2026-11-11-m4-p05-field-binding-g1.md), [ADR-0007](ADR-0007-m4-builder-taxonomy-foundation.md) and [M4 TASK_PLAN](../archive/plans/milestones/M4/TASK_PLAN.md). All security/ownership gates of [ADR-0008](ADR-0008-harbor-forge-autonomous-delivery.md) remain in force.
 
 ## Data contract
 

@@ -33,7 +33,7 @@ không hoàn thành công việc; lỗi cosmetic có Issue/owner/giới hạn, k
 security/data. SEO/contact/video và các capability khác vẫn giữ acceptance V1.
 Beta PASS không là M8/V1 VERIFIED: native Windows/Linux/macOS, common RC, deferred
 milestones, notices/license và owner public-release authorization vẫn bắt buộc.
-[G3 checkpoint](../plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md) quy định
+[G3 checkpoint](../archive/plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md) quy định
 case matrix/ownership/sequence; yêu cầu này chưa là evidence nghiệm thu.
 
 **Trạng thái:** Chủ dự án đã xác nhận phạm vi sau vòng rà soát yêu cầu. Tài liệu này là đầu vào cho đánh giá tech stack và có ưu tiên cao hơn các đề xuất thiết kế trước đó.
@@ -62,7 +62,7 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 
 Chủ dự án chốt **phương án A** cho milestone M3: sản phẩm phải sử dụng được trong Admin **gần WordPress**, giao diện xây bằng **Tailwind CSS**, có Dashboard; Posts/Pages với `post` và `page` **built-in**; Media Library ảnh + picker; Users Admin/Editor (list/create/edit/role/password), login/logout; General Settings tối thiểu (site title/tagline/timezone); Appearance→Themes (ZIP install/list/activate cơ bản); Plugins (ZIP install/list/enable/disable). Giữ hoạt động Builder/preview và bảo vệ session/RBAC/CSRF/media; không coi M3 hoàn tất khi chỉ có backend hoặc API.
 
-**Ngoại lệ nhỏ so với giới hạn V1 cũ:** riêng `post`/`page` M3 có trạng thái **draft/published tối thiểu** theo quy tắc Lưu/Xuất bản bên trên (không có approval workflow, scheduled publishing, revision history). Quy trình biên tập đa bước vẫn để sau V1. Taxonomy, plugin CPT/field bridge, video/media delete/reconcile, Builder AST, template/Theme Options, SEO/contact và backup/restore **vẫn nằm trong V1**, nhưng không phải điều kiện đóng M3 phương án A; xem [roadmap](../plans/ROADMAP_V1.md) để biết mốc chính.
+**Ngoại lệ nhỏ so với giới hạn V1 cũ:** riêng `post`/`page` M3 có trạng thái **draft/published tối thiểu** theo quy tắc Lưu/Xuất bản bên trên (không có approval workflow, scheduled publishing, revision history). Quy trình biên tập đa bước vẫn để sau V1. Taxonomy, plugin CPT/field bridge, video/media delete/reconcile, Builder AST, template/Theme Options, SEO/contact và backup/restore **vẫn nằm trong V1**, nhưng không phải điều kiện đóng M3 phương án A; xem [roadmap](../archive/plans/ROADMAP_V1.md) để biết mốc chính.
 
 ## Chỉ đạo chủ dự án — không tương thích ngược, 20/11/2026
 
