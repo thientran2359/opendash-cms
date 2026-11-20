@@ -1,14 +1,5 @@
 # Chuẩn thao tác chung cho 5 agent OpenDash (thủ công trong chat)
 
-**EGM, 20/11/2026:** bắt đầu thiết kế/chia việc từ
-[guide chính](../docs/plans/EGM_WORKFLOW.md). Mỗi topic ghi một coordinator,
-một primary design và handoff đủ source/base/files/dependencies/acceptance.
-Goldfish là reviewer tạm thời đọc-only trong context mới; không thay owner task
-hoặc required PR review. G0–G5 còn là nghĩa vụ/trường tương thích; task mới dùng
-nguồn plans đúng mẫu hiện có, task resume không làm lại pickup. Phân quyền
-section/findings kỹ thuật thuộc coordinator theo ADR-0010, không hỏi owner lại
-cho nội dung đã được ủy quyền. Các thao tác host/Git/GitHub dưới đây giữ nguyên.
-
 > **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao Atlas điều phối và merge mọi PR đủ gate. Nova, Harbor và Forge tự nhận, tự review và merge task đủ điều kiện. G3/Issue/Project Ready, acceptance, required CI và security/data cần bằng chứng. G5 Done cần kiểm chứng riêng.
 
 > **Áp dụng:** Atlas, Nova, Forge, Harbor, Orion. Đây là hướng dẫn cho **chính agent đang được người dùng gọi**, không phải Agent Preflight Check, agent thứ sáu, script, cronjob hoặc Task Watcher. [AGENTS.md](../AGENTS.md) và [GitHub workflow](GITHUB_WORKFLOW.md) là các quy định nền tảng; quyền review/merge tuân theo ADR-0010 và workflow.
@@ -46,7 +37,7 @@ Không có một bước preflight riêng hoặc tiến trình chạy nền; đ�
 
 Áp dụng [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md): ghi Final Decision dựa trên bằng chứng. Atlas chốt quyết định liên task và phân xử bất đồng khi cần. Agent tự chủ triển khai task đủ contract; các gate về quyền, bảo mật và validation vẫn áp dụng.
 
-Theo [discussion-turn-responder](skills/discussion-turn-responder/SKILL.md), kiểm metadata lượt GitHub PR/Issue và `.agents/discussions/`; chỉ phản hồi một lần nếu role/`Next agent` rõ và đến lượt, re-fetch trước POST. Tài khoản GitHub dùng chung không xác định được danh tính agent; khi mơ hồ báo `AMBIGUOUS`, không tự tạo vòng hội thoại.
+Theo [discussion-turn-responder](archive/skills/discussion-turn-responder/SKILL.md), kiểm metadata lượt GitHub PR/Issue và `.agents/discussions/`; chỉ phản hồi một lần nếu role/`Next agent` rõ và đến lượt, re-fetch trước POST. Tài khoản GitHub dùng chung không xác định được danh tính agent; khi mơ hồ báo `AMBIGUOUS`, không tự tạo vòng hội thoại.
 
 
 ## 4. Aster bàn giao sau review qua Chat On Steroids

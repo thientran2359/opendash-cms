@@ -1,5 +1,9 @@
 # M8 Operations and Release — selected G2 contract
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0032`–`0033`, danh mục writer cập nhật tại [`M8_WRITER_INVENTORY.md`](M8_WRITER_INVENTORY.md); xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
+> **Điểm lưu ý đối chiếu codebase:** Bảng `operation_jobs` (`0032`) dùng các cột `actor_user_id`, `summary_json`, `error_code`, `requested_at`. Các sai khác kỹ thuật cần xử lý qua Design Spec EGM mới (như `storage/backup.rs` chưa gom `plugin_revisions`, đường dẫn `secrets/smtp` & `themes/revisions` trong `storage/restore.rs`, và `AdmittedMutation` cho 3 route operations) được theo dõi riêng.
+
 > **Staging addendum 16/11/2026:** [ADR-0017](../decisions/ADR-0017-usable-beta-staging.md)
 > ưu tiên Beta nội bộ Windows trước common RC/V1 public. Không đổi bất kỳ acceptance
 > native/memory/security/data/restore/license nào của contract này. Beta PASS không
@@ -7,7 +11,7 @@
 > 14/11, không phải kết luận hiện trạng implementation; tra Issue/Project và evidence.
 
 **Owner:** Atlas · **Date:** 2026-11-14 · **G2:** AGREED on merge with [ADR-0015](../decisions/ADR-0015-m8-operations-release.md). **Implementation:** NOT_STARTED. **Verification:** NOT_RUN.
-Baseline `8c5b90072c231c1f0813eb593d7be4447fb0a11d`, migration0031. [G1](../../.agents/research/2026-11-14-m8-operations-release-g1.md) · [PRD](../product/PRODUCT_REQUIREMENTS.md) · [G3](../plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md). New interfaces below are future implementation contracts, not current functionality.
+Baseline `8c5b90072c231c1f0813eb593d7be4447fb0a11d`, migration0031. [G1](../../.agents/research/2026-11-14-m8-operations-release-g1.md) · [PRD](../product/PRODUCT_REQUIREMENTS.md) · [G3](../archive/plans/milestones/M8/slices/2026-11-14-m8-operations-release-g3.md). New interfaces below are future implementation contracts, not current functionality.
 
 ## 1. Scope, versions and gates
 

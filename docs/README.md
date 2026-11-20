@@ -1,77 +1,41 @@
-# OpenDash — Mục lục tài liệu
+# OpenDash — Mục lục Tài liệu (`docs/`)
 
-**Checkpoint ưu tiên 16/11/2026:** [ADR-0017 — Usable Beta staging](decisions/ADR-0017-usable-beta-staging.md)
-và [G3 M7-S14](plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md).
-Dev demo, internal Beta và V1 public là ba phạm vi khác nhau; thiết kế không chứng minh
-runtime/human usability. V1/native/security/license gates giữ nguyên.
+Tài liệu kỹ thuật của OpenDash nằm tại `docs/` ở gốc workspace, độc lập với mã nguồn trong [`cms/`](../cms/README.md). Đọc [README gốc](../README.md) để biết cách chạy ứng dụng và kiểm chứng trên máy phát triển.
 
-Tài liệu này nằm tại `docs/` ở gốc workspace `/opendash-cms`, độc lập với mã nguồn trong `cms/`. Đọc [README gốc](../README.md) và [hướng dẫn phát triển CMS](../cms/README.md) để biết cách chạy OpenDash và phạm vi chưa triển khai.
+## Quy trình Thiết kế & Phát triển Chuẩn: EGM (Elephant-Goldfish Model)
 
-## Nguồn quyết định và thứ tự ưu tiên
+Từ ngày **20/11/2026**, OpenDash áp dụng quy trình **EGM (Elephant soạn spec → Goldfish review độc lập → Chủ dự án duyệt → Code & Verify → Drift Report)** thay thế hoàn toàn quy trình G0–G5 cũ:
+
+1. **Nạp ngữ cảnh dự án (`Elephant`):** Đọc skill [`.agents/skills/opendash-elephant/SKILL.md`](../.agents/skills/opendash-elephant/SKILL.md) cùng các tài liệu nền tảng trong `product/`, `architecture/` và `contracts/`.
+2. **Khám phá & Soạn thảo Spec (`/egm-brainstorm` → `/egm-draft`):** Soạn đặc tả thiết kế kỹ thuật (gồm kiến trúc + `## Detailed Implementation Plan`) tại [`docs/designs/<feature>.md`](designs/README.md) và đăng ký vào [`docs/designs/SITEMAP.md`](designs/SITEMAP.md).
+3. **Review Độc lập bằng Goldfish (`/egm-review` / `/egm-review-loop` + `/egm-resolve`):** Các subagent Goldfish trong ngữ cảnh mới kiểm tra spec đối chiếu với code thật trong `cms/` và các hợp đồng trong `contracts/` trước khi chủ dự án duyệt.
+4. **Triển khai & Kiểm chứng (`Implement & Verify`):** Viết code theo `## Detailed Implementation Plan`, chạy `check-standards.py`, `check-plans.py`, `cargo test` và lưu bằng chứng vào [`docs/verification/`](verification/README.md).
+5. **Kiểm tra Độ lệch Định kỳ (`/egm-drift-report`):** Đối chiếu tài liệu trong `docs/` với codebase thật trong `cms/`.
+
+## Nguồn Quyết định và Thứ tự Ưu tiên
 
 1. Chỉ đạo mới nhất của chủ dự án.
-2. [Yêu cầu sản phẩm V1](product/PRODUCT_REQUIREMENTS.md) — phạm vi sản phẩm đã duyệt.
-3. [Tech stack](architecture/TECH_STACK.md) — các lựa chọn kỹ thuật đã duyệt.
-4. [Kiến trúc CMS](architecture/CMS_ARCHITECTURE.md), [ADR-0001](decisions/ADR-0001-workspace-layout.md), [ADR-0002](decisions/ADR-0002-core-extension-contract.md), [ADR-0003](decisions/ADR-0003-agent-consensus-governance.md), [ADR-0005](decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) và [ADR-0010](decisions/ADR-0010-agent-project-and-merge-authority.md) — ranh giới module, core extension và quyền điều phối, triển khai, merge hiện hành.
-5. [Bộ khung lõi & Quy chuẩn code](contracts/CORE_FOUNDATION.md) và [Plugin ABI v1](contracts/PLUGIN_ABI.md) — contract core kernel, quy chuẩn phân tầng và runtime/SDK.
+2. [Yêu cầu sản phẩm V1](product/PRODUCT_REQUIREMENTS.md) — phạm vi sản phẩm và ràng buộc nghiệp vụ đã xác nhận.
+3. [Bộ khung lõi & Quy chuẩn code](contracts/CORE_FOUNDATION.md), [Plugin ABI](contracts/PLUGIN_ABI.md) và [Writer & Recovery Inventory](contracts/M8_WRITER_INVENTORY.md) — các bất biến phân tầng, Base APIs, sandbox Wasmi và khóa bảo trì `SiteCoordinator`.
+4. [Design Sitemap (`docs/designs/SITEMAP.md`)](designs/SITEMAP.md) — danh mục các đặc tả thiết kế EGM và các hợp đồng nền tảng (`M5`–`M8`, Admin Navigation, Owner Admin Review, Content Foundation `0001`–`0041`).
+5. [Tech stack](architecture/TECH_STACK.md) và [Kiến trúc CMS](architecture/CMS_ARCHITECTURE.md) — cấu trúc workspace 2 crate (`opendash-core`, `opendash-server`) + React Admin.
 
-## Tra cứu theo mục đích
-
-**Điểm vào phát triển với EGM (20/11/2026):** [OpenDash EGM workflow](plans/EGM_WORKFLOW.md)
-quy định chọn luồng theo công việc, phân quyền, một bản thiết kế chính và handoff
-giữa agent. Aster chịu trách nhiệm integration trong [#414](https://github.com/thientran2359/opendash-cms/issues/414).
-Primary draft mới ở `.agents/research/` đến khi chấp nhận rồi promote qua PR;
-`docs/designs/BUILDER_THEME_CONTENT.md` Proposed là ngoại lệ lịch sử và pilot
-được đề xuất, chưa cấp implementation Ready. Research/report hỗ trợ không là
-nguồn quyết định cạnh tranh; Issue/Project vẫn giữ task state.
-
-Bổ sung ngày 19/11/2026: [Builder template và content](product/BUILDER_TEMPLATE_AND_CONTENT.md)
-phân biệt template/thành phần dùng lại với content từng bản ghi có đăng ký Builder;
-hierarchy tham chiếu WordPress, nguồn theme/database và home/archive tách biệt; bỏ yêu cầu chuyển homepage legacy thành Page. Yêu cầu đã xác nhận, chưa là API/schema G2, G3 hay runtime evidence.
-
-Bổ sung sản phẩm đã xác nhận ngày 15/11/2026: [Admin Navigation và bố cục màn hình chỉnh sửa](product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) — menu/submenu, vùng đăng ký panel và vị trí nhóm custom fields; [ADR-0016](decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) đã đạt `G2 AGREED` và merge tại `main@2808e3e` ([receipt #270](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) · [#268](https://github.com/thientran2359/opendash-cms/issues/268)); đặc tả [G3 (`M7-S09-T01`–`M7-S13-T02`)](plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md) đã soạn xong (`Implementation NOT_STARTED / Verification NOT_RUN`, chưa cấp `Project Ready`).
+## Cấu trúc Thư mục `docs/`
 
 | Mục đích | Vị trí | Quy ước |
 | --- | --- | --- |
-| Phạm vi và hành vi sản phẩm | [`product/`](product/PRODUCT_REQUIREMENTS.md) | Đã xác nhận, thay đổi cần chỉ đạo của chủ dự án |
-| Kiến trúc và lựa chọn stack | [`architecture/`](architecture/CMS_ARCHITECTURE.md) | Ghi rõ đề xuất và quyết định; [CMS_PROPOSAL](architecture/CMS_PROPOSAL.md) chỉ tham khảo có chọn lọc |
-| Nghiên cứu, thảo luận chưa duyệt | [`.agents/research/`](../.agents/research/README.md) và [`.agents/discussions/`](../.agents/discussions/README.md) | Lưu bản nháp ngoài `docs/`; tài liệu lịch sử còn giữ để truy vết nguồn |
-| Giao diện kỹ thuật giữa các phần | [`contracts/`](contracts/CORE_FOUNDATION.md) — [Core Foundation](contracts/CORE_FOUNDATION.md) · [Plugin ABI](contracts/PLUGIN_ABI.md) · [Admin Navigation & Single Edit (G2 AGREED)](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) | Contract có version, trạng thái `AGREED` khác `verified` |
-| Quyết định kiến trúc & điều phối | [`decisions/`](decisions/ADR-0001-workspace-layout.md) — [ADR-0001](decisions/ADR-0001-workspace-layout.md) · [ADR-0002](decisions/ADR-0002-core-extension-contract.md) · [ADR-0003](decisions/ADR-0003-agent-consensus-governance.md) · [ADR-0005](decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md) · [ADR-0008](decisions/ADR-0008-harbor-forge-autonomous-delivery.md) · [ADR-0010](decisions/ADR-0010-agent-project-and-merge-authority.md) · [ADR-0016](decisions/ADR-0016-admin-navigation-and-single-edit.md) | ADR có bối cảnh, quyết định, hệ quả, reviewer nếu cần và trạng thái |
-| Roadmap và danh mục module | [Roadmap V1](plans/ROADMAP_V1.md) · [Module Catalog](plans/MODULE_CATALOG_V1.md) · [Quy trình](plans/PLANNING_WORKFLOW.md) | Hai trục chức năng và tiến độ, ID module, research/design gates, mẫu task |
-| Kế hoạch triển khai | [`plans/`](plans/README.md) · [Milestones](plans/milestones/README.md) · [M3/Slices](plans/milestones/M3/README.md) | Milestone quy định điều kiện đóng mốc; slice là phần thực hiện, không phân thư mục theo trạng thái Ready/Done |
-| Module/Capability xuyên milestone | [`plans/modules/`](plans/modules/README.md) · [Module Catalog](plans/MODULE_CATALOG_V1.md) | Nguồn mô tả chức năng, G0–G3 và dependency; module có thể thuộc nhiều milestone |
-| Hồ sơ lịch sử | [`archive/`](archive/README.md) | Chỉ lưu hồ sơ lịch sử/retired, không tự archive một task chỉ vì đã triển khai code |
-| Bằng chứng thực thi | [`verification/`](verification/README.md) | Chỉ ghi `verified` khi có lệnh, môi trường và kết quả thực tế |
-| Điều phối agent | [Giao thức hiện hành](discussions/PROTOCOL.md) · [Quy trình GitHub](../.agents/GITHUB_WORKFLOW.md) · [Handoff cũ](discussions/AGENT_COORDINATION.md) | Handoff trước đây chỉ để tham khảo, không còn là cơ chế hoạt động |
+| **Đặc tả thiết kế tính năng (EGM)** | [`designs/`](designs/README.md) · [**`SITEMAP.md`**](designs/SITEMAP.md) | Mỗi tính năng 1 file spec hoàn chỉnh (`FeatureRange` + `Detailed Implementation Plan`); đăng ký trong `SITEMAP.md` |
+| **Phạm vi và hành vi sản phẩm** | [`product/`](product/PRODUCT_REQUIREMENTS.md) — [PRODUCT_REQUIREMENTS](product/PRODUCT_REQUIREMENTS.md) · [Admin Navigation & Edit Screen](product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md) | Ràng buộc sản phẩm cốt lõi đã xác nhận bởi chủ dự án |
+| **Kiến trúc và lựa chọn stack** | [`architecture/`](architecture/CMS_ARCHITECTURE.md) — [CMS_ARCHITECTURE](architecture/CMS_ARCHITECTURE.md) · [TECH_STACK](architecture/TECH_STACK.md) | Ranh giới crate, `SitePaths`, luồng dữ liệu và các thư viện đã pin |
+| **Hợp đồng kỹ thuật (Contracts)** | [`contracts/`](contracts/CORE_FOUNDATION.md) — [Core Foundation](contracts/CORE_FOUNDATION.md) · [Plugin ABI](contracts/PLUGIN_ABI.md) · [Writer Inventory](contracts/M8_WRITER_INVENTORY.md) · [M5](contracts/M5_THEME_TEMPLATES.md) · [M6](contracts/M6_PLUGIN_EXTENSIONS.md) · [M7](contracts/M7_SITE_FEATURES.md) · [M8](contracts/M8_OPERATIONS_RELEASE.md) · [Admin Nav & Single Edit](contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) · [Admin Review 2026-11](contracts/ADMIN_REVIEW_2026_11.md) · [Content Foundation 2026-11](contracts/CONTENT_FOUNDATION_2026_11.md) | Hợp đồng kỹ thuật và bất biến hệ thống; dùng làm `GoldfishContext` khi review spec và kiểm tra drift |
+| **Quyết định kiến trúc (ADR)** | [`decisions/`](decisions/ADR-0001-workspace-layout.md) (`ADR-0001` đến `ADR-0019`) | Hồ sơ các quyết định kiến trúc đã chốt qua các giai đoạn phát triển |
+| **Bằng chứng thực thi** | [`verification/`](verification/README.md) | Kết quả build, test, smoke/E2E và audit thực chạy kèm SHA và môi trường |
+| **Hồ sơ lịch sử** | [`archive/`](archive/README.md) (`archive/plans/`, `archive/discussions/`, `archive/migrations/`, [`research/`](research/README.md)) | Lưu trữ toàn bộ kế hoạch G0–G5 cũ, thảo luận cũ và tài liệu nghiên cứu ban đầu để truy vết lịch sử |
 
-Không tạo thư mục/module rỗng chỉ để khớp sơ đồ. Khi nguồn mã được đưa vào, đối chiếu cây thư mục và kiểm thử trước khi sửa tài liệu trạng thái.
+Sau khi cập nhật tài liệu trong `docs/`, luôn chạy:
 
-Xem [báo cáo chuyển thư mục ngày 07/11/2026](verification/2026-11-07-layout-migration.md) cho thay đổi `cms/`, `database/` và các kiểm chứng sau di chuyển.
-
-
-### Content foundation follow-up (18/11/2026)
-
-[ADR-0019](decisions/ADR-0019-content-foundation.md) ·
-[contract](contracts/CONTENT_FOUNDATION_2026_11.md) ·
-[task index](plans/TASK_INDEX.md#content-foundation-follow-up--18112026).
-CPT configuration, custom taxonomy, shared permalink resolver and provider integration;
-design only until separately implemented/verified.
-
-### Builder resolver follow-up (19/11/2026)
-
-[ADR-0020](decisions/ADR-0020-builder-template-resolver.md) ·
-[Resolver G2](contracts/BUILDER_TEMPLATE_RESOLVER.md): hierarchy trước, nguồn
-database/theme sau; parts/content riêng; Settings chọn Page Trang chủ và Page
-Blog làm archive post. Không convert homepage legacy thành Page content.
-Final Decision của Atlas trong working tree, contract hiệu lực sau merge;
-G3/API/schema tổng thể chưa hoàn chỉnh, runtime NOT_RUN.
-
-### Builder/theme — bản chuyển sang đặc tả EGM (20/11/2026)
-
-[Đặc tả EGM Builder content, resolver và cấu trúc theme](designs/BUILDER_THEME_CONTENT.md)
-chuyển đầy đủ các quyết định đã chốt tại commit `4a334f0224866108002e8586b04f5643da0798c9`,
-kèm cấu trúc thư mục theme, Page layouts, Section, candidate matrix và bảng đối chiếu nguồn.
-Trạng thái **Proposed** của bản chuyển tài liệu không hủy các quyết định sản phẩm đã duyệt;
-chưa là Goldfish-review PASS, contract API/schema hoàn chỉnh, implementation Ready hay runtime evidence.
-Các nguồn gốc vẫn giữ nguyên để truy vết; không tự đổi ownership/Issue/Project hoặc triển khai CMS.
+```powershell
+python cms/scripts/check-plans.py
+python cms/scripts/check-plans.py --self-test
+git diff --check
+```

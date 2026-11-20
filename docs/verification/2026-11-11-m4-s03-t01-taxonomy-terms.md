@@ -1,7 +1,7 @@
 # M4-S03-T01 — Category cha–con và tag trong Admin
 
 - **Task:** [#79](https://github.com/thientran2359/opendash-cms/issues/79) · CNT-03.1 · Harbor (CoS macOS).
-- **Contract:** [ADR-0007 § P09](../decisions/ADR-0007-m4-builder-taxonomy-foundation.md) · [G3 slice](../plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md).
+- **Contract:** [ADR-0007 § P09](../decisions/ADR-0007-m4-builder-taxonomy-foundation.md) · [G3 slice](../archive/plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md).
 - **Approved source:** `0e3d9886afa6115f84d97aa8905bc29f18fa56cb`.
 - **Implementation base:** `aa512c1a376f64391676ca16ba36ee82e902e3ac` (includes [ADR-0008](../decisions/ADR-0008-harbor-forge-autonomous-delivery.md)).
 - **Implementation head:** xem commit và head SHA của task PR #79 trong phần review/Issue; kết quả sau merge phải được đối chiếu với head của PR.

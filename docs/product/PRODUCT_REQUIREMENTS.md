@@ -1,152 +1,51 @@
-# OpenDash — Yêu cầu sản phẩm bản đầu
+# OpenDash — Yêu cầu Sản phẩm V1
 
-## Delivery stages — Usable Beta (cập nhật 17/11/2026)
+> Tài liệu này xác định phạm vi và hành vi sản phẩm cốt lõi của OpenDash V1. Mọi thay đổi phạm vi sản phẩm cần được chủ dự án phê duyệt thông qua quy trình [EGM](../../AGENTS.md).
 
-Theo [quyết định #292](https://github.com/thientran2359/opendash-cms/issues/292#issuecomment-6917897791)
-và [ADR-0017](../decisions/ADR-0017-usable-beta-staging.md), ưu tiên **Usable Beta nội bộ
-macOS → common RC → V1 public**. Giữ nguyên Rust/SQLite/single executable, Linux VPS,
-Builder/plugin server logic và phạm vi V1. Nội dung đã xác nhận bên dưới vẫn áp dụng.
-
-Theo chỉ đạo mới của chủ dự án: Aster tự review/chốt kỹ thuật, Harbor triển khai
-các sửa lỗi Beta và technical retest; chỉ tham gia thảo luận liên-agent khi
-chủ dự án tạo thảo luận. Xem cập nhật ownership tại ADR-0017.
-
-Beta phải chứng minh site trống → bootstrap/login → Post/Page/CPT + field groups →
-media/taxonomy/menu → theme ZIP/sample import không ghi đè → Builder homepage/header/
-footer/single/archive → restart/provider changes giữ dữ liệu/layout → backup/restore
-root mới → operator kích hoạt → re-edit. Desktop editing và responsive preview/public
-không tự chứng nhận mobile authoring hoặc thiết bị thật. Semantics Lưu/Xuất bản giữ nguyên:
-draft không public, preview chưa lưu không đổi public. Save template dùng chung có thể
-cập nhật public; Save Builder content phải theo publication của bản ghi, kể cả Page
-được chọn làm trang chủ. Xem [phân định Builder ngày 19/11](BUILDER_TEMPLATE_AND_CONTENT.md).
-
-Biên tập thường ngày qua Admin, không SQL/API thủ công/edit file. Operator được chuẩn bị
-binary/môi trường và kích hoạt restored root theo ADR-0015; không hot-swap. Beta dùng
-dữ liệu thử/site cô lập; public routes của instance nội bộ không là deploy Internet.
-Pin source/binary/fixture hashes; demo Mộc Studio hoặc capability tests không thay
-cold walkthrough. Ít nhất một người thử không viết code thực hiện kịch bản, ghi thời gian
-và trợ giúp, tách khỏi agent/automated QA. Aster điều phối người thử, không mặc định owner.
-Thiếu người thử không chặn audit/sửa lỗi nhưng chưa đạt human usability readiness.
-
-Beta exit cần tất cả hành trình bắt buộc đạt, không blocker security/data/recovery hoặc
-không hoàn thành công việc; lỗi cosmetic có Issue/owner/giới hạn, không dùng để waive
-security/data. SEO/contact/video và các capability khác vẫn giữ acceptance V1.
-Beta PASS không là M8/V1 VERIFIED: native Windows/Linux/macOS, common RC, deferred
-milestones, notices/license và owner public-release authorization vẫn bắt buộc.
-[G3 checkpoint](../plans/milestones/M7/slices/2026-11-16-usable-beta-g3.md) quy định
-case matrix/ownership/sequence; yêu cầu này chưa là evidence nghiệm thu.
-
-**Trạng thái:** Chủ dự án đã xác nhận phạm vi sau vòng rà soát yêu cầu. Tài liệu này là đầu vào cho đánh giá tech stack và có ưu tiên cao hơn các đề xuất thiết kế trước đó.
-
-## Đối tượng và ưu tiên
+## 1. Đối tượng và Ưu tiên
 
 OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng quen WordPress, với hệ theme và plugin riêng. Ưu tiên dễ sử dụng, dễ bảo trì, ra sản phẩm nhanh và cài đặt nhanh.
 
-## Cài đặt, vận hành và phân phối
+- **Giai đoạn phát hành:** Usable Beta nội bộ (ưu tiên macOS cho cold walkthrough) → common Release Candidate (RC) → V1 public (Windows, macOS, Linux VPS).
+- **Cơ chế phân phối:** Rust + SQLite, đóng gói thành **một file thực thi duy nhất** (`opendash` / `opendash.exe`). Mỗi bản cài quản lý một website.
+- **Vận hành:** Developer hoặc quản trị máy chủ triển khai trên VPS Linux (hoặc chạy cục bộ trên macOS/Windows); chủ website làm việc qua trình duyệt. Giao diện Admin ưu tiên tiếng Việt; mỗi website phục vụ một ngôn ngữ nội dung. Công khai mã nguồn (giấy phép và mô hình thu phí do chủ dự án chốt trước khi phát hành công khai).
+- **Sao lưu & Phục hồi:** Admin cho sao lưu (mã hóa bằng passphrase) và phục hồi thủ công sang site root mới (Safe Mode trước khi kích hoạt tường minh), bao gồm DB, media, cấu hình, theme, plugin và SMTP secrets.
 
-- Dùng Rust, SQLite và phân phối CMS bằng một file thực thi. Mỗi bản cài quản lý một website.
-- Developer hoặc người quản trị máy chủ cài trên VPS Linux. Chủ website làm việc qua trình duyệt. macOS là môi trường phát triển và thử Usable Beta ưu tiên; Windows tiếp tục được hỗ trợ và kiểm chứng ở common RC/V1.
-- Admin cho sao lưu và phục hồi thủ công, bao gồm nội dung, ảnh, cấu hình, theme và plugin.
-- Mỗi website phục vụ một ngôn ngữ nội dung. Giao diện Admin ưu tiên tiếng Việt.
-- Công khai mã nguồn. Giấy phép và mô hình thu phí còn mở.
+## 2. Nội dung, Lưu vs Xuất bản và Phân quyền
 
-## Nội dung, lưu và phân quyền
+- **Loại nội dung & Trường tùy chỉnh:** Quản trị viên tạo loại nội dung tùy chỉnh (CPT), nhóm custom fields (9 kiểu: `short_text`, `long_text`, `rich_text`, `number`, `toggle`, `date`, `select`, `image`, `gallery`), custom taxonomy (có thể phân cấp cha–con hoặc phẳng) và gắn quyền truy cập theo 3 trục (`min_view_role`, `min_edit_role`, `public_exposure`).
+- **Tài nguyên sẵn có:** Built-in `post`, `page` và private `section` CPT (dùng cho thư viện mẫu cục bộ, không công khai URL riêng); built-in `category` (phân cấp) và `tag` (phẳng).
+- **Phân biệt Lưu và Xuất bản:**
+  - Với `post`, `page` và các CPT cấu hình `publication: "draft_publish"`, **Lưu** bản `draft` chỉ ghi vào DB, không hiển thị trên URL công khai, archive, sitemap hoặc media public; chỉ thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một bài đã `published` sẽ cập nhật nội dung công khai. Preview draft yêu cầu phiên đăng nhập/quyền hợp lệ.
+  - Với **Visual Builder** (homepage, template overrides, exact Page Builder, Section Builder) và CPT cấu hình `immediate`, **Lưu** cập nhật trực tiếp ngay (không có workflow draft đa bước).
+- **Hai vai trò:** `Admin` (quản lý hệ thống, cấu hình, schema CPT/taxonomy, theme, plugin, users, backup/restore) và `Editor` (quản lý nội dung, media, page/section được phép; không truy cập cấu hình hệ thống).
+- **Bảo toàn bản nháp:** Thay đổi chưa lưu trên form được giữ lại khi gặp lỗi `401` (quarantine trước khi đăng nhập lại và kiểm quyền hiệu lực) hoặc `412` (CAS conflict).
 
-- Quản trị viên tạo loại nội dung tùy chỉnh (CPT), custom fields, danh mục có cha–con và thẻ qua giao diện. Theme/plugin có thể định nghĩa sẵn các thành phần này.
-- Các field bản đầu gồm chữ ngắn/dài, trình soạn thảo nội dung, số, bật/tắt, ngày, lựa chọn, ảnh và thư viện ảnh.
-- Người nhập liệu có thể làm việc qua form. Template lấy dữ liệu của nội dung tương ứng để hiển thị.
-- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. **Phân biệt Lưu và Xuất bản:** với `post`/`page` đang ở `draft`, **Lưu** chỉ ghi bản nháp vào DB, không làm nội dung xuất hiện trên URL công khai, archive, sitemap hoặc media public qua tham chiếu draft. Chỉ chuyển trạng thái sang `published` bằng thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một `post`/`page` đã `published` cập nhật nội dung công khai. Preview draft phải yêu cầu phiên đăng nhập/quyền hợp lệ. **Builder content tuân theo publication của bản ghi**, kể cả Page được chọn làm trang chủ; mở hoặc lưu Builder không tự xuất bản. Theo [ADR-0019](../decisions/ADR-0019-content-foundation.md), CPT khác có thể chọn `draft_publish`; mặc định CPT cũ vẫn immediate, chuyển chế độ không tự xuất bản draft. Template trang đầu và content của Page là hai phạm vi riêng theo [yêu cầu ngày 19/11](BUILDER_TEMPLATE_AND_CONTENT.md); không yêu cầu chuyển homepage legacy thành Page, phải giữ dữ liệu hiện hữu. Phần trạng thái/endpoint/schema cụ thể cần G2 trước triển khai.
-- Hai vai trò là Quản trị viên và Biên tập viên. Quản trị viên quản lý hệ thống, cấu hình, theme và plugin. Biên tập viên quản lý và cập nhật nội dung công khai.
+## 3. Điều hướng Admin & Màn hình Single Edit
 
-## Quyết định bổ sung M3 — Core CMS usable (10/11/2026)
+- **Điều hướng 3 nhóm có nhãn** (tham chiếu chi tiết tại [Admin Navigation & Edit Screen](ADMIN_NAVIGATION_AND_EDIT_SCREEN.md)):
+  - **Nội dung:** `Tổng quan` (Dashboard), `Bài viết` (danh sách, thêm mới, chuyên mục, thẻ), `Trang`, `Thư viện media` (ảnh & video độc lập), `Section` và các CPT đang hoạt động.
+  - **Giao diện:** `Giao diện` (Themes, Menus), `Tùy chỉnh giao diện` (Theme Options, Visual Builder), `Loại nội dung & Trường` (tách biệt hoàn toàn khỏi màn nhập liệu entry), `Taxonomy tùy chỉnh`, `Thư viện mẫu`.
+  - **Tùy chỉnh:** `Plugins`, `Người dùng / Hồ sơ của tôi`, `Công cụ` (Sao lưu & Phục hồi, Đối soát media, Tình trạng hệ thống), `Cài đặt` (Tổng quát, Đường dẫn tĩnh, SEO website, Liên hệ, Thông báo Email SMTP).
+- **Màn hình Single Edit:** Chia vùng cố định (`header_bar` do Core sở hữu, `main_top`, `main_primary`, `main_bottom`, `sidebar`; tự động xếp thành 1 cột trên mobile `< 1024px`). Các field nhóm mở rộng và core tham gia chung một lần Lưu nguyên tử (`CompositeEntrySaveInput`).
 
-Chủ dự án chốt **phương án A** cho milestone M3: sản phẩm phải sử dụng được trong Admin **gần WordPress**, giao diện xây bằng **Tailwind CSS**, có Dashboard; Posts/Pages với `post` và `page` **built-in**; Media Library ảnh + picker; Users Admin/Editor (list/create/edit/role/password), login/logout; General Settings tối thiểu (site title/tagline/timezone); Appearance→Themes (ZIP install/list/activate cơ bản); Plugins (ZIP install/list/enable/disable). Giữ hoạt động Builder/preview và bảo vệ session/RBAC/CSRF/media; không coi M3 hoàn tất khi chỉ có backend hoặc API.
+## 4. Visual Builder và Theme
 
-**Ngoại lệ nhỏ so với giới hạn V1 cũ:** riêng `post`/`page` M3 có trạng thái **draft/published tối thiểu** theo quy tắc Lưu/Xuất bản bên trên (không có approval workflow, scheduled publishing, revision history). Quy trình biên tập đa bước vẫn để sau V1. Taxonomy, plugin CPT/field bridge, video/media delete/reconcile, Builder AST, template/Theme Options, SEO/contact và backup/restore **vẫn nằm trong V1**, nhưng không phải điều kiện đóng M3 phương án A; xem [roadmap](../plans/ROADMAP_V1.md) để biết mốc chính.
+- **Visual Builder:** Hoạt động trên máy tính với cây 4 tầng `Section → Row → Column → Element` (`Heading`, `Text`, `Image`, `Button`, `ContentList`, `ContactForm`, `Video`), inspector thuộc tính và iframe preview theo 3 viewport (`desktop`, `tablet`, `mobile`).
+- **Phạm vi chỉnh sửa:** Dựng và chỉnh được homepage, `header`, `footer`, `archive`, `single`, `taxonomy_archive`, từng Page cụ thể (`entry`-scoped) và các private `Section` dùng lại bằng cách sao chép AST.
+- **Theme ZIP:** Hỗ trợ block, template (`C-SEC` safe subset), Theme Options, khai báo CPT/fields/taxonomy/`rewrite_base` và nhập dữ liệu mẫu chọn lọc (không ghi đè nội dung hiện có). Đổi hoặc cập nhật theme vẫn giữ nguyên CPT, nội dung và bố cục người dùng đã chỉnh.
 
-## Chỉ đạo chủ dự án — không tương thích ngược, 20/11/2026
+## 5. Plugin
 
-OpenDash đang phát triển, chưa có bản sản phẩm cũ cần hỗ trợ. Thiết kế mới
-không phải giữ format theme/API/schema cũ, adapter legacy, dual-read/dual-write,
-converter hay lộ trình upgrade từ các bản thử nghiệm. Chốt một format/API/schema
-đích thống nhất; cập nhật source, fixtures và kiểm chứng theo cùng baseline mới.
-Những điều khoản tương thích ngược trong tài liệu lịch sử không ràng buộc
-phạm vi thiết kế mới này. Không phát sinh task compatibility riêng.
+- **Plugin ZIP & Sandbox:** Cài plugin ZIP không cần biên dịch lại CMS; logic server chạy WebAssembly qua **Wasmi** trong worker cô lập tiến trình, giới hạn tài nguyên (fuel, RAM 16 MiB, deadline 5s) và HTTP egress chống SSRF.
+- **Khả năng mở rộng:** Plugin khai báo CPT/fields/taxonomy/`rewrite_base`, hooks (`page/after_save`, `content/before_save`, `content/after_save`), standalone actions, Admin UI khai báo (form, bảng, list, tabs, button) và panel/column mở rộng.
+- **Quyền & Phục hồi:** Quyền hợp lệ được áp dụng tự động theo khai báo; chặn thao tác ngoài quyền; tắt/lỗi plugin vẫn giữ nguyên CPT, schema, giá trị đã nhập và tham chiếu media để tiếp tục quản lý trong Admin.
 
-Điều này không bỏ yêu cầu sản phẩm bảo toàn content/layout khi người dùng
-đổi/cập nhật theme, hay quyền, publication, backup/restore trong mô hình mới.
-Không tự xóa dữ liệu hoặc thư mục hiện có để thực hiện quyết định thiết kế.
+## 6. Tính năng tích hợp sẵn
 
-## Builder và theme
+- **Media:** Upload và quản lý ảnh (JPEG/PNG/WebP) và video (MP4), kiểm soát quyền truy cập media theo trạng thái xuất bản/`public_exposure`, xóa an toàn theo tham chiếu (`media_refs`) và đối soát/quarantine.
+- **Liên hệ & SEO:** Tạo contact form qua Admin/Builder, lưu submissions, gửi thông báo qua SMTP TLS/STARTTLS; cấu hình đường dẫn tĩnh (permalinks) với 301 redirect tự động, tiêu đề/mô tả SEO, OG image, canonical, `robots.txt` và `sitemap.xml`.
 
-- Builder dùng trên máy tính, có cây Section → Row → Column → Element và bảng thuộc tính trong sidebar, bên cạnh là preview. Người dùng chọn phần tử từ cây hoặc preview.
-- Phân biệt **Builder template/thành phần dùng lại** (header, footer, archive, mẫu single, section…) và **Builder content của từng bản ghi**. Template single xác định bố cục chung và vị trí content; sửa content một bản ghi chỉ ảnh hưởng bản ghi đó. Hỗ trợ bố cục và preview cho desktop, tablet và mobile.
-- Page/Post/CPT chỉ dùng Builder cho content khi loại nội dung đăng ký hỗ trợ Builder. Khả năng này độc lập với trình soạn thảo nội dung thông thường; không mặc định mọi CPT đều có Builder. Đổi cấu hình hoặc provider không được xóa content/layout đã lưu.
-- Chọn template theo hierarchy tham chiếu WordPress, phân biệt template trang chủ (`home`), archive bài viết (`archive-post` → `archive`), single/archive cho mọi CPT (gồm Post/Page); header/footer là template parts. Không dùng role `front-page` hoặc `blog`; Page mặc định dùng `page` và cho chọn Page layout khi chỉnh sửa (bổ sung 20/11/2026). Tách nguồn template của theme đang active khỏi bản tùy chỉnh Builder lưu database; bản tùy chỉnh ưu tiên bản theme tương ứng và phải hiển thị rõ nguồn trong Admin. Thứ tự cụ thể đã được Atlas chốt tại [resolver G2](../contracts/BUILDER_TEMPLATE_RESOLVER.md), có hiệu lực contract sau merge; chưa là implementation.
-- Admin trong **Cài đặt** chọn một Page làm **Trang chủ** tại `/` và một Page khác làm **Trang bài viết (Blog)** để hiển thị archive của built-in `post`. Homepage dùng content của Page đã chọn; Blog dùng `archive-post` nếu có, nếu không dùng `archive` mặc định, không dùng body Page làm danh sách bài. Cả hai Page xuất hiện trong danh sách Trang. Không convert homepage legacy cũ sang Page content mới; bảo toàn dữ liệu cũ không đồng nghĩa giữ một chế độ homepage legacy trong mô hình đích. Chi tiết tại [Builder template và content](BUILDER_TEMPLATE_AND_CONTENT.md).
-- Template dùng chung có thể liên kết thuộc tính của block với field của nội dung. Block danh sách cho chọn CPT, danh mục, thứ tự, số lượng và phân trang.
-- Developer thêm block, template và Theme Options trong gói ZIP cài trực tiếp, không cần biên dịch lại CMS. CMS tạo màn hình setting từ khai báo và cung cấp giá trị cho block/template. Phân biệt setting chung của website và tùy chỉnh riêng của theme.
-- Gói theme có thể chứa trang, menu, hình ảnh và cấu hình mẫu. Người dùng chủ động chọn nhập mẫu, quá trình nhập không ghi đè nội dung hiện có.
-- Đổi hoặc cập nhật theme giữ nội dung và bố cục người dùng đã chỉnh. Người dùng chủ động chọn thay thế bằng thiết kế mặc định mới.
+## 7. Ngoài phạm vi bản đầu (Sau V1)
 
-### Cấu trúc theme và Page layout — bổ sung 20/11/2026
-
-Template chính và header/footer đặt root theme; các thư mục template-part/,
-page-layouts/, sections/ và assets/ phân biệt thành phần nhỏ, layout Page,
-Section liên kết Admin và tài nguyên tĩnh. Page mặc định dùng page.html; chọn
-layout không đổi content. Section theme có bản tùy chỉnh database và giữ khi
-update/đổi theme; chèn vẫn COPY, chưa synced propagation. Xem [đặc tả chi tiết](BUILDER_TEMPLATE_AND_CONTENT.md).
-Cách developer viết custom Builder block sẽ thảo luận riêng sau; ví dụ đã
-trao đổi chưa là contract. Yêu cầu khả năng mở rộng block V1 vẫn giữ nguyên.
-
-## Plugin
-
-- Cài plugin ZIP không cần biên dịch lại CMS. Plugin có thể cung cấp CPT, fields, block, template và setting.
-- Bản đầu hỗ trợ logic server qua sự kiện, thao tác và API, kể cả gọi dịch vụ ngoài trong phạm vi quyền. Plugin tạo màn hình Admin riêng bằng form, bảng, danh sách, tab và nút do CMS cung cấp.
-- CMS hiển thị các quyền plugin yêu cầu và tự áp dụng quyền hợp lệ đã khai báo. Quản trị viên xem thông báo, không có bước duyệt quyền. CMS chặn thao tác ngoài quyền khai báo.
-- CMS có thể dừng xử lý plugin lỗi hoặc chạy quá lâu, ghi lỗi và cho phép vô hiệu hóa plugin. Những phần độc lập của website và đường phục hồi trong Admin tiếp tục hoạt động.
-- Đổi theme hoặc tắt plugin giữ các CPT, fields và nội dung đã nhập để tiếp tục quản lý. Xóa dữ liệu là thao tác riêng. CMS thông báo template hoặc block thiếu để người dùng xử lý.
-
-## Tính năng có sẵn
-
-- Tạo form liên hệ với các trường cơ bản và đặt form qua builder. Lưu thông tin gửi trong Admin, thông báo qua SMTP do quản trị viên cấu hình.
-- SEO có URL tùy chỉnh, tiêu đề, mô tả, ảnh chia sẻ, canonical, tùy chọn lập chỉ mục và sitemap tự động.
-
-## Để sau bản đầu
-
-Bán hàng, AI dựng trang từ ảnh, luồng **duyệt/phê duyệt xuất bản nhiều bước** (ngoài trạng thái draft/published tối thiểu M3), lịch sử và khôi phục phiên bản, repeater, quan hệ giữa nội dung, khối đồng bộ tùy ý, lọc nâng cao cho khách truy cập, giao diện plugin tùy ý, tác vụ định kỳ, sao lưu theo lịch, quản lý nội dung đa ngữ và chuyển ngôn ngữ Admin.
-
-## Bổ sung yêu cầu Admin — 15/11/2026
-
-Chủ dự án xác nhận ưu tiên hoàn thiện **Admin và điều hướng gần với cách sử dụng WordPress**: menu/submenu theo công việc, màn hình chỉnh sửa một nội dung có các vùng bố cục cố định và cơ chế đăng ký panel/nhóm custom fields vào vị trí mong muốn. Chi tiết yêu cầu tại [Admin Navigation & Edit Screen](ADMIN_NAVIGATION_AND_EDIT_SCREEN.md).
-
-- Mỗi màn hình có địa chỉ riêng; menu cha/submenu, breadcrumb, tiêu đề và hành động nhất quán, hiển thị theo quyền và bảo toàn thay đổi chưa lưu khi điều hướng.
-- Màn hình sửa Post/Page/CPT có vùng nội dung chính và sidebar. Core quản lý thanh hành động Lưu/Xuất bản; các tính năng đăng ký panel vào vùng được hỗ trợ, với thứ tự và điều kiện hiển thị.
-- Người quản trị chọn các panel áp dụng cho CPT, chọn vị trí cho nhóm custom fields và thứ tự field trong nhóm. Developer sử dụng cùng cơ chế khai báo mở rộng; plugin tuân theo giới hạn UI khai báo và quyền hiện có.
-- Field thuộc nội dung tham gia chung vòng đời nhập liệu, validation, dirty state và nút Lưu của nội dung. Hành động độc lập phải có nút và phản hồi riêng.
-
-Đây là yêu cầu sản phẩm đã xác nhận, **chưa phải contract API/schema, G3 hoặc bằng chứng đã triển khai**. Chưa phân bổ milestone/task; không tự thay phạm vi nghiệm thu hay trạng thái M8 đang thực hiện.
-
-## Quyết định kỹ thuật còn mở
-
-Đánh giá framework server, thư viện quản trị và builder, template engine, runtime plugin và cơ chế đóng gói/cài đặt theo yêu cầu trên. Xem [đánh giá tech stack](../architecture/TECH_STACK.md), [kiến trúc CMS](../architecture/CMS_ARCHITECTURE.md) và [đề xuất CMS-first](../architecture/CMS_PROPOSAL.md).
-
-## Owner review follow-up — 17/11/2026
-
-Chủ dự án chốt notes01–07: Admin grouped navigation; one screen per menu destination;
-WordPress-like content list/filter/actions with controlled theme/plugin contributions;
-one taxonomy panel and explicit draft/publish/update/view actions; separate category/tag
-list/edit routes; exact Page Builder; visible image/video uploads; private Section CPT
-and local template library. See [ADR-0018](../decisions/ADR-0018-owner-admin-review.md)
-and [bounded contract](../contracts/ADMIN_REVIEW_2026_11.md). Page has no core-default
-category/tag, while existing links and explicit provider/user eligibility are preserved.
-Section insertion copies AST; synced propagation remains deferred. Cloud library and
-note08 full Builder redesign stay deferred. No Beta PASS follows from this decision.
-
-
-## Content foundation follow-up — 18/11/2026
-
-Owner ưu tiên CPT có cấu hình, custom taxonomy và liên kết CPT, permalink dùng chung,
-plugin/theme khai báo qua canonical APIs. [ADR-0019](../decisions/ADR-0019-content-foundation.md)
-và [contract](../contracts/CONTENT_FOUNDATION_2026_11.md) chốt giới hạn; thiết kế được
-chấp nhận khi merge, không đồng nghĩa đã implemented/verified hoặc WordPress parity.
+Bán hàng (e-commerce), AI dựng trang từ ảnh, luồng duyệt/phê duyệt xuất bản nhiều bước (ngoài trạng thái `draft`/`published`), lịch sử và khôi phục phiên bản (revisions), repeater, quan hệ giữa nội dung (relation), khối đồng bộ tự động (synced propagation), lọc nâng cao cho khách truy cập, giao diện plugin JS/HTML tùy ý, tác vụ định kỳ (cron), sao lưu theo lịch, quản lý nội dung đa ngữ và chuyển ngôn ngữ Admin.

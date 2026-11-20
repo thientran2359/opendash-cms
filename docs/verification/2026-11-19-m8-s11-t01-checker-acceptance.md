@@ -15,7 +15,7 @@ after closure and showed **Status Done** on 19/11/2026.
 - [Aster APPROVED review](https://github.com/thientran2359/opendash-cms/pull/392#pullrequestreview-5961975496)
   and [final G5 acceptance](https://github.com/thientran2359/opendash-cms/issues/387#issuecomment-6986651391)
   record exact source, validation and closure authority.
-- Normative source is the [amended G3](../plans/milestones/M8/slices/2026-11-18-csrf-checker-g3.md)
+- Normative source is the [amended G3](../archive/plans/milestones/M8/slices/2026-11-18-csrf-checker-g3.md)
   at `a57482f1de422740b8df73695e2ebdc2b728f6c5`.
 - Checker SHA-256 is
   `f5666dc0f7eeae9c2dd0db06a9bf1bab344173b592c8ea99a7fb7cbb7b9c3050`.

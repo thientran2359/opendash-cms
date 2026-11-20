@@ -2,7 +2,7 @@
 
 - **Ngày thực chạy:** 2026-11-11; **Agent:** Harbor (CoS macOS), implementation owner.
 - **GitHub Issue:** [#24](https://github.com/thientran2359/opendash-cms/issues/24); **Task ID:** `M3-S20-T01`.
-- **G3/contract:** [ADR-0004](../decisions/ADR-0004-m3-post-page-publication-boundary.md), [ADR-0005](../decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md), [G3 source + renderer ownership Design Delta@922b598](../plans/milestones/M3/slices/2026-11-11-m3-autonomous-first-tasks.md). G3 nguồn đã merge trước G4, Issue được Project #3 Ready trước pickup; tiến độ runtime được chuyển In progress.
+- **G3/contract:** [ADR-0004](../decisions/ADR-0004-m3-post-page-publication-boundary.md), [ADR-0005](../decisions/ADR-0005-m3-harbor-forge-autonomous-delivery.md), [G3 source + renderer ownership Design Delta@922b598](../archive/plans/milestones/M3/slices/2026-11-11-m3-autonomous-first-tasks.md). G3 nguồn đã merge trước G4, Issue được Project #3 Ready trước pickup; tiến độ runtime được chuyển In progress.
 - **Code under test:** `ab56f8f6fc608d01b40a9641fbef9a584e5b19e5` — branch `task/harbor-m3-s20-t01`; baseline main `922b598c895756738ef143ecbf5eadce3fd43d3b`. Không dùng live DB.
 - **Môi trường:** macOS 15.8.2, Intel/Darwin `x86_64`, Rust `1.99.1`, Python 3, SQLite `3.43.2`. Cargo tại `$HOME/.cargo/bin` (CoS app PATH không tự chứa thư mục này).
 - **CI/merge:** báo cáo này xác nhận local test tại đúng code SHA; required GitHub PR checks và G5/Project Done chỉ được đánh dấu sau khi thật sự kiểm tra trên PR head.

@@ -1,5 +1,9 @@
 # Admin review November 2026 — contract delta
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0035`–`0037`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `Implementation/runtime: NOT_RUN` bên dưới là snapshot lịch sử lúc chốt thiết kế.
+> **Điểm đã được mở rộng:** Nhóm `Giao diện` có thêm `Taxonomy tùy chỉnh` (`#/taxonomy/definitions`) và `Cài đặt` có thêm `Đường dẫn tĩnh` (`#/settings/permalinks`) theo [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md).
+
 **Decision owner:** Aster, under direct owner instructions after completed review.
 **Design:** AGREED, effective after docs merge. **Implementation/runtime:** NOT_RUN.
 This document is normative for the bounded delta below and takes precedence over
@@ -166,14 +170,6 @@ list contributions are projected in authenticated effective-list-config endpoint
 under content-types/{type_key}; sanitize at server and render with shared components.
 
 ## Page Builder (05)
-
-**Owner follow-up 19/11/2026:** [Builder template và content](../product/BUILDER_TEMPLATE_AND_CONTENT.md)
-requires entry content Builder for registered content types, WordPress-inspired
-template hierarchy and distinct theme/database template sources. Homepage-to-Page
-migration is explicitly outside the requested scope. The Page-only interfaces below
-remain the existing bounded contract; they do not implement the new generic
-registration or hierarchy. A separate G2/G3 delta
-must specify those changes without retroactively changing completed task acceptance.
 
 Reuse existing site-owned overrides keyed (page,page,entry_id); never global single
 or homepage. Pass validated immutable target through open/preview/save/reset/reload,

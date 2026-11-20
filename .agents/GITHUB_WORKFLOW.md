@@ -81,28 +81,6 @@ qua CI, ownership hoặc gate. **Atlas, Nova, Harbor và Forge áp dụng ADR-00
 được tự kiểm tra và merge PR đủ gates; ghi `Self-review: <Agent> — reviewed head <SHA>`
 và validation thật trong PR. Không tạo review giả từ một tài khoản chung.
 
-## EGM và handoff tương thích — 2026-11-20
-
-[EGM workflow](../docs/plans/EGM_WORKFLOW.md) quy định cách thiết kế và bàn giao;
-Issue/Project/PR tiếp tục giữ trạng thái vận hành. Bản thiết kế EGM chính giữ
-quyết định kỹ thuật; task section theo mẫu SLICE_TASK trong module/milestone
-plans giữ scope/files/acceptance của task và link về thiết kế. Không duy trì
-hai định nghĩa kiến trúc hoặc coi bản nháp là quyền triển khai.
-
-Trong giai đoạn này generator/adapter **không đổi**: task mới vẫn có ID
-`Mx-Sxx-Txx`, metadata G2/G3/track/module/capability và tám mục hiện hành trong
-nguồn plans được hỗ trợ đã merge. Pin source SHA chứa handoff, revision thiết kế
-đã chấp nhận và code baseline. Sau đó dùng generator read-only và publish payload
-đã đối chiếu bằng Connector/API theo các bước bên dưới. Không truyền trực tiếp
-`docs/designs/` cho generator; không mở manual implementation bypass mới.
-Route không hỗ trợ ID/actor/format thì chặn route đó, không đổi danh tính để né.
-
-Task đã Ready giữ source đã duyệt và kiểm lại gate trước pickup; task đang làm
-giữ In progress/In review và ownership/receipt. Docs/design theo chỉ đạo owner
-hoặc Final Decision đủ evidence dùng luồng PR tài liệu của ADR-0010, không giả
-implementation Ready. Phân quyền kỹ thuật theo adaptation trong ADR-0010;
-không biến mọi technical checkpoint thành yêu cầu owner trả lời.
-
 ## Nguồn sự thật cho task và tài liệu
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |
@@ -110,7 +88,7 @@ không biến mọi technical checkpoint thành yêu cầu owner trả lời.
 | Scope/G0–G3 đã chốt, contract, ADR | `docs/` | Agent ghi Final Decision theo phạm vi được giao hoặc Atlas chốt khi cần, sau đó merge PR đủ gate theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) |
 | Điều tra, thảo luận, đề xuất/task draft | `.agents/research/`, `.agents/discussions/`, `.agents/tasks/` | Agent trên branch của mình |
 | Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator/Muse được ủy quyền, sau khi gate sẵn sàng |
-| Tổng hợp 9 milestone, candidate và tình trạng task để chủ dự án đọc nhanh | [TASK_INDEX](../docs/plans/TASK_INDEX.md) (**snapshot**, không authoritative) | Coordinator thêm task sau G3; agent/reviewer hoàn tất G5 cập nhật qua PR, đối chiếu Issue/Project |
+| Tổng hợp 9 milestone, candidate và tình trạng task để chủ dự án đọc nhanh | [TASK_INDEX](../docs/archive/plans/TASK_INDEX.md) (**snapshot**, không authoritative) | Coordinator thêm task sau G3; agent/reviewer hoàn tất G5 cập nhật qua PR, đối chiếu Issue/Project |
 | Source diff, test, phản biện, chấp thuận tích hợp | **GitHub PR** | Assignee rồi reviewer/CI |
 | Evidence thực chạy/acceptance đã duyệt | `docs/verification/` | Theo quy trình review, không suy từ báo cáo AI |
 | Chat/session/runtime secrets/locks | **Không đưa vào Git** | Từng công cụ giữ riêng |
@@ -152,7 +130,7 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    source thực tế để không giao lại code đã làm.
 2. Task có heading `### M3-Sxx-Txx — Tên nhiệm vụ` trong module brief (hoặc
    `#` nếu task brief riêng) và các heading theo
-   [mẫu SLICE_TASK](../docs/plans/templates/SLICE_TASK.md). Không bắt buộc
+   [mẫu SLICE_TASK](../docs/archive/plans/templates/SLICE_TASK.md). Không bắt buộc
    mỗi task có file `.md` độc lập.
 3. Coordinator/Muse `git fetch origin` rồi dùng công cụ **read-only** để đọc
    blob tại `origin/main` hoặc commit đã duyệt:
@@ -185,7 +163,7 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
 6. Khi scope, contract hoặc acceptance thay đổi: sửa tài liệu trong repo,
    review/merge và **đồng bộ lại body Issue + source SHA**. Khi đổi
    tiến độ, owner hoặc blocker: **Issue/Project phải cập nhật trước**.
-   Theo chỉ đạo mới, riêng [TASK_INDEX](../docs/plans/TASK_INDEX.md) được phép
+   Theo chỉ đạo mới, riêng [TASK_INDEX](../docs/archive/plans/TASK_INDEX.md) được phép
    phản ánh trạng thái có nguồn/link Issue và ngày đối chiếu: coordinator thêm
    hàng task G3 đã phát hành; khi **G5 VERIFIED + Project Done**, agent được
    giao closure cập nhật hàng Done qua PR docs. Nếu chỉ merge code nhưng
@@ -193,7 +171,7 @@ agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằ
    trì JSON/YAML mirror hoặc queue song song khác và không dựa vào index để pickup.
 
 **Ngoại lệ hạ tầng POC Muse → CoS Phase 1 (G3 APPROVED 09/11/2026, Issues chưa READY):** các mã
-`P1-W01..P1-W08` trong [breakdown Phase 1](../docs/plans/muse-cos-win-phase1-g2.md)
+`P1-W01..P1-W08` trong [breakdown Phase 1](../docs/archive/plans/muse-cos-win-phase1-g2.md)
 không phải product task `Mx-Sxx-Txx`. Công cụ
 `prepare-github-issue.py` **không hỗ trợ** namespace/source/metadata này;
 **không chạy CLI đó** hoặc gán module/milestone CMS giả. **Chỉ sau khi** G3
@@ -223,7 +201,7 @@ không nới guard của tool phát hành task module CMS.
   `Roadmap`, `My items` vẫn được giữ. View `Team items` hiển thị
   `Labels` và `Milestone` bên cạnh Status/PR để phân biệt module và mốc.
 - **27 label `module:*`:** theo toàn bộ ID trong
-  [Module Catalog](../docs/plans/MODULE_CATALOG_V1.md), chia màu theo nhóm
+  [Module Catalog](../docs/archive/plans/MODULE_CATALOG_V1.md), chia màu theo nhóm
   FND/CNT/BLD/THM/PLG/SITE/OPS. Các nhóm khác:
   `type:implementation|research|design|verification|process`,
   `agent:atlas|nova|forge|harbor|orion`, `area:agent-workflow`.

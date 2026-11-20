@@ -1,5 +1,8 @@
 # Content foundation — November 2026
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0038`–`0041`, bao gồm `0041_provider_rewrite_defaults.sql` cho C4; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `implementation NOT_STARTED, verification NOT_RUN` bên dưới là snapshot lịch sử lúc chốt thiết kế.
+
 Decision owner/coordinator: Aster. Implementer: Harbor. Effective after merged
 ADR-0019; design AGREED then, implementation NOT_STARTED, verification NOT_RUN.
 This is a bounded extension of CNT-01/03/04, SITE-02 and PLG-03, not WordPress API compatibility.
@@ -24,11 +27,6 @@ Wasmi hooks, with tests proving their interaction with new content settings.
 Graph is a locator, not runtime evidence; stale symbols were checked on disk.
 
 ## 2. Content type settings (C1)
-
-**Owner follow-up 19/11/2026:** [Builder template và content](../product/BUILDER_TEMPLATE_AND_CONTENT.md)
-requires a distinct content Builder capability. The two-value supports set below
-is the existing C1 contract, not support for that new requirement. Builder registration,
-defaults and preservation/fallback need a separate G2/G3 delta before implementation.
 
 Add optional `settings` to existing CPT create/update/read DTOs and canonical
 schema JSON. All fields deny unknown keys. Settings contain `public: bool`,

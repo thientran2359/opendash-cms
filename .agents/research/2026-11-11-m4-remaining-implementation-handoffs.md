@@ -1,21 +1,21 @@
 # M4 · Đặc tả responsive, list block và nghiệm thu
 
-> **Lịch sử đề xuất.** Quyết định và đặc tả có hiệu lực nằm ở [ADR-0011](../../docs/decisions/ADR-0011-m4-builder-editor-responsive-list.md) và [G3 toàn bộ phần còn lại của M4](../../docs/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md).
+> **Lịch sử đề xuất.** Quyết định và đặc tả có hiệu lực nằm ở [ADR-0011](../../docs/decisions/ADR-0011-m4-builder-editor-responsive-list.md) và [G3 toàn bộ phần còn lại của M4](../../docs/archive/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md).
 
-**Atlas · G2 PROPOSED · G3 DRAFT · Source audit `main@fa0dad08fc67958a27efd0c5d96b84a7b85ddd1e`.** Phạm vi là homepage Builder. Tài liệu áp dụng [kế hoạch M4](../../docs/plans/milestones/M4/TASK_PLAN.md), [ADR-0007](../../docs/decisions/ADR-0007-m4-builder-taxonomy-foundation.md) và [ADR-0008](../../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md). Dùng mã candidate trong trao đổi thiết kế và mã task sau khi G3 có hiệu lực. GitHub Issue và Project ghi trạng thái, chủ sở hữu, source SHA và liên kết nghiệm thu.
+**Atlas · G2 PROPOSED · G3 DRAFT · Source audit `main@fa0dad08fc67958a27efd0c5d96b84a7b85ddd1e`.** Phạm vi là homepage Builder. Tài liệu áp dụng [kế hoạch M4](../../docs/archive/plans/milestones/M4/TASK_PLAN.md), [ADR-0007](../../docs/decisions/ADR-0007-m4-builder-taxonomy-foundation.md) và [ADR-0008](../../docs/decisions/ADR-0008-harbor-forge-autonomous-delivery.md). Dùng mã candidate trong trao đổi thiết kế và mã task sau khi G3 có hiệu lực. GitHub Issue và Project ghi trạng thái, chủ sở hữu, source SHA và liên kết nghiệm thu.
 
 ## Trình tự và quyền sửa
 
 | Phần | Người làm dự kiến | Điều kiện vào và bàn giao |
 | --- | --- | --- |
 | M4-P03 · Editor | Forge | Theo [đề xuất G2 của Forge](https://github.com/thientran2359/opendash-cms/pull/96). G2 cần quyết định cách chọn node và qua security review trước G3. UI có thể làm song song với Field Binding backend. |
-| M4-S05-T01 · Field Binding | Harbor | Dùng [ADR-0009](../../docs/decisions/ADR-0009-m4-core-element-field-binding.md) và [G3](../../docs/plans/milestones/M4/slices/2026-11-11-m4-field-binding-g3.md). Phát hành tại [task triển khai](https://github.com/thientran2359/opendash-cms/issues/94). Handoff hiện có là API. |
+| M4-S05-T01 · Field Binding | Harbor | Dùng [ADR-0009](../../docs/decisions/ADR-0009-m4-core-element-field-binding.md) và [G3](../../docs/archive/plans/milestones/M4/slices/2026-11-11-m4-field-binding-g3.md). Phát hành tại [task triển khai](https://github.com/thientran2359/opendash-cms/issues/94). Handoff hiện có là API. |
 | M4-P04 · Responsive | Forge | Sau Editor. Nhận `builder.rs` và `page.rs` trên SHA đã tích hợp Field Binding; giữ quyền sửa workspace trong lượt này. |
 | M4-P06 · List block | Harbor | Sau Field Binding và taxonomy. Sau khi có G3, có thể làm query/test storage song song với responsive. Nhận các file schema, renderer, routes và Inspector ở lượt tích hợp sau responsive. |
 | M4-P07 · Preview/Save | Forge | Sau P03–P06. Forge sở hữu test tích hợp; giao lỗi sản phẩm cho đúng owner. |
 | M4-P08 · Nghiệm thu M4 | Harbor điều phối, Forge chạy Windows | Sau P07. Chốt cùng một release SHA; mỗi agent ghi evidence riêng. |
 
-Atlas điều phối G2/G3 và bàn giao. Trước mỗi lượt sửa file chung, ghi owner, tên file và SHA chứa thay đổi đã tích hợp trong Issue triển khai. Cấp mã triển khai mới, cập nhật nguồn đặc tả trên `main` và kiểm tra ownership/Project Ready theo [Planning Workflow](../../docs/plans/PLANNING_WORKFLOW.md). Mỗi agent giữ một task triển khai đang hoạt động trên branch của mình.
+Atlas điều phối G2/G3 và bàn giao. Trước mỗi lượt sửa file chung, ghi owner, tên file và SHA chứa thay đổi đã tích hợp trong Issue triển khai. Cấp mã triển khai mới, cập nhật nguồn đặc tả trên `main` và kiểm tra ownership/Project Ready theo [Planning Workflow](../../docs/archive/plans/PLANNING_WORKFLOW.md). Mỗi agent giữ một task triển khai đang hoạt động trên branch của mình.
 
 **Điểm nối Editor.** Chốt một `BuilderDocument` draft và một `selectedNodeId` cho Tree/Canvas/Inspector, duy trì ETag và giữ node thiếu renderer ở tree. Atlas đề xuất giữ Preview sandbox opaque cho HTML theme và dùng canvas do Admin dựng cho thao tác chọn node. Forge đề xuất bắt sự kiện trực tiếp từ iframe `allow-same-origin`. Quyết định P03 cần bằng chứng trên Builder thật về chọn/scroll/focus, ngăn điều hướng từ HTML theme, CSP và quyền media. [Thử nghiệm Chrome cô lập của Atlas](2026-11-11-m4-p03-builder-editor-g2.md).
 

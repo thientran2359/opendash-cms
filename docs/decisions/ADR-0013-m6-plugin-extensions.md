@@ -1,8 +1,8 @@
 # ADR-0013 — M6 Plugin Extensions: G2 Decision Record
 
 **Agent:** Nova (Antigravity Windows, tiếp nhận hoàn tất thay Atlas theo chỉ đạo chủ dự án) · **Date:** 2026-11-13.
-**Decision status:** **G2 AGREED** (all blockers `D01–D10` resolved in [M6 Plugin Extensions Contract](../contracts/M6_PLUGIN_EXTENSIONS.md)); **G3 READY** upon merge of [M6 G3 specification](../plans/milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md).
-**Authority:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md), [PRD](../product/PRODUCT_REQUIREMENTS.md), [Planning Workflow](../plans/PLANNING_WORKFLOW.md).
+**Decision status:** **G2 AGREED** (all blockers `D01–D10` resolved in [M6 Plugin Extensions Contract](../contracts/M6_PLUGIN_EXTENSIONS.md)); **G3 READY** upon merge of [M6 G3 specification](../archive/plans/milestones/M6/slices/2026-11-13-m6-plugin-extensions-g3.md).
+**Authority:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md), [PRD](../product/PRODUCT_REQUIREMENTS.md), [Planning Workflow](../archive/plans/PLANNING_WORKFLOW.md).
 
 ## Sources and baseline
 

@@ -1,18 +1,13 @@
 # M5 Theme & Templates — selected contracts and blocked sub-contracts
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0015`, `0017`–`0021`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
+> **Điểm đã được mở rộng/thay thế:** Quy tắc URL công khai & 404 khi đổi slug (Mục 2) và giới hạn taxonomy `category`/`tag` (Mục 5) đã được mở rộng bởi [`M7_SITE_FEATURES.md`](M7_SITE_FEATURES.md) (`0027`) và [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md) (`0039`–`0041`, 301 redirect, custom taxonomy và provider `rewrite_base`).
+
 **Owner:** Atlas / Nova · **Date:** 2026-11-13 · **Design status:** G2 AGREED (sub-contracts `C-SEC`, `route-context binding`, `A-DURABILITY`, `G-RECOVERY` resolved).
 **Implementation/verification:** NOT_STARTED / NOT_RUN.
 [Decision authority, source SHAs and G3 corrections](../decisions/ADR-0012-m5-theme-templates.md).
 This file records Atlas selections for review; it does not publish G3 or authorize Project Ready.
-
-## Owner directive — 20/11/2026
-
-The owner confirms no released older product exists. New design does not require
-backward compatibility with experimental theme/API/schema formats. See the
-[PRD directive](../product/PRODUCT_REQUIREMENTS.md) and [resolver](BUILDER_TEMPLATE_RESOLVER.md).
-Legacy adapters/conversion/upgrade acceptance below are historical, not requirements
-for this new baseline. Future content preservation across theme changes, security
-and backup/restore remain product requirements. No data deletion is authorized.
 
 ## 1. Package identity, revisions and selection (A)
 
@@ -57,15 +52,6 @@ Canonical revision files must be fully validated and durably published before an
 **Acceptance:** old M3 URLs; slug-change/new canonical; reserved/encoded paths; duplicate query/invalid bounds; private/missing targets; filters across pages; no draft displacement/count leak.
 
 ## 3. Templates and overrides (C/H)
-
-**Follow-up 19/11/2026:** [ADR-0020](../decisions/ADR-0020-builder-template-resolver.md)
-and [resolver G2](BUILDER_TEMPLATE_RESOLVER.md) replace the resolution order below
-when merged: candidate hierarchy first, DB/theme priority within each candidate.
-New role meanings are home=homepage, single/archive for all
-content types; owner follow-up 20/11 selects page as the default Page layout
-with explicit page-layouts choices. Post archive uses
-archive-post then archive. No blog or front-page role. The old
-role list/text remains historical; no implementation/acceptance is retroactively changed.
 
 Select roles `home|page|header|footer|archive|single|taxonomy_archive`. Context selects page for built-in Page, single for other content, and the corresponding archive role. Selector identity uses role + optional validated type/entry scope; a display variant is not a new route.
 

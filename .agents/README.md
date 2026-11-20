@@ -1,50 +1,14 @@
-# OpenDash CMS - Agent working area
+# OpenDash CMS — Khu vực hỗ trợ Agent (`.agents/`)
 
-For new design work, start with the [OpenDash EGM guide](../docs/plans/EGM_WORKFLOW.md).
-Keep the primary working draft here until accepted; promote it through PR to
-`docs/designs/` and retain a successor pointer or historical snapshot here.
-One coordinator owns a topic. Goldfish reports support the primary design;
-they are not another task queue or an independent source of approved behavior.
-Existing Proposed Builder docs remain an explicit historical exception.
+Thư mục `.agents/` lưu trữ các skill vận hành cho quy trình **EGM (Elephant-Goldfish Model) + Multi-Agent Execution** (Atlas, Nova, Aster nghiên cứu/soạn spec/điều phối → Forge, Harbor triển khai & kiểm chứng đa OS) cùng hồ sơ nghiên cứu lịch sử. Tài liệu chính thức của dự án nằm tại [`docs/`](../docs/README.md) và đặc tả thiết kế nằm tại [`docs/designs/`](../docs/designs/SITEMAP.md).
 
-The Git-tracked `.agents/` directory holds research, design discussions,
-proposed tasks, handoff notes and templates that are not yet approved.
-`docs/` holds official requirements, approved plans/decisions/contracts and
-real verification. Historical docs already linked from plans remain preserved.
+- [`skills/README.md`](skills/README.md): 4 active skills:
+  - [`opendash-elephant`](skills/opendash-elephant/SKILL.md): nạp ngữ cảnh dự án và `GoldfishContext` cho EGM.
+  - [`atlas-task-dispatch`](skills/atlas-task-dispatch/SKILL.md): Atlas/Aster giao Issue triển khai từ Design Spec EGM sang Forge/Harbor qua CoS adapter.
+  - [`github-task-pickup`](skills/github-task-pickup/SKILL.md): Forge/Harbor nhận và thực thi Issue từ GitHub Project #3 theo `## Detailed Implementation Plan`.
+  - [`github-pr-review-merge`](skills/github-pr-review-merge/SKILL.md): Atlas/Aster/Nova review và merge PR đủ gate.
+- [`agents.yaml`](agents.yaml), [`ASTER.md`](ASTER.md), [`AGENT_OPERATING_STANDARD.md`](AGENT_OPERATING_STANDARD.md), [`GITHUB_WORKFLOW.md`](GITHUB_WORKFLOW.md), [`GIT_WORKTREE_IDENTITY.md`](GIT_WORKTREE_IDENTITY.md): định danh agent, nhánh `agent/<name>`, chuẩn vận hành GitHub/CoS và worktree Git identity.
+- `archive/skills/`: lưu trữ các skill đã ngừng sử dụng (`discussion-turn-responder`, các hook/watcher nền cũ).
+- `research/`, `discussions/`, `tasks/`, `scripts/`: hồ sơ nghiên cứu và công cụ kiểm tra (`check-agent-artifacts.py`, `cos_dispatch.py`).
 
-- `agents.yaml`: agent identities and their GitHub branches
-- [Aster](ASTER.md): Codex macOS coordinator setup and owner authorization
-- `research/`: preliminary alternatives, code investigation and evidence
-- `discussions/`: append-only technical design turns and questions
-- `tasks/`: shareable task descriptions, reports and acceptance evidence
-- `inbox/`: durable handoff notes, never runtime secrets
-- `scripts/`: future local tools, not automatically enabled
-- `templates/`: task, research and discussion templates
-- `skills/`: four on-demand skills (`github-task-pickup`, `discussion-turn-responder`, `github-pr-review-merge`, `atlas-task-dispatch`); no autonomous polling
-- `archive/skills/`: retired skills preserved solely for reference
-
-**Quy trình thao tác chung:** [AGENT_OPERATING_STANDARD.md](AGENT_OPERATING_STANDARD.md) quy định cách kiểm branch/Git fetch, GitHub Connector và CoS Desktop Browser dùng đúng phiên Chrome đăng nhập, thực hiện **bởi chính agent trong chat**, không tạo Agent Preflight Check. [GITHUB_WORKFLOW.md](GITHUB_WORKFLOW.md) vẫn là chuẩn Issues/PR; GitHub Issue là nguồn trạng thái task và PR là nguồn review. [Bảng trạng thái M3](../docs/plans/M3_STATUS_2026-11-09.md) phân biệt phần đã làm và backlog.
-
-**Review tài liệu giữa agent:** reviewer đưa findings trực tiếp lên GitHub PR;
-tác giả PR sửa và commit/push lên branch của mình; reviewer kiểm tra lại trên
-commit mới. Xem [quy trình review PR](GITHUB_WORKFLOW.md#review-tài-liệuthiết-kế-qua-pr-giữa-các-agent).
-Chỉ giao reviewer quyền sửa file khi đã chỉ định rõ branch và file ownership.
-
-No archived SKILL.md should be loaded or executed. The former
-PowerShell handoff hooks and scripts are retired. Restore only after a
-fresh technical/security review.
-
-Five agents may use five separate local code folders, each on its fixed branch
-of the same GitHub opendash-cms repository:
-Atlas/Codex Win, Nova/Antigravity Win, Forge/CoS Win, Harbor/CoS Mac and
-Orion/Antigravity Mac. Commit validated task-scoped work, non-force push to
-the corresponding agent branch and link the commit/PR to the GitHub Issue.
-A push is not review, merge, approval or independent verification.
-Under [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas coordinates the project and may merge any eligible PR. Nova, Harbor and Forge may self-review and merge their own eligible PRs. Required checks, security and data gates apply.
-
-Atlas-to-CoS one-shot dispatch is implemented for Forge/Harbor using a local
-authenticated API and SSH to Mac; each host must pass its own security and
-delivery gate. It is invoked by Atlas on demand, not a background service.
-See [the adapter guide](research/2026-11-12-cos-one-shot-adapter.md).
-Never upload credentials, private records, raw runtime logs or local database
-copies into the public Git history.
+Không lưu thông tin xác thực, khóa bí mật, log runtime hoặc bản sao cơ sở dữ liệu SQLite vào Git. Kiểm tra an toàn bằng `python .agents/scripts/check-agent-artifacts.py`.
