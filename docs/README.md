@@ -58,3 +58,12 @@ database/theme sau; parts/content riêng; Settings chọn Page Trang chủ và P
 Blog làm archive post. Không convert homepage legacy thành Page content.
 Final Decision của Atlas trong working tree, contract hiệu lực sau merge;
 G3/API/schema tổng thể chưa hoàn chỉnh, runtime NOT_RUN.
+
+### Builder/theme — bản chuyển sang đặc tả EGM (20/11/2026)
+
+[Đặc tả EGM Builder content, resolver và cấu trúc theme](designs/BUILDER_THEME_CONTENT.md)
+chuyển đầy đủ các quyết định đã chốt tại commit `4a334f0224866108002e8586b04f5643da0798c9`,
+kèm cấu trúc thư mục theme, Page layouts, Section, candidate matrix và bảng đối chiếu nguồn.
+Trạng thái **Proposed** của bản chuyển tài liệu không hủy các quyết định sản phẩm đã duyệt;
+chưa là Goldfish-review PASS, contract API/schema hoàn chỉnh, implementation Ready hay runtime evidence.
+Các nguồn gốc vẫn giữ nguyên để truy vết; không tự đổi ownership/Issue/Project hoặc triển khai CMS.
