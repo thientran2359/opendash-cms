@@ -4,7 +4,9 @@
 * **Status:** Approved
 * **Date:** 2026-11-20
 * **Baseline:** `main@7f29bcf` (migrations `0001`–`0041`)
-* **Goldfish Review:** 5-agent independent swarm (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-comprehension`, `egm-zoom-out`) — all Blocker/Major findings resolved and approved by owner.
+* **Approved By:** Owner
+* **Approval Evidence:** Owner chat 2026-11-20 (Cách A Full Site Editor + OQ-02/03/04 chốt) · PR #424 (`e47d5d3`)
+* **Goldfish Review:** 5-agent independent swarm (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-comprehension`, `egm-zoom-out`) · 2026-11-20 · reviewed `main@7f29bcf` (all Blocker/Major resolved)
 * **Related Spec:** [Design Spec 2: Generic CPT Content Builder, Pattern CPT (`core/pattern_ref`) & Pattern Library](cpt-content-builder-and-pattern-library.md)
 
 ---
@@ -292,29 +294,47 @@ CREATE TABLE template_override_media_refs (
 
 ### Slice S01: Theme Package v3 Manifest, Core Types & C-SEC Typed Composition (Additive — Zero Compile Break)
 
-* **Phạm vi file:** `cms/crates/opendash-core/src/theme.rs`, `cms/crates/opendash-core/src/builder.rs`, `cms/crates/opendash-server/src/template_sec.rs`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/backup_worker.rs`.
+* **Dependencies:** None (additive trên `main@e47d5d3`, không phá vỡ callers v2 hiện có).
+* **File Ownership:** `cms/crates/opendash-core/src/theme.rs`, `cms/crates/opendash-core/src/builder.rs`, `cms/crates/opendash-server/src/template_sec.rs`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/backup_worker.rs`.
 * **Công việc chính:**
   1. Định nghĩa `ThemeV3Manifest`, `TemplateCandidateKind`, `TemplateCandidate::canonical_key()`, `ThemeTemplateDecl`, `PageLayoutDecl`, `ThemePatternDecl` trong `opendash_core::theme`.
   2. Thêm `KnownElement::ContentSlot(ContentSlotProps)` và `KnownElement::TemplatePart(TemplatePartProps)` vào `opendash_core::builder`.
   3. Cài đặt `validate_and_compile_csec_composition()` trong `template_sec.rs` (`od_part("<literal>")` DAG depth ≤ 3, fan-out ≤ 32, shared fuel; `od_content()` standalone `Stmt::EmitExpr`, per-render nonce, C-SEC check trước khi inject).
   4. Cài đặt `parse_theme_zip_v3` trong `theme.rs` (tạm giữ struct v2 đến S02 để workspace compile & test PASS 100%) và cập nhật `backup_worker.rs` hỗ trợ `source_format == "v3"`.
+* **Acceptance Criteria:**
+  - [ ] Unit tests `opendash_core::theme` xác thực `ThemeV3Manifest` (`manifest_version == 3`, từ chối duplicate `canonical_target_key`, đường dẫn ngoài root/4 thư mục).
+  - [ ] Unit tests `template_sec.rs` chặn `od_part` vòng lặp, depth > 3, fan-out > 32, `od_content()` trong loop/attribute hoặc sai số lượng (entry = 1, non-entry = 0, index = 0..=1), và cho phép `<form>` trong nội dung chèn sau nonce.
+  - [ ] `backup_worker.rs` bao gồm revision `source_format == "v3"` trong snapshot; `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S01 (chưa có migration SQLite nên không ảnh hưởng DB hiện hành).
 
 ### Slice S02: Migration 0042, 2-Axis Template Resolver, Visual Builder Overrides & Page Layouts
 
-* **Phạm vi file:** `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/storage/{theme,import,overrides,entries,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/routes/{themes,entries,public_content,builder,seo}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/{themes,builder}.ts`, `cms/admin/src/features/editor/SingleEditWorkspace.tsx`, `cms/admin/src/features/library/TemplateLibraryPage.tsx`, `cms/admin/src/features/themes/ThemesPanel.tsx`, `cms/crates/opendash-server/src/storage/theme_tests.rs`.
+* **Dependencies:** Spec 1 Slice `S01`.
+* **File Ownership:** `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/storage/{theme,import,overrides,entries,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/routes/{themes,entries,public_content,builder,seo}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/{themes,builder}.ts`, `cms/admin/src/features/editor/SingleEditWorkspace.tsx`, `cms/admin/src/features/library/TemplateLibraryPage.tsx`, `cms/admin/src/features/themes/ThemesPanel.tsx`, `cms/crates/opendash-server/src/storage/theme_tests.rs`.
 * **Công việc chính:**
   1. Thêm Migration `0042` và chuyển toàn bộ `theme.rs`, `storage/theme.rs`, `storage/import.rs`, fixtures sang v3 duy nhất (gỡ v1/v2).
   2. Triển khai `build_candidates` + `resolve_template_2axis` trong `storage/overrides.rs` (DB `ast_json` → active theme v3 HTML theo từng candidate), cập nhật `page.rs` render `core/content_slot` & `core/template_part` + truyền cờ CSP, cập nhật `media_refs.rs` & `public_content.rs`.
   3. Hỗ trợ `page_layout_key` & `custom_template_key` (`PatchField::Keep`) trong `storage/entries.rs`, `routes/entries.rs` và `GET /api/admin/themes/active/layouts`.
   4. Triển khai `GET/PUT /api/admin/template-overrides` và `POST /api/admin/template-overrides/{id}/reset` trong `routes/themes.rs` & `app.rs` (gỡ route override cũ ở `routes/builder.rs`), nối UI Admin.
+* **Acceptance Criteria:**
+  - [ ] Integration tests chứng minh theme-specific (`single-project.html`) thắng DB-generic (`single`), DB `ast_json` cùng candidate thắng theme, `core/content_slot` & `core/template_part` render đúng kèm CSP.
+  - [ ] Page Layout (`canvas` không header/footer) & Custom Single Template bảo toàn reference qua `PatchField::Keep` khi đổi theme và fallback an toàn.
+  - [ ] `POST /api/admin/template-overrides/{id}/reset` kiểm `If-Match` (`428`/`412`) và trả `next_effective_source` chính xác; `npm run build` và `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S02 và khôi phục DB fixture trước Migration `0042` (không có dữ liệu production cũ cần migrate ngược).
 
 ### Slice S03: Atomic Reading Settings (Homepage & Posts Page), Route Authority, Sitemap/SEO & Admin UI
 
-* **Phạm vi file:** `cms/crates/opendash-server/src/storage/{settings,permalinks,sitemap,seo,entries}.rs`, `cms/crates/opendash-server/src/routes/{settings,public,public_content,seo,builder}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/settings.ts`, `cms/admin/src/App.tsx`, `cms/admin/src/shell/router.ts`, `cms/admin/src/features/settings/ReadingSettingsPanel.tsx`, `cms/admin/src/features/system/GeneralSettingsPanel.tsx`.
+* **Dependencies:** Spec 1 Slice `S02`.
+* **File Ownership:** `cms/crates/opendash-server/src/storage/{settings,permalinks,sitemap,seo,entries}.rs`, `cms/crates/opendash-server/src/routes/{settings,public,public_content,seo,builder}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/settings.ts`, `cms/admin/src/App.tsx`, `cms/admin/src/shell/router.ts`, `cms/admin/src/features/settings/ReadingSettingsPanel.tsx`, `cms/admin/src/features/system/GeneralSettingsPanel.tsx`.
 * **Công việc chính:**
   1. Cài đặt `get_reading` / `save_reading` trong `storage/settings.rs` và `GET/PUT /api/admin/settings/reading` trong `routes/settings.rs` & `app.rs` (`require_admin_with_csrf`, `AdmittedMutation`, `If-Match`).
   2. Cập nhật `permalinks::sync_claims_in_tx` chuyển quyền sở hữu `/` & `("archive", "post")` không collision, xóa Page đang gắn trong `storage/entries.rs::delete` tăng `site_reading_settings.version` (giữ trạng thái `deleted` → `404 + noindex`), đồng bộ `storage/sitemap.rs` & `storage/seo.rs`.
   3. Chuyển `routes/public.rs` sang route authority + Resolver 2 trục (gỡ `/api/admin/builder/homepage*` thử nghiệm cũ), cập nhật `routes/seo.rs::missing_public_page` và hoàn thiện UI `ReadingSettingsPanel.tsx`.
+* **Acceptance Criteria:**
+  - [ ] `PUT /api/admin/settings/reading` từ chối trùng 2 Page ID, draft, non-page (`400`), kiểm `If-Match` (`428`/`412`); gán/đổi/bỏ chọn `posts_page_id` không phát sinh `409 permalink_collision`.
+  - [ ] `/` render Homepage Page qua `home → PageLayout → page`; Posts Page render `archive-post → archive` giữ nguyên `values_json`; xóa/chuyển draft trả `404` + `X-Robots-Tag: noindex`; sitemap không lặp `/`.
+  - [ ] `npm run build`, `check-standards.py`, `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S03 (bảng `site_reading_settings` vẫn giữ sạch ở Migration `0042`).
 
 ---
 

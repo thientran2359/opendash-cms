@@ -11,7 +11,7 @@ Thư mục `cms/` tập trung mã nguồn, migrations (`0001`–`0041`), SDK, sc
 | Plugin SDK (AssemblyScript) | [`sdk`](sdk/README.md) |
 | Theme và plugin mẫu | [`examples/plugins/sample-plugin`](examples/plugins/sample-plugin/README.md), [`examples/themes/sample-theme`](examples/themes/sample-theme/README.md) |
 | SQLite migrations và fixture nguồn | [`migrations`](migrations/README.md), [`fixtures`](fixtures/README.md) |
-| Linux deploy configs (systemd/nginx) | [`deploy`](deploy/README.md) |
+| Linux deploy configs (systemd/nginx) | [`deploy/`](deploy/install-linux.sh), [`opendash.service`](deploy/opendash.service) |
 | Build/health/check/E2E scripts | [`scripts`](scripts/README.md) |
 | Tài liệu, kiến trúc, hợp đồng, thiết kế EGM | [`docs`](../docs/README.md) |
 | Thử nghiệm lịch sử | [`spikes`](spikes/README.md) |

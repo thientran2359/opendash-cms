@@ -14,18 +14,23 @@ OpenDash áp dụng quy trình **EGM (Elephant soạn spec → Goldfish review �
    - Lưu đặc tả hoàn chỉnh vào [`docs/designs/<feature>.md`](docs/designs/README.md) và đăng ký vào [`docs/designs/SITEMAP.md`](docs/designs/SITEMAP.md).
    - Phần `## Detailed Implementation Plan` ở nửa dưới file phải liệt kê đầy đủ từng file sẽ tạo/sửa trong `cms/` và `docs/`, lý do thay đổi, chữ ký hàm/schema/API và kế hoạch kiểm chứng (`### Verification Plan`), không để lại quyết định thiết kế mơ hồ cho lúc code.
 4. **Bước 3 — Review Độc lập bằng Goldfish (`/egm-review` / `/egm-review-loop` + `/egm-resolve`):**
-   - Khởi chạy các subagent **Goldfish** trong ngữ cảnh mới hoàn toàn (zero-context) để kiểm tra đặc tả tại `docs/designs/<feature>.md` theo **2 mức độ**:
-     - **Full Swarm (6–8 Goldfish — tính năng kiến trúc lớn):** `egm-zoom-out`, `egm-inventive-catalyst`, `egm-comprehension`, `egm-design`, `egm-structural`, `egm-style`, `egm-implementation-readiness`, `egm-codebase-details`.
-     - **Fast Review (3 Goldfish lõi — tính năng nhỏ/vừa hoặc bản sửa lỗi có phạm vi thiết kế):** `egm-design`, `egm-codebase-details`, `egm-implementation-readiness`.
+   - Khởi chạy các subagent **Goldfish** trong ngữ cảnh mới hoàn toàn (zero-context) để kiểm tra đặc tả tại `docs/designs/<feature>.md`, ánh xạ đúng preset của EGM upstream `0.1.1`:
+     - **Kiến trúc lớn:** chạy `/egm-review` preset `uninterrupted` hoặc `interactive` (Stages `5 → 6 → 7 → 8 → 9`: `egm-zoom-out`, `egm-comprehension`, `egm-design`, `egm-structural`, `egm-style`, `egm-implementation-readiness`, `egm-codebase-details`).
+     - **Tính năng nhỏ/vừa hoặc bản sửa lỗi có phạm vi thiết kế:** chạy `/egm-review-loop` với 3 reviewer lõi (`design_critic`, `codebase_details`, `implementation_readiness`).
+     - **Giới hạn harness:** Chỉ chạy Goldfish review trên harness hỗ trợ fresh-context subagent (Antigravity App/IDE Extension, Codex `spawn_agent` đọc `agents/*.md`); không tự review trong cùng context trên môi trường thiếu subagent (CoS / standalone IDE).
    - Luôn nạp `GoldfishContext` chuẩn gồm: [`docs/product/PRODUCT_REQUIREMENTS.md`](docs/product/PRODUCT_REQUIREMENTS.md), [`docs/contracts/CORE_FOUNDATION.md`](docs/contracts/CORE_FOUNDATION.md), [`docs/contracts/PLUGIN_ABI.md`](docs/contracts/PLUGIN_ABI.md), [`docs/contracts/M8_WRITER_INVENTORY.md`](docs/contracts/M8_WRITER_INVENTORY.md) và các file mã nguồn `cms/` liên quan.
-   - **Elephant** chạy `/egm-resolve` để phân loại findings (`PROPOSE FIX` vs `CONTEST`), nhận quyết định từ chủ dự án và cập nhật trực tiếp vào `docs/designs/<feature>.md` (`Status: Approved`, không còn `Open Questions` mở hay `TODO`/`TBD`).
+   - **Elephant** chạy `/egm-resolve` để phân loại findings (`PROPOSE FIX` vs `CONTEST`), lưu tóm tắt kết quả review vào PR Design Spec, và cập nhật đầy đủ 3 trường provenance bắt buộc khi chuyển sang `Status: Approved`: `**Approved By:**`, `**Approval Evidence:**`, `**Goldfish Review:**` (không còn `Open Questions` mở hay `TODO`/`TBD`).
+   - **Phân quyền duyệt Spec (3 tầng — đồng bộ [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)):**
+     - **Owner bắt buộc duyệt:** Đổi PRD/phạm vi sản phẩm, đổi kiến trúc lõi/schema breaking, đổi quy trình/phân quyền hoặc release public (`Approved By: Owner`).
+     - **Coordinator (`Atlas`, `Aster`) được ủy quyền duyệt:** Design Spec nằm trong phạm vi PRD đã chốt, bản sửa lỗi có phạm vi thiết kế (`Approved By: Atlas (delegated)` hoặc `Aster (delegated)`).
+     - **Implementer (`Nova`, `Forge`, `Harbor`) tự chủ:** Nhận Issue `Ready`, triển khai đúng `Detailed Implementation Plan`, tự review & tự merge PR của mình khi đạt 100% required CI (`governance-*`, `cms-ci`) và `Verification Plan`.
 5. **Bước 4 — Triển khai & Kiểm chứng (`Implement & Verify`):**
-   - Chỉ bắt đầu viết code sau khi chủ dự án duyệt Design Spec đã qua Goldfish review (`Status: Approved`). Với Design Spec lớn, có thể chia `### Slice S01: ...` trong `## Detailed Implementation Plan` và tạo Issue từng slice bằng `prepare-github-issue.py --source docs/designs/<feature>.md --slice S01`.
+   - Chỉ bắt đầu viết code sau khi Design Spec đạt `Status: Approved` (đủ provenance) và đã merge vào `main`. Với Design Spec lớn, chia `### Slice S01: ...` trong `## Detailed Implementation Plan` (mỗi slice bắt buộc có `**Dependencies:**`, `**File Ownership:**`, `**Acceptance Criteria:**`, `**Rollback:**`) và tạo Issue từng slice bằng `prepare-github-issue.py --source docs/designs/<feature>.md --slice S01`.
    - Sau khi triển khai, bắt buộc chạy bộ kiểm tra chuẩn và ghi nhận kết quả thực tế (kèm giới hạn nếu có); với các đợt kiểm chứng lớn hoặc release, lưu biên bản tại [`docs/verification/`](docs/verification/README.md).
    - Khi hoàn tất merge & kiểm chứng thực tế: cập nhật `Status` trong [`docs/designs/SITEMAP.md`](docs/designs/SITEMAP.md) (`Approved` → `Implemented` → `Verified`), gắn ghi chú `Superseded by docs/designs/<feature>.md` tại mục bị thay thế ở contract nền tảng cũ (nếu có) và chạy `node cms/scripts/codegraph-index-docs.mjs`.
 6. **Bước 5 — Duy trì Ngữ cảnh & Chống Trôi Tài liệu (`/egm-bootstrap` & `/egm-drift-report`):**
    - Dùng `/egm-bootstrap` để cập nhật hệ thống `README.md` theo cấu trúc cây trong `cms/`.
-   - Định kỳ dùng `/egm-drift-report` để kiểm tra `docs/` đối chiếu với codebase thật trong `cms/`, kịp thời cập nhật tài liệu hoặc sửa code khi có độ lệch.
+   - **Trigger `/egm-drift-report`:** Coordinator đóng spec bắt buộc chạy `/egm-drift-report` **sau khi mỗi Design Spec chuyển sang `Implemented`** (trước khi đánh dấu `**Verified**` trên `SITEMAP.md`) và trước mỗi đợt release, lưu báo cáo tại `.agents/research/` hoặc đính kèm PR closure.
 
 ### 1.2. Phối hợp Đa-Agent (`Atlas / Nova / Aster → Forge / Harbor`)
 

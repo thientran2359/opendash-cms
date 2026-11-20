@@ -4,7 +4,9 @@
 * **Status:** Approved
 * **Date:** 2026-11-20
 * **Baseline:** `main@7f29bcf` (xây tiếp sau [Design Spec 1: Theme Format v3 & Template Resolver](theme-format-and-template-resolver.md), migration `0042`)
-* **Goldfish Review:** 5-agent independent swarm (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-comprehension`, `egm-zoom-out`) — all Blocker/Major findings resolved and approved by owner.
+* **Approved By:** Owner
+* **Approval Evidence:** Owner chat 2026-11-20 (Pattern CPT `core/pattern_ref` depth=1, Admin-only write, `post` mặc định tắt Builder, Pattern Library Gutenberg) · PR #424 (`e47d5d3`)
+* **Goldfish Review:** 5-agent independent swarm (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-comprehension`, `egm-zoom-out`) · 2026-11-20 · reviewed `main@7f29bcf` (all Blocker/Major resolved)
 
 ---
 
@@ -221,29 +223,47 @@ CREATE INDEX idx_entry_pattern_refs_target ON entry_pattern_refs(target_pattern_
 
 ### Slice S01: Generic CPT `ContentSupport::Builder`, `content_mode` & Unified Entry Builder (Migration `0043`)
 
-* **Phạm vi file:** `cms/migrations/0043_cpt_content_builder.sql`, `cms/crates/opendash-core/src/content.rs`, `cms/crates/opendash-server/src/storage/{entries,builder,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/routes/{builder,public,public_content}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/{builder,content}.ts`, `cms/admin/src/features/content/{ContentTypeSchemaSettings,ContentTypeForm}.tsx`, `cms/admin/src/features/editor/SingleEditWorkspace.tsx`.
+* **Dependencies:** Spec 1 (`S01`–`S03` đã merge để có slot `{{ od_content() }}` & `core/content_slot`).
+* **File Ownership:** `cms/migrations/0043_cpt_content_builder.sql`, `cms/crates/opendash-core/src/content.rs`, `cms/crates/opendash-server/src/storage/{entries,builder,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/routes/{builder,public,public_content}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/{builder,content}.ts`, `cms/admin/src/features/content/{ContentTypeSchemaSettings,ContentTypeForm}.tsx`, `cms/admin/src/features/editor/SingleEditWorkspace.tsx`.
 * **Công việc chính:**
   1. Áp dụng Migration `0043` và thêm `ContentSupport::Builder` (`page` mặc định bật, `post` mặc định tắt; giữ nguyên `"section"` ở slice này để không gãy compile/test).
   2. Triển khai CRUD & preview cho `/api/admin/entries/{type_key}/{id}/builder` (CAS `content_entries.version`, `updated_at`, `ContentAfterSave`, kiểm `ContentSupport::Builder` → `403`, tái sử dụng `routes::settings::{parse_if_match, no_store_headers}`).
   3. Cập nhật `collect_pins_in_tx`, `media_is_referenced` và nối render vào `{{ od_content() }}` (Spec 1) với fallback về `values_json["body"]` + truyền cờ CSP.
   4. Cập nhật UI cấu hình `ContentSupport::Builder` và chuyển chế độ `Editor ↔ Visual Builder` trên `SingleEditWorkspace.tsx`.
+* **Acceptance Criteria:**
+  - [ ] `page` mặc định bật `Builder`, `post` mặc định tắt (`403` trên API + ẩn nút UI cho tới khi Admin bật); CPT tùy chỉnh bật/tắt đúng; sửa A không đổi B hay shared template.
+  - [ ] Đổi `editor ↔ builder` và tắt `Builder` giữ nguyên cả `values_json["body"]` lẫn `entry_builder_documents`; draft & media private không lộ qua public/preview.
+  - [ ] `npm run build`, `check-standards.py`, `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S01 và khôi phục DB fixture trước Migration `0043`.
 
 ### Slice S02: Pattern CPT (`pattern`), Block `core/pattern_ref` (Depth = 1) & Guard Migration (`0044`)
 
-* **Phạm vi file:** `cms/migrations/0044_pattern_cpt_and_refs.sql`, `cms/crates/opendash-core/src/{content,builder}.rs`, `cms/crates/opendash-server/src/storage/{patterns,mod,entries,content,permalinks,sitemap,seo,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/routes/{patterns,mod,content,themes}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `docs/product/PRODUCT_REQUIREMENTS.md`, `cms/admin/src/api/patterns.ts`, `cms/admin/src/App.tsx`, `cms/admin/src/shell/{router.ts,AdminShell.tsx}`, `cms/admin/src/features/patterns/PatternsPage.tsx`, `cms/admin/src/features/library/TemplateLibraryPage.tsx`, `cms/admin/src/builder/{BuilderInspector.tsx,document.ts}`.
+* **Dependencies:** Spec 2 Slice `S01`.
+* **File Ownership:** `cms/migrations/0044_pattern_cpt_and_refs.sql`, `cms/crates/opendash-core/src/{content,builder}.rs`, `cms/crates/opendash-server/src/storage/{patterns,mod,entries,content,permalinks,sitemap,seo,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/routes/{patterns,mod,content,themes}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `docs/product/PRODUCT_REQUIREMENTS.md`, `cms/admin/src/api/patterns.ts`, `cms/admin/src/App.tsx`, `cms/admin/src/shell/{router.ts,AdminShell.tsx}`, `cms/admin/src/features/patterns/PatternsPage.tsx`, `cms/admin/src/features/library/TemplateLibraryPage.tsx`, `cms/admin/src/builder/{BuilderInspector.tsx,document.ts}`.
 * **Công việc chính:**
   1. Áp dụng Migration `0044` hợp nhất `section_documents*` vào `entry_builder_*`, đổi `'section'` → `'pattern'` trên `content.rs` và toàn bộ 7 file backend có guard `!= 'section'`, gỡ `storage/sections.rs`, `routes/sections.rs` và `media_delete_section_aware`.
   2. Thêm `KnownElement::PatternRef(PatternRefProps)` trong `opendash_core::builder`, chặn `PatternRef`/`ContentList` bên trong Pattern (depth = 1), cài đặt batch resolver trong `page.rs` (tối đa 16 Pattern, 1024 node, fallback an toàn khi thiếu) và 1-hop `entry_pattern_refs` trong `media_is_referenced`.
   3. Triển khai `/api/admin/patterns` (`GET` session, `POST/PUT/DELETE` `require_admin_with_csrf`, `409 Conflict` kèm `referencing_count` trừ khi `?force=true`; Builder AST dùng lại `/api/admin/entries/pattern/{id}/builder`).
   4. Xây dựng `PatternsPage.tsx` và block `Reusable Pattern` (`<SelectField>` chọn Pattern CPT) trong `BuilderInspector.tsx`.
+* **Acceptance Criteria:**
+  - [ ] Nhúng cùng 1 Pattern CTA vào 3 trang (`Home`, `Contact`, `About`), Admin sửa Pattern 1 lần → cả 3 trang hiển thị nội dung mới; Editor nhận `403` khi gọi `POST/PUT/DELETE /api/admin/patterns*`.
+  - [ ] Từ chối `400` khi nhúng `PatternRef` hoặc `ContentList` bên trong Pattern; `DELETE` Pattern đang dùng trả `409` kèm danh sách trang và chỉ xóa khi `?force=true`; trang tham chiếu Pattern đã xóa không crash.
+  - [ ] Public media ACL cấp quyền 1-hop cho media trong Pattern gắn trên trang `published` và thu hồi ngay khi trang về `draft`/đổi mode; `npm run build` & `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S02 và khôi phục DB fixture trước Migration `0044`.
 
 ### Slice S03: Pattern Library (`Explore all patterns` — Theme `patterns/` & Gutenberg Modal)
 
-* **Phạm vi file:** `cms/crates/opendash-server/src/storage/patterns.rs`, `cms/crates/opendash-server/src/routes/patterns.rs`, `cms/crates/opendash-server/src/app.rs`, `cms/admin/src/api/patterns.ts`, `cms/admin/src/builder/{BuilderWorkspace.tsx,PatternLibraryModal.tsx,document.ts}`.
+* **Dependencies:** Spec 1 Slice `S02` (Theme v3 `patterns`) và Spec 2 Slice `S02` (`storage/patterns.rs`, `routes/patterns.rs`).
+* **File Ownership:** `cms/crates/opendash-server/src/storage/patterns.rs`, `cms/crates/opendash-server/src/routes/patterns.rs`, `cms/crates/opendash-server/src/app.rs`, `cms/admin/src/api/patterns.ts`, `cms/admin/src/builder/{BuilderWorkspace.tsx,PatternLibraryModal.tsx,document.ts}`.
 * **Công việc chính:**
   1. Triển khai `list_theme_patterns()` và 2 endpoint `GET /api/admin/patterns/library` (`?category=&q=`) & `GET /api/admin/patterns/library/theme/{key}` đọc từ `ThemeV3Manifest.patterns` của active theme v3 (ảnh dùng `/theme/<theme_id>/<rel_path>`).
   2. Cài đặt `cloneWithFreshNodeIds(doc)` trong `cms/admin/src/builder/document.ts`.
   3. Thêm tab `Patterns` ở sidebar trái của `BuilderWorkspace.tsx` và modal `PatternLibraryModal.tsx` (`Explore all patterns` với tìm kiếm, cột danh mục, lưới xem trước và chèn COPY AST vào canvas).
+* **Acceptance Criteria:**
+  - [ ] `GET /api/admin/patterns/library` lọc đúng theo `category` và `q` từ `patterns/*.json` của active theme v3 (trả `[]` khi chưa có active theme).
+  - [ ] Bấm chèn mẫu từ `PatternLibraryModal.tsx` tạo bản COPY AST với toàn bộ `node_id` mới; sửa trên trang không ghi ngược file theme bất biến.
+  - [ ] `npm run build`, `check-standards.py`, `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S03 (không thay đổi schema SQLite).
 
 ---
 
