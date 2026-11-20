@@ -16,7 +16,9 @@ media/taxonomy/menu → theme ZIP/sample import không ghi đè → Builder home
 footer/single/archive → restart/provider changes giữ dữ liệu/layout → backup/restore
 root mới → operator kích hoạt → re-edit. Desktop editing và responsive preview/public
 không tự chứng nhận mobile authoring hoặc thiết bị thật. Semantics Lưu/Xuất bản giữ nguyên:
-draft không public, preview chưa lưu không đổi public, Save Builder cập nhật public ngay.
+draft không public, preview chưa lưu không đổi public. Save template dùng chung có thể
+cập nhật public; Save Builder content phải theo publication của bản ghi, kể cả Page
+được chọn làm trang chủ. Xem [phân định Builder ngày 19/11](BUILDER_TEMPLATE_AND_CONTENT.md).
 
 Biên tập thường ngày qua Admin, không SQL/API thủ công/edit file. Operator được chuẩn bị
 binary/môi trường và kích hoạt restored root theo ADR-0015; không hot-swap. Beta dùng
@@ -53,7 +55,7 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 - Quản trị viên tạo loại nội dung tùy chỉnh (CPT), custom fields, danh mục có cha–con và thẻ qua giao diện. Theme/plugin có thể định nghĩa sẵn các thành phần này.
 - Các field bản đầu gồm chữ ngắn/dài, trình soạn thảo nội dung, số, bật/tắt, ngày, lựa chọn, ảnh và thư viện ảnh.
 - Người nhập liệu có thể làm việc qua form. Template lấy dữ liệu của nội dung tương ứng để hiển thị.
-- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. **Phân biệt Lưu và Xuất bản:** với `post`/`page` đang ở `draft`, **Lưu** chỉ ghi bản nháp vào DB, không làm nội dung xuất hiện trên URL công khai, archive, sitemap hoặc media public qua tham chiếu draft. Chỉ chuyển trạng thái sang `published` bằng thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một `post`/`page` đã `published` cập nhật nội dung công khai. Preview draft phải yêu cầu phiên đăng nhập/quyền hợp lệ. Với **Builder/homepage** hiện hữu, **Lưu** tiếp tục cập nhật trang công khai ngay; không tự thêm workflow draft cho Builder. Theo [ADR-0019](../decisions/ADR-0019-content-foundation.md), CPT khác có thể chọn `draft_publish`; mặc định CPT cũ vẫn immediate, chuyển chế độ không tự xuất bản draft. Phần trạng thái/endpoint/schema cụ thể cần G2 trước triển khai.
+- Các thay đổi chưa lưu hiển thị trong màn hình chỉnh sửa hoặc preview. **Phân biệt Lưu và Xuất bản:** với `post`/`page` đang ở `draft`, **Lưu** chỉ ghi bản nháp vào DB, không làm nội dung xuất hiện trên URL công khai, archive, sitemap hoặc media public qua tham chiếu draft. Chỉ chuyển trạng thái sang `published` bằng thao tác **Xuất bản** mới công khai nội dung; **Lưu** sửa một `post`/`page` đã `published` cập nhật nội dung công khai. Preview draft phải yêu cầu phiên đăng nhập/quyền hợp lệ. **Builder content tuân theo publication của bản ghi**, kể cả Page được chọn làm trang chủ; mở hoặc lưu Builder không tự xuất bản. Theo [ADR-0019](../decisions/ADR-0019-content-foundation.md), CPT khác có thể chọn `draft_publish`; mặc định CPT cũ vẫn immediate, chuyển chế độ không tự xuất bản draft. Template trang đầu và content của Page là hai phạm vi riêng theo [yêu cầu ngày 19/11](BUILDER_TEMPLATE_AND_CONTENT.md); không yêu cầu chuyển homepage legacy thành Page, phải giữ dữ liệu hiện hữu. Phần trạng thái/endpoint/schema cụ thể cần G2 trước triển khai.
 - Hai vai trò là Quản trị viên và Biên tập viên. Quản trị viên quản lý hệ thống, cấu hình, theme và plugin. Biên tập viên quản lý và cập nhật nội dung công khai.
 
 ## Quyết định bổ sung M3 — Core CMS usable (10/11/2026)
@@ -62,14 +64,40 @@ Chủ dự án chốt **phương án A** cho milestone M3: sản phẩm phải s
 
 **Ngoại lệ nhỏ so với giới hạn V1 cũ:** riêng `post`/`page` M3 có trạng thái **draft/published tối thiểu** theo quy tắc Lưu/Xuất bản bên trên (không có approval workflow, scheduled publishing, revision history). Quy trình biên tập đa bước vẫn để sau V1. Taxonomy, plugin CPT/field bridge, video/media delete/reconcile, Builder AST, template/Theme Options, SEO/contact và backup/restore **vẫn nằm trong V1**, nhưng không phải điều kiện đóng M3 phương án A; xem [roadmap](../plans/ROADMAP_V1.md) để biết mốc chính.
 
+## Chỉ đạo chủ dự án — không tương thích ngược, 20/11/2026
+
+OpenDash đang phát triển, chưa có bản sản phẩm cũ cần hỗ trợ. Thiết kế mới
+không phải giữ format theme/API/schema cũ, adapter legacy, dual-read/dual-write,
+converter hay lộ trình upgrade từ các bản thử nghiệm. Chốt một format/API/schema
+đích thống nhất; cập nhật source, fixtures và kiểm chứng theo cùng baseline mới.
+Những điều khoản tương thích ngược trong tài liệu lịch sử không ràng buộc
+phạm vi thiết kế mới này. Không phát sinh task compatibility riêng.
+
+Điều này không bỏ yêu cầu sản phẩm bảo toàn content/layout khi người dùng
+đổi/cập nhật theme, hay quyền, publication, backup/restore trong mô hình mới.
+Không tự xóa dữ liệu hoặc thư mục hiện có để thực hiện quyết định thiết kế.
+
 ## Builder và theme
 
 - Builder dùng trên máy tính, có cây Section → Row → Column → Element và bảng thuộc tính trong sidebar, bên cạnh là preview. Người dùng chọn phần tử từ cây hoặc preview.
-- Dựng và chỉnh được page, header, footer, archive và single. Hỗ trợ bố cục và preview cho desktop, tablet và mobile.
+- Phân biệt **Builder template/thành phần dùng lại** (header, footer, archive, mẫu single, section…) và **Builder content của từng bản ghi**. Template single xác định bố cục chung và vị trí content; sửa content một bản ghi chỉ ảnh hưởng bản ghi đó. Hỗ trợ bố cục và preview cho desktop, tablet và mobile.
+- Page/Post/CPT chỉ dùng Builder cho content khi loại nội dung đăng ký hỗ trợ Builder. Khả năng này độc lập với trình soạn thảo nội dung thông thường; không mặc định mọi CPT đều có Builder. Đổi cấu hình hoặc provider không được xóa content/layout đã lưu.
+- Chọn template theo hierarchy tham chiếu WordPress, phân biệt template trang chủ (`home`), archive bài viết (`archive-post` → `archive`), single/archive cho mọi CPT (gồm Post/Page); header/footer là template parts. Không dùng role `front-page` hoặc `blog`; Page mặc định dùng `page` và cho chọn Page layout khi chỉnh sửa (bổ sung 20/11/2026). Tách nguồn template của theme đang active khỏi bản tùy chỉnh Builder lưu database; bản tùy chỉnh ưu tiên bản theme tương ứng và phải hiển thị rõ nguồn trong Admin. Thứ tự cụ thể đã được Atlas chốt tại [resolver G2](../contracts/BUILDER_TEMPLATE_RESOLVER.md), có hiệu lực contract sau merge; chưa là implementation.
+- Admin trong **Cài đặt** chọn một Page làm **Trang chủ** tại `/` và một Page khác làm **Trang bài viết (Blog)** để hiển thị archive của built-in `post`. Homepage dùng content của Page đã chọn; Blog dùng `archive-post` nếu có, nếu không dùng `archive` mặc định, không dùng body Page làm danh sách bài. Cả hai Page xuất hiện trong danh sách Trang. Không convert homepage legacy cũ sang Page content mới; bảo toàn dữ liệu cũ không đồng nghĩa giữ một chế độ homepage legacy trong mô hình đích. Chi tiết tại [Builder template và content](BUILDER_TEMPLATE_AND_CONTENT.md).
 - Template dùng chung có thể liên kết thuộc tính của block với field của nội dung. Block danh sách cho chọn CPT, danh mục, thứ tự, số lượng và phân trang.
 - Developer thêm block, template và Theme Options trong gói ZIP cài trực tiếp, không cần biên dịch lại CMS. CMS tạo màn hình setting từ khai báo và cung cấp giá trị cho block/template. Phân biệt setting chung của website và tùy chỉnh riêng của theme.
 - Gói theme có thể chứa trang, menu, hình ảnh và cấu hình mẫu. Người dùng chủ động chọn nhập mẫu, quá trình nhập không ghi đè nội dung hiện có.
 - Đổi hoặc cập nhật theme giữ nội dung và bố cục người dùng đã chỉnh. Người dùng chủ động chọn thay thế bằng thiết kế mặc định mới.
+
+### Cấu trúc theme và Page layout — bổ sung 20/11/2026
+
+Template chính và header/footer đặt root theme; các thư mục template-part/,
+page-layouts/, sections/ và assets/ phân biệt thành phần nhỏ, layout Page,
+Section liên kết Admin và tài nguyên tĩnh. Page mặc định dùng page.html; chọn
+layout không đổi content. Section theme có bản tùy chỉnh database và giữ khi
+update/đổi theme; chèn vẫn COPY, chưa synced propagation. Xem [đặc tả chi tiết](BUILDER_TEMPLATE_AND_CONTENT.md).
+Cách developer viết custom Builder block sẽ thảo luận riêng sau; ví dụ đã
+trao đổi chưa là contract. Yêu cầu khả năng mở rộng block V1 vẫn giữ nguyên.
 
 ## Plugin
 

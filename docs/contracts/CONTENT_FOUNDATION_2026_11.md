@@ -25,6 +25,11 @@ Graph is a locator, not runtime evidence; stale symbols were checked on disk.
 
 ## 2. Content type settings (C1)
 
+**Owner follow-up 19/11/2026:** [Builder template và content](../product/BUILDER_TEMPLATE_AND_CONTENT.md)
+requires a distinct content Builder capability. The two-value supports set below
+is the existing C1 contract, not support for that new requirement. Builder registration,
+defaults and preservation/fallback need a separate G2/G3 delta before implementation.
+
 Add optional `settings` to existing CPT create/update/read DTOs and canonical
 schema JSON. All fields deny unknown keys. Settings contain `public: bool`,
 `has_archive: bool`, `publication: immediate|draft_publish`,
