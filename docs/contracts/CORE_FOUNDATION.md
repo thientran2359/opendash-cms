@@ -66,7 +66,24 @@ Trước khi thêm bất kỳ tính năng, route, bảng dữ liệu hay màn h�
 
 ---
 
-## 6. Kiểm tra Quy chuẩn Tự động
+## 6. Thuật ngữ chuẩn (Glossary — OpenDash ↔ WordPress)
+
+Bảng dưới đây thống nhất thuật ngữ dùng trong mã nguồn (`cms/`), API, giao diện Admin và Design Spec EGM để tránh đặt tên chồng chéo giữa các agent và developer:
+
+| Thuật ngữ OpenDash | Định danh / Nơi lưu chuẩn | Tương đương WordPress | Ý nghĩa & Hành vi chuẩn |
+|---|---|---|---|
+| **Pattern (CPT)** / **Reusable Pattern Block** | CPT private `pattern` (`content_entries`) · Block `core/pattern_ref` | Synced Pattern / Reusable Block | Khối do người dùng tạo trong Admin CPT. Khi chèn block `core/pattern_ref` (chọn `pattern_id`) vào nhiều trang (Home, Contact, About…), sửa 1 lần trong Pattern CPT sẽ tự cập nhật đồng bộ ở mọi nơi đang gọi. |
+| **Pattern Library** | Thư mục `patterns/*.json` trong Theme + nguồn Cloud (mở rộng) | Block Pattern Directory (`Explore all patterns`) | Thư viện mẫu sẵn mở từ Visual Builder; bấm chọn là **COPY / import AST** (tạo node IDs mới) vào trang đang chỉnh sửa, không liên kết sống với file gốc. |
+| **Template** | Root HTML (`index.html`, `home.html`, `page.html`, `single*.html`, `archive*.html`, `taxonomy*.html`, `404.html`) | Block / Classic Templates | Bố cục dùng chung cho từng ngữ cảnh route, khai báo có kiểu trong `theme.json`, cho phép tùy chỉnh site-owned trong `template_overrides`. |
+| **Template Part** | Root `header.html`/`footer.html` & `template-part/*.html` · `{{ od_part("<key>") }}` · Block `core/template_part` | Template Parts | Thành phần bố cục dùng lại (header, footer, post-card, breadcrumbs, pagination…), nhúng qua directive tĩnh `od_part` (Theme HTML) hoặc block `core/template_part` (Visual Builder). |
+| **Page Layout** | `page-layouts/*.html` (`full_width`, `sidebar`, `canvas`…) | Page Templates | Bố cục có tên chọn ở sidebar màn sửa Page; không thay đổi nội dung hay trạng thái xuất bản của Page. `canvas` không gọi `header`/`footer`. |
+| **Content Slot** | `{{ od_content() }}` (Theme HTML) · Block `core/content_slot` (Visual Builder) | `the_content()` / Post Content block | Đúng 1 vị trí do core kiểm soát để chèn nội dung bản ghi (editor HTML đã lọc hoặc Builder AST đã render) vào entry template. |
+| **Reading Settings** | `site_reading_settings` · `/api/admin/settings/reading` | Settings → Reading (Homepage / Posts page) | Cấu hình atomic 2 Page ID độc lập (`homepage_page_id` cho `/`, `posts_page_id` cho archive `post`) đi qua 1 route authority (`storage/permalinks.rs`). |
+| **C-SEC** | `opendash_server::template_sec` ([M5_THEME_TEMPLATES.md](M5_THEME_TEMPLATES.md)) | N/A (Ràng buộc bảo mật OpenDash) | Tập con an toàn MiniJinja: auto-escape HTML bắt buộc, cấm `{% include %}`/`{% extends %}`/`\|safe`/thẻ `<script>`, giới hạn fuel (`10_000`), recursion (`16`) và dung lượng render (`512 KiB`). |
+
+---
+
+## 7. Kiểm tra Quy chuẩn Tự động
 
 Bắt buộc chạy sau mỗi thay đổi code hoặc tài liệu:
 
