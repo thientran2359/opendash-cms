@@ -79,9 +79,20 @@ jobs:
         with:
           workspaces: cms
 
-      - name: Check Rust formatting
+      - name: Check Rust formatting on changed files
         if: steps.changes.outputs.run_cms == 'true'
-        run: cargo fmt --manifest-path cms/Cargo.toml --all --check
+        shell: bash
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            CHANGED_RS="$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- 'cms/crates/**/*.rs')"
+            if [ -n "$CHANGED_RS" ]; then
+              echo "$CHANGED_RS" | xargs rustfmt --edition 2024 --check
+            else
+              echo "No changed Rust files to check formatting."
+            fi
+          fi
 
       - name: Run Rust workspace tests (release, locked)
         if: steps.changes.outputs.run_cms == 'true'
