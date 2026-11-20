@@ -142,8 +142,8 @@ impl SecretStore {
         }
         platform::verify_file_acl(&path)?;
 
-        let mut file = File::open(&path)
-            .map_err(|_| ApiError::internal("Không thể đọc tệp bí mật SMTP."))?;
+        let mut file =
+            File::open(&path).map_err(|_| ApiError::internal("Không thể đọc tệp bí mật SMTP."))?;
         let mut buf = Vec::with_capacity(meta.len() as usize);
         std::io::Read::by_ref(&mut file)
             .take((MAX_SMTP_SECRET_FILE_BYTES + 1) as u64)
@@ -181,15 +181,15 @@ pub fn ensure_no_reparse_or_symlink(path: &Path) -> ApiResult<()> {
                 use std::os::windows::fs::MetadataExt;
                 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
                 if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
-                    return Err(ApiError::internal(
-                        "Từ chối reparse point tại kho bí mật.",
-                    ));
+                    return Err(ApiError::internal("Từ chối reparse point tại kho bí mật."));
                 }
             }
             Ok(())
         }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(_) => Err(ApiError::internal("Không thể kiểm tra metadata kho bí mật.")),
+        Err(_) => Err(ApiError::internal(
+            "Không thể kiểm tra metadata kho bí mật.",
+        )),
     }
 }
 
@@ -281,17 +281,16 @@ mod platform {
     use windows_sys::Win32::{
         Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, LocalFree},
         Security::{
-            ACL, ACL_SIZE_INFORMATION, ACCESS_ALLOWED_ACE, AclSizeInformation,
+            ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
             Authorization::{
-                EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SET_ACCESS, SE_FILE_OBJECT,
+                EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, SE_FILE_OBJECT, SET_ACCESS,
                 SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
                 TRUSTEE_W,
             },
-            CreateWellKnownSid, DACL_SECURITY_INFORMATION, EqualSid, GetAce,
-            GetAclInformation, GetSecurityDescriptorControl, GetTokenInformation,
-            NO_INHERITANCE, PROTECTED_DACL_SECURITY_INFORMATION,
-            SECURITY_DESCRIPTOR_CONTROL, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
-            TokenUser, WinLocalSystemSid,
+            CreateWellKnownSid, DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation,
+            GetSecurityDescriptorControl, GetTokenInformation, NO_INHERITANCE,
+            PROTECTED_DACL_SECURITY_INFORMATION, SE_DACL_PROTECTED, SECURITY_DESCRIPTOR_CONTROL,
+            TOKEN_QUERY, TOKEN_USER, TokenUser, WinLocalSystemSid,
         },
         Storage::FileSystem::FILE_ALL_ACCESS,
         System::Threading::{GetCurrentProcess, OpenProcessToken},
@@ -345,7 +344,13 @@ mod platform {
         unsafe {
             let mut size: u32 = 68;
             let mut buf = vec![0u8; size as usize];
-            if CreateWellKnownSid(WinLocalSystemSid, ptr::null_mut(), buf.as_mut_ptr().cast(), &mut size) == 0 {
+            if CreateWellKnownSid(
+                WinLocalSystemSid,
+                ptr::null_mut(),
+                buf.as_mut_ptr().cast(),
+                &mut size,
+            ) == 0
+            {
                 return Err(ApiError::internal("Không thể tạo SYSTEM SID."));
             }
             Ok(buf)
@@ -477,7 +482,9 @@ mod platform {
                     if ace.Header.AceType != 0 {
                         return Err(ApiError::internal("Phát hiện ACE không hợp lệ trong DACL."));
                     }
-                    let sid_ptr = (&ace.SidStart as *const u32).cast::<std::ffi::c_void>().cast_mut();
+                    let sid_ptr = (&ace.SidStart as *const u32)
+                        .cast::<std::ffi::c_void>()
+                        .cast_mut();
                     let is_user = EqualSid(sid_ptr, user.sid) != 0;
                     let is_sys = EqualSid(sid_ptr, sys.as_mut_ptr().cast()) != 0;
                     if !is_user && !is_sys {
@@ -524,7 +531,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("opendash-secret-test-{nanos}"));
-        let store = SecretStore::new(dir.clone());
+        let store = SecretStore::new(dir.join("smtp"));
         store.verify_native_acl().expect("native ACL probe");
 
         let r = store.write_smtp_secret("p@ssw0rd!").expect("write secret");
