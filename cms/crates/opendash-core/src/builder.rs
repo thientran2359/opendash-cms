@@ -205,6 +205,10 @@ pub enum KnownElement {
     List(ListProps),
     #[serde(rename = "core/contact_form")]
     ContactForm(ContactFormProps),
+    #[serde(rename = "core/content_slot")]
+    ContentSlot(ContentSlotProps),
+    #[serde(rename = "core/template_part")]
+    TemplatePart(TemplatePartProps),
     #[serde(rename = "legacy/block")]
     Legacy(LegacyBlockProps),
     #[serde(rename = "plugin/block")]
@@ -217,6 +221,19 @@ pub struct PluginBlockProps {
     pub block_id: String,
     #[serde(default)]
     pub values: BTreeMap<String, Value>,
+}
+
+/// Typed insertion point for the current entry's sanitized content.
+/// Context-specific slot-count rules belong to the template override layer.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentSlotProps {}
+
+/// A named theme/template part resolved by the server in the render context.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplatePartProps {
+    pub part_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -356,6 +373,8 @@ impl KnownElement {
             Self::Legacy(_)
             | Self::List(_)
             | Self::ContactForm(_)
+            | Self::ContentSlot(_)
+            | Self::TemplatePart(_)
             | Self::Video(_)
             | Self::PluginBlock(_) => None,
         }
@@ -603,7 +622,9 @@ fn validate_known(
             if props.values.len() > 64 {
                 return Err("Plugin block props exceed limit");
             }
-            let descriptor = catalog.get(&props.block_id).ok_or("Unknown plugin block descriptor")?;
+            let descriptor = catalog
+                .get(&props.block_id)
+                .ok_or("Unknown plugin block descriptor")?;
             if descriptor.status != ProviderStatus::Active {
                 return Err("Plugin block provider is not active");
             }
@@ -628,18 +649,28 @@ fn validate_known(
                 return Err("Invalid Builder contact form configuration");
             }
         }
+        KnownElement::ContentSlot(_) => {}
+        KnownElement::TemplatePart(props) => {
+            if !valid_kebab_segment_with_limit(&props.part_key, 64) {
+                return Err("Invalid Builder template part key");
+            }
+        }
         KnownElement::List(props) => {
             if !valid_content_type_key(&props.type_key)
                 || !(1..=20).contains(&props.page_size)
                 || props.category_id.is_some_and(|id| id <= 0)
                 || props.tag_id.is_some_and(|id| id <= 0)
                 || props.term_id.is_some_and(|id| id <= 0)
-                || props.taxonomy_key.as_deref().is_some_and(|key| !valid_content_type_key(key))
+                || props
+                    .taxonomy_key
+                    .as_deref()
+                    .is_some_and(|key| !valid_content_type_key(key))
                 || (props.taxonomy_key.is_some() != props.term_id.is_some())
                 || (props.taxonomy_key.is_some()
                     && (props.category_id.is_some() || props.tag_id.is_some()))
                 || (props.include_descendants
-                    && props.category_id.is_none() && props.taxonomy_key.is_none())
+                    && props.category_id.is_none()
+                    && props.taxonomy_key.is_none())
             {
                 return Err("Invalid Builder list configuration");
             }
@@ -856,6 +887,82 @@ mod tests {
                 }],
             }],
         }
+    }
+
+    #[test]
+    fn v3_template_composition_blocks_roundtrip_and_validate() {
+        let mut document = fixture();
+        let children = &mut document.sections[0].children[0].children[0].children;
+        children.push(element(
+            "content-slot-1",
+            KnownElement::ContentSlot(ContentSlotProps {}),
+        ));
+        children.push(element(
+            "template-part-1",
+            KnownElement::TemplatePart(TemplatePartProps {
+                part_key: "post-card".into(),
+            }),
+        ));
+        document.validate_for_save(&registry(), None).unwrap();
+
+        let encoded = serde_json::to_value(&document).unwrap();
+        assert_eq!(
+            encoded["sections"][0]["children"][0]["children"][0]["children"][5],
+            json!({"id": "content-slot-1", "type": "core/content_slot", "props": {}})
+        );
+        assert_eq!(
+            encoded["sections"][0]["children"][0]["children"][0]["children"][6],
+            json!({"id": "template-part-1", "type": "core/template_part",
+                   "props": {"part_key": "post-card"}})
+        );
+        let decoded = BuilderDocument::from_json(&document.to_json().unwrap()).unwrap();
+        assert_eq!(decoded, document);
+        decoded.validate_for_save(&registry(), None).unwrap();
+    }
+
+    #[test]
+    fn template_part_rejects_invalid_key_and_unknown_properties() {
+        let mut document = fixture();
+        document.sections[0].children[0].children[0]
+            .children
+            .push(element(
+                "template-part-1",
+                KnownElement::TemplatePart(TemplatePartProps {
+                    part_key: "header".into(),
+                }),
+            ));
+        let valid = serde_json::to_value(&document).unwrap();
+        let overly_long = "a".repeat(65);
+        for bad_key in [
+            "",
+            "../header",
+            "header:footer",
+            "Header",
+            overly_long.as_str(),
+        ] {
+            let mut changed = document.clone();
+            let ElementContent::Known(KnownElement::TemplatePart(props)) =
+                &mut changed.sections[0].children[0].children[0].children[5].content
+            else {
+                panic!("expected template part");
+            };
+            props.part_key = bad_key.into();
+            assert!(
+                changed.validate_for_save(&registry(), None).is_err(),
+                "{bad_key}"
+            );
+        }
+        let mut bad = valid.clone();
+        bad["sections"][0]["children"][0]["children"][0]["children"][5]["props"]["extra"] =
+            json!("forbidden");
+        let decoded = BuilderDocument::from_json(bad.to_string().as_bytes()).unwrap();
+        assert!(decoded.validate_for_save(&registry(), None).is_err());
+
+        let mut content_slot = valid;
+        content_slot["sections"][0]["children"][0]["children"][0]["children"][5] = json!({"id": "content-slot-1", "type": "core/content_slot",
+                   "props": {"html": "<script>unsafe</script>"}});
+        let decoded = BuilderDocument::from_json(content_slot.to_string().as_bytes()).unwrap();
+        assert!(decoded.validate_for_save(&registry(), None).is_err());
     }
 
     #[test]
@@ -1318,8 +1425,7 @@ mod tests {
         filtered.validate_for_save(&registry(), None).unwrap();
 
         let mut generic = original.clone();
-        generic["sections"][0]["children"][0]["children"][0]["children"][0]["props"] =
-            json!({"type_key": "post", "taxonomy_key": "genre", "term_id": 37,
+        generic["sections"][0]["children"][0]["children"][0]["children"][0]["props"] = json!({"type_key": "post", "taxonomy_key": "genre", "term_id": 37,
                    "include_descendants": true});
         let generic = BuilderDocument::from_json(generic.to_string().as_bytes()).unwrap();
         generic.validate_for_save(&registry(), None).unwrap();
@@ -1380,11 +1486,26 @@ mod tests {
         });
         let doc = BuilderDocument::from_json(raw.to_string().as_bytes()).unwrap();
         doc.validate_for_save(&registry(), None).unwrap();
-        assert!(doc.validate_route_context_for_role(Some("single"), None).is_ok());
-        assert!(doc.validate_route_context_for_role(Some("page"), None).is_ok());
-        assert!(doc.validate_route_context_for_role(Some("home"), None).is_err());
-        assert!(doc.validate_route_context_for_role(Some("archive"), None).is_err());
-        assert!(doc.validate_route_context_for_role(Some("single"), Some(&[])).is_ok());
+        assert!(
+            doc.validate_route_context_for_role(Some("single"), None)
+                .is_ok()
+        );
+        assert!(
+            doc.validate_route_context_for_role(Some("page"), None)
+                .is_ok()
+        );
+        assert!(
+            doc.validate_route_context_for_role(Some("home"), None)
+                .is_err()
+        );
+        assert!(
+            doc.validate_route_context_for_role(Some("archive"), None)
+                .is_err()
+        );
+        assert!(
+            doc.validate_route_context_for_role(Some("single"), Some(&[]))
+                .is_ok()
+        );
 
         let custom_field = json!({
             "schema_version": 1,
@@ -1410,7 +1531,15 @@ mod tests {
             }]
         });
         let custom_doc = BuilderDocument::from_json(custom_field.to_string().as_bytes()).unwrap();
-        assert!(custom_doc.validate_route_context_for_role(Some("single"), Some(&["summary".to_string()])).is_ok());
-        assert!(custom_doc.validate_route_context_for_role(Some("single"), Some(&["other".to_string()])).is_err());
+        assert!(
+            custom_doc
+                .validate_route_context_for_role(Some("single"), Some(&["summary".to_string()]))
+                .is_ok()
+        );
+        assert!(
+            custom_doc
+                .validate_route_context_for_role(Some("single"), Some(&["other".to_string()]))
+                .is_err()
+        );
     }
 }
