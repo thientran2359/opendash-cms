@@ -1,6 +1,6 @@
 # GitHub workflow cho 5 agent — đề xuất chuẩn vận hành
 
-> **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao Atlas điều phối toàn dự án, chốt quyết định kỹ thuật và merge mọi PR đủ gate, kể cả PR của mình. Nova, Harbor và Forge tự nhận task đủ G3/ownership và tự review/merge PR của mình. Orion đi qua Atlas review/merge. Required CI, acceptance, security/data và GitHub protection vẫn áp dụng.
+> **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao Atlas điều phối toàn dự án, chốt quyết định kỹ thuật và merge mọi PR đủ gate, kể cả PR của mình. Nova, Harbor và Forge tự nhận task đủ Design Spec EGM (`Status: Approved`) / ownership và tự review/merge PR của mình. Orion đi qua Atlas review/merge. Required CI, acceptance, security/data và GitHub protection vẫn áp dụng.
 
 **Repository nguồn duy nhất:** `thientran2359/opendash-cms`.
 Code nằm trong 5 worktree/checkout **cục bộ** tách biệt trên Windows và macOS;
@@ -85,110 +85,48 @@ và validation thật trong PR. Không tạo review giả từ một tài khoả
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |
 | --- | --- | --- |
-| Scope/G0–G3 đã chốt, contract, ADR | `docs/` | Agent ghi Final Decision theo phạm vi được giao hoặc Atlas chốt khi cần, sau đó merge PR đủ gate theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) |
-| Điều tra, thảo luận, đề xuất/task draft | `.agents/research/`, `.agents/discussions/`, `.agents/tasks/` | Agent trên branch của mình |
-| Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator/Muse được ủy quyền, sau khi gate sẵn sàng |
-| Tổng hợp 9 milestone, candidate và tình trạng task để chủ dự án đọc nhanh | [TASK_INDEX](../docs/archive/plans/TASK_INDEX.md) (**snapshot**, không authoritative) | Coordinator thêm task sau G3; agent/reviewer hoàn tất G5 cập nhật qua PR, đối chiếu Issue/Project |
+| Đặc tả thiết kế EGM (`Status: Approved`), contract nền tảng, ADR | `docs/designs/`, `docs/contracts/`, `docs/decisions/` | Elephant (`Atlas`, `Nova`, `Aster`) qua quy trình EGM + Goldfish review và phê duyệt của chủ dự án |
+| Điều tra, thảo luận phụ, đề xuất/task draft | `.agents/research/`, `.agents/discussions/`, `.agents/tasks/` | Agent trên branch của mình |
+| Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator (`Atlas`, `Aster`, `Nova`), sau khi Design Spec đạt `Status: Approved` và merge vào `main` |
+| Danh mục Design Spec EGM và baseline `M1–M8` | [`docs/designs/SITEMAP.md`](../docs/designs/SITEMAP.md) | Elephant đăng ký khi `/egm-draft`; cập nhật `Implemented`/`Verified` sau khi merge & kiểm chứng |
 | Source diff, test, phản biện, chấp thuận tích hợp | **GitHub PR** | Assignee rồi reviewer/CI |
 | Evidence thực chạy/acceptance đã duyệt | `docs/verification/` | Theo quy trình review, không suy từ báo cáo AI |
 | Chat/session/runtime secrets/locks | **Không đưa vào Git** | Từng công cụ giữ riêng |
 
-**Task ID:** ID G3 theo `M{milestone}-S{slice}-T{task}` chỉ được gán khi
-có breakdown chính thức `READY`. GitHub Issue number là mã vận chuyển duy nhất,
-không thay đổi task ID trong kế hoạch; ghi cả hai trong Issue. Không tái cấp
-những ID lịch sử đã retired. Nếu chưa có G3, Issue có thể là research/
-design task, không cấp nhầm implementation `READY`.
+**Task ID:** Theo quy trình EGM mới, mỗi đặc tả triển khai dùng mã `EGM-<slug>` (hoặc `EGM-<slug>-S01` khi tách slice bằng `--slice`). Mã `M{milestone}-S{slice}-T{task}` chỉ còn dùng cho các task G3 lịch sử đã phát hành trước khi chuyển sang EGM. GitHub Issue number là mã vận chuyển duy nhất; ghi cả Task ID và đường dẫn Design Spec tại `source_sha` trong Issue.
 
 ## Chuẩn GitHub Issue: đọc được độc lập với source code
 
 **Issue không chỉ có Task ID hoặc link tài liệu.** Một người quản lý phải mở
 Issue là hiểu được: đang làm gì, vì sao cần, lợi ích với người dùng, phạm vi,
-phần không làm, các acceptance checklist, dependency, agent, trạng thái và
-đường dẫn review. Tiêu đề chuẩn: `[M3-S07-T01] Quản lý danh mục phân cấp`.
+phần không làm, kế hoạch triển khai chi tiết, kiểm chứng, agent và trạng thái.
+Tiêu đề chuẩn: `[EGM-builder-theme-S01] Theme & Template Builder — Slice S01: Theme Manifest & Resolver`.
 Mẫu tạo Issue thủ công ở [Implementation task](../.github/ISSUE_TEMPLATE/implementation.yml)
 và [Research/Design](../.github/ISSUE_TEMPLATE/research-design.yml).
 
 | Nội dung | Nguồn chuẩn / nơi cập nhật |
 | --- | --- |
-| Roadmap, module, capability, approved G0–G3, contract và acceptance | `docs/plans/`, `docs/contracts/` qua review |
-| Bản diễn giải dễ hiểu, mục tiêu, phạm vi, ngoài phạm vi và acceptance của task cụ thể | **Issue có bản sao dễ đọc** từ task G3 tại commit nguồn; không được tự đổi yêu cầu riêng trong Issue |
+| Đặc tả thiết kế EGM (`Status: Approved`), kiến trúc, file đích và kế hoạch kiểm chứng | `docs/designs/<feature>.md`, `docs/designs/SITEMAP.md`, `docs/contracts/` |
+| Bản diễn giải dễ hiểu, mục tiêu, phạm vi, Detailed Implementation Plan và Verification Plan | **Issue sinh tự động** từ `prepare-github-issue.py` tại `source_sha` trên `origin/main`; không tự đổi yêu cầu riêng trong Issue |
 | Người thực hiện, trạng thái, blocker, ngày/luồng giao việc, liên kết PR/chat | GitHub Issue/Project (không commit lại vào docs cho từng lần tiến độ đổi) |
-| Kết quả test có phạm vi, môi trường, SHA | `docs/verification/`; dẫn link trong Issue/PR |
+| Kết quả test có phạm vi, môi trường, SHA | `docs/verification/`; dẫn link trong Issue/PR và `docs/designs/SITEMAP.md` |
 
-Với task code, Issue phải có ít nhất **8 mục**: tổng quan/giá trị, mục tiêu,
-phạm vi, ngoài phạm vi, acceptance checklist, dependency, kỹ thuật/file
-ownership/approved gate, kiểm thử/rủi ro/rollback; cuối cùng dẫn tài liệu
-gốc tại **commit SHA cố định**, baseline code SHA và metadata task/module.
-Ngôn ngữ phần đầu ưu tiên tiếng Việt dễ hiểu; phần kỹ thuật ghi đủ để coding
-agent không suy đoán API/schema. Chỉ đánh dấu checkbox sau khi có bằng chứng.
+### Tạo Issue bằng CLI xuất JSON (`prepare-github-issue.py`)
 
-### Tạo Issue bằng Muse / CLI xuất JSON
-
-1. G0–G3 của task đã được chốt và **merge vào `main`**, G3 ghi rõ `READY`;
-   nếu Full-Track thì G2 phải `AGREED`. Task G1/G2 và ID historical
-   `PROPOSED` không được chuyển thành implementation Issue READY. Đối chiếu
-   source thực tế để không giao lại code đã làm.
-2. Task có heading `### M3-Sxx-Txx — Tên nhiệm vụ` trong module brief (hoặc
-   `#` nếu task brief riêng) và các heading theo
-   [mẫu SLICE_TASK](../docs/archive/plans/templates/SLICE_TASK.md). Không bắt buộc
-   mỗi task có file `.md` độc lập.
-3. Coordinator/Muse `git fetch origin` rồi dùng công cụ **read-only** để đọc
-   blob tại `origin/main` hoặc commit đã duyệt:
+1. Design Spec tại `docs/designs/<feature>.md` đã qua Goldfish review, được chủ dự án duyệt (`**Status:** Approved`), không còn `Open Questions` mở hay `TODO`/`TBD`, có đầy đủ `## Detailed Implementation Plan` (`### Target Files to Create/Modify` + `### Verification Plan`) và đã **merge vào `main`**.
+2. Với đặc tả lớn, có thể chia nhiều slice bằng heading `### Slice S01: <Tên slice>` trong `## Detailed Implementation Plan` để tạo các Issue nhỏ độc lập.
+3. Coordinator (`Atlas`, `Aster`, `Nova`) chạy `git fetch origin` rồi dùng công cụ **read-only** để đọc blob tại `origin/main`:
 
    ```shell
-   python .agents/scripts/prepare-github-issue.py --source docs/plans/modules/CNT-03-taxonomy.md --task-id M3-S07-T01 --ref origin/main --agent forge --format json
+   python .agents/scripts/prepare-github-issue.py --source docs/designs/<feature>.md --ref origin/main --agent forge --format json
+   # Hoặc tách riêng 1 slice:
+   python .agents/scripts/prepare-github-issue.py --source docs/designs/<feature>.md --slice S01 --ref origin/main --agent forge --format json
    ```
 
-   Đường dẫn/ID trong ví dụ là minh họa, chỉ chạy khi file và task thực sự
-   tồn tại và đã được duyệt. Công cụ từ chối metadata thiếu, G3 không READY,
-   Full-Track G2 chưa AGREED, heading không duy nhất, phần mô tả/checklist
-   chưa hoàn chỉnh. `--base-ref <code-sha>` cho phép tách baseline source
-   code khỏi commit chứa tài liệu. Output có `title`, `body`, `labels`,
-   `milestone` (GitHub number), `milestone_title`, `project_url`,
-   `source_sha`, `base_sha`, `task_id`; **không tạo Issue hoặc gửi chat**.
-4. Muse **kiểm tra cả Issue open và closed** theo Task ID (so sánh task ID
-   chính xác, không chỉ chuỗi gần đúng). Nếu đã có, update cùng Issue khi
-   source version đổi; nếu chưa, gọi GitHub API `create_issue`. Không có
-   đảm bảo atomic chống trùng từ GitHub search: Muse phải serialize việc
-   publish theo Task ID, xác nhận kết quả sau timeout/ambiguous failure
-   trước khi retry. Không sinh Issue thứ hai cho cùng task/đợt triển khai.
-5. Muse **xác nhận lại** GitHub milestone number + title từ API rồi truyền
-   `milestone` vào `create_issue`; gắn `labels` của output. Nếu milestone
-   bị đổi/xóa, **BLOCKED**, không âm thầm chọn mốc khác. GitHub Project đã có
-   auto-add Issue mới từ repository; Muse xác nhận Issue xuất hiện ở Project
-   và đặt `Status=Ready` sau khi xác minh G3, không đánh dấu hoàn thành.
-   (GitHub không hiểu `agent:forge` là username assignee.) Chỉ gán GitHub
-   assignee nếu là tài khoản thực có quyền; agent runtime identity nằm ở
-   `agent:*` label.
-6. Khi scope, contract hoặc acceptance thay đổi: sửa tài liệu trong repo,
-   review/merge và **đồng bộ lại body Issue + source SHA**. Khi đổi
-   tiến độ, owner hoặc blocker: **Issue/Project phải cập nhật trước**.
-   Theo chỉ đạo mới, riêng [TASK_INDEX](../docs/archive/plans/TASK_INDEX.md) được phép
-   phản ánh trạng thái có nguồn/link Issue và ngày đối chiếu: coordinator thêm
-   hàng task G3 đã phát hành; khi **G5 VERIFIED + Project Done**, agent được
-   giao closure cập nhật hàng Done qua PR docs. Nếu chỉ merge code nhưng
-   chưa G5, giữ In review/Partial theo GitHub, không tự ghi Done. Không duy
-   trì JSON/YAML mirror hoặc queue song song khác và không dựa vào index để pickup.
-
-**Ngoại lệ hạ tầng POC Muse → CoS Phase 1 (G3 APPROVED 09/11/2026, Issues chưa READY):** các mã
-`P1-W01..P1-W08` trong [breakdown Phase 1](../docs/archive/plans/muse-cos-win-phase1-g2.md)
-không phải product task `Mx-Sxx-Txx`. Công cụ
-`prepare-github-issue.py` **không hỗ trợ** namespace/source/metadata này;
-**không chạy CLI đó** hoặc gán module/milestone CMS giả. **Chỉ sau khi** G3
-work package tương ứng được review/merge vào `main`, các điều kiện và
-dependency đạt, coordinator có thể **tạo Issue riêng theo mẫu**
-[Implementation task](../.github/ISSUE_TEMPLATE/implementation.yml):
-tiêu đề `[P1-Wxx] ...`, nhãn `type:implementation`, `agent:forge`,
-`area:agent-workflow`, đủ 8 mục kỹ thuật/nghiệp vụ, file ownership, gate
-`READY`, approved `source_sha` (Git blob immutable), `base_sha`, owner,
-acceptance và rollback. Không tự gán GitHub milestone M3 hoặc `Module:` giả.
-Kiểm cả Issue open/closed theo **ID chính xác** trước khi publish và giữ
-  [Issue #5](https://github.com/thientran2359/opendash-cms/issues/5) **chỉ
-coordination / `NO_DISPATCH`**, không dùng làm implementation Issue.
-**Staged activation:** lúc đầu chỉ W01/W02 được xem xét `READY`; W03–W08
-phải chờ P0 evidence + signal contract + cập nhật các brief tương ứng đã
-review/merge, rồi pin lại SHA nguồn mới. Đây là ngoại lệ **riêng Phase 1**,
-không nới guard của tool phát hành task module CMS.
+   Công cụ tự động từ chối nếu spec chưa `Approved`, thiếu `Detailed Implementation Plan`/`Verification Plan`, còn `Open Questions` chưa chốt hoặc còn placeholder `TODO`/`TBD`. `--base-ref <code-sha>` cho phép tách baseline source code khỏi commit chứa tài liệu. Output có `title`, `body`, `labels`, `project_url`, `source_sha`, `base_sha`, `task_id`; **không tự tạo Issue hoặc gửi chat**.
+4. Kiểm tra cả Issue open và closed theo `task_id` chính xác để tránh tạo trùng. Khi đã có, cập nhật cùng Issue nếu `source_sha` thay đổi; nếu chưa, tạo Issue trên GitHub và gắn đúng `labels` (`type:implementation`, `egm`, `agent:<name>`).
+5. Project #3 có auto-add Issue mới; xác nhận Issue xuất hiện trên Project và đặt `Status=Ready` sau khi xác minh đủ gate. Agent runtime identity nằm ở label `agent:*`.
+6. Khi scope hoặc thiết kế thay đổi: sửa `docs/designs/<feature>.md`, review/merge rồi **đồng bộ lại body Issue + `source_sha`**. Khi hoàn tất merge và kiểm chứng thực tế PASS, cập nhật `Status` trong [`docs/designs/SITEMAP.md`](../docs/designs/SITEMAP.md) (`Implemented` / `**Verified**` kèm link `docs/verification/*.md`). *(Lưu ý: quy trình G0–G5 và `docs/archive/plans/TASK_INDEX.md` đã được lưu trữ lịch sử, không dùng cho task mới.)*
 
 ### GitHub trực tiếp: cấu hình đã xác nhận 09/11/2026
 
@@ -239,16 +177,16 @@ và `agent:*` nếu đã phân công. Task quy trình liên module dùng
 
 | Project Status | Task workflow |
 | --- | --- |
-| Backlog | Research/design đang mở, task chưa đủ G3; không được tự thực thi |
-| Ready | Implementation G3 READY đã duyệt và đủ nguồn/acceptance |
+| Backlog | Research/design đang mở (`Draft`/`Proposed`), chưa đạt `Status: Approved`; không được tự thực thi |
+| Ready | Design Spec EGM `Status: Approved` đã merge vào `main` và đủ `Detailed Implementation Plan` / `Verification Plan` |
 | In progress | CLAIMED/IN_PROGRESS (hoặc BLOCKED với blocker nêu trong Issue) |
-| In review | SUBMITTED, REVIEWED hoặc MERGED nhưng chưa có G5 verification |
+| In review | SUBMITTED, REVIEWED hoặc MERGED nhưng chưa hoàn tất kiểm chứng thực tế (`Verification Plan`) |
 | Done | Chỉ khi đã VERIFIED đúng phạm vi có evidence và chấp thuận đóng |
 
-**Đồng bộ task đã G3 nhưng còn Backlog:** theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md),
+**Đồng bộ task đã Approved nhưng còn Backlog:** theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md),
 Atlas, Nova, Harbor và Forge có thể trực tiếp chuyển Issue đã giao đúng agent từ `Backlog`
-sang `Ready` **sau khi** đối chiếu source G3 merged, dependency, acceptance,
-file ownership và không có blocker thực. Kiểm lại `Ready` trên Project trước
+sang `Ready` **sau khi** đối chiếu Design Spec EGM đã merge (`Status: Approved`), dependency,
+`Verification Plan`, file ownership và không có blocker thực. Kiểm lại `Ready` trên Project trước
 khi claim. Không sử dụng thao tác này để bypass điều kiện `Ready` hoặc nhận
 Issue của agent khác.
 

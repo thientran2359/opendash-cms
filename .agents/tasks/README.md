@@ -6,6 +6,7 @@ owner, assignee, dependency và trạng thái duy nhất; PR giữ diff và revi
 Dùng [quy trình GitHub](../GITHUB_WORKFLOW.md) và
 [mẫu Task](../templates/TASK.md).
 
-Không tạo task thực thi khi G2/contract chưa được duyệt. Một agent branch chỉ
-có một implementation task active; không cộng dồn nhiều task vào PR.
+Không tạo task thực thi khi Design Spec EGM trong `docs/designs/` chưa đạt
+`Status: Approved` và chưa merge vào `main`. Một agent branch chỉ có một
+implementation task active; không cộng dồn nhiều task vào PR.
 Commit/push sau test và cập nhật Issue/PR, không tự merge hoặc tuyên bố VERIFIED.

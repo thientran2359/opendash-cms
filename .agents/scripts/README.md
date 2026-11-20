@@ -5,22 +5,24 @@
   `--apply`, không tự push hoặc merge.
 - `check-agent-artifacts.py`: kiểm tra file đang có trong vùng `.agents/` để
   phát hiện hook/skill đã retired còn active hoặc artifact/secret rõ ràng.
-- `prepare-github-issue.py`: đọc đặc tả task G3 READY từ **Git blob tại
-  `origin/main`** (hoặc commit `--ref` đã duyệt), validate gate/nội dung và
-  xuất JSON `title`/`body`/`labels` có mô tả đầy đủ cho Muse/GitHub API.
-  Output còn có GitHub `milestone` (number), `milestone_title` để
-  đối chiếu với GitHub trước khi publish và `project_url` (Project hiện
-  có tự thêm Issue mở); **không tạo label `status:*`/`milestone:*`**.
+- `prepare-github-issue.py`: đọc Design Spec EGM (`Status: Approved` trong
+  `docs/designs/<feature>.md`, hỗ trợ tách `--slice S01`) hoặc nguồn G3 lịch sử
+  từ **Git blob tại `origin/main`** (hoặc commit `--ref` đã duyệt), validate
+  gate/nội dung và xuất JSON `title`/`body`/`labels` cho GitHub API.
   Không tạo Issue, không ghi file hoặc gửi task; phải kiểm tra trùng Task ID
-  ở GitHub trước khi publish. Ví dụ khi đã có task hợp lệ:
+  ở GitHub trước khi publish. Ví dụ:
 
   ```shell
-  python .agents/scripts/prepare-github-issue.py --source docs/plans/modules/CNT-03-taxonomy.md --task-id M3-S07-T01 --agent forge --format json
+  python .agents/scripts/prepare-github-issue.py --source docs/designs/<feature>.md --agent forge --format json
+  python .agents/scripts/prepare-github-issue.py --source docs/designs/<feature>.md --slice S01 --agent forge --format json
   python -m unittest discover -s .agents/scripts -p 'test_prepare_github_issue.py' -v
   ```
+- `cos_dispatch.py`: adapter guarded một lần (one-shot + resume theo ACK) để
+  Atlas/Aster giao Issue (`EGM-<slug>` hoặc `M*-S*-T*` lịch sử) và sửa PR tài
+  liệu cho Forge/Harbor qua Chat On Steroids.
 
-  **Lưu ý:** đường dẫn/task ID chỉ là minh họa; mã hiện có CNT-01/CNT-05
-  ghi các task G3 cũ là ứng viên, công cụ phải từ chối.
+Chạy trên từng checkout bằng Python 3. Kiểm chứng unit tests bằng:
 
-Chạy trên từng checkout bằng Python 3. Các adapter Muse → CoS/Antigravity
-chưa được kiểm chứng nên **không có cơ chế tự gửi task đang bật**.
+```shell
+python -m unittest discover -s .agents/scripts -p 'test_cos_*.py' -v
+```
