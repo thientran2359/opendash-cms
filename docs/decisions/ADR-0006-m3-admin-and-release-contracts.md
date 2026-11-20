@@ -2,7 +2,7 @@
 
 **Trạng thái:** `AGREED` · **Tác giả:** Atlas · **Baseline nghiên cứu:** `origin/main@2c679ce3825a10fbc69f2e12e212a43ec5194174`.
 
-[Issue #45](https://github.com/thientran2359/opendash-cms/issues/45) · [PR #46](https://github.com/thientran2359/opendash-cms/pull/46) · [G1 và ma trận 19 candidate](../../.agents/research/2026-11-11-atlas-m3-remaining-g1-g2.md) · [M3 Task Plan](../plans/milestones/M3/TASK_PLAN.md).
+[Issue #45](https://github.com/thientran2359/opendash-cms/issues/45) · [PR #46](https://github.com/thientran2359/opendash-cms/pull/46) · [G1 và ma trận 19 candidate](../../.agents/research/2026-11-11-atlas-m3-remaining-g1-g2.md) · [M3 Task Plan](../archive/plans/milestones/M3/TASK_PLAN.md).
 
 ## Phạm vi và điều kiện áp dụng
 

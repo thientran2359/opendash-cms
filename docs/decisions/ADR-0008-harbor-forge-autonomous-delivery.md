@@ -24,4 +24,4 @@
 
 ## Cập nhật hướng dẫn
 
-Tại thời điểm ban hành, quy định này ưu tiên so với câu chữ giới hạn **riêng M3** trong [Agent Operating Standard](../../.agents/AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md), [github-task-pickup](../../.agents/skills/github-task-pickup/SKILL.md) và [AGENTS.md](../../AGENTS.md) khi agent đang làm việc là Harbor/Forge. Quyền và **nhánh mặc định hiện hành** theo ADR-0010, bao gồm bổ sung 2026-11-19; không viện dẫn mục 3 lịch sử để buộc tạo task branch. Các gate Project, CI, security và evidence vẫn bắt buộc.
+Tại thời điểm ban hành, quy định này ưu tiên so với câu chữ giới hạn **riêng M3** trong [Agent Operating Standard](../../.agents/AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md), [github-task-pickup](../../.agents/archive/skills/github-task-pickup/SKILL.md) và [AGENTS.md](../../AGENTS.md) khi agent đang làm việc là Harbor/Forge. Quyền và **nhánh mặc định hiện hành** theo ADR-0010, bao gồm bổ sung 2026-11-19; không viện dẫn mục 3 lịch sử để buộc tạo task branch. Các gate Project, CI, security và evidence vẫn bắt buộc.

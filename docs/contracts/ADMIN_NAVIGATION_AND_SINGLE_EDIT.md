@@ -1,9 +1,13 @@
 # Contract: Admin Navigation, CPT Schema Builder, Panel Registry & Composite Single Edit (G2 AGREED)
 
+> [!NOTE]
+> **Trạng thái hiện hành (2026-11-20):** **Implemented** (migration `0034_field_groups_and_editor_layout.sql`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `NOT_STARTED / NOT_RUN` bên dưới là snapshot lịch sử lúc chốt G2.
+> **Điểm đã được mở rộng/thay thế:** Bảng điều hướng & hash URL ở Mục 5.1 đã được cập nhật thành bố cục 3 nhóm (`Nội dung`, `Giao diện`, `Tùy chỉnh`, chuyển `Loại nội dung & Trường` sang `#/appearance/content-types`, `Liên hệ`/`SMTP` sang `#/settings/contact|smtp`) theo [`ADMIN_REVIEW_2026_11.md`](ADMIN_REVIEW_2026_11.md) và [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md) (xem tổng hợp tại [`docs/product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md`](../product/ADMIN_NAVIGATION_AND_EDIT_SCREEN.md)).
+
 **Owner:** Nova (Author) · **Reviewer / Coordinator:** Atlas · **Date:** 2026-11-16
 **Design status:** **G2 AGREED (`CONCLUDED_BY_AGENTS`)** — chốt theo Final Decision của Atlas tại [PR #270 receipt (`#issuecomment-6903576673`)](https://github.com/thientran2359/opendash-cms/pull/270#issuecomment-6903576673) trên head `6c0150690a8148ceb2e668546a7d5e6a8edc4824` (đã giải quyết đầy đủ `R1`–`R5` tại [Issue #268](https://github.com/thientran2359/opendash-cms/issues/268) và `270-R1`–`270-R9` tại [PR #270](https://github.com/thientran2359/opendash-cms/pull/270)); có hiệu lực contract kỹ thuật đầy đủ khi PR được merge theo [ADR-0010](../decisions/ADR-0010-agent-project-and-merge-authority.md).
 **Decision authority:** [ADR-0016](../decisions/ADR-0016-admin-navigation-and-single-edit.md) · **Baseline:** `main@a52607c` (migration cao nhất hiện tại: `0033_media_lifecycle.sql`).
-**Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Đặc tả G3 (`M7-S09-T01`–`M7-S13-T02`) được quy định tại [G3 Admin Navigation & Single Edit](../plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md); chưa phát hành GitHub Issue hay cấp `Project Ready` từ tài liệu này.
+**Implementation / Verification:** `NOT_STARTED / NOT_RUN`. Đặc tả G3 (`M7-S09-T01`–`M7-S13-T02`) được quy định tại [G3 Admin Navigation & Single Edit](../archive/plans/milestones/M7/slices/2026-11-16-admin-navigation-and-single-edit-g3.md); chưa phát hành GitHub Issue hay cấp `Project Ready` từ tài liệu này.
 
 > [!IMPORTANT]
 > Mã [ADR-0016](../decisions/ADR-0016-admin-navigation-and-single-edit.md) và tên migration dự kiến `0034_field_groups_and_editor_layout.sql` được kiểm tra tại baseline `main@a52607c`, **không phải số cứng cấp trước cho runtime**. Khi lập G3 và mở PR triển khai runtime, agent thực hiện phải kiểm tra lại số thứ tự kế tiếp trên `main`.

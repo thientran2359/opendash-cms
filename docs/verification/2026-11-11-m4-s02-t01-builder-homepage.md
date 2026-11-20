@@ -1,6 +1,6 @@
 # M4-S02-T01 — Builder homepage Open / Preview / Save (Windows, G4)
 
-**Issue:** [#78](https://github.com/thientran2359/opendash-cms/issues/78) · **Agent:** Forge · **Scope:** BLD-01 / BLD-01.1 · **Gate:** G3 READY ([approved source](../plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md) at `0e3d9886afa6115f84d97aa8905bc29f18fa56cb`).
+**Issue:** [#78](https://github.com/thientran2359/opendash-cms/issues/78) · **Agent:** Forge · **Scope:** BLD-01 / BLD-01.1 · **Gate:** G3 READY ([approved source](../archive/plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md) at `0e3d9886afa6115f84d97aa8905bc29f18fa56cb`).
 
 **Implementation base:** `origin/main@c6668b73a10c4ff7d990e61a2d14d30bba4a8842` (Builder core #77 and Taxonomy #85 already merged). Dedicated task branch/worktree `task/forge-m4-s02-t01`. **Implementation head:** `368ac40479f8d29c4ae5ea1deb57d9e9a1a643d5`, merged by [PR #88](https://github.com/thientran2359/opendash-cms/pull/88) into `main@113b8351eb1d5ca527eed68f2ee210495d3b85c0`. MERGED and G5 VERIFIED are evidenced separately below.
 

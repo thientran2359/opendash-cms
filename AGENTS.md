@@ -1,161 +1,71 @@
-# Làm việc trong OpenDash
+# Làm việc trong OpenDash (Quy trình Chuẩn EGM)
 
-## Owner directive — macOS Beta and Harbor, 2026-11-17
+## 1. Quy trình Phát triển Chuẩn: Elephant-Goldfish Model (EGM)
 
-Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt
-kỹ thuật và tự review; không cần peer review. Aster chỉ tham gia thảo luận
-liên-agent khi chủ dự án tạo cuộc thảo luận. Harbor là implementer của toàn bộ
-chín task remediation F01–F09 và thực hiện technical retest macOS; một task
-active trên `agent/harbor`, không hai writer trên cùng file. Aster chuẩn bị
-candidate và phối hợp human dogfood; automation không thay người thử thật.
+OpenDash áp dụng quy trình **EGM (Elephant soạn spec → Goldfish review độc lập → Chủ dự án duyệt → Mới viết code)** cho mọi tính năng, thay đổi kiến trúc và bản sửa lỗi có phạm vi thiết kế, thay thế hoàn toàn quy trình G0–G5 và điều phối liên-agent cũ:
 
-Chỉ đạo này thay ownership, nền tảng Beta và yêu cầu peer review cũ bên dưới.
-Các PR #310–#313 đã merge. G3 vẫn cần immutable source/base, dependencies,
-file ownership và Project Ready được xác minh trước pickup. Bằng chứng Windows
-cũ giữ nguyên; không suy thành macOS PASS. Beta yêu cầu native macOS B01–B10
-và negative regressions trên cùng candidate. Windows/Linux/native common RC và
-V1 gates vẫn riêng; không đóng chúng từ Beta PASS. F08 giữ security hold đến
-khi có giải thích provenance và kiểm chứng macOS đầy đủ; đối chiếu Windows
-vẫn là follow-up bắt buộc trước common RC. F09 cần full release suite macOS
-hai lượt và isolated run; receipt Windows thất bại vẫn giữ và phải được đối
-chiếu trước common RC, không gọi là Windows defect resolved.
+1. **Nạp Ngữ cảnh Dự án (`Elephant`):**
+   - Trước khi bắt đầu thiết kế hoặc review, đọc skill ngữ cảnh [`.agents/skills/opendash-elephant/SKILL.md`](.agents/skills/opendash-elephant/SKILL.md), [`docs/README.md`](docs/README.md) và [`docs/designs/SITEMAP.md`](docs/designs/SITEMAP.md).
+   - Kiểm tra mã nguồn thực tế trong `cms/` (và tra cứu CodeGraph) trước khi tuyên bố một chức năng đã có hay chưa có.
+2. **Bước 1 — Khám phá & Phản biện Ý tưởng (`/egm-brainstorm`, khi cần làm rõ bài toán):**
+   - **Elephant** thảo luận cùng chủ dự án để làm rõ bài toán, các phương án kỹ thuật và đánh đổi (trade-offs), sau đó gọi swarm **Goldfish** phản biện sớm và lưu `concepts_brief.md` (ở vùng artifact/scratch của phiên chat).
+3. **Bước 2 — Soạn thảo Đặc tả Thiết kế (`/egm-draft`):**
+   - **Elephant** soạn thảo đặc tả kỹ thuật theo từng mục có cổng phê duyệt của chủ dự án (`Overview & Goals` → `Technical Plan` → `Alternatives Considered` → `Detailed Implementation Plan`).
+   - Lưu đặc tả hoàn chỉnh vào [`docs/designs/<feature>.md`](docs/designs/README.md) và đăng ký vào [`docs/designs/SITEMAP.md`](docs/designs/SITEMAP.md).
+   - Phần `## Detailed Implementation Plan` ở nửa dưới file phải liệt kê đầy đủ từng file sẽ tạo/sửa trong `cms/` và `docs/`, lý do thay đổi, chữ ký hàm/schema/API và kế hoạch kiểm chứng (`### Verification Plan`), không để lại quyết định thiết kế mơ hồ cho lúc code.
+4. **Bước 3 — Review Độc lập bằng Goldfish (`/egm-review` / `/egm-review-loop` + `/egm-resolve`):**
+   - Khởi chạy các subagent **Goldfish** trong ngữ cảnh mới hoàn toàn (zero-context) để kiểm tra đặc tả tại `docs/designs/<feature>.md`:
+     - Đánh giá kiến trúc & độ phức tạp (`egm-zoom-out`, `egm-inventive-catalyst`).
+     - Kiểm tra tính tự chứa & dễ hiểu (`egm-comprehension`).
+     - Phản biện thiết kế, cấu trúc & văn phong (`egm-design`, `egm-structural`, `egm-style`).
+     - Kiểm tra mức độ sẵn sàng triển khai & đối chiếu từng symbol/file với codebase thật (`egm-implementation-readiness`, `egm-codebase-details`).
+   - Luôn nạp `GoldfishContext` chuẩn gồm: [`docs/product/PRODUCT_REQUIREMENTS.md`](docs/product/PRODUCT_REQUIREMENTS.md), [`docs/contracts/CORE_FOUNDATION.md`](docs/contracts/CORE_FOUNDATION.md), [`docs/contracts/PLUGIN_ABI.md`](docs/contracts/PLUGIN_ABI.md), [`docs/contracts/M8_WRITER_INVENTORY.md`](docs/contracts/M8_WRITER_INVENTORY.md) và các file mã nguồn `cms/` liên quan.
+   - **Elephant** chạy `/egm-resolve` để phân loại findings (`PROPOSE FIX` vs `CONTEST`), nhận quyết định từ chủ dự án và cập nhật trực tiếp vào `docs/designs/<feature>.md`.
+5. **Bước 4 — Triển khai & Kiểm chứng (`Implement & Verify`):**
+   - Chỉ bắt đầu viết code sau khi chủ dự án duyệt Design Spec đã qua Goldfish review.
+   - Sau khi triển khai, bắt buộc chạy bộ kiểm tra chuẩn và ghi nhận kết quả thực tế (kèm giới hạn nếu có); với các đợt kiểm chứng lớn hoặc release, lưu biên bản tại [`docs/verification/`](docs/verification/README.md).
+6. **Bước 5 — Duy trì Ngữ cảnh & Chống Trôi Tài liệu (`/egm-bootstrap` & `/egm-drift-report`):**
+   - Dùng `/egm-bootstrap` để cập nhật hệ thống `README.md` theo cấu trúc cây trong `cms/`.
+   - Định kỳ dùng `/egm-drift-report` để kiểm tra `docs/` đối chiếu với codebase thật trong `cms/`, kịp thời cập nhật tài liệu hoặc sửa code khi có độ lệch.
 
-Thứ tự Harbor: M8-S10-T01 → M7-S15-T01 → M5-S11-T01 → M7-S15-T02 →
-M7-S15-T03 → M7-S15-T04 → M7-S15-T05 → M6-S09-T01 → M8-S10-T02.
-Mọi task sau giữ Backlog đến khi dependencies và slot đủ gate. Aster ghi
-self-review/acceptance tại head SHA, checks thực chạy và giới hạn; không waive
-security/data, CI, human test hoặc release authorization.
+---
 
+## 2. Ngữ cảnh Hệ thống và Ranh giới Kỹ thuật Bắt buộc
 
-## Ngữ cảnh và nguồn quyết định
+- **Cấu trúc Workspace:** Mã nguồn, build scripts, migrations (`0001`–`0041`) và SDK đặt trong [`cms/`](cms/README.md); tài liệu đặt tại [`docs/`](docs/README.md); dữ liệu vận hành của website (`database/`, `themes/`, `plugins/`, `uploads/`) nằm ở root và tách biệt với mã nguồn. Xem [README.md](README.md) và [Kiến trúc CMS](docs/architecture/CMS_ARCHITECTURE.md).
+- **Ràng buộc Sản phẩm ([`PRODUCT_REQUIREMENTS.md`](docs/product/PRODUCT_REQUIREMENTS.md)):**
+  - Rust + SQLite, đóng gói thành **một file thực thi duy nhất**, Visual Builder 4 tầng (`Section → Row → Column → Element`) và plugin chạy logic server qua **Wasmi (`=2.0.0`)** trong worker cô lập tiến trình.
+  - **Bảo toàn dữ liệu:** Giữ khả năng quản lý CPT, custom fields, taxonomy terms và nội dung khi đổi theme hoặc tắt plugin; bảo toàn bố cục đã chỉnh khi cập nhật theme; giữ thay đổi chưa lưu trong preview và khi gặp lỗi `401`/`412`.
+  - **Lưu vs Xuất bản:** Với `post`, `page` và CPT cấu hình `publication: "draft_publish"`, **Lưu** bản `draft` chỉ ghi DB (không công khai); chỉ **Xuất bản** mới đưa nội dung ra URL công khai/archive/sitemap/media ACL. Với Builder (homepage/overrides) và CPT `immediate`, **Lưu** cập nhật trang công khai ngay.
+- **Tái sử dụng Base APIs & Phân tầng ([`CORE_FOUNDATION.md`](docs/contracts/CORE_FOUNDATION.md)):**
+  - Dùng chung bộ kiểm tra định danh (`opendash_core::id`, `ScopedResourceId`), bộ đăng ký gắn quyền sở hữu (`opendash_core::registry`), điều phối sự kiện (`HookDispatcher`), bộ đọc gói ZIP an toàn (`opendash_server::package`), khóa bảo trì và admission lease (`SiteCoordinator`, `AdmittedMutation` theo [`M8_WRITER_INVENTORY.md`](docs/contracts/M8_WRITER_INVENTORY.md)), guard xác thực/CSRF (`opendash_server::auth`) và kiểu lỗi (`ApiError`).
+  - `opendash-core` thuần Rust (`serde`, `serde_json`, `url`), tuyệt đối không chứa I/O, HTTP hay SQL.
+  - **100% truy vấn SQLite (`sqlx::query*`, `sqlx::raw_sql`) phải đặt trong `cms/crates/opendash-server/src/storage/`**. Không viết lặp hàm hoặc viết SQL trực tiếp trong `routes/`.
+  - Mọi lời gọi HTTP từ React Admin phải đi qua `cms/admin/src/api/client.ts`.
+- **Thư viện đã pin ([`TECH_STACK.md`](docs/architecture/TECH_STACK.md)):** Dùng đúng phiên bản thư viện đã pin trong `cms/Cargo.toml` và `cms/admin/package.json` (giữ `cms/Cargo.lock` đồng bộ với `cms/Cargo.toml`). Không thay API bằng phỏng đoán; không tự ý nâng dependency để né vấn đề.
 
-- `/opendash-cms` đặt mã nguồn, build scripts và SDK trong `cms/`, tài liệu tại `docs/`; `database/`, `themes/`, `plugins/`, `uploads/` thuộc website và nằm ở root. M1/M2 và migration/fixture lịch sử đã được nhập. Đối chiếu [báo cáo tại đích](docs/verification/2026-11-07-m1-m2-import.md) trước khi mở rộng phạm vi. Kiểm tra file thực tế trước khi tuyên bố chức năng đã có. Xem [README](README.md) và [verification](docs/verification/README.md).
-- Đọc [README.md](README.md) và [docs/product/PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) trước khi đề xuất tech stack hoặc thay đổi kiến trúc/code.
-- Dự án phát triển trước trên Windows. Lát cắt Rust và cách kiểm chứng được ghi trong [README.md](README.md). Không báo đã build/test/benchmark nếu chưa thực hiện được trên mã thật.
-- Giữ các ràng buộc đã xác nhận trong [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md), bao gồm Rust + SQLite, một file thực thi, builder và plugin chạy logic server từ bản đầu. Hướng stack và Wasmi đã được chủ dự án chốt trong [docs/architecture/TECH_STACK.md](docs/architecture/TECH_STACK.md); cấu trúc dự án theo [docs/architecture/CMS_ARCHITECTURE.md](docs/architecture/CMS_ARCHITECTURE.md), bộ khung lõi và quy chuẩn code theo [docs/contracts/CORE_FOUNDATION.md](docs/contracts/CORE_FOUNDATION.md) và hợp đồng ABI theo [docs/contracts/PLUGIN_ABI.md](docs/contracts/PLUGIN_ABI.md).
-- Chỉ đạo mới của chủ dự án và [PRODUCT_REQUIREMENTS.md](docs/product/PRODUCT_REQUIREMENTS.md) có ưu tiên cao nhất. Theo [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas điều phối toàn dự án và có quyền chốt quyết định kỹ thuật. Agent tự chủ quyết định cách triển khai task đã đủ contract. Owner theo dõi tiến độ, không là cổng ký duyệt mặc định. Consensus khác `IMPLEMENTED`/`VERIFIED` và không được hạ chuẩn bảo mật.
+---
 
-## Ranh giới kỹ thuật
+## 3. Kiểm chứng, Git và CodeGraph
 
-- Khi đánh giá phương án, giữ khả năng quản lý CPT/fields/nội dung khi đổi theme hoặc tắt plugin, bảo toàn bố cục đã chỉnh khi cập nhật theme và giữ thay đổi chưa lưu trong preview. Luồng bản đầu cập nhật website công khai khi bấm Lưu.
-- So sánh runtime plugin theo khả năng cài ZIP, giới hạn quyền đã khai báo, dừng tác vụ lỗi hoặc chạy quá lâu và phục hồi qua Admin.
-- Xem mô hình AST, projection, artifact và cache trong [docs/architecture/CMS_PROPOSAL.md](docs/architecture/CMS_PROPOSAL.md) là các phương án cần đối chiếu chọn lọc theo [docs/architecture/CMS_ARCHITECTURE.md](docs/architecture/CMS_ARCHITECTURE.md). Nếu đánh giá template động, kiểm tra ranh giới giữa mã template và dữ liệu người dùng, cùng xử lý URL/CSS/rich text theo ngữ cảnh.
-- Dùng thư viện và API theo phiên bản đã pin; tra docs chính thức hoặc Context7 nếu có coverage. Không thay API bằng phỏng đoán; không tự nâng dependency để né vấn đề.
-- Tuân thủ quy chuẩn code và nguyên tắc tái sử dụng Base APIs trong [docs/contracts/CORE_FOUNDATION.md](docs/contracts/CORE_FOUNDATION.md): dùng chung bộ kiểm tra định danh (`opendash_core::id`), bộ đăng ký gắn quyền sở hữu (`opendash_core::registry`), điều phối sự kiện (`HookDispatcher`), bộ đọc gói ZIP an toàn (`opendash_server::package`), guard xác thực/CSRF (`opendash_server::auth`), kiểu lỗi (`ApiError`) và đặt toàn bộ truy vấn SQLite trong `opendash_server::storage`. Không viết lặp hàm hoặc viết SQL trực tiếp trong `routes/`.
-
-## Tài liệu và kiểm chứng
-
-- Khi chủ dự án giao Atlas chuẩn bị một milestone, đầu ra bắt buộc là bộ đặc tả G3 cho toàn bộ task trong phạm vi milestone, kể cả task sẽ triển khai sau. Atlas chốt các quyết định G1/G2 cần thiết, ghi thứ tự phụ thuộc và quyền sở hữu theo [Planning Workflow](docs/plans/PLANNING_WORKFLOW.md#chuẩn-bị-g3-cho-toàn-bộ-milestone). Chỉ chuyển từng task sang Project `Ready` khi task đó thực sự đủ điều kiện nhận triển khai.
-- Trước khi làm một slice: nêu contract liên quan, tiêu chí nghiệm thu và phần ngoài phạm vi. Sau khi làm: ghi thay đổi, lệnh/check thực chạy, kết quả và giới hạn.
-- Với thay đổi hành vi, chọn kiểm chứng theo phạm vi: preview chưa lưu, cập nhật khi Lưu, dữ liệu và bố cục khi đổi theme, quyền và lỗi plugin, hoặc backup/restore. Không tạo test chỉ lặp lại implementation.
-- Trạng thái thiết kế `AGREED` khác `implemented` và `verified`. Giữ các trạng thái này riêng; không đánh dấu hoàn thành khi thiếu fixtures/bằng chứng thực tế.
-- Tài liệu mới đặt đúng nhóm theo [docs/README.md](docs/README.md); dùng [Planning Workflow V1](docs/plans/PLANNING_WORKFLOW.md) và [Module Catalog](docs/plans/MODULE_CATALOG_V1.md) khi chia milestone/slice/task. Quy trình Living Module Brief G0–G3, Full-Track/Fast-Track, Primary Acceptance Slice, Stop-and-Propose đã được thống nhất; **đồng thuận về planning không chốt schema M3**. Kiến trúc có ADR, bằng chứng thực chạy ở `docs/verification/`.
-- Dùng đường dẫn Markdown tương đối trong repo. Sau khi đổi docs/plans, chạy `python cms/scripts/check-plans.py` và `python cms/scripts/check-plans.py --self-test` cùng `git diff --check`. Checker kiểm nhất quán link/ID/evidence, không thay thế review thiết kế hoặc test thực thi.
-- Ghi lệnh chạy chính xác trong [README.md](README.md) và giữ `cms/Cargo.lock` đồng bộ với `cms/Cargo.toml`. Từ root, dùng `cargo build --manifest-path cms/Cargo.toml --locked` để kiểm tra build lặp lại được; từ `cms/` có thể dùng `cargo build --locked`.
-
-## Multi-agent collaboration and archived skills
-
-- Atlas (Codex Win), Nova (Antigravity Win), Forge (CoS Win), Harbor (CoS
-  macOS) and Orion (Antigravity macOS) work in separate local folders, on
-  `agent/<name>` branches of the same `thientran2359/opendash-cms` Git remote.
-- **Owner xác nhận ngày 2026-11-19:** với mọi agent (gồm Aster), dùng
-  `agent/<name>` làm **nhánh triển khai mặc định cho task mới**. Sau khi PR
-  và G5 được bàn giao, fetch/sync an toàn từ `origin/main` trước task sau;
-  chỉ tạo `task/*` khi cần cô lập thật và ghi lý do trên Issue/PR. Không
-  reset/rebase/force-push, không né branch đang có PR hoặc worktree dirty.
-  Xem quyết định [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)
-  và [GitHub workflow](.agents/GITHUB_WORKFLOW.md). Nhánh/PR lịch sử giữ nguyên.
-- Draft technical research, discussions and task handoffs belong in `.agents/`
-  (see `.agents/README.md` and `.agents/agents.yaml`). **Agent-concluded and peer-reviewed**
-  decisions, plans/contracts and actual verification belong in `docs/` after PR merge.
-  Keep existing historical references and their source evidence. Apply [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md).
-- `.agents/skills/` contains four **manual chat skills**:
-  [github-task-pickup](.agents/skills/github-task-pickup/SKILL.md) when asked to fetch/perform one's GitHub Issue,
-  [discussion-turn-responder](.agents/skills/discussion-turn-responder/SKILL.md) when asked to check and answer one's discussion turns,
-  [github-pr-review-merge](.agents/skills/github-pr-review-merge/SKILL.md) for Atlas reviewing and merging eligible implementation and concluded design PRs,
-  and [atlas-task-dispatch](.agents/skills/atlas-task-dispatch/SKILL.md) for Atlas to RUN/STATUS already assigned Forge/Harbor Issues through the guarded one-shot CoS adapter.
-  Read the corresponding SKILL.md on request even if the host does not auto-discover repo skills.
-  No skill starts any background process, cronjob or automatic CoS dispatch.
-  `.agents/archive/skills/` contains retired skills for reference ONLY.
-  Do not invoke archived handoff scripts, PowerShell Stop hooks or the previous
-  opendash-orchestrator as if they were active automation.
-- GitHub Issues are the source of truth for active task state, and PRs record
-  changes and review. Follow [the GitHub workflow](.agents/GITHUB_WORKFLOW.md);
-  `.agents/tasks/` must not become a competing live queue.
-- Keep the user's Git global author identity unchanged on every machine.
-  Before an agent commits, follow [per-worktree Git identity setup](.agents/GIT_WORKTREE_IDENTITY.md)
-  and retain the `Agent: <Agent>` commit trailer. Worktree-specific identity
-  is local machine configuration, not a separate authenticated GitHub account.
-- Follow the shared [Agent Operating Standard](.agents/AGENT_OPERATING_STANDARD.md)
-  directly **within the current agent/chat**: confirm workspace/branch, fetch
-  remote Git refs without overwriting work, consult GitHub Connector, and
-  enforce task/PR ownership. **Do not create a separate Agent Preflight Check
-  agent, skill, script or background process.** For authenticated GitHub UI
-  on CoS, use **Desktop Browser** attached to the user's already signed-in
-  Chrome session, rather than the isolated Plugins Browser profile.
-- For cross-agent document/design reviews, the reviewer records actionable
-  findings on the GitHub PR; the PR author owns fixes, commits and non-force
-  pushes on their branch, and the reviewer rechecks the updated PR. If GitHub
-  comments are unavailable, relay findings to the author to record on the PR.
-  A reviewer edits files only with explicit file/branch ownership reassignment.
-- **Harbor → Aster (owner instruction, 2026-11-19):** khi một Issue/PR thực sự
-  cần Aster review hoặc chốt file ownership, Harbor chủ động bàn giao qua
-  **cửa sổ chat Codex/ChatGPT đang mở** trên macOS bằng CoS Desktop, sau khi
-  chuẩn bị PR/SHA/CI/test/blockers. **Không cần xác minh chat đích theo
-  Aster/project cho chiều CoS → Codex**; guard chống gửi nhầm đó chỉ áp dụng
-  chiều Codex → CoS. Vẫn tránh gửi trùng và bảo toàn nội dung đang soạn theo
-  [Agent Operating Standard — Harbor → Aster](.agents/AGENT_OPERATING_STANDARD.md#5-handoff-harbor-aster-qua-codex-macos).
-  Chỉ yêu cầu Aster review khi thực sự cần; không biến peer review thành gate
-  bắt buộc cho mọi Issue. Nếu không thể nhập an toàn vào cửa sổ đang mở, giữ
-  nguyên bản nháp và dùng Issue/PR để ghi handoff chờ xử lý.
-  **Khi tin nhắn đã gửi thành công, báo `SENT` và kết thúc lượt Harbor ngay;**
-  không chờ Codex/Aster trả lời hoặc theo dõi kết quả trong cùng lượt.
-  Tin nhắn chat **không** thay verdict trên GitHub, required CI, review/merge
-  gates hoặc G5; không tự kích hoạt automation/chạy nền.
-- Branch names in `.agents/agents.yaml` describe desired agent identities,
-  not proof that remote branches or AI sessions are configured.
-- Assign one responsible implementer and one coordinator per task, with issue
-  ID, base SHA, exact file ownership, explicit acceptance and approved gate.
-  Keep one active implementation task per agent branch. Protect uncommitted
-  changes and avoid two writers on the same file.
-- **Owner authorization (2026-11-11):** [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)
-  gives Atlas project-wide coordination, final technical decisions and merge
-  authority for all eligible PRs, including its own. Nova, Harbor and Forge
-  may pick up eligible work and self-review/self-merge their own PRs without
-  waiting for assignment approval or peer review. Orion uses Atlas review.
-  Implementation pickup requires verified G3, ownership, dependencies and
-  Project Ready. Authorized agents may sync eligible items to Ready.
-- Stage only task-owned changes after validation and non-force push to the
-  authorized branch. Before merge, record the reviewed head SHA, self-review
-  or reviewer verdict, acceptance, tests and required CI. Branch protection,
-  security and data preservation gates apply. Review-only stays review-only.
-  No background merge or deployment.
-- Muse-to-CoS/Antigravity dispatch must be verified through authenticated
-  host-specific adapters first. Chat delivery or AI consensus does not
-  establish completion or VERIFIED evidence. **Recorded Final Decision + merged docs PR**
-  is the technical-contract authority under ADR-0010.
-- No infinite agent loops, blind retries of ambiguous deliveries, or secrets
-  and private runtime state in Git.
-- The owner has **paused the Python Task Watcher / cronjob plan** in favor of
-  on-demand GitHub issue pickup and discussion replies. TW proposals do not
-  authorize running watcher/PONG or bypassing Project Ready and security gates.
-
-## Tra cứu quan hệ mã nguồn với CodeGraph
-
-- Khi cần hiểu một hàm gọi những hàm nào, ai gọi hàm đó, dependency giữa file hoặc phạm vi ảnh hưởng trước khi sửa code, ưu tiên MCP CodeGraph (`codegraph_symbol_search`, `codegraph_get_callers`, `codegraph_get_callees`, `codegraph_get_call_graph`, `codegraph_analyze_impact`, `codegraph_get_edit_context`). Tìm symbol trước rồi dùng `uri` + `line` từ kết quả để truy vấn graph.
-- Khi đối chiếu implementation với quyết định/contract, tìm trong sáu tài liệu đã nạp vào kho docs của CodeGraph bằng `codegraph_search_docs` và kiểm tra trực tiếp tài liệu nguồn. Khi các tài liệu thay đổi, chạy `node cms/scripts/codegraph-index-docs.mjs` để cập nhật chỉ mục docs.
-- CodeGraph là chỉ mục phân tích tĩnh có thể bỏ sót lời gọi động, macro, hook hoặc mã không parse trọn vẹn. Luôn xác minh kết quả quan trọng bằng code thật và kiểm chứng phù hợp; nếu MCP không được kết nối thì dùng `rg`, đọc mã nguồn và tài liệu như bình thường. Xem [bằng chứng cài đặt](docs/verification/2026-11-07-codegraph-setup.md).
-- Khi Chat On Steroids chưa xuất hiện các MCP tool `codegraph_*`, dùng CLI tương đương qua Core: `node cms/scripts/codegraph-query.mjs symbol HookDispatcher`, `node cms/scripts/codegraph-query.mjs callgraph cms/crates/opendash-server/src/plugin/host_ops.rs 94`, hoặc `node cms/scripts/codegraph-query.mjs docs "plugin ABI"`. Sau khi tra graph, kiểm tra các file thật trước khi sửa.
-
-## Aster — owner authorization (2026-11-17)
-
-- The owner appointed **Aster (Codex macOS)** as a project coordinator with
-  the same authority as Atlas: planning/G3, task coordination, final technical
-  decisions, review and merge of any eligible PR, including its own.
-- Apply the Atlas coordinator rules in ADR-0010, the GitHub workflow, operating
-  standard and manual skills equally to Aster. Existing ownership, G3/Ready,
-  required CI, security and data preservation gates remain mandatory.
-- Aster uses this independent checkout on `agent/aster`, worktree Git identity
-  `Aster` and commit trailer `Agent: Aster`. Preserve the user's global Git
-  identity. Coordinate overlapping decisions through the existing Issue/PR;
-  do not take over another agent's task without recorded handoff.
+- **Lệnh kiểm chứng bắt buộc sau khi sửa code hoặc tài liệu:**
+  ```powershell
+  python cms/scripts/check-standards.py
+  python cms/scripts/check-standards.py --self-test
+  python cms/scripts/check-plans.py
+  python cms/scripts/check-plans.py --self-test
+  python .agents/scripts/check-agent-artifacts.py
+  cargo fmt --manifest-path cms/Cargo.toml --all --check
+  cargo build --manifest-path cms/Cargo.toml --locked
+  cargo test --manifest-path cms/Cargo.toml --workspace --release --locked
+  git diff --check
+  ```
+- **Không báo đã build/test/benchmark nếu chưa thực chạy trên mã thật.** Phân biệt rõ trạng thái thiết kế (`Approved` trong `docs/designs/`) với trạng thái đã triển khai (`Implemented`) và đã kiểm chứng (`Verified` có biên bản trong `docs/verification/`).
+- **Tra cứu quan hệ mã nguồn với CodeGraph:**
+  - Trước khi sửa code hoặc khi Goldfish/Elephant đối chiếu thiết kế với codebase, ưu tiên dùng MCP CodeGraph (`codegraph_symbol_search`, `codegraph_get_callers`, `codegraph_get_callees`, `codegraph_get_call_graph`, `codegraph_analyze_impact`, `codegraph_get_edit_context`, `codegraph_search_docs`) hoặc CLI `node cms/scripts/codegraph-query.mjs`, sau đó luôn đọc file mã nguồn thật để xác minh.
+  - Khi cập nhật các tài liệu kiến trúc/contract/design chính, chạy `node cms/scripts/codegraph-index-docs.mjs` để làm mới chỉ mục tài liệu của CodeGraph.
+- **Git & Bảo mật:**
+  - Dùng đường dẫn Markdown tương đối trong repository.
+  - Bảo toàn global Git author identity của người dùng trên máy; nếu dùng worktree identity riêng thì tuân theo [`.agents/GIT_WORKTREE_IDENTITY.md`](.agents/GIT_WORKTREE_IDENTITY.md).
+  - Không commit secrets, private keys, dữ liệu runtime hoặc file SQLite cục bộ vào Git.
+  - Hồ sơ quy trình G0–G5 và các skill điều phối cũ trong [`docs/archive/`](docs/archive/README.md) và `.agents/archive/` chỉ giữ để tham khảo lịch sử, không kích hoạt lại.

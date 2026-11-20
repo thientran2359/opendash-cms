@@ -2,7 +2,7 @@
 
 - **Writer:** Harbor (CoS macOS), 2026-11-10.
 - **Baseline:** `origin/main@658fc26d7c07866572df006a611773ac4c3d96fc` (PR #20 merged).
-- **Input:** [G1 / G2 v0.1 cho M3-P07](m3-p07-built-in-post-page-g1-g2.md), [PRD save/publish](../../docs/product/PRODUCT_REQUIREMENTS.md), [M3 A task plan](../../docs/plans/milestones/M3/TASK_PLAN.md), [ADR-0003](../../docs/decisions/ADR-0003-agent-consensus-governance.md).
+- **Input:** [G1 / G2 v0.1 cho M3-P07](m3-p07-built-in-post-page-g1-g2.md), [PRD save/publish](../../docs/product/PRODUCT_REQUIREMENTS.md), [M3 A task plan](../../docs/archive/plans/milestones/M3/TASK_PLAN.md), [ADR-0003](../../docs/decisions/ADR-0003-agent-consensus-governance.md).
 - **Gate:** G0 M3 A `AGREED`; G1 code-audit bổ sung; **G2 `PROPOSED`, chưa `AGREED`; G3 chỉ là *candidate work packages*, chưa có Task ID `Mx-Sxx-Txx`, GitHub Issue/Project `Ready`; G4/G5 `NOT_RUN`.**
 - **Scope:** P07 core-owned built-in `post/page`; P08 publication backend + Admin Posts/Pages; P16 public visibility + authenticated preview. Không sửa code/migration, không mở task implementation từ file này.
 
@@ -56,7 +56,7 @@
 | **WP-D — Posts/Pages Admin UI** | Navigation + list/create/edit/delete Post/Page; draft/save/publish/unpublish, status label/ETag/412 unsaved form, picker and admin preview accessible. | Depends WP-B/WP-C and **M3-P09 AdminShell contract**; UI owner Orion or designated agent, restricted to `cms/admin/src/**` paths **enumerated exactly** at G3; coordinate `App.tsx` and Tailwind layout ownership with P09. |
 | **WP-E — E2E & OS parity evidence** | Fresh/upgrade/collision/rollback fixtures; two roles, draft→published→draft, shared-media last-ref, pagination, restart, 401/403/412/CSRF, CSS/HTML escaping, Admin browser on macOS; Windows smoke separately with SHA/runner; G5 only after evidence. | Depends WP-A..D and M3-P17/P18/P19 gates; Harbor/macOS, Forge or Atlas/Windows runner under independent review. Only test/evidence paths assigned; no bypass CI or dummy PASS. |
 
-**Không phải phát hành tự động 5 Issue:** các `WP-*` là work packages để thảo luận, không phải namespace Task ID hay `READY`. Coordinator sẽ chia task thật theo `M3-Sxx-Txx` **sau khi G2 `AGREED` + G3 reviewed/merged**, pin `source_sha`/`base_sha`, exact writable paths, owner/reviewer, acceptance và cập nhật [TASK_INDEX](../../docs/plans/TASK_INDEX.md) khi Issue thật được phát hành.
+**Không phải phát hành tự động 5 Issue:** các `WP-*` là work packages để thảo luận, không phải namespace Task ID hay `READY`. Coordinator sẽ chia task thật theo `M3-Sxx-Txx` **sau khi G2 `AGREED` + G3 reviewed/merged**, pin `source_sha`/`base_sha`, exact writable paths, owner/reviewer, acceptance và cập nhật [TASK_INDEX](../../docs/archive/plans/TASK_INDEX.md) khi Issue thật được phát hành.
 
 ## 4. Decision points gửi reviewer + tests cần kiểm
 

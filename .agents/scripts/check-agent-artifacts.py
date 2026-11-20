@@ -11,10 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Only these manually invoked, owner-requested project skills are active.
 # Any other SKILL.md under the active directory must still fail governance.
 ACTIVE_SKILLS = {
-    ".agents/skills/github-task-pickup/SKILL.md": "github-task-pickup",
-    ".agents/skills/discussion-turn-responder/SKILL.md": "discussion-turn-responder",
-    ".agents/skills/github-pr-review-merge/SKILL.md": "github-pr-review-merge",
-    ".agents/skills/atlas-task-dispatch/SKILL.md": "atlas-task-dispatch",
+    ".agents/skills/opendash-elephant/SKILL.md": "opendash-elephant",
 }
 STRONG_SECRETS = [
     re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----"),

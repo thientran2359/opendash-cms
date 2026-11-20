@@ -9,7 +9,7 @@ a product runtime change, production deployment, or independent G5 sign-off.
 
 | Item | Evidence |
 | --- | --- |
-| Task | [Issue #107](https://github.com/thientran2359/opendash-cms/issues/107), [G3 integration specification](../plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md#m4-s09-t01--nghiệm-thu-tích-hợp-preview-và-save) |
+| Task | [Issue #107](https://github.com/thientran2359/opendash-cms/issues/107), [G3 integration specification](../archive/plans/milestones/M4/slices/2026-11-11-m4-builder-remaining-g3.md#m4-s09-t01--nghiệm-thu-tích-hợp-preview-và-save) |
 | Immutable G3 source | `690dfa1167f11fba701cf8a0cfa4c36cc5ed29a0` |
 | G4 starting main | `f917ae1db6312426012d1a05b0f5e6650ba6ba2a` (contains #103, #104, #105, #106 G5 evidence; #106 G4 release merge `09900e6`). |
 | Dependency handoff | Forge #102/#103, Harbor #104/#105/#106 verified and merged; [#106 G5 report](2026-11-12-m4-s08-t02-g5-macos.md). |

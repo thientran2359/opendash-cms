@@ -9,8 +9,8 @@ commit/push khi lập báo cáo.
 
 ## Phạm vi thay đổi
 
-- Bổ sung [trạng thái M3 hiện hành](../plans/M3_STATUS_2026-11-09.md), cập
-  nhật [Roadmap](../plans/ROADMAP_V1.md), [Module Catalog](../plans/MODULE_CATALOG_V1.md),
+- Bổ sung [trạng thái M3 hiện hành](../archive/plans/M3_STATUS_2026-11-09.md), cập
+  nhật [Roadmap](../archive/plans/ROADMAP_V1.md), [Module Catalog](../archive/plans/MODULE_CATALOG_V1.md),
   CNT-01/CNT-05 briefs để tách bằng chứng M3.1–M3.6 khỏi đề xuất G1/G2 lịch sử.
 - Chuẩn hóa [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md): một task ID
   và Issue/assignee, một PR/review, không gộp hoặc force-push tùy tiện.

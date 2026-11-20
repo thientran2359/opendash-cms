@@ -2,7 +2,7 @@
 
 **Tình trạng:** G1 source-audited; G2 **PROPOSED**, chưa có Final Decision/ADR/PR merge; G3 **NOT READY**.
 **Người soạn:** Forge (CoS Windows); **source baseline:** `origin/main@62d85ece47813d90079c78b3b84aae1a339a0d98` ngày 2026-11-11.
-**Nguồn nhiệm vụ:** [Issue #71](https://github.com/thientran2359/opendash-cms/issues/71) (M4-P03, BLD-03/FND-05), [M4 Task Plan](../../docs/plans/milestones/M4/TASK_PLAN.md), [ADR-0007](../../docs/decisions/ADR-0007-m4-builder-taxonomy-foundation.md).
+**Nguồn nhiệm vụ:** [Issue #71](https://github.com/thientran2359/opendash-cms/issues/71) (M4-P03, BLD-03/FND-05), [M4 Task Plan](../../docs/archive/plans/milestones/M4/TASK_PLAN.md), [ADR-0007](../../docs/decisions/ADR-0007-m4-builder-taxonomy-foundation.md).
 
 ## 1. Ranh giới và nguồn kiểm chứng G1
 

@@ -1,7 +1,7 @@
 # M4-S05-T01 — Field Binding Post/Page/CPT (Harbor, Mac Intel)
 
 - **Task:** [#94](https://github.com/thientran2359/opendash-cms/issues/94) (implementation from [design #73](https://github.com/thientran2359/opendash-cms/issues/73)).
-- **Approved G2/G3:** [ADR-0009](../decisions/ADR-0009-m4-core-element-field-binding.md), [G3 slice](../plans/milestones/M4/slices/2026-11-11-m4-field-binding-g3.md) merged by [PR #93](https://github.com/thientran2359/opendash-cms/pull/93), **source/base SHA** `fa0dad08fc67958a27efd0c5d96b84a7b85ddd1e`.
+- **Approved G2/G3:** [ADR-0009](../decisions/ADR-0009-m4-core-element-field-binding.md), [G3 slice](../archive/plans/milestones/M4/slices/2026-11-11-m4-field-binding-g3.md) merged by [PR #93](https://github.com/thientran2359/opendash-cms/pull/93), **source/base SHA** `fa0dad08fc67958a27efd0c5d96b84a7b85ddd1e`.
 - **Implementation branch:** `task/harbor-m4-s05-t01` on clean standalone project worktree; original `agent/harbor` unchanged. **Implementation head/CI:** pin to PR after final push; this document records actual checks from source worktree, not invented G5.
 - **Status:** G4 local tests PASS; **G5 release/on-device test and Project Done NOT_VERIFIED** until separate post-merge evidence.
 

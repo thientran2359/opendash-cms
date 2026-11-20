@@ -10,7 +10,7 @@ native G5 remain independently gated; do not close this Issue from this report.
 
 - [Issue #378](https://github.com/thientran2359/opendash-cms/issues/378)
   is In progress on GitHub Project #3; Harbor implements, Aster coordinates.
-  [Approved M6 G3](../plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md)
+  [Approved M6 G3](../archive/plans/milestones/M6/slices/2026-11-18-content-foundation-g3.md)
   source: 695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d.
   Original inspected baseline: 2ebe51cbe1099c4721304e2b31895aa78b7c1241.
 - Predecessor #377 was merged and had separate native macOS G5 (PR #403),

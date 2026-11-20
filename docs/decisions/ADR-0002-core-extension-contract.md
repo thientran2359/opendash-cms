@@ -2,7 +2,7 @@
 
 - Ngày: 2026-11-07
 - Trạng thái thiết kế: AGREED trong phạm vi triển khai M2.5 chủ dự án giao; kiểm chứng ghi riêng.
-- Liên quan: [kế hoạch](../plans/milestones/M2.5-core-foundation.md), [contract](../contracts/CORE_FOUNDATION.md).
+- Liên quan: [kế hoạch](../archive/plans/milestones/M2.5-core-foundation.md), [contract](../contracts/CORE_FOUNDATION.md).
 
 ## Quyết định
 

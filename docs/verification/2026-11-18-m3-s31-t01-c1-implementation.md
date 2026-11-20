@@ -1,7 +1,7 @@
 # M3-S31-T01 — Content foundation C1, macOS Intel implementation verification
 
 - Issue: [#373](https://github.com/thientran2359/opendash-cms/issues/373)
-- Immutable G3: [M3 content foundation G3](../plans/milestones/M3/slices/2026-11-18-content-foundation-g3.md) from merged PR #372, source `695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d`
+- Immutable G3: [M3 content foundation G3](../archive/plans/milestones/M3/slices/2026-11-18-content-foundation-g3.md) from merged PR #372, source `695fe94a7c6c6f24e0dd35629a32e8e2ace3bf4d`
 - G2: [ADR-0019](../decisions/ADR-0019-content-foundation.md) and [C1](../contracts/CONTENT_FOUNDATION_2026_11.md)
 - Implementer and self-reviewer: Harbor; coordinator: Aster
 - Implementation base: `22628cbf6fa2de88a3695efdde1b29866a3e2e90` (`origin/main` at pickup)

@@ -21,4 +21,4 @@ Ngày 07/11/2026, Windows. Workspace đích có mốc scaffold `0ec91ec`. Nguồ
 | `python scripts/windows_distribution_smoke.py --binary target/release/opendash.exe` | PASS, gồm kiểm tra nâng cấp fixture và binary độc lập |
 | `python scripts/windows_plugin_smoke.py --binary target/release/opendash.exe` | PASS |
 
-Kết quả áp dụng cho bản sao nguồn trên Windows. Khi [nhập mã](../plans/README.md), đối chiếu với cây làm việc có fingerprint trên, giữ chuỗi migrations và fixture, tích hợp quy ước `SitePaths` của workspace đích, rồi chạy lại bộ kiểm chứng tại đích. Linux và kiểm tra giao diện thủ công nằm ngoài lượt này.
+Kết quả áp dụng cho bản sao nguồn trên Windows. Khi [nhập mã](../archive/plans/README.md), đối chiếu với cây làm việc có fingerprint trên, giữ chuỗi migrations và fixture, tích hợp quy ước `SitePaths` của workspace đích, rồi chạy lại bộ kiểm chứng tại đích. Linux và kiểm tra giao diện thủ công nằm ngoài lượt này.

@@ -1,6 +1,6 @@
 # M4-S01-T01 — Builder document v1 và kiểm tra cấu trúc
 
-**Issue:** [#77](https://github.com/thientran2359/opendash-cms/issues/77) · **Agent:** Forge (Windows) · **Module:** BLD-02.1 · **Contract:** [ADR-0007 § P01](../decisions/ADR-0007-m4-builder-taxonomy-foundation.md) và [G3 M4-S01-T01](../plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md).
+**Issue:** [#77](https://github.com/thientran2359/opendash-cms/issues/77) · **Agent:** Forge (Windows) · **Module:** BLD-02.1 · **Contract:** [ADR-0007 § P01](../decisions/ADR-0007-m4-builder-taxonomy-foundation.md) và [G3 M4-S01-T01](../archive/plans/milestones/M4/slices/2026-11-11-m4-foundation-g3.md).
 
 **Approved source/baseline:** `0e3d9886afa6115f84d97aa8905bc29f18fa56cb` · **Implementation base:** `origin/main@5b8b79f29dc467a54523a4bcf795b0399122a2ca` · **Branch:** `task/forge-m4-s01-t01`.
 

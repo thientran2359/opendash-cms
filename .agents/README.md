@@ -1,43 +1,11 @@
-# OpenDash CMS - Agent working area
+# OpenDash CMS — Khu vực hỗ trợ Agent (`.agents/`)
 
-The Git-tracked `.agents/` directory holds research, design discussions,
-proposed tasks, handoff notes and templates that are not yet approved.
-`docs/` holds official requirements, approved plans/decisions/contracts and
-real verification. Historical docs already linked from plans remain preserved.
+Thư mục `.agents/` lưu trữ skill nạp ngữ cảnh dự án cho quy trình **EGM (Elephant-Goldfish Model)** cùng các bản nháp nghiên cứu và hồ sơ điều phối lịch sử. Tài liệu chính thức của dự án nằm tại [`docs/`](../docs/README.md) và đặc tả thiết kế nằm tại [`docs/designs/`](../docs/designs/SITEMAP.md).
 
-- `agents.yaml`: agent identities and their GitHub branches
-- [Aster](ASTER.md): Codex macOS coordinator setup and owner authorization
-- `research/`: preliminary alternatives, code investigation and evidence
-- `discussions/`: append-only technical design turns and questions
-- `tasks/`: shareable task descriptions, reports and acceptance evidence
-- `inbox/`: durable handoff notes, never runtime secrets
-- `scripts/`: future local tools, not automatically enabled
-- `templates/`: task, research and discussion templates
-- `skills/`: four on-demand skills (`github-task-pickup`, `discussion-turn-responder`, `github-pr-review-merge`, `atlas-task-dispatch`); no autonomous polling
-- `archive/skills/`: retired skills preserved solely for reference
+- [`skills/opendash-elephant/SKILL.md`](skills/opendash-elephant/SKILL.md): Skill nạp ngữ cảnh kiến trúc, hợp đồng lõi và `GoldfishContext` mặc định của OpenDash cho Elephant và Goldfish.
+- [`skills/README.md`](skills/README.md): Hướng dẫn sử dụng `opendash-elephant` kết hợp với bộ skill của plugin EGM (`/egm-brainstorm`, `/egm-draft`, `/egm-review`, `/egm-resolve`, `/egm-bootstrap`, `/egm-drift-report`).
+- [`GIT_WORKTREE_IDENTITY.md`](GIT_WORKTREE_IDENTITY.md): Cấu hình Git identity theo worktree để bảo toàn global Git config của người dùng.
+- `archive/skills/`: Lưu trữ các skill của quy trình G0–G5 cũ (chỉ dùng để tham khảo lịch sử, không kích hoạt).
+- `research/`, `discussions/`, `tasks/`, `scripts/`: Lưu trữ hồ sơ nghiên cứu và công cụ kiểm tra lịch sử từ giai đoạn G0–G5.
 
-**Quy trình thao tác chung:** [AGENT_OPERATING_STANDARD.md](AGENT_OPERATING_STANDARD.md) quy định cách kiểm branch/Git fetch, GitHub Connector và CoS Desktop Browser dùng đúng phiên Chrome đăng nhập, thực hiện **bởi chính agent trong chat**, không tạo Agent Preflight Check. [GITHUB_WORKFLOW.md](GITHUB_WORKFLOW.md) vẫn là chuẩn Issues/PR; GitHub Issue là nguồn trạng thái task và PR là nguồn review. [Bảng trạng thái M3](../docs/plans/M3_STATUS_2026-11-09.md) phân biệt phần đã làm và backlog.
-
-**Review tài liệu giữa agent:** reviewer đưa findings trực tiếp lên GitHub PR;
-tác giả PR sửa và commit/push lên branch của mình; reviewer kiểm tra lại trên
-commit mới. Xem [quy trình review PR](GITHUB_WORKFLOW.md#review-tài-liệuthiết-kế-qua-pr-giữa-các-agent).
-Chỉ giao reviewer quyền sửa file khi đã chỉ định rõ branch và file ownership.
-
-No archived SKILL.md should be loaded or executed. The former
-PowerShell handoff hooks and scripts are retired. Restore only after a
-fresh technical/security review.
-
-Five agents may use five separate local code folders, each on its fixed branch
-of the same GitHub opendash-cms repository:
-Atlas/Codex Win, Nova/Antigravity Win, Forge/CoS Win, Harbor/CoS Mac and
-Orion/Antigravity Mac. Commit validated task-scoped work, non-force push to
-the corresponding agent branch and link the commit/PR to the GitHub Issue.
-A push is not review, merge, approval or independent verification.
-Under [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas coordinates the project and may merge any eligible PR. Nova, Harbor and Forge may self-review and merge their own eligible PRs. Required checks, security and data gates apply.
-
-Atlas-to-CoS one-shot dispatch is implemented for Forge/Harbor using a local
-authenticated API and SSH to Mac; each host must pass its own security and
-delivery gate. It is invoked by Atlas on demand, not a background service.
-See [the adapter guide](research/2026-11-12-cos-one-shot-adapter.md).
-Never upload credentials, private records, raw runtime logs or local database
-copies into the public Git history.
+Không lưu thông tin xác thực, khóa bí mật, log runtime hoặc bản sao cơ sở dữ liệu SQLite vào Git. Kiểm tra an toàn bằng `python .agents/scripts/check-agent-artifacts.py`.
