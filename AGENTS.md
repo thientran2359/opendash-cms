@@ -1,24 +1,5 @@
 # Làm việc trong OpenDash
 
-## EGM — điểm vào cho công việc mới, 2026-11-20
-
-Đọc [OpenDash EGM workflow](docs/plans/EGM_WORKFLOW.md) trước khi mở thiết kế
-mới hoặc chia task. Đây là hướng dẫn chính về chọn quy trình, nguồn tài liệu,
-phân quyền và bàn giao. Dùng EGM đầy đủ cho thiết kế/ranh giới quan trọng,
-luồng lite cho thay đổi hẹp đủ contract, chỉnh docs trực tiếp khi không đổi nghĩa.
-Các tiêu chí Full-Track của Planning Workflow vẫn áp dụng. Không sửa plugin EGM.
-
-Owner chốt sản phẩm/ưu tiên lớn/phát hành; coordinator được giao (Atlas hoặc
-Aster) chốt kỹ thuật trong phạm vi đã duyệt; implementer tự quyết chi tiết
-trong contract. Goldfish là vai trò phản biện tạm thời, không là agent/branch
-vận hành mới. Mỗi topic có một coordinator và một bản thiết kế chính.
-
-G0–G5 bên dưới giữ các nghĩa vụ và trường tương thích, không buộc tạo thêm
-vòng duyệt bên cạnh EGM. Task mới vẫn dùng handoff được hỗ trợ dưới docs/plans,
-ID ổn định và nguồn đã merge trước Project Ready; không đưa docs/designs trực
-tiếp vào generator cũ. Task đang chạy giữ source/ownership/receipt hiện có.
-Xem [quyền EGM trong ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md#opendash-egm-authority-adaptation-v1--2026-11-20).
-
 ## Owner directive — macOS Beta and Harbor, 2026-11-17
 
 Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt
