@@ -360,7 +360,10 @@ CREATE TABLE template_override_media_refs (
 
 ## Design Delta D01 — Explicit static assets (#426)
 
-**Status:** Proposed — not implementation authority until independent EGM review, delegated approval and merge.
+**Status:** Approved — implementation authority still requires merge and pinned handoff.
+**Approved By:** Aster (delegated).
+**Approval Evidence:** [PR #433 coordinator decision](https://github.com/thientran2359/opendash-cms/pull/433#issuecomment-7049933198).
+**Goldfish Review:** Independent fresh-context `delta_review`; initial two P2 findings resolved; re-review PASS, recorded below.
 **Coordinator:** Aster. **Baseline:** `284f000333b32d38629297c0368584761d54d67f`.
 
 ### Problem and selected direction
