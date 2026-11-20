@@ -30,7 +30,9 @@ from pathlib import Path
 REPOSITORY = "thientran2359/opendash-cms"
 BRANCHES = {"forge": "agent/forge", "harbor": "agent/harbor"}
 DEFAULT_MAC_SSH = os.environ.get("OPENDASH_COS_MAC_SSH", "")
-TASK_RE = re.compile(r"^M[1-9][0-9]*-S[0-9]{2}-T[0-9]{2}$")
+TASK_RE = re.compile(
+    r"^(?:EGM-[A-Za-z0-9][A-Za-z0-9_-]{0,63}|M[1-9][0-9]*-S[0-9]{2}-T[0-9]{2})$"
+)
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 # A leading dash would be interpreted as an ssh option by some clients.
 HOST_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -551,7 +553,7 @@ def prompt(target, mode, issue=None, task_id=None, source_sha=None, base_sha=Non
     return ("You are " + name + " in OpenDash CMS. Run the repository skill "
             ".agents/skills/github-task-pickup/SKILL.md for Issue #" + str(issue) +
             " (" + task_id + "). Source SHA " + source_sha + "; base SHA " + base_sha +
-            ". Verify live GitHub Issue/Project #3, approved G3, ownership, dependencies, "
+            ". Verify live GitHub Issue/Project #3, approved EGM Design Spec (or legacy G3), ownership, dependencies, "
             "branch, dirty worktree and any current PR before writing. Resume the current "
             "task if applicable. Stop and report blockers if any condition fails. "
             "Follow repo AGENTS.md and permitted review/merge gates. Report results in this chat.")

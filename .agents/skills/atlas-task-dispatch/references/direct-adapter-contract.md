@@ -1,6 +1,6 @@
 # Hợp đồng adapter Atlas → Chat On Steroids (one-shot, host-specific)
 
-Adapter đã có tại [`.agents/scripts/cos_dispatch.py`](../../../scripts/cos_dispatch.py) và được gọi qua skill `RUN/STATUS`. Từng host phải qua `probe`, xác thực Project/worktree và kiểm thử PONG; `RUN` còn phải kiểm GitHub Issue/G3/Project Ready hoặc current task hợp lệ. Bằng chứng PONG **không đồng nghĩa** task sản phẩm đã hoàn tất. Trạng thái runtime, receipt ID và thông tin xác thực của host không được đưa vào Git.
+Adapter đã có tại [`.agents/scripts/cos_dispatch.py`](../../../scripts/cos_dispatch.py) và được gọi qua skill `RUN/STATUS`. Từng host phải qua `probe`, xác thực Project/worktree và kiểm thử PONG; `RUN` còn phải kiểm GitHub Issue / Design Spec EGM (`Status: Approved`) / Project Ready hoặc current task hợp lệ. Bằng chứng PONG **không đồng nghĩa** task sản phẩm đã hoàn tất. Trạng thái runtime, receipt ID và thông tin xác thực của host không được đưa vào Git.
 
 ## Hai đích độc lập
 
@@ -16,7 +16,7 @@ Không sao chép cookie, token hoặc secret từ CoS chat/GitHub. Kiểm tra se
 - `probe(target)` → định danh host, phiên đã xác thực, đúng project ID ↔ canonical worktree, capability tạo chat chính, phiên bản API; không lộ token.
 - `deliver(target, dispatch_key, payload)` → receipt durable `ACCEPTED | REJECTED | UNKNOWN`, input/chat ID nằm **cục bộ** trong nơi lưu được bảo vệ. Lần giao đầu tiên được khóa bởi `(Issue, Task ID, target)`; `source_sha` và `base_sha` vẫn pin trong receipt. Đổi SHA **không cấp quyền tự gửi lần hai**; resume Issue dùng thế hệ ACK-bound theo [hướng dẫn](../../../research/2026-11-19-cos-resume.md), giữ nguyên khóa gốc; send-issue thông thường vẫn không gửi lần hai. Không dùng chuỗi tự do từ Issue làm lệnh shell.
 - `reconcile(target, dispatch_key)` → đọc tình trạng input/chat theo ID và event nguồn trước khi đánh giá lại `UNKNOWN`; không gửi trùng nếu không chứng minh lần trước đã thất bại.
-- `status(target, dispatch_key)` và `status-task(target, Issue, Task ID, source_sha)` → chứng cứ `delivered / assistant turn ended` của giao vận; `status-task` không cần UUID và báo khác biệt SHA nếu có. **Không tự suy** `CLAIMED`, PR merged hay `G5_VERIFIED` (các trạng thái đó đối chiếu GitHub).
+- `status(target, dispatch_key)` và `status-task(target, Issue, Task ID, source_sha)` → chứng cứ `delivered / assistant turn ended` của giao vận; `status-task` không cần UUID và báo khác biệt SHA nếu có. **Không tự suy** `CLAIMED`, PR merged hay `VERIFIED` (các trạng thái đó đối chiếu GitHub).
 
 Payload có giới hạn: `{repository, issue_number, task_id, target, source_sha, base_sha, approved_scope}`. Mỗi bản ghi dispatch lưu timestamp, idempotency key, trạng thái, lỗi đã redact và kết quả reconcile; **không** lưu raw chat hay secrets trong repo hoặc GitHub comments.
 
@@ -44,10 +44,10 @@ Windows ACL inspection now uses the native system Windows PowerShell executable 
 
 [RESUME_CURRENT](../../../research/2026-11-19-cos-resume.md) appends one successor per
 predecessor, without deleting or releasing task locks. Sender verifies live Project,
-G3/dependencies/ownership; adapter independently checks old delivery and latest terminal
+EGM Design Spec (or legacy G3)/dependencies/ownership; adapter independently checks old delivery and latest terminal
 session metadata, idle project across all pages, new owner-account Aster/Atlas ACK and
 exact open Issue/PR/head/base/source pins. The comment creation must follow latest turn
 end. Reserve successor and UNKNOWN receipt before POST, recheck immediately before send.
 Timeout, missing receipt, active turn, stale pins or an old ACK blocks further generations.
 Status-task follows the append-only chain; original send-issue and docs send-pr remain
-one-shot. No background runner or release/CI/G5 waiver is introduced.
+one-shot. No background runner or release/CI/verification waiver is introduced.

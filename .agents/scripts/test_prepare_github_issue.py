@@ -228,6 +228,51 @@ class EgmDesignTests(unittest.TestCase):
         with self.assertRaisesRegex(MODULE.TaskError, "placeholder"):
             MODULE.parse_egm_design(egm_example(overview="TODO fill this in"))
 
+    def test_egm_design_refuses_unresolved_open_questions(self):
+        doc = egm_example() + "\n## Open Questions\n\n| ID | Question |\n| --- | --- |\n| OQ-01 | Pending choice |\n"
+        with self.assertRaisesRegex(MODULE.TaskError, "Open Questions"):
+            MODULE.parse_egm_design(doc)
+
+    def test_egm_design_slice_extracts_target_slice_and_verification(self):
+        sliced = (
+            egm_example()
+            .replace(
+                "### Target Files to Create/Modify",
+                "### Target Files to Create/Modify\n\n"
+                "### Slice S01: Theme Manifest & Resolver\n\n"
+                "- `cms/crates/opendash-server/src/theme.rs` (Modify): Parse v3 manifest.\n\n"
+                "### Slice S02: Page Layouts\n\n"
+                "- `cms/crates/opendash-server/src/routes/public.rs` (Modify): Render page layouts.\n",
+            )
+        )
+        design = MODULE.parse_egm_design(sliced)
+        payload = MODULE.egm_issue_payload(
+            design,
+            "docs/designs/builder-theme.md",
+            "a" * 40,
+            "b" * 40,
+            "forge",
+            slice_id="S01",
+        )
+        self.assertEqual(payload["task_id"], "EGM-builder-theme-S01")
+        self.assertEqual(
+            payload["title"],
+            "[EGM-builder-theme-S01] Backup Plugin Revisions & Restore Path Alignment — Slice S01: Theme Manifest & Resolver",
+        )
+        self.assertIn("theme.rs", payload["body"])
+        self.assertNotIn("Slice S02", payload["body"])
+        self.assertIn("### Verification Plan", payload["body"])
+
+        with self.assertRaisesRegex(MODULE.TaskError, "Slice S99"):
+            MODULE.egm_issue_payload(
+                design,
+                "docs/designs/builder-theme.md",
+                "a" * 40,
+                "b" * 40,
+                "forge",
+                slice_id="S99",
+            )
+
     def test_egm_cli_reads_approved_blob_without_task_id(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

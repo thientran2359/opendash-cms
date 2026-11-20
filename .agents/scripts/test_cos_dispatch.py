@@ -354,8 +354,12 @@ class DispatchTests(unittest.TestCase):
     def test_issue_requires_real_task_and_full_shas(self):
         with self.assertRaisesRegex(adapter.Blocked, "INVALID_ISSUE"):
             adapter.send("forge", self.request_id, "issue", 104, "WRONG-ID", "a" * 40, "b" * 40)
+        with self.assertRaisesRegex(adapter.Blocked, "INVALID_ISSUE"):
+            adapter.send("forge", self.request_id, "issue", 104, "EGM-bad id!", "a" * 40, "b" * 40)
         with self.assertRaisesRegex(adapter.Blocked, "SOURCE_AND_BASE_SHA"):
             adapter.send("forge", self.request_id, "issue", 104, "M4-S08-T01", "short", "b" * 40)
+        with self.assertRaisesRegex(adapter.Blocked, "SOURCE_AND_BASE_SHA"):
+            adapter.send("forge", self.request_id, "issue", 104, "EGM-builder-theme-S01", "short", "b" * 40)
 
     def test_reconcile_only_reports_pong_and_delivery(self):
         receipt = {"input_id": str(uuid.uuid4()), "mode": "pong"}
