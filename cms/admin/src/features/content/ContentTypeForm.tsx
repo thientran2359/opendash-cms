@@ -9,10 +9,10 @@ import {
   CONTENT_FIELD_TYPES,
   ContentFieldDefinition,
   ContentFieldType,
-  ContentTypeDefinition,
 } from './types.ts';
+import type { ContentPublicationPolicy, ContentSupport, ContentTypeDefinitionWithSettings } from '../../api/content.ts';
 
-interface DraftField {
+export interface DraftField {
   id: number;
   key: string;
   label: string;
@@ -23,26 +23,65 @@ interface DraftField {
 
 const snakeKeyPattern = /^[a-z][a-z0-9_]{0,63}$/;
 
+/** The complete unsaved editor state, including fields that are not valid yet. */
+export interface ContentTypeCreationDraft {
+  key: string;
+  label: string;
+  fields: DraftField[];
+  isPublic: boolean;
+  hasArchive: boolean;
+  publication: ContentPublicationPolicy;
+  supports: ContentSupport[];
+}
+
+export const blankContentTypeCreationDraft = (): ContentTypeCreationDraft => ({
+  key: '', label: '', fields: [], isPublic: true, hasArchive: true,
+  publication: 'immediate', supports: ['editor', 'featured_image'],
+});
+
+export const isContentTypeCreationDraftDirty = (draft: ContentTypeCreationDraft): boolean =>
+  Boolean(draft.key || draft.label || draft.fields.length || !draft.isPublic || !draft.hasArchive
+    || draft.publication !== 'immediate' || draft.supports.length !== 2);
+
+const copyDraft = (draft: ContentTypeCreationDraft): ContentTypeCreationDraft => ({
+  ...draft, fields: draft.fields.map(field => ({ ...field })), supports: [...draft.supports],
+});
+
 interface ContentTypeFormProps {
   disabled: boolean;
-  onCreate: (input: ContentTypeDefinition) => Promise<boolean>;
+  onCreate: (input: ContentTypeDefinitionWithSettings) => Promise<boolean>;
   onDirtyChange: (dirty: boolean) => void;
+  /** Optional one-time mount hydration. The caller owns identity-scoped storage. */
+  initialDraft?: ContentTypeCreationDraft | null;
+  /** Synchronous input snapshot for safe 401 unmounts. */
+  onDraftChange?: (draft: ContentTypeCreationDraft) => void;
 }
 
 export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
-  disabled, onCreate, onDirtyChange,
+  disabled, onCreate, onDirtyChange, initialDraft, onDraftChange,
 }) => {
-  const [key, setKey] = useState('');
-  const [label, setLabel] = useState('');
-  const [fields, setFields] = useState<DraftField[]>([]);
+  const [draft, setDraft] = useState<ContentTypeCreationDraft>(() =>
+    copyDraft(initialDraft ?? blankContentTypeCreationDraft()));
+  const draftRef = useRef(draft);
+  const { key, label, fields, isPublic, hasArchive, publication, supports } = draft;
   const [error, setError] = useState('');
-  const nextId = useRef(0);
-  const dirty = Boolean(key || label || fields.length);
+  const nextId = useRef(Math.max(0, ...draft.fields.map(field => field.id)));
+  const dirty = isContentTypeCreationDraftDirty(draft);
 
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
+  // Write the exact draft during the input event, not after a delayed effect:
+  // a 401 can unmount the form before a queued effect would persist the edit.
+  const updateDraft = (next: ContentTypeCreationDraft) => {
+    draftRef.current = next;
+    setDraft(next);
+    onDraftChange?.(copyDraft(next));
+  };
+  const update = (patch: Partial<ContentTypeCreationDraft>) =>
+    updateDraft({ ...draftRef.current, ...patch });
+
   const updateField = (id: number, patch: Partial<DraftField>) => {
-    setFields(prev => prev.map(field => field.id === id ? { ...field, ...patch } : field));
+    update({ fields: draftRef.current.fields.map(field => field.id === id ? { ...field, ...patch } : field) });
     setError('');
   };
 
@@ -52,17 +91,23 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
       return;
     }
     nextId.current += 1;
-    setFields(prev => [...prev, {
+    update({ fields: [...draftRef.current.fields, {
       id: nextId.current,
       key: '',
       label: '',
       type: 'short_text',
       required: false,
       optionsText: '',
-    }]);
+    }] });
   };
 
-  const buildSchema = (): ContentTypeDefinition => {
+  const toggleSupport = (support: ContentSupport, enabled: boolean) => {
+    update({ supports: enabled
+      ? [...draftRef.current.supports.filter(value => value !== support), support]
+      : draftRef.current.supports.filter(value => value !== support) });
+  };
+
+  const buildSchema = (): ContentTypeDefinitionWithSettings => {
     if (!snakeKeyPattern.test(key)) {
       throw new Error('Khóa CPT phải bắt đầu bằng chữ thường và chỉ chứa chữ thường, số, dấu _ (tối đa 64 ký tự).');
     }
@@ -102,7 +147,9 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
         options,
       };
     });
-    return { key, label, fields: resultFields };
+    return { key, label, fields: resultFields,
+      settings: { public: isPublic, has_archive: hasArchive, publication, supports },
+    };
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -112,9 +159,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
       const schema = buildSchema();
       const created = await onCreate(schema);
       if (created) {
-        setKey('');
-        setLabel('');
-        setFields([]);
+        updateDraft(blankContentTypeCreationDraft());
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Không thể đọc cấu hình CPT.');
@@ -124,11 +169,35 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
   return (
     <form onSubmit={submit} className="content-schema-form">
       <h3>Đăng ký loại nội dung mới</h3>
-      <p className="content-help">Chỉ quản trị viên được khai báo CPT. Hiện chưa có chức năng sửa/xóa schema sau khi tạo.</p>
+      <p className="content-help">Chỉ quản trị viên được khai báo CPT. Có thể chỉnh sửa nhãn và hành vi trong phần cài đặt loại nội dung.</p>
       <div className="content-form-grid">
-        <TextField id="content-type-key" name="key" label="Khóa CPT *" value={key} disabled={disabled} maxLength={64} onChange={setKey} placeholder="vi_du: portfolio_item" />
-        <TextField id="content-type-label" name="label" label="Tên hiển thị *" value={label} disabled={disabled} maxLength={100} onChange={setLabel} placeholder="Dự án" />
+        <TextField id="content-type-key" name="key" label="Khóa CPT *" value={key} disabled={disabled} maxLength={64} onChange={value => update({ key: value })} placeholder="vi_du: portfolio_item" />
+        <TextField id="content-type-label" name="label" label="Tên hiển thị *" value={label} disabled={disabled} maxLength={100} onChange={value => update({ label: value })} placeholder="Dự án" />
       </div>
+      <fieldset className="space-y-3 rounded-lg border border-slate-200 p-3">
+        <legend className="px-1 font-semibold">Hành vi loại nội dung</legend>
+        <CheckboxField id="new-cpt-public" label="Công khai bài viết (public)" checked={isPublic}
+          disabled={disabled} onChange={value => update({ isPublic: value })} />
+        <CheckboxField id="new-cpt-archive" label="Cho phép trang danh sách (has_archive)"
+          checked={hasArchive} disabled={disabled} onChange={value => update({ hasArchive: value })} />
+        <SelectField id="new-cpt-publication" label="Cơ chế xuất bản"
+          value={publication} disabled={disabled}
+          options={[
+            { value: 'immediate', label: 'Lưu là xuất bản (immediate)' },
+            { value: 'draft_publish', label: 'Lưu nháp / Xuất bản (draft_publish)' },
+          ]}
+          onChange={event => update({ publication: event.target.value as ContentPublicationPolicy })} />
+        <fieldset className="space-y-2">
+          <legend className="text-sm font-medium">Thành phần màn hình chỉnh sửa</legend>
+          <CheckboxField id="new-cpt-editor" label="Trình soạn thảo (editor)"
+            checked={supports.includes('editor')} disabled={disabled}
+            onChange={checked => toggleSupport('editor', checked)} />
+          <CheckboxField id="new-cpt-featured-image" label="Ảnh đại diện (featured_image)"
+            checked={supports.includes('featured_image')} disabled={disabled}
+            onChange={checked => toggleSupport('featured_image', checked)} />
+          <p className="text-xs text-slate-600">Tắt thành phần chỉ ẩn quyền chỉnh sửa, không xóa nội dung hoặc ảnh đã lưu.</p>
+        </fieldset>
+      </fieldset>
       <div className="content-section-heading">
         <h4>Custom fields ({fields.length})</h4>
         <button type="button" className="btn-secondary" onClick={addField} disabled={disabled || fields.length >= 64}>+ Thêm field</button>
@@ -185,7 +254,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => setFields(prev => prev.filter(item => item.id !== field.id))}
+            onClick={() => update({ fields: draftRef.current.fields.filter(item => item.id !== field.id) })}
             disabled={disabled}
           >
             Bỏ field

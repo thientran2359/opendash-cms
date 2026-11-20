@@ -237,8 +237,57 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
         .unwrap();
     pool.close().await;
 
-    // 5. Restart server and verify public header renders `/content/post/about-v2` and omits Draft Link
+    // 5. Restart server, then reconcile the fixture's out-of-band SQL slug
+    // change through the same CAS-checked writer used by real Admin updates.
+    // C3 public routes must never fall back to unsynchronized legacy rows.
     let srv2 = spawn_server_at(site_root.clone(), false).await;
+    let login2 = client
+        .post(format!("{}/auth/login", srv2.base_url))
+        .json(&json!({ "username": "admin", "password": "AdminPassword123!" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(login2.status(), 200);
+    let cookie2 = login2
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .map(|s| s.split(';').next().unwrap_or(s).to_string())
+        .collect::<Vec<_>>()
+        .join("; ");
+    let csrf2 = login2.json::<Value>().await.unwrap()["csrf_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let settings_response = client
+        .get(format!("{}/api/admin/settings/permalinks", srv2.base_url))
+        .header("Cookie", &cookie2)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(settings_response.status(), 200);
+    let settings: Value = settings_response.json().await.unwrap();
+    let settings_version = settings["version"].as_i64().unwrap();
+    let sync_response = client
+        .put(format!("{}/api/admin/settings/permalinks", srv2.base_url))
+        .header("Cookie", &cookie2)
+        .header("Origin", &srv2.base_url)
+        .header("X-CSRF-Token", &csrf2)
+        .header("If-Match", format!("\"v{settings_version}\""))
+        .json(&json!({
+            "post_structure": settings["post_structure"],
+            "content_type_bases": settings["content_type_bases"],
+            "taxonomy_bases": settings["taxonomy_bases"]
+        }))
+        .send()
+        .await
+        .unwrap();
+    let sync_status = sync_response.status();
+    let sync_body = sync_response.text().await.unwrap();
+    assert_eq!(sync_status, 200, "fixture claim sync: {sync_body}");
+
+    // Verify public header renders `/content/post/about-v2` and omits Draft Link.
     let html = client
         .get(format!("{}/content/post/about-v2", srv2.base_url))
         .send()
@@ -256,25 +305,6 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
     assert!(!html.contains("Draft Link"));
 
     // 6. Switch theme A -> B -> A and verify menu + slot assignment preserved
-    let login2 = client
-        .post(format!("{}/auth/login", srv2.base_url))
-        .json(&json!({ "username": "admin", "password": "AdminPassword123!" }))
-        .send()
-        .await
-        .unwrap();
-    let cookie2 = login2
-        .headers()
-        .get_all(reqwest::header::SET_COOKIE)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-        .map(|s| s.split(';').next().unwrap_or(s).to_string())
-        .collect::<Vec<_>>()
-        .join("; ");
-    let csrf2 = login2.json::<Value>().await.unwrap()["csrf_token"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
     for (ver, rev) in [(2, &rev_ids[1]), (3, &rev_ids[0])] {
         let act = client
             .put(format!("{}/api/admin/themes/active", srv2.base_url))

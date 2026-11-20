@@ -1,6 +1,6 @@
 # ADR-0008 — Harbor và Forge tự chủ triển khai, review và merge từ M4
 
-> **Cập nhật phân quyền:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md) là nguồn hiện hành về vai trò, tự chủ triển khai, review và merge. Các quy định cũ dưới đây được giữ làm lịch sử quyết định.
+> **Cập nhật phân quyền và nhánh:** [ADR-0010](ADR-0010-agent-project-and-merge-authority.md) là nguồn hiện hành. Quy định cũ tại mục 3 về mặc định tạo branch/worktree **theo task** đã được owner thay thế ngày 2026-11-19: dùng `agent/<name>` mặc định, `task/*` chỉ là ngoại lệ có lý do/ownership rõ. Nội dung cũ bên dưới giữ làm lịch sử, không áp dụng cho task mới.
 
 - **Trạng thái:** **AGREED — owner direct, 2026-11-11**. Có hiệu lực như quy định chung sau khi tài liệu được merge vào `main`; chỉ đạo owner trong chat có ưu tiên ngay khi làm việc.
 - **Phạm vi:** M4 và các milestone/tác vụ OpenDash tiếp theo; quyền M3 trong [ADR-0005](ADR-0005-m3-harbor-forge-autonomous-delivery.md) giữ nguyên. Không thay đổi các PR đã merge hoặc task thuộc agent khác.
@@ -24,4 +24,4 @@
 
 ## Cập nhật hướng dẫn
 
-Quy định này ưu tiên so với câu chữ giới hạn **riêng M3** trong [Agent Operating Standard](../../.agents/AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md), [github-task-pickup](../../.agents/skills/github-task-pickup/SKILL.md) và [AGENTS.md](../../AGENTS.md) khi agent đang làm việc là Harbor/Forge. Các gate Project, CI, security và evidence vẫn bắt buộc.
+Tại thời điểm ban hành, quy định này ưu tiên so với câu chữ giới hạn **riêng M3** trong [Agent Operating Standard](../../.agents/AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../.agents/GITHUB_WORKFLOW.md), [github-task-pickup](../../.agents/skills/github-task-pickup/SKILL.md) và [AGENTS.md](../../AGENTS.md) khi agent đang làm việc là Harbor/Forge. Quyền và **nhánh mặc định hiện hành** theo ADR-0010, bao gồm bổ sung 2026-11-19; không viện dẫn mục 3 lịch sử để buộc tạo task branch. Các gate Project, CI, security và evidence vẫn bắt buộc.

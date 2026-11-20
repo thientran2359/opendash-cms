@@ -83,6 +83,14 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
                     .filter(|id| *id > 0)
                     .ok_or_else(|| ApiError::bad_request("tag_id không hợp lệ."))?);
             }
+            "taxonomy_key" if opendash_core::content::valid_content_type_key(value) => {
+                filter.taxonomy_key = Some(value.to_owned());
+            }
+            "term_id" => {
+                filter.term_id = Some(value.parse::<i64>().ok()
+                    .filter(|id| *id > 0 && id.to_string() == value)
+                    .ok_or_else(|| ApiError::bad_request("term_id không hợp lệ."))?);
+            }
             "include_descendants" if matches!(value, "true" | "false") => {
                 filter.include_descendants = value == "true";
             }
@@ -116,8 +124,15 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
             _ => return Err(ApiError::bad_request("Tham số bảng nội dung không hợp lệ.")),
         }
     }
-    if filter.include_descendants && filter.category_id.is_none() {
-        return Err(ApiError::bad_request("include_descendants yêu cầu category_id."));
+    if filter.taxonomy_key.is_some() != filter.term_id.is_some()
+        || (filter.taxonomy_key.is_some()
+            && (filter.category_id.is_some() || filter.tag_id.is_some()))
+    {
+        return Err(ApiError::bad_request("taxonomy_key/term_id thiếu cặp hoặc trộn aliases."));
+    }
+    if filter.include_descendants && filter.category_id.is_none()
+        && filter.taxonomy_key.is_none() {
+        return Err(ApiError::bad_request("include_descendants cần taxonomy filter."));
     }
     Ok(filter)
 }
@@ -295,6 +310,7 @@ pub async fn entry_list(
         category_id: pagination.category_id,
         tag_id: pagination.tag_id,
         include_descendants: pagination.include_descendants.unwrap_or(false),
+        ..entry_storage::EntryFilters::default()
     };
     let mut items = entry_storage::list_entries(&db, &type_key, limit, offset, filters).await?;
     if let Some(eff) = effective {

@@ -83,20 +83,39 @@ pub async fn resolve_in_tx_with_route(
                         }
                         // An entry's values NEVER leave storage on the public path until
                         // the published predicate and active provider check both hold.
-                        let source: Option<SourceRow> = sqlx::query_as(
-                            "SELECT t.definition_json, e.title, e.values_json, p.path
+                        let source_row: Option<(i64, String, String, String)> = sqlx::query_as(
+                            "SELECT e.id, t.definition_json, e.title, e.values_json
                                FROM content_entries e JOIN content_types t
                                  ON t.key = e.content_type_key
-                                 LEFT JOIN entry_public_paths p ON p.entry_id = e.id
                               WHERE e.content_type_key = ? AND e.slug = ?
                                 AND t.provider_status = 'active'
-                                AND (? = 1 OR e.publication_status = 'published')",
+                                AND (? = 1 OR (
+                                    e.publication_status = 'published'
+                                    AND e.content_type_key != 'section'
+                                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+                                ))",
                         )
                         .bind(&key.0)
                         .bind(&key.1)
                         .bind(i64::from(authenticated_preview))
                         .fetch_optional(&mut **tx)
                         .await?;
+                        let source = if let Some((entry_id, definition, title, values)) = source_row {
+                            // Preview may read draft fields, but an unpublished
+                            // route must never become a public binding URL.
+                            let url = if crate::storage::seo::resolve_public_entry_path_in_tx(
+                                &mut **tx, entry_id,
+                            ).await?.is_some() {
+                                crate::storage::permalinks::canonical_entry_path_in_tx(
+                                    &mut **tx, entry_id,
+                                ).await?
+                            } else {
+                                None
+                            };
+                            Some((definition, title, values, url))
+                        } else {
+                            None
+                        };
                         cache.insert(key.clone(), source);
                     }
                     let result = cache
@@ -163,7 +182,7 @@ fn extract_route_context(
     field_key: &str,
     type_key: &str,
     slug: &str,
-    (definition, title, values, custom_path): &SourceRow,
+    (definition, title, values, canonical_url): &SourceRow,
     heading: bool,
 ) -> BindingResult {
     let Ok(schema) = serde_json::from_str::<ContentTypeDefinition>(definition) else {
@@ -189,7 +208,7 @@ fn extract_route_context(
             slug.to_string()
         }
         "url" => {
-            let Some(u) = custom_path.clone().or_else(|| CanonicalUrlBuilder::entry(type_key, slug)) else {
+            let Some(u) = canonical_url.clone() else {
                 return BindingResult::Unavailable;
             };
             u

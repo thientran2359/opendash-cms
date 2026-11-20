@@ -14,7 +14,7 @@ Không sao chép cookie, token hoặc secret từ CoS chat/GitHub. Kiểm tra se
 ## Giao diện logic tối thiểu (transport cụ thể phải được chứng minh)
 
 - `probe(target)` → định danh host, phiên đã xác thực, đúng project ID ↔ canonical worktree, capability tạo chat chính, phiên bản API; không lộ token.
-- `deliver(target, dispatch_key, payload)` → receipt durable `ACCEPTED | REJECTED | UNKNOWN`, input/chat ID nằm **cục bộ** trong nơi lưu được bảo vệ. Lần giao đầu tiên được khóa bởi `(Issue, Task ID, target)`; `source_sha` và `base_sha` vẫn pin trong receipt. Đổi SHA **không cấp quyền tự gửi lần hai**; re-dispatch cần thế hệ được phê duyệt và cơ chế release riêng (chưa triển khai). Không dùng chuỗi tự do từ Issue làm lệnh shell.
+- `deliver(target, dispatch_key, payload)` → receipt durable `ACCEPTED | REJECTED | UNKNOWN`, input/chat ID nằm **cục bộ** trong nơi lưu được bảo vệ. Lần giao đầu tiên được khóa bởi `(Issue, Task ID, target)`; `source_sha` và `base_sha` vẫn pin trong receipt. Đổi SHA **không cấp quyền tự gửi lần hai**; resume Issue dùng thế hệ ACK-bound theo [hướng dẫn](../../../research/2026-11-19-cos-resume.md), giữ nguyên khóa gốc; send-issue thông thường vẫn không gửi lần hai. Không dùng chuỗi tự do từ Issue làm lệnh shell.
 - `reconcile(target, dispatch_key)` → đọc tình trạng input/chat theo ID và event nguồn trước khi đánh giá lại `UNKNOWN`; không gửi trùng nếu không chứng minh lần trước đã thất bại.
 - `status(target, dispatch_key)` và `status-task(target, Issue, Task ID, source_sha)` → chứng cứ `delivered / assistant turn ended` của giao vận; `status-task` không cần UUID và báo khác biệt SHA nếu có. **Không tự suy** `CLAIMED`, PR merged hay `G5_VERIFIED` (các trạng thái đó đối chiếu GitHub).
 
@@ -38,3 +38,16 @@ The GitHub preflight uses host-local authenticated `gh api --hostname github.com
 Durable lock identity is `(target, PR number)`, independent of head/review/request UUID. Same request replays receipt only; uncertain delivery or changed head never authorizes a second send. `status-pr` finds the receipt by PR without a remembered UUID and reports changed head/review references. Recovery from lock-without-receipt is UNKNOWN and requires reconciliation, not automatic release. Agent slot/absence of conflicting work is a sender preflight requirement; GitHub scope alone does not prove the agent is idle.
 
 Windows ACL inspection now uses the native system Windows PowerShell executable and a process-local system-only PSModulePath. Module/read errors terminate and fail closed. It does not modify global environment or any ACL/token. The SSH transport explicitly streams Python source/output as UTF-8 to preserve non-ASCII signed review markers on Windows→Mac.
+
+
+## Issue resume extension — owner authorization 19/11/2026
+
+[RESUME_CURRENT](../../../research/2026-11-19-cos-resume.md) appends one successor per
+predecessor, without deleting or releasing task locks. Sender verifies live Project,
+G3/dependencies/ownership; adapter independently checks old delivery and latest terminal
+session metadata, idle project across all pages, new owner-account Aster/Atlas ACK and
+exact open Issue/PR/head/base/source pins. The comment creation must follow latest turn
+end. Reserve successor and UNKNOWN receipt before POST, recheck immediately before send.
+Timeout, missing receipt, active turn, stale pins or an old ACK blocks further generations.
+Status-task follows the append-only chain; original send-issue and docs send-pr remain
+one-shot. No background runner or release/CI/G5 waiver is introduced.

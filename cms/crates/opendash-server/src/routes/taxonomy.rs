@@ -10,9 +10,13 @@ use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use std::collections::BTreeMap;
 use serde_json::Value;
 use sqlx::SqlitePool;
+use opendash_core::content::{
+    TaxonomyDefinition, TaxonomyDefinitionInput, TaxonomyDefinitionPatch,
+    valid_content_type_key,
+};
 
 use crate::{
-    auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
+    auth::{require_admin, require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     storage::taxonomy,
 };
@@ -25,6 +29,34 @@ pub struct TaxonomyPagination {
     kind: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyTermResolveQuery {
+    ids: String,
+}
+
+fn parse_term_resolve_ids(raw: &str) -> ApiResult<Vec<i64>> {
+    if raw.is_empty() || raw.len() > 2000 {
+        return Err(ApiError::bad_request("Tối đa 100 ID term mỗi lần tra cứu."));
+    }
+    let mut ids = Vec::new();
+    let mut unique = std::collections::HashSet::new();
+    for raw_id in raw.split(',') {
+        if ids.len() == 100 || raw_id.is_empty() || raw_id.starts_with('0')
+            || !raw_id.bytes().all(|digit| digit.is_ascii_digit())
+        {
+            return Err(ApiError::bad_request("Danh sách ID term không hợp lệ hoặc vượt 100 ID."));
+        }
+        let id = raw_id.parse::<i64>()
+            .map_err(|_| ApiError::bad_request("ID term không hợp lệ."))?;
+        if id <= 0 || !unique.insert(id) {
+            return Err(ApiError::bad_request("Danh sách ID term không hợp lệ hoặc trùng."));
+        }
+        ids.push(id);
+    }
+    Ok(ids)
 }
 
 #[derive(Deserialize)]
@@ -105,20 +137,88 @@ fn term_response(status: StatusCode, term: taxonomy::TaxonomyTerm) -> Response {
         .into_response()
 }
 
+fn definition_response(status: StatusCode, definition: TaxonomyDefinition) -> Response {
+    (
+        status,
+        [
+            (header::ETAG, format!("\"v{}\"", definition.version)),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        Json(definition),
+    ).into_response()
+}
+
+pub async fn taxonomy_definitions_list(
+    State(db): State<SqlitePool>, headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    Ok(([(header::CACHE_CONTROL, "no-store")],
+        Json(taxonomy::list_definitions(&db).await?)).into_response())
+}
+
+pub async fn taxonomy_definitions_get(
+    State(db): State<SqlitePool>, headers: HeaderMap, Path(key): Path<String>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    if !valid_content_type_key(&key) {
+        return Err(ApiError::bad_request("Khóa taxonomy không hợp lệ."));
+    }
+    let definition = taxonomy::get_definition(&db, &key).await?
+        .ok_or_else(|| ApiError::not_found("Taxonomy không tồn tại."))?;
+    Ok(definition_response(StatusCode::OK, definition))
+}
+
+pub async fn taxonomy_definitions_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>, headers: HeaderMap,
+    payload: Result<Json<TaxonomyDefinitionInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    let actor = require_admin_with_csrf(&headers, &db).await?;
+    let input = parse_body(payload)?;
+    let created = taxonomy::create_definition(&db, &actor, &input).await?;
+    Ok(definition_response(StatusCode::CREATED, created))
+}
+
+pub async fn taxonomy_definitions_patch(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>, headers: HeaderMap, Path(key): Path<String>,
+    payload: Result<Json<TaxonomyDefinitionPatch>, JsonRejection>,
+) -> ApiResult<Response> {
+    let actor = require_admin_with_csrf(&headers, &db).await?;
+    if !valid_content_type_key(&key) {
+        return Err(ApiError::bad_request("Khóa taxonomy không hợp lệ."));
+    }
+    let expected = expected_version(&headers)?;
+    let input = parse_body(payload)?;
+    let updated = taxonomy::patch_definition(&db, &actor, &key, expected, &input).await?;
+    Ok(definition_response(StatusCode::OK, updated))
+}
+
+pub async fn taxonomy_definitions_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>, headers: HeaderMap, Path(key): Path<String>,
+) -> ApiResult<Response> {
+    let actor = require_admin_with_csrf(&headers, &db).await?;
+    if !valid_content_type_key(&key) {
+        return Err(ApiError::bad_request("Khóa taxonomy không hợp lệ."));
+    }
+    let expected = expected_version(&headers)?;
+    taxonomy::delete_definition(&db, &actor, &key, expected).await?;
+    Ok((StatusCode::NO_CONTENT, [(header::CACHE_CONTROL, "no-store")]).into_response())
+}
+
 pub async fn taxonomy_list(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Query(query): Query<TaxonomyPagination>,
 ) -> ApiResult<Response> {
     require_session(&headers, &db).await?;
-    if query
-        .kind
-        .as_deref()
-        .is_some_and(|kind| !taxonomy::valid_kind(kind))
-    {
-        return Err(ApiError::bad_request(
-            "Loại term phải là category hoặc tag.",
-        ));
+    if let Some(key) = query.kind.as_deref() {
+        if !valid_content_type_key(key)
+            || taxonomy::get_definition(&db, key).await?.is_none()
+        {
+            return Err(ApiError::bad_request("Taxonomy không tồn tại."));
+        }
     }
     let limit = query.limit.unwrap_or(50);
     let offset = query.offset.unwrap_or(0);
@@ -127,6 +227,19 @@ pub async fn taxonomy_list(
     }
     let page = taxonomy::list_terms(&db, query.kind.as_deref(), limit, offset).await?;
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(page)).into_response())
+}
+
+/// Resolve names by IDs referenced in visible entry-table rows. One bounded
+/// read replaces scanning up to 64 independently paginated term catalogs.
+pub async fn taxonomy_terms_resolve(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Query(query): Query<TaxonomyTermResolveQuery>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    let ids = parse_term_resolve_ids(&query.ids)?;
+    let result = taxonomy::resolve_term_labels(&db, &ids).await?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(result)).into_response())
 }
 
 pub async fn taxonomy_get(
@@ -250,6 +363,62 @@ pub async fn taxonomy_eligibility_list(
         .into_response())
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyEligibilityPut {
+    taxonomies: Vec<String>,
+    expected_version: i64,
+}
+
+pub async fn taxonomy_eligibility_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(content_type_key): Path<String>,
+    payload: Result<Json<TaxonomyEligibilityPut>, JsonRejection>,
+) -> ApiResult<Response> {
+    let actor = require_admin_with_csrf(&headers, &db).await?;
+    let input = parse_body(payload)?;
+    let etag_version = crate::routes::settings::parse_if_match(&headers)?;
+    if input.expected_version != etag_version {
+        return Err(ApiError::bad_request("expected_version không khớp If-Match."));
+    }
+    let updated = crate::storage::content::put_site_taxonomy_eligibility(
+        &db, &actor, &content_type_key, etag_version, &input.taxonomies,
+    ).await?;
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CACHE_CONTROL, "no-store".to_string()),
+            (header::ETAG, format!("\"v{}\"", updated.version)),
+        ],
+        Json(updated),
+    ).into_response())
+}
+
+pub async fn taxonomy_eligibility_effective(
+    State(db): State<SqlitePool>, headers: HeaderMap,
+    Path(content_type_key): Path<String>,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    if !valid_content_type_key(&content_type_key) {
+        return Err(ApiError::bad_request("Khóa CPT không hợp lệ."));
+    }
+    let keys = crate::storage::content::load_effective_taxonomies(&db, &content_type_key).await?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(keys)).into_response())
+}
+
+/// Admin reads the entire persisted selection before replacing a site
+/// override. Returning only effective keys would silently drop dormant keys.
+pub async fn taxonomy_eligibility_configured(
+    State(db): State<SqlitePool>, headers: HeaderMap,
+    Path(content_type_key): Path<String>,
+) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let configured = crate::storage::content::load_configured_taxonomies(&db, &content_type_key).await?;
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(configured)).into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,5 +450,18 @@ mod tests {
         let child: PatchTaxonomyTerm = serde_json::from_str(r#"{"parent_id":42}"#).unwrap();
         assert_eq!(child.parent_id, Some(Some(42)));
         assert!(serde_json::from_str::<PatchTaxonomyTerm>(r#"{"kind":"tag"}"#).is_err());
+    }
+
+    #[test]
+    fn bulk_term_resolve_has_hard_id_cap_and_strict_ids() {
+        let hundred = (1..=100).map(|id| id.to_string()).collect::<Vec<_>>().join(",");
+        assert_eq!(parse_term_resolve_ids(&hundred).unwrap().len(), 100);
+        let hundred_one = format!("{hundred},101");
+        assert_eq!(parse_term_resolve_ids(&hundred_one).unwrap_err().0, StatusCode::BAD_REQUEST);
+        for invalid in ["", "0", "01", "1,", ",1", "1,,2", "1,1", "1,-2", "1,+2", "1, 2",
+            "1,9223372036854775808", "1;DROP TABLE taxonomy_terms"] {
+            assert_eq!(parse_term_resolve_ids(invalid).unwrap_err().0, StatusCode::BAD_REQUEST,
+                "must reject {invalid:?}");
+        }
     }
 }

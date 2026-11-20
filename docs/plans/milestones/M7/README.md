@@ -39,3 +39,10 @@ Mọi Issue đang Backlog trên Project #3 khi kiểm tra; owner dự kiến ở
 - [G2: ADR-0016](../../../decisions/ADR-0016-admin-navigation-and-single-edit.md) và [Contract Admin Navigation & Single Edit](../../../contracts/ADMIN_NAVIGATION_AND_SINGLE_EDIT.md) (`G2 AGREED` tại `main@2808e3e`).
 - [G3: 8 task / 5 slice (`M7-S09-T01`..`M7-S13-T02`)](slices/2026-11-16-admin-navigation-and-single-edit-g3.md) — bao gồm inventory màn hình/route hiện tại, phân loại `UI_REORG` vs `NEW_BACKEND_AND_UI`, wireframe desktop/mobile 390px và đặc tả đầy đủ 8 task G3.
 - **Trạng thái:** `G2 AGREED` / `G3 READY` (có hiệu lực sau khi PR G3 được review/merge vào `main`); `Implementation NOT_STARTED` / `Verification NOT_RUN`; chưa phát hành GitHub Issue hay cấp `Project Ready` từ tài liệu.
+
+
+## Technical retest macOS — 20/11/2026
+
+[M7-S14-T05](slices/2026-11-20-beta-technical-retest-g3.md) do Harbor thực hiện sau
+#378 native G5, Aster pin candidate/impact. Report-only B01–B10 và negative regression;
+không cần human tester cho technical task, không cấp Beta PASS hoặc đóng #302.

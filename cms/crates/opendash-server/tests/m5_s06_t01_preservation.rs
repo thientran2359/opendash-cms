@@ -368,24 +368,21 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     let (editor_cookie2, editor_csrf2) =
         login(&client, &srv2.base_url, "editor1", "EditorPassword123!").await;
 
-    // 5a. Public routes still serve published `portfolio` content via core fallback (not 500, not hidden)
+    // 5a. C3/C4 deny public routing while the owning provider is inactive,
+    // even though the site-owned rows must remain editable in Admin.
     let pub_arch = client
         .get(format!("{}/content/portfolio", srv2.base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(pub_arch.status(), 200);
-    let pub_arch_body = pub_arch.text().await.unwrap();
-    assert!(pub_arch_body.contains("Case Study One"));
+    assert_eq!(pub_arch.status(), 404);
 
     let pub_single = client
         .get(format!("{}/content/portfolio/case-study-1", srv2.base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(pub_single.status(), 200);
-    let pub_single_body = pub_single.text().await.unwrap();
-    assert!(pub_single_body.contains("Case Study One"));
+    assert_eq!(pub_single.status(), 404);
 
     // 5b. Editor sees `provider_inactive` status and CAN list, create, and update `portfolio` entries + terms!
     let cts: Value = client
@@ -413,8 +410,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
         .json(&json!({
             "slug": "case-study-2",
             "title": "Case Study Two",
-            "values": { "client": "Beta LLC", "budget": 9000 },
-            "term_ids": [cat_id]
+            "values": { "client": "Beta LLC", "budget": 9000 }
         }))
         .send()
         .await
@@ -442,13 +438,39 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
         .json(&json!({
             "slug": "case-study-1",
             "title": "Case Study One Updated",
-            "values": { "client": "Acme Global", "budget": 7500 },
-            "term_ids": [cat_id, tag_id]
+            "values": { "client": "Acme Global", "budget": 7500 }
         }))
         .send()
         .await
         .unwrap();
     assert_eq!(editor_upd.status(), 200);
+    let saved_entry1: Value = editor_upd.json().await.unwrap();
+    let saved_ver = saved_entry1["version"].as_i64().unwrap();
+
+    // While the provider is inactive, an explicit membership change must be
+    // rejected atomically; an ordinary title/value-only edit above remains valid.
+    let rejected_terms = client
+        .put(format!("{}/api/admin/content-types/portfolio/entries/{entry1_id}", srv2.base_url))
+        .header("Cookie", &editor_cookie2)
+        .header("Origin", &srv2.base_url)
+        .header("X-CSRF-Token", &editor_csrf2)
+        .header("If-Match", format!("\"v{saved_ver}\""))
+        .json(&json!({
+            "slug": "case-study-1",
+            "title": "Rejected Membership Change",
+            "values": { "client": "Should Not Persist", "budget": 1 },
+            "term_ids": [cat_id]
+        }))
+        .send().await.unwrap();
+    assert_eq!(rejected_terms.status(), 400);
+    let after_rejection: Value = client
+        .get(format!("{}/api/admin/content-types/portfolio/entries/{entry1_id}", srv2.base_url))
+        .header("Cookie", &editor_cookie2)
+        .send().await.unwrap().json().await.unwrap();
+    assert_eq!(after_rejection["version"], saved_ver);
+    assert_eq!(after_rejection["title"], "Case Study One Updated");
+    assert_eq!(after_rejection["values"]["client"], "Acme Global");
+    assert_eq!(after_rejection["term_ids"], cur_entry1["term_ids"]);
 
     // 5c. Editor still receives 403 on Admin-only endpoints
     assert_eq!(
@@ -575,6 +597,24 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     assert_eq!(portfolio_matches.len(), 1);
     assert_eq!(portfolio_matches[0]["status"], "active");
 
+    // The same provider returning must restore the exact public routes without
+    // duplicating the entry or changing its stable identity.
+    let restored_archive = client
+        .get(format!("{}/content/portfolio", srv2.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(restored_archive.status(), 200);
+    // Theme templates may choose a fixed archive body; the public 200 and
+    // authenticated row assertions below are the stable preservation contract.
+    let restored_single = client
+        .get(format!("{}/content/portfolio/case-study-1", srv2.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(restored_single.status(), 200);
+    assert!(restored_single.text().await.unwrap().contains("Case Study One Updated"));
+
     let entries_list: Value = client
         .get(format!("{}/api/admin/content-types/portfolio/entries", srv2.base_url))
         .header("Cookie", &admin_cookie2)
@@ -590,7 +630,38 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     assert_eq!(e1["title"], "Case Study One Updated");
     assert_eq!(e1["values"]["client"], "Acme Global");
     assert_eq!(e1["values"]["budget"], 7500);
+    assert_eq!(e1["term_ids"], json!([cat_id, tag_id]), "inactive title/value edit must preserve memberships");
     assert!(items.iter().any(|e| e["id"] == entry2_id));
+
+    // The same explicit category assignment rejected while inactive becomes
+    // eligible when Theme A's declaration is active again. Persist and reread
+    // it under the original stable entry ID.
+    let entry2_before: Value = client
+        .get(format!("{}/api/admin/content-types/portfolio/entries/{entry2_id}", srv2.base_url))
+        .header("Cookie", &editor_cookie2)
+        .send().await.unwrap().json().await.unwrap();
+    let entry2_version = entry2_before["version"].as_i64().unwrap();
+    let membership_update = client
+        .put(format!("{}/api/admin/content-types/portfolio/entries/{entry2_id}", srv2.base_url))
+        .header("Cookie", &editor_cookie2)
+        .header("Origin", &srv2.base_url)
+        .header("X-CSRF-Token", &editor_csrf2)
+        .header("If-Match", format!("\"v{entry2_version}\""))
+        .json(&json!({
+            "slug": "case-study-2",
+            "title": "Case Study Two",
+            "values": { "client": "Beta LLC", "budget": 9000 },
+            "term_ids": [cat_id]
+        }))
+        .send().await.unwrap();
+    assert_eq!(membership_update.status(), 200);
+    let entry2_after: Value = client
+        .get(format!("{}/api/admin/content-types/portfolio/entries/{entry2_id}", srv2.base_url))
+        .header("Cookie", &editor_cookie2)
+        .send().await.unwrap().json().await.unwrap();
+    assert_eq!(entry2_after["id"], entry2_id);
+    assert_eq!(entry2_after["term_ids"], json!([cat_id]));
+    assert_eq!(entry2_after["values"]["client"], "Beta LLC");
 
     let opts: Value = client
         .get(format!("{}/api/themes/theme-a/options", srv2.base_url))

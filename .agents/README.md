@@ -1,5 +1,12 @@
 # OpenDash CMS - Agent working area
 
+For new design work, start with the [OpenDash EGM guide](../docs/plans/EGM_WORKFLOW.md).
+Keep the primary working draft here until accepted; promote it through PR to
+`docs/designs/` and retain a successor pointer or historical snapshot here.
+One coordinator owns a topic. Goldfish reports support the primary design;
+they are not another task queue or an independent source of approved behavior.
+Existing Proposed Builder docs remain an explicit historical exception.
+
 The Git-tracked `.agents/` directory holds research, design discussions,
 proposed tasks, handoff notes and templates that are not yet approved.
 `docs/` holds official requirements, approved plans/decisions/contracts and

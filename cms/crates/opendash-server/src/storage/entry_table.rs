@@ -22,6 +22,8 @@ pub struct EntryTableFilter {
     pub status: String,
     pub category_id: Option<i64>,
     pub tag_id: Option<i64>,
+    pub taxonomy_key: Option<String>,
+    pub term_id: Option<i64>,
     pub include_descendants: bool,
     pub updated_month: Option<String>,
     pub sort: String,
@@ -37,6 +39,8 @@ impl Default for EntryTableFilter {
             status: "all".into(),
             category_id: None,
             tag_id: None,
+            taxonomy_key: None,
+            term_id: None,
             include_descendants: false,
             updated_month: None,
             sort: "updated_at".into(),
@@ -88,6 +92,12 @@ const CATEGORY_SCOPE: &str = "
    SELECT c.id, category_scope.depth + 1 FROM taxonomy_terms c
    JOIN category_scope ON c.parent_id = category_scope.id
    WHERE category_scope.depth < 8 AND ? = 1
+ ), generic_scope(id, depth) AS (
+   SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = ?
+   UNION ALL
+   SELECT c.id, generic_scope.depth + 1 FROM taxonomy_terms c
+   JOIN generic_scope ON c.parent_id = generic_scope.id
+   WHERE generic_scope.depth < 8 AND ? = 1
  )";
 
 const SCOPE: &str = "
@@ -102,12 +112,19 @@ const SCOPE: &str = "
    ))
    AND (? IS NULL OR EXISTS (
      SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id AND et.term_id = ?
+   ))
+   AND (? IS NULL OR EXISTS (
+     SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id
+       AND et.term_id IN (SELECT id FROM generic_scope)
    ))";
 
 macro_rules! bind_scope {
     ($query:expr, $key:expr, $filter:expr) => {
         $query
             .bind($filter.category_id)
+            .bind(i64::from($filter.include_descendants))
+            .bind($filter.term_id)
+            .bind(&$filter.taxonomy_key)
             .bind(i64::from($filter.include_descendants))
             .bind($key)
             .bind(&$filter.q)
@@ -118,28 +135,22 @@ macro_rules! bind_scope {
             .bind($filter.category_id)
             .bind($filter.tag_id)
             .bind($filter.tag_id)
+            .bind($filter.term_id)
     };
 }
 
 async fn validate_terms(
     tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
     filter: &EntryTableFilter,
 ) -> ApiResult<()> {
-    for (id, kind) in [(filter.category_id, "category"), (filter.tag_id, "tag")] {
-        if let Some(id) = id {
-            let actual: Option<String> =
-                sqlx::query_scalar("SELECT kind FROM taxonomy_terms WHERE id = ?")
-                    .bind(id)
-                    .fetch_optional(&mut **tx)
-                    .await?;
-            if actual.as_deref() != Some(kind) {
-                return Err(ApiError::bad_request(
-                    "Category/Tag không tồn tại hoặc sai loại.",
-                ));
-            }
-        }
-    }
-    Ok(())
+    entries::validate_filter_in_tx(tx, type_key, &entries::EntryFilters {
+        category_id: filter.category_id,
+        tag_id: filter.tag_id,
+        taxonomy_key: filter.taxonomy_key.clone(),
+        term_id: filter.term_id,
+        include_descendants: filter.include_descendants,
+    }, false).await
 }
 
 /// A single SQLite read transaction guarantees counts, ACL and rows are from
@@ -161,7 +172,7 @@ pub async fn query(
     if effective.base.status != ProviderStatus::Active {
         return Err(ApiError::not_found("Loại nội dung không khả dụng."));
     }
-    validate_terms(&mut tx, filter).await?;
+    validate_terms(&mut tx, type_key, filter).await?;
 
     let count_sql = format!(
         "{CATEGORY_SCOPE} SELECT COUNT(*),
@@ -244,6 +255,9 @@ pub async fn query(
                     && field.definition.public_exposure == PublicExposure::Public
             })
         });
+        // SEO's public resolver checks provider state and CPT visibility as
+        // well as publication, so a private CPT remains editable without
+        // giving its Admin row a misleading public View link.
         let public_url = if record.publication_status == "published" {
             seo::resolve_public_entry_path_in_tx(&mut tx, record.id).await?
         } else {
@@ -272,4 +286,60 @@ pub async fn query(
         limit: filter.limit,
         offset: filter.offset,
     })
+}
+
+#[cfg(test)]
+mod c1_public_url_tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn published_private_cpt_remains_in_admin_without_view_url() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            r#"INSERT INTO content_types(key,definition_json,owner_kind)
+               VALUES('news','{"key":"news","label":"News","fields":[],"settings":{"public":false,"has_archive":true,"publication":"immediate","supports":["editor","featured_image"]}}','user')"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES('news','hidden-article','Hidden Article','{}','published')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+
+        let hidden = query(&db, "news", FieldRole::Admin, &EntryTableFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(hidden.total, 1);
+        assert_eq!(hidden.status_counts.published, 1);
+        assert_eq!(hidden.items[0].id, id);
+        assert!(hidden.items[0].public_url.is_none());
+
+        sqlx::query(
+            "UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.public', json('true')) WHERE key='news'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        // This legacy fixture writes directly to SQLite instead of using the
+        // normal content-type writer. Rebuild C3 claims in the same serialized
+        // transaction the production writer would use after its mutation.
+        let mut tx = db.begin().await.unwrap();
+        super::super::permalinks::sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let visible = query(&db, "news", FieldRole::Admin, &EntryTableFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(visible.items[0].public_url.as_deref(), Some("/content/news/hidden-article"));
+    }
 }

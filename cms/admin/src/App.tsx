@@ -8,6 +8,7 @@ import { ContentTypeSchemaSettings } from './features/content/ContentTypeSchemaS
 import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
+import { clearPermalinkDrafts, discardPermalinkDraft, PermalinkSettingsPage } from './features/settings/PermalinkSettingsPage.tsx';
 import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
@@ -26,6 +27,7 @@ import { BackupsPanel } from './features/operations/BackupsPanel.tsx';
 import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
+import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
 import { SectionsPage } from './features/sections/SectionsPage.tsx';
 import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
 
@@ -71,8 +73,22 @@ export const App: React.FC = () => {
   const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
   const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
   const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
+  const siteInstanceIdRef = useRef(siteInstanceId);
+  siteInstanceIdRef.current = siteInstanceId;
   const [authGeneration, setAuthGeneration] = useState<number>(1);
   const [contentDirty, setContentDirty] = useState(false);
+  const [schemaDirty, setSchemaDirty] = useState(false);
+  const schemaDirtyRef = useRef(false);
+  const markSchemaDirty = useCallback((value: boolean) => {
+    schemaDirtyRef.current = value;
+    setSchemaDirty(value);
+  }, []);
+  const [permalinkDirty, setPermalinkDirty] = useState(false);
+  const permalinkDirtyRef = useRef(false);
+  const markPermalinkDirty = useCallback((value: boolean) => {
+    permalinkDirtyRef.current = value;
+    setPermalinkDirty(value);
+  }, []);
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
@@ -93,6 +109,10 @@ export const App: React.FC = () => {
   routeRef.current = route;
   const userRef = useRef(user);
   userRef.current = user;
+  // A response from a former authentication session may arrive after another
+  // account has logged in. Only the session that issued the request may react
+  // to its 401; otherwise it could log out the *new* account and lose drafts.
+  const authSessionEpochRef = useRef(0);
   const builderDirtyRef = useRef(builderDirty);
   builderDirtyRef.current = builderDirty;
   const lastBuilderRouteRef = useRef<ParsedRoute>(parseAdminRoute('#/builder'));
@@ -151,12 +171,26 @@ export const App: React.FC = () => {
       && builderIdentity(current) !== builderIdentity(next);
     const leavingBuilder = switchingBuilderTarget && builderDirtyRef.current;
     const leavingSection = current.view === 'sections' && current.rawHash !== destination && sectionsDirtyRef.current;
+    const leavingSchema = current.view === 'settings' && current.sub === 'content-types'
+      && schemaDirtyRef.current && acceptedHashRef.current !== destination;
+    const leavingPermalinks = current.view === 'settings' && current.sub === 'permalinks'
+      && acceptedHashRef.current !== destination && permalinkDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    return !(leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection) ||
-      window.confirm(switchingBuilderTarget
+    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema || leavingPermalinks;
+    if (!hasDirty) return true;
+    const approved = window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
-        : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
+        : leavingTerm
+          ? 'Taxonomy có thay đổi chưa lưu. Rời màn hình sẽ bỏ bản nhập. Tiếp tục?'
+          : leavingSchema || leavingSection || leavingPermalinks
+            ? 'Có thay đổi chưa lưu. Rời màn hình có thể làm mất bản nhập. Tiếp tục?'
+            : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
+    if (approved && leavingPermalinks && userRef.current) {
+      discardPermalinkDraft(siteInstanceIdRef.current, userRef.current.id);
+      markPermalinkDirty(false);
+    }
+    return approved;
   };
 
   useEffect(() => {
@@ -218,13 +252,13 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
+  }, [contentDirty, schemaDirty, permalinkDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -248,6 +282,7 @@ export const App: React.FC = () => {
     const msg = err instanceof Error ? err.message : fallback;
     setStatus(msg, true);
     if (is401) {
+      authSessionEpochRef.current += 1;
       editorDraftStore.quarantineAll();
       setUser(null);
       setCsrfToken(null);
@@ -270,10 +305,13 @@ export const App: React.FC = () => {
     (async () => {
       try {
         const auth = await api.getAuthMe();
+        authSessionEpochRef.current += 1;
         lastAuthenticatedUserId.current = auth.user.id;
         setAccountContextId(auth.user.id);
         setAccountContextRole(auth.user.role);
-        if (auth.site_instance_id) setSiteInstanceId(auth.site_instance_id);
+        // No verified site ID must disable cross-login draft restoration,
+        // never inherit an identity from a previous site on this origin.
+        setSiteInstanceId(auth.site_instance_id ?? 'default-site');
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
@@ -313,10 +351,11 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       const res = await api.login(authUsername, authPassword);
-      const nextSiteId = res.site_instance_id ?? siteInstanceId;
-      if (res.site_instance_id && res.site_instance_id !== siteInstanceId) {
+      authSessionEpochRef.current += 1;
+      const nextSiteId = res.site_instance_id ?? 'default-site';
+      if (nextSiteId !== siteInstanceId) {
         editorDraftStore.clear();
-        setSiteInstanceId(res.site_instance_id);
+        setSiteInstanceId(nextSiteId);
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
         markSectionsDirty(false);
@@ -329,7 +368,6 @@ export const App: React.FC = () => {
       } else {
         setAuthGeneration(g => g + 1);
       }
-      if (!res.site_instance_id && nextSiteId !== siteInstanceId) setSiteInstanceId(nextSiteId);
       lastAuthenticatedUserId.current = res.user.id;
       setAccountContextId(res.user.id);
       setAccountContextRole(res.user.role);
@@ -349,13 +387,15 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
     try {
       await api.logout(csrfToken);
+      authSessionEpochRef.current += 1;
       editorDraftStore.clear();
+      clearPermalinkDrafts();
       setUser(null);
       setCsrfToken(null);
       setAuthUsername('');
@@ -368,6 +408,7 @@ export const App: React.FC = () => {
       setBuilderReset(value => value + 1);
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
+      markPermalinkDirty(false);
       setBuilderDirty(false);
       setPostsDirty(false);
       setPagesDirty(false);
@@ -387,6 +428,7 @@ export const App: React.FC = () => {
   };
 
   const handleOwnAccountChanged = () => {
+    authSessionEpochRef.current += 1;
     editorDraftStore.quarantineAll();
     setUser(null);
     setCsrfToken(null);
@@ -472,6 +514,16 @@ export const App: React.FC = () => {
     }
   };
 
+  const requestEpoch = authSessionEpochRef.current;
+  const requestActorId = user?.id;
+  const scopedTaxonomyApiError = (error: unknown, fallback: string) => {
+    // Detached taxonomy/CPT requests may resolve after another account has
+    // authenticated. A stale 401 must never revoke that newer session.
+    if (requestActorId === undefined || userRef.current?.id !== requestActorId
+      || authSessionEpochRef.current !== requestEpoch) return;
+    handleApiError(error, fallback);
+  };
+
   return (
     <AdminShell
       user={user}
@@ -490,7 +542,7 @@ export const App: React.FC = () => {
       cptTypes={cptTypes}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
       sidebarContent={<BuilderWorkspace
         key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
         route={lastBuilderRouteRef.current}
@@ -515,16 +567,19 @@ export const App: React.FC = () => {
         onApplied={() => { setThemeRevision(v => v + 1); setBuilderReset(v => v + 1); }} />}
       schemaSettingsContent={
         <ContentTypeSchemaSettings
+          user={user}
+          siteInstanceId={siteInstanceId}
           selectedTypeKey={selectedSchemaTypeKey}
           onSelectTypeKey={key => {
-            setSelectedSchemaTypeKey(key);
             if (key) navigateHash(`#/appearance/content-types/${key}`);
+            else setSelectedSchemaTypeKey(null);
           }}
           csrfToken={csrfToken}
-          onApiError={handleApiError}
+          onApiError={scopedTaxonomyApiError}
           onContentTypesChanged={() => {
             void loadCptTypes();
           }}
+          onDirtyChange={markSchemaDirty}
         />
       }
       profileContent={
@@ -546,6 +601,11 @@ export const App: React.FC = () => {
           : route.sub === 'health' ? <SystemStatus /> : null}
       settingsContent={route.sub === 'general'
         ? <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        : route.sub === 'permalinks'
+          ? <PermalinkSettingsPage key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
+              user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+              onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cài đặt permalink.')}
+              onDirtyChange={markPermalinkDirty} />
         : route.sub === 'seo'
           ? <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
           : route.sub === 'contact'
@@ -576,6 +636,7 @@ export const App: React.FC = () => {
         onRunPlugin={handleRunPlugin}
         csrfToken={csrfToken}
         onUnauthorized={() => {
+          authSessionEpochRef.current += 1;
           editorDraftStore.quarantineAll();
           setUser(null);
           setCsrfToken(null);
@@ -643,13 +704,18 @@ export const App: React.FC = () => {
           onDirtyChange={markSectionsDirty} onNavigateHash={navigateHash} />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
-      taxonomyContent={route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
-        ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
-            kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
-            termId={route.entryId ?? null} user={user} csrfToken={csrfToken}
-            onApiError={handleApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
-        : <TaxonomyPage kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
-            onApiError={handleApiError} onNavigateHash={navigateHash} />}
+      taxonomyContent={route.taxonomyMode === 'definitions'
+        ? <TaxonomyDefinitionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}`}
+            user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} onApiError={scopedTaxonomyApiError}
+            onNavigateHash={navigateHash} onDirtyChange={markTermDirty} />
+        : route.taxonomyMode === 'edit' || route.taxonomyMode === 'new'
+          ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
+              kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
+              termId={route.entryId ?? null} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+              onApiError={scopedTaxonomyApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
+          : <TaxonomyPage key={`terms-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
+              kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
+              onApiError={scopedTaxonomyApiError} onNavigateHash={navigateHash} />}
     />
   );
 };

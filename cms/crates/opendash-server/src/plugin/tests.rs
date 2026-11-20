@@ -522,7 +522,10 @@ mod tests {
             .await
             .unwrap();
 
-        // Run migrations
+        // Use the actual schema; plugin installation now consults the theme,
+        // extension and content registries as well as the original plugin
+        // tables, so a partial hand-built schema is no longer representative.
+        sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS plugins (
                 id TEXT PRIMARY KEY,
@@ -582,6 +585,7 @@ mod tests {
         .await
         .unwrap();
 
+
         let manager = PluginManager::new(pool.clone(), true);
         let zip_bytes =
             include_bytes!("../../../../examples/plugins/sample-plugin/sample-plugin.zip");
@@ -599,7 +603,7 @@ mod tests {
         // Connection 1 acquires exclusive write lock
         let mut lock_tx = pool.begin().await.unwrap();
         sqlx::query(
-            "INSERT INTO plugin_kv (plugin_id, key, value_json) VALUES ('holder', 'held', '1')",
+            "INSERT INTO plugin_kv (plugin_id, key, value_json) VALUES ('sample-plugin', 'held', '1')",
         )
         .execute(&mut *lock_tx)
         .await

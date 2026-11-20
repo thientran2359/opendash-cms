@@ -232,6 +232,17 @@ Issue/Project là nguồn live; snapshot 17/11/2026 dưới đây không tự c�
 Backlog; #284 Done. #242/#245 hiện do Forge phụ trách theo owner transfer.
 Nova assignment ở bảng 14/11 là lịch sử, không dùng để nhận task. Beta NOT_RUN.
 
+## Coding audit follow-up — 18/11/2026
+
+[Research PR #382](https://github.com/thientran2359/opendash-cms/pull/382) đã merge;
+[Aster coordination #385](https://github.com/thientran2359/opendash-cms/issues/385)
+giữ disposition cho CS-01–CS-13. Harbor giữ ownership #375/App/Menu/Builder qua
+G5 sau G4 merge; các correction trùng file chờ bàn giao và đối chiếu source mới.
+
+| Task | Responsible | Status / source | Issue |
+| --- | --- | --- | --- |
+| [M8-S11-T01](milestones/M8/slices/2026-11-18-csrf-checker-g3.md) | Forge | **Done · checker G5 VERIFIED 19/11/2026**; Issue closed completed and Project Done verified; exact merge `443d736`, 82/82 handlers and 69 policy scenarios PASS | [#387](https://github.com/thientran2359/opendash-cms/issues/387) · [#389](https://github.com/thientran2359/opendash-cms/pull/389) · [#392](https://github.com/thientran2359/opendash-cms/pull/392) · [acceptance](../verification/2026-11-19-m8-s11-t01-checker-acceptance.md) |
+
 ## Task thực tế không thuộc 9 milestone CMS
 
 | GitHub task | Công việc | Trạng thái ghi nhận | GitHub Issue |
@@ -315,15 +326,16 @@ No changes to #302 Project or closure, no Beta PASS.
 ## Content foundation follow-up — 18/11/2026
 
 [ADR-0019](../decisions/ADR-0019-content-foundation.md), Aster coordinator, Harbor
-implementer/self-review. Specifications complete on merge; runtime NOT_RUN, live
-Project Ready unverified. Serial dependencies require actual G5, not Issue closure.
+implementer/self-review. Specifications complete on merge; at original
+publication, runtime was NOT_RUN and live Project Ready unverified. Serial
+dependencies require actual G5, not Issue closure.
 
 | Task | Scope | State |
 | --- | --- | --- |
-| [M3-S31-T01](milestones/M3/slices/2026-11-18-content-foundation-g3.md) | Cấu hình hành vi CPT và cơ chế Lưu/Xuất bản | PLANNED · [#373](https://github.com/thientran2359/opendash-cms/issues/373) |
-| [M4-S12-T01](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Đăng ký custom taxonomy và liên kết với CPT | PLANNED · [#374](https://github.com/thientran2359/opendash-cms/issues/374) |
-| [M4-S12-T02](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Quản lý taxonomy tùy chỉnh xuyên Admin và Builder | PLANNED · [#375](https://github.com/thientran2359/opendash-cms/issues/375) |
-| [M7-S17-T01](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Giải quyết permalink và redirect bằng một route authority | PLANNED · [#376](https://github.com/thientran2359/opendash-cms/issues/376) |
+| [M3-S31-T01](milestones/M3/slices/2026-11-18-content-foundation-g3.md) | Cấu hình hành vi CPT và cơ chế Lưu/Xuất bản | G4 merged [#380](https://github.com/thientran2359/opendash-cms/pull/380) · [native macOS G5 VERIFIED](../verification/2026-11-18-m3-s31-t01-g5-macos.md) · [#373](https://github.com/thientran2359/opendash-cms/issues/373) |
+| [M4-S12-T01](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Đăng ký custom taxonomy và liên kết với CPT | G4 merged [#383](https://github.com/thientran2359/opendash-cms/pull/383) · [native macOS G5 VERIFIED](../verification/2026-11-18-m4-s12-t01-g5-macos.md) · [#374](https://github.com/thientran2359/opendash-cms/issues/374) |
+| [M4-S12-T02](milestones/M4/slices/2026-11-18-content-foundation-g3.md) | Quản lý taxonomy tùy chỉnh xuyên Admin và Builder | **Harbor · native macOS Intel G5 VERIFIED** at exact G4 merge `6eb8357`: C2 Chrome/API/SQLite **30/30**, independent M7 table **21/21**, schema 0039 old/new/snapshot rollback **7/7**, historical 0038→0039 rollback **5/5**. G4 [#390](https://github.com/thientran2359/opendash-cms/pull/390) merged, four P2s resolved; G5 [evidence PR #395](https://github.com/thientran2359/opendash-cms/pull/395) merged · [G5 report](../verification/2026-11-19-m4-s12-t02-g5-macos.md) · [#375](https://github.com/thientran2359/opendash-cms/issues/375). Windows/Linux native and human Beta #302 separate |
+| [M7-S17-T01](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Giải quyết permalink và redirect bằng một route authority | **Harbor · native macOS Intel G5 VERIFIED** on exact G4 merge `9c463e9`: canonical/redirect/ACL/Builder Chrome+SQLite **16/16**, actual 0039→0040→restored 0039→0040 **6/6**, merged Rust focused **16/16 + 2/2**, full premerge Rust **211/211**. G4 [PR #398](https://github.com/thientran2359/opendash-cms/pull/398) merged; Aster bounded test ownership [PR #399](https://github.com/thientran2359/opendash-cms/pull/399); [G5 report](../verification/2026-11-19-m7-s17-t01-g5-macos.md) · [#376](https://github.com/thientran2359/opendash-cms/issues/376). Windows/Linux native and #302 human Beta separate |
 | [M7-S17-T02](milestones/M7/slices/2026-11-18-content-foundation-g3.md) | Cấu hình permalink và URL xem bài trong Admin | PLANNED · [#377](https://github.com/thientran2359/opendash-cms/issues/377) |
 | [M6-S11-T01](milestones/M6/slices/2026-11-18-content-foundation-g3.md) | Plugin/theme khai báo CPT taxonomy rewrite và kiểm chứng hooks | PLANNED · [#378](https://github.com/thientran2359/opendash-cms/issues/378) |
 
@@ -333,3 +345,10 @@ Issue rendering; milestone IDs4/5/8/7 verified live. M3 milestone4 remains histo
 closed; this follow-up does not revoke prior closure or assert milestone completion.
 Project membership/status NOT_VERIFIED (CLI lacks read:project); publication does
 not grant Ready. No agent message/dispatch, no changes to #302.
+
+
+## Beta technical retest — 20/11/2026
+
+| Task | Scope | State | GitHub |
+| --- | --- | --- | --- |
+| [M7-S14-T05](milestones/M7/slices/2026-11-20-beta-technical-retest-g3.md) | Native macOS integrated B01–B10, Content Foundation and security/data negatives | Harbor · G3 merged [#409](https://github.com/thientran2359/opendash-cms/pull/409); runtime NOT_RUN; live Project gates apply | [#410](https://github.com/thientran2359/opendash-cms/issues/410) |

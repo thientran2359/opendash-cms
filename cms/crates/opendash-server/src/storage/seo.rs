@@ -1,5 +1,5 @@
 //! M7-S03-T01 SQLite storage for custom entry paths, ID-based redirects, and route claims.
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use opendash_core::content::PatchField;
 use serde::Serialize;
@@ -12,10 +12,27 @@ use crate::{
     storage::entries::ContentEntryRecord,
 };
 
+// C3 extends the legacy validator's protected namespace. Centralize the
+// additional roots here so all storage claims enforce one policy.
+pub fn is_reserved_route_root(root: &str) -> bool {
+    matches!(root, "uploads" | "static" | "favicon.ico")
+        || crate::seo::validate_custom_entry_path(&format!("/{root}")).is_err()
+}
+
+pub fn validate_c3_custom_entry_path(raw: &str) -> Result<String, &'static str> {
+    let path = validate_custom_entry_path(raw)?;
+    let root = path[1..].split('/').next().unwrap_or("");
+    if matches!(root, "uploads" | "static" | "favicon.ico") {
+        return Err("Đường dẫn dùng tiền tố hệ thống được bảo vệ.");
+    }
+    Ok(path)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EntryRouteSnapshot {
     pub entry_version: i64,
     pub custom_path: Option<String>,
+    pub public_url: Option<String>,
 }
 
 pub enum PublicRouteResolution {
@@ -35,19 +52,7 @@ pub async fn resolve_entry_path_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
 ) -> ApiResult<Option<String>> {
-    let row: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT e.content_type_key, e.slug, p.path
-           FROM content_entries e
-           JOIN content_types t ON t.key = e.content_type_key
-           LEFT JOIN entry_public_paths p ON p.entry_id = e.id
-          WHERE e.id = ? AND t.provider_status = 'active'",
-    )
-    .bind(entry_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    Ok(row.and_then(|(type_key, slug, custom)| {
-        custom.or_else(|| CanonicalUrlBuilder::entry_from_id(entry_id, &type_key, &slug))
-    }))
+    crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
 /// Resolves the canonical public path ONLY if the entry is published and its CPT is active.
@@ -55,21 +60,15 @@ pub async fn resolve_public_entry_path_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
 ) -> ApiResult<Option<String>> {
-    let row: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT e.content_type_key, e.slug, p.path
-           FROM content_entries e
-           JOIN content_types t ON t.key = e.content_type_key
-           LEFT JOIN entry_public_paths p ON p.entry_id = e.id
-          WHERE e.id = ?
-            AND e.publication_status = 'published'
-            AND t.provider_status = 'active'",
-    )
-    .bind(entry_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    Ok(row.and_then(|(type_key, slug, custom)| {
-        custom.or_else(|| CanonicalUrlBuilder::entry_from_id(entry_id, &type_key, &slug))
-    }))
+    let visible: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM content_entries e
+           JOIN content_types t ON t.key=e.content_type_key
+           WHERE e.id=? AND e.publication_status='published'
+             AND e.content_type_key!='section' AND t.provider_status='active'
+             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)",
+    ).bind(entry_id).fetch_one(&mut *conn).await?;
+    if visible == 0 { return Ok(None); }
+    crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
 pub async fn resolve_public_entry_paths_by_ids(
@@ -80,18 +79,12 @@ pub async fn resolve_public_entry_paths_by_ids(
     if entries.is_empty() {
         return Ok(out);
     }
-    let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT entry_id, path FROM entry_public_paths",
-    )
-    .fetch_all(db)
-    .await?;
-    let custom_map: HashMap<i64, String> = rows.into_iter().collect();
+    let mut conn = db.acquire().await?;
     for e in entries {
-        if let Some(url) = custom_map
-            .get(&e.id)
-            .cloned()
-            .or_else(|| CanonicalUrlBuilder::entry_from_id(e.id, &e.content_type_key, &e.slug))
-        {
+        // Even a stale caller must not construct a public URL for a private CPT.
+        // Only resolve the bounded page supplied by the caller, never scan every
+        // custom path in the database.
+        if let Some(url) = resolve_public_entry_path_in_tx(&mut conn, e.id).await? {
             out.insert(e.id, url);
         }
     }
@@ -104,7 +97,7 @@ pub async fn validate_route_claim_in_tx(
     raw_path: &str,
     owner_entry_id: Option<i64>,
 ) -> ApiResult<String> {
-    let path = validate_custom_entry_path(raw_path).map_err(ApiError::bad_request)?;
+    let path = validate_c3_custom_entry_path(raw_path).map_err(ApiError::bad_request)?;
     let first_seg = path[1..].split('/').next().unwrap_or("");
     let cpt_conflict: Option<String> = sqlx::query_scalar(
         "SELECT key FROM content_types WHERE key = ? AND provider_status = 'active' LIMIT 1",
@@ -140,6 +133,27 @@ pub async fn validate_route_claim_in_tx(
         return Err(ApiError::conflict(
             "Đường dẫn đang được giữ làm redirect cho một bài viết khác.",
         ));
+    }
+
+    let claim_owner: Option<(String, String)> = sqlx::query_as(
+        "SELECT target_kind,target_id FROM permalink_route_claims WHERE path=?",
+    ).bind(&path).fetch_optional(&mut *conn).await?;
+    if let Some((kind,id)) = claim_owner
+        && (kind != "entry" || id.parse::<i64>().ok() != owner_entry_id)
+    {
+        return Err(ApiError::conflict(format!(
+            "permalink_collision:path={path} existing={kind}:{id}",
+        )));
+    }
+    let historical_owner: Option<(String, String)> = sqlx::query_as(
+        "SELECT target_kind,target_id FROM permalink_route_redirects WHERE source_path=?",
+    ).bind(&path).fetch_optional(&mut *conn).await?;
+    if let Some((kind,id)) = historical_owner
+        && (kind != "entry" || id.parse::<i64>().ok() != owner_entry_id)
+    {
+        return Err(ApiError::conflict(format!(
+            "permalink_collision:path={path} redirect_owner={kind}:{id}",
+        )));
     }
 
     Ok(path)
@@ -244,7 +258,7 @@ pub async fn record_slug_change_redirect_in_tx(
 
 /// Sets or clears `entry_public_paths` inside an active transaction, enforcing ENTRY CAS
 /// and cross-table uniqueness, and capturing old custom path in `entry_redirects`.
-pub async fn set_entry_route_in_tx(
+async fn set_entry_route_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
     expected_entry_version: i64,
@@ -279,6 +293,7 @@ pub async fn set_entry_route_in_tx(
         return Ok(EntryRouteSnapshot {
             entry_version: current_ver,
             custom_path: old_custom,
+            public_url: None,
         });
     }
 
@@ -334,6 +349,7 @@ pub async fn set_entry_route_in_tx(
     Ok(EntryRouteSnapshot {
         entry_version: expected_entry_version + 1,
         custom_path: normalized_new,
+        public_url: None,
     })
 }
 
@@ -342,6 +358,9 @@ pub async fn get_entry_route(
     type_key: &str,
     entry_id: i64,
 ) -> ApiResult<EntryRouteSnapshot> {
+    // Both the entry token and canonical claim must come from one SQLite
+    // snapshot. A separate pool query could mix a stale token with a new URL.
+    let mut tx = db.begin().await?;
     let row: Option<(i64, Option<String>)> = sqlx::query_as(
         "SELECT e.version, p.path
            FROM content_entries e
@@ -350,14 +369,17 @@ pub async fn get_entry_route(
     )
     .bind(type_key)
     .bind(entry_id)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
     let Some((entry_version, custom_path)) = row else {
         return Err(ApiError::not_found("Không tìm thấy nội dung."));
     };
+    let public_url = resolve_public_entry_path_in_tx(&mut tx, entry_id).await?;
+    tx.commit().await?;
     Ok(EntryRouteSnapshot {
         entry_version,
         custom_path,
+        public_url,
     })
 }
 
@@ -381,7 +403,12 @@ pub async fn put_entry_route(
         if exists.is_none() {
             return Err(ApiError::not_found("Không tìm thấy nội dung."));
         }
-        set_entry_route_in_tx(&mut conn, entry_id, expected_entry_version, custom_path).await
+        let mut result = set_entry_route_in_tx(&mut conn, entry_id, expected_entry_version, custom_path).await?;
+        crate::storage::permalinks::sync_claims_in_tx(&mut conn).await?;
+        // Resolve only after the canonical claims have been synchronized. The
+        // response remains within this writer transaction and matches its ETag.
+        result.public_url = resolve_public_entry_path_in_tx(&mut conn, entry_id).await?;
+        Ok(result)
     }
     .await;
     match res {
@@ -410,7 +437,9 @@ pub async fn custom_path_for_published_slug(
           WHERE e.content_type_key = ?
             AND e.slug = ?
             AND e.publication_status = 'published'
-            AND t.provider_status = 'active'",
+            AND e.content_type_key != 'section'
+            AND t.provider_status = 'active'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(type_key)
     .bind(slug)
@@ -433,7 +462,9 @@ pub async fn resolve_custom_or_redirect_path(
                JOIN content_types t ON t.key = e.content_type_key
               WHERE p.path = ?
                 AND e.publication_status = 'published'
-                AND t.provider_status = 'active'",
+                AND e.content_type_key != 'section'
+                AND t.provider_status = 'active'
+                AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
         )
         .bind(path)
         .fetch_optional(db)
@@ -456,7 +487,9 @@ pub async fn resolve_custom_or_redirect_path(
            JOIN content_types t ON t.key = e.content_type_key
           WHERE r.source_path = ?
             AND e.publication_status = 'published'
-            AND t.provider_status = 'active'",
+            AND e.content_type_key != 'section'
+            AND t.provider_status = 'active'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(path)
     .fetch_optional(&mut *tx)
@@ -493,6 +526,7 @@ pub async fn sync_entry_seo_media_ref_in_tx(
           WHERE s.entry_id = ?
             AND e.publication_status = 'published'
             AND t.provider_status = 'active'
+            AND e.content_type_key != 'section'
             AND s.og_image_id IS NOT NULL",
     )
     .bind(entry_id)

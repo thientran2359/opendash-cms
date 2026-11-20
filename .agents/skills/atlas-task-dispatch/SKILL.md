@@ -16,6 +16,7 @@ Nguồn trạng thái: GitHub Issues + Project #3 + PR/CI; trạng thái giao v�
 | Lệnh | Khi nào | Hành động |
 | --- | --- | --- |
 | `RUN forge`, `RUN harbor`, `RUN both` | Chủ dự án muốn agent làm/tiếp tục Issue đã giao | Kiểm GitHub, `probe`, `status-task`, gọi `send-issue` **một lần** nếu đủ gate |
+| `RESUME Issue #N` | Tiếp tục cùng implementation task sau ACK/feedback mới | `resume-issue` có structured ACK, pin PR/head/base, lượt cũ kết thúc và slot rảnh; không xóa lock |
 | `STATUS forge`, `STATUS harbor`, `STATUS both` | Hỏi tiến độ, receipt, blocker | Chỉ đọc GitHub + `status-task`/`status`; không gửi chat |
 | `RUN PR #N` / `STATUS PR #N` | Sửa tài liệu trên PR của agent có review Atlas actionable | `check-pr`/`status-pr`, rồi `send-pr` đúng một lần nếu đủ gate; không thay Project |
 
@@ -36,7 +37,7 @@ python .agents/scripts/cos_dispatch.py send-issue forge --request-id <lowercase-
 python .agents/scripts/cos_dispatch.py status-task forge --issue <N> --task-id <Mx-Sxx-Txx> --source-sha <approved-full-source-sha>
 ```
 
-Thay `forge` bằng `harbor` cho CoS macOS; `RUN both` chạy tuần tự cho hai Issue đủ điều kiện độc lập. Tạo một UUID mới **chỉ trước lần gửi hợp lệ đầu tiên**. Nếu `status-task` đã có `ACCEPTED`/`UNKNOWN` hoặc báo task đã được dispatch, **không tạo UUID mới và gửi lại**; chỉ reconcile/status. Nếu `probe` báo `can_send=false`, chặn và báo lý do. Lệnh `send-issue` chỉ gửi Issue/Task/SHA và prompt cố định yêu cầu agent trong CoS thực hiện `$github-task-pickup`. Việc kiểm branch dirty, claim, thực thi, G5 và PR thuộc agent đích theo workflow.
+Thay `forge` bằng `harbor` cho CoS macOS; `RUN both` chạy tuần tự cho hai Issue đủ điều kiện độc lập. Tạo một UUID mới **chỉ trước lần gửi hợp lệ đầu tiên**. Nếu `status-task` đã có `ACCEPTED`/`UNKNOWN` hoặc báo task đã được dispatch, **không tạo UUID mới và gửi lại**; chỉ reconcile/status hoặc dùng **RESUME Issue** có đủ gate riêng dưới đây. Không gọi lại send-issue. Nếu `probe` báo `can_send=false`, chặn và báo lý do. Lệnh `send-issue` chỉ gửi Issue/Task/SHA và prompt cố định yêu cầu agent trong CoS thực hiện `$github-task-pickup`. Việc kiểm branch dirty, claim, thực thi, G5 và PR thuộc agent đích theo workflow.
 
 Một `HTTP 202` là **ACCEPTED vào CoS outbox**; `outbox_delivery=sent` là chat đã nhận; `assistant_turn_ended` là lượt phản hồi hoàn tất. Ba trạng thái này không chứng minh code đã merge hay G5 đạt. Không ghi Done trên GitHub vì transport thành công.
 
@@ -71,3 +72,44 @@ Thay forge bằng harbor cho Mac. `check-pr` chỉ đọc GitHub; `status-pr` c�
 **Báo cáo PR:** `PR/head/review | DOCS_AUTHOR_CORRECTION_ONLY | agent slot | probe/check-pr | receipt | updated PR head/tests/blockers`. Nếu không đủ gate, nói đúng blocker; không đổi thành Issue implementation để đi vòng.
 
 Ví dụ chủ dự án: **“Atlas, RUN both theo Issue đã giao trong M4”** hoặc **“Atlas, STATUS Forge và Harbor”**.
+
+
+## RESUME Issue — lượt tiếp tục có ACK mới
+
+Owner-authorized 19/11/2026. Chỉ dùng sau khi đã có lần `send-issue` cho cùng task;
+không dùng để nhận task mới, mở lại Issue Done, sửa PR docs qua luồng khác hoặc né
+security/ownership. Aster áp dụng quyền coordinator như Atlas.
+
+1. Đọc live Issue/Project: cùng task/agent, Open, In progress/In review, PR hiện hữu
+   cùng repo trên agent branch. Source G3 đã merge, dependencies và scope đủ gate
+   cho hành động tiếp tục. Kiểm dirty diff thuộc task, giữ mọi unrelated changes.
+2. Đối chiếu ACK/feedback đã ghi trên Issue. Coordinator đăng **comment mới** theo
+   mẫu có cấu trúc trong [hướng dẫn resume](../../research/2026-11-19-cos-resume.md),
+   sau khi lượt trước đã kết thúc. Ghi scope/hành động/giới hạn ngoài marker.
+   Comment phải do account owner được ủy quyền đăng, ký `Agent: Aster` hoặc
+   `Agent: Atlas`; marker pin repository/target/Issue/Task/source/PR/head/base và
+   intent RESUME_CURRENT. ACK thông thường thiếu marker không đủ để adapter gửi.
+   Không ghi runtime input/request/project IDs vào GitHub hoặc repo.
+3. `probe`, `status-task` tìm generation mới nhất. Previous outcome phải ACCEPTED,
+   outbox sent, metadata xác nhận latest turn ended. Đọc hết metadata pagination,
+   không active/unclear turn trong project, không đọc transcript để kiểm slot.
+   UNKNOWN, receipt thiếu, metadata thiếu, pagination lặp hoặc host offline ⇒ BLOCKED.
+4. Tạo một UUID sau khi gate đủ, gọi lệnh dưới đúng một lần. Adapter re-fetch Issue,
+   PR và ACK, kiểm timestamp ACK sau latest turn end, kiểm lại ngay trước POST.
+   Mỗi predecessor chỉ một successor; không xóa/ghi đè khóa cũ. Timeout/crash giữ
+   UNKNOWN để reconcile, không thay UUID/ACK/head để gửi lại. Cùng UUID chỉ trả receipt.
+5. `status-task` trả generation mới nhất; `status --request-id` đọc receipt cụ thể.
+   Ghi receipt giao vận riêng với code/CI/G5. Lượt resume hoàn tất và có feedback
+   mới thì tạo structured ACK mới; ACK cũ không cấp lần gửi tiếp.
+
+```bash
+python3.13 .agents/scripts/cos_dispatch.py --local resume-issue harbor \
+  --request-id <uuid> --issue <N> --task-id <Task-ID> \
+  --source-sha <approved-G3-SHA> --base-sha <current-PR-base-SHA> \
+  --pr <PR> --head-sha <current-PR-head-SHA> --ack-id <new-Issue-comment-ID>
+python3.13 .agents/scripts/cos_dispatch.py --local status-task harbor \
+  --issue <N> --task-id <Task-ID> --source-sha <approved-G3-SHA>
+```
+
+Aster trên Mac dùng `--local`; Atlas Windows bỏ `--local` để dùng SSH Harbor đã pin.
+`send-pr`/`status-pr` và luồng gửi lần đầu giữ nguyên. Không có watcher/cron/polling nền.

@@ -27,13 +27,63 @@ const entriesPath = (key: string): string =>
 const entryPath = (key: string, id: number): string =>
   `${entriesPath(key)}/${id}`;
 
-export function listContentTypes(): Promise<OwnedContentType[]> {
+/** Authenticated, saved-entry HTML preview. Never expose as a public permalink. */
+export const contentEntryPreviewPath = (key: string, id: number): string =>
+  `${entryPath(key, id)}/preview`;
+
+/** C1 settings extend the existing schema DTO without changing legacy callers. */
+export type ContentSupport = 'editor' | 'featured_image';
+export type ContentPublicationPolicy = 'immediate' | 'draft_publish';
+
+export interface ContentTypeSettings {
+  public: boolean;
+  has_archive: boolean;
+  publication: ContentPublicationPolicy;
+  supports: ContentSupport[];
+}
+
+export type ContentTypeDefinitionWithSettings = ContentTypeDefinition & {
+  /** Optional on update: omission preserves the canonical stored settings. */
+  settings?: ContentTypeSettings;
+};
+
+export type OwnedContentTypeWithSettings = Omit<OwnedContentType, 'descriptor'> & {
+  descriptor: ContentTypeDefinitionWithSettings;
+};
+
+export type EffectiveEditorConfigWithSettings = EffectiveEditorConfigProjection & {
+  /** New C1 server responses always include effective settings. */
+  settings?: ContentTypeSettings;
+};
+
+/** Compatibility while an older binary or stored CPT is being upgraded. */
+export function effectiveContentTypeSettings(
+  typeKey: string,
+  settings?: ContentTypeSettings,
+): ContentTypeSettings {
+  const effective: ContentTypeSettings = settings ?? {
+    public: typeKey !== 'section',
+    has_archive: typeKey !== 'section',
+    publication: typeKey === 'post' || typeKey === 'page' || typeKey === 'section'
+      ? 'draft_publish' : 'immediate',
+    supports: ['editor', 'featured_image'],
+  };
+  if (typeKey === 'section') {
+    return { ...effective, public: false, has_archive: false, publication: 'draft_publish' };
+  }
+  if (typeKey === 'post' || typeKey === 'page') {
+    return { ...effective, publication: 'draft_publish' };
+  }
+  return effective;
+}
+
+export function listContentTypes(): Promise<OwnedContentTypeWithSettings[]> {
   return requestJson('/api/admin/content-types', {
     defaultErrorMessage: 'Không thể tải loại nội dung.',
   });
 }
 
-export function createContentType(input: ContentTypeDefinition, csrfToken: string): Promise<OwnedContentType> {
+export function createContentType(input: ContentTypeDefinitionWithSettings, csrfToken: string): Promise<OwnedContentTypeWithSettings> {
   return requestJson('/api/admin/content-types', {
     method: 'POST',
     csrfToken,
@@ -47,9 +97,9 @@ export function createContentType(input: ContentTypeDefinition, csrfToken: strin
 export function updateContentType(
   key: string,
   version: number,
-  input: ContentTypeDefinition,
+  input: ContentTypeDefinitionWithSettings,
   csrfToken: string,
-): Promise<OwnedContentType> {
+): Promise<OwnedContentTypeWithSettings> {
   return requestJson(contentTypePath(key), {
     method: 'PUT',
     csrfToken,
@@ -128,7 +178,7 @@ export function putEditorLayout(
   });
 }
 
-export function getEffectiveEditorConfig(typeKey: string): Promise<EffectiveEditorConfigProjection> {
+export function getEffectiveEditorConfig(typeKey: string): Promise<EffectiveEditorConfigWithSettings> {
   return requestJson(`${contentTypePath(typeKey)}/effective-editor-config`, {
     defaultErrorMessage: 'Không thể tải cấu hình editor hiệu lực.',
   });
@@ -182,7 +232,9 @@ export function runEntryProviderAction(
 
 export interface ContentTypeTaxonomyEligibility {
   content_type_key: string;
-  taxonomy_kind: 'category' | 'tag';
+  taxonomy_kind: string;
+  owner_kind: string;
+  owner_id: string | null;
   provider_status: string;
   declaration_state: string;
 }
@@ -191,6 +243,49 @@ export function listContentTypeTaxonomyEligibility(typeKey: string, signal?: Abo
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
     signal,
     defaultErrorMessage: 'Không thể kiểm tra taxonomy hiệu lực.',
+  });
+}
+
+/** Effective, active taxonomies include the site's explicit CPT override. */
+export function getEffectiveContentTypeTaxonomies(typeKey: string, signal?: AbortSignal): Promise<string[]> {
+  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/effective`, {
+    signal,
+    defaultErrorMessage: 'Không thể tải taxonomy áp dụng cho loại nội dung.',
+  });
+}
+
+export interface ConfiguredContentTypeTaxonomies {
+  taxonomies: string[];
+  effective: string[];
+  has_override: boolean;
+  /** CAS version captured in the same SQLite snapshot as configured keys. */
+  type_version: number;
+}
+
+/** Full saved choice, including inactive provider keys hidden from public use. */
+export function getConfiguredContentTypeTaxonomies(
+  typeKey: string, signal?: AbortSignal,
+): Promise<ConfiguredContentTypeTaxonomies> {
+  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
+    signal,
+    defaultErrorMessage: 'Không thể tải toàn bộ cấu hình taxonomy đã lưu.',
+  });
+}
+
+/** Shares the canonical CPT schema version; stale edits fail with 412. */
+export function updateContentTypeTaxonomyEligibility(
+  typeKey: string,
+  expectedVersion: number,
+  taxonomies: string[],
+  csrfToken: string,
+): Promise<OwnedContentTypeWithSettings> {
+  return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
+    method: 'PUT',
+    contentType: 'application/json',
+    csrfToken,
+    ifMatchVersion: expectedVersion,
+    body: JSON.stringify({ taxonomies, expected_version: expectedVersion }),
+    defaultErrorMessage: 'Không thể cập nhật taxonomy áp dụng.',
   });
 }
 

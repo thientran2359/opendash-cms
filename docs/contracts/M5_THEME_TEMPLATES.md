@@ -5,6 +5,15 @@
 [Decision authority, source SHAs and G3 corrections](../decisions/ADR-0012-m5-theme-templates.md).
 This file records Atlas selections for review; it does not publish G3 or authorize Project Ready.
 
+## Owner directive — 20/11/2026
+
+The owner confirms no released older product exists. New design does not require
+backward compatibility with experimental theme/API/schema formats. See the
+[PRD directive](../product/PRODUCT_REQUIREMENTS.md) and [resolver](BUILDER_TEMPLATE_RESOLVER.md).
+Legacy adapters/conversion/upgrade acceptance below are historical, not requirements
+for this new baseline. Future content preservation across theme changes, security
+and backup/restore remain product requirements. No data deletion is authorized.
+
 ## 1. Package identity, revisions and selection (A)
 
 - New v2 package `theme_id` is a stable lowercase kebab identifier (1–64 characters), unrelated to display name/version. Ownership uses `ResourceOwner::Theme(theme_id)`. Full block IDs stay namespaced; never infer package ownership from their prefix.
@@ -48,6 +57,15 @@ Canonical revision files must be fully validated and durably published before an
 **Acceptance:** old M3 URLs; slug-change/new canonical; reserved/encoded paths; duplicate query/invalid bounds; private/missing targets; filters across pages; no draft displacement/count leak.
 
 ## 3. Templates and overrides (C/H)
+
+**Follow-up 19/11/2026:** [ADR-0020](../decisions/ADR-0020-builder-template-resolver.md)
+and [resolver G2](BUILDER_TEMPLATE_RESOLVER.md) replace the resolution order below
+when merged: candidate hierarchy first, DB/theme priority within each candidate.
+New role meanings are home=homepage, single/archive for all
+content types; owner follow-up 20/11 selects page as the default Page layout
+with explicit page-layouts choices. Post archive uses
+archive-post then archive. No blog or front-page role. The old
+role list/text remains historical; no implementation/acceptance is retroactively changed.
 
 Select roles `home|page|header|footer|archive|single|taxonomy_archive`. Context selects page for built-in Page, single for other content, and the corresponding archive role. Selector identity uses role + optional validated type/entry scope; a display variant is not a new route.
 
@@ -93,6 +111,19 @@ M4 binding (`ADR-0009`) resolves one exact `type_key,entry_slug`; for single/pag
 - Persist canonical definitions with immutable `ResourceOwner::Theme(theme_id)`, separate from runtime template availability. Other-owner collision stays 409 even if that owner is inactive/withdrawn. Core post/page are never claimable.
 - State axes: declaration declared/withdrawn; provider active/inactive/missing/invalid. Switching theme changes availability, not declaration ownership. Updating a revision to omit a declaration marks it withdrawn, retaining schema/values. Explicit same-owner re-declaration requires compatibility checks; bulk `activate_owner` is not that operation.
 - Runtime block/template execution requires active eligible provider. Admin/Editor entry and field-value editing uses retained valid schema independent of provider availability. Content/public fallback follows published policy without resurrecting inactive theme code. Do not globally hide all published content merely because the original theme is inactive.
+- **Content Foundation clarification, Aster Final Decision 19/11/2026:** the
+  statement above preserves public site/core-owned content across theme changes
+  and safe template fallback for otherwise eligible content. A CPT owned by an
+  inactive provider follows the existing active-provider public guard: archive
+  and single routes return404 while inactive; matching-owner reactivation
+  restores200 only for content still eligible by publication/public policy.
+  Canonical definitions, IDs, values, memberships and authenticated editing stay
+  available as specified. This distinction follows
+  [C3/C4](CONTENT_FOUNDATION_2026_11.md#4-permalinks-and-route-authority-c3) and
+  was already implemented at pre-C3 baseline
+  `49fcd730be526fee17b5a5f240d58f1cc919d626`. Old preservation tests must assert
+  both inactive public denial and authenticated retention, then successful public
+  restoration after reactivation; template fallback cannot bypass CPT eligibility.
 - Same-owner label/help/default-only changes may be compatible. Optional new fields preserve old entries. Removal/type change/key rename/required tightening/select-option removal is rejected if it invalidates retained data; no automatic dropping. Content-type withdrawal retains valid fields and entry editability. Destructive changes require another explicit migration/rollback contract.
 - S10 builds canonical transaction-aware CNT registration/evolution APIs in server storage, using core validators and owned registry; they are future work, not current APIs. In-memory registry is refreshed only from committed canonical DB state, not published before commit.
 - Taxonomy eligibility declarations only refer to core category/tag and a compatible owned type. Terms and entry links stay site-owned; core term kinds and existing user types cannot be taken over. Withdrawal does not remove existing term membership or prevent editing retained content.

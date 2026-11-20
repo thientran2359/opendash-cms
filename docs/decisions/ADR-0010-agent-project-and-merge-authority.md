@@ -1,5 +1,74 @@
 # ADR-0010 — Quyền điều phối và merge của các agent
 
+## OpenDash EGM authority adaptation v1 — 2026-11-20
+
+**Nguồn:** authority adaptation đã được owner chấp thuận và lưu trong
+[migration design](../../.agents/research/egm-migration-2026-11-20/design_draft.md),
+được nhập qua PR #413. Owner tiếp tục đồng ý hướng tài liệu-first và yêu cầu
+Aster review/tích hợp trong [Issue #414](https://github.com/thientran2359/opendash-cms/issues/414).
+**Final Decision: Aster — CONCLUDED_BY_COORDINATOR** cho integration tài liệu;
+hiệu lực khi PR tương ứng merge. Không tuyên bố toàn migration đã hoàn tất.
+
+[EGM workflow](../plans/EGM_WORKFLOW.md) là điểm vào duy nhất cho thiết kế mới.
+Owner quyết định phạm vi/hành vi sản phẩm, ưu tiên lớn và public release.
+Atlas/Aster, theo coordinator được ghi cho topic, quyết định kiến trúc,
+API/schema, section acceptance, xử lý findings, chia task và ownership trong
+phạm vi đó. Implementer tự quyết cách thực hiện trong contract đã chốt.
+Không hỏi lại owner chỉ vì checkpoint upstream gọi người quyết định là tác giả.
+Quyết định kỹ thuật phải có provenance; thay đổi scope sản phẩm vẫn về owner.
+
+Đây là adaptation của OpenDash, không phải upstream EGM nguyên bản. Giữ plugin,
+persona và standards nguyên vẹn. Goldfish phản biện trong context mới, không cấp
+quyền triển khai hay thay required GitHub review. Một topic có một coordinator;
+Atlas/Aster chuyển vai trò qua Issue/PR, không ra quyết định cạnh tranh.
+
+Quyền merge, branch/file ownership, security/data, required CI, native/human và
+release gates giữ nguyên. G0–G5 còn là nghĩa vụ/metadata tương thích theo bảng
+mapping trong guide; không là bộ phê duyệt song song. Task EGM mới vẫn có
+handoff đúng mẫu trong nguồn plans được công cụ hỗ trợ, nguồn immutable đã merge
+và Project Ready được xác minh. Không đổi ID/receipt/lock hoặc kéo task resume
+về Ready chỉ để đổi tài liệu. PR docs/design có Final Decision đi theo quyền
+docs hiện có, không cần giả lập implementation G3/Ready.
+
+## Owner directive — nhánh agent mặc định, 2026-11-19
+
+Chủ dự án xác nhận **mỗi agent triển khai tuần tự các task trên nhánh cố định
+`agent/<name>` trong `.agents/agents.yaml`**, thay vì mặc định tạo
+`task/<agent>-...` cho mỗi Issue. Quy định này có hiệu lực cho task/PR mới của
+mọi agent và **ưu tiên quy tắc bắt buộc tách task branch** trong ADR-0005,
+ADR-0008. Các commit, PR và task branch lịch sử vẫn giữ nguyên; không đổi
+nhánh của PR đang mở hoặc viết lại lịch sử để áp dụng hồi tố.
+
+1. **Nhánh mặc định:** Atlas `agent/atlas`, Nova `agent/nova`,
+   Forge `agent/forge`, Harbor `agent/harbor`, Orion `agent/orion`,
+   Aster `agent/aster`. Mỗi agent chỉ có **một implementation task active**
+   và một writer trên từng file/schema; không nhận task mới khi nhánh còn
+   PR/diff chưa bàn giao hoặc task chưa đạt gate giải phóng.
+2. **Trước task mới:** xác minh worktree sạch, không có PR/task khác đang chiếm
+   nhánh, kiểm `git fetch origin`, `origin/main`, `origin/agent/<name>`
+   và lịch sử chưa merge. Đồng bộ `agent/<name>` với `origin/main`:
+   fast-forward nếu đủ điều kiện; nếu lịch sử phân kỳ thì chỉ merge được review
+   và giải quyết conflict theo ownership. Không tự reset, rebase/force-push,
+   bỏ commit chưa merge hoặc tự ghi đè worktree. Không đồng bộ được an toàn
+   thì **BLOCKED**, không tạo nhánh khác để lách gate.
+3. **PR và G5:** commit có Task ID và trailer `Agent: <Agent>`, non-force push
+   lên chính `agent/<name>`, mở PR từ đó vào `main`. Sau merge lại đồng bộ
+   từ `origin/main` trước task tiếp theo. Nghiệm thu G5 có thể dùng checkout
+   detached/worktree cô lập tại **exact merge SHA**; không cần task branch
+   lâu dài chỉ để chạy release/rollback.
+4. **Ngoại lệ `task/*`:** chỉ dùng khi có lý do cụ thể cần cô lập trong phạm
+   vi task được phép (ví dụ thử nghiệm/rollback, pin release hoặc xung đột worktree),
+   được ghi rõ lý do, source/base SHA và ownership trên Issue/PR, đồng thời
+   không lách điều kiện một task active, Ready, CI/review hay quyền file.
+   Không tạo `task/*` theo thói quen. Sau ngoại lệ, trở về nhánh agent
+   mặc định khi đã bàn giao an toàn.
+
+Quy trình thực hành tương ứng nằm ở
+[`GITHUB_WORKFLOW.md`](../../.agents/GITHUB_WORKFLOW.md) và
+[`AGENT_OPERATING_STANDARD.md`](../../.agents/AGENT_OPERATING_STANDARD.md).
+Các gate G2/G3, Project Ready, security, branch protection, CI, G5 và giới
+hạn quyền merge của từng agent **không thay đổi**.
+
 ## Owner directive — macOS Beta and Harbor, 2026-11-17
 
 Chủ dự án chuyển ưu tiên Usable Beta sang **macOS**. Aster điều phối, chốt

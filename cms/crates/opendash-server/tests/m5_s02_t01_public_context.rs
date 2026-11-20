@@ -297,6 +297,45 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         }
     }
 
+    // Legacy direct-SQL setup bypasses C3's production writer. A same-value
+    // permalink PUT exercises the normal CAS-checked claim sync before the
+    // existing public visibility and malformed-route assertion matrix.
+    let setup = client
+        .post(format!("{base}/auth/setup"))
+        .json(&serde_json::json!({"username":"public_context_admin","password":"Strong-Public-Context-Password-123!"}))
+        .send().await.unwrap();
+    assert_eq!(setup.status(), reqwest::StatusCode::CREATED);
+    let login = client
+        .post(format!("{base}/auth/login"))
+        .json(&serde_json::json!({"username":"public_context_admin","password":"Strong-Public-Context-Password-123!"}))
+        .send().await.unwrap();
+    assert_eq!(login.status(), reqwest::StatusCode::OK);
+    let cookie = login.headers().get_all(reqwest::header::SET_COOKIE)
+        .iter().filter_map(|v| v.to_str().ok())
+        .map(|v| v.split(';').next().unwrap().to_string())
+        .collect::<Vec<_>>().join("; ");
+    let csrf = login.json::<serde_json::Value>().await.unwrap()["csrf_token"]
+        .as_str().unwrap().to_owned();
+    let settings = client.get(format!("{base}/api/admin/settings/permalinks"))
+        .header("Cookie", &cookie).send().await.unwrap();
+    assert_eq!(settings.status(), reqwest::StatusCode::OK);
+    let settings: serde_json::Value = settings.json().await.unwrap();
+    let version = settings["version"].as_i64().unwrap();
+    let input = serde_json::json!({
+        "post_structure":settings["post_structure"],
+        "content_type_bases":settings["content_type_bases"],
+        "taxonomy_bases":settings["taxonomy_bases"]
+    });
+    let sync = client.put(format!("{base}/api/admin/settings/permalinks"))
+        .header("Cookie", &cookie)
+        .header("x-csrf-token", &csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .header("Origin", &base)
+        .json(&input).send().await.unwrap();
+    let status = sync.status();
+    let body = sync.text().await.unwrap();
+    assert_eq!(status, reqwest::StatusCode::OK, "fixture permalink sync: {body}");
+
     for (path, expected_status) in [
         ("/", 200),
         ("/content/post", 200),
@@ -311,9 +350,11 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         ("/content/post?category_id=0", 400),
         ("/content/post?include_descendants=true", 400),
         ("/content/post?utm_campaign=ignored", 200),
-        ("/content/post/public%2Farticle", 404),
-        ("/content/post/public%252Farticle", 404),
-        ("/content/post/public%5Carticle", 404),
+        // C3 CONTENT_FOUNDATION_2026_11: malformed token/encoding/traversal
+        // must return 400, unlike a valid missing/private target (404).
+        ("/content/post/public%2Farticle", 400),
+        ("/content/post/public%252Farticle", 400),
+        ("/content/post/public%5Carticle", 400),
         ("/taxonomy/category/missing", 404),
         ("/taxonomy/tag/sea", 404),
         ("/taxonomy/category/sea", 200),

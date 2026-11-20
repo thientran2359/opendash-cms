@@ -45,7 +45,7 @@ img{max-width:100%;height:auto;border-radius:8px}
 .gallery{display:flex;flex-wrap:wrap;gap:0.75rem}.gallery img{width:190px;height:150px;object-fit:contain}
 </style></head><body><main>
 <header><strong>{{ site.title }}</strong>{% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}</header>
-<nav><a href="{{ archive_url }}">← {{ content_type.label }}</a></nav>
+{% if archive_url %}<nav><a href="{{ archive_url }}">← {{ content_type.label }}</a></nav>{% endif %}
 <article><h1>{{ entry.title }}</h1>
 <dl>{% for field in entry.fields %}
 {% if field.text or field.image_url or field.gallery_urls %}
@@ -169,7 +169,6 @@ pub fn entry_view_with_url(
             gallery_urls,
         });
     }
-    let url = url.or_else(|| CanonicalUrlBuilder::entry_from_id(record.id, &schema.key, &record.slug));
     EntryView {
         id: record.id,
         title: record.title,
@@ -379,10 +378,25 @@ pub fn render_single_with_site(
     selected_template: Option<&str>,
     site: &SiteContext<'_>,
 ) -> ApiResult<String> {
+    // Admin preview/legacy callers have no public route context. Public routes
+    // must supply the storage-resolved, visibility-checked archive explicitly.
+    let fallback = CanonicalUrlBuilder::archive(&schema.key);
+    render_single_with_site_and_archive(schema, entry, selected_template, site, fallback.as_deref())
+}
+
+/// Public rendering must never synthesize a legacy archive link when the
+/// archive is private, disabled or has a configured permalink rewrite.
+pub fn render_single_with_site_and_archive(
+    schema: &ContentTypeDefinition,
+    entry: &EntryView,
+    selected_template: Option<&str>,
+    site: &SiteContext<'_>,
+    archive_url: Option<&str>,
+) -> ApiResult<String> {
     let data = serde_json::json!({
         "content_type": schema,
         "entry": entry,
-        "archive_url": CanonicalUrlBuilder::archive(&schema.key).unwrap_or_default(),
+        "archive_url": archive_url,
         "site": site,
     });
     if let Some(custom) = selected_template {
@@ -403,6 +417,7 @@ mod tests {
         let schema = ContentTypeDefinition {
             key: "post".into(),
             label: "Bài viết".into(),
+            settings: opendash_core::content::ContentTypeSettings::builtin_publication(),
             fields: vec![ContentFieldDefinition {
                 key: "body".into(),
                 label: "Nội dung".into(),
@@ -441,6 +456,7 @@ mod tests {
             key: "news".into(),
             label: "Tin tức".into(),
             fields: vec![],
+            settings: Default::default(),
         };
         let site = SiteContext {
             title: "<script>alert(1)</script>",
@@ -461,5 +477,42 @@ mod tests {
         .unwrap();
         assert!(custom_html.contains("&lt;script&gt;"));
         assert!(!custom_html.contains("<img"));
+    }
+
+    #[test]
+    fn public_entry_without_resolved_href_never_forges_a_legacy_url() {
+        let schema = ContentTypeDefinition {
+            key: "post".into(),
+            label: "Posts".into(),
+            fields: vec![],
+            settings: Default::default(),
+        };
+        let entry = ContentEntryRecord {
+            id: 17,
+            content_type_key: "post".into(),
+            slug: "old-slug".into(),
+            title: "Safe title".into(),
+            values: BTreeMap::new(),
+            term_ids: vec![],
+            publication_status: "published".into(),
+            version: 1,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let unresolved = entry_view_with_url(entry.clone(), &schema, None);
+        assert_eq!(unresolved.url, None);
+        let html = render_single_with_site_and_archive(
+            &schema, &unresolved, None, &DEFAULT_SITE, None,
+        )
+        .unwrap();
+        assert!(!html.contains("content/post"));
+        let resolved = entry_view_with_url(entry, &schema, Some("/blog/new-slug".into()));
+        assert_eq!(resolved.url.as_deref(), Some("/blog/new-slug"));
+        let html = render_single_with_site_and_archive(
+            &schema, &resolved, None, &DEFAULT_SITE, Some("/blog"),
+        )
+        .unwrap();
+        assert!(html.contains("href=\"/blog\"") || html.contains("href=\"&#x2f;blog\""));
+        assert!(!html.contains("content/post"));
     }
 }

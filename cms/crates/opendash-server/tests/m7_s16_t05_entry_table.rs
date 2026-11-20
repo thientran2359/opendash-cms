@@ -119,6 +119,40 @@ async fn table(
     req.send().await.unwrap()
 }
 
+// This older test seeds raw SQLite rows after the C3 route-claim migration.
+// Real entry writers synchronize claims automatically; the fixture triggers
+// that same serialized writer path through a version-checked admin settings
+// update, without weakening its table/filter/public_url assertions.
+async fn sync_fixture_claims(client: &Client, site: &Site, cookie: &str, csrf: &str) {
+    let response = client
+        .get(format!("{}/api/admin/settings/permalinks", site.base))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let settings: Value = response.json().await.unwrap();
+    let version = settings["version"].as_i64().unwrap();
+    let input = json!({
+        "post_structure":settings["post_structure"],
+        "content_type_bases":settings["content_type_bases"],
+        "taxonomy_bases":settings["taxonomy_bases"]
+    });
+    let response = client
+        .put(format!("{}/api/admin/settings/permalinks", site.base))
+        .header("Cookie", cookie)
+        .header("x-csrf-token", csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .header("Origin", &site.base)
+        .json(&input)
+        .send()
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = response.text().await.unwrap();
+    assert_eq!(status, StatusCode::OK, "fixture permalink sync: {body}");
+}
+
 #[tokio::test]
 async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() {
     let site = Site::launch().await;
@@ -240,6 +274,8 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
     .await
     .unwrap();
     tx.commit().await.unwrap();
+
+    sync_fixture_claims(&client, &site, &admin_cookie, &csrf).await;
 
     let snapshot: Value = table(&client, &site, Some(&admin_cookie), "post", "?limit=100")
         .await

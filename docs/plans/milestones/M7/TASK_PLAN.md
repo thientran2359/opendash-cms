@@ -45,3 +45,11 @@ F08 remains a security blocker; no Beta/native/release PASS from specs or CI.
 [Harbor follow-up G3](slices/2026-11-17-owner-admin-review-g3.md) covers the bounded
 Admin delta under [ADR-0018](../../../decisions/ADR-0018-owner-admin-review.md).
 PLANNED, not Project Ready or runtime VERIFIED. See shared serial delivery order.
+
+
+## Technical retest extension — 20/11/2026
+
+[M7-S14-T05 G3](slices/2026-11-20-beta-technical-retest-g3.md) tách Harbor technical
+retest macOS khỏi human #302. Candidate 5ad3738, C1–C4 impact, report-only ownership;
+Aster coordinator. Specs merged khác Project Ready. #302 human và #303 readiness
+giữ gates riêng; không Beta PASS từ T05.

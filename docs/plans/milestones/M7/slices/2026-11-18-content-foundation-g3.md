@@ -96,6 +96,69 @@ M4-S12-T02 merged và G5 VERIFIED. Các common gates ở đầu tài liệu bắ
 - `cms/crates/opendash-server/src/content_render.rs`
 - `cms/migrations/0040_permalink_claims.sql`
 
+Aster recorded ownership consolidation and regression disposition, 19/11/2026,
+for [#376](https://github.com/thientran2359/opendash-cms/issues/376) and
+[Draft #398](https://github.com/thientran2359/opendash-cms/pull/398), reviewed
+candidate `eecb83019378476cbae4aee6ef8dea1e3fd5543d`. Harbor remains the sole
+writer for this task. The earlier Builder integration ACK covers
+`cms/crates/opendash-server/src/page.rs` and
+`cms/crates/opendash-server/src/storage/builder.rs`. The new canonical resolver
+module `cms/crates/opendash-server/src/storage/permalinks.rs` is within C3 storage
+ownership; `storage/mod.rs` remains common wiring only.
+
+Additional **test-only** ownership is granted for the following legacy regression
+fixtures. Production code in `storage/entry_table.rs` is outside this extension.
+
+- `cms/crates/opendash-server/src/storage/entry_table.rs` — only its
+  `#[cfg(test)] c1_public_url_tests` module and test-only helpers.
+- `cms/crates/opendash-server/tests/m7_s16_t05_entry_table.rs`
+- `cms/crates/opendash-server/tests/m5_s02_t01_public_context.rs`
+- `cms/crates/opendash-server/tests/m5_s06_t01_preservation.rs`
+- `cms/crates/opendash-server/tests/m5_s08_t01_e2e_delivery.rs`
+- `cms/crates/opendash-server/tests/m5_s09_t01_site_menus.rs`
+- `cms/crates/opendash-server/tests/m5_s10_t01_theme_cnt_declarations.rs`
+- `cms/crates/opendash-server/tests/m6_s02_t01_plugin_cnt_bridge.rs`
+- `cms/crates/opendash-server/tests/m6_s02_t02_plugin_taxonomy.rs`
+- `cms/crates/opendash-server/tests/m6_s08_t01_plugin_e2e.rs`
+- `cms/crates/opendash-server/tests/m7_s09_t01_schema_field_groups.rs`
+
+Bounded accepted corrections follow the existing C1/C2/C3/C4 contracts and the
+[M5](../../../../contracts/M5_THEME_TEMPLATES.md#5-cnt-lifecycle-and-taxonomy-e)
+and [M6](../../../../contracts/M6_PLUGIN_EXTENSIONS.md#2-owner-neutral-cnt--taxonomy-bridge-p08-p04-d03-d08)
+clarifications. After direct-SQL fixture changes, synchronize canonical claims
+through the serialized storage helper for unit fixtures or authenticated
+same-value permalink GET/PUT with matching CAS/CSRF/Origin for binary fixtures.
+Keep custom/legacy URL, draft denial, menu escaping, filter/count/pagination,
+restart, collision rollback and data-preservation assertions. Only individually
+identified malformed encoding/traversal404 expectations may become the already
+specified C3 status400; valid missing/private/draft targets retain404.
+
+For provider-owned inactive CPT public routes, assert404 and authenticated
+retention/editability, then200 after matching reactivation when otherwise public.
+For the two builtin-hijack fixtures, supply valid core `post` declaration settings
+(`public:true,has_archive:true,publication:draft_publish,supports:[editor,featured_image]`)
+and retain the original409 collision/rollback assertions. For inactive-provider
+entry updates, omit `term_ids` to exercise valid title/value editing with200 and
+unchanged memberships; preserve explicit membership-change coverage after
+reactivation or an active site override, with an ineligible-selection negative
+case and durable-state checks. Do not turn expected200 into400 to pass the suite.
+For migrated builtin lists, assert exact keys post/page/section, retain post/page
+version/schema-token and migration/CAS checks, and assert Section core ownership
+and immutable private settings, rather than weakening the check to an arbitrary
+count. No runtime/API change, disabled test or swallowed failure is authorized
+by this test-fixture extension.
+
+Aster independently ran all five disputed provider/schema integration targets
+on the exact **pre-C3** baseline `49fcd730be526fee17b5a5f240d58f1cc919d626` with
+`--no-fail-fast -- --test-threads=1`: all five reproduced the reported failures
+(theme422 versus409, builtin-plugin400 versus409, two inactive-selection400
+versus200, builtin count3 versus2). These failures predate #398 and establish
+the baseline for correction. Corrected regression execution remains pending.
+Harbor must run the corrected
+focused targets and full affected serial suites, preserve old failure receipts,
+and report exact source/commands/results before G4 acceptance. New unexplained
+failures require triage; no baseline waiver or migration/G5 gate is granted.
+
 Thêm focused tests/runner/fixtures và wiring theo shared ownership ở đầu. DTO/API,
 transaction/error behavior theo contract; mở rộng file ngoài quyền cần coordinator.
 

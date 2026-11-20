@@ -1,8 +1,13 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEntryComposite,
+  contentEntryPreviewPath,
+  effectiveContentTypeSettings,
   getContentEntry,
   getEffectiveEditorConfig,
+  listContentTypes,
+  type ContentTypeSettings,
+  type EffectiveEditorConfigWithSettings,
   updateEntryComposite,
 } from '../../api/content.ts';
 import { runPluginAction } from '../../api/plugins.ts';
@@ -12,11 +17,12 @@ import type { AuthUser } from '../../types.ts';
 import type {
   ContentFieldValue,
   EffectiveEditorConfigProjection,
+  EffectivePanelProjection,
 } from '../content/types.ts';
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
 import { MediaPicker } from '../media/MediaPicker.tsx';
-import { EntryListPage, entryTableHash, parseEntryTableHash } from '../content/EntryListPage.tsx';
+import { EntryListPage, entryTableHash, parseEntryTableHash, safePublicPath } from '../content/EntryListPage.tsx';
 
 interface FieldMediaPickerTarget {
   fieldKey: string;
@@ -53,6 +59,56 @@ function slugFromTitle(title: string): string {
   return s && /^[a-z]/.test(s) ? s : `item-${Date.now().toString(36).slice(-4)}`;
 }
 
+function supportAllowsField(typeKey: string, key: string, settings: ContentTypeSettings): boolean {
+  if (typeKey !== 'post' && typeKey !== 'page') return true;
+  if (key === 'body') return settings.supports.includes('editor');
+  if (key === 'featured_image') return settings.supports.includes('featured_image');
+  return true;
+}
+
+/** Restrict UI affordances without removing values from the saved entry/draft. */
+function displayEditorConfig(
+  config: EffectiveEditorConfigWithSettings,
+  settings: ContentTypeSettings,
+): EffectiveEditorConfigProjection {
+  const typeKey = config.type_key;
+  const projectPanels = (panels: EffectivePanelProjection[]): EffectivePanelProjection[] =>
+    panels.filter(({ panel }) => {
+      if (panel.kind.kind !== 'core_built_in') return true;
+      if (panel.kind.core_key === 'body_editor') return settings.supports.includes('editor');
+      if (panel.kind.core_key === 'featured_image') return settings.supports.includes('featured_image');
+      return true;
+    }).map(panel => ({
+      ...panel,
+      field_keys: panel.field_keys.filter(key => supportAllowsField(typeKey, key, settings)),
+      subgroups: panel.subgroups.map(group => ({
+        ...group,
+        field_keys: group.field_keys.filter(key => supportAllowsField(typeKey, key, settings)),
+      })).filter(group => group.field_keys.length > 0),
+    })).filter(panel => {
+      if (panel.panel.kind.kind === 'base_fields_slice' || panel.panel.kind.kind === 'content_fields') {
+        return panel.field_keys.length > 0;
+      }
+      if (panel.panel.kind.kind === 'core_built_in' && panel.panel.kind.core_key === 'base_fields') {
+        return panel.field_keys.length > 0;
+      }
+      return true;
+    });
+
+  return {
+    ...config,
+    effective_fields: Object.fromEntries(
+      Object.entries(config.effective_fields).filter(([key]) => supportAllowsField(typeKey, key, settings)),
+    ),
+    regions: {
+      main_top: projectPanels(config.regions.main_top),
+      main_primary: projectPanels(config.regions.main_primary),
+      main_bottom: projectPanels(config.regions.main_bottom),
+      sidebar: projectPanels(config.regions.sidebar),
+    },
+  };
+}
+
 export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   typeKey,
   mode,
@@ -68,7 +124,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   onDirtyChange,
   onNavigateHash,
 }) => {
-  const [config, setConfig] = useState<EffectiveEditorConfigProjection | null>(null);
+  const [config, setConfig] = useState<EffectiveEditorConfigWithSettings | null>(null);
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [publicationStatus, setPublicationStatus] = useState<'draft' | 'published'>('draft');
@@ -88,6 +144,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const saveInFlightRef = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [confirmedPublicLink, setConfirmedPublicLink] = useState<{
+    scope: string; version: number; path: string | null;
+  } | null>(null);
   const [mediaPicker, setMediaPicker] = useState<FieldMediaPickerTarget | null>(null);
   const baselineRef = useRef<EditorDraftPayload | null>(null);
   const draftRef = useRef<EditorDraftPayload | null>(null);
@@ -95,6 +154,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const schemaTokenRef = useRef('');
   const canWriteRouteRef = useRef(true);
   const canWriteSeoRef = useRef(true);
+
+  const settings = config ? effectiveContentTypeSettings(typeKey, config.settings) : null;
+  const editorConfig = useMemo(
+    () => config && settings ? displayEditorConfig(config, settings) : null,
+    [config],
+  );
 
   const tabUuid = useRef(Math.random().toString(36).slice(2, 10));
   const draftKey = editorDraftStore.makeDraftKey(typeKey, entryId, draftUuid ?? tabUuid.current);
@@ -124,6 +189,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       || target.sessionEpoch !== editorDraftStore.getSessionEpoch()
       || target.schemaToken !== activeMediaSchemaRef.current
       || !eff || !eff.editable || eff.effective_status !== 'active'
+      || !supportAllowsField(typeKey, target.fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
       || eff.definition.type !== target.kind
     ) return;
     setMediaPicker(null);
@@ -192,6 +258,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   }, [dirty, onDirtyChange]);
 
   useEffect(() => {
+    setConfirmedPublicLink(null);
     if (!user) {
       setConfig(null);
       baselineRef.current = null;
@@ -213,10 +280,19 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           return;
         }
 
-        const freshCfg = await getEffectiveEditorConfig(typeKey);
+        const effectiveConfig = await getEffectiveEditorConfig(typeKey);
+        // Older effective-editor-config projections omit C1 settings. The
+        // canonical content-type read DTO still carries the effective values.
+        const readSettings = effectiveConfig.settings
+          ?? (await listContentTypes()).find(item => item.descriptor.key === typeKey)?.descriptor.settings;
+        const freshCfg: EffectiveEditorConfigWithSettings = {
+          ...effectiveConfig,
+          settings: effectiveContentTypeSettings(typeKey, readSettings),
+        };
         if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
         const emptySeo = { title: null, description: null, og_image_id: null, canonical_url: null, noindex: false };
         let baseline: EditorDraftPayload;
+        let serverPublicPath: string | null = null;
         let routeReadable = true;
         let seoReadable = true;
         if (mode === 'edit' && entryId !== null) {
@@ -237,6 +313,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
           routeReadable = routeSnap !== null;
           seoReadable = seoSnap !== null;
+          if (rec.publication_status === 'published' && routeSnap?.entry_version === rec.version) {
+            serverPublicPath = safePublicPath(routeSnap.public_url);
+          }
           const allowedValues = Object.fromEntries(
             Object.entries(rec.values).filter(([key]) => key in freshCfg.effective_fields),
           );
@@ -254,7 +333,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         } else {
           baseline = {
             id: null, version: null, title: '', slug: '', slug_touched: false,
-            publication_status: typeKey === 'post' || typeKey === 'page' ? 'draft' : 'published',
+            publication_status: effectiveContentTypeSettings(typeKey, freshCfg.settings).publication === 'draft_publish'
+              ? 'draft' : 'published',
             values: {}, cleared_fields: [], term_ids: [], custom_path: '', seo: emptySeo,
           };
         }
@@ -264,6 +344,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         );
         if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
         baselineRef.current = baseline;
+        setConfirmedPublicLink({
+          scope: mediaScopeKey, version: baseline.version ?? 0, path: serverPublicPath,
+        });
         draftRef.current = restored?.payload ?? baseline;
         schemaTokenRef.current = restored?.schema_token_at_edit ?? freshCfg.schema_token;
         canWriteRouteRef.current = routeReadable;
@@ -317,6 +400,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     if (!config || !csrfToken || saving || saveInFlightRef.current || !draftRef.current || !user) return;
     const isBuiltInContent = typeKey === 'post' || typeKey === 'page';
     if (isBuiltInContent && !intent) return;
+    const effectiveSettings = effectiveContentTypeSettings(typeKey, config.settings);
+    if (typeKey === 'section') return; // Section uses its dedicated private editor.
+    const nextPublication = effectiveSettings.publication === 'draft_publish'
+      ? (intent ?? draftRef.current.publication_status)
+      : 'published';
     const snapshot = draftRef.current;
     const submittedRevision = editRevisionRef.current;
     const requestEpoch = editorDraftStore.getSessionEpoch();
@@ -326,7 +414,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     if (!snapshot.slug.trim()) nextErrors.slug = 'Slug không được để trống.';
 
     for (const [fk, eff] of Object.entries(config.effective_fields)) {
-      if (eff.effective_required && eff.editable) {
+      if (eff.effective_required && eff.editable && supportAllowsField(typeKey, fk, effectiveSettings)) {
         const v = snapshot.values[fk];
         const empty = snapshot.cleared_fields.includes(fk) || v === undefined || v === null || (typeof v === 'string' && !v.trim());
         if (empty) {
@@ -350,7 +438,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     // Send ONLY editable fields (never send read-only fields -> Omitted = Preserve)
     const submitValues: Record<string, ContentFieldValue> = {};
     for (const [fk, eff] of Object.entries(config.effective_fields)) {
-      if (!eff.editable) continue;
+      if (!eff.editable || !supportAllowsField(typeKey, fk, effectiveSettings)) continue;
       if (snapshot.cleared_fields.includes(fk)) {
         submitValues[fk] = null;
       } else if (fk in snapshot.values) {
@@ -364,7 +452,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         expected_schema_token: expectedSchemaToken,
         title: snapshot.title.trim(),
         slug: snapshot.slug.trim(),
-        publication_status: isBuiltInContent ? intent : snapshot.publication_status,
+        publication_status: nextPublication,
         values: submitValues,
         // Omitted term_ids retains existing links; [] only clears by user edit.
         term_ids: baselineRef.current && diffEditorPayload(baselineRef.current, snapshot).includes('term_ids')
@@ -399,6 +487,29 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         } : snapshot.seo,
       };
       baselineRef.current = saved;
+      // A committed slug, route or publication change can invalidate the old
+      // link. Require a matching server response before exposing another URL.
+      setConfirmedPublicLink(null);
+      if (entryId !== null && saved.publication_status === 'published') {
+        void getEntryRoute(typeKey, res.entry.id).then(routeSnap => {
+          if (requestEpoch !== editorDraftStore.getSessionEpoch() ||
+              activeDraftKeyRef.current !== draftKey ||
+              activeMediaScopeRef.current !== mediaScopeKey) return;
+          if (routeSnap.entry_version !== res.entry.version) return;
+          setConfirmedPublicLink({
+            scope: mediaScopeKey,
+            version: res.entry.version,
+            path: safePublicPath(routeSnap.public_url),
+          });
+        }).catch(error => {
+          if (requestEpoch === editorDraftStore.getSessionEpoch() &&
+              activeDraftKeyRef.current === draftKey &&
+              activeMediaScopeRef.current === mediaScopeKey &&
+              error instanceof ApiClientError && error.status === 401) {
+            onApiError(error, 'Phiên đăng nhập hết hạn khi tải URL công khai.');
+          }
+        });
+      }
       schemaTokenRef.current = config.schema_token;
       editorDraftStore.delete(draftKey);
       const hasNewerChanges = editRevisionRef.current !== submittedRevision;
@@ -408,7 +519,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         setDirty(false);
       } else if (draftRef.current) {
         const remaining = { ...draftRef.current, id: res.entry.id, version: res.entry.version,
-          publication_status: isBuiltInContent ? res.entry.publication_status : draftRef.current.publication_status };
+          publication_status: draftRef.current.publication_status === snapshot.publication_status
+            ? res.entry.publication_status : draftRef.current.publication_status };
         draftRef.current = remaining;
         const changed = diffEditorPayload(saved, remaining);
         const newKey = editorDraftStore.makeDraftKey(typeKey, res.entry.id);
@@ -436,6 +548,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       }
       if (err instanceof ApiClientError && err.status === 412) {
         setStatusNote('Có xung đột version hoặc schema (412). Nháp vẫn được giữ để xử lý.');
+      } else if (err instanceof ApiClientError && err.status === 409) {
+        setStatusNote('Thao tác bị từ chối vì xung đột chính sách xuất bản (409). Nháp vẫn được giữ.');
       }
       onApiError(err, 'Không thể lưu nội dung.');
     } finally {
@@ -455,15 +569,21 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     return <p className="text-sm text-slate-600">Đang tải cấu hình trình chỉnh sửa...</p>;
   }
 
-  // Link from the last server-confirmed version, never a dirty custom-path
-  // draft. A draft has no public URL and must not get a public View link.
+  // Public URLs must come from the server route authority. Never derive a URL
+  // from the slug/custom path or from an unsaved editor draft.
   const confirmed = baselineRef.current;
-  const confirmedCustomPath = confirmed?.custom_path;
-  const publicPath = confirmed?.id === entryId && confirmed?.publication_status === 'published'
-    ? confirmedCustomPath?.startsWith('/') && !confirmedCustomPath.startsWith('//')
-      ? confirmedCustomPath
-      : `/content/${encodeURIComponent(typeKey)}/${encodeURIComponent(confirmed.slug)}`
+  const publicPath = settings?.public && typeKey !== 'section'
+    && confirmed?.id === entryId && confirmed?.publication_status === 'published'
+    && confirmedPublicLink?.scope === mediaScopeKey
+    && confirmedPublicLink.version === confirmed.version
+    ? confirmedPublicLink.path
     : null;
+  const draftPreviewPath = typeKey !== 'section' && confirmed?.id === entryId
+    && confirmed.publication_status === 'draft' && entryId !== null
+    ? contentEntryPreviewPath(typeKey, entryId) : null;
+  const isBuiltIn = typeKey === 'post' || typeKey === 'page';
+  const isDraftPublishCpt = !isBuiltIn && typeKey !== 'section'
+    && settings?.publication === 'draft_publish';
 
   return (
     <div className="space-y-4">
@@ -472,15 +592,58 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         ← Về danh sách
       </button>
       {statusNote && (
-        <div className={statusNote.includes('(412)')
+        <div className={statusNote.includes('(412)') || statusNote.includes('(409)')
           ? 'rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800'
           : 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'}
-          role={statusNote.includes('(412)') ? 'alert' : 'status'}>
+          role={statusNote.includes('(412)') || statusNote.includes('(409)') ? 'alert' : 'status'}>
           {statusNote}
         </div>
       )}
+      {draftPreviewPath && (
+        <a href={draftPreviewPath} target="_blank" rel="noopener noreferrer"
+          className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
+          Xem trước bản nháp đã lưu (yêu cầu đăng nhập)
+        </a>
+      )}
+      {isDraftPublishCpt && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3"
+          role="group" aria-label="Lưu nháp và xuất bản">
+          <span className="text-sm text-slate-700">
+            {publicationStatus === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
+          </span>
+          <button type="button" disabled={saving || !csrfToken}
+            onClick={() => void handleSave('draft')}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-50">
+            {publicationStatus === 'published' ? 'Chuyển về nháp' : 'Lưu nháp'}
+          </button>
+          <button type="button" disabled={saving || !csrfToken}
+            onClick={() => void handleSave('published')}
+            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            {publicationStatus === 'published' ? 'Cập nhật' : 'Đăng bài'}
+          </button>
+          {publicPath && <a href={publicPath} target="_blank" rel="noopener noreferrer"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
+            Xem nội dung
+          </a>}
+        </div>
+      )}
+      {!isBuiltIn && !isDraftPublishCpt && publicPath && (
+        <a href={publicPath} target="_blank" rel="noopener noreferrer"
+          className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
+          Xem nội dung
+        </a>
+      )}
+      {/* Legacy renderer has a fixed CPT status select and generic Save button.
+          Keep its Builder action and layout while showing policy-aware actions above. */}
+      <style>{`
+        .c1-immediate [data-panel-id="core:publish_box"] label { display: none; }
+        .c1-draft-publish [data-panel-id="core:publish_box"] label { display: none; }
+        .c1-draft-publish [data-region="header_bar"] > div:last-child > button { display: none; }
+        .c1-draft-publish [data-panel-id="core:publish_box"] div.flex.flex-wrap.items-center.gap-2 > button { display: none; }
+      `}</style>
+      <div className={isDraftPublishCpt ? 'c1-draft-publish' : !isBuiltIn ? 'c1-immediate' : ''}>
       <PanelRegionRenderer
-        config={config}
+        config={editorConfig ?? config}
         values={values}
         clearedFields={clearedFields}
         title={title}
@@ -534,6 +697,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           if (
             !csrfToken || !user || !draftRef.current
             || !eff || !eff.editable || eff.effective_status !== 'active'
+            || !supportAllowsField(typeKey, fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
             || eff.definition.type !== kind
           ) return;
           setMediaPicker({
@@ -587,11 +751,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           onNavigateHash(`#/builder?template=${typeKey === 'page' ? 'page' : 'single'}&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
         }}
       />
+      </div>
       {mediaPicker && mediaPicker.scopeKey === mediaScopeKey && csrfToken && user && config
         && config.schema_token === mediaPicker.schemaToken
         && editorDraftStore.getSessionEpoch() === mediaPicker.sessionEpoch
         && config.effective_fields[mediaPicker.fieldKey]?.editable
         && config.effective_fields[mediaPicker.fieldKey]?.effective_status === 'active'
+        && supportAllowsField(typeKey, mediaPicker.fieldKey, effectiveContentTypeSettings(typeKey, config.settings))
         && config.effective_fields[mediaPicker.fieldKey]?.definition.type === mediaPicker.kind
         && (
           <MediaPicker

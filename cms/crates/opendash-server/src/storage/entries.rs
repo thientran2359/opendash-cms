@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use opendash_core::content::{
-    ContentEntryInput, ContentTypeDefinition, EffectiveContentSchema, EffectiveFieldStatus,
+    ContentEntryInput, ContentTypeDefinition, ContentTypeSettings, ContentPublication,
+    ContentSupport, EffectiveContentSchema, EffectiveFieldStatus,
     FieldRole, PatchField, deserialize_patch_field,
 };
 use serde::Serialize;
@@ -25,6 +26,39 @@ fn forbid_generic_section_write(type_key: &str) -> ApiResult<()> {
     } else {
         Ok(())
     }
+}
+
+fn verify_supported_values(
+    type_key: &str,
+    values: &BTreeMap<String, Value>,
+    settings: &ContentTypeSettings,
+) -> ApiResult<()> {
+    // These are protected Core fields only on Post/Page. A custom CPT may
+    // legitimately define unrelated fields named `body` or `featured_image`.
+    if !matches!(type_key, "post" | "page") {
+        return Ok(());
+    }
+    for (key, feature) in [
+        ("body", ContentSupport::Editor),
+        ("featured_image", ContentSupport::FeaturedImage),
+    ] {
+        if values.contains_key(key) && !settings.supports(feature) {
+            return Err(ApiError::unprocessable(format!(
+                "Không thể chỉnh sửa '{key}' khi tính năng này bị tắt."
+            )));
+        }
+    }
+    Ok(())
+}
+
+async fn current_settings_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+) -> ApiResult<ContentTypeSettings> {
+    let schema = crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    Ok(schema.base.descriptor.settings)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,10 +118,12 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
 }
 
 /// Category/tag query predicates. Missing IDs mean no restriction.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct EntryFilters {
     pub category_id: Option<i64>,
     pub tag_id: Option<i64>,
+    pub taxonomy_key: Option<String>,
+    pub term_id: Option<i64>,
     pub include_descendants: bool,
 }
 
@@ -105,6 +141,7 @@ pub enum PublishedListMissing {
     ContentType,
     Category,
     Tag,
+    Taxonomy,
 }
 
 #[derive(Debug)]
@@ -200,30 +237,37 @@ async fn begin_entry_write<'a>(
     }
 }
 
-async fn validate_term_ids(tx: &mut Transaction<'_, Sqlite>, ids: &[i64]) -> ApiResult<()> {
+async fn validate_term_ids(
+    tx: &mut Transaction<'_, Sqlite>, type_key: &str, ids: &[i64],
+) -> ApiResult<()> {
     if ids.len() > 96 || ids.iter().any(|id| *id <= 0) {
         return Err(ApiError::bad_request("term_ids không hợp lệ."));
     }
     let mut unique = std::collections::HashSet::new();
-    let (mut categories, mut tags) = (0_usize, 0_usize);
+    let mut counts = std::collections::HashMap::<String, usize>::new();
+    let eligible = crate::storage::content::load_effective_taxonomies_in_tx(
+        &mut **tx, type_key,
+    ).await?;
     for &id in ids {
         if !unique.insert(id) {
             return Err(ApiError::bad_request("term_ids không được trùng lặp."));
         }
         let kind: Option<String> =
-            sqlx::query_scalar("SELECT kind FROM taxonomy_terms WHERE id = ?")
+            sqlx::query_scalar("SELECT t.kind FROM taxonomy_terms t
+               JOIN taxonomy_definitions d ON d.key=t.kind
+              WHERE t.id=? AND d.provider_status='active'
+                AND d.declaration_state='declared'")
                 .bind(id)
                 .fetch_optional(&mut **tx)
                 .await?;
-        match kind.as_deref() {
-            Some("category") => categories += 1,
-            Some("tag") => tags += 1,
-            _ => return Err(ApiError::bad_request("Category/Tag ID không tồn tại.")),
+        let kind = kind.ok_or_else(|| ApiError::bad_request("Term ID không tồn tại hoặc inactive."))?;
+        if !eligible.contains(&kind) {
+            return Err(ApiError::bad_request("Taxonomy của term không được phép dùng cho CPT."));
         }
-        if categories > 32 || tags > 64 {
-            return Err(ApiError::bad_request(
-                "Mỗi entry tối đa 32 category và 64 tag.",
-            ));
+        let count = counts.entry(kind.clone()).or_insert(0);
+        *count += 1;
+        if *count > if kind == "category" { 32 } else { 64 } {
+            return Err(ApiError::bad_request("Số term của taxonomy vượt giới hạn."));
         }
     }
     Ok(())
@@ -347,14 +391,26 @@ pub async fn list_published_page_in_tx(
             "Trang danh sách phải từ 1–100 và page_size từ 1–20.",
         ));
     }
-    if filters.include_descendants && filters.category_id.is_none() {
+    if filters.include_descendants && filters.category_id.is_none()
+        && filters.taxonomy_key.is_none() {
         return Err(ApiError::bad_request(
-            "include_descendants yêu cầu category_id.",
+            "include_descendants yêu cầu category_id hoặc generic taxonomy.",
         ));
+    }
+    // Invalid filter shapes remain a request error. A valid persisted pair
+    // that points at a withdrawn/private/deleted taxonomy is instead a
+    // missing Builder configuration, so the public homepage still renders.
+    if filters.taxonomy_key.is_some() != filters.term_id.is_some()
+        || (filters.taxonomy_key.is_some()
+            && (filters.category_id.is_some() || filters.tag_id.is_some()))
+        || filters.term_id.is_some_and(|id| id <= 0)
+    {
+        return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
     }
 
     let type_exists: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'",
+        "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'
+         AND key != 'section' AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(type_key)
     .fetch_optional(&mut **tx)
@@ -364,6 +420,14 @@ pub async fn list_published_page_in_tx(
             PublishedListMissing::ContentType,
         ));
     }
+
+    // Persisted Builder list nodes are configuration, not user-provided
+    // request filters. A site admin may withdraw a taxonomy association
+    // without deleting the old node or its entry links; render an empty list
+    // with the existing MissingConfig diagnostic rather than aborting the
+    // entire public homepage with 400.
+    let effective_taxonomies =
+        crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
 
     for (id, kind, missing) in [
         (
@@ -377,17 +441,53 @@ pub async fn list_published_page_in_tx(
             if id <= 0 {
                 return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
             }
-            let actual: Option<String> =
-                sqlx::query_scalar("SELECT kind FROM taxonomy_terms WHERE id = ?")
+            let actual: Option<String> = sqlx::query_scalar(
+                "SELECT term.kind FROM taxonomy_terms term
+                   JOIN taxonomy_definitions d ON d.key=term.kind
+                  WHERE term.id=? AND d.public=1 AND d.provider_status='active'
+                    AND d.declaration_state='declared'",
+            )
                     .bind(id)
                     .fetch_optional(&mut **tx)
                     .await?;
-            if actual.as_deref() != Some(kind) {
+            if actual.as_deref() != Some(kind)
+                || !effective_taxonomies.iter().any(|enabled| enabled == kind)
+            {
                 return Ok(PublishedListResult::MissingConfig(missing));
             }
         }
     }
 
+    if let (Some(kind), Some(id)) = (&filters.taxonomy_key, filters.term_id) {
+        // The same consistent transaction includes association, definition
+        // visibility and term kind. Do not expose drafts or private taxonomy
+        // membership by probing an unavailable saved Builder node.
+        let usable: Option<i64> = sqlx::query_scalar(
+            "SELECT d.hierarchical FROM taxonomy_terms term
+              JOIN taxonomy_definitions d ON d.key = term.kind
+             WHERE term.id = ? AND term.kind = ? AND d.public = 1
+               AND d.provider_status = 'active'
+               AND d.declaration_state = 'declared'",
+        )
+        .bind(id)
+        .bind(kind)
+        .fetch_optional(&mut **tx)
+        .await?;
+        // A saved list can outlive a legitimate hierarchical -> flat edit
+        // (allowed once all terms are roots). Treat its now-incompatible
+        // descendant filter as missing configuration, while request filters
+        // still receive the strict 400 from validate_filter_in_tx below.
+        if usable.is_none()
+            || (filters.include_descendants && usable == Some(0))
+            || !effective_taxonomies.iter().any(|enabled| enabled == kind)
+        {
+            return Ok(PublishedListResult::MissingConfig(
+                PublishedListMissing::Taxonomy,
+            ));
+        }
+    }
+
+    validate_filter_in_tx(tx, type_key, &filters, true).await?;
     // One extra row tells the renderer whether to expose a next-page link.
     // Bounds above guarantee no integer overflow or unbounded fetch.
     let offset = (page - 1) * page_size;
@@ -411,23 +511,7 @@ async fn list_entries_filtered(
     published_only: bool,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
     let mut tx = db.begin().await?;
-    for (id, kind) in [(filters.category_id, "category"), (filters.tag_id, "tag")] {
-        if let Some(id) = id {
-            if id <= 0 {
-                return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
-            }
-            let actual: Option<String> =
-                sqlx::query_scalar("SELECT kind FROM taxonomy_terms WHERE id = ?")
-                    .bind(id)
-                    .fetch_optional(&mut *tx)
-                    .await?;
-            if actual.as_deref() != Some(kind) {
-                return Err(ApiError::bad_request(
-                    "Category/Tag trong bộ lọc không tồn tại hoặc sai loại.",
-                ));
-            }
-        }
-    }
+    validate_filter_in_tx(&mut tx, type_key, &filters, published_only).await?;
     let entries = query_entries_filtered(
         &mut tx,
         type_key,
@@ -440,6 +524,60 @@ async fn list_entries_filtered(
     .await?;
     tx.commit().await?;
     Ok(entries)
+}
+
+/// Validate all three supported filter forms in the same read snapshot as
+/// the query. Inactive, private or unassociated terms cannot be used to probe
+/// published entry existence; Admin may still manage private taxonomies.
+pub(crate) async fn validate_filter_in_tx(
+    tx: &mut Transaction<'_, Sqlite>, type_key: &str,
+    filters: &EntryFilters, published_only: bool,
+) -> ApiResult<()> {
+    if filters.taxonomy_key.is_some() != filters.term_id.is_some()
+        || (filters.taxonomy_key.is_some()
+            && (filters.category_id.is_some() || filters.tag_id.is_some()))
+    {
+        return Err(ApiError::bad_request("Trộn hoặc thiếu cặp taxonomy_key + term_id."));
+    }
+    if filters.include_descendants && filters.category_id.is_none()
+        && filters.taxonomy_key.is_none() {
+        return Err(ApiError::bad_request("include_descendants cần taxonomy filter."));
+    }
+    let allowed = crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
+    for (id, kind) in [(filters.category_id, "category"), (filters.tag_id, "tag"),
+        (filters.term_id, filters.taxonomy_key.as_deref().unwrap_or(""))] {
+        if let Some(id) = id {
+            if id <= 0 {
+                return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
+            }
+            let actual: Option<(String, i64, i64)> = sqlx::query_as(
+                "SELECT t.kind,d.public,d.hierarchical FROM taxonomy_terms t
+                  JOIN taxonomy_definitions d ON d.key=t.kind
+                 WHERE t.id=? AND d.provider_status='active'
+                   AND d.declaration_state='declared'",
+            )
+                    .bind(id)
+                .fetch_optional(&mut **tx)
+                    .await?;
+            if !actual.as_ref().is_some_and(|(actual, _, _)| actual == kind) {
+                return Err(ApiError::bad_request(
+                    "Term trong bộ lọc không tồn tại hoặc sai taxonomy.",
+                ));
+            }
+            let (_, is_public, hierarchical) = actual.expect("checked term");
+            if !allowed.iter().any(|a| a == kind)
+                || (published_only && is_public == 0)
+            {
+                return Err(ApiError::bad_request("Taxonomy không được dùng cho CPT này."));
+            }
+            if filters.include_descendants && filters.taxonomy_key.as_deref() == Some(kind)
+                && hierarchical == 0
+            {
+                return Err(ApiError::bad_request("Taxonomy không phân cấp không nhận descendants."));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Shared category/tag AND predicates for the old archives and new list
@@ -466,12 +604,21 @@ async fn query_entries_filtered(
              SELECT child.id, category_scope.depth + 1
              FROM taxonomy_terms child JOIN category_scope ON child.parent_id = category_scope.id
              WHERE category_scope.depth < 8 AND ? = 1
+         ), generic_scope(id, depth) AS (
+             SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = ?
+             UNION ALL
+             SELECT child.id, generic_scope.depth+1 FROM taxonomy_terms child
+             JOIN generic_scope ON child.parent_id=generic_scope.id
+             WHERE generic_scope.depth < 8 AND ? = 1
          )
          SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json, e.publication_status,
                 e.version, e.created_at, e.updated_at
            FROM content_entries e
+           JOIN content_types t ON t.key = e.content_type_key
           WHERE e.content_type_key = ?
-            AND (? = 0 OR e.publication_status = 'published')
+            AND (? = 0 OR (e.publication_status = 'published'
+                 AND e.content_type_key != 'section' AND t.provider_status = 'active'
+                 AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1))
             AND (? IS NULL OR EXISTS (
                 SELECT 1 FROM entry_terms et
                  WHERE et.entry_id = e.id AND et.term_id IN (SELECT id FROM category_scope)
@@ -479,16 +626,24 @@ async fn query_entries_filtered(
             AND (? IS NULL OR EXISTS (
                 SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id AND et.term_id = ?
             ))
+            AND (? IS NULL OR EXISTS (
+                SELECT 1 FROM entry_terms et WHERE et.entry_id=e.id
+                  AND et.term_id IN (SELECT id FROM generic_scope)
+            ))
           ORDER BY e.id {direction} LIMIT ? OFFSET ?"
     );
     let rows: Vec<EntryRow> = sqlx::query_as(sqlx::AssertSqlSafe(statement))
         .bind(filters.category_id)
+        .bind(i64::from(filters.include_descendants))
+        .bind(filters.term_id)
+        .bind(&filters.taxonomy_key)
         .bind(i64::from(filters.include_descendants))
         .bind(type_key)
         .bind(i64::from(published_only))
         .bind(filters.category_id)
         .bind(filters.tag_id)
         .bind(filters.tag_id)
+        .bind(filters.term_id)
         .bind(limit)
         .bind(offset)
         .fetch_all(&mut **tx)
@@ -520,24 +675,27 @@ pub async fn create_entry_with_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
+    let settings = current_settings_in_tx(&mut tx, type_key).await?;
+    verify_supported_values(type_key, &input.values, &settings)?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
-        validate_term_ids(&mut tx, ids).await?;
+        validate_term_ids(&mut tx, type_key, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
+    let status = if settings.publication == ContentPublication::DraftPublish { "draft" } else { "published" };
     let result = sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
-         VALUES (?, ?, ?, ?, CASE WHEN ? IN ('post', 'page') THEN 'draft' ELSE 'published' END)",
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(type_key)
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
-    .bind(type_key)
+    .bind(status)
     .execute(&mut *tx)
     .await;
     let id = match result {
@@ -558,6 +716,7 @@ pub async fn create_entry_with_fence(
     .fetch_one(&mut *tx)
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(record)
 }
@@ -587,6 +746,8 @@ pub async fn update_entry_with_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
+    let settings = current_settings_in_tx(&mut tx, type_key).await?;
+    verify_supported_values(type_key, &input.values, &settings)?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
@@ -601,7 +762,7 @@ pub async fn update_entry_with_fence(
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
-        validate_term_ids(&mut tx, ids).await?;
+        validate_term_ids(&mut tx, type_key, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
     let result = sqlx::query(
@@ -641,6 +802,7 @@ pub async fn update_entry_with_fence(
             .fetch_one(&mut *tx)
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
+            crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
             tx.commit().await?;
             Ok(record)
         }
@@ -691,22 +853,25 @@ pub async fn create_entry_with_schema_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
-    verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    let settings = &effective.base.descriptor.settings;
+    verify_supported_values(type_key, &input.values, settings)?;
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
-        validate_term_ids(&mut tx, ids).await?;
+        validate_term_ids(&mut tx, type_key, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
+    let status = if settings.publication == ContentPublication::DraftPublish { "draft" } else { "published" };
     let result = sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
-         VALUES (?, ?, ?, ?, CASE WHEN ? IN ('post', 'page') THEN 'draft' ELSE 'published' END)",
+         VALUES (?, ?, ?, ?, ?)",
     )
     .bind(type_key)
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
-    .bind(type_key)
+    .bind(status)
     .execute(&mut *tx)
     .await;
     let id = match result {
@@ -727,6 +892,7 @@ pub async fn create_entry_with_schema_fence(
     .fetch_one(&mut *tx)
     .await?;
     let record = decoded_with_terms(&mut tx, row).await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(record)
 }
@@ -743,7 +909,8 @@ pub async fn update_entry_with_schema_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_section_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
-    verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
+    verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
     let old_slug: String = sqlx::query_scalar(
         "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -755,7 +922,7 @@ pub async fn update_entry_with_schema_fence(
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
-        validate_term_ids(&mut tx, ids).await?;
+        validate_term_ids(&mut tx, type_key, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
     let result = sqlx::query(
@@ -795,6 +962,7 @@ pub async fn update_entry_with_schema_fence(
             .fetch_one(&mut *tx)
             .await?;
             let record = decoded_with_terms(&mut tx, row).await?;
+            crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
             tx.commit().await?;
             Ok(record)
         }
@@ -849,6 +1017,7 @@ fn effective_as_ct_def(effective: &EffectiveContentSchema) -> ContentTypeDefinit
     ContentTypeDefinition {
         key: effective.base.descriptor.key.clone(),
         label: effective.base.descriptor.label.clone(),
+        settings: effective.base.descriptor.settings.clone(),
         fields: effective
             .effective_fields
             .values()
@@ -906,7 +1075,15 @@ pub async fn prepare_composite_entry_save(
                 "publication_status ch? h? tr? 'draft' ho?c 'published'.",
             ));
         }
+        if effective.base.descriptor.settings.publication == ContentPublication::Immediate
+            && status == "draft"
+        {
+            return Err(ApiError::unprocessable(
+                "Loại nội dung lưu ngay không hỗ trợ trạng thái bản nháp.",
+            ));
+        }
     }
+    verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
 
     // Check Field ACL BEFORE reading existing entry / comparing values (no value-comparison oracle)
     let caller_role = actor_field_role(actor.user.role);
@@ -1006,6 +1183,14 @@ pub async fn commit_composite_entry_save(
 ) -> ApiResult<CompositeEntrySaveResult> {
     let mut tx = begin_entry_write(db, actor).await?;
     let effective = verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
+    verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
+    let is_draft_capable = effective.base.descriptor.settings.publication
+        == ContentPublication::DraftPublish;
+    if !is_draft_capable && plan.publication_status.as_deref() == Some("draft") {
+        return Err(ApiError::unprocessable(
+            "Loại nội dung lưu ngay không hỗ trợ trạng thái bản nháp.",
+        ));
+    }
 
     crate::storage::seo::check_default_slug_claim_in_tx(
         &mut tx,
@@ -1021,7 +1206,7 @@ pub async fn commit_composite_entry_save(
     )
     .await?;
     if let Some(ids) = &plan.merged_input.term_ids {
-        validate_term_ids(&mut tx, ids).await?;
+        validate_term_ids(&mut tx, type_key, ids).await?;
     }
 
     let values_json = serde_json::to_string(&plan.merged_input.values)?;
@@ -1031,12 +1216,7 @@ pub async fn commit_composite_entry_save(
             // for the built-in types. Keep that security trigger intact and
             // transition to published *within this same writer transaction*.
             // No intermediate draft can be observed or committed.
-            let is_builtin = matches!(type_key, "post" | "page");
-            let status_clause = if is_builtin {
-                "draft"
-            } else {
-                plan.publication_status.as_deref().unwrap_or("published")
-            };
+            let status_clause = if is_draft_capable { "draft" } else { "published" };
             let res = sqlx::query(
                 "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
                  VALUES (?, ?, ?, ?, ?)",
@@ -1054,7 +1234,7 @@ pub async fn commit_composite_entry_save(
                 }
                 other => other?.last_insert_rowid(),
             };
-            if is_builtin && plan.publication_status.as_deref() == Some("published") {
+            if is_draft_capable && plan.publication_status.as_deref() == Some("published") {
                 // Initial create remains v1; this is one logical atomic Save,
                 // not a separate publication/CAS transition.
                 sqlx::query(
@@ -1144,6 +1324,7 @@ pub async fn commit_composite_entry_save(
     )
     .await?;
 
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
 
@@ -1179,6 +1360,7 @@ pub async fn delete_entry(
         .bind(id)
         .execute(&mut *tx)
         .await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(())
 }
@@ -1191,12 +1373,22 @@ pub async fn set_publication_status(
     expected_version: i64,
     status: &str,
 ) -> ApiResult<ContentEntryRecord> {
+    forbid_generic_section_write(type_key)?;
+    if status != "draft" && status != "published" {
+        return Err(ApiError::bad_request("Trạng thái xuất bản không hợp lệ."));
+    }
     let mut tx = db.begin().await?;
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+    let settings = current_settings_in_tx(&mut tx, type_key).await?;
+    if settings.publication != ContentPublication::DraftPublish {
+        return Err(ApiError::bad_request("Loại nội dung này sử dụng chế độ lưu ngay."));
+    }
     let result = sqlx::query(
         "UPDATE content_entries
          SET publication_status = ?, version = version + 1, updated_at = datetime('now')
-         WHERE content_type_key = ? AND id = ? AND version = ?
-           AND content_type_key IN ('post', 'page')",
+         WHERE content_type_key = ? AND id = ? AND version = ?",
     )
     .bind(status)
     .bind(type_key)
@@ -1208,6 +1400,7 @@ pub async fn set_publication_status(
         return Err(missing_or_stale(db, type_key, id).await?);
     }
     crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     get_entry(db, type_key, id)
         .await?
@@ -1289,6 +1482,11 @@ mod tests {
         .execute(&db)
         .await
         .unwrap();
+        // Page stays unassociated by default; this fixture explicitly opts in
+        // Page and the custom CPT, as a real C2 Admin configuration would.
+        sqlx::query("INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
+                     VALUES ('page','[\"category\",\"tag\"]'),('news','[\"category\",\"tag\"]')")
+            .execute(&db).await.unwrap();
         let root = sqlx::query(
             "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Root','list-root')",
         )
@@ -1333,6 +1531,7 @@ mod tests {
             category_id: Some(root),
             tag_id: Some(tag),
             include_descendants: true,
+            ..EntryFilters::default()
         };
         for (sort, expected) in [
             (PublishedListSort::IdDesc, [third, second, first]),
@@ -1340,7 +1539,7 @@ mod tests {
         ] {
             for (i, &id) in expected.iter().enumerate() {
                 let page = expect_list_page(
-                    list_published_page(&db, "post", i as i64 + 1, 1, sort, filters)
+                    list_published_page(&db, "post", i as i64 + 1, 1, sort, filters.clone())
                         .await
                         .unwrap(),
                 );
@@ -1358,7 +1557,7 @@ mod tests {
                 PublishedListSort::IdAsc,
                 EntryFilters {
                     include_descendants: false,
-                    ..filters
+                    ..filters.clone()
                 },
             )
             .await
@@ -1372,7 +1571,7 @@ mod tests {
         assert!(!exact.has_next);
         for (type_key, id) in [("page", page_id), ("news", cpt_id)] {
             let result = expect_list_page(
-                list_published_page(&db, type_key, 1, 20, PublishedListSort::IdDesc, filters)
+                list_published_page(&db, type_key, 1, 20, PublishedListSort::IdDesc, filters.clone())
                     .await
                     .unwrap(),
             );
@@ -1384,7 +1583,7 @@ mod tests {
         }
 
         let past_end = expect_list_page(
-            list_published_page(&db, "post", 100, 1, PublishedListSort::IdAsc, filters)
+            list_published_page(&db, "post", 100, 1, PublishedListSort::IdAsc, filters.clone())
                 .await
                 .unwrap(),
         );
@@ -1575,6 +1774,158 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn builder_generic_taxonomy_list_hides_drafts_and_survives_withdrawn_references() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO taxonomy_definitions(key,label,hierarchical,public,owner_kind)
+             VALUES('genre','Genre',1,1,'user')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
+             VALUES('post','[\"genre\"]')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let root = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('genre','Root','genre-root')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let child = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id)
+             VALUES('genre','Child','genre-child',?)",
+        )
+        .bind(root)
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let published = list_test_entry(&db, "post", "genre-public", true, &[child]).await;
+        list_test_entry(&db, "post", "genre-draft", false, &[child]).await;
+        let filters = EntryFilters {
+            taxonomy_key: Some("genre".into()),
+            term_id: Some(root),
+            include_descendants: true,
+            ..EntryFilters::default()
+        };
+        let page = expect_list_page(
+            list_published_page(&db, "post", 1, 1, PublishedListSort::IdDesc, filters.clone())
+                .await
+                .unwrap(),
+        );
+        assert_eq!(page.entries.iter().map(|entry| entry.id).collect::<Vec<_>>(), [published]);
+        assert!(!page.has_next, "drafts must not create a next page");
+
+        // A malformed query remains a 400, even though a withdrawn persisted
+        // Builder reference is treated as unavailable configuration.
+        let malformed = EntryFilters {
+            tag_id: Some(child),
+            ..filters.clone()
+        };
+        let error = list_published_page(
+            &db, "post", 1, 6, PublishedListSort::IdDesc, malformed,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+
+        for change in [
+            "UPDATE taxonomy_definitions SET public=0 WHERE key='genre'",
+            "UPDATE taxonomy_definitions SET provider_status='provider_inactive',public=1 WHERE key='genre'",
+            "UPDATE taxonomy_definitions SET declaration_state='withdrawn',
+                provider_status='active' WHERE key='genre'",
+        ] {
+            sqlx::query(change).execute(&db).await.unwrap();
+            let result = list_published_page(
+                &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(
+                result,
+                PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
+            ));
+        }
+        sqlx::query(
+            "UPDATE taxonomy_definitions
+                SET public=1, provider_status='active',declaration_state='declared'
+              WHERE key='genre'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE content_type_taxonomy_overrides SET taxonomies_json='[]'
+             WHERE content_type_key='post'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let withdrawn = list_published_page(
+            &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            withdrawn,
+            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
+        ));
+        sqlx::query(
+            "UPDATE content_type_taxonomy_overrides SET taxonomies_json='[\"genre\"]'
+             WHERE content_type_key='post'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM entry_terms WHERE term_id=?")
+            .bind(child)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM taxonomy_terms WHERE id=?")
+            .bind(child)
+            .execute(&db)
+            .await
+            .unwrap();
+        let deleted = list_published_page(
+            &db, "post", 1, 6, PublishedListSort::IdDesc,
+            EntryFilters { term_id: Some(child), ..filters.clone() },
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            deleted,
+            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
+        ));
+        // An Admin can switch a taxonomy to flat once every remaining term
+        // is a root. An older saved Builder node with descendants=true must
+        // not turn the entire public homepage into HTTP 400.
+        sqlx::query("UPDATE taxonomy_definitions SET hierarchical=0 WHERE key='genre'")
+            .execute(&db).await.unwrap();
+        let incompatible = list_published_page(
+            &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+        ).await.unwrap();
+        assert!(matches!(incompatible,
+            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)));
+        let mut tx = db.begin().await.unwrap();
+        let query_error = validate_filter_in_tx(&mut tx, "post", &filters, true)
+            .await.unwrap_err();
+        assert_eq!(query_error.0, axum::http::StatusCode::BAD_REQUEST,
+            "user-provided filters remain strict after the definition change");
+    }
+
+    #[tokio::test]
     async fn published_taxonomy_filter_excludes_drafts_before_pagination() {
         let db = SqlitePoolOptions::new()
             .max_connections(1)
@@ -1642,21 +1993,22 @@ mod tests {
             category_id: Some(root),
             tag_id: Some(tag),
             include_descendants: true,
+            ..EntryFilters::default()
         };
-        let first = list_published_filtered(&db, "post", 1, 0, filters)
+        let first = list_published_filtered(&db, "post", 1, 0, filters.clone())
             .await
             .unwrap();
-        let second = list_published_filtered(&db, "post", 1, 1, filters)
+        let second = list_published_filtered(&db, "post", 1, 1, filters.clone())
             .await
             .unwrap();
-        let last = list_published_filtered(&db, "post", 1, 2, filters)
+        let last = list_published_filtered(&db, "post", 1, 2, filters.clone())
             .await
             .unwrap();
         assert_eq!(first.iter().map(|e| e.id).collect::<Vec<_>>(), [ids[2]]);
         assert_eq!(second.iter().map(|e| e.id).collect::<Vec<_>>(), [ids[0]]);
         assert!(last.is_empty());
         assert_eq!(first[0].term_ids, [root, child, tag]);
-        let admin = list_entries(&db, "post", 10, 0, filters).await.unwrap();
+        let admin = list_entries(&db, "post", 10, 0, filters.clone()).await.unwrap();
         assert_eq!(
             admin.len(),
             3,
@@ -1687,7 +2039,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            list_published_filtered(&db, "post", 10, 0, filters)
+            list_published_filtered(&db, "post", 10, 0, filters.clone())
                 .await
                 .unwrap()
                 .is_empty()

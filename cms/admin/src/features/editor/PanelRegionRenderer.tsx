@@ -8,7 +8,6 @@ import type {
 } from '../content/types.ts';
 import { FieldValueInput } from '../content/FieldValueInput.tsx';
 import { TermPicker } from '../taxonomy/TermPicker.tsx';
-import type { TaxonomyKind } from '../../api/taxonomy.ts';
 
 export interface PanelRegionRendererProps {
   config: EffectiveEditorConfigProjection;
@@ -332,7 +331,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           return config.taxonomies.length > 0 ? (
             <div data-testid="single-edit-terms">
               <TermPicker userId={userId} selectedIds={termIds} disabled={saving}
-                allowedKinds={config.taxonomies.filter((kind): kind is TaxonomyKind => kind === 'category' || kind === 'tag')}
+                typeKey={config.type_key} allowedKinds={config.taxonomies}
                 onApiError={onApiError} onChange={onTermIdsChange} />
             </div>
           ) : null;

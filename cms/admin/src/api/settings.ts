@@ -78,3 +78,35 @@ export function savePublicSiteSettings(
     defaultErrorMessage: 'Không lưu được cài đặt công khai.',
   });
 }
+
+/** SITE-02/C3: the server owns the version and every canonical route claim. */
+export interface PermalinkSettings {
+  version: number;
+  post_structure: string;
+  content_type_bases: Record<string, string | null>;
+  taxonomy_bases: Record<string, string | null>;
+}
+
+export type PermalinkSettingsDraft = Omit<PermalinkSettings, 'version'>;
+
+export function getPermalinkSettings(signal?: AbortSignal): Promise<PermalinkSettings> {
+  return requestJson<PermalinkSettings>('/api/admin/settings/permalinks', {
+    signal,
+    defaultErrorMessage: 'Không thể tải cấu hình permalink.',
+  });
+}
+
+export function savePermalinkSettings(
+  draft: PermalinkSettingsDraft,
+  expectedVersion: number,
+  csrfToken: string,
+): Promise<PermalinkSettings> {
+  return requestJson<PermalinkSettings>('/api/admin/settings/permalinks', {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: expectedVersion,
+    contentType: 'application/json',
+    body: JSON.stringify(draft),
+    defaultErrorMessage: 'Không thể lưu cấu hình permalink.',
+  });
+}

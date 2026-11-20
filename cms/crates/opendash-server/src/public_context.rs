@@ -25,14 +25,16 @@ impl TaxonomyKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PublicFilters {
     pub category_id: Option<i64>,
     pub tag_id: Option<i64>,
+    pub taxonomy_key: Option<String>,
+    pub term_id: Option<i64>,
     pub descendants: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublicQuery {
     pub page: i64,
     pub filters: PublicFilters,
@@ -67,7 +69,8 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
     for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
         let recognized = matches!(
             key.as_ref(),
-            "page" | "category_id" | "tag_id" | "include_descendants" | "descendants"
+            "page" | "category_id" | "tag_id" | "taxonomy_key" | "term_id"
+                | "include_descendants" | "descendants"
         );
         if !recognized {
             continue;
@@ -100,6 +103,15 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
             "tag_id" if !matches!(scope, QueryScope::Single) => {
                 query.filters.tag_id = Some(numeric()?);
             }
+            "taxonomy_key" if !matches!(scope, QueryScope::Single) => {
+                if !valid_content_type_key(&value) {
+                    return Err("taxonomy_key không hợp lệ.");
+                }
+                query.filters.taxonomy_key = Some(value.into_owned());
+            }
+            "term_id" if !matches!(scope, QueryScope::Single) => {
+                query.filters.term_id = Some(numeric()?);
+            }
             "include_descendants" if matches!(scope, QueryScope::ContentArchive) => {
                 query.filters.descendants = boolean()?;
             }
@@ -109,16 +121,26 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
             _ => return Err("Tham số query không dùng được trên route này."),
         }
     }
+    if query.filters.taxonomy_key.is_some() != query.filters.term_id.is_some() {
+        return Err("taxonomy_key và term_id phải dùng cùng nhau.");
+    }
+    if query.filters.taxonomy_key.is_some()
+        && (query.filters.category_id.is_some() || query.filters.tag_id.is_some())
+    {
+        return Err("Không được trộn generic taxonomy filter với category/tag aliases.");
+    }
     match scope {
         QueryScope::ContentArchive
-            if query.filters.descendants && query.filters.category_id.is_none() =>
+            if query.filters.descendants && query.filters.category_id.is_none()
+                && query.filters.taxonomy_key.is_none() =>
         {
-            Err("include_descendants yêu cầu category_id.")
+            Err("include_descendants yêu cầu category_id hoặc taxonomy_key + term_id.")
         }
         QueryScope::TaxonomyArchive(TaxonomyKind::Tag)
-            if query.filters.descendants && query.filters.category_id.is_none() =>
+            if query.filters.descendants && query.filters.category_id.is_none()
+                && query.filters.taxonomy_key.is_none() =>
         {
-            Err("descendants yêu cầu category_id trên tag archive.")
+            Err("descendants yêu cầu category_id hoặc hierarchical generic taxonomy.")
         }
         _ => Ok(query),
     }
@@ -126,6 +148,21 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
 
 pub fn validate_single_query(raw: Option<&str>) -> Result<(), &'static str> {
     parse_query(raw, QueryScope::Single).map(|_| ())
+}
+
+/// Validate the original HTTP request path *before* matching any history
+/// claim. A decoded/normalized alternate spelling must never alias a route.
+/// Canonical path segments in C3 are unescaped and slash-separated.
+pub fn validate_public_request_path(path: &str) -> Result<(), &'static str> {
+    if !path.starts_with('/')
+        || path.contains('%')
+        || path.contains('#')
+        || path.chars().any(char::is_control)
+        || (path != "/" && path.split('/').skip(1).any(|s| s.is_empty() || s == "." || s == ".."))
+    {
+        return Err("Đường dẫn công khai không hợp lệ.");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +184,13 @@ pub enum PublicRequestContext {
     TaxonomyArchive {
         term_id: i64,
         kind: TaxonomyKind,
+        slug: String,
+        query: PublicQuery,
+        canonical_path: String,
+    },
+    GenericTaxonomyArchive {
+        term_id: i64,
+        kind_key: String,
         slug: String,
         query: PublicQuery,
         canonical_path: String,
@@ -218,7 +262,9 @@ impl CanonicalUrlBuilder {
         ))
     }
 
-    fn with_query(base: String, query: PublicQuery, scope: QueryScope) -> String {
+    /// Serialize only typed, validated query fields against a canonical base
+    /// returned by storage. Public consumers must not reconstruct that base.
+    pub fn with_query(base: String, query: PublicQuery, scope: QueryScope) -> String {
         let mut pairs = url::form_urlencoded::Serializer::new(String::new());
         if query.page > 1 {
             pairs.append_pair("page", &query.page.to_string());
@@ -228,6 +274,10 @@ impl CanonicalUrlBuilder {
         }
         if let Some(id) = query.filters.tag_id {
             pairs.append_pair("tag_id", &id.to_string());
+        }
+        if let (Some(key), Some(id)) = (&query.filters.taxonomy_key, query.filters.term_id) {
+            pairs.append_pair("taxonomy_key", key);
+            pairs.append_pair("term_id", &id.to_string());
         }
         if query.filters.descendants {
             let key = if matches!(scope, QueryScope::ContentArchive) {
@@ -295,5 +345,32 @@ impl CanonicalUrlBuilder {
             ),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod request_path_tests {
+    use super::*;
+
+    #[test]
+    fn reject_encoded_and_non_canonical_request_paths() {
+        for path in [
+            "/blog/%2fprivate", "/blog/%252fprivate", "/blog/%2e%2e/private",
+            "/blog/../private", "/blog/./post", "/blog//post", "/blog/post/",
+            "//blog/post", "/blog/post#fragment", "/blog/post\0",
+        ] {
+            assert!(validate_public_request_path(path).is_err(), "{path}");
+        }
+        for path in ["/", "/blog/post", "/content/post/hello", "/genres/fiction"] {
+            assert!(validate_public_request_path(path).is_ok(), "{path}");
+        }
+    }
+
+    #[test]
+    fn canonical_pagination_uses_storage_base_not_legacy_prefix() {
+        let query = parse_query(Some("page=2&category_id=5&utm_campaign=x"), QueryScope::ContentArchive)
+            .expect("valid bounded query");
+        let href = CanonicalUrlBuilder::with_query("/blog".into(), query, QueryScope::ContentArchive);
+        assert_eq!(href, "/blog?page=2&category_id=5");
     }
 }

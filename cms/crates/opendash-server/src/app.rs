@@ -27,7 +27,8 @@ use crate::{
         },
         content::{
             MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list,
-            content_type_update, editor_layout_get, editor_layout_put,
+            content_type_update, content_entry_publication, content_entry_preview,
+            editor_layout_get, editor_layout_put,
             effective_editor_config_get, field_group_create, field_group_delete,
             field_group_list, field_group_update,
         },
@@ -35,7 +36,7 @@ use crate::{
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
             entry_table_get,
-            entry_composite_create, entry_composite_update, entry_preview, entry_publication,
+            entry_composite_create, entry_composite_update,
             entry_update,
         },
         media::{
@@ -55,11 +56,14 @@ use crate::{
         public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
         settings::{
             general_get, general_put, public_get, public_put, theme_options_get,
-            theme_options_put, timezones_get,
+            theme_options_put, timezones_get, permalinks_get, permalinks_put,
         },
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_get, taxonomy_list,
-            taxonomy_patch, taxonomy_eligibility_list,
+            taxonomy_patch, taxonomy_terms_resolve, taxonomy_eligibility_list,
+            taxonomy_eligibility_put, taxonomy_eligibility_effective,
+            taxonomy_definitions_list, taxonomy_definitions_create, taxonomy_definitions_get,
+            taxonomy_definitions_patch, taxonomy_definitions_delete,
         },
         themes::{ThemeStoreRoot, theme_activate, theme_asset, theme_install, theme_list},
         users::{
@@ -266,6 +270,12 @@ pub fn build_router_with_themes_root(
         )
         .route("/api/admin/settings/timezones", get(timezones_get))
         .route(
+            "/api/admin/settings/permalinks",
+            get(permalinks_get)
+                .put(permalinks_put)
+                .layer(DefaultBodyLimit::max(16 * 1024)),
+        )
+        .route(
             "/api/admin/menus",
             get(menus_list)
                 .post(menus_create)
@@ -289,10 +299,27 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_MENU_JSON_BYTES)),
         )
         .route(
+            "/api/admin/taxonomy/definitions",
+            get(taxonomy_definitions_list)
+                .post(taxonomy_definitions_create)
+                .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/taxonomy/definitions/{key}",
+            get(taxonomy_definitions_get)
+                .patch(taxonomy_definitions_patch)
+                .delete(taxonomy_definitions_delete)
+                .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/taxonomy/terms",
             get(taxonomy_list)
                 .post(taxonomy_create)
                 .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/taxonomy/terms/resolve",
+            get(taxonomy_terms_resolve),
         )
         .route(
             "/api/admin/taxonomy/terms/{id}",
@@ -307,7 +334,17 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/taxonomy/eligibility/{content_type_key}",
-            get(taxonomy_eligibility_list),
+            get(taxonomy_eligibility_list)
+                .put(taxonomy_eligibility_put)
+                .layer(DefaultBodyLimit::max(MAX_TAXONOMY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/taxonomy/eligibility/{content_type_key}/effective",
+            get(taxonomy_eligibility_effective),
+        )
+        .route(
+            "/api/admin/taxonomy/eligibility/{content_type_key}/configured",
+            get(crate::routes::taxonomy::taxonomy_eligibility_configured),
         )
         .route(
             "/api/admin/operations/diagnostics",
@@ -487,11 +524,11 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/{id}/publication",
-            post(entry_publication).layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+            post(content_entry_publication).layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/{id}/preview",
-            get(entry_preview),
+            get(content_entry_preview),
         )
         .route(
             "/api/admin/content-types/{type_key}/entries/{id}/route",

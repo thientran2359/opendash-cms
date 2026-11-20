@@ -25,6 +25,11 @@ Graph is a locator, not runtime evidence; stale symbols were checked on disk.
 
 ## 2. Content type settings (C1)
 
+**Owner follow-up 19/11/2026:** [Builder template và content](../product/BUILDER_TEMPLATE_AND_CONTENT.md)
+requires a distinct content Builder capability. The two-value supports set below
+is the existing C1 contract, not support for that new requirement. Builder registration,
+defaults and preservation/fallback need a separate G2/G3 delta before implementation.
+
 Add optional `settings` to existing CPT create/update/read DTOs and canonical
 schema JSON. All fields deny unknown keys. Settings contain `public: bool`,
 `has_archive: bool`, `publication: immediate|draft_publish`,
@@ -96,6 +101,46 @@ and term extension panels. Existing category_id/tag_id query keys remain aliases
 new `taxonomy_key`+`term_id` pair supports one generic filter, positive canonical ID,
 reject half pair/mixed aliases and cap pagination as today. Descendants only when
 selected taxonomy is hierarchical. Do not silently ignore unsupported filters.
+
+### C2 corrective read projections and CAS clarification — 19/11/2026
+
+Aster Final Decision for [#375](https://github.com/thientran2359/opendash-cms/issues/375),
+reviewed corrective head `9017b9cb2af9b71c8b6975a88c69db6209f160d7`.
+These additive Admin reads support the existing C2 configuration and entry tables.
+
+- Admin GET `/api/admin/taxonomy/eligibility/{content_type_key}/configured`
+  returns `{taxonomies:[key],has_override:bool,effective:[key],type_version:i64}`.
+  The configured selection preserves inactive/withdrawn provider associations;
+  the effective selection retains current visibility rules. All fields, including
+  the CPT CAS version, come from one SQLite read transaction. Section rejects400;
+  missing CPT404; existing Admin authentication applies; response is no-store.
+  A client saves only against the version matched to its configured baseline.
+  A separately fetched CPT version cannot silently replace this token. Rebase
+  reapplies local additions/removals to a fresh matched snapshot and leaves
+  Save blocked when the displayed snapshots disagree. A later writer still
+  causes412 at the existing eligibility PUT.
+- Session-authenticated GET `/api/admin/taxonomy/terms/resolve?ids=...` returns
+  an array of `{id:i64,kind:key,name:string}` for requested existing term IDs.
+  Follow the existing Admin term-read permission boundary, including Editor.
+  Require1–100 distinct canonical positive i64 IDs separated by commas, maximum
+  2000 characters; malformed/duplicate/overflow inputs400, missing session401.
+  Missing IDs are omitted. Return no-store and only the requested projection,
+  using parameterized storage queries. Entry tables request visible-row IDs in
+  batches of at most100, with at most two concurrent label requests; full term
+  catalogs load only for actively used filters. Report loading/failure explicitly.
+- Taxonomy eligibility site overrides are an Admin operation for eligible
+  non-Section CPTs, including plugin/theme CPTs. This does not grant provider
+  schema-definition edits. Core category/tag label/public edits remain supported;
+  their key/hierarchy and user-only deletion constraints remain in force.
+- Meaningful existing provider CPT schema/status/declaration or eligibility
+  changes advance the owning CPT CAS in the same writer transaction, once per
+  affected key in that operation. Identical redeclarations/status calls are
+  idempotent. Preserve links on withdrawal/deactivation, including separately
+  declared eligibility on a withdrawn CPT. No second version counter or migration.
+
+These reads do not generate canonical public custom-term URLs. C3 remains the
+authority for that behavior. Exact merged-source native release G5 is a separate
+gate from this design clarification and premerge regression evidence.
 
 ## 4. Permalinks and route authority (C3)
 

@@ -309,6 +309,7 @@ impl PluginManager {
             let schema = opendash_core::content::ContentTypeDefinition {
                 key: effective_schema.base.descriptor.key.clone(),
                 label: effective_schema.base.descriptor.label.clone(),
+                settings: effective_schema.base.descriptor.settings.clone(),
                 fields: effective_schema
                     .effective_fields
                     .values()

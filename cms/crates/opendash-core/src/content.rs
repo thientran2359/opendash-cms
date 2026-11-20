@@ -425,6 +425,79 @@ pub fn valid_default_value(field: &ContentFieldDefinition, value: &Value) -> boo
     true
 }
 
+/// Publication semantics are server-owned; the Admin UI must not infer them from
+/// the content-type key. Legacy custom types use the immediate policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentPublication {
+    Immediate,
+    DraftPublish,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentSupport {
+    Editor,
+    FeaturedImage,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentTypeSettings {
+    pub public: bool,
+    pub has_archive: bool,
+    pub publication: ContentPublication,
+    pub supports: Vec<ContentSupport>,
+}
+
+impl Default for ContentTypeSettings {
+    fn default() -> Self {
+        Self {
+            public: true,
+            has_archive: true,
+            publication: ContentPublication::Immediate,
+            supports: vec![ContentSupport::Editor, ContentSupport::FeaturedImage],
+        }
+    }
+}
+
+impl ContentTypeSettings {
+    pub fn default_for_type_key(type_key: &str) -> Self {
+        match type_key {
+            "post" | "page" => Self::builtin_publication(),
+            "section" => Self::private_section(),
+            _ => Self::default(),
+        }
+    }
+
+    pub fn builtin_publication() -> Self {
+        Self { publication: ContentPublication::DraftPublish, ..Self::default() }
+    }
+
+    pub fn private_section() -> Self {
+        Self {
+            public: false,
+            has_archive: false,
+            publication: ContentPublication::DraftPublish,
+            supports: Vec::new(),
+        }
+    }
+
+    pub fn validate_and_normalize(&mut self) -> Result<(), &'static str> {
+        let original_len = self.supports.len();
+        self.supports.sort_unstable();
+        self.supports.dedup();
+        if self.supports.len() != original_len {
+            return Err("supports không được chứa tính năng trùng lặp.");
+        }
+        Ok(())
+    }
+
+    pub fn supports(&self, feature: ContentSupport) -> bool {
+        self.supports.contains(&feature)
+    }
+}
+
 /// Wire input DTO for `POST /api/admin/content-types` and `PUT /api/admin/content-types/{type_key}`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -433,6 +506,8 @@ pub struct ContentTypeDefinitionInput {
     pub label: String,
     #[serde(default)]
     pub fields: Vec<FieldDefinitionInput>,
+    #[serde(default)]
+    pub settings: Option<ContentTypeSettings>,
 }
 
 impl ContentTypeDefinitionInput {
@@ -455,10 +530,15 @@ impl ContentTypeDefinitionInput {
             }
             canonical_fields.push(cf);
         }
+        let mut settings = self
+            .settings
+            .unwrap_or_else(|| ContentTypeSettings::default_for_type_key(&self.key));
+        settings.validate_and_normalize()?;
         let def = ContentTypeDefinition {
             key: self.key,
             label: self.label,
             fields: canonical_fields,
+            settings,
         };
         def.validate()?;
         Ok(def)
@@ -474,6 +554,9 @@ pub struct ContentTypeDefinition {
     pub label: String,
     #[serde(default)]
     pub fields: Vec<ContentFieldDefinition>,
+    /// Legacy definitions without this property deserialize to public immediate.
+    #[serde(default)]
+    pub settings: ContentTypeSettings,
 }
 
 impl ContentTypeDefinition {
@@ -483,6 +566,19 @@ impl ContentTypeDefinition {
         }
         if !valid_label(&self.label) {
             return Err("Tên loại nội dung không hợp lệ.");
+        }
+        let mut settings = self.settings.clone();
+        settings.validate_and_normalize()?;
+        if settings != self.settings {
+            return Err("supports chưa được chuẩn hóa.");
+        }
+        if matches!(self.key.as_str(), "post" | "page")
+            && self.settings.publication != ContentPublication::DraftPublish
+        {
+            return Err("post/page phải sử dụng cơ chế Lưu nháp và Xuất bản.");
+        }
+        if self.key == "section" && self.settings != ContentTypeSettings::private_section() {
+            return Err("Section phải luôn riêng tư và không được xuất bản.");
         }
         if self.fields.len() > 64 {
             return Err("Mỗi loại nội dung hỗ trợ tối đa 64 custom fields.");
@@ -945,6 +1041,7 @@ impl EffectiveContentSchema {
                 "version": self.base_version,
                 "taxonomies": sorted_tax,
                 "fields": self.base.descriptor.fields,
+                "settings": self.base.descriptor.settings,
             },
             "attached_groups": self.attached_groups.iter().map(|g| {
                 serde_json::json!({
@@ -1085,6 +1182,8 @@ pub fn merge_package_redeclared_fields(
 pub struct CntDeclarations {
     #[serde(default)]
     pub content_types: Vec<ContentTypeDeclaration>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub taxonomy_definitions: Vec<TaxonomyDeclaration>,
     #[serde(default)]
     pub taxonomy_eligibility: Vec<TaxonomyEligibilityDeclaration>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1094,35 +1193,53 @@ pub struct CntDeclarations {
 impl CntDeclarations {
     pub fn is_empty(&self) -> bool {
         self.content_types.is_empty()
+            && self.taxonomy_definitions.is_empty()
             && self.taxonomy_eligibility.is_empty()
             && self.field_groups.is_empty()
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self.taxonomy_definitions.len() > 64 {
+            return Err("Mỗi gói hỗ trợ tối đa 64 taxonomy_definitions.");
+        }
+        let mut seen_taxonomies = HashSet::new();
+        for taxonomy in &self.taxonomy_definitions {
+            taxonomy.validate()?;
+            if !seen_taxonomies.insert(taxonomy.key.as_str()) {
+                return Err("Khóa taxonomy bị trùng lặp trong declarations.");
+            }
+        }
         let mut seen_keys = HashSet::new();
         for ct in &self.content_types {
             if !seen_keys.insert(ct.key.as_str()) {
                 return Err("Khóa content_type bị trùng lặp trong declarations.");
             }
+            if matches!(ct.key.as_str(), "post" | "page" | "section")
+                && ct.rewrite_base.is_some()
+            {
+                return Err("Post/Page/Section không hỗ trợ rewrite_base riêng của provider.");
+            }
+            validate_provider_rewrite_base(ct.rewrite_base.as_deref())?;
+            let mut settings = ct.settings.clone().unwrap_or_default();
+            settings.validate_and_normalize()?;
             let def = ContentTypeDefinition {
                 key: ct.key.clone(),
                 label: ct.label.clone(),
                 fields: ct.fields.clone(),
+                settings,
             };
             def.validate()?;
-            for tax in &ct.taxonomies {
-                if tax != "category" && tax != "tag" {
-                    return Err("Chỉ hỗ trợ taxonomy eligibility cho category hoặc tag lõi.");
-                }
-            }
+            validate_provider_taxonomy_keys(&ct.taxonomies)?;
         }
+        let mut seen_eligibility = HashSet::new();
         for elig in &self.taxonomy_eligibility {
             if !valid_content_type_key(&elig.content_type) {
                 return Err("Khóa loại nội dung trong taxonomy_eligibility không hợp lệ.");
             }
+            validate_provider_taxonomy_keys(&elig.taxonomies)?;
             for tax in &elig.taxonomies {
-                if tax != "category" && tax != "tag" {
-                    return Err("Chỉ hỗ trợ taxonomy eligibility cho category hoặc tag lõi.");
+                if !seen_eligibility.insert((elig.content_type.as_str(), tax.as_str())) {
+                    return Err("Trùng association content_type/taxonomy trong declarations.");
                 }
             }
         }
@@ -1140,6 +1257,40 @@ impl CntDeclarations {
     }
 }
 
+/// Syntax shared by CPT and taxonomy rewrite defaults. Route root reservations,
+/// namespace collisions, and site overrides belong to the C3 storage resolver.
+fn validate_provider_rewrite_base(base: Option<&str>) -> Result<(), &'static str> {
+    if let Some(base) = base {
+        let segments: Vec<&str> = base.split('/').collect();
+        if segments.len() > 3
+            || segments
+                .iter()
+                .any(|segment| !valid_kebab_segment_with_limit(segment, 64))
+        {
+            return Err("rewrite_base phải có từ 1 đến 3 đoạn kebab-case hợp lệ.");
+        }
+    }
+    Ok(())
+}
+
+/// References may point to core, site-owned, or same-provider taxonomies;
+/// canonical storage verifies existence, ownership, and provider activity.
+fn validate_provider_taxonomy_keys(keys: &[String]) -> Result<(), &'static str> {
+    if keys.len() > 64 {
+        return Err("Mỗi content type hỗ trợ tối đa 64 taxonomy associations.");
+    }
+    let mut seen = HashSet::new();
+    for key in keys {
+        if !valid_content_type_key(key) {
+            return Err("Khóa taxonomy trong eligibility không hợp lệ.");
+        }
+        if !seen.insert(key.as_str()) {
+            return Err("Khóa taxonomy trùng lặp trong eligibility.");
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentTypeDeclaration {
@@ -1149,6 +1300,40 @@ pub struct ContentTypeDeclaration {
     pub fields: Vec<ContentFieldDefinition>,
     #[serde(default)]
     pub taxonomies: Vec<String>,
+    /// Omission preserves existing provider-owned settings on package re-install.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<ContentTypeSettings>,
+    /// Provider default only. The site's explicit C3 override takes precedence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewrite_base: Option<String>,
+}
+
+/// Package-declared taxonomy defaults. Owner, version and provider status are
+/// assigned and checked by the canonical registry/storage layer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyDeclaration {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub hierarchical: bool,
+    #[serde(default = "taxonomy_public_default")]
+    pub public: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewrite_base: Option<String>,
+}
+
+impl TaxonomyDeclaration {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        TaxonomyDefinitionInput {
+            key: self.key.clone(),
+            label: self.label.clone(),
+            hierarchical: self.hierarchical,
+            public: self.public,
+        }
+        .validate()?;
+        validate_provider_rewrite_base(self.rewrite_base.as_deref())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1157,6 +1342,74 @@ pub struct TaxonomyEligibilityDeclaration {
     pub content_type: String,
     #[serde(default)]
     pub taxonomies: Vec<String>,
+}
+
+/// Canonical site taxonomy descriptor (C2). Ownership is the same registry
+/// primitive used by content types, not a second competing ownership system.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyDefinition {
+    pub key: String,
+    pub label: String,
+    pub hierarchical: bool,
+    pub public: bool,
+    pub version: i64,
+    pub owner: ResourceOwner,
+    pub provider_status: ProviderStatus,
+    pub declaration_state: DeclarationState,
+}
+
+fn taxonomy_public_default() -> bool { true }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyDefinitionInput {
+    pub key: String,
+    pub label: String,
+    #[serde(default)]
+    pub hierarchical: bool,
+    #[serde(default = "taxonomy_public_default")]
+    pub public: bool,
+}
+
+impl TaxonomyDefinitionInput {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if !valid_content_type_key(&self.key) {
+            return Err("Khóa taxonomy không hợp lệ.");
+        }
+        if matches!(self.key.as_str(), "category" | "tag" | "post" | "page" | "section")
+            || RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
+        {
+            return Err("Khóa taxonomy thuộc namespace Core được bảo vệ.");
+        }
+        if !valid_label(&self.label) {
+            return Err("Tên taxonomy không hợp lệ (tối đa 100 ký tự).");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TaxonomyDefinitionPatch {
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub hierarchical: Option<bool>,
+    #[serde(default)]
+    pub public: Option<bool>,
+}
+
+impl TaxonomyDefinitionPatch {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.label.is_none() && self.hierarchical.is_none() && self.public.is_none() {
+            return Err("Cần ít nhất một thuộc tính taxonomy để cập nhật.");
+        }
+        if self.label.as_ref().is_some_and(|label| !valid_label(label)) {
+            return Err("Tên taxonomy không hợp lệ (tối đa 100 ký tự).");
+        }
+        Ok(())
+    }
 }
 
 pub fn valid_label(value: &str) -> bool {
@@ -1638,6 +1891,7 @@ pub struct EffectiveEditorRegionsProjection {
 pub struct EffectiveEditorConfigProjection {
     pub type_key: String,
     pub label: String,
+    pub settings: ContentTypeSettings,
     pub owner: ResourceOwner,
     pub provider_status: ProviderStatus,
     pub declaration_state: DeclarationState,
@@ -2376,6 +2630,7 @@ pub fn project_effective_editor_config(
     EffectiveEditorConfigProjection {
         type_key: effective.base.descriptor.key.clone(),
         label: effective.base.descriptor.label.clone(),
+        settings: effective.base.descriptor.settings.clone(),
         owner: effective.base.owner.clone(),
         provider_status: effective.base.status,
         declaration_state: effective.base.declaration_state,
@@ -2397,6 +2652,120 @@ pub fn project_effective_editor_config(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn c4_provider_legacy_manifest_remains_compatible() {
+        let legacy: CntDeclarations = serde_json::from_value(json!({
+            "content_types": [{"key": "review", "label": "Reviews", "taxonomies": ["category", "tag"]}]
+        }))
+        .unwrap();
+        legacy.validate().unwrap();
+        let serialized = serde_json::to_value(&legacy).unwrap();
+        assert!(serialized.get("taxonomy_definitions").is_none());
+        assert!(serialized["content_types"][0].get("rewrite_base").is_none());
+        assert!(serialized["content_types"][0].get("settings").is_none());
+        assert!(CntDeclarations::default().is_empty());
+    }
+
+    #[test]
+    fn c4_provider_can_declare_taxonomy_and_rewrite_defaults() {
+        let payload = json!({
+            "taxonomy_definitions": [
+                {"key":"genre","label":"Genre","hierarchical":true,"public":false,"rewrite_base":"library/genres"},
+                {"key":"series","label":"Series"}
+            ],
+            "content_types": [{
+                "key":"review","label":"Reviews","taxonomies":["genre","category","site_taxonomy"],
+                "rewrite_base":"library/reviews",
+                "settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor"]}
+            }],
+            "taxonomy_eligibility": [{"content_type":"review","taxonomies":["series","tag"]}]
+        });
+        let input: CntDeclarations = serde_json::from_value(payload).unwrap();
+        input.validate().unwrap();
+        let actual = serde_json::to_value(&input).unwrap();
+        assert_eq!(actual["taxonomy_definitions"][0]["public"], false);
+        assert_eq!(actual["taxonomy_definitions"][1]["hierarchical"], false);
+        assert_eq!(actual["taxonomy_definitions"][1]["public"], true);
+        assert!(actual["taxonomy_definitions"][1].get("rewrite_base").is_none());
+        assert_eq!(actual["content_types"][0]["rewrite_base"], "library/reviews");
+        assert_eq!(serde_json::from_value::<CntDeclarations>(actual).unwrap(), input);
+
+        let tax_only: CntDeclarations = serde_json::from_value(json!({
+            "taxonomy_definitions":[{"key":"genre","label":"Genre"}]
+        })).unwrap();
+        assert!(!tax_only.is_empty());
+    }
+
+    #[test]
+    fn c4_provider_rejects_duplicate_or_core_owned_taxonomy_declarations() {
+        for key in ["category", "tag", "post", "page", "section", "seo", "Invalid-Key"] {
+            let declarations: CntDeclarations = serde_json::from_value(json!({
+                "taxonomy_definitions":[{"key":key,"label":"A"}]
+            })).unwrap();
+            assert!(declarations.validate().is_err(), "reserved or invalid taxonomy: {key}");
+        }
+        let duplicate: CntDeclarations = serde_json::from_value(json!({
+            "taxonomy_definitions":[{"key":"genre","label":"Genre"}, {"key":"genre","label":"Other"}]
+        })).unwrap();
+        assert!(duplicate.validate().is_err());
+
+        for path in [
+            json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","surprise":3}]}),
+            json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","owner":{"kind":"plugin","id":"other"}}]}),
+            json!({"content_types":[{"key":"review","label":"Reviews","rewrite_base":"a","surprise":3}]}),
+            json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","rewrite_base":7}]})
+        ] {
+            assert!(serde_json::from_value::<CntDeclarations>(path).is_err());
+        }
+    }
+
+    #[test]
+    fn c4_provider_rejects_duplicate_eligibility_rows_claiming_same_taxonomy() {
+        let duplicate: CntDeclarations = serde_json::from_value(json!({
+            "taxonomy_eligibility": [
+                {"content_type":"review","taxonomies":["genre"]},
+                {"content_type":"review","taxonomies":["genre"]}
+            ]
+        })).unwrap();
+        assert!(duplicate.validate().is_err());
+    }
+
+    #[test]
+    fn c4_provider_rejects_malformed_rewrite_bases_and_associations() {
+        for base in ["", "/reviews", "reviews/", "a//b", "a/b/c/d", "../x", "X", "review_name", "news?x=1", "a/%term%"] {
+            let cpt: CntDeclarations = serde_json::from_value(json!({
+                "content_types":[{"key":"review","label":"Reviews","rewrite_base":base}]
+            })).unwrap();
+            assert!(cpt.validate().is_err(), "invalid CPT rewrite base: {base}");
+            let tax: CntDeclarations = serde_json::from_value(json!({
+                "taxonomy_definitions":[{"key":"genre","label":"Genre","rewrite_base":base}]
+            })).unwrap();
+            assert!(tax.validate().is_err(), "invalid taxonomy rewrite base: {base}");
+        }
+        for taxonomies in [
+            json!(["genre", "genre"]),
+            json!(["bad-key"]),
+            json!([""]),
+            json!(["category", "category"])
+        ] {
+            let cpt: CntDeclarations = serde_json::from_value(json!({
+                "content_types":[{"key":"review","label":"Reviews","taxonomies":taxonomies}]
+            })).unwrap();
+            assert!(cpt.validate().is_err(), "invalid CPT association: {taxonomies}");
+            let eligibility: CntDeclarations = serde_json::from_value(json!({
+                "taxonomy_eligibility":[{"content_type":"review","taxonomies":taxonomies}]
+            })).unwrap();
+            assert!(eligibility.validate().is_err(), "invalid eligibility association: {taxonomies}");
+        }
+        let builtin: CntDeclarations = serde_json::from_value(json!({
+            "content_types":[{
+                "key":"post","label":"Post","rewrite_base":"blog",
+                "settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor"]}
+            }]
+        })).unwrap();
+        assert!(builtin.validate().is_err(), "post URLs belong to global C3 policy");
+    }
 
     #[test]
     fn accepts_custom_post_type_keys() {
@@ -2443,6 +2812,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            settings: ContentTypeSettings::default(),
         }
     }
 

@@ -4,7 +4,10 @@
 
 **Repository nguồn duy nhất:** `thientran2359/opendash-cms`.
 Code nằm trong 5 worktree/checkout **cục bộ** tách biệt trên Windows và macOS;
-mỗi agent chỉ sửa branch `agent/<name>` được gán trong [agents.yaml](agents.yaml).
+mỗi agent dùng branch mặc định `agent/<name>` được gán trong [agents.yaml](agents.yaml).
+Theo [ADR-0010 (owner 2026-11-19)](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md),
+`task/*` không còn là nhánh bắt buộc cho từng Issue; chỉ là ngoại lệ cô lập
+được giải thích trên Issue/PR, không được lách ownership/Ready hoặc một task active.
 Tạo branch mới không tự tạo được một phiên Codex/Antigravity/CoS hoặc điều khiển
 remote. Adapter điều phối Muse chưa được xác nhận/khởi chạy.
 
@@ -77,6 +80,28 @@ review trong ruleset. Không tự gán kết quả AI thành approval GitHub, kh
 qua CI, ownership hoặc gate. **Atlas, Nova, Harbor và Forge áp dụng ADR-0010**:
 được tự kiểm tra và merge PR đủ gates; ghi `Self-review: <Agent> — reviewed head <SHA>`
 và validation thật trong PR. Không tạo review giả từ một tài khoản chung.
+
+## EGM và handoff tương thích — 2026-11-20
+
+[EGM workflow](../docs/plans/EGM_WORKFLOW.md) quy định cách thiết kế và bàn giao;
+Issue/Project/PR tiếp tục giữ trạng thái vận hành. Bản thiết kế EGM chính giữ
+quyết định kỹ thuật; task section theo mẫu SLICE_TASK trong module/milestone
+plans giữ scope/files/acceptance của task và link về thiết kế. Không duy trì
+hai định nghĩa kiến trúc hoặc coi bản nháp là quyền triển khai.
+
+Trong giai đoạn này generator/adapter **không đổi**: task mới vẫn có ID
+`Mx-Sxx-Txx`, metadata G2/G3/track/module/capability và tám mục hiện hành trong
+nguồn plans được hỗ trợ đã merge. Pin source SHA chứa handoff, revision thiết kế
+đã chấp nhận và code baseline. Sau đó dùng generator read-only và publish payload
+đã đối chiếu bằng Connector/API theo các bước bên dưới. Không truyền trực tiếp
+`docs/designs/` cho generator; không mở manual implementation bypass mới.
+Route không hỗ trợ ID/actor/format thì chặn route đó, không đổi danh tính để né.
+
+Task đã Ready giữ source đã duyệt và kiểm lại gate trước pickup; task đang làm
+giữ In progress/In review và ownership/receipt. Docs/design theo chỉ đạo owner
+hoặc Final Decision đủ evidence dùng luồng PR tài liệu của ADR-0010, không giả
+implementation Ready. Phân quyền kỹ thuật theo adaptation trong ADR-0010;
+không biến mọi technical checkpoint thành yêu cầu owner trả lời.
 
 ## Nguồn sự thật cho task và tài liệu
 
@@ -284,7 +309,8 @@ không tự coi lời nhắn đã gửi hoặc commit tồn tại là hoàn thà
 
 **Một implementation task đang active trên mỗi agent branch.** Nếu còn
 PR chưa merge, không đưa task không liên quan vào cùng branch; chờ review/
-đồng bộ hoặc dùng task branch tách riêng sau quyết định thay đổi quy ước.
+đồng bộ. Không tạo `task/*` để nhận task mới khi PR/task hiện tại vẫn
+chiếm quyền; ngoại lệ cô lập chỉ phục vụ phạm vi đã ủy quyền theo ADR-0010.
 Đảm bảo ownership file/schema/API tránh hai agent ghi cùng một hợp đồng.
 
 ## Review tài liệu/thiết kế qua PR giữa các agent
@@ -370,12 +396,19 @@ và một worktree local cho mỗi agent. Không dùng remote filesystem cho IDE
 Không chạy lệnh bootstrap đồng thời trên cùng clone.
 
 Branch `agent/<name>` lần đầu tạo từ `origin/main` nếu local/remote chưa có;
-nếu remote đã có, checkout tracking branch đó. Sau khi có PR được merge,
-coordinator yêu cầu agent đồng bộ: `git fetch origin` rồi
-`git merge origin/main` trong branch của chính mình, xử lý conflict bằng
-review, không reset --hard hoặc force push. Nếu có commit từ máy khác, trước
-khi push phải fetch/merge/refactor theo phê duyệt; `push` từ chối non-fast-forward
-là BLOCKED, không tự force.
+nếu remote đã có, checkout tracking branch đó. **Mỗi task mới dùng lại branch
+agent mặc định**, không tự tạo `task/*`. Trước khi nhận task khác, kiểm
+worktree sạch, PR/task cũ đã giải phóng, `git fetch origin` và xác minh
+`origin/main`, `origin/agent/<name>`, các commit chưa merge.
+Đồng bộ branch của chính mình bằng `git merge --ff-only origin/main` khi
+lịch sử cho phép; nếu phân kỳ, review các commit và merge `origin/main`
+sau khi xử lý conflict đúng ownership, hoặc dừng BLOCKED nếu chưa thể an toàn.
+Không tự reset --hard, rebase/force push hoặc làm mất diff/commit.
+Nếu có commit từ máy khác, phải đối chiếu trước khi push; non-fast-forward
+là BLOCKED, không tự force. Sau PR merge, lặp lại bước sync trước task kế tiếp.
+Checkout detached tại exact merged SHA được khuyến nghị cho G5/release test.
+Chỉ dùng `task/*` khi cần cô lập thật, ghi rõ lý do/base/head/ownership trên
+Issue/PR; ngoại lệ không cho phép hai task active hay né gate.
 
 ## Checklist trước khi push / tạo PR
 
@@ -388,8 +421,9 @@ là BLOCKED, không tự force.
    `python cms/scripts/check-plans.py --self-test`,
    `python .agents/scripts/check-agent-artifacts.py` và `git diff --check`.
 4. Commit ghi task ID (ví dụ `M3-S03-T01: ...`), non-force
-   `git push -u origin agent/<name>` sau khi HEAD/remote đúng; với task branch
-   được giao, push đúng `task/...`. Commit có trailer `Agent: <name>`.
+   `git push -u origin agent/<name>` sau khi HEAD/remote đúng; chỉ dùng và
+   push `task/*` khi ngoại lệ đã được ghi rõ trên Issue/PR. Commit có
+   trailer `Agent: <name>`; PR thường từ `agent/<name>` vào `main`.
 5. Đính commit SHA, môi trường và lệnh PASS/FAIL/NOT_RUN vào Issue và PR;
    reviewer hoặc agent được tự review theo ADR-0010 so sánh source, dependency, contract
    và DB migration impact; ghi verdict cùng `Reviewed head SHA` theo quy chuẩn.
