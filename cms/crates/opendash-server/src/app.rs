@@ -22,8 +22,7 @@ use crate::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
         builder::{
             builder, entry_builder_get, entry_builder_preview, entry_builder_put,
-            entry_builder_reset, homepage_get, homepage_preview, homepage_put, page, preview,
-            registry, save, serve_asset,
+            entry_builder_reset, page, preview, registry, save, serve_asset,
         },
         content::{
             MAX_CONTENT_TYPE_JSON_BYTES, content_entry_preview, content_entry_publication,
@@ -53,7 +52,7 @@ use crate::{
         public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
         settings::{
             general_get, general_put, permalinks_get, permalinks_put, public_get, public_put,
-            theme_options_get, theme_options_put, timezones_get,
+            reading_get, reading_put, theme_options_get, theme_options_put, timezones_get,
         },
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_definitions_create,
@@ -238,16 +237,6 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
         )
         .route(
-            "/api/admin/builder/homepage",
-            get(homepage_get)
-                .put(homepage_put)
-                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
-        )
-        .route(
-            "/api/admin/builder/homepage/preview",
-            post(homepage_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
-        )
-        .route(
             "/api/admin/entries/{type_key}/{id}/builder",
             get(entry_builder_get)
                 .put(entry_builder_put)
@@ -287,6 +276,12 @@ pub fn build_router_with_themes_root(
             "/api/admin/settings/public",
             get(public_get)
                 .put(public_put)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/settings/reading",
+            get(reading_get)
+                .put(reading_put)
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/settings/timezones", get(timezones_get))

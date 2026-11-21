@@ -16,6 +16,163 @@ pub const TZDB_VERSION: &str = "2026f";
 pub const MAX_SITE_TITLE_SCALARS: usize = 120;
 pub const MAX_TAGLINE_SCALARS: usize = 240;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadingPageStatus {
+    Unconfigured,
+    Published,
+    Draft,
+    Deleted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReadingSettings {
+    pub homepage_page_id: Option<i64>,
+    pub posts_page_id: Option<i64>,
+    pub homepage_status: ReadingPageStatus,
+    pub posts_page_status: ReadingPageStatus,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadingSettingsInput {
+    pub homepage_page_id: Option<i64>,
+    pub posts_page_id: Option<i64>,
+}
+
+async fn reading_page_status_in_conn(
+    conn: &mut SqliteConnection,
+    id: Option<i64>,
+) -> ApiResult<ReadingPageStatus> {
+    let Some(id) = id else {
+        return Ok(ReadingPageStatus::Unconfigured);
+    };
+    let row: Option<(String, String, i64)> = sqlx::query_as(
+        "SELECT e.content_type_key, e.publication_status,
+                COALESCE(json_extract(t.definition_json, '$.settings.public'), 1)
+           FROM content_entries e
+           JOIN content_types t ON t.key = e.content_type_key
+          WHERE e.id = ? AND t.provider_status = 'active'",
+    )
+    .bind(id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(match row {
+        None => ReadingPageStatus::Deleted,
+        Some((key, publication, public))
+            if key == "page" && publication == "published" && public == 1 =>
+        {
+            ReadingPageStatus::Published
+        }
+        Some(_) => ReadingPageStatus::Draft,
+    })
+}
+
+/// A read on an existing SQLite connection can join a public route's snapshot.
+pub async fn get_reading_in_conn(conn: &mut SqliteConnection) -> ApiResult<ReadingSettings> {
+    let (homepage_page_id, posts_page_id, version): (Option<i64>, Option<i64>, i64) =
+        sqlx::query_as(
+            "SELECT homepage_page_id, posts_page_id, version
+               FROM site_reading_settings WHERE id = 1",
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+    let homepage_status = reading_page_status_in_conn(conn, homepage_page_id).await?;
+    let posts_page_status = reading_page_status_in_conn(conn, posts_page_id).await?;
+    Ok(ReadingSettings {
+        homepage_page_id,
+        posts_page_id,
+        homepage_status,
+        posts_page_status,
+        version,
+    })
+}
+
+pub async fn get_reading(db: &SqlitePool) -> ApiResult<ReadingSettings> {
+    let mut tx = db.begin().await?;
+    // Keep IDs, publication state and version from one SQLite read snapshot.
+    let snapshot = get_reading_in_conn(&mut tx).await?;
+    tx.commit().await?;
+    Ok(snapshot)
+}
+
+/// Delete never clears an assignment: retain a tombstone and advance the
+/// settings ETag in the *same transaction* as removal of the Page.
+pub async fn bump_reading_version_on_deleted_entry_in_tx(
+    conn: &mut SqliteConnection,
+    entry_id: i64,
+) -> ApiResult<()> {
+    sqlx::query(
+        "UPDATE site_reading_settings
+            SET version = version + 1, updated_at = datetime('now')
+          WHERE id = 1 AND (homepage_page_id = ? OR posts_page_id = ?)",
+    )
+    .bind(entry_id)
+    .bind(entry_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// One SQLite write transaction is the CAS boundary for settings and routes.
+/// Invalid or unpublished IDs cannot be assigned; existing tombstones are
+/// retained until the administrator explicitly chooses new values.
+pub async fn save_reading(
+    db: &SqlitePool,
+    input: ReadingSettingsInput,
+    expected_version: i64,
+) -> ApiResult<ReadingSettings> {
+    let mut tx = db.begin().await?;
+    // Acquire a write reservation before reading a version or validating IDs.
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+    let current = get_reading_in_conn(&mut tx).await?;
+    if current.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Reading Settings đã thay đổi. Tải lại trước khi lưu.",
+        ));
+    }
+    if input.homepage_page_id.is_some() && input.homepage_page_id == input.posts_page_id {
+        return Err(ApiError::bad_request(
+            "Trang chủ và Trang bài viết phải là hai Page khác nhau.",
+        ));
+    }
+    for id in [input.homepage_page_id, input.posts_page_id]
+        .into_iter()
+        .flatten()
+    {
+        if id <= 0
+            || reading_page_status_in_conn(&mut tx, Some(id)).await? != ReadingPageStatus::Published
+        {
+            return Err(ApiError::bad_request(
+                "Page được chọn phải tồn tại, public và đã xuất bản.",
+            ));
+        }
+    }
+    let updated = sqlx::query(
+        "UPDATE site_reading_settings
+            SET homepage_page_id = ?, posts_page_id = ?,
+                version = version + 1, updated_at = datetime('now')
+          WHERE id = 1 AND version = ?",
+    )
+    .bind(input.homepage_page_id)
+    .bind(input.posts_page_id)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() != 1 {
+        return Err(ApiError::precondition_failed(
+            "Reading Settings đã thay đổi. Tải lại trước khi lưu.",
+        ));
+    }
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    let saved = get_reading_in_conn(&mut tx).await?;
+    tx.commit().await?;
+    Ok(saved)
+}
+
 static TIMEZONES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     include_str!("settings_timezones_2026f.txt")
         .lines()
