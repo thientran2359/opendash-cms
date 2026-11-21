@@ -285,3 +285,8 @@ CREATE INDEX idx_entry_pattern_refs_target ON entry_pattern_refs(target_pattern_
    - **Bảo toàn dữ liệu & Publication:** Đổi `editor ↔ builder`, tắt `Builder` trên CPT, đổi theme và restart giữ nguyên cả `values_json["body"]` lẫn `entry_builder_documents`; bản `draft` (kể cả Homepage Page) và media private không lộ qua public hay preview; `401`/`412` giữ nguyên bản nháp.
    - **Pattern CPT & `core/pattern_ref` (depth = 1):** Nhúng cùng 1 Pattern CTA vào 3 trang (`Home`, `Contact`, `About`), Admin sửa Pattern 1 lần → cả 3 trang hiển thị nội dung mới; Editor bị chặn `403` khi gọi `POST/PUT/DELETE /api/admin/patterns*`; từ chối `400` khi nhúng `PatternRef` hoặc `ContentList` bên trong Pattern; `DELETE` Pattern đang dùng trả `409` kèm danh sách trang và chỉ xóa khi `?force=true`; trang tham chiếu Pattern đã xóa không crash; public media ACL cấp quyền 1-hop cho media trong Pattern gắn trên trang `published` và thu hồi ngay khi trang về `draft`/đổi mode.
    - **Pattern Library:** Lọc theo danh mục/từ khóa trả đúng mẫu từ `patterns/*.json` của active theme v3; bấm chèn tạo bản COPY AST với `node_id` mới hoàn toàn, sửa trên trang không ghi ngược file theme bất biến; restart và `age` backup/restore bảo toàn đầy đủ.
+
+
+## Proposed D02 coordination amendment
+
+See [S02 target-only Page Builder and provider selections](s02-target-only-page-builder.md). While Draft, this is a review proposal, not implementation authority. It brings the Page-only entry document foundation into Theme S02/0042; later CPT S01/0043 extends those tables rather than recreating them. Owner clarified that no previous release or historical-data compatibility is required. Generic CPT, Patterns and Reading Settings remain in their existing later slices.

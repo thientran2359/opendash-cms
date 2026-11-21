@@ -400,3 +400,8 @@ Before implementation, revert only the documentation delta. After implementation
 Independent fresh-context reviewer `delta_review` read this amendment against the actual core/server theme validators and package-reader boundary. Initial verdict CHANGES_REQUESTED: two P2 findings, core/server path grammar mismatch and directory entries bypassing the v3 callback. Both were resolved by specifying the identical ASCII/length grammar and explicitly preserving safe empty directory entries while rejecting hidden regular files. Re-review verdict PASS: no remaining actionable P0/P1/P2. This review does not assert implementation verification.
 
 Actual documentation validation: check-plans PASS; check-plans self-test 13 fixtures PASS; check-agent-artifacts PASS; standards and self-test PASS using Python 3.9 with a temporary pip-vendored tomli compatibility module, including child processes; diff whitespace PASS. CodeGraph indexing attempted but unavailable because the engine is not installed in this worktree. No CMS runtime files changed, and Rust/runtime/native tests were not run for this documentation-only delta. Required remote CI and delegated approval remain merge preconditions.
+
+
+## Proposed D02 coordination amendment
+
+See [S02 target-only Page Builder and provider selections](s02-target-only-page-builder.md). While Draft, this is a review proposal, not implementation authority. It brings the Page-only entry document foundation into Theme S02/0042; later CPT S01/0043 extends those tables rather than recreating them. Owner clarified that no previous release or historical-data compatibility is required. Generic CPT, Patterns and Reading Settings remain in their existing later slices.
