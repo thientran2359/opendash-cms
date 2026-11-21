@@ -8,6 +8,7 @@ import {
   type TaxonomyDefinition,
 } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface Props {
   user: AuthUser | null;
@@ -70,8 +71,8 @@ const fromDefinition = (definition: TaxonomyDefinition): FormValues => ({
   key: definition.key, label: definition.label,
   hierarchical: definition.hierarchical, public: definition.public,
 });
-const fieldClass = 'mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm disabled:opacity-50';
-const buttonClass = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50';
+const fieldClass = 'mt-1 h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 disabled:opacity-50';
+const buttonClass = 'inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50';
 
 function failure(cause: unknown, fallback: string): string {
   if (cause instanceof ApiClientError) {
@@ -482,77 +483,77 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
         }); }
       }}>Tải lại</button>
     </header>
-    {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-    {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
-      {missingDefinition && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
-        Taxonomy {activeKey} đã bị xóa hoặc không còn truy cập được. Bản nhập của bạn vẫn hiển thị bên dưới để sao chép; không thể lưu lên định nghĩa đã mất.
-      </p>}
-    {loading && <p role="status">Đang tải taxonomy…</p>}
+    {error && <AdminAlert tone="error">{error}</AdminAlert>}
+    {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
+    {missingDefinition && <AdminAlert tone="warning" role="alert">
+      Taxonomy {activeKey} đã bị xóa hoặc không còn truy cập được. Bản nhập của bạn vẫn hiển thị bên dưới để sao chép; không thể lưu lên định nghĩa đã mất.
+    </AdminAlert>}
+    {loading && <p role="status" className="text-xs text-zinc-500">Đang tải taxonomy…</p>}
     <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-base font-semibold">Định nghĩa ({definitions.length}/64)</h3>
-          {user.role === 'admin' && <button type="button" className="od-primary-action" disabled={busy || definitions.length >= 64}
-            onClick={() => choose('__new__')}>Thêm taxonomy</button>}
+          <h3 className="text-sm font-semibold text-zinc-950">Định nghĩa ({definitions.length}/64)</h3>
+          {user.role === 'admin' && <AdminButton variant="primary" size="sm" disabled={busy || definitions.length >= 64}
+            onClick={() => choose('__new__')}>+ Thêm taxonomy</AdminButton>}
         </div>
-        {ordered.map(item => <div key={item.key} className={`rounded-lg border p-3 ${activeKey === item.key ? 'border-blue-500 bg-blue-50' : 'border-slate-200'}`}>
+        {ordered.map(item => <div key={item.key} className={`rounded-xl border p-3.5 transition-colors ${activeKey === item.key ? 'border-od-accent bg-blue-50/50' : 'border-zinc-200 bg-white'}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="break-words text-sm font-semibold">{item.label} <span className="text-slate-500">({item.key})</span></p>
-              <p className="text-xs text-slate-600">{item.hierarchical ? 'Phân cấp' : 'Phẳng'} · {item.public ? 'Công khai' : 'Riêng tư'} · {item.owner.kind} · v{item.version}</p>
+              <p className="break-words text-sm font-semibold text-zinc-950">{item.label} <span className="font-normal text-zinc-500">({item.key})</span></p>
+              <p className="mt-0.5 text-xs text-zinc-500">{item.hierarchical ? 'Phân cấp' : 'Phẳng'} · {item.public ? 'Công khai' : 'Riêng tư'} · {item.owner.kind} · v{item.version}</p>
               {item.provider_status !== 'active' || item.declaration_state !== 'declared' ?
-                <p className="text-xs text-amber-800">Provider {item.provider_status}, khai báo {item.declaration_state}; dữ liệu vẫn được giữ.</p> : null}
+                <p className="mt-0.5 text-xs text-amber-800">Provider {item.provider_status}, khai báo {item.declaration_state}; dữ liệu vẫn được giữ.</p> : null}
             </div>
-            <div className="flex gap-2">
-              <button className={buttonClass} type="button" disabled={busy} onClick={() => choose(item.key)}>Cấu hình</button>
-              <button className={buttonClass} type="button" disabled={busy} onClick={() => {
+            <div className="flex gap-1.5">
+              <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => choose(item.key)}>Cấu hình</AdminButton>
+              <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => {
                 if (dirty && !window.confirm('Có thay đổi chưa lưu. Rời trang?')) return;
                 onNavigateHash(termsHash(item.key));
-              }}>Term</button>
+              }}>Term</AdminButton>
             </div>
           </div>
         </div>)}
       </div>
       <div className="min-w-0 space-y-4">
-        {(isNew || active || missingDefinition) && <form onSubmit={event => void saveDefinition(event)} className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="text-base font-semibold">{isNew ? 'Tạo định nghĩa' : `Chỉnh sửa ${active?.key ?? activeKey}`}</h3>
-          <label className="block text-sm font-medium">Khóa *
+        {(isNew || active || missingDefinition) && <form onSubmit={event => void saveDefinition(event)} className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4">
+          <h3 className="text-sm font-semibold text-zinc-950">{isNew ? 'Tạo định nghĩa' : `Chỉnh sửa ${active?.key ?? activeKey}`}</h3>
+          <label className="block text-xs font-medium text-zinc-700">Khóa *
             <input className={fieldClass} value={form.key} maxLength={64} required disabled={!isNew || busy || !canEdit}
               onChange={event => setForm(previous => ({ ...previous, key: event.target.value }))}/>
-            <span className="block text-xs font-normal text-slate-500">Dùng chữ thường, số và dấu gạch dưới; khóa không thể đổi sau khi tạo.</span>
+            <span className="mt-1 block text-xs font-normal text-zinc-500">Dùng chữ thường, số và dấu gạch dưới; khóa không thể đổi sau khi tạo.</span>
           </label>
-          <label className="block text-sm font-medium">Tên hiển thị *
+          <label className="block text-xs font-medium text-zinc-700">Tên hiển thị *
             <input className={fieldClass} value={form.label} maxLength={100} required disabled={busy || !canEdit}
               onChange={event => setForm(previous => ({ ...previous, label: event.target.value }))}/>
           </label>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.hierarchical}
+          <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.hierarchical}
             disabled={busy || !canEdit || active?.owner.kind === 'core'} onChange={event => setForm(previous => ({ ...previous, hierarchical: event.target.checked }))}/>
             Cho phép phân cấp cha/con (tối đa 8 cấp)</label>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.public}
+          <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.public}
             disabled={busy || !canEdit} onChange={event => setForm(previous => ({ ...previous, public: event.target.checked }))}/>
             Cho phép hiển thị công khai</label>
-          {active && active.owner.kind !== 'user' && <p className="text-xs text-slate-600">{active.owner.kind === 'core'
+          {active && active.owner.kind !== 'user' && <p className="text-xs text-zinc-500">{active.owner.kind === 'core'
             ? 'Taxonomy Core giữ nguyên khóa và chế độ phân cấp.'
             : 'Định nghĩa do provider quản lý. Chỉ provider được sửa hoặc xóa.'}</p>}
-          {conflict && <div role="alert" className="space-y-2 text-sm text-amber-800">
+          {conflict && <AdminAlert tone="warning" role="alert" className="space-y-2">
             <p>Phiên bản đã cũ. Bản nhập được giữ; đối chiếu bản mới trước khi lưu.</p>
-            <button type="button" className={buttonClass} disabled={busy || !active}
-              onClick={() => void rebaseDefinition()}>Đối chiếu phiên bản mới, giữ các trường đang sửa</button>
-          </div>}
+            <AdminButton variant="secondary" size="sm" disabled={busy || !active}
+              onClick={() => void rebaseDefinition()}>Đối chiếu phiên bản mới, giữ các trường đang sửa</AdminButton>
+          </AdminAlert>}
           <div className="flex flex-wrap gap-2">
-            <button type="submit" className="od-primary-action" disabled={busy || !csrfToken || !canEdit || conflict || (!isNew && !configDirty)}>
-              {busy ? 'Đang lưu…' : 'Lưu định nghĩa'}</button>
-            {canDelete && <button type="button" className={buttonClass} disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>Xóa</button>}
-            {missingDefinition && <button type="button" className={buttonClass} onClick={() => choose('')}>
+            <AdminButton type="submit" variant="primary" disabled={busy || !csrfToken || !canEdit || conflict || (!isNew && !configDirty)}>
+              {busy ? 'Đang lưu…' : 'Lưu định nghĩa'}</AdminButton>
+            {canDelete && <AdminButton variant="danger" disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>Xóa</AdminButton>}
+            {missingDefinition && <AdminButton variant="secondary" onClick={() => choose('')}>
               Bỏ bản nhập không còn đích lưu
-            </button>}
+            </AdminButton>}
           </div>
         </form>}
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-          <h3 className="text-base font-semibold">Gắn taxonomy với loại nội dung</h3>
-          <label className="flex flex-col gap-1 text-sm font-medium">
+        <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
+          <h3 className="text-sm font-semibold text-zinc-950">Gắn taxonomy với loại nội dung</h3>
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
             <span>Loại nội dung</span>
-            <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm disabled:opacity-50" value={typeKey} disabled={busy || eligibilityLoading || loading}
+            <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 disabled:opacity-50" value={typeKey} disabled={busy || eligibilityLoading || loading}
               onChange={event => {
                 if (eligibleDirty && !window.confirm('Bỏ thay đổi taxonomy chưa lưu?')) return;
                 recoveredRef.current = null;
@@ -562,8 +563,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
                 <option key={item.descriptor.key} value={item.descriptor.key}>{item.descriptor.label} ({item.descriptor.key})</option>)}
             </select>
           </label>
-          {eligibilityLoading && <p role="status" className="text-sm">Đang tải cấu hình áp dụng…</p>}
-          {!eligibilityLoading && definitions.map(item => <label key={item.key} className="flex items-start gap-2 text-sm">
+          {eligibilityLoading && <p role="status" className="text-xs text-zinc-500">Đang tải cấu hình áp dụng…</p>}
+          {!eligibilityLoading && definitions.map(item => <label key={item.key} className="flex items-start gap-2 text-sm text-zinc-800">
             <input type="checkbox" className="mt-1" checked={eligible.includes(item.key)}
               disabled={!typeEditable || busy || eligibilityLoading || eligibilityConflict}
               onChange={event => setEligible(previous => event.target.checked
@@ -573,19 +574,19 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
                 <span className="block text-xs text-amber-700">Provider không hoạt động hoặc đã rút khai báo; liên kết đã cấu hình được giữ.</span>}
             </span>
           </label>)}
-          {(eligibilityConflict || eligibilityVersionMismatch) && <div role="alert" className="space-y-2 text-sm text-amber-800">
+          {(eligibilityConflict || eligibilityVersionMismatch) && <AdminAlert tone="warning" role="alert" className="space-y-2">
             <p>Version CPT không khớp với snapshot taxonomy hoặc schema đã thay đổi. Bản chọn được giữ; đối chiếu trước khi lưu.</p>
-            <button type="button" className={buttonClass} disabled={busy || eligibilityLoading}
-              onClick={() => void rebaseEligibility()}>Đối chiếu schema mới, giữ lựa chọn đã sửa</button>
-          </div>}
+            <AdminButton variant="secondary" size="sm" disabled={busy || eligibilityLoading}
+              onClick={() => void rebaseEligibility()}>Đối chiếu schema mới, giữ lựa chọn đã sửa</AdminButton>
+          </AdminAlert>}
           {eligible.some(key => !definitions.some(item => item.key === key)) &&
             <p role="status" className="text-xs text-amber-700">Có taxonomy cấu hình nhưng không còn trong danh sách. Chúng được giữ để tránh mất liên kết ngoài ý muốn.</p>}
           {definitions.some(item => eligible.includes(item.key) && !configuredEffective.includes(item.key)) &&
             <p role="status" className="text-xs text-amber-700">Taxonomy chưa hiệu lực sẽ không hiện trong picker, nhưng vẫn giữ cấu hình để phục hồi khi provider hoạt động trở lại.</p>}
-          <button type="button" className="od-primary-action" onClick={() => void saveEligibility()}
+          <AdminButton variant="primary" onClick={() => void saveEligibility()}
             disabled={!typeEditable || !csrfToken || !eligibleDirty || busy || eligibilityLoading ||
-              eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>Lưu loại được áp dụng</button>
-          {!typeEditable && typeKey && <p className="text-xs text-slate-600">Chỉ Admin được chỉnh sửa taxonomy áp dụng cho CPT hợp lệ (trừ Section).</p>}
+              eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>Lưu loại được áp dụng</AdminButton>
+          {!typeEditable && typeKey && <p className="text-xs text-zinc-500">Chỉ Admin được chỉnh sửa taxonomy áp dụng cho CPT hợp lệ (trừ Section).</p>}
         </div>
       </div>
     </div>

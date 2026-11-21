@@ -1,11 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { getProfile, updateProfile, type UserProfile } from '../../api/users.ts';
+import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface UserProfilePanelProps {
   csrfToken: string | null;
   onApiError: (error: unknown, fallback: string) => void;
   onProfileUpdated?: (profile: UserProfile) => void;
 }
+
+const INPUT_CLASS =
+  'h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 ' +
+  'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent';
 
 export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
   csrfToken,
@@ -75,71 +80,62 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
   };
 
   if (!profile) {
-    return <p className="text-sm text-slate-600">Đang tải hồ sơ...</p>;
+    return <p className="text-sm text-zinc-500">Đang tải hồ sơ...</p>;
   }
 
   return (
     <section className="max-w-xl space-y-5" data-testid="user-profile-panel">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-900">Hồ sơ của tôi</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Vai trò: <strong className="uppercase">{profile.role}</strong> · Phiên bản v{profile.version}
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-base font-semibold text-zinc-950">Hồ sơ của tôi</h2>
+          <p className="mt-0.5 text-xs text-zinc-500">Phiên bản v{profile.version}</p>
+        </div>
+        <AdminBadge tone={profile.role === 'admin' ? 'success' : 'neutral'} className="uppercase">
+          {profile.role}
+        </AdminBadge>
       </div>
-      {message && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800" role="status">
-          {message}
-        </div>
-      )}
-      {errorMsg && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800" role="alert">
-          {errorMsg}
-        </div>
-      )}
+      {message && <AdminAlert tone="success">{message}</AdminAlert>}
+      {errorMsg && <AdminAlert tone="error">{errorMsg}</AdminAlert>}
       <form onSubmit={handleSubmit} className="space-y-4">
-        <label className="block text-sm font-medium text-slate-800">
-          Tên đăng nhập / Hiển thị
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Tên đăng nhập / Hiển thị</span>
           <input
             type="text"
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className={INPUT_CLASS}
             value={username}
             onChange={e => setUsername(e.target.value)}
             required
           />
         </label>
-        <div className="border-t border-slate-200 pt-4">
-          <h3 className="text-sm font-semibold text-slate-800">Đổi mật khẩu (tùy chọn)</h3>
-          <p className="mt-0.5 text-xs text-slate-500">Bắt buộc nhập mật khẩu hiện tại khi đổi mật khẩu.</p>
-          <div className="mt-3 space-y-3">
-            <label className="block text-sm font-medium text-slate-800">
-              Mật khẩu hiện tại
-              <input
-                type="password"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                value={currentPassword}
-                onChange={e => setCurrentPassword(e.target.value)}
-                autoComplete="current-password"
-              />
-            </label>
-            <label className="block text-sm font-medium text-slate-800">
-              Mật khẩu mới
-              <input
-                type="password"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                value={newPassword}
-                onChange={e => setNewPassword(e.target.value)}
-                autoComplete="new-password"
-              />
-            </label>
+        <div className="space-y-3 border-t border-zinc-200 pt-4">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-900">Đổi mật khẩu (tùy chọn)</h3>
+            <p className="mt-0.5 text-xs text-zinc-500">Bắt buộc nhập mật khẩu hiện tại khi đổi mật khẩu.</p>
           </div>
+          <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+            <span>Mật khẩu hiện tại</span>
+            <input
+              type="password"
+              className={INPUT_CLASS}
+              value={currentPassword}
+              onChange={e => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+            <span>Mật khẩu mới</span>
+            <input
+              type="password"
+              className={INPUT_CLASS}
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+          </label>
         </div>
-        <button
-          type="submit"
-          disabled={saving || !csrfToken}
-          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
-        >
+        <AdminButton type="submit" variant="primary" disabled={saving || !csrfToken}>
           {saving ? 'Đang lưu...' : 'Lưu hồ sơ'}
-        </button>
+        </AdminButton>
       </form>
     </section>
   );
