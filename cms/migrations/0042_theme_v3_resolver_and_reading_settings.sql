@@ -46,3 +46,74 @@ CREATE TABLE template_override_media_refs (
 );
 CREATE INDEX idx_template_override_media_refs_media
     ON template_override_media_refs (media_id);
+
+-- v3 is a durable revision source format (not a render-time alias). Migration
+-- 0015 constrained packages/revisions to v1_legacy or v2. SQLite cannot ALTER
+-- a CHECK constraint in place. Rebuild this entire, bounded FK dependency set
+-- in the same migrator transaction. Copy each source row before dropping any
+-- table; preserve active-selection CAS, legacy mappings and revision digests.
+-- No PRAGMA foreign_keys=OFF or writable_schema manipulation is required.
+CREATE TABLE theme_packages_0042_copy AS SELECT * FROM theme_packages;
+CREATE TABLE theme_revisions_0042_copy AS SELECT * FROM theme_revisions;
+CREATE TABLE theme_legacy_mappings_0042_copy AS SELECT * FROM theme_legacy_mappings;
+CREATE TABLE theme_active_selection_0042_copy AS SELECT * FROM theme_active_selection;
+
+-- Drop FK children first, then parents; recreate parents first, then children.
+DROP TABLE theme_active_selection;
+DROP TABLE theme_legacy_mappings;
+DROP TABLE theme_revisions;
+DROP TABLE theme_packages;
+
+CREATE TABLE theme_packages (
+    theme_id TEXT PRIMARY KEY NOT NULL,
+    display_name TEXT NOT NULL,
+    source_format TEXT NOT NULL CHECK (source_format IN ('v1_legacy', 'v2', 'v3')),
+    is_legacy INTEGER NOT NULL DEFAULT 0 CHECK (is_legacy IN (0, 1)),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT INTO theme_packages (theme_id, display_name, source_format, is_legacy, created_at)
+SELECT theme_id, display_name, source_format, is_legacy, created_at
+  FROM theme_packages_0042_copy;
+
+CREATE TABLE theme_revisions (
+    revision_id TEXT PRIMARY KEY NOT NULL,
+    theme_id TEXT NOT NULL REFERENCES theme_packages(theme_id) ON DELETE RESTRICT,
+    version TEXT NOT NULL,
+    revision_digest TEXT NOT NULL UNIQUE,
+    source_format TEXT NOT NULL CHECK (source_format IN ('v1_legacy', 'v2', 'v3')),
+    manifest_json TEXT NOT NULL,
+    file_digests_json TEXT NOT NULL DEFAULT '{}',
+    legacy_block_id TEXT REFERENCES theme_blocks(id) ON DELETE RESTRICT,
+    provenance_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (theme_id, version)
+);
+CREATE INDEX idx_theme_revisions_theme_id ON theme_revisions(theme_id);
+INSERT INTO theme_revisions (
+    revision_id, theme_id, version, revision_digest, source_format, manifest_json,
+    file_digests_json, legacy_block_id, provenance_json, created_at
+)
+SELECT revision_id, theme_id, version, revision_digest, source_format, manifest_json,
+       file_digests_json, legacy_block_id, provenance_json, created_at
+  FROM theme_revisions_0042_copy;
+
+CREATE TABLE theme_legacy_mappings (
+    block_id TEXT PRIMARY KEY NOT NULL REFERENCES theme_blocks(id) ON DELETE RESTRICT,
+    theme_id TEXT NOT NULL UNIQUE REFERENCES theme_packages(theme_id) ON DELETE RESTRICT,
+    revision_id TEXT NOT NULL UNIQUE REFERENCES theme_revisions(revision_id) ON DELETE RESTRICT
+);
+INSERT INTO theme_legacy_mappings (block_id, theme_id, revision_id)
+SELECT block_id, theme_id, revision_id FROM theme_legacy_mappings_0042_copy;
+
+CREATE TABLE theme_active_selection (
+    id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+    revision_id TEXT REFERENCES theme_revisions(revision_id) ON DELETE RESTRICT,
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1)
+);
+INSERT INTO theme_active_selection (id, revision_id, version)
+SELECT id, revision_id, version FROM theme_active_selection_0042_copy;
+
+DROP TABLE theme_active_selection_0042_copy;
+DROP TABLE theme_legacy_mappings_0042_copy;
+DROP TABLE theme_revisions_0042_copy;
+DROP TABLE theme_packages_0042_copy;

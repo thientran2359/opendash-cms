@@ -124,6 +124,30 @@ async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_ref
             .execute(&db)
             .await
             .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_packages (theme_id,display_name,source_format,is_legacy)
+             VALUES ('old-site-theme','Legacy','v2',0)",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_revisions (
+                revision_id,theme_id,version,revision_digest,source_format,
+                manifest_json,file_digests_json,provenance_json
+             ) VALUES ('old-site-rev','old-site-theme','2.0.0','digest-v2','v2','{}','{}','{}')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_active_selection (id,revision_id,version)
+             VALUES (1,'old-site-rev',17)
+             ON CONFLICT(id) DO UPDATE SET revision_id=excluded.revision_id,version=17",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
         db.close().await;
     }
     let db = init_db(&path).await.unwrap();
@@ -139,6 +163,42 @@ async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_ref
         .await
         .unwrap();
     assert_eq!(count, 0);
+    let (revision_id, selection_cas): (String, i64) =
+        sqlx::query_as("SELECT revision_id,version FROM theme_active_selection WHERE id=1")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!((revision_id.as_str(), selection_cas), ("old-site-rev", 17));
+    let preserved: (String, String, String) = sqlx::query_as(
+        "SELECT p.source_format,r.source_format,r.revision_digest
+           FROM theme_packages p JOIN theme_revisions r ON r.theme_id=p.theme_id
+          WHERE p.theme_id='old-site-theme'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(preserved, ("v2".into(), "v2".into(), "digest-v2".into()));
+    sqlx::query(
+        "INSERT INTO theme_packages (theme_id,display_name,source_format,is_legacy)
+         VALUES ('new-site-theme','V3','v3',0)",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO theme_revisions (
+            revision_id,theme_id,version,revision_digest,source_format,
+            manifest_json,file_digests_json,provenance_json
+         ) VALUES ('new-site-rev','new-site-theme','3.0.0','digest-v3','v3','{}','{}','{}')",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let foreign_keys: Vec<(String, i64, String, i64)> = sqlx::query_as("PRAGMA foreign_key_check")
+        .fetch_all(&db)
+        .await
+        .unwrap();
+    assert!(foreign_keys.is_empty(), "{foreign_keys:?}");
     // No foreign-key cascade: deleting a Page preserves the historical ID and
     // increments the reading CAS independently at the entries writer layer.
     sqlx::query(
