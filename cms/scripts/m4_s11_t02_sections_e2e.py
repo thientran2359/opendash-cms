@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -19,6 +20,7 @@ import subprocess
 import tempfile
 import time
 import traceback
+import zipfile
 
 from playwright.sync_api import expect, sync_playwright
 from m7_beta_menu_picker_e2e import admin_login, api_json, free_port, launch_server, stop_server
@@ -29,6 +31,31 @@ from media_smoke import make_png
 
 def sha(path: pathlib.Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def upload_section_test_theme(ctx, base: str, old_manifest: dict, csrf: str) -> dict:
+    """Install a real v3 theme while retaining the provider admin extension fixture."""
+    manifest = {
+        "manifest_version": 3,
+        "theme_id": old_manifest["theme_id"],
+        "name": old_manifest["name"],
+        "version": old_manifest["version"],
+        "templates": [{"kind": "index", "file": "index.html"}],
+    }
+    if "admin_extensions" in old_manifest:
+        manifest["admin_extensions"] = old_manifest["admin_extensions"]
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("theme.json", json.dumps(manifest, ensure_ascii=False))
+        archive.writestr("index.html", "<main>Section theme regression</main>")
+    response = ctx.request.post(
+        base + "/api/admin/themes",
+        data=output.getvalue(),
+        headers={"Origin": base, "X-CSRF-Token": csrf, "Content-Type": "application/zip"},
+        timeout=20000,
+    )
+    assert response.status == 201, (response.status, response.text()[:400])
+    return response.json()
 
 
 def create_ui_section(page, base: str, title: str, slug: str) -> int:
@@ -389,12 +416,12 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     checks.append("real_plugin_install_disable_reenable_preserves_both_private_Section_ASTs")
 
                     provider_theme = json.loads(THEME_JSON.read_text(encoding="utf-8"))
-                    first_theme = upload_provider(admin, base, "theme", provider_theme, csrf, expected=201)
+                    first_theme = upload_section_test_theme(admin, base, provider_theme, csrf)
                     alt_theme = copy.deepcopy(provider_theme)
                     alt_theme["theme_id"] = "section-test-alternative"
                     alt_theme["name"] = "Section test alternative"
                     alt_theme.pop("admin_extensions", None)
-                    second_theme = upload_provider(admin, base, "theme", alt_theme, csrf, expected=201)
+                    second_theme = upload_section_test_theme(admin, base, alt_theme, csrf)
                     for theme_revision in (first_theme, second_theme, first_theme):
                         summary = api_json(admin, "GET", base, "/api/admin/themes")
                         api_json(admin, "PUT", base, "/api/admin/themes/active",
