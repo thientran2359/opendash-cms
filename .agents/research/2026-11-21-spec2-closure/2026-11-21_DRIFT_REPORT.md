@@ -1,0 +1,13 @@
+# Spec 2 drift report — 2026-11-21
+
+Source: `67d82082ed65363de5cec8e7e3241a96ad06ed6e`, identical tree to PR #449 head `a56d776ef8cfb63cb0981bef6e5335e451ac6c87`. Scope: all three slices of the single selected design below. CodeGraph was consulted first but its index omits newer Pattern files; current on-disk source is authoritative. This is a static contract audit, not an additional execution of the native suites.
+
+## docs/designs/cpt-content-builder-and-pattern-library.md
+
+- **D1 — UI implementation gap:** Technical Plan C requires sidebar tabs Blocks / Patterns / Media. `cms/admin/src/builder/BuilderWorkspace.tsx:145` accepts only blocks/patterns; the tablist around lines 770–777 renders only those two. Existing inspector media controls do not implement the specified third sidebar tab. Preserve the existing picker/ACL while adding the missing tab.
+- **D2 — insertion behavior gap:** CUJ 4 requires inserting the copied Pattern at the selected position. `BuilderWorkspace.tsx:389–392` always appends copied Sections to the end and explicitly announces that behavior. Insert root Sections immediately after the Section containing the current selection (including selected descendants), with append fallback when nothing is selected; retain four-level structure, fresh IDs, anchors, limits and unsaved-only behavior.
+- **D3 — response contract gap:** Technical Plan A.2 specifies updated_at in the successful entry Builder PUT result. `storage/builder.rs:816–823` EntryBuilderOpen and routes/builder.rs entry_builder_put return no updated_at. Return the committed content entry timestamp with the shared entry CAS result; no schema change or independent document version is needed.
+- **D4 — documentation mismatch:** A.2 describes Preview JSON as html/has_active_contact_form, whereas the shared RenderedLayout serializes html/diagnostics and retains the form flag internally for CSP. D02/D03 already specify this common behavior. Reconciled in closure docs. Correct the stale description; do not expose/change the flag solely to match obsolete prose.
+- **D5 — documentation mismatch:** C and Goal 4 still describe theme_id asset paths. `storage/patterns.rs:320` uses theme_asset_url with the immutable revision_digest, matching the approved Theme v3 serving contract. Reconciled in closure docs. Correct the asset URL examples; do not add a theme-ID alias or a new media scheme.
+
+No Verified promotion while D1–D3 remain. D4/D5 are documentation reconciliations backed by the already approved D02/D03 and Theme v3 contracts. Passing receipts establish the covered cases, not untested Media-tab/selected-position/timestamp conformance.
