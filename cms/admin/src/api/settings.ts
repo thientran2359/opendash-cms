@@ -110,3 +110,38 @@ export function savePermalinkSettings(
     defaultErrorMessage: 'Không thể lưu cấu hình permalink.',
   });
 }
+
+/** EGM S03. Both assignments share one server-owned CAS version and transaction. */
+export type ReadingPageStatus = 'unconfigured' | 'published' | 'draft' | 'deleted';
+
+export interface ReadingSettings {
+  homepage_page_id: number | null;
+  posts_page_id: number | null;
+  homepage_status: ReadingPageStatus;
+  posts_page_status: ReadingPageStatus;
+  version: number;
+}
+
+export type ReadingSettingsDraft = Pick<ReadingSettings, 'homepage_page_id' | 'posts_page_id'>;
+
+export function getReadingSettings(signal?: AbortSignal): Promise<ReadingSettings> {
+  return requestJson<ReadingSettings>('/api/admin/settings/reading', {
+    signal,
+    defaultErrorMessage: 'Không thể tải cấu hình trang chủ và trang bài viết.',
+  });
+}
+
+export function saveReadingSettings(
+  draft: ReadingSettingsDraft,
+  version: number,
+  csrfToken: string,
+): Promise<ReadingSettings> {
+  return requestJson<ReadingSettings>('/api/admin/settings/reading', {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify(draft),
+    defaultErrorMessage: 'Không thể lưu cấu hình trang chủ và trang bài viết.',
+  });
+}
