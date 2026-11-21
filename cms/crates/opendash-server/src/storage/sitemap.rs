@@ -48,7 +48,7 @@ WITH indexable AS (
       JOIN content_types t ON t.key = e.content_type_key
       LEFT JOIN entry_seo s ON s.entry_id = e.id
      WHERE e.publication_status = 'published'
-       AND e.content_type_key != 'section'
+       AND e.content_type_key != 'pattern'
        AND NOT EXISTS (
            SELECT 1 FROM site_reading_settings reading
             WHERE reading.id = 1
@@ -67,7 +67,7 @@ WITH indexable AS (
            NULL AS lastmod
       FROM content_types t
      WHERE t.provider_status = 'active'
-       AND t.key != 'section'
+       AND t.key != 'pattern'
        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
        AND COALESCE(json_extract(t.definition_json, '$.settings.has_archive'), 1) = 1
        -- A posts archive claimed by Reading Settings is not indexable when
@@ -107,7 +107,7 @@ WITH indexable AS (
           WHERE et.term_id = tm.id
             AND e.publication_status = 'published'
             AND ct.provider_status = 'active'
-            AND e.content_type_key != 'section'
+            AND e.content_type_key != 'pattern'
             AND COALESCE(json_extract(ct.definition_json, '$.settings.public'), 1) = 1
             AND (
               EXISTS (

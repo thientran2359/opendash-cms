@@ -62,12 +62,16 @@ export function effectiveContentTypeSettings(
   settings?: ContentTypeSettings,
 ): ContentTypeSettings {
   const effective: ContentTypeSettings = settings ?? {
-    public: typeKey !== 'section',
-    has_archive: typeKey !== 'section',
+    public: typeKey !== 'pattern' && typeKey !== 'section',
+    has_archive: typeKey !== 'pattern' && typeKey !== 'section',
     publication: typeKey === 'post' || typeKey === 'page' || typeKey === 'section'
       ? 'draft_publish' : 'immediate',
-    supports: typeKey === 'page' ? ['editor', 'featured_image', 'builder'] : ['editor', 'featured_image'],
+    supports: typeKey === 'pattern' ? ['builder']
+      : typeKey === 'page' ? ['editor', 'featured_image', 'builder'] : ['editor', 'featured_image'],
   };
+  if (typeKey === 'pattern') {
+    return { ...effective, public: false, has_archive: false, publication: 'immediate', supports: ['builder'] };
+  }
   if (typeKey === 'section') {
     return { ...effective, public: false, has_archive: false, publication: 'draft_publish' };
   }

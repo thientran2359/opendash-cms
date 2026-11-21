@@ -36,12 +36,12 @@ pub struct ContentTypeApiItem {
 }
 
 pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
-    if key == "section" {
+    if key == "pattern" {
         return Some(ContentTypeDefinition {
-            key: "section".into(),
-            label: "Section".into(),
+            key: "pattern".into(),
+            label: "Patterns".into(),
             fields: Vec::new(),
-            settings: ContentTypeSettings::private_section(),
+            settings: ContentTypeSettings::private_pattern(),
         });
     }
     let label = match key {
@@ -74,6 +74,22 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
     })
 }
 
+/// Only accepted by the pre-migration collision check while upgrading a site
+/// from 0037. The 0044 migration removes this deprecated Core registration.
+fn legacy_section_definition() -> ContentTypeDefinition {
+    ContentTypeDefinition {
+        key: "section".into(),
+        label: "Section".into(),
+        fields: Vec::new(),
+        settings: ContentTypeSettings {
+            public: false,
+            has_archive: false,
+            publication: ContentPublication::DraftPublish,
+            supports: Vec::new(),
+        },
+    }
+}
+
 /// Verify existing reserved keys before SQLx applies the forward migration.
 /// No data is rewritten when a user/theme/plugin owns a conflicting key.
 pub async fn preflight_builtin_key_collisions(
@@ -89,11 +105,16 @@ pub async fn preflight_builtin_key_collisions(
     }
     let rows: Vec<(String, String, String, Option<String>, String)> = sqlx::query_as(
         "SELECT key, definition_json, owner_kind, owner_id, provider_status
-         FROM content_types WHERE key IN ('post', 'page', 'section')",
+         FROM content_types WHERE key IN ('post', 'page', 'pattern', 'section')",
     )
     .fetch_all(db)
     .await?;
     for (key, raw, owner, owner_id, status) in rows {
+        let canonical = if key == "section" {
+            legacy_section_definition()
+        } else {
+            builtin_definition(&key).expect("known core key")
+        };
         let matching_definition = serde_json::from_str::<ContentTypeDefinition>(&raw)
             .ok()
             .map(|mut definition| {
@@ -104,11 +125,9 @@ pub async fn preflight_builtin_key_collisions(
                     .and_then(|value| value.get("settings").cloned())
                     .is_some();
                 if !has_settings {
-                    definition.settings =
-                        builtin_definition(&key).expect("known core key").settings;
+                    definition.settings = canonical.settings.clone();
                 }
-                let canonical = builtin_definition(&key).expect("known core key");
-                let allowed_settings = if key == "section" {
+                let allowed_settings = if matches!(key.as_str(), "section" | "pattern") {
                     definition.settings == canonical.settings
                 } else {
                     definition.settings.publication == ContentPublication::DraftPublish
@@ -375,7 +394,7 @@ pub async fn insert_user_content_type(
     db: &SqlitePool,
     input: &ContentTypeDefinitionInput,
 ) -> ApiResult<ContentTypeApiItem> {
-    if builtin_definition(&input.key).is_some() {
+    if builtin_definition(&input.key).is_some() || input.key == "section" {
         return Err(ApiError::conflict("post/page là khóa Core được bảo vệ."));
     }
     let definition = input
@@ -429,8 +448,8 @@ pub async fn update_user_content_type(
             "Khóa loại nội dung trong body không khớp với đường dẫn URL.",
         ));
     }
-    if type_key == "section" {
-        return Err(ApiError::forbidden("Không thể thay đổi Section riêng tư."));
+    if matches!(type_key, "pattern" | "section") {
+        return Err(ApiError::forbidden("Không thể thay đổi Pattern hệ thống."));
     }
     let mut incoming = input
         .clone()
@@ -1963,7 +1982,7 @@ pub async fn load_configured_taxonomies(
     db: &SqlitePool,
     type_key: &str,
 ) -> ApiResult<ConfiguredContentTypeTaxonomies> {
-    if !valid_content_type_key(type_key) || type_key == "section" {
+    if !valid_content_type_key(type_key) || matches!(type_key, "pattern" | "section") {
         return Err(ApiError::bad_request(
             "Loại nội dung không hỗ trợ taxonomy.",
         ));
@@ -2021,7 +2040,9 @@ pub async fn put_site_taxonomy_eligibility(
     expected_version: i64,
     taxonomies: &[String],
 ) -> ApiResult<ContentTypeApiItem> {
-    if !opendash_core::content::valid_content_type_key(type_key) || type_key == "section" {
+    if !opendash_core::content::valid_content_type_key(type_key)
+        || matches!(type_key, "pattern" | "section")
+    {
         return Err(ApiError::bad_request(
             "Không thể cấu hình taxonomy cho Section.",
         ));

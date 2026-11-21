@@ -37,7 +37,7 @@ use crate::{
         },
         import::{import_dry_run, import_execute},
         media::{
-            media_get, media_list, media_original, media_thumbnail, media_upload,
+            media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
             media_video_upload,
         },
         menu::{
@@ -213,28 +213,25 @@ pub fn build_router_with_themes_root(
         .route("/api/admin/dashboard", get(dashboard_get))
         .route("/api/admin/library", get(crate::routes::themes::local_library_list))
         .route(
-            "/api/admin/sections",
-            get(crate::routes::sections::section_list)
-                .post(crate::routes::sections::section_create)
+            "/api/admin/patterns",
+            get(crate::routes::patterns::pattern_list)
+                .post(crate::routes::patterns::pattern_create)
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route(
-            "/api/admin/sections/{id}",
-            get(crate::routes::sections::section_get)
-                .put(crate::routes::sections::section_update)
-                .delete(crate::routes::sections::section_delete)
+            "/api/admin/patterns/{id}",
+            get(crate::routes::patterns::pattern_get)
+                .put(crate::routes::patterns::pattern_update)
+                .delete(crate::routes::patterns::pattern_delete)
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route(
-            "/api/admin/sections/{id}/document",
-            get(crate::routes::sections::section_document_get)
-                .put(crate::routes::sections::section_document_put)
-                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+            "/api/admin/patterns/library",
+            get(crate::routes::patterns::pattern_library_list),
         )
         .route(
-            "/api/admin/sections/{id}/document/preview",
-            post(crate::routes::sections::section_document_preview)
-                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+            "/api/admin/patterns/library/theme/{key}",
+            get(crate::routes::patterns::pattern_library_theme_get),
         )
         .route(
             "/api/admin/entries/{type_key}/{id}/builder",
@@ -577,7 +574,7 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/media/{id}",
-            get(media_get).delete(crate::routes::sections::media_delete_section_aware),
+            get(media_get).delete(media_delete),
         )
         .route("/api/admin/media/{id}/file", get(media_original))
         .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))

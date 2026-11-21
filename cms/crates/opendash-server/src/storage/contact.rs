@@ -351,7 +351,8 @@ pub async fn get_submission(db: &SqlitePool, id: i64) -> ApiResult<ContactSubmis
         return Err(ApiError::not_found("Không tìm thấy lượt gửi liên hệ."));
     };
     let mut detail = ContactSubmissionDetail::try_from(row)?;
-    detail.notification_attempts = crate::storage::smtp::list_attempts_for_submission(db, id).await?;
+    detail.notification_attempts =
+        crate::storage::smtp::list_attempts_for_submission(db, id).await?;
     Ok(detail)
 }
 
@@ -456,9 +457,8 @@ pub async fn check_and_increment_rate_limits(
         return Ok(Some((min_expires - now_secs).max(1) as u64));
     }
 
-    let new_buckets_needed = i64::from(min_count == 0)
-        + i64::from(hour_count == 0)
-        + i64::from(global_count == 0);
+    let new_buckets_needed =
+        i64::from(min_count == 0) + i64::from(hour_count == 0) + i64::from(global_count == 0);
     if new_buckets_needed > 0 {
         let active_buckets: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM contact_rate_buckets")
             .fetch_one(&mut *tx)
@@ -521,9 +521,7 @@ pub async fn record_submission_in_tx(
         if prev_hash == payload_hash {
             return Ok((prev_sub_id, true, None));
         }
-        return Err(ApiError::conflict(
-            "Yêu cầu trùng lặp với nội dung khác.",
-        ));
+        return Err(ApiError::conflict("Yêu cầu trùng lặp với nội dung khác."));
     }
 
     let res = sqlx::query(

@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import * as builderApi from '../api/builder.ts';
 import { getContentEntry } from '../api/content.ts';
-import * as sectionApi from '../api/sections.ts';
+import { listPatterns, type PatternRecord } from '../api/patterns.ts';
 import type { AuthUser, BlockRegistry } from '../types.ts';
 import type { BuilderDiagnostic, HomepageOpen, OverrideRole, TemplateTargetInput } from '../api/builder.ts';
 import type { ParsedRoute } from '../shell/router.ts';
 import {
-  type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type ListProps, type NodeKind, type ResponsiveAlign,
+  type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type InsertableElementType, type ListProps, type NodeKind, type ResponsiveAlign,
   type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
-  allNodes, appendNode, copySectionIntoDocument, isElement, isLockedElement, locate, moveNode, preservesAnchors,
+  allNodes, appendNode, isElement, isLockedElement, locate, moveNode, preservesAnchors,
   removeNode, setElementBinding, setListProps, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
@@ -91,13 +91,13 @@ export function BuilderWorkspace({
   // The accepted route owns the target identity. Never change this independently
   // of App's dirty-navigation guard (including browser Back/Forward).
   // The global Builder opens a valid typed template; Homepage is now Page-scoped.
-  const targetRole = (route.templateRole ?? 'header') as OverrideRole | 'section' | 'entry';
+  const targetRole = (route.templateRole ?? 'header') as OverrideRole | 'entry';
   const scopeTypeKey = route.typeKey ?? '';
   const scopeEntryId = route.entryId ?? null;
   const scopedPage = targetRole === 'page' && scopeTypeKey === 'page' && scopeEntryId !== null;
   const scopedEntry = (targetRole === 'entry' && Boolean(scopeTypeKey) && scopeEntryId !== null) || scopedPage;
-  const scopedSection = targetRole === 'section' && scopeTypeKey === 'section' && scopeEntryId !== null;
-  const sharedTarget: TemplateTargetInput | null = scopedEntry || scopedSection || (scopeEntryId !== null && targetRole !== 'single')
+  const scopedPattern = scopedEntry && scopeTypeKey === 'pattern';
+  const sharedTarget: TemplateTargetInput | null = scopedEntry || (scopeEntryId !== null && targetRole !== 'single')
     ? null
     : targetRole === 'header' || targetRole === 'footer'
       ? { kind: 'part', part_key: targetRole }
@@ -122,7 +122,7 @@ export function BuilderWorkspace({
   const [registry, setRegistry] = useState<BlockRegistry>({});
   const registryRef = useRef<BlockRegistry>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [elementType, setElementType] = useState<ElementType>('core/heading');
+  const [elementType, setElementType] = useState<InsertableElementType>('core/heading');
   const [mode, setMode] = useState<'canvas' | 'preview'>('canvas');
   // Pure UI state: changing viewport never changes document JSON or revision.
   const [viewport, setViewport] = useState<BuilderViewport>('desktop');
@@ -139,11 +139,9 @@ export function BuilderWorkspace({
   const [conflict, setConflict] = useState(false);
   const [notice, setNotice] = useState('Mở Builder để chỉnh template hoặc bố cục Page.');
   const [error, setError] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  const [librarySections, setLibrarySections] = useState<sectionApi.SectionRecord[]>([]);
-  const [libraryLoading, setLibraryLoading] = useState(false);
-  const [insertingId, setInsertingId] = useState<number | null>(null);
-  const librarySeq = useRef(0);
+  const [patterns, setPatterns] = useState<PatternRecord[]>([]);
+  const [patternsLoaded, setPatternsLoaded] = useState(false);
+  const patternSeq = useRef(0);
   const ownerRef = useRef<number | null>(null);
   const ownerRoleRef = useRef<AuthUser['role'] | null>(null);
   const loadedRef = useRef(false);
@@ -156,9 +154,6 @@ export function BuilderWorkspace({
   const authorityRef = useRef(authority);
   authorityRef.current = authority;
   const openedTarget = async () => {
-    if (scopedSection && scopeEntryId !== null) {
-      return { ...await sectionApi.getSectionDocument(scopeEntryId), exists: true, sharedId: null, contentMode: null };
-    }
     if (scopedEntry && scopeEntryId !== null) {
       const opened = await builderApi.getEntryBuilder(scopeTypeKey, scopeEntryId);
       return { document: opened.document ?? EMPTY_DOCUMENT, version: opened.version,
@@ -171,7 +166,7 @@ export function BuilderWorkspace({
       exists: Boolean(opened), sharedId: opened?.id ?? null, contentMode: null };
   };
   const freshPageDetails = async () => {
-    if (!scopedEntry || scopeEntryId === null) return null;
+    if (!scopedEntry || scopeEntryId === null || scopedPattern) return null;
     const entry = await getContentEntry(scopeTypeKey, scopeEntryId);
     // Builder also supports private CPTs; their lack of a public route must
     // not hide the authenticated editing surface. Do not swallow auth errors.
@@ -195,11 +190,9 @@ export function BuilderWorkspace({
   };
   const clear = () => {
     loadSeq.current += 1;
-    librarySeq.current += 1;
-    setLibraryOpen(false);
-    setLibrarySections([]);
-    setLibraryLoading(false);
-    setInsertingId(null);
+    patternSeq.current += 1;
+    setPatterns([]);
+    setPatternsLoaded(false);
     invalidatePreview();
     draftRef.current = EMPTY_DOCUMENT;
     setDraft(EMPTY_DOCUMENT);
@@ -228,15 +221,33 @@ export function BuilderWorkspace({
     onDirtyChange(revision !== savedRevision);
   }, [revision, savedRevision, onDirtyChange]);
 
-  // A pending private Section fetch may never insert into a different target,
-  // account, role, or authorization generation after navigation/re-login.
+  // Pattern metadata is private and must be scoped to the current account
+  // and accepted Builder target. Loading the list never mutates the AST.
   useEffect(() => {
-    librarySeq.current += 1;
-    setLibraryOpen(false);
-    setLibrarySections([]);
-    setLibraryLoading(false);
-    setInsertingId(null);
-  }, [route.rawHash, user?.id, user?.role, csrfToken, resetToken]);
+    const seq = ++patternSeq.current;
+    setPatterns([]);
+    setPatternsLoaded(false);
+    if (!active || !user || !csrfToken || route.sub !== 'builder') return;
+    listPatterns().then(data => {
+      if (seq !== patternSeq.current) return;
+      setPatterns(data.items);
+      setPatternsLoaded(true);
+    }).catch(cause => {
+      if (seq === patternSeq.current) onApiError(cause, 'Không tải được danh sách Pattern.');
+    });
+    return () => { patternSeq.current += 1; };
+  }, [active, route.rawHash, user?.id, user?.role, csrfToken, resetToken]);
+
+  const refreshPatterns = () => {
+    if (!active || !user || !csrfToken) return;
+    const seq = ++patternSeq.current;
+    setPatternsLoaded(false);
+    listPatterns().then(data => {
+      if (seq === patternSeq.current) { setPatterns(data.items); setPatternsLoaded(true); }
+    }).catch(cause => {
+      if (seq === patternSeq.current) onApiError(cause, 'Không thể làm mới danh sách Pattern.');
+    });
+  };
 
   // Fetch only the accepted target. An inactive Builder must not fetch templates
   // in the background while an Editor is working on a Page.
@@ -342,51 +353,15 @@ export function BuilderWorkspace({
   };
 
   const add = (parentId: string | null, kind: NodeKind) => {
+    if (!scopedEntry && kind === 'element' && elementType === 'core/pattern_ref') {
+      return message('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+    }
+    if (scopedPattern && kind === 'element' && (elementType === 'core/pattern_ref' || elementType === 'core/list')) {
+      return message('Pattern không được chứa Reusable Pattern hoặc Danh sách nội dung.', true);
+    }
     const next = appendNode(draftRef.current, parentId, kind, elementType);
     if (!next) return message('Vị trí thêm node không hợp lệ.', true);
     changeDraft(next.document, next.id);
-  };
-  const openLibrary = async () => {
-    if (!active || !user || !csrfToken || !loadedRef.current || libraryLoading) return;
-    if (libraryOpen) { librarySeq.current += 1; setLibraryOpen(false); return; }
-    const requestId = ++librarySeq.current;
-    const accountId = user.id;
-    setLibraryLoading(true);
-    try {
-      const catalog = await sectionApi.getLocalTemplateLibrary();
-      if (requestId !== librarySeq.current || ownerRef.current !== accountId) return;
-      setLibrarySections(catalog.sections);
-      setLibraryOpen(true);
-    } catch (cause) {
-      if (requestId === librarySeq.current) onApiError(cause, 'Không thể mở thư viện Section.');
-    } finally { if (requestId === librarySeq.current) setLibraryLoading(false); }
-  };
-  const insertSection = async (id: number) => {
-    if (!active || !user || !csrfToken || !loadedRef.current || loading || saving || insertingId !== null) return;
-    const requestId = ++librarySeq.current;
-    const accountId = user.id;
-    setInsertingId(id);
-    try {
-      const sourceDocument = await sectionApi.getSectionDocument(id);
-      if (requestId !== librarySeq.current || ownerRef.current !== accountId || !loadedRef.current) return;
-      const next = copySectionIntoDocument(draftRef.current, sourceDocument.document, selectedId);
-      if (!next) {
-        message('Section rỗng, vượt giới hạn hoặc vị trí chèn không hợp lệ. Không có thay đổi.', true);
-        return;
-      }
-      // Locked provider nodes are preserved in their own Section; copying an
-      // unresolved provider is not equivalent to installing it in this target.
-      const unresolved = allNodes(sourceDocument.document).some(location =>
-        location.kind === 'element' && isLockedElement(location.node as import('./document.ts').BuilderElement, registryRef.current));
-      if (unresolved) {
-        message('Section chứa block chưa resolve. Giữ bản gốc; bật lại provider trước khi chèn bản sao.', true);
-        return;
-      }
-      changeDraft(next.document, next.firstId);
-      message('Đã chèn bản SAO Section #' + id + ' với ID mới. Chỉ là nháp; cần Lưu Builder để áp dụng.');
-    } catch (cause) {
-      if (requestId === librarySeq.current) onApiError(cause, 'Không thể sao chép Section vào Builder.');
-    } finally { if (requestId === librarySeq.current) setInsertingId(null); }
   };
   const reorder = (id: string, direction: -1 | 1) => {
     const next = moveNode(draftRef.current, id, direction);
@@ -449,9 +424,7 @@ export function BuilderWorkspace({
     setPreviewing(true);
     message('Đang tạo bản Preview từ nháp...');
     try {
-      const result = scopedSection && scopeEntryId !== null
-          ? await sectionApi.previewSectionDocument(scopeEntryId, snapshot, csrfToken, controller.signal)
-          : scopedEntry && scopeEntryId !== null
+      const result = scopedEntry && scopeEntryId !== null
             ? await builderApi.previewEntryBuilder(scopeTypeKey, scopeEntryId, snapshot, csrfToken, controller.signal)
             : sharedTarget
               ? await builderApi.previewTemplateOverride(sharedTarget, snapshot, csrfToken,
@@ -487,7 +460,28 @@ export function BuilderWorkspace({
 
   const save = async () => {
     if (!active || !csrfToken || !user || !loadedRef.current || savingRef.current || versionRef.current === null) return;
-    if (scopedEntry && entryModeRef.current !== 'builder' && !window.confirm(
+    const refs = allNodes(draftRef.current).filter(node =>
+      node.kind === 'element' && (node.node as import('./document.ts').BuilderElement).type === 'core/pattern_ref')
+      .map(node => Number((node.node as import('./document.ts').BuilderElement).props.pattern_id));
+    if (!scopedEntry && refs.length > 0) {
+      message('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+      return;
+    }
+    if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
+      message('Mỗi Reusable Pattern cần một Pattern hợp lệ; tối đa 16 Pattern duy nhất trên một trang.', true);
+      return;
+    }
+    if (patternsLoaded && refs.some(id => !patterns.some(pattern => pattern.id === id))) {
+      message('Một Pattern đã bị xóa. Hãy chọn Pattern thay thế trong Inspector trước khi lưu.', true);
+      return;
+    }
+    if (scopedPattern && allNodes(draftRef.current).some(node =>
+      node.kind === 'element' && ['core/list', 'core/pattern_ref'].includes(
+        (node.node as import('./document.ts').BuilderElement).type))) {
+      message('Pattern không được chứa Reusable Pattern hoặc danh sách nội dung.', true);
+      return;
+    }
+    if (scopedEntry && !scopedPattern && entryModeRef.current !== 'builder' && !window.confirm(
       'Thiết kế mới sẽ thay phần thân nội dung đang hiển thị sau khi Lưu. ' +
       'Nội dung văn bản hiện tại vẫn được giữ để khôi phục khi Reset. Tiếp tục?'
     )) return;
@@ -501,9 +495,7 @@ export function BuilderWorkspace({
     const requestAuthority = authority;
     message('Đang lưu snapshot (If-Match "v' + snapshotVersion + '")...');
     try {
-      const result = scopedSection && scopeEntryId !== null
-          ? await sectionApi.saveSectionDocument(scopeEntryId, snapshot, snapshotVersion, csrfToken)
-          : scopedEntry && scopeEntryId !== null
+      const result = scopedEntry && scopeEntryId !== null
             ? await builderApi.saveEntryBuilder(scopeTypeKey, scopeEntryId, snapshot, snapshotVersion, csrfToken)
             : sharedTarget
               ? await builderApi.putTemplateOverride(sharedTarget, snapshot, csrfToken, snapshotVersion || undefined)
@@ -519,7 +511,7 @@ export function BuilderWorkspace({
       setSavedRevision(snapshotRevision);
       if (snapshotRevision === revisionRef.current) {
         invalidatePreview();
-        if ('diagnostics' in result) setDiagnostics(result.diagnostics);
+        if ('diagnostics' in result && Array.isArray(result.diagnostics)) setDiagnostics(result.diagnostics);
       }
       if (scopedEntry) {
         const details = await freshPageDetails();
@@ -527,8 +519,8 @@ export function BuilderWorkspace({
         setPageDetails(details);
       }
       message(snapshotRevision === revisionRef.current
-        ? scopedSection
-          ? 'Đã lưu Section. Bố cục chỉ có trong thư viện riêng tư; chưa xuất bản.'
+        ? scopedPattern
+          ? 'Đã lưu Pattern đồng bộ; mọi nội dung tham chiếu sẽ hiển thị bố cục mới.'
           : scopedEntry && pageDetails?.status === 'draft'
           ? 'Đã lưu bố cục nháp. Nội dung vẫn chưa xuất bản.'
           : 'Đã lưu và cập nhật website công khai.'
@@ -592,7 +584,7 @@ export function BuilderWorkspace({
   const reload = () => loadRoleTarget(true);
 
   const resetRoleOverride = async () => {
-    if (!active || scopedSection || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
+    if (!active || scopedPattern || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
     if (revisionRef.current !== savedRevision
         && !window.confirm('Reset sẽ bỏ nháp chưa lưu. Tiếp tục?')) return;
     if (!window.confirm('Reset bố cục ' + targetRole + ' để sử dụng nội dung dự phòng?')) return;
@@ -639,7 +631,7 @@ export function BuilderWorkspace({
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
         <div>
           <h2 className="!m-0 text-lg font-bold text-slate-900">
-            {scopedEntry ? `${scopeTypeKey === 'page' ? 'Page' : scopeTypeKey} Builder #${scopeEntryId}` : scopedSection ? `Section Builder #${scopeEntryId}` : 'Override: ' + targetRole}
+            {scopedEntry ? `${scopeTypeKey === 'page' ? 'Page' : scopedPattern ? 'Pattern' : scopeTypeKey} Builder #${scopeEntryId}` : 'Override: ' + targetRole}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
             Nguồn: {source} · ETag: {version === null ? 'Chưa tải' : '"v' + version + '"'}
@@ -650,16 +642,15 @@ export function BuilderWorkspace({
           <label htmlFor="builder-role-target" className="text-sm font-medium text-slate-600">Role</label>
 
           <select id="builder-role-target" aria-label="Role Builder" className="text-sm"
-            disabled={user.role !== 'admin' || scopedEntry || scopedSection}
+            disabled={user.role !== 'admin' || scopedEntry}
             value={targetRole} onChange={event => {
-              const next = event.target.value as OverrideRole | 'section' | 'entry';
-              if (next === 'entry' || next === 'page' || next === 'section') return;
+              const next = event.target.value as OverrideRole | 'entry';
+              if (next === 'entry' || next === 'page') return;
               onNavigateHash(`#/builder?template=${next}${scopeTypeKey && (next === 'archive' || next === 'single') ? `&type=${encodeURIComponent(scopeTypeKey)}` : ''}`);
             }}>
 
             <option value="page" disabled={!scopedPage}>page</option>
             <option value="entry" disabled={!scopedEntry || scopedPage}>entry · riêng theo CPT</option>
-            <option value="section" disabled={!scopedSection}>section · riêng tư</option>
 
             <option value="header">header</option>
 
@@ -674,7 +665,6 @@ export function BuilderWorkspace({
           </select>
 
           {scopedEntry && <span className="text-xs font-medium text-slate-600">{scopeTypeKey} · entry #{scopeEntryId}</span>}
-          {scopedSection && <span className="text-xs font-medium text-slate-600">section · entry #{scopeEntryId} · private</span>}
           {(targetRole === 'archive' || targetRole === 'single') && !scopedEntry && (
 
             <input type="text" className="w-28 text-sm" placeholder="type_key"
@@ -702,18 +692,17 @@ export function BuilderWorkspace({
             disabled={!user || loading || previewing || !loadedRef.current || (Boolean(sharedTarget) && user.role !== 'admin')}
             onClick={() => void preview()}>Xem trước</button>
           <button id="save" type="button" disabled={!user || loading || saving || !loadedRef.current || !dirty}
-            onClick={() => void save()}> {saving ? 'Đang lưu…' : scopedSection ? 'Lưu Section' : scopedPage ? 'Lưu Page' : scopedEntry ? 'Lưu nội dung' : 'Lưu override'} </button>
-          {!scopedSection && overrideExists && (
+            onClick={() => void save()}> {saving ? 'Đang lưu…' : scopedPattern ? 'Lưu Pattern' : scopedPage ? 'Lưu Page' : scopedEntry ? 'Lưu nội dung' : 'Lưu override'} </button>
+          {!scopedPattern && overrideExists && (
             <button type="button" className="btn-secondary" disabled={!user || loading || saving}
               onClick={() => void resetRoleOverride()}>Reset mặc định</button>
           )}
           {scopedEntry && <button type="button" className="btn-secondary"
-            onClick={() => onNavigateHash(scopeTypeKey === 'page' ? `#/pages/${scopeEntryId}/edit`
+            onClick={() => onNavigateHash(scopedPattern ? `#/patterns/${scopeEntryId}/edit`
+              : scopeTypeKey === 'page' ? `#/pages/${scopeEntryId}/edit`
               : scopeTypeKey === 'post' ? `#/posts/${scopeEntryId}/edit`
-                : `#/cpt/${encodeURIComponent(scopeTypeKey)}/${scopeEntryId}/edit`)}>{scopedPage ? 'Trở lại Page' : 'Trở lại nội dung'}</button>}
-          {scopedSection && <button type="button" className="btn-secondary"
-            onClick={() => onNavigateHash(`#/sections/${scopeEntryId}/edit`)}>Trở lại Section</button>}
-          {!scopedSection && (scopedEntry ? pageDetails?.status === 'published' && Boolean(pageDetails.url) : true) && (
+                : `#/cpt/${encodeURIComponent(scopeTypeKey)}/${scopeEntryId}/edit`)}>{scopedPattern ? 'Trở lại Pattern' : scopedPage ? 'Trở lại Page' : 'Trở lại nội dung'}</button>}
+          {!scopedPattern && (scopedEntry ? pageDetails?.status === 'published' && Boolean(pageDetails.url) : true) && (
             <a href={scopedEntry ? pageDetails?.url : '/'} target="_blank" rel="noopener noreferrer"
               className="rounded border border-slate-200 px-3 py-2 text-sm text-sky-700">
               {scopedEntry ? 'Xem nội dung công khai' : 'Trang công khai'}
@@ -724,11 +713,11 @@ export function BuilderWorkspace({
       <div role={error ? 'alert' : 'status'} className={'rounded-lg border p-3 text-sm ' +
         (error ? 'border-red-200 bg-red-50 text-red-800' : 'border-slate-200 bg-white text-slate-600')}>
         {loading ? 'Đang tải Builder… ' : ''}{notice}
-        {scopedEntry && pageDetails?.status === 'draft' &&
+        {scopedEntry && !scopedPattern && pageDetails?.status === 'draft' &&
           <p className="mt-1">Page đang là bản nháp. Lưu bố cục sẽ không xuất bản Page.</p>}
         {sharedTarget && <p className="mt-1">Preview hiển thị template đang chỉnh sửa; chưa cập nhật website công khai.</p>}
-        {scopedSection && <p className="mt-1">Section này chỉ lưu trong website. Không có URL công khai; Preview chỉ hiển thị sau đăng nhập.</p>}
-        {scopedEntry && !overrideExists && loadedRef.current &&
+        {scopedPattern && <p className="mt-1">Pattern không có URL public. Mỗi lần lưu Builder, các trang tham chiếu sẽ dùng bố cục mới. Không thể lồng Reusable Pattern hoặc danh sách nội dung bên trong Pattern.</p>}
+        {scopedEntry && !scopedPattern && !overrideExists && loadedRef.current &&
           <p className="mt-1">Chưa có thiết kế Page riêng. Nội dung văn bản hiện tại vẫn được dùng cho đến khi bạn lưu thiết kế mới. Lưu thiết kế sẽ thay phần thân hiển thị, và Reset sẽ khôi phục phần thân văn bản.</p>}
         {conflict && <button type="button" className="btn-secondary ml-3" onClick={() => void reload()}>
           Xem bản server (cần xác nhận bỏ nháp)
@@ -739,29 +728,19 @@ export function BuilderWorkspace({
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
             <label htmlFor="builder-element-type" className="text-xs text-slate-500">Element mới</label>
             <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
-              value={elementType} onChange={event => setElementType(event.target.value as ElementType)}>
-              {ELEMENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
+              value={elementType} onChange={event => setElementType(event.target.value as InsertableElementType)}>
+              {ELEMENT_TYPES.filter(type =>
+                (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
+                && (!scopedPattern || type !== 'core/list'))
+                .map(type => <option key={type} value={type}>{type === 'core/pattern_ref' ? 'Reusable Pattern' : type}</option>)}
             </select>
           </div>
-          <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-local-library">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <strong className="text-xs">Thư viện Section cục bộ</strong>
-              <button type="button" className="btn-secondary text-xs" disabled={loading || saving || libraryLoading}
-                onClick={() => void openLibrary()}>{libraryLoading ? 'Đang tải…' : libraryOpen ? 'Đóng' : 'Chọn Section'}</button>
-            </div>
-            {libraryOpen && <div className="mt-3 space-y-2">
-              <p className="text-xs text-slate-500">Chèn bản sao với ID mới sau Section đang chọn. Không liên kết với Section gốc.</p>
-              {librarySections.length === 0 && <p className="text-xs">Chưa có Section. Tạo Section tại mục Section riêng tư.</p>}
-              {librarySections.map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs">
-                <span className="min-w-0 break-words">#{item.id} · {item.title}</span>
-                <button type="button" disabled={insertingId !== null || loading || saving}
-                  onClick={() => void insertSection(item.id)}>
-                  {insertingId === item.id ? 'Đang chèn…' : 'Chèn bản sao'}
-                </button>
-              </div>)}
-            </div>}
-          </section>
-          <BuilderTree document={draft} selectedId={selectedId} elementType={elementType}
+          {scopedEntry && !scopedPattern && <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-pattern-help">
+            <strong className="text-xs">Reusable Pattern</strong>
+            <p className="mt-1 text-xs text-slate-600">Chọn “Reusable Pattern” ở Element mới, thêm vào Column, rồi chọn Pattern trong Inspector để tham chiếu đồng bộ.</p>
+            <p className="mt-1 text-xs text-slate-600">{patternsLoaded ? `${patterns.length} Pattern sẵn dùng` : 'Đang tải danh sách Pattern…'}</p>
+          </section>}
+          <BuilderTree document={draft} selectedId={selectedId} elementType={elementType as ElementType}
             onSelect={setSelectedId} onAdd={add} onMove={reorder} onDelete={remove} />
         </div>
         <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Trình chỉnh sửa canvas">
@@ -776,6 +755,7 @@ export function BuilderWorkspace({
             data-testid="builder-structural-viewport">
             <div style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: 'none', minWidth: 0 }}>
               <BuilderCanvas document={draft} selectedId={selectedId} registry={registry}
+                patterns={patterns} patternsLoaded={patternsLoaded}
                 viewport={viewport} onSelect={setSelectedId} />
             </div>
           </div>
@@ -797,6 +777,7 @@ export function BuilderWorkspace({
         <div className="min-w-0">
           <BuilderInspector document={draft} selectedId={selectedId} registry={registry}
             csrfToken={csrfToken} viewport={viewport}
+            patterns={patterns} patternsLoaded={patternsLoaded} onRefreshPatterns={refreshPatterns}
 
             allowRouteContext={targetRole === 'single' || targetRole === 'page'}
 

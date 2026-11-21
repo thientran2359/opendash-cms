@@ -5,6 +5,7 @@ import {
   getTemplateOverrides, resetTemplateOverride, type TypedTemplateOverride,
 } from '../../api/builder.ts';
 import { getLocalTemplateLibrary, type LocalTemplateLibrary } from '../../api/sections.ts';
+import { listPatterns, type PatternRecord } from '../../api/patterns.ts';
 
 interface Props {
   user: AuthUser | null;
@@ -17,6 +18,7 @@ interface Props {
 
 export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigateHash, onApiError, onApplied }: Props) {
   const [catalog, setCatalog] = useState<LocalTemplateLibrary | null>(null);
+  const [patterns, setPatterns] = useState<PatternRecord[]>([]);
   const [overrides, setOverrides] = useState<TypedTemplateOverride[]>([]);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState<string | null>(null);
@@ -29,10 +31,11 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
     if (currentRole !== 'admin' || !csrfToken) return;
     const seq = ++requestSeq.current;
     setLoading(true);
-    Promise.all([getLocalTemplateLibrary(), getTemplateOverrides()]).then(([data, rows]) => {
+    Promise.all([getLocalTemplateLibrary(), getTemplateOverrides(), listPatterns()]).then(([data, rows, patternList]) => {
       if (seq === requestSeq.current) {
         setCatalog(data);
         setOverrides(rows.items);
+        setPatterns(patternList.items);
       }
     }).catch(error => {
       if (seq === requestSeq.current) onApiError(error, 'Không tải được thư viện mẫu.');
@@ -42,15 +45,17 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
   useEffect(() => {
     requestSeq.current += 1;
     setCatalog(null);
+    setPatterns([]);
     setOverrides([]);
     setApplying(null);
     if (currentRole !== 'admin' || !csrfToken) return;
     const seq = ++requestSeq.current;
     setLoading(true);
-    Promise.all([getLocalTemplateLibrary(), getTemplateOverrides()]).then(([data, rows]) => {
+    Promise.all([getLocalTemplateLibrary(), getTemplateOverrides(), listPatterns()]).then(([data, rows, patternList]) => {
       if (seq === requestSeq.current) {
         setCatalog(data);
         setOverrides(rows.items);
+        setPatterns(patternList.items);
       }
     }).catch(error => {
       if (seq === requestSeq.current) onApiError(error, 'Không tải được thư viện mẫu.');
@@ -85,24 +90,24 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
   return <main className="od-admin-card min-w-0 space-y-5" data-testid="local-template-library">
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="text-xl font-semibold">Thư viện mẫu cục bộ</h2>
-        <p className="mt-1 text-sm text-slate-600">Mẫu Section thuộc website và template của theme đang kích hoạt. Không kết nối cloud.</p></div>
+        <p className="mt-1 text-sm text-slate-600">Pattern dùng chung thuộc website và template role của theme đang kích hoạt.</p></div>
       <button type="button" className="btn-secondary" disabled={loading || !!applying} onClick={refresh}>Tải lại thư viện</button>
     </header>
     {loading && <p role="status">Đang đọc thư viện…</p>}
     {notice && <p role="status" className="text-sm text-slate-700">{notice}</p>}
     {catalog && <>
-      <section className="space-y-3" aria-label="Section cục bộ">
-        <h3 className="font-semibold">Section riêng tư ({catalog.sections.length})</h3>
-        <p className="text-sm text-slate-600">Chọn “Chèn bản sao” trong Builder đích. Chèn không lưu, không xuất bản, không liên kết ngược Section gốc.</p>
+      <section className="space-y-3" aria-label="Pattern cục bộ">
+        <h3 className="font-semibold">Pattern đồng bộ ({patterns.length})</h3>
+        <p className="text-sm text-slate-600">Thêm block Reusable Pattern từ Visual Builder rồi chọn Pattern cần dùng. Thay đổi bản gốc sẽ cập nhật mọi nơi đang tham chiếu.</p>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {catalog.sections.map(item => <article key={item.id} className="min-w-0 rounded-lg border border-slate-200 p-3">
+          {patterns.map(item => <article key={item.id} className="min-w-0 rounded-lg border border-slate-200 p-3">
             <h4 className="break-words font-medium">{item.title}</h4>
-            <p className="mt-1 break-words text-xs text-slate-500">#{item.id} · {item.slug} · riêng tư</p>
-            <button type="button" className="btn-secondary mt-3" onClick={() => onNavigateHash(`#/sections/${item.id}/edit`)}>Mở Section</button>
+            <p className="mt-1 break-words text-xs text-slate-500">#{item.id} · {item.slug} · {item.referencing_count} nội dung tham chiếu</p>
+            <button type="button" className="btn-secondary mt-3" onClick={() => onNavigateHash(`#/patterns/${item.id}/edit`)}>Mở Pattern</button>
           </article>)}
         </div>
-        {!catalog.sections.length && <p className="text-sm">Chưa có Section. Tạo một Section trước khi sử dụng thư viện.</p>}
-        <button type="button" onClick={() => onNavigateHash('#/sections/new')}>Tạo Section mới</button>
+        {!patterns.length && <p className="text-sm">Chưa có Pattern đồng bộ.</p>}
+        <button type="button" onClick={() => onNavigateHash('#/patterns/new')}>Tạo Pattern mới</button>
       </section>
       <section className="space-y-3 border-t border-slate-200 pt-4" aria-label="Mẫu theme cục bộ">
         <h3 className="font-semibold">Mẫu theme đang kích hoạt</h3>
@@ -114,7 +119,7 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
           </div>
           {item.can_apply && <span className="text-xs text-slate-600">Mẫu thuộc active theme</span>}
         </article>)}
-        {!catalog.theme_templates.length && <p className="text-sm text-slate-600">Theme không cung cấp mẫu role cục bộ hợp lệ. Section vẫn được bảo toàn; không tải nội dung từ mạng.</p>}
+        {!catalog.theme_templates.length && <p className="text-sm text-slate-600">Theme không cung cấp mẫu role cục bộ hợp lệ. Pattern CPT được lưu riêng và vẫn được bảo toàn.</p>}
       </section>
       <section className="space-y-3 border-t border-slate-200 pt-4" aria-label="Site template overrides">
         <h3 className="font-semibold">Site template overrides ({overrides.length})</h3>

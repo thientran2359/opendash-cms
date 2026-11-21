@@ -1,16 +1,21 @@
 import React from 'react';
 import type { BuilderColumn, BuilderDocument, BuilderElement, BuilderRow, BuilderSection, BuilderViewport } from './document.ts';
 import { effectiveResponsive, isLockedElement, rowUsesGrid } from './document.ts';
+import type { PatternRecord } from '../api/patterns.ts';
 
 interface Props {
   document: BuilderDocument;
   selectedId: string | null;
   viewport: BuilderViewport;
   registry: Record<string, Record<string, string>>;
+  patterns: PatternRecord[];
+  patternsLoaded: boolean;
   onSelect: (id: string) => void;
 }
 
-function ElementContent({ element, registry }: { element: BuilderElement; registry: Props['registry'] }) {
+function ElementContent({ element, registry, patterns, patternsLoaded }: {
+  element: BuilderElement; registry: Props['registry']; patterns: PatternRecord[]; patternsLoaded: boolean;
+}) {
   if (isLockedElement(element, registry)) {
     return <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
       Không thể hiển thị: {element.type || 'Block chưa xác định'} (giữ dữ liệu gốc)
@@ -22,6 +27,16 @@ function ElementContent({ element, registry }: { element: BuilderElement; regist
     </div>;
   }
   switch (element.type) {
+    case 'core/pattern_ref': {
+      const id = Number(element.props.pattern_id);
+      const found = patterns.find(pattern => pattern.id === id);
+      return <div className={'rounded border p-3 text-sm ' +
+        (patternsLoaded && !found ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-indigo-300 bg-indigo-50 text-indigo-900')}>
+        {found ? `Reusable Pattern: ${found.title} (#${id}) · đồng bộ`
+          : id > 0 && patternsLoaded ? `Pattern #${id} không còn tồn tại · xem Inspector để thay thế`
+            : id > 0 ? `Đang tải Pattern #${id}…` : 'Chưa chọn Pattern · mở Inspector'}
+      </div>;
+    }
     case 'core/contact_form':
       return <div className="rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
         Form liên hệ #{String(element.props.form_id ?? 1)} · Nút: {String(element.props.submit_label ?? 'Gửi liên hệ')}
@@ -58,7 +73,7 @@ function ElementContent({ element, registry }: { element: BuilderElement; regist
   }
 }
 
-export function BuilderCanvas({ document, selectedId, registry, viewport, onSelect }: Props) {
+export function BuilderCanvas({ document, selectedId, registry, patterns, patternsLoaded, viewport, onSelect }: Props) {
   const selectProps = (id: string) => ({
     type: 'button' as const,
     'data-canvas-id': id,
@@ -75,7 +90,7 @@ export function BuilderCanvas({ document, selectedId, registry, viewport, onSele
     <button key={element.id} {...selectProps(element.id)}
       aria-label={'Chọn element ' + element.type + ' ' + element.id}>
       <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{element.type}</span>
-      <ElementContent element={element} registry={registry} />
+      <ElementContent element={element} registry={registry} patterns={patterns} patternsLoaded={patternsLoaded} />
     </button>
   );
   const renderColumn = (column: BuilderColumn, inGrid: boolean) => (

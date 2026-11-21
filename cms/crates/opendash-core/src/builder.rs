@@ -207,6 +207,8 @@ pub enum KnownElement {
     ContactForm(ContactFormProps),
     #[serde(rename = "core/content_slot")]
     ContentSlot(ContentSlotProps),
+    #[serde(rename = "core/pattern_ref")]
+    PatternRef(PatternRefProps),
     #[serde(rename = "core/template_part")]
     TemplatePart(TemplatePartProps),
     #[serde(rename = "legacy/block")]
@@ -228,6 +230,14 @@ pub struct PluginBlockProps {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ContentSlotProps {}
+
+/// A one-hop reference to a private Pattern CPT entry. The server resolves
+/// this ID from a trusted SQLite snapshot; client-provided markup is ignored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatternRefProps {
+    pub pattern_id: i64,
+}
 
 /// A named theme/template part resolved by the server in the render context.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -374,6 +384,7 @@ impl KnownElement {
             | Self::List(_)
             | Self::ContactForm(_)
             | Self::ContentSlot(_)
+            | Self::PatternRef(_)
             | Self::TemplatePart(_)
             | Self::Video(_)
             | Self::PluginBlock(_) => None,
@@ -650,6 +661,11 @@ fn validate_known(
             }
         }
         KnownElement::ContentSlot(_) => {}
+        KnownElement::PatternRef(props) => {
+            if props.pattern_id <= 0 {
+                return Err("Invalid Pattern reference ID");
+            }
+        }
         KnownElement::TemplatePart(props) => {
             if !valid_kebab_segment_with_limit(&props.part_key, 64) {
                 return Err("Invalid Builder template part key");

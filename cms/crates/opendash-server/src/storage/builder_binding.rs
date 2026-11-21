@@ -91,7 +91,7 @@ pub async fn resolve_in_tx_with_route(
                                 AND t.provider_status = 'active'
                                 AND (? = 1 OR (
                                     e.publication_status = 'published'
-                                    AND e.content_type_key != 'section'
+                                    AND e.content_type_key != 'pattern'
                                     AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                                 ))",
                         )
@@ -100,15 +100,20 @@ pub async fn resolve_in_tx_with_route(
                         .bind(i64::from(authenticated_preview))
                         .fetch_optional(&mut **tx)
                         .await?;
-                        let source = if let Some((entry_id, definition, title, values)) = source_row {
+                        let source = if let Some((entry_id, definition, title, values)) = source_row
+                        {
                             // Preview may read draft fields, but an unpublished
                             // route must never become a public binding URL.
                             let url = if crate::storage::seo::resolve_public_entry_path_in_tx(
                                 &mut **tx, entry_id,
-                            ).await?.is_some() {
+                            )
+                            .await?
+                            .is_some()
+                            {
                                 crate::storage::permalinks::canonical_entry_path_in_tx(
                                     &mut **tx, entry_id,
-                                ).await?
+                                )
+                                .await?
                             } else {
                                 None
                             };
@@ -214,11 +219,10 @@ fn extract_route_context(
             u
         }
         "cover_url" => {
-            let Some(img_field) = schema
-                .fields
-                .iter()
-                .find(|f| f.field_type == ContentFieldType::Image && f.public_exposure == PublicExposure::Public)
-            else {
+            let Some(img_field) = schema.fields.iter().find(|f| {
+                f.field_type == ContentFieldType::Image
+                    && f.public_exposure == PublicExposure::Public
+            }) else {
                 return BindingResult::Unavailable;
             };
             let Some(media_id) = values.get(&img_field.key).and_then(Value::as_str) else {
@@ -285,11 +289,7 @@ fn extract_field_value(
     }
 }
 
-fn finalize_binding_value(
-    target: BindingTarget,
-    text: String,
-    heading: bool,
-) -> BindingResult {
+fn finalize_binding_value(target: BindingTarget, text: String, heading: bool) -> BindingResult {
     // Bound data must meet the same output restrictions as static typed props;
     // rich_text is ALWAYS escaped later by the shared core renderer.
     let max = match target {

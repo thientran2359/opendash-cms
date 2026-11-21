@@ -888,6 +888,15 @@ async fn validate_typed_document_in_tx(
     document
         .validate_for_save(&state.descriptors()?, prior)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    // S02 stores synchronized Pattern references per content entry through
+    // entry_pattern_refs. Shared template overrides have no such ownership or
+    // public-media projection, so accepting a PatternRef here would silently
+    // hide its markup on public pages. Keep these blocks entry-scoped.
+    if !builder::pattern_ids(document).is_empty() {
+        return Err(ApiError::bad_request(
+            "Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.",
+        ));
+    }
     let route_role = match target.kind {
         TemplateCandidateKind::Single
         | TemplateCandidateKind::SingleCustom
@@ -1317,7 +1326,7 @@ async fn resolve_preview_entry(
     let Some((type_key, id)) = selected else {
         return Ok(None);
     };
-    if type_key == "section" {
+    if type_key == "pattern" {
         return Err(ApiError::not_found("Preview entry not found."));
     }
     let valid = match target.kind {
@@ -1424,7 +1433,7 @@ pub async fn preview_typed_override(
         theme_context["content_type"] = serde_json::to_value(definition)?;
         if record.content_mode == ContentMode::Builder
             && definition.settings.supports(ContentSupport::Builder)
-            && record.content_type_key != "section"
+            && record.content_type_key != "pattern"
         {
             if let Some(mut rendered) = builder::preview_saved_page_body_in_tx(
                 &mut tx,

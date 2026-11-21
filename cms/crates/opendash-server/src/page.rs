@@ -37,6 +37,10 @@ pub struct BuilderDiagnostic {
 pub type ContactFormResults =
     std::collections::BTreeMap<String, Option<crate::storage::contact::ContactFormRecord>>;
 
+/// Pattern documents are resolved from one SQLite snapshot before rendering.
+/// A missing target is deliberately absent, never client-provided HTML.
+pub type PatternResults = std::collections::BTreeMap<i64, RenderedLayout>;
+
 #[derive(Debug, Serialize)]
 pub struct RenderedLayout {
     #[serde(skip_serializing)]
@@ -231,10 +235,40 @@ pub fn render_builder_with_template_context(
     forms: &ContactFormResults,
     context: Option<&BuilderTemplateContext<'_>>,
 ) -> ApiResult<RenderedLayout> {
+    render_builder_with_patterns(
+        state,
+        document,
+        is_preview,
+        bindings,
+        lists,
+        forms,
+        context,
+        &PatternResults::new(),
+        false,
+    )
+}
+
+/// Render an entry or a trusted, one-hop Pattern body. Only the storage layer
+/// can populate `patterns`, so incoming AST never carries referenced markup.
+pub fn render_builder_with_patterns(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
+    lists: &ListResults,
+    forms: &ContactFormResults,
+    context: Option<&BuilderTemplateContext<'_>>,
+    patterns: &PatternResults,
+    pattern_document: bool,
+) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
     let mut html = builder_responsive_css(document);
-    html.push_str("<main data-builder-version=\"1\">");
+    if pattern_document {
+        html.push_str("<div class=\"od-pattern-content\" data-builder-version=\"1\">");
+    } else {
+        html.push_str("<main data-builder-version=\"1\">");
+    }
     let mut diagnostics = Vec::new();
     let mut has_active_contact_form = false;
     for section in &document.sections {
@@ -493,6 +527,28 @@ pub fn render_builder_with_template_context(
                                 }
                             }
                         }
+                        ElementContent::Known(KnownElement::PatternRef(props)) => {
+                            match patterns.get(&props.pattern_id) {
+                                Some(pattern) => {
+                                    has_active_contact_form |= pattern.has_active_contact_form;
+                                    Some(format!(
+                                        "<div class=\"od-pattern-ref\" data-pattern-id=\"{}\">{}</div>",
+                                        props.pattern_id, pattern.html,
+                                    ))
+                                }
+                                None => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "pattern_missing",
+                                    });
+                                    if is_preview {
+                                        Some("<div class=\"od-pattern-missing\" role=\"status\">Pattern không còn tồn tại.</div>".into())
+                                    } else {
+                                        None
+                                    }
+                                }
+                            }
+                        }
                         ElementContent::Known(KnownElement::TemplatePart(props)) => {
                             match context.and_then(|ctx| ctx.parts.get(&props.part_key)) {
                                 Some(html) => Some(html.clone()),
@@ -565,9 +621,8 @@ pub fn render_builder_with_template_context(
                         }
                     };
                     if let Some(fragment) = rendered {
-                        if context.is_some()
-                            && html.len().saturating_add(fragment.len())
-                                > crate::template_sec::MAX_RENDERED_HTML_BYTES
+                        if html.len().saturating_add(fragment.len())
+                            > crate::template_sec::MAX_RENDERED_HTML_BYTES
                         {
                             return Err(ApiError::bad_request(
                                 "Builder template composition exceeds 512 KiB.",
@@ -585,8 +640,12 @@ pub fn render_builder_with_template_context(
         }
         html.push_str("</section>");
     }
-    html.push_str("</main>");
-    if context.is_some() && html.len() > crate::template_sec::MAX_RENDERED_HTML_BYTES {
+    html.push_str(if pattern_document {
+        "</div>"
+    } else {
+        "</main>"
+    });
+    if html.len() > crate::template_sec::MAX_RENDERED_HTML_BYTES {
         return Err(ApiError::bad_request(
             "Builder template composition exceeds 512 KiB.",
         ));

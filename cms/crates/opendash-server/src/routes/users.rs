@@ -204,10 +204,7 @@ pub struct UpdateProfileInput {
     pub new_password: Option<String>,
 }
 
-pub async fn profile_get(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-) -> ApiResult<Response> {
+pub async fn profile_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
     let actor = require_session(&headers, &db).await?;
     let summary = users::get_profile(&db, actor.user.id).await?;
     Ok(response(StatusCode::OK, summary))

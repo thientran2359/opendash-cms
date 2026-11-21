@@ -210,15 +210,15 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   latestScopeRef.current = selectedScope;
   latestTypeRef.current = activeKey;
   const isBuiltin = activeKey === 'post' || activeKey === 'page';
-  const isSection = activeKey === 'section';
+  const isPattern = activeKey === 'pattern';
   const canEditSettings = Boolean(activeType && (
     activeType.owner.kind === 'user'
     || (activeType.owner.kind === 'core' && isBuiltin)
   ));
   // Site-owned CPT taxonomy associations are independent of provider-owned
   // schema editing. Admin may override plugin/theme CPT eligibility without
-  // modifying the provider's schema; Section and Editors remain restricted.
-  const canEditTaxonomies = Boolean(activeType && !isSection && user?.role === 'admin');
+  // modifying the provider's schema; Pattern and Editors remain restricted.
+  const canEditTaxonomies = Boolean(activeType && !isPattern && user?.role === 'admin');
   const canonicalSettings = activeType
     ? effectiveContentTypeSettings(activeKey, activeType.descriptor.settings)
     : null;
@@ -280,7 +280,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
   }, [createDirty, settingsChanged, taxonomyChanged, onDirtyChange]);
 
   useEffect(() => {
-    if (!currentIdentity || !activeKey || isSection) {
+    if (!currentIdentity || !activeKey || isPattern) {
       setTaxonomyState(null);
       setTaxonomyError('');
       return;
@@ -320,11 +320,11 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
       onApiError(error, 'Không thể tải liên kết taxonomy.');
     });
     return () => { active = false; controller.abort(); };
-  }, [activeKey, currentIdentity, revision, isSection, selectedScope]);
+  }, [activeKey, currentIdentity, revision, isPattern, selectedScope]);
 
   const handleUpdateTaxonomies = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!activeType || !taxonomyLoaded || !canEditTaxonomies || isSection || taxonomyBusy
+    if (!activeType || !taxonomyLoaded || !canEditTaxonomies || isPattern || taxonomyBusy
       || savingSettings || !csrfToken || taxonomyLoaded.stale || !taxonomyChanged) return;
     if (settingsChanged && !window.confirm(
       'Lưu taxonomy sẽ tải lại phiên bản CPT. Phần cấu hình chung chưa lưu có thể bị bỏ. Tiếp tục?',
@@ -816,7 +816,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
               </form>
             ) : (
               <p className="mt-4 text-sm text-zinc-600">
-                {isSection ? 'Section là loại nội dung riêng tư và không cho phép thay đổi cấu hình công khai.'
+                {isPattern ? 'Pattern là loại nội dung riêng tư và không cho phép thay đổi cấu hình công khai.'
                   : 'Cấu hình thuộc quyền sở hữu của nhà cung cấp; chỉ có thể xem tại đây.'}
               </p>
             )}
@@ -827,7 +827,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
             <p className="mt-1 text-sm text-zinc-600">
               Chọn taxonomy được phép gắn vào {activeType.descriptor.label}. Bỏ chọn không xóa liên kết đã lưu.
             </p>
-            {isSection ? <p className="mt-3 text-sm text-zinc-600">Section không hỗ trợ taxonomy.</p>
+            {isPattern ? <p className="mt-3 text-sm text-zinc-600">Pattern không hỗ trợ taxonomy.</p>
               : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-zinc-600">Đang tải taxonomy áp dụng…</p>
                 : <form className="mt-3.5 space-y-3.5" onSubmit={handleUpdateTaxonomies}>
                     <div className="grid gap-2.5 sm:grid-cols-2">
@@ -866,7 +866,7 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                         </label>
                       ))}
                     </div>
-                    {!canEditTaxonomies && <p className="text-xs text-zinc-500">Chỉ quản trị viên có thể thay đổi taxonomy; Section không hỗ trợ.</p>}
+                    {!canEditTaxonomies && <p className="text-xs text-zinc-500">Chỉ quản trị viên có thể thay đổi taxonomy; Pattern không hỗ trợ.</p>}
                     {taxonomyChanged && <p className="text-xs text-zinc-500" role="status">
                       {selectedScope
                         ? 'Bản chọn taxonomy chưa lưu được giữ trong bộ nhớ phiên này theo tài khoản, website và loại nội dung khi bạn chuyển màn hình hoặc đăng nhập lại. Tải lại trang sẽ xóa bản nháp.'

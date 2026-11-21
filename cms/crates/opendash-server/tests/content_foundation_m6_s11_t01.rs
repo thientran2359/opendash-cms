@@ -1932,9 +1932,9 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
             .fetch_one(&db)
             .await
             .unwrap();
-    // EGM Spec 2 S01 adds migration 0043's generic CPT Builder index without
-    // altering the 0040→0041 provider permalink preservation assertions above.
-    assert_eq!(migration_version, 43);
+    // EGM Spec 2 S02 adds migration 0044's private Pattern data conversion;
+    // the 0040→0041 permalink preservation assertions above must still hold.
+    assert_eq!(migration_version, 44);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

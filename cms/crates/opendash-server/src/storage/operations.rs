@@ -336,10 +336,7 @@ pub async fn get_maintenance_generation(db: &SqlitePool) -> ApiResult<i64> {
 }
 
 #[allow(dead_code)]
-pub async fn bump_maintenance_generation(
-    db: &SqlitePool,
-    kind: OperationKind,
-) -> ApiResult<i64> {
+pub async fn bump_maintenance_generation(db: &SqlitePool, kind: OperationKind) -> ApiResult<i64> {
     sqlx::query(
         r#"
         UPDATE maintenance_generation
@@ -566,11 +563,7 @@ mod tests {
             .expect("mark interrupted");
         assert_eq!(interrupted_count, 2);
         assert_eq!(
-            get_job(&db, &media_job.id)
-                .await
-                .unwrap()
-                .unwrap()
-                .state,
+            get_job(&db, &media_job.id).await.unwrap().unwrap().state,
             OperationState::Interrupted
         );
 
