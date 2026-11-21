@@ -27,7 +27,7 @@ interface SubMenuItem {
   disabled?: boolean;
 }
 
-type NavigationGroup = 'content' | 'appearance' | 'customize';
+type NavigationGroup = 'content' | 'appearance' | 'system';
 
 interface ParentMenuItem {
   id: string;
@@ -93,70 +93,74 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       ],
     },
     {
+      id: 'contact',
+      label: 'Liên hệ',
+      icon: 'mail',
+      hash: '#/settings/contact',
+      group: 'content',
+      adminOnly: true,
+    },
+    {
+      id: 'builder',
+      label: 'Visual Builder',
+      icon: 'builder',
+      hash: '#/builder',
+      group: 'appearance',
+      adminOnly: true,
+    },
+    {
+      id: 'themes',
+      label: 'Theme',
+      icon: 'themes',
+      hash: '#/appearance/themes',
+      group: 'appearance',
+      adminOnly: true,
+      children: [
+        { label: 'Themes đã cài', hash: '#/appearance/themes' },
+        { label: 'Cài theme', hash: '#/appearance/library' },
+      ],
+    },
+    {
+      id: 'theme-options',
+      label: 'Tùy chọn theme',
+      icon: 'palette',
+      hash: '#/appearance/options',
+      group: 'appearance',
+      adminOnly: true,
+      children: [
+        { label: 'Tùy chọn theme', hash: '#/appearance/options' },
+        { label: 'Menus', hash: '#/appearance/menus' },
+      ],
+    },
+    {
       id: 'sections',
       label: 'Section',
       icon: 'content',
       hash: '#/sections',
-      group: 'content',
+      group: 'appearance',
       children: [
         { label: 'Tất cả Section', hash: '#/sections' },
         { label: 'Thêm Section', hash: '#/sections/new' },
       ],
     },
     {
-      id: 'themes',
-      label: 'Giao diện',
-      icon: 'themes',
-      hash: '#/appearance/themes',
-      group: 'appearance',
-      adminOnly: true,
-      children: [
-        { label: 'Themes', hash: '#/appearance/themes' },
-        { label: 'Menus', hash: '#/appearance/menus' },
-      ],
-    },
-    {
-      id: 'theme-customize',
-      label: 'Tùy chỉnh giao diện',
-      icon: 'themes',
-      hash: '#/appearance/options',
-      group: 'appearance',
-      adminOnly: true,
-      children: [
-        { label: 'Tùy chọn theme', hash: '#/appearance/options' },
-        { label: 'Visual Builder', hash: '#/builder' },
-      ],
-    },
-    {
-      id: 'content-types',
-      label: 'Loại nội dung & Trường',
-      icon: 'content',
+      id: 'schema',
+      label: 'Cấu trúc nội dung',
+      icon: 'schema',
       hash: '#/appearance/content-types',
-      group: 'appearance',
+      group: 'system',
       adminOnly: true,
-    },
-    {
-      id: 'taxonomies',
-      label: 'Taxonomy tùy chỉnh',
-      icon: 'content',
-      hash: '#/taxonomy/definitions',
-      group: 'appearance',
-      adminOnly: true,
-    },
-    {
-      id: 'library',
-      label: 'Thư viện mẫu',
-      icon: 'content',
-      hash: '#/appearance/library',
-      group: 'appearance',
-      adminOnly: true,
+      children: [
+        { label: 'Loại nội dung & Trường', hash: '#/appearance/content-types' },
+        { label: 'Taxonomy tùy chỉnh', hash: '#/taxonomy/definitions' },
+      ],
     },
     {
       id: 'plugins',
       label: 'Plugins',
       icon: 'plugins',
       hash: '#/plugins',
-      group: 'customize',
+      group: 'system',
       adminOnly: true,
       children: [
         { label: 'Plugins đã cài', hash: '#/plugins' },
@@ -168,7 +172,7 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       label: 'Người dùng',
       icon: 'users',
       hash: isAdmin ? '#/users' : '#/users/profile',
-      group: 'customize',
+      group: 'system',
       children: [
         { label: 'Tất cả người dùng', hash: '#/users', adminOnly: true },
         { label: 'Thêm người dùng', hash: '#/users/new', adminOnly: true },
@@ -180,7 +184,7 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       label: 'Công cụ',
       icon: 'tools',
       hash: '#/tools/backup',
-      group: 'customize',
+      group: 'system',
       adminOnly: true,
       children: [
         { label: 'Sao lưu & Phục hồi', hash: '#/tools/backup' },
@@ -193,14 +197,13 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       label: 'Cài đặt',
       icon: 'settings',
       hash: '#/settings/general',
-      group: 'customize',
+      group: 'system',
       adminOnly: true,
       children: [
         { label: 'Tổng quát', hash: '#/settings/general' },
         { label: 'Trang chủ & Bài viết', hash: '#/settings/reading' },
         { label: 'Đường dẫn tĩnh', hash: '#/settings/permalinks' },
         { label: 'SEO', hash: '#/settings/seo' },
-        { label: 'Liên hệ', hash: '#/settings/contact' },
         { label: 'Thông báo Email (SMTP)', hash: '#/settings/smtp' },
       ],
     },
@@ -214,7 +217,11 @@ function NavIcon({ name }: { name: string }) {
     pages: <><path d="M5 3h10l4 4v14H5zM15 3v5h4M9 12h6M9 16h6" /></>,
     content: <><path d="M4 5h16v14H4zM8 9h3v3H8zM14 9h3M14 13h3M8 16h9" /></>,
     media: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="1.5" /><path d="m4 17 5-5 4 3 3-4 5 6" /></>,
+    mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></>,
+    builder: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M9 11h12" /></>,
     themes: <><path d="M12 3 3 8l9 5 9-5-9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" /></>,
+    palette: <><circle cx="12" cy="12" r="9" /><circle cx="9" cy="10" r="1" /><circle cx="14" cy="9" r="1" /><circle cx="16" cy="13" r="1" /><circle cx="10" cy="15" r="1" /></>,
+    schema: <><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6" /></>,
     plugins: <><path d="M9 3h6v5h5v5h-5v8H9v-8H4V8h5z" /></>,
     users: <><circle cx="9" cy="8" r="3" /><path d="M3 21v-2a6 6 0 0 1 12 0v2M17 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 5v1" /></>,
     tools: <><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" /></>,
@@ -279,16 +286,18 @@ export const AdminShell: React.FC<AdminShellProps> = ({
       ? `cpt:${route.typeKey}`
       : route.view === 'taxonomy'
         ? (route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
-          ? 'taxonomies' : 'posts')
+          ? 'schema' : 'posts')
         : route.view === 'profile'
           ? 'users'
           : route.view === 'builder'
-            ? 'theme-customize'
+            ? 'builder'
             : route.view === 'themes'
-              ? (route.sub === 'options' ? 'theme-customize' : route.sub === 'library' ? 'library' : 'themes')
+              ? (route.sub === 'options' || route.sub === 'menus' ? 'theme-options' : 'themes')
               : route.view === 'settings' && route.sub === 'content-types'
-                ? 'content-types'
-                : route.view;
+                ? 'schema'
+                : route.view === 'settings' && route.sub === 'contact'
+                  ? 'contact'
+                  : route.view;
 
   useEffect(() => {
     setOpenMenuId(activeParentId);
@@ -319,7 +328,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     { id: 'dashboard', label: null, match: null },
     { id: 'content', label: 'Nội dung', match: 'content' },
     { id: 'appearance', label: 'Giao diện', match: 'appearance' },
-    { id: 'customize', label: 'Tùy chỉnh', match: 'customize' },
+    { id: 'system', label: 'Hệ thống', match: 'system' },
   ];
   const menuGroups = groupOrder.map(group => ({
     ...group,
@@ -337,7 +346,8 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     route.view === 'profile' ? '#/users/profile' :
     route.view === 'builder' ? '#/builder' :
     route.view === 'tools' ? `#/tools/${route.sub}` :
-    route.view === 'settings' ? `#/settings/${route.sub}` :
+    route.view === 'settings'
+      ? (route.sub === 'content-types' ? '#/appearance/content-types' : `#/settings/${route.sub}`) :
     route.view === 'media' ? (route.sub === 'upload' ? '#/media/upload' : '#/media') :
     route.view === 'plugins' ? (route.sub === 'install' ? '#/plugins/install' : '#/plugins') :
     route.view === 'users' ? (route.sub === 'new' ? '#/users/new' : '#/users') :
@@ -354,9 +364,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   };
   const pageTitle = routeForbidden
     ? '403 Không có quyền truy cập'
-    : route.view === 'themes' && route.sub === 'library'
-      ? 'Chưa khả dụng'
-      : activeChild?.label ?? (route.sub === 'edit' ? 'Chỉnh sửa' : subLabels[route.sub]) ?? activeParent?.label ?? 'Tổng quan';
+    : activeChild?.label ?? (route.sub === 'edit' ? 'Chỉnh sửa' : subLabels[route.sub]) ?? activeParent?.label ?? 'Tổng quan';
   const breadcrumbParts = [
     'Quản trị',
     activeGroupLabel,
