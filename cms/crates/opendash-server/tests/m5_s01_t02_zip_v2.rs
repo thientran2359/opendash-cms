@@ -241,8 +241,13 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
         .send()
         .await
         .unwrap();
-    assert_eq!(install_a.status(), 201);
-    let body_a: Value = install_a.json().await.unwrap();
+    let install_a_status = install_a.status();
+    let install_a_body = install_a.text().await.unwrap();
+    assert_eq!(
+        install_a_status, 201,
+        "v3 install response: {install_a_body}"
+    );
+    let body_a: Value = serde_json::from_str(&install_a_body).unwrap();
     assert_eq!(body_a["activated"], false);
     let rev_a = body_a["revision_id"].as_str().unwrap().to_string();
     let digest_a = body_a["revision_digest"].as_str().unwrap().to_string();
@@ -337,8 +342,9 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
     assert_eq!(act_b.status(), 200);
     assert_eq!(act_b.headers().get("etag").unwrap(), "\"v3\"");
 
-    // 7. An installed revision attempting to redeclare a protected core CPT
-    // must fail activation atomically (409) without advancing active CAS.
+    // 7. D01 validates declarations at ZIP ingestion, before any durable
+    // revision exists. A prohibited core CPT redeclaration must be rejected
+    // without changing the active selection or its CAS version.
     let m_decl = br#"{
         "manifest_version": 3,
         "theme_id": "editorial-clean",
@@ -356,26 +362,22 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
         .send()
         .await
         .unwrap();
-    assert_eq!(install_decl.status(), 201);
-    let rev_decl = install_decl.json::<Value>().await.unwrap()["revision_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let act_decl = client
-        .put(format!("{}/api/admin/themes/active", srv.base_url))
+    assert_eq!(install_decl.status(), 400);
+    let decl_err = install_decl.text().await.unwrap();
+    assert!(!decl_err.is_empty());
+    let after_rejection = client
+        .get(format!("{}/api/admin/themes", srv.base_url))
         .header("Cookie", &cookie)
-        .header("x-csrf-token", &csrf)
-        .header("If-Match", "\"v3\"")
-        .json(&serde_json::json!({ "revision_id": rev_decl }))
         .send()
         .await
+        .unwrap()
+        .json::<Value>()
+        .await
         .unwrap();
-    assert_eq!(act_decl.status(), 409);
-    let decl_err = act_decl.text().await.unwrap();
-    assert!(!decl_err.is_empty());
+    assert_eq!(after_rejection["selection"]["version"], 3);
+    assert_eq!(after_rejection["revisions"].as_array().unwrap().len(), 2);
 
-    // Rollback to rev_a still works with "v3" (confirming failed declarations did not bump or corrupt)
+    // Rollback to rev_a still works with "v3" (invalid ZIP never advanced CAS).
     let rollback_a = client
         .put(format!("{}/api/admin/themes/active", srv.base_url))
         .header("Cookie", &cookie)

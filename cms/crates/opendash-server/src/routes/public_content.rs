@@ -305,7 +305,10 @@ pub(crate) async fn render_canonical_archive(
         &fallback_html,
         None,
         serde_json::json!({
-            "content_type": schema,
+            // Do not export ContentTypeDefinition fields/settings/defaults to a
+            // public theme: field-level access is represented exclusively by
+            // exposure-filtered EntryView values.
+            "content_type": {"key": schema.key, "label": schema.label},
             "entries": entries,
             "previous_url": previous,
             "next_url": next,
@@ -464,7 +467,7 @@ pub(crate) async fn render_single_entry_response(
         &db, &candidates, active_v3.as_ref(), &site_ctx, &theme_opts,
         &fallback_html, Some((&type_key, &entry.slug)),
         serde_json::json!({
-            "content_type": schema,
+            "content_type": {"key": schema.key, "label": schema.label},
             "entry": entry_view_with_url(entry.clone(), &schema, Some(canonical_path_for_seo.clone())),
             "archive_url": archive_path,
             "route": {"kind":"single", "path":canonical_path_for_seo},
@@ -759,7 +762,7 @@ pub(crate) async fn render_canonical_taxonomy(
         &fallback_html,
         None,
         serde_json::json!({
-            "content_type": schema,
+            "content_type": {"key": schema.key, "label": schema.label},
             "entries": entries,
             "taxonomy": {"key":schema.key, "id":term_id, "slug":term.slug, "name":schema.label},
             "previous_url": previous,

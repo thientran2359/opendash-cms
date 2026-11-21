@@ -68,7 +68,11 @@ async fn serve(site: &Path, port: u16) -> Server {
         .unwrap();
     let server = Server(child);
     let client = Client::new();
-    let deadline = Instant::now() + Duration::from_secs(20);
+    // Native plugin/Wasm tests in this file run concurrently by default.
+    // Give an isolated server time to initialize when several concurrent
+    // fixture migrations compete for the same macOS Intel CPU; status must
+    // still reach healthy, and every behavioral assertion remains mandatory.
+    let deadline = Instant::now() + Duration::from_secs(45);
     loop {
         if let Ok(resp) = client
             .get(format!("http://127.0.0.1:{port}/api/health"))
@@ -1928,7 +1932,9 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
             .fetch_one(&db)
             .await
             .unwrap();
-    assert_eq!(migration_version, 41);
+    // S02 extends the canonical schema to migration 0042 without altering
+    // the 0040→0041 provider permalink preservation assertions above.
+    assert_eq!(migration_version, 42);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await
