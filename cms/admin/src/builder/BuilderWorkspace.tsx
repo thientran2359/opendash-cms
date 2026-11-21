@@ -436,6 +436,7 @@ export function BuilderWorkspace({
     previewAbort.current = controller;
     const snapshot = draftRef.current;
     const snapshotRevision = revisionRef.current;
+    const snapshotVersion = versionRef.current;
     const accountId = user.id;
     const requestAuthority = authority;
     setPreviewing(true);
@@ -447,7 +448,13 @@ export function BuilderWorkspace({
           ? await sectionApi.previewSectionDocument(scopeEntryId, snapshot, csrfToken, controller.signal)
           : scopedPage && scopeEntryId !== null
             ? await builderApi.previewEntryBuilder(scopeEntryId, snapshot, csrfToken, controller.signal)
-            : (() => { throw new Error('Preview template dùng chung chưa có API target.'); })();
+            : sharedTarget
+              ? await builderApi.previewTemplateOverride(sharedTarget, snapshot, csrfToken,
+                  sharedTarget.kind === 'single' && scopeEntryId !== null && scopeTypeKey
+                    ? { type_key: scopeTypeKey, entry_id: scopeEntryId } : undefined,
+                  snapshotVersion !== null && snapshotVersion > 0 ? snapshotVersion : undefined,
+                  controller.signal)
+              : (() => { throw new Error('Target Builder không hợp lệ.'); })();
       if (current !== previewSeq.current || revisionRef.current !== snapshotRevision
           || ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
       const prepared = await preparePreviewMarkup(result.html, controller.signal);
@@ -461,8 +468,13 @@ export function BuilderWorkspace({
         : 'Preview nháp — chưa ghi dữ liệu lên website.');
     } catch (cause) {
       if (controller.signal.aborted || current !== previewSeq.current || authorityRef.current !== requestAuthority) return;
-      message('Preview thất bại.', true);
-      onApiError(cause, 'Không thể xem trước Builder.');
+      if (sharedTarget && cause instanceof api.ApiClientError && cause.status === 412) {
+        setConflict(true);
+        message('Bố cục đã thay đổi từ phiên khác (412). Nháp của bạn vẫn còn.', true);
+      } else {
+        message('Preview thất bại.', true);
+        onApiError(cause, 'Không thể xem trước Builder.');
+      }
     } finally {
       if (current === previewSeq.current) setPreviewing(false);
     }
@@ -698,7 +710,7 @@ export function BuilderWorkspace({
             Tải bản server
           </button>
           <button id="preview" type="button" className="btn-secondary"
-            disabled={!user || loading || previewing || !loadedRef.current || Boolean(sharedTarget)}
+            disabled={!user || loading || previewing || !loadedRef.current || (Boolean(sharedTarget) && user.role !== 'admin')}
             onClick={() => void preview()}>Xem trước</button>
           <button id="save" type="button" disabled={!user || loading || saving || !loadedRef.current || !dirty}
             onClick={() => void save()}> {saving ? 'Đang lưu…' : scopedSection ? 'Lưu Section' : scopedPage ? 'Lưu Page' : targetRole === 'homepage' ? 'Lưu homepage' : 'Lưu override'} </button>
@@ -723,7 +735,7 @@ export function BuilderWorkspace({
         {loading ? 'Đang tải Builder… ' : ''}{notice}
         {scopedPage && pageDetails?.status === 'draft' &&
           <p className="mt-1">Page đang là bản nháp. Lưu bố cục sẽ không xuất bản Page.</p>}
-        {sharedTarget && <p className="mt-1">Preview nháp template dùng chung chưa có API target.</p>}
+        {sharedTarget && <p className="mt-1">Preview hiển thị template đang chỉnh sửa; chưa cập nhật website công khai.</p>}
         {scopedSection && <p className="mt-1">Section này chỉ lưu trong website. Không có URL công khai; Preview chỉ hiển thị sau đăng nhập.</p>}
         {scopedPage && !overrideExists && loadedRef.current &&
           <p className="mt-1">Chưa có thiết kế Page riêng. Nội dung văn bản hiện tại vẫn được dùng cho đến khi bạn lưu thiết kế mới. Lưu thiết kế sẽ thay phần thân hiển thị, và Reset sẽ khôi phục phần thân văn bản.</p>}

@@ -83,6 +83,27 @@ export function putTemplateOverride(
   });
 }
 
+export interface TemplatePreviewEntry {
+  type_key: string;
+  entry_id: number;
+}
+
+export function previewTemplateOverride(
+  target: TemplateTargetInput,
+  document: BuilderDocument,
+  csrfToken: string,
+  previewEntry?: TemplatePreviewEntry,
+  expectedVersion?: number,
+  signal?: AbortSignal,
+): Promise<HomepagePreview> {
+  return requestJson('/api/admin/template-overrides/preview', {
+    method: 'POST', csrfToken, contentType: 'application/json',
+    ifMatchVersion: expectedVersion, signal,
+    body: JSON.stringify({ target, document, preview_entry: previewEntry }),
+    defaultErrorMessage: 'Không thể xem trước template dùng chung.',
+  });
+}
+
 export interface TypedTemplateResetResult {
   reset_id: number;
   canonical_target_key: string;

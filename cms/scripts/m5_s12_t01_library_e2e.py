@@ -12,6 +12,7 @@ import io
 import json
 import pathlib
 import platform
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -21,7 +22,7 @@ import zipfile
 from playwright.sync_api import expect, sync_playwright
 from m7_beta_menu_picker_e2e import admin_login, api_json, launch_server, stop_server
 from m4_s11_t02_sections_e2e import create_ui_section
-from m4_s11_t01_page_builder_e2e import ui_create_page, new_heading, page_scope
+from m4_s11_t01_page_builder_e2e import ui_create_page, new_heading, change_heading, page_scope
 from media_smoke import make_png
 
 
@@ -59,6 +60,175 @@ def put_header(ctx, base, doc, csrf, version=None):
                     {"target": {"kind": "part", "part_key": "header"}, "document": doc},
                     csrf, {"If-Match": f'"v{version}"'} if version is not None else None,
                     expected=201 if version is None else 200)
+
+
+def shared_preview_checks(page, admin, anon, base, csrf, source_path, image_id, heading, artifacts, checks):
+    """Exercise the actual D03 browser request before any destination Save."""
+    preview_path = '/api/admin/template-overrides/preview'
+    workspace = page.get_by_test_id('builder-workspace')
+
+    def open_role(role):
+        page.evaluate("(role) => location.hash = '#/builder?template=' + role", role)
+        expect(page.get_by_role('heading', name=f'Override: {role}')).to_be_visible(timeout=15000)
+        expect(workspace).to_contain_text('Đã mở', timeout=15000)
+
+    def preview(status=200):
+        with page.expect_response(lambda r: r.url.endswith(preview_path) and r.request.method == 'POST') as pending:
+            page.get_by_role('button', name='Xem trước').click()
+        response = pending.value
+        assert response.status == status, response.text()[:400]
+        return response
+
+    def snapshot():
+        public = anon.request.get(base + '/')
+        assert public.status == 200
+        return (
+            api_json(admin, 'GET', base, '/api/admin/template-overrides'),
+            api_json(admin, 'GET', base, '/api/admin/builder/homepage'),
+            api_json(admin, 'GET', base, source_path),
+            public.text(),
+            anon.request.get(base + f'/media/{image_id}/file').status,
+        )
+
+    def login_ui(username, password):
+        expect(page.locator('#auth-username')).to_be_visible(timeout=15000)
+        assert workspace.count() == 0
+        page.locator('#auth-username').fill(username)
+        page.locator('#auth-password').fill(password)
+        page.locator('#auth-login').click()
+        expect(page.get_by_role('heading', name='Override: header')).to_be_visible(timeout=20000)
+        return api_json(admin, 'GET', base, '/auth/me')['csrf_token']
+
+    assert get_header(admin, base) is None
+    before = snapshot()
+    open_role('header')
+    picker = page.get_by_test_id('builder-local-library')
+    picker.get_by_role('button', name='Chọn Section', exact=True).click()
+    expect(picker.get_by_text('UI library banner', exact=False)).to_be_visible(timeout=12000)
+    picker.get_by_role('button', name='Chèn bản sao').click()
+    expect(workspace).to_contain_text('Đã chèn bản SAO', timeout=15000)
+    response = preview()
+    payload = response.request.post_data_json
+    assert payload['target'] == {'kind': 'part', 'part_key': 'header'}
+    assert payload.get('preview_entry') is None
+    assert 'if-match' not in response.request.all_headers()
+    assert 'LIBRARY COPY HEADING PRIVATE' in json.dumps(payload['document'])
+    assert response.headers.get('cache-control') == 'no-store'
+    assert response.headers.get('x-content-type-options') == 'nosniff'
+    iframe = page.locator('#canvas')
+    frame = page.frame_locator('#canvas')
+    expect(frame.locator('body')).to_contain_text('LIBRARY COPY HEADING PRIVATE', timeout=15000)
+    expect(iframe).to_have_attribute('sandbox', '')
+    expect(frame.locator('img[alt="Private Section-only image"]')).to_have_attribute('src', re.compile(r'^data:image/png;base64,'))
+    assert iframe.evaluate('(node) => node.contentDocument === null')
+    assert snapshot() == before and before[-1] == 404
+    expect(workspace).to_contain_text('Chưa lưu')
+    page.screenshot(path=str(artifacts / 'shared-template-unsaved-preview.png'), full_page=True)
+    checks.append('D03_new_target_dirty_preview_private_raster_opaque_sandbox_no_persistence_or_public_change')
+
+    # An unexpected private media MIME must not be converted into trusted data.
+    # Intercept only this raster fetch; the preview endpoint itself stays real.
+    private_image_url = base + f'/api/admin/media/{image_id}/file'
+    page.route(private_image_url, lambda route: route.fulfill(
+        status=200, content_type='image/svg+xml', body='<svg xmlns="http://www.w3.org/2000/svg"/>'))
+    try:
+        preview()
+        expect(workspace).to_contain_text('1 ảnh riêng tư chưa hiển thị', timeout=15000)
+        expect(frame.locator('img[alt="Private Section-only image"]')).to_have_attribute(
+            'src', f'/api/admin/media/{image_id}/file')
+        expect(iframe).to_have_attribute('sandbox', '')
+    finally:
+        page.unroute(private_image_url)
+    assert snapshot() == before
+    checks.append('D03_private_preview_MIME_allowlist_rejects_non_raster')
+
+    # Keep a real response pending at the client boundary, even if AbortSignal
+    # is triggered: the request/target authority checks must also reject it.
+    page.evaluate("""() => {
+        const original = window.fetch;
+        window.fetch = async (...args) => {
+            if (!String(args[0]).endsWith('/api/admin/template-overrides/preview')) {
+                return original(...args);
+            }
+            const response = await original(...args);
+            return new Promise(resolve => {
+                window.releaseD03Preview = () => {
+                    window.fetch = original;
+                    resolve(response);
+                };
+            });
+        };
+    }""")
+    preview()
+    page.wait_for_function("typeof window.releaseD03Preview === 'function'")
+    open_role('footer')  # existing dialog handler accepts discarding header
+    new_heading(page, 'D03 FOOTER NEWER DRAFT')
+    page.evaluate('window.releaseD03Preview()')
+    expect(workspace).to_contain_text('D03 FOOTER NEWER DRAFT')
+    expect(page.locator('#canvas')).to_have_count(0)
+    response = preview()
+    assert response.request.post_data_json['target'] == {'kind': 'part', 'part_key': 'footer'}
+    expect(frame.locator('body')).to_contain_text('D03 FOOTER NEWER DRAFT', timeout=15000)
+    expect(frame.locator('body')).not_to_contain_text('LIBRARY COPY HEADING PRIVATE')
+    assert snapshot() == before
+    checks.append('D03_late_response_cannot_replace_new_target_or_draft')
+
+    # A saved version is sent in If-Match; preview never calls the save route.
+    saved = put_header(admin, base, heading, csrf)
+    open_role('header')
+    change_heading(page, 'D03 HEADER LOCAL UNSAVED')
+    before_saved = snapshot()
+    response = preview()
+    assert response.request.all_headers()['if-match'] == f'"v{saved["version"]}"'
+    expect(frame.locator('body')).to_contain_text('D03 HEADER LOCAL UNSAVED', timeout=15000)
+    assert snapshot() == before_saved
+    checks.append('D03_saved_target_preview_uses_CAS_without_mutating_saved_AST_or_public_output')
+
+    api_json(admin, 'POST', base, '/auth/logout', csrf=csrf, expected=204)
+    preview(401)
+    csrf = login_ui('library_admin', 'AdminPassword123!')
+    expect(workspace).to_contain_text('D03 HEADER LOCAL UNSAVED', timeout=15000)
+    expect(workspace).to_contain_text('Chưa lưu')
+    assert preview().request.all_headers()['if-match'] == f'"v{saved["version"]}"'
+    expect(frame.locator('body')).to_contain_text('D03 HEADER LOCAL UNSAVED')
+    assert snapshot() == before_saved
+    checks.append('D03_401_same_account_relogin_recovers_dirty_target_and_version')
+
+    remote = copy.deepcopy(heading)
+    remote['sections'][0]['children'][0]['children'][0]['children'][0]['props']['text'] = 'D03 REMOTE HEADER'
+    current = put_header(admin, base, remote, csrf, saved['version'])
+    before_stale = snapshot()
+    response = preview(412)
+    assert response.request.all_headers()['if-match'] == f'"v{saved["version"]}"'
+    expect(workspace).to_contain_text('412', timeout=15000)
+    expect(workspace).to_contain_text('Chưa lưu')
+    page.get_by_role('button', name='Canvas cấu trúc', exact=True).click()
+    expect(workspace).to_contain_text('D03 HEADER LOCAL UNSAVED')
+    assert snapshot() == before_stale
+    checks.append('D03_412_retains_stale_local_AST_and_remote_persisted_state')
+
+    api_json(admin, 'POST', base, '/api/admin/users', {
+        'username': 'library_preview_admin', 'password': 'PreviewPassword123!', 'role': 'admin',
+    }, csrf, expected=201)
+    api_json(admin, 'POST', base, '/auth/logout', csrf=csrf, expected=204)
+    preview(401)
+    csrf = login_ui('library_preview_admin', 'PreviewPassword123!')
+    expect(workspace).to_contain_text('Đã mở', timeout=15000)
+    expect(workspace).not_to_contain_text('D03 HEADER LOCAL UNSAVED')
+    expect(page.locator('#canvas')).to_have_count(0)
+    expect(workspace).to_contain_text('D03 REMOTE HEADER')
+    assert preview().request.all_headers()['if-match'] == f'"v{current["version"]}"'
+    expect(frame.locator('body')).to_contain_text('D03 REMOTE HEADER')
+    assert snapshot() == before_stale
+    api_json(admin, 'POST', base, '/auth/logout', csrf=csrf, expected=204)
+    preview(401)
+    csrf = login_ui('library_admin', 'AdminPassword123!')
+    expect(workspace).to_contain_text('Đã mở', timeout=15000)
+    api_json(admin, 'POST', base, f'/api/admin/template-overrides/{current["id"]}/reset',
+             csrf=csrf, extra={'If-Match': f'"v{current["version"]}"'})
+    assert get_header(admin, base) is None
+    checks.append('D03_cross_account_login_clears_previous_preview_and_draft')
+    return csrf
 
 
 def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
@@ -219,6 +389,9 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         {'revision_id': uploaded.json()['revision_id']}, csrf,
                         {'If-Match': f'"v{current_theme["version"]}"'})
                     checks.append('theme_switch_preserves_site_AST_then_reset_resolves_current_active_part')
+
+                    csrf = shared_preview_checks(page, admin, anon, base, csrf, source_path,
+                                                 image_id, heading, artifacts, checks)
 
                     page_id = ui_create_page(page, base, 'Library destination Page', 'library-destination',
                                              'Library fallback Page body')
