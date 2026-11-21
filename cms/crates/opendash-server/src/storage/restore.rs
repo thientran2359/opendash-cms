@@ -51,7 +51,9 @@ pub async fn build_expected_schema_objects(
         .cloned()
         .collect();
     if subset_migrations.is_empty() {
-        return Err(ApiError::bad_request("Không có migration hợp lệ cho schema backup."));
+        return Err(ApiError::bad_request(
+            "Không có migration hợp lệ cho schema backup.",
+        ));
     }
 
     let mut sub_migrator = base;
@@ -114,7 +116,9 @@ pub async fn validate_restored_db_read_only(db_path: &Path) -> ApiResult<i64> {
         .fetch_all(&mut conn)
         .await?;
     if !fk_rows.is_empty() {
-        return Err(ApiError::bad_request("SQLite backup vi phạm foreign_key_check."));
+        return Err(ApiError::bad_request(
+            "SQLite backup vi phạm foreign_key_check.",
+        ));
     }
 
     // Bound schema metadata BEFORE materializing DDL strings.
@@ -141,12 +145,11 @@ pub async fn validate_restored_db_read_only(db_path: &Path) -> ApiResult<i64> {
     }
 
     // Verify _sqlx_migrations ledger against compiled migrations.
-    let mig_rows = sqlx::query(
-        "SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version ASC",
-    )
-    .fetch_all(&mut conn)
-    .await
-    .map_err(|_| ApiError::bad_request("Backup thiếu bảng _sqlx_migrations hợp lệ."))?;
+    let mig_rows =
+        sqlx::query("SELECT version, checksum, success FROM _sqlx_migrations ORDER BY version ASC")
+            .fetch_all(&mut conn)
+            .await
+            .map_err(|_| ApiError::bad_request("Backup thiếu bảng _sqlx_migrations hợp lệ."))?;
     if mig_rows.is_empty() {
         return Err(ApiError::bad_request("Backup có _sqlx_migrations rỗng."));
     }
@@ -158,7 +161,9 @@ pub async fn validate_restored_db_read_only(db_path: &Path) -> ApiResult<i64> {
         let checksum: Vec<u8> = row.try_get("checksum")?;
         let success: bool = row.try_get("success")?;
         if !success {
-            return Err(ApiError::bad_request("Backup chứa migration chưa hoàn tất."));
+            return Err(ApiError::bad_request(
+                "Backup chứa migration chưa hoàn tất.",
+            ));
         }
         let Some(expected_mig) = compiled.migrations.get(idx) else {
             return Err(ApiError::bad_request(
@@ -242,7 +247,9 @@ pub async fn validate_and_rebase_copy(db_path: &Path) -> ApiResult<i64> {
         .map_err(|_| ApiError::internal("Không chạy được migrations trên bản sao khôi phục."))?;
 
     // Clear stale auth sessions, active operation leases/queues, and disable SMTP auto-sending.
-    sqlx::query("DELETE FROM sessions").execute(&mut conn).await?;
+    sqlx::query("DELETE FROM sessions")
+        .execute(&mut conn)
+        .await?;
     sqlx::query(
         "UPDATE operation_jobs SET state = 'interrupted', version = version + 1, finished_at = COALESCE(finished_at, datetime('now')), updated_at = datetime('now') WHERE state IN ('queued', 'running')",
     )
@@ -263,13 +270,17 @@ pub async fn validate_and_rebase_copy(db_path: &Path) -> ApiResult<i64> {
         .fetch_one(&mut conn)
         .await?;
     if !integrity.eq_ignore_ascii_case("ok") {
-        return Err(ApiError::internal("Integrity check thất bại sau khi sanitize bản sao."));
+        return Err(ApiError::internal(
+            "Integrity check thất bại sau khi sanitize bản sao.",
+        ));
     }
     let fk_rows = sqlx::query("PRAGMA foreign_key_check")
         .fetch_all(&mut conn)
         .await?;
     if !fk_rows.is_empty() {
-        return Err(ApiError::internal("Foreign key check thất bại sau khi sanitize bản sao."));
+        return Err(ApiError::internal(
+            "Foreign key check thất bại sau khi sanitize bản sao.",
+        ));
     }
 
     let _ = sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -283,10 +294,7 @@ pub async fn validate_and_rebase_copy(db_path: &Path) -> ApiResult<i64> {
     Ok(final_version.max(declared_version))
 }
 
-pub async fn verify_restored_db_references(
-    db_path: &Path,
-    site_root: &Path,
-) -> ApiResult<()> {
+pub async fn verify_restored_db_references(db_path: &Path, site_root: &Path) -> ApiResult<()> {
     let opts = SqliteConnectOptions::new()
         .filename(db_path)
         .create_if_missing(false)

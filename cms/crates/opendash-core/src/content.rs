@@ -486,7 +486,7 @@ impl ContentTypeSettings {
         match type_key {
             "post" => Self::builtin_publication(),
             "page" => Self::builtin_page(),
-            "section" => Self::private_section(),
+            "pattern" => Self::private_pattern(),
             _ => Self::default(),
         }
     }
@@ -507,12 +507,12 @@ impl ContentTypeSettings {
         settings
     }
 
-    pub fn private_section() -> Self {
+    pub fn private_pattern() -> Self {
         Self {
             public: false,
             has_archive: false,
-            publication: ContentPublication::DraftPublish,
-            supports: Vec::new(),
+            publication: ContentPublication::Immediate,
+            supports: vec![ContentSupport::Builder],
         }
     }
 
@@ -597,6 +597,9 @@ impl ContentTypeDefinition {
         if !valid_content_type_key(&self.key) {
             return Err("Khóa loại nội dung không hợp lệ.");
         }
+        if self.key == "section" {
+            return Err("Section là khóa Core đã được thay thế bằng Pattern.");
+        }
         if !valid_label(&self.label) {
             return Err("Tên loại nội dung không hợp lệ.");
         }
@@ -610,8 +613,8 @@ impl ContentTypeDefinition {
         {
             return Err("post/page phải sử dụng cơ chế Lưu nháp và Xuất bản.");
         }
-        if self.key == "section" && self.settings != ContentTypeSettings::private_section() {
-            return Err("Section phải luôn riêng tư và không được xuất bản.");
+        if self.key == "pattern" && self.settings != ContentTypeSettings::private_pattern() {
+            return Err("Pattern phải luôn riêng tư và chỉ hỗ trợ Builder.");
         }
         if self.fields.len() > 64 {
             return Err("Mỗi loại nội dung hỗ trợ tối đa 64 custom fields.");
@@ -1044,7 +1047,7 @@ impl EffectiveContentSchema {
         }
 
         if !is_builtin
-            && base.descriptor.key != "section"
+            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
             && !effective_fields.contains_key("featured_image")
         {
             effective_fields.insert(
@@ -1277,8 +1280,10 @@ impl CntDeclarations {
             if !seen_keys.insert(ct.key.as_str()) {
                 return Err("Khóa content_type bị trùng lặp trong declarations.");
             }
-            if matches!(ct.key.as_str(), "post" | "page" | "section") && ct.rewrite_base.is_some() {
-                return Err("Post/Page/Section không hỗ trợ rewrite_base riêng của provider.");
+            if matches!(ct.key.as_str(), "post" | "page" | "pattern" | "section")
+                && ct.rewrite_base.is_some()
+            {
+                return Err("Core Post/Page/Pattern không hỗ trợ rewrite_base riêng của provider.");
             }
             validate_provider_rewrite_base(ct.rewrite_base.as_deref())?;
             let mut settings = ct.settings.clone().unwrap_or_default();
@@ -1442,7 +1447,7 @@ impl TaxonomyDefinitionInput {
         }
         if matches!(
             self.key.as_str(),
-            "category" | "tag" | "post" | "page" | "section"
+            "category" | "tag" | "post" | "page" | "pattern" | "section"
         ) || RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
         {
             return Err("Khóa taxonomy thuộc namespace Core được bảo vệ.");
@@ -1986,7 +1991,7 @@ fn panel_sort_key(def: &PanelDefinition, placement: &PanelPlacementConfig) -> (i
 pub fn eligible_base_field_keys(effective: &EffectiveContentSchema) -> Vec<String> {
     let type_key = effective.base.descriptor.key.as_str();
     let is_builtin = matches!(type_key, "post" | "page");
-    let is_section = type_key == "section";
+    let is_private_reusable = matches!(type_key, "section" | "pattern");
     effective
         .base
         .descriptor
@@ -1994,7 +1999,7 @@ pub fn eligible_base_field_keys(effective: &EffectiveContentSchema) -> Vec<Strin
         .iter()
         .filter(|f| {
             !(is_builtin && f.key == "body")
-                && !(!is_section && f.key == "featured_image")
+                && !(!is_private_reusable && f.key == "featured_image")
         })
         .map(|f| f.key.clone())
         .collect()
@@ -2140,7 +2145,9 @@ pub fn build_core_and_group_panels(
         });
     }
 
-    if type_key != "section" && effective.effective_fields.contains_key("featured_image") {
+    if !matches!(type_key.as_str(), "section" | "pattern")
+        && effective.effective_fields.contains_key("featured_image")
+    {
         panels.push(PanelDefinition {
             panel_id: "core:featured_image".into(),
             owner: ResourceOwner::Core,

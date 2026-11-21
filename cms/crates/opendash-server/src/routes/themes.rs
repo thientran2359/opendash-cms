@@ -27,7 +27,7 @@ use crate::{
     error::{ApiError, ApiResult},
     package::{V2ZipError, is_valid_zip_content_type, validate_v2_relative_path},
     storage::{
-        overrides, sections,
+        overrides, patterns,
         theme::{
             self, RevisionActivationOutcome, RevisionInstallOutcome, ThemeList, ThemeRevisionRecord,
         },
@@ -235,17 +235,16 @@ fn response(value: ThemeList) -> Response {
     (headers(Some(value.version)), Json(value)).into_response()
 }
 
-/// #356: site-local pattern catalog. An Editor can discover only canonical
-/// private Section metadata; theme/provider descriptors remain Admin-only.
-/// Individual Section ASTs are still obtained through the scoped authenticated
-/// Section document API, never embedded in a list response.
+/// Site-local catalog: Editors may list private Pattern metadata, while theme
+/// template descriptors remain Admin-only. Pattern AST is retrieved only through
+/// the generic authenticated entry Builder API.
 pub async fn local_library_list(
     State(db): State<SqlitePool>,
     Extension(themes_root): Extension<ThemeStoreRoot>,
     request_headers: HeaderMap,
 ) -> ApiResult<Response> {
     let actor = require_session(&request_headers, &db).await?;
-    let sections = sections::list(&db).await?;
+    let patterns = patterns::list(&db).await?;
     let templates = if actor.user.role == Role::Admin {
         theme::list_local_theme_templates(&db, &themes_root.0).await?
     } else {
@@ -258,7 +257,7 @@ pub async fn local_library_list(
     Ok((
         headers(None),
         Json(serde_json::json!({
-            "sections": sections,
+            "patterns": patterns,
             "theme_templates": templates.theme_templates,
             "theme_state": templates.theme_state,
             "active_theme_id": templates.active_theme_id,

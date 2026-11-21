@@ -25,7 +25,15 @@ pub async fn plugin_install(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
-    State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
+    State(content_registry): State<
+        Arc<
+            tokio::sync::RwLock<
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
+            >,
+        >,
+    >,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<Response> {
@@ -42,7 +50,8 @@ pub async fn plugin_install(
         .install_plugin_checked(&bytes)
         .await
         .map_err(map_plugin_storage_err)?;
-    *content_registry.write().await = crate::storage::content::load_content_type_catalog(&db).await?;
+    *content_registry.write().await =
+        crate::storage::content::load_content_type_catalog(&db).await?;
     Ok((StatusCode::CREATED, Json(summary)).into_response())
 }
 
@@ -97,7 +106,15 @@ pub async fn plugin_action(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
-    State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
+    State(content_registry): State<
+        Arc<
+            tokio::sync::RwLock<
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
+            >,
+        >,
+    >,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     axum::extract::Path((id, action)): axum::extract::Path<(String, String)>,
@@ -152,7 +169,15 @@ pub async fn plugin_disable(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
-    State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
+    State(content_registry): State<
+        Arc<
+            tokio::sync::RwLock<
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
+            >,
+        >,
+    >,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
@@ -163,15 +188,27 @@ pub async fn plugin_disable(
         .disable_plugin_cas(&id, expected_cas)
         .await
         .map_err(map_plugin_storage_err)?;
-    *content_registry.write().await = crate::storage::content::load_content_type_catalog(&db).await?;
-    Ok(Json(serde_json::json!({ "message": "Đã vô hiệu hóa plugin.", "cas_version": next_cas })).into_response())
+    *content_registry.write().await =
+        crate::storage::content::load_content_type_catalog(&db).await?;
+    Ok(
+        Json(serde_json::json!({ "message": "Đã vô hiệu hóa plugin.", "cas_version": next_cas }))
+            .into_response(),
+    )
 }
 
 pub async fn plugin_enable(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
-    State(content_registry): State<Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
+    State(content_registry): State<
+        Arc<
+            tokio::sync::RwLock<
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
+            >,
+        >,
+    >,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
@@ -182,8 +219,12 @@ pub async fn plugin_enable(
         .enable_plugin_cas(&id, expected_cas)
         .await
         .map_err(map_plugin_storage_err)?;
-    *content_registry.write().await = crate::storage::content::load_content_type_catalog(&db).await?;
-    Ok(Json(serde_json::json!({ "message": "Đã kích hoạt plugin.", "cas_version": next_cas })).into_response())
+    *content_registry.write().await =
+        crate::storage::content::load_content_type_catalog(&db).await?;
+    Ok(
+        Json(serde_json::json!({ "message": "Đã kích hoạt plugin.", "cas_version": next_cas }))
+            .into_response(),
+    )
 }
 
 fn parse_optional_if_match(headers: &HeaderMap) -> ApiResult<Option<i64>> {
@@ -304,7 +345,9 @@ fn validate_ui_node(
         "field" => {
             let ft = node.field_type.as_deref().unwrap_or("text");
             if !matches!(ft, "text" | "textarea" | "number" | "checkbox" | "select") {
-                return Err("Field type không được hỗ trợ hoặc bị cấm (không hỗ trợ secret/html/js/css).");
+                return Err(
+                    "Field type không được hỗ trợ hoặc bị cấm (không hỗ trợ secret/html/js/css).",
+                );
             }
         }
         _ => return Err("Node kind không thuộc schema v1."),
@@ -348,8 +391,8 @@ pub async fn plugin_ui_schema(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
     let actor = crate::auth::require_session(&headers, &db).await?;
-    let Some((_, manifest_json, enabled)) = crate::storage::plugin::load_plugin_executable(&db, &id)
-        .await?
+    let Some((_, manifest_json, enabled)) =
+        crate::storage::plugin::load_plugin_executable(&db, &id).await?
     else {
         return Err(ApiError::not_found("Không tìm thấy plugin đang hoạt động."));
     };
@@ -362,7 +405,9 @@ pub async fn plugin_ui_schema(
     let allowed_actions: Vec<String> = manifest
         .actions
         .iter()
-        .filter(|a| matches!(actor.user.role, crate::auth::Role::Admin) || a.required_role == "editor")
+        .filter(|a| {
+            matches!(actor.user.role, crate::auth::Role::Admin) || a.required_role == "editor"
+        })
         .map(|a| a.id.clone())
         .collect();
 

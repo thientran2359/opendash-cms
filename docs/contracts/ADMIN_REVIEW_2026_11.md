@@ -1,5 +1,7 @@
 # Admin review November 2026 — contract delta
 
+> **Superseded by docs/designs/cpt-content-builder-and-pattern-library.md:** [Spec 2](../designs/cpt-content-builder-and-pattern-library.md) replaces private Section naming/storage and Page-only Builder restrictions with Generic CPT Builder, private Pattern CPT and Pattern Library in migrations 0043/0044 (S01–S03 merged). Unrelated contracts remain applicable. [Closure/drift gate](../verification/2026-11-21-spec2-closure.md) records remaining conformance gaps; this note does not claim full Verified status.
+
 > [!NOTE]
 > **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0035`–`0037`; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `Implementation/runtime: NOT_RUN` bên dưới là snapshot lịch sử lúc chốt thiết kế.
 > **Điểm đã được mở rộng:** Nhóm `Giao diện` có thêm `Taxonomy tùy chỉnh` (`#/taxonomy/definitions`) và `Cài đặt` có thêm `Đường dẫn tĩnh` (`#/settings/permalinks`) theo [`CONTENT_FOUNDATION_2026_11.md`](CONTENT_FOUNDATION_2026_11.md).

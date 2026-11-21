@@ -64,7 +64,9 @@ function slugFromTitle(title: string): string {
 }
 
 function supportAllowsField(typeKey: string, key: string, settings: ContentTypeSettings): boolean {
-  if (key === 'featured_image' && typeKey !== 'section') return settings.supports.includes('featured_image');
+  if (key === 'featured_image' && typeKey !== 'section' && typeKey !== 'pattern') {
+    return settings.supports.includes('featured_image');
+  }
   if (typeKey !== 'post' && typeKey !== 'page') return true;
   if (key === 'body') return settings.supports.includes('editor');
   return true;
@@ -128,6 +130,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   onDirtyChange,
   onNavigateHash,
 }) => {
+  // Pattern is a private, Builder-only CPT. Its metadata mutations go through
+  // PatternsPage (/api/admin/patterns); generic entry editing must not expose
+  // public URLs, publication controls or a second write path for Patterns.
+  const isPattern = typeKey === 'pattern';
   const [config, setConfig] = useState<EffectiveEditorConfigWithSettings | null>(null);
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
@@ -221,7 +227,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     persistDraftPatch({ values: nextValues, cleared_fields: nextCleared });
   };
 
-  const listHashPrefix = typeKey === 'post' ? '#/posts' : typeKey === 'page' ? '#/pages' : `#/cpt/${typeKey}`;
+  const listHashPrefix = typeKey === 'post' ? '#/posts' : typeKey === 'page' ? '#/pages'
+    : isPattern ? '#/patterns' : `#/cpt/${typeKey}`;
 
   const applyPayload = (payload: EditorDraftPayload) => {
     setTitle(payload.title);
@@ -288,6 +295,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     const reqEpoch = editorDraftStore.getSessionEpoch();
     setConfig(null);
     setStatusNote(null);
+    if (isPattern) {
+      baselineRef.current = null;
+      draftRef.current = null;
+      setDirty(false);
+      return;
+    }
 
     (async () => {
       try {
@@ -339,7 +352,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             getContentEntry(typeKey, entryId),
             optional(getEntryRoute(typeKey, entryId)),
             optional(getEntrySeo(typeKey, entryId)),
-            typeKey !== 'section' && freshCfg.settings?.supports.includes('builder')
+            freshCfg.settings?.supports.includes('builder')
               ? optional(getEntryBuilder(typeKey, entryId)) : Promise.resolve(null),
           ]);
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
@@ -454,11 +467,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   };
 
   const handleSave = async (intent?: 'draft' | 'published') => {
-    if (!config || !csrfToken || saving || saveInFlightRef.current || !draftRef.current || !user) return;
+    if (isPattern || !config || !csrfToken || saving || saveInFlightRef.current || !draftRef.current || !user) return;
     const isBuiltInContent = typeKey === 'post' || typeKey === 'page';
     if (isBuiltInContent && !intent) return;
     const effectiveSettings = effectiveContentTypeSettings(typeKey, config.settings);
-    if (typeKey === 'section') return; // Section uses its dedicated private editor.
     const nextPublication = effectiveSettings.publication === 'draft_publish'
       ? (intent ?? draftRef.current.publication_status)
       : 'published';
@@ -645,6 +657,15 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     }
   };
 
+  if (isPattern) {
+    if (!isActive || !user) return null;
+    return <div className="od-admin-card space-y-3" role="status">
+      <p className="text-sm text-slate-700">Pattern là nội dung riêng tư, dùng chung qua Visual Builder.</p>
+      <button type="button" onClick={() => onNavigateHash(entryId === null
+        ? '#/patterns' : `#/patterns/${entryId}/edit`)}>Mở quản lý Pattern</button>
+    </div>;
+  }
+
   if (mode === 'list') {
     if (!isActive || !user) return null;
     return <EntryListPage typeKey={typeKey} user={user} siteInstanceId={siteInstanceId}
@@ -659,13 +680,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   // Public URLs must come from the server route authority. Never derive a URL
   // from the slug/custom path or from an unsaved editor draft.
   const confirmed = baselineRef.current;
-  const publicPath = settings?.public && typeKey !== 'section'
+  const publicPath = settings?.public && !isPattern
     && confirmed?.id === entryId && confirmed?.publication_status === 'published'
     && confirmedPublicLink?.scope === mediaScopeKey
     && confirmedPublicLink.version === confirmed.version
     ? confirmedPublicLink.path
     : null;
-  const draftPreviewPath = typeKey !== 'section' && confirmed?.id === entryId
+  const draftPreviewPath = !isPattern && confirmed?.id === entryId
     && confirmed.publication_status === 'draft' && entryId !== null
     ? contentEntryPreviewPath(typeKey, entryId) : null;
   const isBuiltIn = typeKey === 'post' || typeKey === 'page';
@@ -737,7 +758,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           {statusNote}
         </div>
       )}
-      {typeKey !== 'section' && entryId !== null &&
+      {!isPattern && entryId !== null &&
         (settings?.supports.includes('builder') || contentMode === 'builder' ||
           baselineRef.current?.content_mode === 'builder') && (
         <div className="rounded-xl border border-zinc-200 bg-white p-3.5 space-y-2">
@@ -885,9 +906,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           }
         }}
         onSave={intent => void handleSave(intent)}
-        canOpenBuilder={typeKey !== 'section' && Boolean(settings?.supports.includes('builder'))}
+        canOpenBuilder={!isPattern && Boolean(settings?.supports.includes('builder'))}
         onOpenBuilder={() => {
-          if (typeKey === 'section' || !settings?.supports.includes('builder')) {
+          if (isPattern || !settings?.supports.includes('builder')) {
             setStatusNote('Loại nội dung này chưa hỗ trợ Visual Builder.');
             return;
           }

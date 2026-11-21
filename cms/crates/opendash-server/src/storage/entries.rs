@@ -16,12 +16,12 @@ use crate::{
     error::{ApiError, ApiResult},
 };
 
-/// Section is a separate, strictly private canonical entry protocol. Generic
+/// Pattern is a separate, strictly private canonical entry protocol. Generic
 /// content writes (including composite field/layout hooks) may not mutate it.
-fn forbid_generic_section_write(type_key: &str) -> ApiResult<()> {
-    if type_key == "section" {
+fn forbid_generic_pattern_write(type_key: &str) -> ApiResult<()> {
+    if type_key == "pattern" {
         Err(ApiError::forbidden(
-            "Section chỉ được sửa qua API riêng tư /api/admin/sections.",
+            "Pattern chỉ được sửa qua API riêng tư /api/admin/patterns.",
         ))
     } else {
         Ok(())
@@ -388,8 +388,8 @@ pub async fn list_published_filtered(
     offset: i64,
     filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
-    if type_key == "section" {
-        return Err(ApiError::not_found("Section là nội dung riêng tư."));
+    if type_key == "pattern" {
+        return Err(ApiError::not_found("Pattern là nội dung riêng tư."));
     }
     list_entries_filtered(db, type_key, limit, offset, filters, true).await
 }
@@ -422,7 +422,7 @@ pub async fn list_published_page_in_tx(
     sort: PublishedListSort,
     filters: EntryFilters,
 ) -> ApiResult<PublishedListResult> {
-    if type_key == "section" {
+    if type_key == "pattern" {
         return Ok(PublishedListResult::MissingConfig(
             PublishedListMissing::ContentType,
         ));
@@ -453,7 +453,7 @@ pub async fn list_published_page_in_tx(
 
     let type_exists: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'
-         AND key != 'section' AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
+         AND key != 'pattern' AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(type_key)
     .fetch_optional(&mut **tx)
@@ -678,7 +678,7 @@ async fn query_entries_filtered(
            JOIN content_types t ON t.key = e.content_type_key
           WHERE e.content_type_key = ?
             AND (? = 0 OR (e.publication_status = 'published'
-                 AND e.content_type_key != 'section' AND t.provider_status = 'active'
+                 AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
                  AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1))
             AND (? IS NULL OR EXISTS (
                 SELECT 1 FROM entry_terms et
@@ -734,7 +734,7 @@ pub async fn create_entry_with_fence(
     input: &ContentEntryInput,
     fence: Option<&PluginActionFence>,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     let settings = current_settings_in_tx(&mut tx, type_key).await?;
     verify_supported_values(type_key, &input.values, &settings)?;
@@ -820,7 +820,7 @@ pub async fn update_entry_with_fence(
     input: &ContentEntryInput,
     fence: Option<&PluginActionFence>,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     let settings = current_settings_in_tx(&mut tx, type_key).await?;
     verify_supported_values(type_key, &input.values, &settings)?;
@@ -936,7 +936,7 @@ pub async fn create_entry_with_schema_fence(
     input: &ContentEntryInput,
     preflight_schema_token: &str,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     let settings = &effective.base.descriptor.settings;
@@ -997,7 +997,7 @@ pub async fn update_entry_with_schema_fence(
     input: &ContentEntryInput,
     preflight_schema_token: &str,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
@@ -1281,7 +1281,7 @@ pub async fn prepare_composite_entry_save(
     entry_id: Option<i64>,
     input: &CompositeEntrySaveInput,
 ) -> ApiResult<CompositePreflightPlan> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let client_token = input
         .expected_schema_token
         .as_deref()
@@ -1700,7 +1700,7 @@ pub async fn delete_entry(
     id: i64,
     expected_version: i64,
 ) -> ApiResult<()> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = db.begin().await?;
     let result = sqlx::query(
         "DELETE FROM content_entries
@@ -1738,7 +1738,7 @@ pub async fn set_publication_status(
     expected_version: i64,
     status: &str,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     if status != "draft" && status != "published" {
         return Err(ApiError::bad_request("Trạng thái xuất bản không hợp lệ."));
     }

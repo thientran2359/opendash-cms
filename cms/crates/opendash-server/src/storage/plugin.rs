@@ -8,11 +8,7 @@ fn map_cnt_err(err: crate::error::ApiError) -> PluginStorageError {
     }
 }
 
-use std::{
-    fs,
-    io::Write,
-    path::Path,
-};
+use std::{fs, io::Write, path::Path};
 
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqliteConnection, SqlitePool};
@@ -63,7 +59,11 @@ pub fn compute_plugin_revision_digest_with_extensions(
         hasher.update(b"\0admin_extensions\0");
         hasher.update(serde_json::to_vec(ext).expect("validated admin declarations serialize"));
     }
-    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 pub fn ensure_plugins_layout_and_quarantine_stale(plugins_root: &Path) -> Result<usize, String> {
@@ -71,8 +71,7 @@ pub fn ensure_plugins_layout_and_quarantine_stale(plugins_root: &Path) -> Result
     let revisions = plugins_root.join("revisions");
     let archives = plugins_root.join("archives");
     for dir in [&staging, &revisions, &archives] {
-        fs::create_dir_all(dir)
-            .map_err(|e| format!("Không thể khởi tạo thư mục plugins/: {e}"))?;
+        fs::create_dir_all(dir).map_err(|e| format!("Không thể khởi tạo thư mục plugins/: {e}"))?;
     }
     let mut cleaned = 0usize;
     let entries = fs::read_dir(&staging)
@@ -84,8 +83,9 @@ pub fn ensure_plugins_layout_and_quarantine_stale(plugins_root: &Path) -> Result
             fs::remove_dir_all(&path)
                 .map_err(|e| format!("Không thể dọn staging cũ trong plugins/.staging: {e}"))?;
         } else {
-            fs::remove_file(&path)
-                .map_err(|e| format!("Không thể dọn file staging cũ trong plugins/.staging: {e}"))?;
+            fs::remove_file(&path).map_err(|e| {
+                format!("Không thể dọn file staging cũ trong plugins/.staging: {e}")
+            })?;
         }
         cleaned += 1;
     }
@@ -114,9 +114,8 @@ pub fn verify_plugin_revision_durability(
     let extension = if ext_path.exists() {
         let raw = fs::read(&ext_path)
             .map_err(|_| "Revision plugin không đọc được admin-extensions.json.".to_string())?;
-        let parsed: opendash_core::admin_extensions::AdminExtensions =
-            serde_json::from_slice(&raw)
-                .map_err(|_| "Admin extension revision không hợp lệ.".to_string())?;
+        let parsed: opendash_core::admin_extensions::AdminExtensions = serde_json::from_slice(&raw)
+            .map_err(|_| "Admin extension revision không hợp lệ.".to_string())?;
         let canonical = serde_json::to_vec(&parsed)
             .map_err(|_| "Admin extension revision không serialize được.".to_string())?;
         if raw != canonical {
@@ -126,7 +125,12 @@ pub fn verify_plugin_revision_durability(
     } else {
         None
     };
-    if compute_plugin_revision_digest_with_extensions(&manifest_json, &wasm_bytes, extension.as_ref()) != revision_digest {
+    if compute_plugin_revision_digest_with_extensions(
+        &manifest_json,
+        &wasm_bytes,
+        extension.as_ref(),
+    ) != revision_digest
+    {
         return Err("Nội dung revision plugin trên đĩa bị hỏng hoặc lệch digest.".to_string());
     }
     Ok(())
@@ -150,7 +154,12 @@ pub fn stage_and_publish_plugin_revision(
     wasm_bytes: &[u8],
 ) -> Result<(), String> {
     stage_and_publish_plugin_revision_with_extensions(
-        plugins_root, run_uuid, revision_digest, manifest_json, wasm_bytes, None,
+        plugins_root,
+        run_uuid,
+        revision_digest,
+        manifest_json,
+        wasm_bytes,
+        None,
     )
 }
 
@@ -178,15 +187,16 @@ pub fn stage_and_publish_plugin_revision_with_extensions(
 
     fs::create_dir_all(&staging_dir)
         .map_err(|e| format!("Không thể tạo thư mục staging plugin: {e}"))?;
-    if let Err(err) = write_durable_file(&staging_dir.join("manifest.json"), manifest_json.as_bytes())
-        .and_then(|_| write_durable_file(&staging_dir.join("plugin.wasm"), wasm_bytes))
-        .and_then(|_| match extensions {
-            Some(ext) => {
-                let raw = serde_json::to_vec(ext).map_err(|e| e.to_string())?;
-                write_durable_file(&staging_dir.join("admin-extensions.json"), &raw)
-            }
-            None => Ok(()),
-        })
+    if let Err(err) =
+        write_durable_file(&staging_dir.join("manifest.json"), manifest_json.as_bytes())
+            .and_then(|_| write_durable_file(&staging_dir.join("plugin.wasm"), wasm_bytes))
+            .and_then(|_| match extensions {
+                Some(ext) => {
+                    let raw = serde_json::to_vec(ext).map_err(|e| e.to_string())?;
+                    write_durable_file(&staging_dir.join("admin-extensions.json"), &raw)
+                }
+                None => Ok(()),
+            })
     {
         let _ = fs::remove_dir_all(&staging_dir);
         return Err(err);
@@ -227,12 +237,15 @@ pub async fn install_plugin_revision(
     // Fail combined-cap checks before publishing a durable ZIP revision.
     crate::storage::admin_extensions::require_capacity(db_pool, "plugin", &manifest.id, extensions)
         .await
-        .map_err(|e| if e.0 == axum::http::StatusCode::CONFLICT {
-            PluginStorageError::Conflict(e.1.into_owned())
-        } else { PluginStorageError::Internal(e.1.into_owned()) })?;
-    let revision_digest = compute_plugin_revision_digest_with_extensions(
-        manifest_json, wasm_bytes, extensions,
-    );
+        .map_err(|e| {
+            if e.0 == axum::http::StatusCode::CONFLICT {
+                PluginStorageError::Conflict(e.1.into_owned())
+            } else {
+                PluginStorageError::Internal(e.1.into_owned())
+            }
+        })?;
+    let revision_digest =
+        compute_plugin_revision_digest_with_extensions(manifest_json, wasm_bytes, extensions);
     let run_uuid = crate::auth::generate_random_token();
 
     // Check version collision before staging on disk
@@ -333,7 +346,9 @@ pub async fn install_plugin_revision(
         .bind(&manifest.id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| PluginStorageError::Internal(format!("Lỗi cập nhật active_revision_id: {e}")))?;
+        .map_err(|e| {
+            PluginStorageError::Internal(format!("Lỗi cập nhật active_revision_id: {e}"))
+        })?;
 
     crate::storage::content::sync_plugin_cnt_declarations_in_tx(
         &mut tx,
@@ -343,12 +358,27 @@ pub async fn install_plugin_revision(
     .await
     .map_err(map_cnt_err)?;
     crate::storage::admin_extensions::require_capacity_in_conn(
-        &mut tx, "plugin", &manifest.id, extensions,
-    ).await.map_err(map_cnt_err)?;
+        &mut tx,
+        "plugin",
+        &manifest.id,
+        extensions,
+    )
+    .await
+    .map_err(map_cnt_err)?;
     crate::storage::admin_extensions::sync_owner_in_conn(
-        &mut tx, "plugin", &manifest.id, extensions, "active",
-        &manifest.actions.iter().map(|action| action.id.clone()).collect::<Vec<_>>(),
-    ).await.map_err(map_cnt_err)?;
+        &mut tx,
+        "plugin",
+        &manifest.id,
+        extensions,
+        "active",
+        &manifest
+            .actions
+            .iter()
+            .map(|action| action.id.clone())
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .map_err(map_cnt_err)?;
 
     tx.commit()
         .await
@@ -412,7 +442,12 @@ pub async fn list_plugins(db_pool: &SqlitePool) -> Result<Vec<PluginSummary>, St
             } else {
                 PluginPermissions {
                     sqlite: vec![],
-                    http: vec![], content_read: vec![], network: vec![], content_write: vec![], ..Default::default() }
+                    http: vec![],
+                    content_read: vec![],
+                    network: vec![],
+                    content_write: vec![],
+                    ..Default::default()
+                }
             };
 
         list.push(PluginSummary {
@@ -454,7 +489,12 @@ pub async fn get_plugin(db_pool: &SqlitePool, id: &str) -> Result<Option<PluginS
     } else {
         PluginPermissions {
             sqlite: vec![],
-            http: vec![], content_read: vec![], network: vec![], content_write: vec![], ..Default::default() }
+            http: vec![],
+            content_read: vec![],
+            network: vec![],
+            content_write: vec![],
+            ..Default::default()
+        }
     };
 
     Ok(Some(PluginSummary {
@@ -496,10 +536,12 @@ pub async fn set_plugin_enabled(
         .await
         .map_err(|error| error.1.into_owned())?;
     crate::storage::admin_extensions::set_owner_status_in_conn(&mut tx, "plugin", id, enabled)
-        .await.map_err(|e| e.1.into_owned())?;
+        .await
+        .map_err(|e| e.1.into_owned())?;
     if enabled {
         crate::storage::admin_extensions::require_capacity_in_conn(&mut tx, "plugin", id, None)
-            .await.map_err(|e| e.1.into_owned())?;
+            .await
+            .map_err(|e| e.1.into_owned())?;
     }
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(())
@@ -523,7 +565,9 @@ pub async fn set_plugin_enabled_cas(
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi truy vấn plugin: {e}")))?;
 
     let Some(current_cas) = current else {
-        return Err(PluginStorageError::NotFound("Plugin không tồn tại.".to_string()));
+        return Err(PluginStorageError::NotFound(
+            "Plugin không tồn tại.".to_string(),
+        ));
     };
 
     if let Some(expected) = expected_cas_version {
@@ -548,13 +592,13 @@ pub async fn set_plugin_enabled_cas(
     crate::storage::content::set_plugin_cnt_provider_status_in_tx(&mut tx, id, enabled)
         .await
         .map_err(map_cnt_err)?;
-    crate::storage::admin_extensions::set_owner_status_in_conn(
-        &mut tx, "plugin", id, enabled,
-    ).await.map_err(map_cnt_err)?;
+    crate::storage::admin_extensions::set_owner_status_in_conn(&mut tx, "plugin", id, enabled)
+        .await
+        .map_err(map_cnt_err)?;
     if enabled {
-        crate::storage::admin_extensions::require_capacity_in_conn(
-            &mut tx, "plugin", id, None,
-        ).await.map_err(map_cnt_err)?;
+        crate::storage::admin_extensions::require_capacity_in_conn(&mut tx, "plugin", id, None)
+            .await
+            .map_err(map_cnt_err)?;
     }
 
     let next_cas: i64 = sqlx::query_scalar("SELECT cas_version FROM plugins WHERE id = ?")
@@ -659,7 +703,6 @@ pub async fn record_plugin_execution_result(
         eprintln!("Plugin log unavailable: {id} {correlation_id} {level}: {message}");
     }
 }
-
 
 pub async fn content_hook_subscriptions(
     db: &SqlitePool,

@@ -122,15 +122,17 @@ fn document(heading: &str) -> Value {
 }
 
 #[test]
-fn page_default_enabled_post_default_disabled_and_section_unchanged() {
+fn page_default_enabled_post_default_disabled_and_pattern_private() {
     let page = ContentTypeSettings::default_for_type_key("page");
     let post = ContentTypeSettings::default_for_type_key("post");
-    let section = ContentTypeSettings::default_for_type_key("section");
+    let pattern = ContentTypeSettings::default_for_type_key("pattern");
     assert!(page.supports(ContentSupport::Builder));
     assert!(!page.has_archive);
     assert!(!post.supports(ContentSupport::Builder));
     assert!(post.has_archive);
-    assert!(!section.supports(ContentSupport::Builder));
+    assert!(pattern.supports(ContentSupport::Builder));
+    assert!(!pattern.public);
+    assert!(!pattern.has_archive);
     assert_eq!(ContentMode::Editor.as_str(), "editor");
 }
 

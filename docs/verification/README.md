@@ -45,3 +45,5 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [M7 planning G1/G2/G3 — 14/11/2026](2026-11-14-m7-planning.md): docs/source validation only, full14-task coverage; M7 runtime/native/browser NOT_RUN.
 
 - [M8 G1/G2/G3 planning — 14/11/2026](2026-11-14-m8-planning.md): all18 tasks/8 candidates specified, source/docs checks only; M8 native/runtime NOT_RUN.
+
+- [Spec 2 S01–S03 closure and drift gate (2026-11-21)](2026-11-21-spec2-closure.md) — merged-source/native artifact verification; remains Implemented pending conformance fixes.

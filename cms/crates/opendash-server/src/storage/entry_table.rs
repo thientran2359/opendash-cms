@@ -144,13 +144,19 @@ async fn validate_terms(
     type_key: &str,
     filter: &EntryTableFilter,
 ) -> ApiResult<()> {
-    entries::validate_filter_in_tx(tx, type_key, &entries::EntryFilters {
-        category_id: filter.category_id,
-        tag_id: filter.tag_id,
-        taxonomy_key: filter.taxonomy_key.clone(),
-        term_id: filter.term_id,
-        include_descendants: filter.include_descendants,
-    }, false).await
+    entries::validate_filter_in_tx(
+        tx,
+        type_key,
+        &entries::EntryFilters {
+            category_id: filter.category_id,
+            tag_id: filter.tag_id,
+            taxonomy_key: filter.taxonomy_key.clone(),
+            term_id: filter.term_id,
+            include_descendants: filter.include_descendants,
+        },
+        false,
+    )
+    .await
 }
 
 /// A single SQLite read transaction guarantees counts, ACL and rows are from
@@ -161,7 +167,7 @@ pub async fn query(
     caller_role: FieldRole,
     filter: &EntryTableFilter,
 ) -> ApiResult<EntryTableResult> {
-    if type_key == "section" {
+    if type_key == "pattern" {
         return Err(ApiError::forbidden("Section dùng bảng quản lý riêng tư."));
     }
     let mut tx = db.begin().await?;
@@ -335,11 +341,16 @@ mod c1_public_url_tests {
         // normal content-type writer. Rebuild C3 claims in the same serialized
         // transaction the production writer would use after its mutation.
         let mut tx = db.begin().await.unwrap();
-        super::super::permalinks::sync_claims_in_tx(&mut tx).await.unwrap();
+        super::super::permalinks::sync_claims_in_tx(&mut tx)
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         let visible = query(&db, "news", FieldRole::Admin, &EntryTableFilter::default())
             .await
             .unwrap();
-        assert_eq!(visible.items[0].public_url.as_deref(), Some("/content/news/hidden-article"));
+        assert_eq!(
+            visible.items[0].public_url.as_deref(),
+            Some("/content/news/hidden-article")
+        );
     }
 }

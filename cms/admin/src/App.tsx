@@ -30,7 +30,7 @@ import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
 import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
-import { SectionsPage } from './features/sections/SectionsPage.tsx';
+import { PatternsPage } from './features/patterns/PatternsPage.tsx';
 import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
 
 const HISTORY_INDEX = '__openDashAdminHistoryIndex';
@@ -101,9 +101,9 @@ export const App: React.FC = () => {
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
-  const [sectionsDirty, setSectionsDirty] = useState(false);
-  const sectionsDirtyRef = useRef(false);
-  const markSectionsDirty = (value: boolean) => { sectionsDirtyRef.current = value; setSectionsDirty(value); };
+  const [patternsDirty, setPatternsDirty] = useState(false);
+  const patternsDirtyRef = useRef(false);
+  const markPatternsDirty = (value: boolean) => { patternsDirtyRef.current = value; setPatternsDirty(value); };
   const [termDirty, setTermDirty] = useState(false);
   const termDirtyRef = useRef(false);
   const markTermDirty = (next: boolean) => {
@@ -157,7 +157,7 @@ export const App: React.FC = () => {
       setCptTypes(list);
       const defMap = new Map(definitions.map(def => [def.key, def]));
       const customTypes = list.filter(
-        ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section',
+        ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
       );
       const entries = await Promise.all(
         customTypes.map(async ct => {
@@ -197,7 +197,7 @@ export const App: React.FC = () => {
     const switchingBuilderTarget = current.view === 'builder'
       && builderIdentity(current) !== builderIdentity(next);
     const leavingBuilder = switchingBuilderTarget && builderDirtyRef.current;
-    const leavingSection = current.view === 'sections' && current.rawHash !== destination && sectionsDirtyRef.current;
+    const leavingPattern = current.view === 'patterns' && current.rawHash !== destination && patternsDirtyRef.current;
     const leavingSchema = current.view === 'settings' && current.sub === 'content-types'
       && schemaDirtyRef.current && acceptedHashRef.current !== destination;
     const leavingPermalinks = current.view === 'settings' && current.sub === 'permalinks'
@@ -206,13 +206,13 @@ export const App: React.FC = () => {
       && acceptedHashRef.current !== destination && readingDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema || leavingPermalinks || leavingReading;
+    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading;
     if (!hasDirty) return true;
     const approved = window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
         : leavingTerm
           ? 'Taxonomy có thay đổi chưa lưu. Rời màn hình sẽ bỏ bản nhập. Tiếp tục?'
-          : leavingSchema || leavingSection || leavingPermalinks || leavingReading
+          : leavingSchema || leavingPattern || leavingPermalinks || leavingReading
             ? 'Có thay đổi chưa lưu. Rời màn hình có thể làm mất bản nhập. Tiếp tục?'
             : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
     if (approved && leavingPermalinks && userRef.current) {
@@ -285,13 +285,13 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
+  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, postsDirty, pagesDirty, termDirty, patternsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -391,13 +391,13 @@ export const App: React.FC = () => {
         setSiteInstanceId(nextSiteId);
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
-        markSectionsDirty(false);
+        markPatternsDirty(false);
       } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         editorDraftStore.clear();
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
-        markSectionsDirty(false);
+        markPatternsDirty(false);
       } else {
         setAuthGeneration(g => g + 1);
       }
@@ -420,7 +420,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -447,7 +447,7 @@ export const App: React.FC = () => {
       setBuilderDirty(false);
       setPostsDirty(false);
       setPagesDirty(false);
-      markSectionsDirty(false);
+      markPatternsDirty(false);
       markTermDirty(false);
       lastAuthenticatedUserId.current = null;
       setRoute(parseAdminRoute('#/dashboard', window.location.pathname));
@@ -578,7 +578,7 @@ export const App: React.FC = () => {
       cptTaxonomies={cptTaxonomies}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || builderDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
       sidebarContent={<BuilderWorkspace
         key={builderIdentity(lastBuilderRouteRef.current) ?? 'header'}
         route={lastBuilderRouteRef.current}
@@ -739,10 +739,10 @@ export const App: React.FC = () => {
           onNavigateHash={navigateHash}
         />
       }
-      sectionsContent={
-        <SectionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}:${user?.role ?? 'none'}`}
+      patternsContent={
+        <PatternsPage key={siteInstanceId}
           route={route} user={user} csrfToken={csrfToken} onApiError={handleApiError}
-          onDirtyChange={markSectionsDirty} onNavigateHash={navigateHash} />
+          onDirtyChange={markPatternsDirty} onNavigateHash={navigateHash} />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
       taxonomyContent={route.taxonomyMode === 'definitions'

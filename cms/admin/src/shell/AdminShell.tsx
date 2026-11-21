@@ -46,7 +46,7 @@ function buildMenuTree(
   cptTaxonomies: Record<string, Array<{ key: string; label: string }>> = {},
 ): ParentMenuItem[] {
   const customTypes = cptTypes.filter(
-    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section',
+    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
   );
   return [
     { id: 'dashboard', label: 'Tổng quan', icon: 'dashboard', hash: '#/dashboard' },
@@ -142,14 +142,15 @@ function buildMenuTree(
       ],
     },
     {
-      id: 'sections',
-      label: 'Section',
+      id: 'patterns',
+      label: 'Patterns',
       icon: 'content',
-      hash: '#/sections',
+      hash: '#/patterns',
       group: 'appearance',
+      adminOnly: true,
       children: [
-        { label: 'Tất cả Section', hash: '#/sections' },
-        { label: 'Thêm Section', hash: '#/sections/new' },
+        { label: 'Tất cả Pattern', hash: '#/patterns' },
+        { label: 'Thêm Pattern', hash: '#/patterns/new' },
       ],
     },
     {
@@ -263,7 +264,7 @@ interface AdminShellProps {
   schemaSettingsContent: React.ReactNode;
   postsContent: React.ReactNode;
   pagesContent: React.ReactNode;
-  sectionsContent: React.ReactNode;
+  patternsContent: React.ReactNode;
   mediaContent: React.ReactNode;
   taxonomyContent: React.ReactNode;
   dashboardContent: React.ReactNode;
@@ -283,7 +284,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
   route, routeForbidden, cptTypes, cptTaxonomies, onNavigateHash, hasUnsavedChanges,
   sidebarContent, previewContent, contentContent, schemaSettingsContent,
-  postsContent, pagesContent, sectionsContent, mediaContent, taxonomyContent, dashboardContent,
+  postsContent, pagesContent, patternsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
   menusContent, themeOptionsContent, libraryContent,
 }) => {
@@ -385,12 +386,12 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     .filter((part, index) => index === 0 || part !== breadcrumbParts[index - 1])
     .join(' / ');
   const customCptTypes = cptTypes.filter(
-    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section',
+    ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
   );
-  // SectionsPage and TemplateLibraryPage own their own <main> landmark outside S01/S02 ownership.
+  // PatternsPage and TemplateLibraryPage own their own <main> landmark.
   const routeOwnsMain = Boolean(
     user && !routeForbidden && (
-      route.view === 'sections' ||
+      route.view === 'patterns' ||
       (route.view === 'themes' && route.sub === 'library')
     ),
   );
@@ -594,7 +595,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'menus' && <div className="od-admin-card min-w-0">{menusContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'options' && <div className="od-admin-card min-w-0">{themeOptionsContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && <div className="od-legacy-scope">{libraryContent}</div>}
-                {user && route.view === 'sections' && <div className="od-legacy-scope">{sectionsContent}</div>}
+                {user?.role === 'admin' && route.view === 'patterns' && <div className="od-legacy-scope">{patternsContent}</div>}
 
                 <section className={user && route.view === 'builder' ? 'od-editor-panel od-legacy-scope' : 'hidden'} aria-label="Builder" aria-hidden={!user || route.view !== 'builder'}>
                   <div id="builder-main">

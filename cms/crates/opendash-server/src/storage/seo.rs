@@ -99,7 +99,7 @@ pub async fn resolve_public_entry_path_in_tx(
         "SELECT EXISTS(SELECT 1 FROM content_entries e
            JOIN content_types t ON t.key=e.content_type_key
            WHERE e.id=? AND e.publication_status='published'
-             AND e.content_type_key!='section' AND t.provider_status='active'
+             AND e.content_type_key!='pattern' AND t.provider_status='active'
              AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)",
     )
     .bind(entry_id)
@@ -481,7 +481,7 @@ pub async fn custom_path_for_published_slug(
           WHERE e.content_type_key = ?
             AND e.slug = ?
             AND e.publication_status = 'published'
-            AND e.content_type_key != 'section'
+            AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
@@ -506,7 +506,7 @@ pub async fn resolve_custom_or_redirect_path(
                JOIN content_types t ON t.key = e.content_type_key
               WHERE p.path = ?
                 AND e.publication_status = 'published'
-                AND e.content_type_key != 'section'
+                AND e.content_type_key != 'pattern'
                 AND t.provider_status = 'active'
                 AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
         )
@@ -532,7 +532,7 @@ pub async fn resolve_custom_or_redirect_path(
            JOIN content_types t ON t.key = e.content_type_key
           WHERE r.source_path = ?
             AND e.publication_status = 'published'
-            AND e.content_type_key != 'section'
+            AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
@@ -573,7 +573,7 @@ pub async fn sync_entry_seo_media_ref_in_tx(
           WHERE s.entry_id = ?
             AND e.publication_status = 'published'
             AND t.provider_status = 'active'
-            AND e.content_type_key != 'section'
+            AND e.content_type_key != 'pattern'
             AND s.og_image_id IS NOT NULL",
     )
     .bind(entry_id)

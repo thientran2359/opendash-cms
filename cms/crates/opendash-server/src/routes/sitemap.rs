@@ -20,7 +20,9 @@ use crate::{
 
 fn parse_sitemap_part(raw: &str) -> Option<usize> {
     let num_str = raw.strip_suffix(".xml")?;
-    if num_str.is_empty() || num_str.starts_with('0') || !num_str.bytes().all(|b| b.is_ascii_digit())
+    if num_str.is_empty()
+        || num_str.starts_with('0')
+        || !num_str.bytes().all(|b| b.is_ascii_digit())
     {
         return None;
     }
@@ -123,8 +125,7 @@ pub async fn sitemap_part(
         return Err(ApiError::not_found("Không tìm thấy phần sitemap."));
     }
     let offset = ((page - 1) as i64) * SITEMAP_PART_SIZE;
-    let routes =
-        list_indexable_routes_in_tx(&mut tx, origin, offset, SITEMAP_PART_SIZE).await?;
+    let routes = list_indexable_routes_in_tx(&mut tx, origin, offset, SITEMAP_PART_SIZE).await?;
     tx.commit().await?;
 
     let xml = render_sitemap_part(&pub_settings, &routes)?;

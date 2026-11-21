@@ -46,8 +46,11 @@ export interface BuilderSection extends ResponsiveContainer { id: string; childr
 export interface BuilderDocument { schema_version: number; sections: BuilderSection[] }
 export type BuilderNode = BuilderSection | BuilderRow | BuilderColumn | BuilderElement;
 export type NodeKind = 'section' | 'row' | 'column' | 'element';
+/** ElementType is the legacy binding/field registry's closed set. PatternRef
+ * is an insertable core block with its own typed Inspector, no field binding. */
 export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/video' | 'core/button' | 'core/list' | 'core/contact_form';
-export const ELEMENT_TYPES: ElementType[] = ['core/heading', 'core/text', 'core/image', 'core/video', 'core/button', 'core/list', 'core/contact_form'];
+export type InsertableElementType = ElementType | 'core/pattern_ref';
+export const ELEMENT_TYPES: InsertableElementType[] = ['core/heading', 'core/text', 'core/image', 'core/video', 'core/button', 'core/list', 'core/contact_form', 'core/pattern_ref'];
 export const EMPTY_DOCUMENT: BuilderDocument = { schema_version: 1, sections: [] };
 export interface NodeLocation {
   node: BuilderNode;
@@ -166,6 +169,7 @@ export function nodeTitle(location: NodeLocation): string {
   return ({
     'core/heading': 'Tiêu đề', 'core/text': 'Văn bản',
     'core/image': 'Hình ảnh', 'core/video': 'Video', 'core/button': 'Nút', 'core/list': 'Danh sách', 'core/contact_form': 'Form liên hệ',
+    'core/pattern_ref': 'Reusable Pattern',
     'legacy/block': 'Block theme',
   } as Record<string, string>)[element.type] || 'Block chưa nhận diện';
 }
@@ -223,6 +227,10 @@ export function isLockedElement(element: BuilderElement, registry: Record<string
       || (props.sort !== undefined && !['id_desc', 'id_asc'].includes(String(props.sort)))
       || (props.page_size !== undefined && (!Number.isInteger(props.page_size)
         || Number(props.page_size) < 1 || Number(props.page_size) > 20));
+    // 0 is the intentional client-side placeholder while selecting a Pattern.
+    // Server validation rejects it on Save; retain the Inspector so the user
+    // can select a valid Pattern without throwing away the new block.
+    case 'core/pattern_ref': return !Number.isSafeInteger(props.pattern_id) || Number(props.pattern_id) < 0;
     case 'legacy/block':
       return typeof props.block_id !== 'string' || !object(props.values)
         || !Object.hasOwn(registry, props.block_id);
@@ -271,6 +279,22 @@ function clone<T>(document: T): T {
   return JSON.parse(JSON.stringify(document)) as T;
 }
 
+/** Import theme AST as an independent copy. Generate an ID for every level,
+ * including containers and locked/unknown elements, without mutating the
+ * immutable theme source or touching the existing target document.
+ */
+export function cloneWithFreshNodeIds(
+  source: BuilderDocument, existing?: BuilderDocument,
+): BuilderDocument {
+  const copy = clone(source);
+  const reservedSections = [...copy.sections, ...(existing?.sections ?? [])];
+  const reserved = { schema_version: copy.schema_version, sections: reservedSections };
+  for (const entry of allNodes(copy)) {
+    entry.node.id = newNodeId(entry.kind, reserved);
+  }
+  return copy;
+}
+
 function childrenAt(document: BuilderDocument, location: NodeLocation | undefined): BuilderNode[] | undefined {
   if (!location) return document.sections;
   if (location.kind === 'element') return undefined;
@@ -279,7 +303,7 @@ function childrenAt(document: BuilderDocument, location: NodeLocation | undefine
 }
 
 export function appendNode(
-  document: BuilderDocument, parentId: string | null, kind: NodeKind, elementType: ElementType,
+  document: BuilderDocument, parentId: string | null, kind: NodeKind, elementType: InsertableElementType,
 ): { document: BuilderDocument; id: string } | null {
   const parent = locate(document, parentId);
   if ((kind === 'section' && parentId !== null)
@@ -293,7 +317,7 @@ export function appendNode(
       && allNodes(document).filter(item => item.kind === 'element'
         && (item.node as BuilderElement).type === 'core/list').length >= 8) return null;
   const id = newNodeId(kind, next);
-  const defaults: Record<ElementType, Record<string, unknown>> = {
+  const defaults: Record<InsertableElementType, Record<string, unknown>> = {
     'core/heading': { level: 2, text: 'Tiêu đề mới' },
     'core/text': { text: 'Nội dung mới' },
     'core/image': { media_id: '', alt: '' },
@@ -301,55 +325,12 @@ export function appendNode(
     'core/button': { label: 'Nút mới', url: '/' },
     'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
     'core/contact_form': { form_id: 1, submit_label: 'Gửi liên hệ' },
+    'core/pattern_ref': { pattern_id: 0 },
   };
   const node: BuilderNode = kind === 'element' ? { id, type: elementType, props: { ...defaults[elementType] } }
     : { id, children: [] };
   children.push(node);
   return { document: next, id };
-}
-
-/** #356 Copy, never reference: a site-owned Section's top-level AST nodes
- * become fresh nodes in the destination, placed after the selected Section
- * ancestor or appended at document root. Source and its media refs do not
- * mutate. Save/preview validation remains server-authoritative. */
-export function copySectionIntoDocument(
-  destination: BuilderDocument,
-  source: BuilderDocument,
-  selectedId: string | null,
-): { document: BuilderDocument; firstId: string } | null {
-  if (source.schema_version !== 1 || destination.schema_version !== 1
-      || source.sections.length === 0) return null;
-  const next = clone(destination);
-  const used = new Set(allNodes(next).map(location => location.node.id));
-  const fresh = (kind: NodeKind): string => {
-    let id: string;
-    do { id = newNodeId(kind, next); } while (used.has(id));
-    used.add(id);
-    return id;
-  };
-  const copies: BuilderSection[] = source.sections.map(section => ({
-    ...clone(section),
-    id: fresh('section'),
-    children: section.children.map(row => ({
-      ...clone(row),
-      id: fresh('row'),
-      children: row.children.map(column => ({
-        ...clone(column),
-        id: fresh('column'),
-        children: column.children.map(element => ({
-          ...clone(element),
-          id: fresh('element'),
-        })),
-      })),
-    })),
-  }));
-  const location = locate(destination, selectedId);
-  const insertionIndex = location ? location.path[0] + 1 : next.sections.length;
-  next.sections.splice(insertionIndex, 0, ...copies);
-  if (allNodes(next).length > 512 || JSON.stringify(next).length > 256 * 1024) return null;
-  if (allNodes(next).filter(item => item.kind === 'element'
-      && (item.node as BuilderElement).type === 'core/list').length > 8) return null;
-  return { document: next, firstId: copies[0].id };
 }
 
 /** Typed list updates; never encode filters/booleans as static string props. */

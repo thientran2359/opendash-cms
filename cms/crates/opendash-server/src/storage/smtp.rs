@@ -22,7 +22,9 @@ impl TlsMode {
         match raw {
             "starttls" => Ok(Self::Starttls),
             "implicit_tls" => Ok(Self::ImplicitTls),
-            _ => Err(ApiError::bad_request("tls_mode phải là starttls hoặc implicit_tls.")),
+            _ => Err(ApiError::bad_request(
+                "tls_mode phải là starttls hoặc implicit_tls.",
+            )),
         }
     }
 }
@@ -176,7 +178,9 @@ pub async fn put_smtp_settings_cas(
     .await?;
 
     if res.rows_affected() == 0 {
-        return Err(ApiError::conflict("Cấu hình SMTP đã thay đổi (If-Match không khớp)."));
+        return Err(ApiError::conflict(
+            "Cấu hình SMTP đã thay đổi (If-Match không khớp).",
+        ));
     }
     get_smtp_settings(db).await
 }
@@ -186,7 +190,11 @@ pub async fn create_initial_attempt_in_conn(
     submission_id: i64,
 ) -> ApiResult<Option<i64>> {
     let settings = get_smtp_settings_in_conn(conn).await?;
-    let initial_state = if settings.enabled { "pending" } else { "disabled" };
+    let initial_state = if settings.enabled {
+        "pending"
+    } else {
+        "disabled"
+    };
     let snapshot = TransportSnapshot {
         settings_version: settings.version,
         host: settings.host,

@@ -474,11 +474,10 @@ pub async fn get_profile(db: &SqlitePool, user_id: i64) -> ApiResult<UserSummary
 }
 
 pub async fn load_user_password_hash(db: &SqlitePool, user_id: i64) -> ApiResult<String> {
-    let hash: Option<String> =
-        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
-            .bind(user_id)
-            .fetch_optional(db)
-            .await?;
+    let hash: Option<String> = sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(db)
+        .await?;
     hash.ok_or_else(|| ApiError::not_found("Không tìm thấy tài khoản."))
 }
 
@@ -563,7 +562,10 @@ pub async fn compute_site_instance_id(db: &SqlitePool) -> Option<String> {
     // replacing the underlying DB invalidates old RAM drafts intentionally.
     // No user row belongs in the identity: the first Admin can be deleted,
     // renamed or have their credentials changed while the site remains intact.
-    let rows = sqlx::query("PRAGMA database_list").fetch_all(db).await.ok()?;
+    let rows = sqlx::query("PRAGMA database_list")
+        .fetch_all(db)
+        .await
+        .ok()?;
     let database_path: String = rows.into_iter().find_map(|row| {
         (row.try_get::<String, _>("name").ok()?.as_str() == "main")
             .then(|| row.try_get::<String, _>("file").ok())
