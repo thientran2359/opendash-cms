@@ -1998,8 +1998,7 @@ pub fn eligible_base_field_keys(effective: &EffectiveContentSchema) -> Vec<Strin
         .fields
         .iter()
         .filter(|f| {
-            !(is_builtin && f.key == "body")
-                && !(!is_private_reusable && f.key == "featured_image")
+            !(is_builtin && f.key == "body") && !(!is_private_reusable && f.key == "featured_image")
         })
         .map(|f| f.key.clone())
         .collect()

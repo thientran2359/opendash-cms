@@ -1124,13 +1124,21 @@ fn normalize_entry_timestamp(raw: &str, field_name: &str) -> ApiResult<String> {
     let month: u32 = date_it
         .next()
         .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
-        .ok_or_else(|| ApiError::unprocessable(format!("Tháng trong {field_name} không hợp lệ.")))?;
+        .ok_or_else(|| {
+            ApiError::unprocessable(format!("Tháng trong {field_name} không hợp lệ."))
+        })?;
     let day: u32 = date_it
         .next()
         .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
         .ok_or_else(|| ApiError::unprocessable(format!("Ngày trong {field_name} không hợp lệ.")))?;
-    if date_it.next().is_some() || !(1970..=2100).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return Err(ApiError::unprocessable(format!("Ngày trong {field_name} nằm ngoài phạm vi hợp lệ.")));
+    if date_it.next().is_some()
+        || !(1970..=2100).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+    {
+        return Err(ApiError::unprocessable(format!(
+            "Ngày trong {field_name} nằm ngoài phạm vi hợp lệ."
+        )));
     }
     let mut time_it = time_part.split(':');
     let hour: u32 = time_it
@@ -1145,11 +1153,15 @@ fn normalize_entry_timestamp(raw: &str, field_name: &str) -> ApiResult<String> {
         Some(s) => (s.len() == 2)
             .then(|| s.parse().ok())
             .flatten()
-            .ok_or_else(|| ApiError::unprocessable(format!("Giây trong {field_name} không hợp lệ.")))?,
+            .ok_or_else(|| {
+                ApiError::unprocessable(format!("Giây trong {field_name} không hợp lệ."))
+            })?,
         None => 0,
     };
     if time_it.next().is_some() || hour > 23 || minute > 59 || second > 59 {
-        return Err(ApiError::unprocessable(format!("Giờ phút giây trong {field_name} không hợp lệ.")));
+        return Err(ApiError::unprocessable(format!(
+            "Giờ phút giây trong {field_name} không hợp lệ."
+        )));
     }
     Ok(format!(
         "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}"
