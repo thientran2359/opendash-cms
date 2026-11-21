@@ -9,12 +9,13 @@ import type { ParsedRoute } from '../shell/router.ts';
 import {
   type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type InsertableElementType, type ListProps, type NodeKind, type ResponsiveAlign,
   type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
-  allNodes, appendNode, isElement, isLockedElement, locate, moveNode, preservesAnchors,
+  allNodes, appendNode, cloneWithFreshNodeIds, isElement, isLockedElement, locate, moveNode, preservesAnchors,
   removeNode, setElementBinding, setListProps, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
 import { BuilderCanvas } from './BuilderCanvas.tsx';
 import { BuilderInspector } from './BuilderInspector.tsx';
+import { PatternLibraryModal } from './PatternLibraryModal.tsx';
 
 interface Props {
   route: ParsedRoute;
@@ -141,6 +142,8 @@ export function BuilderWorkspace({
   const [error, setError] = useState(false);
   const [patterns, setPatterns] = useState<PatternRecord[]>([]);
   const [patternsLoaded, setPatternsLoaded] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<'blocks' | 'patterns'>('blocks');
+  const [showPatternLibrary, setShowPatternLibrary] = useState(false);
   const patternSeq = useRef(0);
   const ownerRef = useRef<number | null>(null);
   const ownerRoleRef = useRef<AuthUser['role'] | null>(null);
@@ -193,6 +196,8 @@ export function BuilderWorkspace({
     patternSeq.current += 1;
     setPatterns([]);
     setPatternsLoaded(false);
+    setSidebarTab('blocks');
+    setShowPatternLibrary(false);
     invalidatePreview();
     draftRef.current = EMPTY_DOCUMENT;
     setDraft(EMPTY_DOCUMENT);
@@ -332,15 +337,15 @@ export function BuilderWorkspace({
     return () => { alive = false; };
   }, [themeRevision, user?.id]);
 
-  const changeDraft = (updated: BuilderDocument | null, nextSelected?: string | null, removedId?: string) => {
-    if (!updated) return;
+  const changeDraft = (updated: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
+    if (!updated) return false;
     if (!preservesAnchors(draftRef.current, updated, registryRef.current, removedId)) {
       message('Node không resolve cần giữ nguyên vị trí, ancestor và nội dung.', true);
-      return;
+      return false;
     }
     if (allNodes(updated).length > 512 || JSON.stringify(updated).length > 256 * 1024) {
       message('Builder vượt giới hạn 512 node hoặc 256 KiB.', true);
-      return;
+      return false;
     }
     draftRef.current = updated;
     setDraft(updated);
@@ -350,6 +355,42 @@ export function BuilderWorkspace({
     setMode('canvas');
     if (nextSelected !== undefined) setSelectedId(nextSelected);
     message('Có thay đổi chưa lưu.');
+    return true;
+  };
+
+  const insertThemePattern = (sourceDocument: BuilderDocument, title: string): boolean => {
+    if (!active || !user || !csrfToken || !loadedRef.current || savingRef.current) return false;
+    if (sourceDocument.schema_version !== draftRef.current.schema_version || !sourceDocument.sections.length) {
+      message('Mẫu từ theme không có bố cục Builder tương thích.', true);
+      return false;
+    }
+    const sourceNodes = allNodes(sourceDocument);
+    if (scopedPattern && sourceNodes.some(node => node.kind === 'element'
+        && ['core/pattern_ref', 'core/list'].includes(
+          (node.node as import('./document.ts').BuilderElement).type))) {
+      message('Pattern CPT không cho phép lồng Reusable Pattern hoặc Danh sách nội dung.', true);
+      return false;
+    }
+    const existingNodes = allNodes(draftRef.current);
+    const combinedListCount = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
+      && (node.node as import('./document.ts').BuilderElement).type === 'core/list').length;
+    if (combinedListCount > 8) {
+      message('Builder chỉ hỗ trợ tối đa 8 Danh sách nội dung.', true);
+      return false;
+    }
+    const refs = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
+        && (node.node as import('./document.ts').BuilderElement).type === 'core/pattern_ref')
+      .map(node => Number((node.node as import('./document.ts').BuilderElement).props.pattern_id));
+    if ((!scopedEntry && refs.length > 0) || refs.some(id => !Number.isSafeInteger(id) || id <= 0)
+        || new Set(refs).size > 16) {
+      message('Mẫu không phù hợp với target hoặc giới hạn 16 Reusable Pattern.', true);
+      return false;
+    }
+    const copy = cloneWithFreshNodeIds(sourceDocument, draftRef.current);
+    const next = { ...draftRef.current, sections: [...draftRef.current.sections, ...copy.sections] };
+    if (!changeDraft(next, copy.sections[0].id)) return false;
+    message('Đã chèn bản sao “' + title + '” vào cuối canvas. Chưa lưu lên website.');
+    return true;
   };
 
   const add = (parentId: string | null, kind: NodeKind) => {
@@ -725,23 +766,46 @@ export function BuilderWorkspace({
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(245px,0.8fr)_minmax(360px,1.6fr)_minmax(255px,0.9fr)]">
         <div className="min-w-0">
-          <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
-            <label htmlFor="builder-element-type" className="text-xs text-slate-500">Element mới</label>
-            <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
-              value={elementType} onChange={event => setElementType(event.target.value as InsertableElementType)}>
-              {ELEMENT_TYPES.filter(type =>
-                (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
-                && (!scopedPattern || type !== 'core/list'))
-                .map(type => <option key={type} value={type}>{type === 'core/pattern_ref' ? 'Reusable Pattern' : type}</option>)}
-            </select>
+          <div className="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-white p-1" role="tablist" aria-label="Builder sidebar">
+            <button type="button" role="tab" aria-selected={sidebarTab === 'blocks'} aria-controls="builder-sidebar-blocks"
+              className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
+                (sidebarTab === 'blocks' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
+              onClick={() => setSidebarTab('blocks')}>Blocks</button>
+            <button type="button" role="tab" aria-selected={sidebarTab === 'patterns'} aria-controls="builder-sidebar-patterns"
+              className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
+                (sidebarTab === 'patterns' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
+              onClick={() => setSidebarTab('patterns')}>Patterns</button>
           </div>
-          {scopedEntry && !scopedPattern && <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-pattern-help">
-            <strong className="text-xs">Reusable Pattern</strong>
-            <p className="mt-1 text-xs text-slate-600">Chọn “Reusable Pattern” ở Element mới, thêm vào Column, rồi chọn Pattern trong Inspector để tham chiếu đồng bộ.</p>
-            <p className="mt-1 text-xs text-slate-600">{patternsLoaded ? `${patterns.length} Pattern sẵn dùng` : 'Đang tải danh sách Pattern…'}</p>
+          <div id="builder-sidebar-blocks" role="tabpanel" hidden={sidebarTab !== 'blocks'}>
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
+              <label htmlFor="builder-element-type" className="text-xs text-slate-500">Element mới</label>
+              <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
+                value={elementType} onChange={event => setElementType(event.target.value as InsertableElementType)}>
+                {ELEMENT_TYPES.filter(type =>
+                  (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
+                  && (!scopedPattern || type !== 'core/list'))
+                  .map(type => <option key={type} value={type}>{type === 'core/pattern_ref' ? 'Reusable Pattern' : type}</option>)}
+              </select>
+            </div>
+            {scopedEntry && !scopedPattern && <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-pattern-help">
+              <strong className="text-xs">Reusable Pattern</strong>
+              <p className="mt-1 text-xs text-slate-600">Chọn “Reusable Pattern” ở Element mới, thêm vào Column, rồi chọn Pattern trong Inspector để tham chiếu đồng bộ.</p>
+              <p className="mt-1 text-xs text-slate-600">{patternsLoaded ? `${patterns.length} Pattern sẵn dùng` : 'Đang tải danh sách Pattern…'}</p>
+            </section>}
+            <BuilderTree document={draft} selectedId={selectedId} elementType={elementType as ElementType}
+              onSelect={setSelectedId} onAdd={add} onMove={reorder} onDelete={remove} />
+          </div>
+          {sidebarTab === 'patterns' && <section id="builder-sidebar-patterns" role="tabpanel"
+            className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="!m-0 text-sm font-semibold text-slate-900">Pattern Library</h3>
+            <p className="text-sm text-slate-600">Khám phá mẫu từ theme v3 và chèn bản sao vào cuối canvas. Bản gốc trong theme không thay đổi.</p>
+            <button type="button" className="w-full" data-testid="open-pattern-library"
+              disabled={loading || saving || !loadedRef.current}
+              onClick={() => setShowPatternLibrary(true)}>Explore all patterns</button>
+            {scopedEntry && !scopedPattern && <p className="text-xs text-slate-600">
+              Cần đồng bộ giữa nhiều trang? Dùng block Reusable Pattern ở tab Blocks.
+            </p>}
           </section>}
-          <BuilderTree document={draft} selectedId={selectedId} elementType={elementType as ElementType}
-            onSelect={setSelectedId} onAdd={add} onMove={reorder} onDelete={remove} />
         </div>
         <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Trình chỉnh sửa canvas">
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
@@ -786,6 +850,9 @@ export function BuilderWorkspace({
             onResponsiveChange={editResponsive} onError={onApiError} />
         </div>
       </div>
+      {showPatternLibrary && <PatternLibraryModal key={themeRevision}
+        onClose={() => setShowPatternLibrary(false)}
+        onInsert={insertThemePattern} onApiError={onApiError} />}
     </div>
   );
 }

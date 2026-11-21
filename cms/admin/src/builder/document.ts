@@ -279,6 +279,22 @@ function clone<T>(document: T): T {
   return JSON.parse(JSON.stringify(document)) as T;
 }
 
+/** Import theme AST as an independent copy. Generate an ID for every level,
+ * including containers and locked/unknown elements, without mutating the
+ * immutable theme source or touching the existing target document.
+ */
+export function cloneWithFreshNodeIds(
+  source: BuilderDocument, existing?: BuilderDocument,
+): BuilderDocument {
+  const copy = clone(source);
+  const reservedSections = [...copy.sections, ...(existing?.sections ?? [])];
+  const reserved = { schema_version: copy.schema_version, sections: reservedSections };
+  for (const entry of allNodes(copy)) {
+    entry.node.id = newNodeId(entry.kind, reserved);
+  }
+  return copy;
+}
+
 function childrenAt(document: BuilderDocument, location: NodeLocation | undefined): BuilderNode[] | undefined {
   if (!location) return document.sections;
   if (location.kind === 'element') return undefined;
