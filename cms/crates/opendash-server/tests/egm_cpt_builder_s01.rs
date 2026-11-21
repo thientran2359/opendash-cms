@@ -293,19 +293,60 @@ async fn cpt_builder_capability_cas_body_isolation_and_disable_preservation() {
     assert_eq!(saved.status(), StatusCode::OK);
     assert_eq!(saved.headers()[header::ETAG], "\"v2\"");
     let payload: Value = saved.json().await.unwrap();
+    assert_eq!(payload["entry_id"], a);
+    assert_eq!(payload["version"], 2);
     assert_eq!(payload["document"], doc);
     assert_eq!(payload["content_mode"], "builder");
+    let returned_updated_at = payload["updated_at"]
+        .as_str()
+        .expect("Builder PUT returns content entry updated_at");
+    assert!(!returned_updated_at.is_empty());
+    let db = SqlitePool::connect(&format!(
+        "sqlite://{}",
+        site.root.join("database/opendash.sqlite").display()
+    ))
+    .await
+    .unwrap();
+    // The mutation and response share content_entries' CAS version/timestamp.
+    let persisted: (i64, String, String) = sqlx::query_as(
+        "SELECT e.version, e.updated_at, d.document_json
+           FROM content_entries e JOIN entry_builder_documents d ON d.entry_id=e.id
+          WHERE e.id=?",
+    )
+    .bind(a)
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(persisted.0, payload["version"].as_i64().unwrap());
+    assert_eq!(persisted.1, returned_updated_at);
+    assert_eq!(serde_json::from_str::<Value>(&persisted.2).unwrap(), doc);
+    let reopened: Value = auth_get().send().await.unwrap().json().await.unwrap();
+    assert_eq!(reopened["version"], payload["version"]);
+    assert_eq!(reopened["updated_at"], payload["updated_at"]);
     let stale = http
         .put(&url)
         .header(header::COOKIE, &cookie)
         .header(header::ORIGIN, &site.base)
         .header("X-CSRF-Token", &csrf)
         .header(header::IF_MATCH, "\"v1\"")
-        .json(&doc)
+        .json(&document("Stale design must not replace committed AST"))
         .send()
         .await
         .unwrap();
     assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+    let after_stale: (i64, String, String) = sqlx::query_as(
+        "SELECT e.version, e.updated_at, d.document_json
+           FROM content_entries e JOIN entry_builder_documents d ON d.entry_id=e.id
+          WHERE e.id=?",
+    )
+    .bind(a)
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        after_stale, persisted,
+        "stale 412 must preserve committed row"
+    );
     let beta_url = format!("{}/api/admin/entries/project/{b}/builder", site.base);
     let beta_after: Value = http
         .get(&beta_url)
@@ -319,12 +360,6 @@ async fn cpt_builder_capability_cas_body_isolation_and_disable_preservation() {
     assert_eq!(beta_after["version"], 1);
     assert!(beta_after["document"].is_null());
 
-    let db = SqlitePool::connect(&format!(
-        "sqlite://{}",
-        site.root.join("database/opendash.sqlite").display()
-    ))
-    .await
-    .unwrap();
     let (raw_values, mode, ast): (String, String, String) = sqlx::query_as(
         "SELECT e.values_json, e.content_mode, d.document_json
          FROM content_entries e JOIN entry_builder_documents d ON d.entry_id=e.id WHERE e.id=?",

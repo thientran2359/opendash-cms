@@ -16,6 +16,7 @@ import { BuilderTree } from './BuilderTree.tsx';
 import { BuilderCanvas } from './BuilderCanvas.tsx';
 import { BuilderInspector } from './BuilderInspector.tsx';
 import { PatternLibraryModal } from './PatternLibraryModal.tsx';
+import { MediaPicker } from '../features/media/MediaPicker.tsx';
 
 interface Props {
   route: ParsedRoute;
@@ -142,8 +143,9 @@ export function BuilderWorkspace({
   const [error, setError] = useState(false);
   const [patterns, setPatterns] = useState<PatternRecord[]>([]);
   const [patternsLoaded, setPatternsLoaded] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<'blocks' | 'patterns'>('blocks');
+  const [sidebarTab, setSidebarTab] = useState<'blocks' | 'patterns' | 'media'>('blocks');
   const [showPatternLibrary, setShowPatternLibrary] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
   const patternSeq = useRef(0);
   const ownerRef = useRef<number | null>(null);
   const ownerRoleRef = useRef<AuthUser['role'] | null>(null);
@@ -198,6 +200,7 @@ export function BuilderWorkspace({
     setPatternsLoaded(false);
     setSidebarTab('blocks');
     setShowPatternLibrary(false);
+    setShowMediaPicker(false);
     invalidatePreview();
     draftRef.current = EMPTY_DOCUMENT;
     setDraft(EMPTY_DOCUMENT);
@@ -387,10 +390,74 @@ export function BuilderWorkspace({
       return false;
     }
     const copy = cloneWithFreshNodeIds(sourceDocument, draftRef.current);
-    const next = { ...draftRef.current, sections: [...draftRef.current.sections, ...copy.sections] };
+    // Any selected descendant belongs to exactly one root Section. Copy
+    // immediately after that Section; a missing selection appends at the end.
+    const selectedSection = locate(draftRef.current, selectedId)?.path[0];
+    const insertionIndex = selectedSection === undefined
+      ? draftRef.current.sections.length : selectedSection + 1;
+    const next = { ...draftRef.current, sections: [
+      ...draftRef.current.sections.slice(0, insertionIndex),
+      ...copy.sections,
+      ...draftRef.current.sections.slice(insertionIndex),
+    ] };
     if (!changeDraft(next, copy.sections[0].id)) return false;
-    message('Đã chèn bản sao “' + title + '” vào cuối canvas. Chưa lưu lên website.');
+    message('Đã chèn bản sao “' + title + '” ' +
+      (selectedSection === undefined ? 'vào cuối canvas.' : 'sau Section được chọn.') +
+      ' Chưa lưu lên website.');
     return true;
+  };
+
+  const insertMediaImage = (ids: string[]) => {
+    const mediaId = ids[0];
+    if (!mediaId || !/^[a-zA-Z0-9_-]{1,128}$/.test(mediaId) || !loadedRef.current
+        || !active || !user || !csrfToken || savingRef.current) return;
+    const selected = locate(draftRef.current, selectedId);
+    if (selected?.kind === 'element' && isElement(selected.node)
+        && selected.node.type === 'core/image' && !isLockedElement(selected.node, registryRef.current)) {
+      if (!changeDraft(setNodeField(draftRef.current, selected.node.id, 'media_id', mediaId), selected.node.id)) return;
+    } else {
+      // Fill only the missing container levels so an image always has the
+      // required Section → Row → Column → Element shape.
+      let next = draftRef.current;
+      let columnId: string | undefined;
+      if (selected?.kind === 'element') columnId = selected.parentId ?? undefined;
+      else if (selected?.kind === 'column') columnId = selected.node.id;
+      let sectionId = selected && selected.path.length > 0
+        ? next.sections[selected.path[0]]?.id : undefined;
+      let rowId = selected && selected.path.length > 1
+        ? next.sections[selected.path[0]]?.children[selected.path[1]]?.id : undefined;
+      if (!columnId) {
+        if (!sectionId) {
+          const section = appendNode(next, null, 'section', 'core/image');
+          if (!section) return;
+          next = section.document;
+          sectionId = section.id;
+        }
+        if (!rowId) {
+          const row = appendNode(next, sectionId, 'row', 'core/image');
+          if (!row) return;
+          next = row.document;
+          rowId = row.id;
+        }
+        const row = locate(next, rowId);
+        if (row?.kind === 'row' && !columnId) {
+          const rowNode = row.node as import('./document.ts').BuilderRow;
+          columnId = rowNode.children[rowNode.children.length - 1]?.id;
+        }
+        if (!columnId) {
+          const column = appendNode(next, rowId, 'column', 'core/image');
+          if (!column) return;
+          next = column.document;
+          columnId = column.id;
+        }
+      }
+      const inserted = appendNode(next, columnId, 'element', 'core/image');
+      if (!inserted) return;
+      const populated = setNodeField(inserted.document, inserted.id, 'media_id', mediaId);
+      if (!changeDraft(populated, inserted.id)) return;
+    }
+    setShowMediaPicker(false);
+    message('Đã chèn ảnh từ Media Library vào bản nháp. Chưa lưu lên website.');
   };
 
   const add = (parentId: string | null, kind: NodeKind) => {
@@ -775,6 +842,10 @@ export function BuilderWorkspace({
               className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
                 (sidebarTab === 'patterns' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
               onClick={() => setSidebarTab('patterns')}>Patterns</button>
+            <button type="button" role="tab" aria-selected={sidebarTab === 'media'} aria-controls="builder-sidebar-media"
+              className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
+                (sidebarTab === 'media' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
+              onClick={() => setSidebarTab('media')}>Media</button>
           </div>
           <div id="builder-sidebar-blocks" role="tabpanel" hidden={sidebarTab !== 'blocks'}>
             <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
@@ -798,13 +869,21 @@ export function BuilderWorkspace({
           {sidebarTab === 'patterns' && <section id="builder-sidebar-patterns" role="tabpanel"
             className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
             <h3 className="!m-0 text-sm font-semibold text-slate-900">Pattern Library</h3>
-            <p className="text-sm text-slate-600">Khám phá mẫu từ theme v3 và chèn bản sao vào cuối canvas. Bản gốc trong theme không thay đổi.</p>
+            <p className="text-sm text-slate-600">Khám phá mẫu từ theme v3 và chèn bản sao sau Section được chọn. Nếu không chọn node, mẫu sẽ nằm ở cuối canvas. Bản gốc trong theme không thay đổi.</p>
             <button type="button" className="w-full" data-testid="open-pattern-library"
               disabled={loading || saving || !loadedRef.current}
               onClick={() => setShowPatternLibrary(true)}>Explore all patterns</button>
             {scopedEntry && !scopedPattern && <p className="text-xs text-slate-600">
               Cần đồng bộ giữa nhiều trang? Dùng block Reusable Pattern ở tab Blocks.
             </p>}
+          </section>}
+          {sidebarTab === 'media' && <section id="builder-sidebar-media" role="tabpanel"
+            className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="!m-0 text-sm font-semibold text-slate-900">Media Library</h3>
+            <p className="text-sm text-slate-600">Chọn ảnh để chèn vào bố cục hiện tại hoặc thay ảnh đang chọn. Thay đổi được giữ trong bản nháp cho đến khi Lưu.</p>
+            <button type="button" className="w-full" data-testid="builder-open-media-picker"
+              disabled={loading || saving || !loadedRef.current || !csrfToken}
+              onClick={() => setShowMediaPicker(true)}>Chọn ảnh từ Media Library</button>
           </section>}
         </div>
         <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Trình chỉnh sửa canvas">
@@ -853,6 +932,9 @@ export function BuilderWorkspace({
       {showPatternLibrary && <PatternLibraryModal key={themeRevision}
         onClose={() => setShowPatternLibrary(false)}
         onInsert={insertThemePattern} onApiError={onApiError} />}
+      {showMediaPicker && <MediaPicker mode="image" acceptKind="image" csrfToken={csrfToken}
+        selectedIds={[]} onApply={insertMediaImage}
+        onClose={() => setShowMediaPicker(false)} onError={onApiError} />}
     </div>
   );
 }
