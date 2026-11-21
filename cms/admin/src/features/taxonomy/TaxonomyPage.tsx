@@ -3,6 +3,7 @@ import { ApiClientError } from '../../api/client.ts';
 import { deleteTaxonomyTerm, getTaxonomyDefinition, listAllTaxonomyTerms,
   type TaxonomyDefinition, type TaxonomyKind, type TaxonomyTerm } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface TaxonomyPageProps {
   kind: TaxonomyKind;
@@ -13,7 +14,6 @@ interface TaxonomyPageProps {
 }
 
 const PAGE_SIZE = 20;
-const buttonClass = 'rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50';
 
 function orderedTerms(hierarchical: boolean, terms: TaxonomyTerm[]): Array<{ term: TaxonomyTerm; depth: number }> {
   const sort = (a: TaxonomyTerm, b: TaxonomyTerm) => a.name.localeCompare(b.name, 'vi') || a.id - b.id;
@@ -113,77 +113,76 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
   };
 
   return (
-    <section className="w-full min-w-0 space-y-5" data-testid="taxonomy-page" data-taxonomy-kind={kind}>
-      <header className="flex flex-wrap items-start justify-between gap-3">
+    <section className="w-full min-w-0 space-y-4" data-testid="taxonomy-page" data-taxonomy-kind={kind}>
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">Nội dung / Taxonomy</p>
-          <h2 className="mt-2 text-2xl font-bold text-slate-900">
+          <h2 className="text-base font-semibold text-zinc-950">
             {definition?.label ?? (kind === 'category' ? 'Danh mục' : kind === 'tag' ? 'Thẻ' : kind)} ({terms.length})
           </h2>
-          <p className="mt-1 text-sm text-slate-600">
+          <p className="mt-0.5 text-xs text-zinc-500">
             {definition?.hierarchical ? 'Taxonomy phân cấp tối đa 8 cấp; có thể chuyển cha mà không đổi ID.' : 'Taxonomy phẳng không có cha; đổi tên hoặc slug không đổi ID.'}
           </p>
-          {!admin && user && <p className="text-sm text-slate-600">Editor có thể chỉnh sửa extension field được cấp quyền; các thuộc tính lõi chỉ Admin sửa.</p>}
+          {!admin && user && <p className="mt-0.5 text-xs text-zinc-500">Editor có thể chỉnh sửa extension field được cấp quyền; các thuộc tính lõi chỉ Admin sửa.</p>}
           {definition && (definition.provider_status !== 'active' || definition.declaration_state !== 'declared') &&
-            <p className="text-sm text-amber-700">Taxonomy hiện không hoạt động; vẫn có thể xem term đã lưu.</p>}
+            <p className="mt-0.5 text-xs text-amber-700">Taxonomy hiện không hoạt động; vẫn có thể xem term đã lưu.</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          {admin && <button type="button" className="od-primary-action" disabled={busy || loading || !definition || definition.provider_status !== 'active' || definition.declaration_state !== 'declared'}
-            onClick={() => onNavigateHash(newHash)}>Thêm mới</button>}
-          <button type="button" className={buttonClass} disabled={busy}
-            onClick={() => onNavigateHash('#/taxonomy/definitions')}>Định nghĩa taxonomy</button>
-          <button type="button" className={buttonClass} disabled={loading || busy}
-            onClick={() => void refresh()}>Làm mới</button>
+          <AdminButton variant="secondary" size="sm" disabled={busy}
+            onClick={() => onNavigateHash('#/taxonomy/definitions')}>Định nghĩa taxonomy</AdminButton>
+          <AdminButton variant="secondary" size="sm" disabled={loading || busy}
+            onClick={() => void refresh()}>Làm mới</AdminButton>
+          {admin && <AdminButton variant="primary" size="sm" disabled={busy || loading || !definition || definition.provider_status !== 'active' || definition.declaration_state !== 'declared'}
+            onClick={() => onNavigateHash(newHash)}>+ Thêm mới</AdminButton>}
         </div>
       </header>
 
-      {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-      {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
-      <label htmlFor="taxonomy-search" className="block text-sm font-medium text-slate-700">
-        Tìm theo tên, slug hoặc ID
+      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
+      <label htmlFor="taxonomy-search" className="flex max-w-md flex-col gap-1 text-xs font-medium text-zinc-600">
+        <span>Tìm theo tên, slug hoặc ID</span>
         <input id="taxonomy-search" type="search" value={search}
           onChange={event => { setSearch(event.target.value); setPage(0); }}
           placeholder="Nhập tên, slug hoặc ID..."
-          className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900" />
       </label>
-      {loading && <p role="status">Đang tải danh sách...</p>}
+      {loading && <p role="status" className="text-xs text-zinc-500">Đang tải danh sách...</p>}
       <div className="space-y-2" aria-busy={loading}>
-        {!loading && visible.length === 0 && <p className="rounded-lg border border-slate-200 p-4 text-sm text-slate-500">
+        {!loading && visible.length === 0 && <p className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500">
           {search ? 'Không tìm thấy mục phù hợp.' : 'Chưa có mục nào.'}
         </p>}
         {visible.map(({term, depth}) => (
-          <article key={term.id} data-term-id={term.id} className="rounded-xl border border-slate-200 bg-white p-4">
+          <article key={term.id} data-term-id={term.id} className="rounded-xl border border-zinc-200 bg-white px-4 py-3 transition-colors hover:bg-zinc-50/70">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0 space-y-1">
-                <h3 className="break-words text-sm font-semibold text-slate-900">
-                  {definition?.hierarchical && depth > 0 && <span aria-hidden="true" className="mr-1 text-slate-400">{'— '.repeat(Math.min(depth, 7))}</span>}
+              <div className="min-w-0 space-y-0.5">
+                <h3 className="break-words text-sm font-semibold text-zinc-950">
+                  {definition?.hierarchical && depth > 0 && <span aria-hidden="true" className="mr-1 text-zinc-400">{'— '.repeat(Math.min(depth, 7))}</span>}
                   {term.name}
                 </h3>
-                <p className="break-all text-xs text-slate-600">/{term.slug} · ID #{term.id} · v{term.version}</p>
-                {definition?.hierarchical && <p className="text-xs text-slate-500">
+                <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}</p>
+                {definition?.hierarchical && <p className="text-xs text-zinc-500">
                   {term.parent_id === null ? 'Danh mục gốc' : `Cha: ${byId.get(term.parent_id)?.name ?? `#${term.parent_id}`}`} · Cấp {depth + 1}
                 </p>}
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" className={buttonClass} disabled={busy}
+              <div className="flex flex-wrap gap-1.5">
+                <AdminButton variant="secondary" size="sm" disabled={busy}
                   aria-label={`Mở chỉnh sửa ${term.name}, ID ${term.id}`}
-                  onClick={() => onNavigateHash(editHash(term.id))}>{admin ? 'Sửa' : 'Extensions'}</button>
-                {admin && <button type="button" className={buttonClass} disabled={busy}
+                  onClick={() => onNavigateHash(editHash(term.id))}>{admin ? 'Sửa' : 'Extensions'}</AdminButton>
+                {admin && <AdminButton variant="danger" size="sm" disabled={busy}
                   aria-label={`Xóa ${term.name}, ID ${term.id}`}
-                  onClick={() => void remove(term)}>Xóa</button>}
+                  onClick={() => void remove(term)}>Xóa</AdminButton>}
               </div>
             </div>
           </article>
         ))}
       </div>
-      <nav aria-label="Phân trang taxonomy" className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+      <nav aria-label="Phân trang taxonomy" className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
         <span>Hiển thị {filtered.length ? currentPage * PAGE_SIZE + 1 : 0}–{Math.min(filtered.length, (currentPage + 1) * PAGE_SIZE)} / {filtered.length}</span>
         <div className="flex items-center gap-2">
-          <button type="button" className={buttonClass} disabled={loading || currentPage === 0}
-            onClick={() => setPage(currentPage - 1)}>Trước</button>
-          <span>Trang {currentPage + 1}/{pages}</span>
-          <button type="button" className={buttonClass} disabled={loading || currentPage + 1 >= pages}
-            onClick={() => setPage(currentPage + 1)}>Sau</button>
+          <AdminButton variant="secondary" size="sm" disabled={loading || currentPage === 0}
+            onClick={() => setPage(currentPage - 1)}>Trước</AdminButton>
+          <span className="tabular-nums">Trang {currentPage + 1}/{pages}</span>
+          <AdminButton variant="secondary" size="sm" disabled={loading || currentPage + 1 >= pages}
+            onClick={() => setPage(currentPage + 1)}>Sau</AdminButton>
         </div>
       </nav>
     </section>

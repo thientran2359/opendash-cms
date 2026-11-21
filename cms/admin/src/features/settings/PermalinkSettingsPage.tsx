@@ -7,6 +7,7 @@ import {
 import { effectiveContentTypeSettings, listContentTypes, queryContentEntryTable, type OwnedContentTypeWithSettings } from '../../api/content.ts';
 import { listTaxonomyDefinitions, type TaxonomyDefinition } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface Props {
   user: AuthUser | null;
@@ -291,40 +292,38 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     ? draft.post_structure : CUSTOM;
 
   return (
-    <section className="min-w-0 space-y-6" data-testid="permalink-settings" aria-labelledby="permalink-heading">
+    <section className="min-w-0 space-y-5" data-testid="permalink-settings" aria-labelledby="permalink-heading">
       <header>
-        <h2 id="permalink-heading" className="text-xl font-semibold text-slate-900">Đường dẫn tĩnh</h2>
-        <p className="mt-1 text-sm text-slate-600">
+        <h2 id="permalink-heading" className="text-base font-semibold text-zinc-950">Đường dẫn tĩnh</h2>
+        <p className="mt-1 text-sm text-zinc-600">
           Chọn cách tạo URL công khai cho bài viết, CPT và taxonomy. URL đang dùng chỉ đổi sau khi Lưu thành công.
           Page giữ đường dẫn hiện tại; Section luôn riêng tư.
         </p>
       </header>
-      {loading && <p role="status">Đang tải cấu hình permalink…</p>}
-      {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
-      {notice && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
+      {loading && <p role="status" className="text-sm text-zinc-500">Đang tải cấu hình permalink…</p>}
+      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {stale && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-          Cấu hình trên máy chủ mới hơn bản bạn bắt đầu sửa. Form vẫn được giữ và nút Lưu tạm khóa để tránh ghi đè.
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button type="button" disabled={loading || saving} onClick={() => void load()}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-800">
+        <AdminAlert tone="warning" className="space-y-2">
+          <p>Cấu hình trên máy chủ mới hơn bản bạn bắt đầu sửa. Form vẫn được giữ và nút Lưu tạm khóa để tránh ghi đè.</p>
+          <div className="flex flex-wrap gap-2">
+            <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={() => void load()}>
               Kiểm tra phiên bản mới
-            </button>
-            <button type="button" disabled={loading || saving} onClick={discardStaleAndReload}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-800">
+            </AdminButton>
+            <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={discardStaleAndReload}>
               Bỏ nháp, dùng phiên bản mới
-            </button>
+            </AdminButton>
           </div>
-        </div>
+        </AdminAlert>
       )}
       {!loading && (!saved || !draft) && (
-        <button type="button" className="od-primary-action" onClick={() => void load()}>Thử tải lại</button>
+        <AdminButton variant="primary" onClick={() => void load()}>Thử tải lại</AdminButton>
       )}
       {saved && draft && (
         <form onSubmit={event => void save(event)} className="space-y-6">
           <div className="space-y-2">
-            <label htmlFor="permalink-post-preset" className="block text-sm font-semibold text-slate-800">Cấu trúc bài viết Post</label>
-            <select id="permalink-post-preset" className="w-full max-w-2xl rounded-lg border border-slate-300 bg-white p-2"
+            <label htmlFor="permalink-post-preset" className="block text-sm font-medium text-zinc-800">Cấu trúc bài viết Post</label>
+            <select id="permalink-post-preset" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
               value={preset} disabled={loading} onChange={event => updateDraft({
                 ...draft, post_structure: event.target.value === CUSTOM
                   ? '/bai-viet/%postname%' : event.target.value,
@@ -333,120 +332,116 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
               <option value={CUSTOM}>Tùy chỉnh</option>
             </select>
             {preset === CUSTOM && (
-              <div>
-                <label htmlFor="permalink-post-custom" className="block text-sm font-medium text-slate-800">Định dạng tùy chỉnh</label>
-                <input id="permalink-post-custom" className="w-full max-w-2xl rounded-lg border border-slate-300 p-2 font-mono"
+              <div className="space-y-1">
+                <label htmlFor="permalink-post-custom" className="block text-xs font-medium text-zinc-700">Định dạng tùy chỉnh</label>
+                <input id="permalink-post-custom" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-3 font-mono text-sm text-zinc-900"
                   value={draft.post_structure} maxLength={512} disabled={loading}
                   onChange={event => updateDraft({ ...draft, post_structure: event.target.value })} />
               </div>
             )}
-            <p className="text-xs text-slate-600">Hỗ trợ tối đa 8 đoạn, literal kebab-case và một token cuối: %postname% hoặc %post_id%. Không hỗ trợ ngày, category hoặc đường dẫn phân cấp.</p>
+            <p className="text-xs text-zinc-500">Hỗ trợ tối đa 8 đoạn, literal kebab-case và một token cuối: %postname% hoặc %post_id%. Không hỗ trợ ngày, category hoặc đường dẫn phân cấp.</p>
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-slate-800">Đường dẫn cơ sở cho Custom Post Type</h3>
-            <p className="mb-3 text-xs text-slate-600">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc dùng đường dẫn legacy. Base tùy chỉnh gồm 1–3 đoạn kebab-case, không có dấu / ở đầu/cuối.</p>
-            {typeKeys.length === 0 && <p className="text-sm text-slate-500">Chưa có CPT công khai có thể cấu hình.</p>}
-            <div className="grid gap-3 sm:grid-cols-2">
+            <h3 className="text-sm font-semibold text-zinc-900">Đường dẫn cơ sở cho Custom Post Type</h3>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-500">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc dùng đường dẫn legacy. Base tùy chỉnh gồm 1–3 đoạn kebab-case, không có dấu / ở đầu/cuối.</p>
+            {typeKeys.length === 0 && <p className="text-sm text-zinc-500">Chưa có CPT công khai có thể cấu hình.</p>}
+            <div className="grid gap-3.5 sm:grid-cols-2">
               {typeKeys.map(keyName => {
                 const available = typeOptions.find(type => type.descriptor.key === keyName);
                 const hasPendingChange = !available &&
                   draft.content_type_bases[keyName] !== saved.content_type_bases[keyName];
                 const choice = baseChoice(draft.content_type_bases, keyName);
-                return <div key={keyName} className="text-sm text-slate-800">
-                  <label htmlFor={`permalink-cpt-${keyName}`}>
-                    {available?.descriptor.label ?? keyName} <span className="text-slate-500">({keyName})</span>
+                return <div key={keyName} className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5 text-sm text-zinc-800">
+                  <label htmlFor={`permalink-cpt-${keyName}`} className="font-medium text-zinc-900">
+                    {available?.descriptor.label ?? keyName} <span className="font-normal text-zinc-500">({keyName})</span>
                     {!available && <span className="ml-2 text-xs text-amber-700">Không hoạt động, giữ cấu hình cũ</span>}
                   </label>
-                  <input id={`permalink-cpt-${keyName}`} className="mt-1 w-full rounded-lg border border-slate-300 p-2 font-mono"
+                  <input id={`permalink-cpt-${keyName}`} className="mt-1.5 h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-sm text-zinc-900"
                     aria-label={`CPT base ${keyName}`} disabled={!available || loading}
                     value={draft.content_type_bases[keyName] ?? ''}
                     onChange={event => updateBaseChoice('content_type_bases', keyName, event.target.value || null)}
                     placeholder="VD: projects" />
-                  <p className="mt-1 text-xs text-slate-600" data-testid={`cpt-base-mode-${keyName}`}>
+                  <p className="mt-1 text-xs text-zinc-500" data-testid={`cpt-base-mode-${keyName}`}>
                     {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng URL legacy.'
                       : choice === 'legacy' ? 'Đang chọn đường dẫn legacy riêng cho website.'
                         : 'Đang dùng base tùy chỉnh của website.'}
                   </p>
-                  {available && <div className="mt-2 flex flex-wrap gap-2">
-                    <button type="button" disabled={loading || choice === 'legacy'}
+                  {available && <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'legacy'}
                       onClick={() => updateBaseChoice('content_type_bases', keyName, null)}
-                      className="rounded border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
-                      aria-label={`Dùng đường dẫn legacy cho CPT ${keyName}`}>Dùng đường dẫn legacy</button>
-                    <button type="button" disabled={loading || choice === 'inherit'}
+                      aria-label={`Dùng đường dẫn legacy cho CPT ${keyName}`}>Dùng đường dẫn legacy</AdminButton>
+                    <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'inherit'}
                       onClick={() => updateBaseChoice('content_type_bases', keyName, undefined)}
-                      className="rounded border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
-                      aria-label={`Kế thừa mặc định cho CPT ${keyName}`}>Kế thừa mặc định</button>
+                      aria-label={`Kế thừa mặc định cho CPT ${keyName}`}>Kế thừa mặc định</AdminButton>
                   </div>}
-                  {hasPendingChange && <button type="button" disabled={loading} onClick={() => revertInactiveBase('content_type_bases', keyName)}
-                    className="mt-1 text-xs font-semibold text-sky-800 underline">
+                  {hasPendingChange && <AdminButton variant="ghost" size="sm" disabled={loading} onClick={() => revertInactiveBase('content_type_bases', keyName)}
+                    className="mt-1.5 text-od-accent">
                     Bỏ thay đổi chưa lưu của CPT này
-                  </button>}
+                  </AdminButton>}
                 </div>;
               })}
             </div>
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-slate-800">Đường dẫn cơ sở cho Taxonomy</h3>
-            <p className="mb-3 text-xs text-slate-600">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc dùng đường dẫn legacy. Không cấu hình đường dẫn term phân cấp.</p>
-            {taxonomyKeys.length === 0 && <p className="text-sm text-slate-500">Chưa có taxonomy công khai có thể cấu hình.</p>}
-            <div className="grid gap-3 sm:grid-cols-2">
+            <h3 className="text-sm font-semibold text-zinc-900">Đường dẫn cơ sở cho Taxonomy</h3>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-500">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc dùng đường dẫn legacy. Không cấu hình đường dẫn term phân cấp.</p>
+            {taxonomyKeys.length === 0 && <p className="text-sm text-zinc-500">Chưa có taxonomy công khai có thể cấu hình.</p>}
+            <div className="grid gap-3.5 sm:grid-cols-2">
               {taxonomyKeys.map(keyName => {
                 const available = taxonomyOptions.find(type => type.key === keyName);
                 const hasPendingChange = !available &&
                   draft.taxonomy_bases[keyName] !== saved.taxonomy_bases[keyName];
                 const choice = baseChoice(draft.taxonomy_bases, keyName);
-                return <div key={keyName} className="text-sm text-slate-800">
-                  <label htmlFor={`permalink-taxonomy-${keyName}`}>
-                    {available?.label ?? keyName} <span className="text-slate-500">({keyName})</span>
+                return <div key={keyName} className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5 text-sm text-zinc-800">
+                  <label htmlFor={`permalink-taxonomy-${keyName}`} className="font-medium text-zinc-900">
+                    {available?.label ?? keyName} <span className="font-normal text-zinc-500">({keyName})</span>
                     {!available && <span className="ml-2 text-xs text-amber-700">Không hoạt động, giữ cấu hình cũ</span>}
                   </label>
-                  <input id={`permalink-taxonomy-${keyName}`} className="mt-1 w-full rounded-lg border border-slate-300 p-2 font-mono"
+                  <input id={`permalink-taxonomy-${keyName}`} className="mt-1.5 h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-sm text-zinc-900"
                     aria-label={`Taxonomy base ${keyName}`} disabled={!available || loading}
                     value={draft.taxonomy_bases[keyName] ?? ''}
                     onChange={event => updateBaseChoice('taxonomy_bases', keyName, event.target.value || null)}
                     placeholder="VD: genres" />
-                  <p className="mt-1 text-xs text-slate-600" data-testid={`taxonomy-base-mode-${keyName}`}>
+                  <p className="mt-1 text-xs text-zinc-500" data-testid={`taxonomy-base-mode-${keyName}`}>
                     {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng URL legacy.'
                       : choice === 'legacy' ? 'Đang chọn đường dẫn legacy riêng cho website.'
                         : 'Đang dùng base tùy chỉnh của website.'}
                   </p>
-                  {available && <div className="mt-2 flex flex-wrap gap-2">
-                    <button type="button" disabled={loading || choice === 'legacy'}
+                  {available && <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'legacy'}
                       onClick={() => updateBaseChoice('taxonomy_bases', keyName, null)}
-                      className="rounded border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
-                      aria-label={`Dùng đường dẫn legacy cho Taxonomy ${keyName}`}>Dùng đường dẫn legacy</button>
-                    <button type="button" disabled={loading || choice === 'inherit'}
+                      aria-label={`Dùng đường dẫn legacy cho Taxonomy ${keyName}`}>Dùng đường dẫn legacy</AdminButton>
+                    <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'inherit'}
                       onClick={() => updateBaseChoice('taxonomy_bases', keyName, undefined)}
-                      className="rounded border border-slate-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
-                      aria-label={`Kế thừa mặc định cho Taxonomy ${keyName}`}>Kế thừa mặc định</button>
+                      aria-label={`Kế thừa mặc định cho Taxonomy ${keyName}`}>Kế thừa mặc định</AdminButton>
                   </div>}
-                  {hasPendingChange && <button type="button" disabled={loading} onClick={() => revertInactiveBase('taxonomy_bases', keyName)}
-                    className="mt-1 text-xs font-semibold text-sky-800 underline">
+                  {hasPendingChange && <AdminButton variant="ghost" size="sm" disabled={loading} onClick={() => revertInactiveBase('taxonomy_bases', keyName)}
+                    className="mt-1.5 text-od-accent">
                     Bỏ thay đổi chưa lưu của taxonomy này
-                  </button>}
+                  </AdminButton>}
                 </div>;
               })}
             </div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4" data-testid="permalink-server-preview">
-            <h3 className="text-sm font-semibold text-slate-900">URL hiện hành từ máy chủ</h3>
-            <p className="mt-1 text-xs text-slate-600">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4" data-testid="permalink-server-preview">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">URL hiện hành từ máy chủ</h3>
+            <p className="mt-1 text-xs text-zinc-600">
               Các ví dụ này được lấy từ trường public_url trong API. Khi form chưa lưu, các URL này vẫn là URL đang hoạt động.
             </p>
-            {examples.length === 0 && <p className="mt-2 text-sm text-slate-600">Chưa có bài public để xem URL mẫu.</p>}
-            {examples.map(item => <p key={item.label + item.path} className="mt-2 break-all text-sm">
-              <span className="mr-2 font-medium text-slate-800">{item.label}:</span>
-              <a href={item.path} target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">{item.path}</a>
+            {examples.length === 0 && <p className="mt-2 text-sm text-zinc-500">Chưa có bài public để xem URL mẫu.</p>}
+            {examples.map(item => <p key={item.label + item.path} className="mt-1.5 break-all text-sm">
+              <span className="mr-2 font-medium text-zinc-800">{item.label}:</span>
+              <a href={item.path} target="_blank" rel="noopener noreferrer" className="text-od-accent underline">{item.path}</a>
             </p>)}
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="submit" className="od-primary-action" disabled={!csrfToken || !dirty || stale || saving || loading}>
+          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+            <AdminButton type="submit" variant="primary" disabled={!csrfToken || !dirty || stale || saving || loading}>
               {saving ? 'Đang lưu…' : 'Lưu permalink'}
-            </button>
-            <button type="button" className="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-800 disabled:opacity-50"
-              disabled={!dirty || stale || saving}
-              onClick={resetDraft}>Bỏ thay đổi</button>
-            <span className="text-xs text-slate-500">Phiên bản {saved.version}{dirty ? ' · Chưa lưu' : ' · Đã đồng bộ'}</span>
+            </AdminButton>
+            <AdminButton variant="secondary" disabled={!dirty || stale || saving} onClick={resetDraft}>
+              Bỏ thay đổi
+            </AdminButton>
+            <span className="text-xs text-zinc-500">Phiên bản {saved.version}{dirty ? ' · Chưa lưu' : ' · Đã đồng bộ'}</span>
           </div>
         </form>
       )}
