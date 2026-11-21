@@ -243,7 +243,9 @@ export function ReadingSettingsPanel({ user, siteInstanceId, csrfToken, onApiErr
       </button>}
       {stale && <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
         <p>Phiên bản máy chủ đã thay đổi. Bản nháp đang nhập vẫn được giữ.</p>
-        <button type="button" className="underline" disabled={saving} onClick={() => {
+        <button type="button" className="underline disabled:opacity-50"
+          disabled={saving || saved.version === baseVersion}
+          onClick={() => {
           setBaseVersion(saved.version);
           setStale(false);
           if (draftKey) pendingDrafts.set(draftKey, { baseVersion: saved.version, values: { ...draft } });
