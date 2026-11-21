@@ -3,12 +3,12 @@ use std::{collections::BTreeMap, sync::Arc};
 use axum::{
     Json,
     body::Bytes,
-    extract::State,
+    extract::{Path, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use opendash_core::builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -168,7 +168,7 @@ fn parse_builder_if_match(headers: &HeaderMap) -> ApiResult<i64> {
         .ok_or_else(|| ApiError::bad_request("If-Match không hợp lệ."))
 }
 
-fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocument> {
+fn require_builder_json(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<()> {
     let is_json = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -182,6 +182,11 @@ fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocum
     if bytes.len() > MAX_BUILDER_JSON_BYTES {
         return Err(ApiError::bad_request("Builder JSON vượt giới hạn 256 KiB."));
     }
+    Ok(())
+}
+
+fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocument> {
+    require_builder_json(headers, bytes)?;
     BuilderDocument::from_json(bytes).map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
@@ -255,6 +260,136 @@ pub async fn homepage_put(
         }),
     )
         .into_response())
+}
+
+fn require_page_builder_type(type_key: &str) -> ApiResult<()> {
+    if type_key != "page" {
+        return Err(ApiError::forbidden(
+            "Builder is available only for Page entries.",
+        ));
+    }
+    Ok(())
+}
+
+fn entry_builder_response(result: builder_storage::EntryBuilderOpen) -> Response {
+    (builder_headers(Some(result.version)), Json(result)).into_response()
+}
+
+fn entry_builder_mutation_response(
+    result: Result<builder_storage::EntryBuilderOpen, builder_storage::EntryBuilderMutationError>,
+) -> ApiResult<Response> {
+    match result {
+        Ok(open) => Ok(entry_builder_response(open)),
+        Err(builder_storage::EntryBuilderMutationError::Api(error)) => Err(error),
+        Err(builder_storage::EntryBuilderMutationError::Veto(veto)) => Ok((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            builder_headers(None),
+            Json(veto),
+        )
+            .into_response()),
+    }
+}
+
+pub async fn entry_builder_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+) -> ApiResult<Response> {
+    let actor = require_session(&headers, &db).await?;
+    require_page_builder_type(&type_key)?;
+    let result = builder_storage::read_entry_builder(&db, &actor, &type_key, id).await?;
+    Ok(entry_builder_response(result))
+}
+
+pub async fn entry_builder_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    bytes: Bytes,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    require_page_builder_type(&type_key)?;
+    let expected_version = parse_builder_if_match(&headers)?;
+    let document = decode_document(&headers, &bytes)?;
+    entry_builder_mutation_response(
+        builder_storage::save_entry_builder(
+            &db,
+            &actor,
+            &hooks,
+            &type_key,
+            id,
+            expected_version,
+            &document,
+        )
+        .await,
+    )
+}
+
+pub async fn entry_builder_preview(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    RawQuery(raw): RawQuery,
+    bytes: Bytes,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    require_page_builder_type(&type_key)?;
+    if raw.as_deref().is_some_and(|query| !query.is_empty()) {
+        return Err(ApiError::bad_request(
+            "Page Builder preview target is fixed by the path.",
+        ));
+    }
+    let document = decode_document(&headers, &bytes)?;
+    let rendered =
+        builder_storage::preview_entry_builder(&db, &actor, &type_key, id, &document).await?;
+    let mut response_headers = builder_headers(None);
+    // Reuse the site's strict layout CSP, including the contact form flag.
+    let layout_response = super::public::rendered_layout_with_form_csp(
+        rendered.html.clone(),
+        rendered.has_active_contact_form,
+    );
+    for name in [header::CONTENT_SECURITY_POLICY, header::REFERRER_POLICY] {
+        if let Some(value) = layout_response.headers().get(&name) {
+            response_headers.insert(name, value.clone());
+        }
+    }
+    Ok((response_headers, Json(rendered)).into_response())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EntryBuilderReset {
+    confirm: bool,
+}
+
+pub async fn entry_builder_reset(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    bytes: Bytes,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    require_page_builder_type(&type_key)?;
+    let expected_version = parse_builder_if_match(&headers)?;
+    require_builder_json(&headers, &bytes)?;
+    let input: EntryBuilderReset =
+        serde_json::from_slice(&bytes).map_err(|error| ApiError::bad_request(error.to_string()))?;
+    entry_builder_mutation_response(
+        builder_storage::reset_entry_builder(
+            &db,
+            &actor,
+            &hooks,
+            &type_key,
+            id,
+            expected_version,
+            input.confirm,
+        )
+        .await,
+    )
 }
 
 #[cfg(test)]

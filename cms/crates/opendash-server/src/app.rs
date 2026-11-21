@@ -21,8 +21,9 @@ use crate::{
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
         builder::{
-            builder, homepage_get, homepage_preview, homepage_put, page, preview, registry, save,
-            serve_asset,
+            builder, entry_builder_get, entry_builder_preview, entry_builder_put,
+            entry_builder_reset, homepage_get, homepage_preview, homepage_put, page, preview,
+            registry, save, serve_asset,
         },
         content::{
             MAX_CONTENT_TYPE_JSON_BYTES, content_entry_preview, content_entry_publication,
@@ -245,6 +246,20 @@ pub fn build_router_with_themes_root(
         .route(
             "/api/admin/builder/homepage/preview",
             post(homepage_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/entries/{type_key}/{id}/builder",
+            get(entry_builder_get)
+                .put(entry_builder_put)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/entries/{type_key}/{id}/builder/preview",
+            post(entry_builder_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/entries/{type_key}/{id}/builder/reset",
+            post(entry_builder_reset).layer(DefaultBodyLimit::max(4096)),
         )
         .route(
             "/api/admin/template-overrides",
