@@ -93,6 +93,17 @@ fn design(title: &str) -> Value {
     json!({"schema_version":1,"sections":[{"id":"section","children":[{"id":"row","children":[{"id":"column","children":[{"id":"heading","type":"core/heading","props":{"level":2,"text":title}}]}]}]}]})
 }
 
+// The Builder GET/PUT/Reset contract now includes content_entries.updated_at.
+// Keep the original exact payload comparison while requiring a real timestamp.
+fn without_updated_at(mut response: Value) -> Value {
+    let timestamp = response["updated_at"]
+        .as_str()
+        .expect("Builder response must include updated_at");
+    assert!(!timestamp.is_empty());
+    response.as_object_mut().unwrap().remove("updated_at");
+    response
+}
+
 #[tokio::test]
 async fn editor_page_exact_scope_acl_draft_cas_reset() {
     let site = start().await;
@@ -154,7 +165,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     assert_eq!(open.headers()["cache-control"], "no-store");
     let initial: Value = open.json().await.unwrap();
     assert_eq!(
-        initial,
+        without_updated_at(initial.clone()),
         json!({"entry_id":ids[0],"type_key":"page","content_mode":"editor","version":1,"document":null})
     );
     let wrong_type = format!("{}/api/admin/entries/post/{}/builder", site.base, ids[0]);
@@ -385,7 +396,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .await
         .unwrap();
     assert_eq!(
-        b_open,
+        without_updated_at(b_open.clone()),
         json!({"entry_id":ids[1],"type_key":"page","content_mode":"editor","version":1,"document":null})
     );
     assert_eq!(
@@ -574,7 +585,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["etag"], "\"v7\"");
     assert_eq!(
-        response.json::<Value>().await.unwrap(),
+        without_updated_at(response.json::<Value>().await.unwrap()),
         json!({"entry_id":ids[0],"type_key":"page","content_mode":"editor","version":7,"document":null})
     );
     assert!(
