@@ -61,7 +61,7 @@ function editorIdentity(route: ParsedRoute, hash: string): string | null {
 
 function builderIdentity(route: ParsedRoute): string | null {
   if (route.view !== 'builder') return null;
-  return `${route.sub}:${route.templateRole ?? 'homepage'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
+  return `${route.sub}:${route.templateRole ?? 'header'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
 }
 
 export const App: React.FC = () => {
@@ -559,7 +559,7 @@ export const App: React.FC = () => {
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
       sidebarContent={<BuilderWorkspace
-        key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
+        key={builderIdentity(lastBuilderRouteRef.current) ?? 'header'}
         route={lastBuilderRouteRef.current}
         active={route.view === 'builder' && isRouteAllowed(route, user?.role ?? 'editor')}
         onNavigateHash={navigateHash}
