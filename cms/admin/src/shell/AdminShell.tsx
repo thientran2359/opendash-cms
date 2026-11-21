@@ -580,10 +580,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 <section className={user && route.view === 'posts' ? `od-editor-panel${postsLegacy}` : 'hidden'} aria-label="Bài viết" aria-hidden={!user || route.view !== 'posts'}>{postsContent}</section>
                 <section className={user && route.view === 'pages' ? `od-editor-panel${pagesLegacy}` : 'hidden'} aria-label="Trang" aria-hidden={!user || route.view !== 'pages'}>{pagesContent}</section>
                 {user && route.view === 'media' && mediaContent}
-                {user && route.view === 'taxonomy' && <div className="od-admin-card od-legacy-scope min-w-0 max-w-full">{taxonomyContent}</div>}
-                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <div className="od-admin-card od-legacy-scope min-w-0">{themesContent}</div>}
-                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'menus' && <div className="od-admin-card od-legacy-scope min-w-0">{menusContent}</div>}
-                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'options' && <div className="od-admin-card od-legacy-scope min-w-0">{themeOptionsContent}</div>}
+                {user && route.view === 'taxonomy' && <div className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</div>}
+                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <div className="od-admin-card min-w-0">{themesContent}</div>}
+                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'menus' && <div className="od-admin-card min-w-0">{menusContent}</div>}
+                {user?.role === 'admin' && route.view === 'themes' && route.sub === 'options' && <div className="od-admin-card min-w-0">{themeOptionsContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && <div className="od-legacy-scope">{libraryContent}</div>}
                 {user?.role === 'admin' && route.view === 'patterns' && <div className="od-legacy-scope">{patternsContent}</div>}
 
