@@ -10,12 +10,15 @@ import {
   type EffectiveEditorConfigWithSettings,
   updateEntryComposite,
 } from '../../api/content.ts';
+import { getEntryBuilder } from '../../api/builder.ts';
 import { runPluginAction } from '../../api/plugins.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
+import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes.ts';
 import type { AuthUser } from '../../types.ts';
 import type {
   ContentFieldValue,
+  ContentMode,
   EffectiveEditorConfigProjection,
   EffectivePanelProjection,
 } from '../content/types.ts';
@@ -128,10 +131,18 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [publicationStatus, setPublicationStatus] = useState<'draft' | 'published'>('draft');
+  const [contentMode, setContentMode] = useState<ContentMode>('editor');
+  const [hasBuilderDocument, setHasBuilderDocument] = useState(false);
   const [values, setValues] = useState<Record<string, ContentFieldValue>>({});
   const [clearedFields, setClearedFields] = useState<string[]>([]);
   const [termIds, setTermIds] = useState<number[]>([]);
   const [customPath, setCustomPath] = useState('');
+  const [themeLayouts, setThemeLayouts] = useState<ThemeLayoutCatalog | null>(null);
+  const [selectedThemeKey, setSelectedThemeKey] = useState<string | null>(null);
+  const [themeKeyDirty, setThemeKeyDirty] = useState(false);
+  const savedThemeKeyRef = useRef<string | null>(null);
+  const selectedThemeKeyRef = useRef<string | null>(null);
+  const themeKeyDirtyRef = useRef(false);
   const [seoTitle, setSeoTitle] = useState('');
   const [seoDescription, setSeoDescription] = useState('');
   const [seoOgImageId, setSeoOgImageId] = useState('');
@@ -212,6 +223,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     setTitle(payload.title);
     setSlug(payload.slug);
     setPublicationStatus(payload.publication_status);
+    setContentMode(payload.content_mode ?? 'editor');
     setValues(payload.values);
     setClearedFields(payload.cleared_fields);
     setTermIds(payload.term_ids);
@@ -230,7 +242,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     draftRef.current = updated;
     editRevisionRef.current += 1;
     const changed = diffEditorPayload(baseline, updated);
-    setDirty(changed.length > 0);
+    setDirty(changed.length > 0 || themeKeyDirtyRef.current);
     if (!changed.length) {
       editorDraftStore.delete(draftKey);
       return;
@@ -259,6 +271,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
   useEffect(() => {
     setConfirmedPublicLink(null);
+    setThemeLayouts(null);
+    setHasBuilderDocument(false);
     if (!user) {
       setConfig(null);
       baselineRef.current = null;
@@ -294,6 +308,18 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         let baseline: EditorDraftPayload;
         let serverPublicPath: string | null = null;
         let routeReadable = true;
+        // Optional theme metadata must not make the entire content editor
+        // unusable during a theme reload/corrupt provider. Only authorization
+        // failures remain fatal; all existing assignments stay in the entry
+        // response and are never implicitly cleared on Save.
+        let layoutCatalog: ThemeLayoutCatalog | null = null;
+        let layoutUnavailable = false;
+        try {
+          layoutCatalog = await getActiveThemeLayouts();
+        } catch (cause) {
+          if (cause instanceof ApiClientError && (cause.status === 401 || cause.status === 403)) throw cause;
+          layoutUnavailable = true;
+        }
         let seoReadable = true;
         if (mode === 'edit' && entryId !== null) {
           // Route/SEO can be forbidden after same-user role downgrade. Never
@@ -305,12 +331,23 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               throw cause;
             }
           };
-          const [rec, routeSnap, seoSnap] = await Promise.all([
+          const [rec, routeSnap, seoSnap, builderSnap] = await Promise.all([
             getContentEntry(typeKey, entryId),
             optional(getEntryRoute(typeKey, entryId)),
             optional(getEntrySeo(typeKey, entryId)),
+            typeKey === 'page' && freshCfg.settings?.supports.includes('builder')
+              ? getEntryBuilder(entryId) : Promise.resolve(null),
           ]);
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
+          setHasBuilderDocument(Boolean(builderSnap?.document && builderSnap.version === rec.version));
+          const themeKey = typeKey === 'page'
+            ? (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null
+            : (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
+          savedThemeKeyRef.current = themeKey;
+          selectedThemeKeyRef.current = themeKey;
+          themeKeyDirtyRef.current = false;
+          setSelectedThemeKey(themeKey);
+          setThemeKeyDirty(false);
           routeReadable = routeSnap !== null;
           seoReadable = seoSnap !== null;
           if (rec.publication_status === 'published' && routeSnap?.entry_version === rec.version) {
@@ -322,6 +359,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           baseline = {
             id: rec.id, version: rec.version, title: rec.title, slug: rec.slug,
             slug_touched: true, publication_status: rec.publication_status,
+            content_mode: typeKey === 'page' ? rec.content_mode : undefined,
             values: allowedValues, cleared_fields: [], term_ids: rec.term_ids ?? [],
             custom_path: routeSnap?.custom_path ?? '',
             seo: seoSnap ? {
@@ -331,10 +369,16 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             } : emptySeo,
           };
         } else {
+          savedThemeKeyRef.current = null;
+          selectedThemeKeyRef.current = null;
+          themeKeyDirtyRef.current = false;
+          setSelectedThemeKey(null);
+          setThemeKeyDirty(false);
           baseline = {
             id: null, version: null, title: '', slug: '', slug_touched: false,
             publication_status: effectiveContentTypeSettings(typeKey, freshCfg.settings).publication === 'draft_publish'
               ? 'draft' : 'published',
+            content_mode: typeKey === 'page' ? 'editor' : undefined,
             values: {}, cleared_fields: [], term_ids: [], custom_path: '', seo: emptySeo,
           };
         }
@@ -343,6 +387,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           routeReadable, seoReadable,
         );
         if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
+        setThemeLayouts(layoutCatalog);
         baselineRef.current = baseline;
         setConfirmedPublicLink({
           scope: mediaScopeKey, version: baseline.version ?? 0, path: serverPublicPath,
@@ -355,7 +400,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         applyPayload(draftRef.current);
         setDirty(Boolean(restored?.dirty_fields.length));
         setConfig(freshCfg);
-        if (restored && restored.schema_token_at_edit !== freshCfg.schema_token) {
+        if (layoutUnavailable) {
+          setStatusNote('Không tải được danh sách template từ theme. Bản nội dung và lựa chọn cũ vẫn được giữ; không thể chọn template mới cho đến khi tải lại.');
+        } else if (restored && restored.schema_token_at_edit !== freshCfg.schema_token) {
           setStatusNote('Schema đã thay đổi. Nháp được giữ; Lưu sẽ kiểm tra schema token cũ để tránh ghi đè.');
         }
       } catch (err) {
@@ -448,11 +495,17 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
     try {
       const payload = {
+        ...(themeKeyDirtyRef.current ? {
+          [typeKey === 'page' ? 'page_layout_key' : 'custom_template_key']: selectedThemeKeyRef.current,
+        } : {}),
         expected_version: entryId === null ? undefined : (snapshot.version ?? undefined),
         expected_schema_token: expectedSchemaToken,
         title: snapshot.title.trim(),
         slug: snapshot.slug.trim(),
         publication_status: nextPublication,
+        ...(typeKey === 'page' && effectiveSettings.supports.includes('builder') &&
+            baselineRef.current?.content_mode !== snapshot.content_mode
+          ? { content_mode: snapshot.content_mode } : {}),
         values: submitValues,
         // Omitted term_ids retains existing links; [] only clears by user edit.
         term_ids: baselineRef.current && diffEditorPayload(baselineRef.current, snapshot).includes('term_ids')
@@ -478,6 +531,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         ...snapshot,
         id: res.entry.id, version: res.entry.version, title: res.entry.title, slug: res.entry.slug,
         slug_touched: true, publication_status: res.entry.publication_status,
+        content_mode: typeKey === 'page' ? res.entry.content_mode : undefined,
         values: res.entry.values, cleared_fields: [], term_ids: res.entry.term_ids ?? snapshot.term_ids,
         custom_path: res.custom_path ?? '',
         seo: res.seo ? {
@@ -487,6 +541,20 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         } : snapshot.seo,
       };
       baselineRef.current = saved;
+      const savedSelection = typeKey === 'page'
+        ? (res.entry as typeof res.entry & { page_layout_key?: string | null }).page_layout_key ?? null
+        : (res.entry as typeof res.entry & { custom_template_key?: string | null }).custom_template_key ?? null;
+      savedThemeKeyRef.current = savedSelection;
+      if (editRevisionRef.current === submittedRevision) {
+        selectedThemeKeyRef.current = savedSelection;
+        setSelectedThemeKey(savedSelection);
+        themeKeyDirtyRef.current = false;
+        setThemeKeyDirty(false);
+      } else {
+        const stillDirty = selectedThemeKeyRef.current !== savedSelection;
+        themeKeyDirtyRef.current = stillDirty;
+        setThemeKeyDirty(stillDirty);
+      }
       // A committed slug, route or publication change can invalidate the old
       // link. Require a matching server response before exposing another URL.
       setConfirmedPublicLink(null);
@@ -516,11 +584,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       if (!hasNewerChanges) {
         draftRef.current = saved;
         applyPayload(saved);
-        setDirty(false);
+        setDirty(themeKeyDirtyRef.current);
       } else if (draftRef.current) {
         const remaining = { ...draftRef.current, id: res.entry.id, version: res.entry.version,
           publication_status: draftRef.current.publication_status === snapshot.publication_status
-            ? res.entry.publication_status : draftRef.current.publication_status };
+            ? res.entry.publication_status : draftRef.current.publication_status,
+          content_mode: draftRef.current.content_mode === snapshot.content_mode
+            ? saved.content_mode : draftRef.current.content_mode };
         draftRef.current = remaining;
         const changed = diffEditorPayload(saved, remaining);
         const newKey = editorDraftStore.makeDraftKey(typeKey, res.entry.id);
@@ -534,7 +604,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             payload: { ...remaining, custom_path_dirty: changed.includes('custom_path'), seo_dirty: changed.includes('seo') },
           });
         }
-        setDirty(changed.length > 0);
+        setDirty(changed.length > 0 || themeKeyDirtyRef.current);
       }
       setStatusNote(hasNewerChanges
         ? `Đã lưu snapshot v${res.entry.version}; chỉnh sửa mới hơn vẫn chưa lưu.`
@@ -543,6 +613,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         onNavigateHash(`${listHashPrefix}/${res.entry.id}/edit`);
       }
     } catch (err) {
+      if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey
+          || activeMediaScopeRef.current !== mediaScopeKey) return;
       if (err instanceof ApiClientError && err.status === 401) {
         editorDraftStore.quarantineAll();
       }
@@ -605,6 +677,21 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           Xem trước bản nháp đã lưu (yêu cầu đăng nhập)
         </a>
       )}
+      {typeKey === 'page' && settings?.supports.includes('builder') && entryId !== null && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+          <label htmlFor="page-content-mode" className="block text-sm font-semibold">Nguồn nội dung Page</label>
+          <select id="page-content-mode" value={contentMode} disabled={saving || !csrfToken}
+            onChange={event => {
+              const next = event.target.value as ContentMode;
+              setContentMode(next);
+              persistDraftPatch({ content_mode: next });
+            }}>
+            <option value="editor">Văn bản</option>
+            <option value="builder" disabled={!hasBuilderDocument && contentMode !== 'builder'}>Visual Builder</option>
+          </select>
+          <p className="text-xs text-slate-600">Chuyển nguồn khi lưu giữ nguyên văn bản và thiết kế đã lưu.</p>
+        </div>
+      )}
       {isDraftPublishCpt && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3"
           role="group" aria-label="Lưu nháp và xuất bản">
@@ -633,6 +720,34 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           Xem nội dung
         </a>
       )}
+      <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2" data-testid="theme-template-selection">
+        <label className="block text-sm font-semibold text-slate-800" htmlFor="entry-theme-selector">
+          {typeKey === 'page' ? 'Page Layout' : 'Custom Single Template'}
+        </label>
+        <select id="entry-theme-selector" className="w-full max-w-lg rounded-lg border border-slate-300 p-2 text-sm"
+          value={selectedThemeKey ?? ''} disabled={saving || !csrfToken || !themeLayouts}
+          onChange={event => {
+            const choice = event.target.value || null;
+            selectedThemeKeyRef.current = choice;
+            setSelectedThemeKey(choice);
+            const differs = choice !== savedThemeKeyRef.current;
+            themeKeyDirtyRef.current = differs;
+            setThemeKeyDirty(differs);
+            if (differs) editRevisionRef.current++;
+            setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
+          }}>
+          <option value="">Theo theme mặc định</option>
+          {(typeKey === 'page' ? themeLayouts?.page_layouts.map(layout => ({ key: layout.key, label: layout.label }))
+            : themeLayouts?.custom_templates.filter(tpl => tpl.allowed_types.includes(typeKey))
+                .map(tpl => ({ key: tpl.custom_key, label: tpl.label })))?.map(choice =>
+              <option key={choice.key} value={choice.key}>{choice.label}</option>)}
+          {selectedThemeKey && !(typeKey === 'page'
+            ? themeLayouts?.page_layouts.some(layout => layout.key === selectedThemeKey)
+            : themeLayouts?.custom_templates.some(tpl => tpl.custom_key === selectedThemeKey && tpl.allowed_types.includes(typeKey))) &&
+            <option value={selectedThemeKey}>{selectedThemeKey} (theme hiện tại không còn cung cấp — được bảo toàn)</option>}
+        </select>
+        {themeKeyDirty && <p className="text-xs text-slate-600">Lựa chọn này chưa lưu. Bản nháp khác vẫn được giữ.</p>}
+      </div>
       {/* Legacy renderer has a fixed CPT status select and generic Save button.
           Keep its Builder action and layout while showing policy-aware actions above. */}
       <style>{`
@@ -744,11 +859,15 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         }}
         onSave={intent => void handleSave(intent)}
         onOpenBuilder={() => {
+          if (typeKey !== 'page' || !settings?.supports.includes('builder')) {
+            setStatusNote('Loại nội dung này chưa hỗ trợ Visual Builder.');
+            return;
+          }
           if (entryId === null) {
             setStatusNote('Vui lòng Lưu nội dung trước khi mở Visual Builder.');
             return;
           }
-          onNavigateHash(`#/builder?template=${typeKey === 'page' ? 'page' : 'single'}&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
+          onNavigateHash(`#/builder?template=page&type=page&entry=${entryId}`);
         }}
       />
       </div>

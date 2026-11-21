@@ -42,20 +42,6 @@ export const getLocalTemplateLibrary = () => requestJson<LocalTemplateLibrary>('
   defaultErrorMessage: 'Không tải được thư viện mẫu cục bộ.',
 });
 
-/** Atomic active-theme revision + global override CAS, with explicit confirm. */
-export const applyLocalThemeTemplate = (
-  item: LocalThemeTemplateDescriptor, overrideVersion: number, csrfToken: string,
-) => requestJson<{ reset: boolean; role: string }>(
-  `/api/admin/library/apply/${encodeURIComponent(item.role)}`, {
-    method: 'POST', contentType: 'application/json', csrfToken,
-    ifMatchVersion: overrideVersion,
-    body: JSON.stringify({
-      confirm: true, revision_id: item.revision_id, revision_digest: item.revision_digest,
-    }),
-    defaultErrorMessage: 'Không thể áp dụng mẫu theme cục bộ.',
-  },
-);
-
 const root = '/api/admin/sections';
 const url = (id: number) => `${root}/${id}`;
 const docUrl = (id: number) => `${url(id)}/document`;

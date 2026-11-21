@@ -71,8 +71,8 @@ fn build_theme_zip(theme_json: &str) -> Vec<u8> {
         let opts = SimpleFileOptions::default();
         zip.start_file("theme.json", opts).unwrap();
         zip.write_all(theme_json.as_bytes()).unwrap();
-        zip.start_file("templates/home.html", opts).unwrap();
-        zip.write_all(b"<html><body><h1>Theme</h1></body></html>").unwrap();
+        zip.start_file("index.html", opts).unwrap();
+        zip.write_all(b"<main>Theme</main>").unwrap();
         zip.finish().unwrap();
     }
     buf.into_inner()
@@ -127,7 +127,11 @@ async fn setup_and_login(client: &Client, base_url: &str) -> (String, String) {
         .send()
         .await
         .unwrap();
-    assert!(resp.status().is_success(), "setup failed: {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "setup failed: {}",
+        resp.status()
+    );
 
     let login = client
         .post(format!("{base_url}/auth/login"))
@@ -139,7 +143,11 @@ async fn setup_and_login(client: &Client, base_url: &str) -> (String, String) {
         .send()
         .await
         .unwrap();
-    assert!(login.status().is_success(), "login failed: {}", login.status());
+    assert!(
+        login.status().is_success(),
+        "login failed: {}",
+        login.status()
+    );
     let cookie = login
         .headers()
         .get(reqwest::header::SET_COOKIE)
@@ -212,7 +220,12 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 201, "plugin install failed: {:?}", resp.text().await);
+    assert_eq!(
+        resp.status(),
+        201,
+        "plugin install failed: {:?}",
+        resp.text().await
+    );
 
     // Verify CPT appears with owner Plugin("job-board") and active status
     let list_resp = client
@@ -233,11 +246,11 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
 
     // 2. Install & activate a Theme with its own CPT; verify plugin's CPT stays Active
     let theme_json = json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "agency-theme",
         "version": "1.0.0",
         "name": "Agency Theme",
-        "templates": { "home": "templates/home.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "declarations": {
             "content_types": [
                 {
@@ -298,7 +311,9 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
 
     // 3. Create an entry of `job_posting`
     let entry_create = client
-        .post(format!("{base_url}/api/admin/content-types/job_posting/entries"))
+        .post(format!(
+            "{base_url}/api/admin/content-types/job_posting/entries"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &csrf)
@@ -313,7 +328,12 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
         .send()
         .await
         .unwrap();
-    assert_eq!(entry_create.status(), 201, "entry create failed: {:?}", entry_create.text().await);
+    assert_eq!(
+        entry_create.status(),
+        201,
+        "entry create failed: {:?}",
+        entry_create.text().await
+    );
     let entry: Value = entry_create.json().await.unwrap();
     let entry_id = entry["id"].as_i64().unwrap();
 
@@ -348,7 +368,9 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
 
     // Editor/Admin can still update the entry while provider is inactive
     let entry_update = client
-        .put(format!("{base_url}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .put(format!(
+            "{base_url}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &csrf)

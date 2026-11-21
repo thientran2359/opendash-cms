@@ -4,14 +4,14 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use opendash_core::{
     content::{
-        AttachedFieldGroupSnapshot, ContentFieldDefinition, ContentFieldType,
-        ContentTypeDefinition, ContentTypeDefinitionInput, ContentTypeSettings, ContentPublication,
-        EditorLayoutConfigV1, EditorRegion,
-        EffectiveContentSchema, EffectiveEditorConfigProjection, EffectiveFieldStatus,
-        FieldGroupRecord, FieldGroupStatus, FieldGroupTargetBinding, FieldRole, PanelDefinition,
-        PanelKind, SchemaTransitionError, UserFieldGroupInput, build_core_and_group_panels,
-        check_base_fields_compatibility, merge_package_redeclared_fields,
-        project_effective_editor_config, resolve_and_validate_editor_layout, valid_content_type_key,
+        AttachedFieldGroupSnapshot, ContentFieldDefinition, ContentFieldType, ContentPublication,
+        ContentTypeDefinition, ContentTypeDefinitionInput, ContentTypeSettings,
+        EditorLayoutConfigV1, EditorRegion, EffectiveContentSchema,
+        EffectiveEditorConfigProjection, EffectiveFieldStatus, FieldGroupRecord, FieldGroupStatus,
+        FieldGroupTargetBinding, FieldRole, PanelDefinition, PanelKind, SchemaTransitionError,
+        UserFieldGroupInput, build_core_and_group_panels, check_base_fields_compatibility,
+        merge_package_redeclared_fields, project_effective_editor_config,
+        resolve_and_validate_editor_layout, valid_content_type_key,
         verify_effective_schema_transition,
     },
     id::ScopedResourceId,
@@ -70,7 +70,7 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
                 ..Default::default()
             },
         ],
-        settings: ContentTypeSettings::builtin_publication(),
+        settings: ContentTypeSettings::default_for_type_key(key),
     })
 }
 
@@ -104,9 +104,8 @@ pub async fn preflight_builtin_key_collisions(
                     .and_then(|value| value.get("settings").cloned())
                     .is_some();
                 if !has_settings {
-                    definition.settings = builtin_definition(&key)
-                        .expect("known core key")
-                        .settings;
+                    definition.settings =
+                        builtin_definition(&key).expect("known core key").settings;
                 }
                 let canonical = builtin_definition(&key).expect("known core key");
                 let allowed_settings = if key == "section" {
@@ -328,10 +327,13 @@ pub async fn load_effective_content_schema_in_tx(
             assoc_str,
         ) in group_rows
         {
-            let fields: Vec<ContentFieldDefinition> = serde_json::from_str(&fields_json)
-                .map_err(|_| ApiError::internal("Dữ liệu fields_json của field group không hợp lệ."))?;
-            let default_region = EditorRegion::from_db(&default_region_str)
-                .ok_or_else(|| ApiError::internal("default_region của field group không hợp lệ."))?;
+            let fields: Vec<ContentFieldDefinition> =
+                serde_json::from_str(&fields_json).map_err(|_| {
+                    ApiError::internal("Dữ liệu fields_json của field group không hợp lệ.")
+                })?;
+            let default_region = EditorRegion::from_db(&default_region_str).ok_or_else(|| {
+                ApiError::internal("default_region của field group không hợp lệ.")
+            })?;
             let status = FieldGroupStatus::from_db(&g_status_str)
                 .ok_or_else(|| ApiError::internal("Trạng thái field group không hợp lệ."))?;
             snapshots.push(AttachedFieldGroupSnapshot {
@@ -428,9 +430,7 @@ pub async fn update_user_content_type(
         ));
     }
     if type_key == "section" {
-        return Err(ApiError::forbidden(
-            "Không thể thay đổi Section riêng tư.",
-        ));
+        return Err(ApiError::forbidden("Không thể thay đổi Section riêng tư."));
     }
     let mut incoming = input
         .clone()
@@ -438,12 +438,11 @@ pub async fn update_user_content_type(
         .map_err(map_input_validation_error)?;
 
     let mut tx = begin_content_write_tx(db).await?;
-    let existing: Option<(String, Option<String>, i64)> = sqlx::query_as(
-        "SELECT owner_kind, owner_id, version FROM content_types WHERE key = ?",
-    )
-    .bind(type_key)
-    .fetch_optional(&mut *tx)
-    .await?;
+    let existing: Option<(String, Option<String>, i64)> =
+        sqlx::query_as("SELECT owner_kind, owner_id, version FROM content_types WHERE key = ?")
+            .bind(type_key)
+            .fetch_optional(&mut *tx)
+            .await?;
 
     let Some((owner_kind, _owner_id, current_version)) = existing else {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
@@ -463,9 +462,10 @@ pub async fn update_user_content_type(
     let old_effective = load_effective_content_schema_in_tx(&mut tx, type_key)
         .await?
         .ok_or_else(|| ApiError::internal("Không thể tải schema hiện tại."))?;
-    if is_builtin && (incoming.key != old_effective.base.descriptor.key
-        || incoming.label != old_effective.base.descriptor.label
-        || incoming.fields != old_effective.base.descriptor.fields)
+    if is_builtin
+        && (incoming.key != old_effective.base.descriptor.key
+            || incoming.label != old_effective.base.descriptor.label
+            || incoming.fields != old_effective.base.descriptor.fields)
     {
         return Err(ApiError::forbidden(
             "Post/Page chỉ hỗ trợ đổi cấu hình hành vi; schema Core phải giữ nguyên.",
@@ -523,9 +523,7 @@ pub async fn update_user_content_type(
     })
 }
 
-pub async fn list_content_types_with_meta(
-    db: &SqlitePool,
-) -> ApiResult<Vec<ContentTypeApiItem>> {
+pub async fn list_content_types_with_meta(db: &SqlitePool) -> ApiResult<Vec<ContentTypeApiItem>> {
     let keys: Vec<String> = sqlx::query_scalar("SELECT key FROM content_types ORDER BY key ASC")
         .fetch_all(db)
         .await?;
@@ -587,10 +585,18 @@ pub async fn load_content_type_definition(
     db: &SqlitePool,
     key: &str,
 ) -> ApiResult<Option<ContentTypeDefinition>> {
+    let mut conn = db.acquire().await?;
+    load_content_type_definition_in_conn(&mut conn, key).await
+}
+
+pub(super) async fn load_content_type_definition_in_conn(
+    conn: &mut SqliteConnection,
+    key: &str,
+) -> ApiResult<Option<ContentTypeDefinition>> {
     let json: Option<String> =
         sqlx::query_scalar("SELECT definition_json FROM content_types WHERE key = ?")
             .bind(key)
-            .fetch_optional(db)
+            .fetch_optional(conn)
             .await?;
     json.map(|raw| {
         let definition: ContentTypeDefinition = serde_json::from_str(&raw)
@@ -724,7 +730,8 @@ async fn has_persisted_group_values_for_type_in_tx(
             .await?;
     let field_keys: HashSet<&str> = fields.iter().map(|f| f.key.as_str()).collect();
     for raw in values_list {
-        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&raw) {
+        if let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(&raw)
+        {
             if map
                 .iter()
                 .any(|(k, v)| field_keys.contains(k.as_str()) && !v.is_null())
@@ -753,7 +760,9 @@ pub async fn create_user_field_group(
             .fetch_optional(&mut *tx)
             .await?;
     if existing.is_some() {
-        return Err(ApiError::conflict("group_id hoặc local_key của nhóm trường đã tồn tại."));
+        return Err(ApiError::conflict(
+            "group_id hoặc local_key của nhóm trường đã tồn tại.",
+        ));
     }
 
     let mut old_snapshots = HashMap::new();
@@ -848,7 +857,11 @@ pub async fn update_user_field_group(
         ));
     }
 
-    let old_targets: Vec<String> = existing.targets.iter().map(|t| t.type_key.clone()).collect();
+    let old_targets: Vec<String> = existing
+        .targets
+        .iter()
+        .map(|t| t.type_key.clone())
+        .collect();
     let mut all_affected_types = BTreeSet::new();
     for t in &old_targets {
         all_affected_types.insert(t.clone());
@@ -1072,12 +1085,20 @@ pub async fn sync_theme_declarations_in_tx(
     let mut changed_keys: BTreeSet<String> = sqlx::query_scalar(
         "SELECT key FROM content_types WHERE owner_kind='theme' AND owner_id != ?
          AND provider_status != 'provider_inactive'",
-    ).bind(theme_id).fetch_all(&mut *conn).await?.into_iter().collect();
+    )
+    .bind(theme_id)
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .collect();
     let elig_keys: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT content_type_key FROM content_type_taxonomy_eligibility
          WHERE owner_kind='theme' AND owner_id != ?
            AND provider_status != 'provider_inactive'",
-    ).bind(theme_id).fetch_all(&mut *conn).await?;
+    )
+    .bind(theme_id)
+    .fetch_all(&mut *conn)
+    .await?;
     changed_keys.extend(elig_keys);
     sqlx::query(
         "UPDATE content_types
@@ -1163,21 +1184,33 @@ pub async fn set_plugin_cnt_provider_status_in_tx(
     if !table_exists_in_tx(conn, "content_types").await? {
         return Ok(());
     }
-    let desired = if active { "active" } else { "provider_inactive" };
+    let desired = if active {
+        "active"
+    } else {
+        "provider_inactive"
+    };
     let declared_only: i64 = i64::from(active);
     let mut changed_keys: BTreeSet<String> = sqlx::query_scalar(
         "SELECT key FROM content_types WHERE owner_kind='plugin' AND owner_id=?
          AND provider_status != ? AND (? = 0 OR declaration_state='declared')",
     )
-    .bind(plugin_id).bind(desired).bind(declared_only)
-    .fetch_all(&mut *conn).await?.into_iter().collect();
+    .bind(plugin_id)
+    .bind(desired)
+    .bind(declared_only)
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .collect();
     let changed_eligibility: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT content_type_key FROM content_type_taxonomy_eligibility
          WHERE owner_kind='plugin' AND owner_id=? AND provider_status != ?
            AND (? = 0 OR declaration_state='declared')",
     )
-    .bind(plugin_id).bind(desired).bind(declared_only)
-    .fetch_all(&mut *conn).await?;
+    .bind(plugin_id)
+    .bind(desired)
+    .bind(declared_only)
+    .fetch_all(&mut *conn)
+    .await?;
     changed_keys.extend(changed_eligibility);
     if active {
         sqlx::query(
@@ -1290,18 +1323,16 @@ async fn sync_owner_cnt_declarations_in_tx(
             candidate_types.insert(t.clone());
         }
     }
-    let existing_owned_ct_keys: Vec<String> = sqlx::query_scalar(
-        "SELECT key FROM content_types WHERE owner_kind = ? AND owner_id = ?",
-    )
-    .bind(owner_kind_str)
-    .bind(owner_id_str)
-    .fetch_all(&mut *conn)
-    .await?;
+    let existing_owned_ct_keys: Vec<String> =
+        sqlx::query_scalar("SELECT key FROM content_types WHERE owner_kind = ? AND owner_id = ?")
+            .bind(owner_kind_str)
+            .bind(owner_id_str)
+            .fetch_all(&mut *conn)
+            .await?;
     // A new provider CPT has no earlier Admin CAS token. For an existing CPT,
     // provider eligibility changes must advance its CAS version just like a
     // site-owned override, even when the provider's schema JSON is unchanged.
-    let existing_owned_ct_set: HashSet<String> =
-        existing_owned_ct_keys.iter().cloned().collect();
+    let existing_owned_ct_set: HashSet<String> = existing_owned_ct_keys.iter().cloned().collect();
     for k in &existing_owned_ct_keys {
         candidate_types.insert(k.clone());
     }
@@ -1362,8 +1393,13 @@ async fn sync_owner_cnt_declarations_in_tx(
                 // Preserve omitted fields as withdrawn when package re-declares CPT (270-R1)
                 let merged_fields =
                     merge_package_redeclared_fields(&existing_def.fields, &ct.fields);
-                let mut incoming_settings = ct.settings.clone().unwrap_or_else(|| existing_def.settings.clone());
-                incoming_settings.validate_and_normalize().map_err(map_input_validation_error)?;
+                let mut incoming_settings = ct
+                    .settings
+                    .clone()
+                    .unwrap_or_else(|| existing_def.settings.clone());
+                incoming_settings
+                    .validate_and_normalize()
+                    .map_err(map_input_validation_error)?;
                 if existing_def.settings.publication == ContentPublication::DraftPublish
                     && incoming_settings.publication == ContentPublication::Immediate
                 {
@@ -1387,7 +1423,8 @@ async fn sync_owner_cnt_declarations_in_tx(
                 };
                 incoming.validate().map_err(map_input_validation_error)?;
                 let incoming_json = serde_json::to_string(&incoming)?;
-                if existing_def != incoming || provider_status != "active"
+                if existing_def != incoming
+                    || provider_status != "active"
                     || declaration_state != "declared"
                 {
                     changed_cpt_types.insert(ct.key.clone());
@@ -1405,7 +1442,9 @@ async fn sync_owner_cnt_declarations_in_tx(
             }
             None => {
                 let mut settings = ct.settings.clone().unwrap_or_default();
-                settings.validate_and_normalize().map_err(map_input_validation_error)?;
+                settings
+                    .validate_and_normalize()
+                    .map_err(map_input_validation_error)?;
                 let incoming = ContentTypeDefinition {
                     key: ct.key.clone(),
                     label: ct.label.clone(),
@@ -1446,7 +1485,9 @@ async fn sync_owner_cnt_declarations_in_tx(
             .execute(&mut *conn)
             .await?
             .rows_affected();
-            if changed > 0 { changed_cpt_types.insert(key); }
+            if changed > 0 {
+                changed_cpt_types.insert(key);
+            }
         }
     }
 
@@ -1467,7 +1508,8 @@ async fn sync_owner_cnt_declarations_in_tx(
         .await?;
         match taxonomy_owner {
             Some((kind, id, provider_status, state))
-                if (kind == "core" || kind == "user"
+                if (kind == "core"
+                    || kind == "user"
                     || (kind == owner_kind_str && id.as_deref() == Some(owner_id_str)))
                     && provider_status == "active"
                     && state == "declared" => {}
@@ -1476,7 +1518,11 @@ async fn sync_owner_cnt_declarations_in_tx(
                     "Không thể liên kết taxonomy thuộc provider khác hoặc không hoạt động.",
                 ));
             }
-            None => return Err(ApiError::bad_request("Taxonomy eligibility chưa được định nghĩa.")),
+            None => {
+                return Err(ApiError::bad_request(
+                    "Taxonomy eligibility chưa được định nghĩa.",
+                ));
+            }
         }
         if builtin_definition(ct_key).is_some() {
             return Err(ApiError::conflict(
@@ -1607,12 +1653,11 @@ async fn sync_owner_cnt_declarations_in_tx(
                 .map_err(map_input_validation_error)?;
 
             for target in &fg.target_types {
-                let exists: bool = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM content_types WHERE key = ?)",
-                )
-                .bind(target)
-                .fetch_one(&mut *conn)
-                .await?;
+                let exists: bool =
+                    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM content_types WHERE key = ?)")
+                        .bind(target)
+                        .fetch_one(&mut *conn)
+                        .await?;
                 if !exists {
                     return Err(ApiError::unprocessable(format!(
                         "Loại nội dung mục tiêu '{target}' trong field_group '{}' chưa tồn tại.",
@@ -1756,11 +1801,13 @@ async fn sync_owner_cnt_declarations_in_tx(
     let rewrites: Vec<crate::storage::permalinks::ProviderRewriteDeclaration> = declarations
         .content_types
         .iter()
-        .map(|ct| crate::storage::permalinks::ProviderRewriteDeclaration {
-            resource_kind: "content_type",
-            resource_key: ct.key.clone(),
-            rewrite_base: ct.rewrite_base.clone(),
-        })
+        .map(
+            |ct| crate::storage::permalinks::ProviderRewriteDeclaration {
+                resource_kind: "content_type",
+                resource_key: ct.key.clone(),
+                rewrite_base: ct.rewrite_base.clone(),
+            },
+        )
         .chain(declarations.taxonomy_definitions.iter().map(|tax| {
             crate::storage::permalinks::ProviderRewriteDeclaration {
                 resource_kind: "taxonomy",
@@ -1770,7 +1817,10 @@ async fn sync_owner_cnt_declarations_in_tx(
         }))
         .collect();
     crate::storage::permalinks::sync_provider_rewrite_defaults_in_tx(
-        conn, owner_kind_str, owner_id_str, &rewrites,
+        conn,
+        owner_kind_str,
+        owner_id_str,
+        &rewrites,
     )
     .await?;
 
@@ -1841,7 +1891,10 @@ pub(crate) async fn load_effective_taxonomies_in_tx(
     if overrides_exist {
         let override_keys: Option<String> = sqlx::query_scalar(
             "SELECT taxonomies_json FROM content_type_taxonomy_overrides WHERE content_type_key=?",
-        ).bind(type_key).fetch_optional(&mut *conn).await?;
+        )
+        .bind(type_key)
+        .fetch_optional(&mut *conn)
+        .await?;
         if let Some(raw) = override_keys {
             let keys: Vec<String> = serde_json::from_str(&raw)
                 .map_err(|_| ApiError::internal("Danh sách taxonomy override bị hỏng."))?;
@@ -1850,8 +1903,13 @@ pub(crate) async fn load_effective_taxonomies_in_tx(
                 let exists: Option<i64> = sqlx::query_scalar(
                     "SELECT 1 FROM taxonomy_definitions WHERE key=?
                      AND provider_status='active' AND declaration_state='declared'",
-                ).bind(&key).fetch_optional(&mut *conn).await?;
-                if exists.is_some() { enabled.push(key); }
+                )
+                .bind(&key)
+                .fetch_optional(&mut *conn)
+                .await?;
+                if exists.is_some() {
+                    enabled.push(key);
+                }
             }
             enabled.sort();
             return Ok(enabled);
@@ -1864,22 +1922,26 @@ pub(crate) async fn load_effective_taxonomies_in_tx(
              WHERE e.content_type_key=? AND e.provider_status='active'
                AND e.declaration_state='declared' AND d.provider_status='active'
                AND d.declaration_state='declared' ORDER BY e.taxonomy_kind",
-        ).bind(type_key).fetch_all(&mut *conn).await?
+        )
+        .bind(type_key)
+        .fetch_all(&mut *conn)
+        .await?
     } else {
         sqlx::query_scalar(
             "SELECT taxonomy_kind FROM content_type_taxonomy_eligibility
              WHERE content_type_key=? AND provider_status='active'
                AND declaration_state='declared' ORDER BY taxonomy_kind",
-        ).bind(type_key).fetch_all(&mut *conn).await?
+        )
+        .bind(type_key)
+        .fetch_all(&mut *conn)
+        .await?
     };
     Ok(rows)
 }
 
 /// C2 canonical effective site/provider eligibility used by schema tokens,
 /// entry writes, Admin table, public lists, and future Builder selectors.
-pub async fn load_effective_taxonomies(
-    db: &SqlitePool, type_key: &str,
-) -> ApiResult<Vec<String>> {
+pub async fn load_effective_taxonomies(db: &SqlitePool, type_key: &str) -> ApiResult<Vec<String>> {
     let mut conn = db.acquire().await?;
     load_effective_taxonomies_in_tx(&mut conn, type_key).await
 }
@@ -1902,21 +1964,22 @@ pub async fn load_configured_taxonomies(
     type_key: &str,
 ) -> ApiResult<ConfiguredContentTypeTaxonomies> {
     if !valid_content_type_key(type_key) || type_key == "section" {
-        return Err(ApiError::bad_request("Loại nội dung không hỗ trợ taxonomy."));
+        return Err(ApiError::bad_request(
+            "Loại nội dung không hỗ trợ taxonomy.",
+        ));
     }
     // Separate autocommit SELECTs can straddle a concurrent eligibility PUT:
     // the old association list and new CPT version would allow a valid CAS
     // write that silently removes another Admin's newly added association.
     // A single read transaction pins BOTH to one SQLite read snapshot.
     let mut tx = db.begin().await?;
-    let type_version: Option<i64> = sqlx::query_scalar(
-        "SELECT version FROM content_types WHERE key=?",
-    )
-    .bind(type_key)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let type_version = type_version
-        .ok_or_else(|| ApiError::not_found("Loại nội dung không tồn tại."))?;
+    let type_version: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM content_types WHERE key=?")
+            .bind(type_key)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let type_version =
+        type_version.ok_or_else(|| ApiError::not_found("Loại nội dung không tồn tại."))?;
     let raw: Option<String> = sqlx::query_scalar(
         "SELECT taxonomies_json FROM content_type_taxonomy_overrides WHERE content_type_key=?",
     )
@@ -1952,11 +2015,16 @@ pub async fn load_configured_taxonomies(
 }
 
 pub async fn put_site_taxonomy_eligibility(
-    db: &SqlitePool, actor: &crate::auth::SessionContext, type_key: &str,
-    expected_version: i64, taxonomies: &[String],
+    db: &SqlitePool,
+    actor: &crate::auth::SessionContext,
+    type_key: &str,
+    expected_version: i64,
+    taxonomies: &[String],
 ) -> ApiResult<ContentTypeApiItem> {
     if !opendash_core::content::valid_content_type_key(type_key) || type_key == "section" {
-        return Err(ApiError::bad_request("Không thể cấu hình taxonomy cho Section."));
+        return Err(ApiError::bad_request(
+            "Không thể cấu hình taxonomy cho Section.",
+        ));
     }
     if taxonomies.len() > 64 {
         return Err(ApiError::bad_request("Tối đa 64 taxonomy cho mỗi CPT."));
@@ -1964,7 +2032,9 @@ pub async fn put_site_taxonomy_eligibility(
     let mut seen = std::collections::HashSet::new();
     for key in taxonomies {
         if !opendash_core::content::valid_content_type_key(key) || !seen.insert(key) {
-            return Err(ApiError::bad_request("Danh sách taxonomy chứa khóa không hợp lệ hoặc trùng."));
+            return Err(ApiError::bad_request(
+                "Danh sách taxonomy chứa khóa không hợp lệ hoặc trùng.",
+            ));
         }
     }
     let mut tx = begin_content_write_tx(db).await?;
@@ -1978,25 +2048,31 @@ pub async fn put_site_taxonomy_eligibility(
     )
     .bind(&actor.token_hash)
     .bind(crate::auth::current_time_secs())
-    .fetch_optional(&mut *tx).await?;
+    .fetch_optional(&mut *tx)
+    .await?;
     match current_actor {
-        Some((id, role)) if id == actor.user.id && role == "admin" => {},
+        Some((id, role)) if id == actor.user.id && role == "admin" => {}
         Some(_) => return Err(ApiError::forbidden("Tài khoản không còn quyền quản trị.")),
         None => return Err(ApiError::unauthorized("Phiên đăng nhập đã bị thu hồi.")),
     }
-    let version: Option<i64> = sqlx::query_scalar(
-        "SELECT version FROM content_types WHERE key=?",
-    ).bind(type_key).fetch_optional(&mut *tx).await?;
+    let version: Option<i64> = sqlx::query_scalar("SELECT version FROM content_types WHERE key=?")
+        .bind(type_key)
+        .fetch_optional(&mut *tx)
+        .await?;
     let Some(version) = version else {
         return Err(ApiError::not_found("Loại nội dung không tồn tại."));
     };
     if version != expected_version {
-        return Err(ApiError::precondition_failed("Schema CPT đã thay đổi; hãy tải lại."));
+        return Err(ApiError::precondition_failed(
+            "Schema CPT đã thay đổi; hãy tải lại.",
+        ));
     }
     for key in taxonomies {
-        let exists: Option<i64> = sqlx::query_scalar(
-            "SELECT 1 FROM taxonomy_definitions WHERE key=?",
-        ).bind(key).fetch_optional(&mut *tx).await?;
+        let exists: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM taxonomy_definitions WHERE key=?")
+                .bind(key)
+                .fetch_optional(&mut *tx)
+                .await?;
         if exists.is_none() {
             return Err(ApiError::bad_request("Taxonomy được chọn không tồn tại."));
         }
@@ -2010,14 +2086,27 @@ pub async fn put_site_taxonomy_eligibility(
         "INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
          VALUES (?,?) ON CONFLICT(content_type_key) DO UPDATE SET
            taxonomies_json=excluded.taxonomies_json,updated_at=datetime('now')",
-    ).bind(type_key).bind(&canonical).execute(&mut *tx).await?;
-    let count = sqlx::query("UPDATE content_types SET version=version+1,
-        updated_at=datetime('now') WHERE key=? AND version=?")
-        .bind(type_key).bind(expected_version).execute(&mut *tx).await?.rows_affected();
+    )
+    .bind(type_key)
+    .bind(&canonical)
+    .execute(&mut *tx)
+    .await?;
+    let count = sqlx::query(
+        "UPDATE content_types SET version=version+1,
+        updated_at=datetime('now') WHERE key=? AND version=?",
+    )
+    .bind(type_key)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
     if count != 1 {
-        return Err(ApiError::precondition_failed("Schema CPT đã thay đổi; hãy tải lại."));
+        return Err(ApiError::precondition_failed(
+            "Schema CPT đã thay đổi; hãy tải lại.",
+        ));
     }
-    let effective = load_effective_content_schema_in_tx(&mut tx, type_key).await?
+    let effective = load_effective_content_schema_in_tx(&mut tx, type_key)
+        .await?
         .ok_or_else(|| ApiError::internal("Không thể tải schema CPT."))?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
@@ -2032,11 +2121,10 @@ async fn load_plugin_action_panels_for_type_in_tx(
     conn: &mut SqliteConnection,
     type_key: &str,
 ) -> ApiResult<Vec<PanelDefinition>> {
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT id, manifest_json FROM plugins WHERE enabled = 1 ORDER BY id ASC",
-    )
-    .fetch_all(&mut *conn)
-    .await?;
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, manifest_json FROM plugins WHERE enabled = 1 ORDER BY id ASC")
+            .fetch_all(&mut *conn)
+            .await?;
 
     let mut out = Vec::new();
     for (plugin_id, raw_manifest) in rows {
@@ -2055,7 +2143,10 @@ async fn load_plugin_action_panels_for_type_in_tx(
             } else {
                 FieldRole::Editor
             };
-            let min_edit_role = ep.min_edit_role.unwrap_or(action_min_role).max(action_min_role);
+            let min_edit_role = ep
+                .min_edit_role
+                .unwrap_or(action_min_role)
+                .max(action_min_role);
             let min_view_role = ep.min_view_role.unwrap_or(FieldRole::Editor);
             out.push(PanelDefinition {
                 panel_id: format!("plugin:{plugin_id}:{}", ep.local_key),
@@ -2119,7 +2210,8 @@ pub async fn get_editor_layout(db: &SqlitePool, type_key: &str) -> ApiResult<Edi
         )));
     };
     let taxonomies = load_effective_taxonomies_in_tx(&mut conn, type_key).await?;
-    let plugin_action_panels = load_plugin_action_panels_for_type_in_tx(&mut conn, type_key).await?;
+    let plugin_action_panels =
+        load_plugin_action_panels_for_type_in_tx(&mut conn, type_key).await?;
     let (raw_layout, version) = load_raw_editor_layout_in_tx(&mut conn, type_key).await?;
     let base_panels =
         build_core_and_group_panels(&effective, !taxonomies.is_empty(), &plugin_action_panels);
@@ -2218,7 +2310,8 @@ pub async fn get_effective_editor_config(
         )));
     };
     let taxonomies = load_effective_taxonomies_in_tx(&mut conn, type_key).await?;
-    let plugin_action_panels = load_plugin_action_panels_for_type_in_tx(&mut conn, type_key).await?;
+    let plugin_action_panels =
+        load_plugin_action_panels_for_type_in_tx(&mut conn, type_key).await?;
     let (raw_layout, version) = load_raw_editor_layout_in_tx(&mut conn, type_key).await?;
     let base_panels =
         build_core_and_group_panels(&effective, !taxonomies.is_empty(), &plugin_action_panels);
@@ -2242,7 +2335,9 @@ pub async fn get_effective_editor_config(
 #[cfg(test)]
 mod eligibility_provider_cas_tests {
     use super::*;
-    use opendash_core::content::{CntDeclarations, ContentTypeDeclaration, TaxonomyEligibilityDeclaration};
+    use opendash_core::content::{
+        CntDeclarations, ContentTypeDeclaration, TaxonomyEligibilityDeclaration,
+    };
     use sqlx::sqlite::SqlitePoolOptions;
 
     fn provider_declarations(taxonomies: &[&str]) -> CntDeclarations {
@@ -2296,14 +2391,13 @@ mod eligibility_provider_cas_tests {
             .unwrap();
         assert_eq!(next.taxonomies, vec!["category", "tag"]);
         assert_eq!(next.type_version, old_version + 1);
-        let stale = sqlx::query(
-            "UPDATE content_types SET version=version+1 WHERE key=? AND version=?",
-        )
-        .bind("provider_books_cas")
-        .bind(old_version)
-        .execute(&db)
-        .await
-        .unwrap();
+        let stale =
+            sqlx::query("UPDATE content_types SET version=version+1 WHERE key=? AND version=?")
+                .bind("provider_books_cas")
+                .bind(old_version)
+                .execute(&db)
+                .await
+                .unwrap();
         assert_eq!(stale.rows_affected(), 0);
 
         declare(&db, &["category", "tag"]).await;
@@ -2318,35 +2412,47 @@ mod eligibility_provider_cas_tests {
         renamed_declarations.content_types[0].label = "Provider books renamed".to_owned();
         let mut tx = db.begin().await.unwrap();
         sync_plugin_cnt_declarations_in_tx(&mut tx, "provider_cas_test", &renamed_declarations)
-            .await.unwrap();
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         let renamed = load_configured_taxonomies(&db, "provider_books_cas")
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(renamed.type_version, same.type_version + 1);
         // Identical re-declaration must not create perpetual CAS conflicts.
         let mut tx = db.begin().await.unwrap();
         sync_plugin_cnt_declarations_in_tx(&mut tx, "provider_cas_test", &renamed_declarations)
-            .await.unwrap();
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
-        assert_eq!(load_configured_taxonomies(&db, "provider_books_cas")
-            .await.unwrap().type_version, renamed.type_version);
+        assert_eq!(
+            load_configured_taxonomies(&db, "provider_books_cas")
+                .await
+                .unwrap()
+                .type_version,
+            renamed.type_version
+        );
 
         // Provider enable/disable changes effective eligibility and also
         // fences stale Admin settings/associations from an earlier lifetime.
         let mut tx = db.begin().await.unwrap();
         set_plugin_cnt_provider_status_in_tx(&mut tx, "provider_cas_test", false)
-            .await.unwrap();
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         let inactive = load_configured_taxonomies(&db, "provider_books_cas")
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(inactive.type_version, renamed.type_version + 1);
         assert!(inactive.effective.is_empty());
         let mut tx = db.begin().await.unwrap();
         set_plugin_cnt_provider_status_in_tx(&mut tx, "provider_cas_test", true)
-            .await.unwrap();
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         let reactivated = load_configured_taxonomies(&db, "provider_books_cas")
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(reactivated.type_version, inactive.type_version + 1);
         assert_eq!(reactivated.effective, vec!["category", "tag"]);
 
@@ -2373,31 +2479,44 @@ mod eligibility_provider_cas_tests {
         };
         let mut tx = db.begin().await.unwrap();
         sync_plugin_cnt_declarations_in_tx(&mut tx, "provider_cas_test", &eligibility_only)
-            .await.unwrap();
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         let eligible_withdrawn_cpt = load_configured_taxonomies(&db, "provider_books_cas")
-            .await.unwrap();
-        assert_eq!(eligible_withdrawn_cpt.type_version, withdrawn.type_version + 1);
+            .await
+            .unwrap();
+        assert_eq!(
+            eligible_withdrawn_cpt.type_version,
+            withdrawn.type_version + 1
+        );
 
         let mut tx = db.begin().await.unwrap();
         set_plugin_cnt_provider_status_in_tx(&mut tx, "provider_cas_test", false)
-            .await.unwrap();
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         let off = load_configured_taxonomies(&db, "provider_books_cas")
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(off.type_version, eligible_withdrawn_cpt.type_version + 1);
 
         let mut tx = db.begin().await.unwrap();
         set_plugin_cnt_provider_status_in_tx(&mut tx, "provider_cas_test", true)
-            .await.unwrap();
+            .await
+            .unwrap();
         tx.commit().await.unwrap();
         let on = load_configured_taxonomies(&db, "provider_books_cas")
-            .await.unwrap();
+            .await
+            .unwrap();
         assert_eq!(on.type_version, off.type_version + 1);
         assert_eq!(on.effective, vec!["category", "tag"]);
-        let stale = sqlx::query(
-            "UPDATE content_types SET version=version+1 WHERE key=? AND version=?",
-        ).bind("provider_books_cas").bind(off.type_version).execute(&db).await.unwrap();
+        let stale =
+            sqlx::query("UPDATE content_types SET version=version+1 WHERE key=? AND version=?")
+                .bind("provider_books_cas")
+                .bind(off.type_version)
+                .execute(&db)
+                .await
+                .unwrap();
         assert_eq!(stale.rows_affected(), 0);
     }
 }

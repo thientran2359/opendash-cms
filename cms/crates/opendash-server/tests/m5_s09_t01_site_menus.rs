@@ -68,21 +68,21 @@ fn build_theme_with_menu_header(id: &str, header_html: &str) -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": id,
             "name": id,
             "version": "1.0.0",
-            "templates": {
-                "header": "templates/header.html",
-                "single": "templates/single.html"
-            }
+            "templates": [{ "kind": "single", "file": "single.html" }],
+            "parts": { "header": "header.html" },
+            "menus": { "slots": ["primary"] }
         });
         zip.start_file("theme.json", opts).unwrap();
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("templates/header.html", opts).unwrap();
+        zip.start_file("header.html", opts).unwrap();
         zip.write_all(header_html.as_bytes()).unwrap();
-        zip.start_file("templates/single.html", opts).unwrap();
-        zip.write_all(b"<article>{{ entry.title }}</article>").unwrap();
+        zip.start_file("single.html", opts).unwrap();
+        zip.write_all(b"<article>{{ entry.title }}{{ od_content() }}</article>")
+            .unwrap();
         zip.finish().unwrap();
     }
     buf
@@ -90,7 +90,10 @@ fn build_theme_with_menu_header(id: &str, header_html: &str) -> Vec<u8> {
 
 #[tokio::test]
 async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
     let site_root = std::env::temp_dir().join(format!("opendash-m5-s09-t01-ssr-{nanos}"));
     let srv = spawn_server_at(site_root.clone(), false).await;
     let client = Client::new();
@@ -140,7 +143,12 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
             .await
             .unwrap();
         assert_eq!(r.status(), 201);
-        rev_ids.push(r.json::<Value>().await.unwrap()["revision_id"].as_str().unwrap().to_string());
+        rev_ids.push(
+            r.json::<Value>().await.unwrap()["revision_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
     }
     let act_a = client
         .put(format!("{}/api/admin/themes/active", srv.base_url))
@@ -156,7 +164,10 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
 
     // 3. Create published post + draft post
     let p1: Value = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)
@@ -169,7 +180,10 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
         .unwrap();
     let p1_id = p1["id"].as_i64().unwrap();
     client
-        .post(format!("{}/api/admin/content-types/post/entries/{p1_id}/publication", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries/{p1_id}/publication",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)
@@ -180,7 +194,10 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
         .unwrap();
 
     let p2: Value = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)

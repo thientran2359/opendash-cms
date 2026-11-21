@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 use url::Url;
 
-use crate::{
-    error::{ApiError, ApiResult},
-};
+use crate::error::{ApiError, ApiResult};
 
 pub const MAX_MENU_ITEMS: usize = 200;
 pub const MAX_MENU_DEPTH: usize = 8;
@@ -143,10 +141,14 @@ pub fn validate_external_url(raw: &str) -> ApiResult<String> {
     let parsed = Url::parse(trimmed)
         .map_err(|_| ApiError::bad_request("URL menu phải là HTTP(S) hợp lệ."))?;
     if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(ApiError::bad_request("URL menu chỉ chấp nhận http hoặc https."));
+        return Err(ApiError::bad_request(
+            "URL menu chỉ chấp nhận http hoặc https.",
+        ));
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err(ApiError::bad_request("URL menu không được chứa credentials."));
+        return Err(ApiError::bad_request(
+            "URL menu không được chứa credentials.",
+        ));
     }
     if parsed.host_str().is_none() {
         return Err(ApiError::bad_request("URL menu thiếu host."));
@@ -156,7 +158,9 @@ pub fn validate_external_url(raw: &str) -> ApiResult<String> {
 
 fn validate_label(raw: &str) -> ApiResult<String> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 160 || trimmed.chars().any(|c| c.is_control())
+    if trimmed.is_empty()
+        || trimmed.chars().count() > 160
+        || trimmed.chars().any(|c| c.is_control())
     {
         return Err(ApiError::bad_request("Nhãn menu item không hợp lệ."));
     }
@@ -182,11 +186,10 @@ pub async fn create_menu_in_tx(
             return Err(ApiError::conflict("origin_provenance menu đã tồn tại."));
         }
     }
-    let dup_key: Option<i64> =
-        sqlx::query_scalar("SELECT id FROM site_menus WHERE menu_key = ?")
-            .bind(&input.menu_key)
-            .fetch_optional(&mut *conn)
-            .await?;
+    let dup_key: Option<i64> = sqlx::query_scalar("SELECT id FROM site_menus WHERE menu_key = ?")
+        .bind(&input.menu_key)
+        .fetch_optional(&mut *conn)
+        .await?;
     if dup_key.is_some() {
         return Err(ApiError::conflict("menu_key đã tồn tại."));
     }
@@ -316,19 +319,22 @@ fn validate_menu_items_plan(
         match item.target_kind {
             MenuTargetKind::Entry => {
                 if item.target_entry_id.is_none_or(|id| id <= 0) {
-                    return Err(ApiError::bad_request("Menu item entry thiếu target_entry_id."));
+                    return Err(ApiError::bad_request(
+                        "Menu item entry thiếu target_entry_id.",
+                    ));
                 }
             }
             MenuTargetKind::Term => {
                 if item.target_term_id.is_none_or(|id| id <= 0) {
-                    return Err(ApiError::bad_request("Menu item term thiếu target_term_id."));
+                    return Err(ApiError::bad_request(
+                        "Menu item term thiếu target_term_id.",
+                    ));
                 }
             }
             MenuTargetKind::External => {
-                let raw = item
-                    .external_url
-                    .as_deref()
-                    .ok_or_else(|| ApiError::bad_request("Menu item external thiếu external_url."))?;
+                let raw = item.external_url.as_deref().ok_or_else(|| {
+                    ApiError::bad_request("Menu item external thiếu external_url.")
+                })?;
                 validate_external_url(raw)?;
             }
         }
@@ -354,22 +360,26 @@ fn validate_menu_items_plan(
     let mut sibling_positions: BTreeSet<(Option<usize>, i64)> = BTreeSet::new();
     for (idx, item) in items.iter().enumerate() {
         let p_idx = if let Some(pid) = item.parent_id {
-            let found = key_to_idx.get(&NodeKey::Existing(pid)).copied().ok_or_else(|| {
-                ApiError::bad_request("parent_id không thuộc cùng menu hoặc không tồn tại.")
-            })?;
+            let found = key_to_idx
+                .get(&NodeKey::Existing(pid))
+                .copied()
+                .ok_or_else(|| {
+                    ApiError::bad_request("parent_id không thuộc cùng menu hoặc không tồn tại.")
+                })?;
             Some(found)
         } else if let Some(ref pck) = item.parent_client_key {
-            let found = key_to_idx.get(&NodeKey::Client(pck.clone())).copied().ok_or_else(|| {
-                ApiError::bad_request("parent_client_key không tồn tại trong menu.")
-            })?;
+            let found = key_to_idx
+                .get(&NodeKey::Client(pck.clone()))
+                .copied()
+                .ok_or_else(|| {
+                    ApiError::bad_request("parent_client_key không tồn tại trong menu.")
+                })?;
             Some(found)
         } else {
             None
         };
         if !sibling_positions.insert((p_idx, item.position)) {
-            return Err(ApiError::bad_request(
-                "Trùng position trong cùng cấp menu.",
-            ));
+            return Err(ApiError::bad_request("Trùng position trong cùng cấp menu."));
         }
         parent_idx[idx] = p_idx;
     }
@@ -381,7 +391,9 @@ fn validate_menu_items_plan(
         seen.insert(start);
         while let Some(p) = cur {
             if !seen.insert(p) {
-                return Err(ApiError::bad_request("Phát hiện vòng lặp (cycle) trong menu."));
+                return Err(ApiError::bad_request(
+                    "Phát hiện vòng lặp (cycle) trong menu.",
+                ));
             }
             depth += 1;
             if depth > MAX_MENU_DEPTH {
@@ -450,19 +462,22 @@ pub async fn replace_menu_items_in_tx(
         match item.target_kind {
             MenuTargetKind::Entry => {
                 if item.target_entry_id.is_none_or(|id| id <= 0) {
-                    return Err(ApiError::bad_request("Menu item entry thiếu target_entry_id."));
+                    return Err(ApiError::bad_request(
+                        "Menu item entry thiếu target_entry_id.",
+                    ));
                 }
             }
             MenuTargetKind::Term => {
                 if item.target_term_id.is_none_or(|id| id <= 0) {
-                    return Err(ApiError::bad_request("Menu item term thiếu target_term_id."));
+                    return Err(ApiError::bad_request(
+                        "Menu item term thiếu target_term_id.",
+                    ));
                 }
             }
             MenuTargetKind::External => {
-                let raw = item
-                    .external_url
-                    .as_deref()
-                    .ok_or_else(|| ApiError::bad_request("Menu item external thiếu external_url."))?;
+                let raw = item.external_url.as_deref().ok_or_else(|| {
+                    ApiError::bad_request("Menu item external thiếu external_url.")
+                })?;
                 validate_external_url(raw)?;
             }
         }
@@ -489,22 +504,26 @@ pub async fn replace_menu_items_in_tx(
     let mut sibling_positions: BTreeSet<(Option<usize>, i64)> = BTreeSet::new();
     for (idx, item) in items.iter().enumerate() {
         let p_idx = if let Some(pid) = item.parent_id {
-            let found = key_to_idx.get(&NodeKey::Existing(pid)).copied().ok_or_else(|| {
-                ApiError::bad_request("parent_id không thuộc cùng menu hoặc không tồn tại.")
-            })?;
+            let found = key_to_idx
+                .get(&NodeKey::Existing(pid))
+                .copied()
+                .ok_or_else(|| {
+                    ApiError::bad_request("parent_id không thuộc cùng menu hoặc không tồn tại.")
+                })?;
             Some(found)
         } else if let Some(ref pck) = item.parent_client_key {
-            let found = key_to_idx.get(&NodeKey::Client(pck.clone())).copied().ok_or_else(|| {
-                ApiError::bad_request("parent_client_key không tồn tại trong menu.")
-            })?;
+            let found = key_to_idx
+                .get(&NodeKey::Client(pck.clone()))
+                .copied()
+                .ok_or_else(|| {
+                    ApiError::bad_request("parent_client_key không tồn tại trong menu.")
+                })?;
             Some(found)
         } else {
             None
         };
         if !sibling_positions.insert((p_idx, item.position)) {
-            return Err(ApiError::bad_request(
-                "Trùng position trong cùng cấp menu.",
-            ));
+            return Err(ApiError::bad_request("Trùng position trong cùng cấp menu."));
         }
         parent_idx[idx] = p_idx;
     }
@@ -517,7 +536,9 @@ pub async fn replace_menu_items_in_tx(
         seen.insert(start);
         while let Some(p) = cur {
             if !seen.insert(p) {
-                return Err(ApiError::bad_request("Phát hiện vòng lặp (cycle) trong menu."));
+                return Err(ApiError::bad_request(
+                    "Phát hiện vòng lặp (cycle) trong menu.",
+                ));
             }
             depth += 1;
             if depth > MAX_MENU_DEPTH {
@@ -558,9 +579,9 @@ pub async fn replace_menu_items_in_tx(
         let p_id = parent_idx[idx].and_then(|p| assigned_ids[p]);
         let label = validate_label(&item.label)?;
         let ext_url = match item.target_kind {
-            MenuTargetKind::External => {
-                Some(validate_external_url(item.external_url.as_deref().unwrap_or(""))?)
-            }
+            MenuTargetKind::External => Some(validate_external_url(
+                item.external_url.as_deref().unwrap_or(""),
+            )?),
             _ => None,
         };
         let entry_id = if item.target_kind == MenuTargetKind::Entry {
@@ -625,9 +646,7 @@ pub async fn replace_menu_items_in_tx(
     .execute(&mut *conn)
     .await?;
     if res.rows_affected() == 0 {
-        return Err(ApiError::precondition_failed(
-            "Menu đã thay đổi đồng thời.",
-        ));
+        return Err(ApiError::precondition_failed("Menu đã thay đổi đồng thời."));
     }
 
     get_menu_in_tx(conn, menu_id)
@@ -635,10 +654,7 @@ pub async fn replace_menu_items_in_tx(
         .ok_or_else(|| ApiError::internal("Không đọc lại được menu sau khi cập nhật."))
 }
 
-pub async fn get_slot_version_in_tx(
-    conn: &mut SqliteConnection,
-    theme_id: &str,
-) -> ApiResult<i64> {
+pub async fn get_slot_version_in_tx(conn: &mut SqliteConnection, theme_id: &str) -> ApiResult<i64> {
     let ver: Option<i64> =
         sqlx::query_scalar("SELECT version FROM site_menu_slot_versions WHERE theme_id = ?")
             .bind(theme_id)
@@ -712,7 +728,10 @@ pub async fn list_slot_assignments_in_tx(
     Ok(rows.into_iter().collect())
 }
 
-async fn resolve_entry_url_in_tx(conn: &mut SqliteConnection, entry_id: i64) -> ApiResult<Option<String>> {
+async fn resolve_entry_url_in_tx(
+    conn: &mut SqliteConnection,
+    entry_id: i64,
+) -> ApiResult<Option<String>> {
     // The SEO public guard is authoritative for publication, Section,
     // provider and CPT visibility; canonical path lookup alone may serve Admin.
     if crate::storage::seo::resolve_public_entry_path_in_tx(conn, entry_id)
@@ -724,7 +743,10 @@ async fn resolve_entry_url_in_tx(conn: &mut SqliteConnection, entry_id: i64) -> 
     crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
-async fn resolve_term_url_in_tx(conn: &mut SqliteConnection, term_id: i64) -> ApiResult<Option<String>> {
+async fn resolve_term_url_in_tx(
+    conn: &mut SqliteConnection,
+    term_id: i64,
+) -> ApiResult<Option<String>> {
     // Term canonical resolution enforces taxonomy declaration, public and
     // provider guards; do not emit links to withdrawn/private terms.
     crate::storage::permalinks::canonical_term_path_in_tx(conn, term_id).await
@@ -803,8 +825,14 @@ pub async fn resolve_menu_view_in_tx(
         };
 
         if let Some(url) = url_opt {
-            resolved_items.insert(item.id, (item.parent_id, item.position, item.label.clone(), url));
-            children_map.entry(item.parent_id).or_default().push(item.id);
+            resolved_items.insert(
+                item.id,
+                (item.parent_id, item.position, item.label.clone(), url),
+            );
+            children_map
+                .entry(item.parent_id)
+                .or_default()
+                .push(item.id);
         }
     }
 
@@ -861,14 +889,22 @@ pub async fn resolve_active_slot_menus(
         tx.commit().await?;
         return Ok(BTreeMap::new());
     };
-    let assignments = list_slot_assignments_in_tx(&mut tx, &theme_id).await?;
+    let out = resolve_slot_menus_in_tx(&mut tx, &theme_id).await?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+pub(super) async fn resolve_slot_menus_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    theme_id: &str,
+) -> ApiResult<BTreeMap<String, MenuViewModel>> {
+    let assignments = list_slot_assignments_in_tx(tx, theme_id).await?;
     let mut out = BTreeMap::new();
     for (slot_key, menu_id) in assignments {
-        if let Some(view) = resolve_menu_view_in_tx(&mut tx, menu_id).await? {
+        if let Some(view) = resolve_menu_view_in_tx(tx, menu_id).await? {
             out.insert(slot_key, view);
         }
     }
-    tx.commit().await?;
     Ok(out)
 }
 
@@ -1028,9 +1064,7 @@ pub async fn delete_menu(db: &SqlitePool, menu_id: i64, expected_version: i64) -
             .execute(&mut *conn)
             .await?;
         if deleted.rows_affected() == 0 {
-            return Err(ApiError::precondition_failed(
-                "Menu đã thay đổi đồng thời.",
-            ));
+            return Err(ApiError::precondition_failed("Menu đã thay đổi đồng thời."));
         }
         for theme_id in affected_themes {
             bump_slot_version_in_tx(&mut conn, &theme_id).await?;
@@ -1175,9 +1209,13 @@ pub async fn preview_menu(
 }
 
 pub fn extract_declared_menu_slots(manifest_json: &str) -> Vec<String> {
-    let Ok(manifest) = serde_json::from_str::<crate::theme::ThemeV2Manifest>(manifest_json) else {
+    let Ok(manifest) = serde_json::from_str::<opendash_core::theme::ThemeV3Manifest>(manifest_json)
+    else {
         return Vec::new();
     };
+    if manifest.validate().is_err() {
+        return Vec::new();
+    }
     let Some(menus_val) = manifest.menus else {
         return Vec::new();
     };
@@ -1189,7 +1227,11 @@ pub fn extract_declared_menu_slots(manifest_json: &str) -> Vec<String> {
                     out.insert(s.to_owned());
                 }
             } else if let Some(obj) = item.as_object() {
-                if let Some(s) = obj.get("key").or_else(|| obj.get("slot_key")).and_then(|v| v.as_str()) {
+                if let Some(s) = obj
+                    .get("key")
+                    .or_else(|| obj.get("slot_key"))
+                    .and_then(|v| v.as_str())
+                {
                     if validate_menu_key(s).is_ok() {
                         out.insert(s.to_owned());
                     }
@@ -1213,7 +1255,10 @@ pub fn extract_declared_menu_slots(manifest_json: &str) -> Vec<String> {
     slots.into_iter().collect()
 }
 
-pub async fn get_menu_slots(db: &SqlitePool, theme_id: &str) -> ApiResult<Option<MenuSlotsSnapshot>> {
+pub async fn get_menu_slots(
+    db: &SqlitePool,
+    theme_id: &str,
+) -> ApiResult<Option<MenuSlotsSnapshot>> {
     let mut tx = db.begin().await?;
     let active: Option<(String, String)> = sqlx::query_as(
         "SELECT r.theme_id, r.manifest_json
@@ -1268,12 +1313,11 @@ pub async fn put_menu_slots(
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
     let res = async {
-        let theme_exists: Option<i64> = sqlx::query_scalar(
-            "SELECT 1 FROM theme_revisions WHERE theme_id = ? LIMIT 1",
-        )
-        .bind(theme_id)
-        .fetch_optional(&mut *conn)
-        .await?;
+        let theme_exists: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM theme_revisions WHERE theme_id = ? LIMIT 1")
+                .bind(theme_id)
+                .fetch_optional(&mut *conn)
+                .await?;
         if theme_exists.is_none() {
             return Err(ApiError::not_found("Không tìm thấy theme."));
         }
@@ -1389,7 +1433,10 @@ mod tests {
 
     #[tokio::test]
     async fn site_menus_bounds_cycles_urls_cas_and_cross_menu_parent() {
-        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let dir = std::env::temp_dir().join(format!("opendash-m5-s09-t01-unit-{nanos}"));
         let db = init_db(&dir.join("cms.db")).await.unwrap();
 
@@ -1431,7 +1478,10 @@ mod tests {
             .map(|i| item_ext(&format!("Item {i}"), i, "https://example.com"))
             .collect();
         assert_eq!(
-            replace_menu_items_in_tx(&mut tx, m1.id, 1, &too_many).await.unwrap_err().0,
+            replace_menu_items_in_tx(&mut tx, m1.id, 1, &too_many)
+                .await
+                .unwrap_err()
+                .0,
             axum::http::StatusCode::BAD_REQUEST
         );
 
@@ -1441,7 +1491,11 @@ mod tests {
                 id: None,
                 client_key: Some(format!("k{d}")),
                 parent_id: None,
-                parent_client_key: if d > 1 { Some(format!("k{}", d - 1)) } else { None },
+                parent_client_key: if d > 1 {
+                    Some(format!("k{}", d - 1))
+                } else {
+                    None
+                },
                 position: 0,
                 label: format!("Depth {d}"),
                 target_kind: MenuTargetKind::External,
@@ -1451,7 +1505,10 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            replace_menu_items_in_tx(&mut tx, m1.id, 1, &too_deep).await.unwrap_err().0,
+            replace_menu_items_in_tx(&mut tx, m1.id, 1, &too_deep)
+                .await
+                .unwrap_err()
+                .0,
             axum::http::StatusCode::BAD_REQUEST
         );
 
@@ -1483,7 +1540,10 @@ mod tests {
             },
         ];
         assert_eq!(
-            replace_menu_items_in_tx(&mut tx, m1.id, 1, &cycle).await.unwrap_err().0,
+            replace_menu_items_in_tx(&mut tx, m1.id, 1, &cycle)
+                .await
+                .unwrap_err()
+                .0,
             axum::http::StatusCode::BAD_REQUEST
         );
 
@@ -1493,7 +1553,10 @@ mod tests {
             item_ext("Two", 0, "https://example.com/2"),
         ];
         assert_eq!(
-            replace_menu_items_in_tx(&mut tx, m1.id, 1, &dup_pos).await.unwrap_err().0,
+            replace_menu_items_in_tx(&mut tx, m1.id, 1, &dup_pos)
+                .await
+                .unwrap_err()
+                .0,
             axum::http::StatusCode::BAD_REQUEST
         );
 
@@ -1515,10 +1578,15 @@ mod tests {
 
         // stale CAS
         assert_eq!(
-            replace_menu_items_in_tx(&mut tx, m1.id, 99, &[item_ext("Ok", 0, "https://example.com")])
-                .await
-                .unwrap_err()
-                .0,
+            replace_menu_items_in_tx(
+                &mut tx,
+                m1.id,
+                99,
+                &[item_ext("Ok", 0, "https://example.com")]
+            )
+            .await
+            .unwrap_err()
+            .0,
             axum::http::StatusCode::PRECONDITION_FAILED
         );
 

@@ -271,7 +271,7 @@ CREATE TABLE template_override_media_refs (
 
 | File | Action | Reason |
 |---|---|---|
-| `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql` | Create | DDL cho `site_reading_settings`, `page_layout_key`, `custom_template_key`, `template_overrides` & `template_override_media_refs`. |
+| `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql` | Create | DDL cho `site_reading_settings`, `page_layout_key`, `custom_template_key`, `template_overrides` & `template_override_media_refs`; D02 thêm Page `content_mode`, `entry_builder_documents`, `entry_builder_media_refs` và `owner_template_selections`. |
 | `cms/crates/opendash-core/src/theme.rs` | Modify | Thêm `ThemeV3Manifest`, `TemplateCandidateKind`, `TemplateCandidate`, `canonical_key()`, `ThemeTemplateDecl`, `PageLayoutDecl`, `ThemePatternDecl`. |
 | `cms/crates/opendash-core/src/builder.rs` | Modify | Thêm `KnownElement::ContentSlot(ContentSlotProps)` và `KnownElement::TemplatePart(TemplatePartProps)` (`#[serde(tag = "type", content = "props")]`). |
 | `cms/crates/opendash-server/src/template_sec.rs` | Modify | AST validator & compiler cho `od_part("<literal>")` (DAG, depth ≤ 3, fan-out ≤ 32, shared fuel) và `od_content()` (standalone `Stmt::EmitExpr`, per-render nonce, C-SEC check trước khi inject). |

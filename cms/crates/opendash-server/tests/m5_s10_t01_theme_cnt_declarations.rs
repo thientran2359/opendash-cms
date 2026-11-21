@@ -57,7 +57,12 @@ async fn spawn_server_at(site_root: PathBuf, run_setup: bool) -> TestServer {
 
     let client = Client::new();
     for _ in 0..80 {
-        if client.get(format!("{base_url}/api/health")).send().await.is_ok() {
+        if client
+            .get(format!("{base_url}/api/health"))
+            .send()
+            .await
+            .is_ok()
+        {
             break;
         }
         if let Some(status) = child.try_wait().unwrap() {
@@ -105,7 +110,7 @@ async fn login(client: &Client, base_url: &str) -> (String, String) {
     (cookie, csrf)
 }
 
-async fn install_v2(
+async fn install_v3(
     client: &Client,
     base_url: &str,
     cookie: &str,
@@ -115,7 +120,7 @@ async fn install_v2(
     let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
     let zip = build_zip(&[
         ("theme.json", &manifest_bytes),
-        ("templates/home.html", b"<main>Home</main>"),
+        ("index.html", b"<main>Home</main>"),
     ]);
     let res = client
         .post(format!("{base_url}/api/admin/themes"))
@@ -134,7 +139,7 @@ async fn install_v2(
         .to_string()
 }
 
-async fn activate_v2(
+async fn activate_v3(
     client: &Client,
     base_url: &str,
     cookie: &str,
@@ -167,18 +172,18 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
     let client = Client::new();
     let (cookie, csrf) = login(&client, &srv.base_url).await;
 
-    // 1. Theme A v1 declares `portfolio` CPT + fields + category/tag eligibility
-    let rev_a1 = install_v2(
+    // 1. Theme A revision 1.0.0 declares `portfolio` CPT + category/tag eligibility
+    let rev_a1 = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "1.0.0",
-            "templates": { "home": "templates/home.html" },
+            "templates": [{ "kind": "index", "file": "index.html" }],
             "declarations": {
                 "content_types": [{
                     "key": "portfolio",
@@ -202,7 +207,7 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         }),
     )
     .await;
-    let act1 = activate_v2(&client, &srv.base_url, &cookie, &csrf, 1, &rev_a1).await;
+    let act1 = activate_v3(&client, &srv.base_url, &cookie, &csrf, 1, &rev_a1).await;
     assert_eq!(act1.status(), 200);
 
     // Create a category term and a portfolio entry with term_ids
@@ -216,10 +221,15 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         .await
         .unwrap();
     assert_eq!(term_res.status(), 201);
-    let term_id = term_res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let term_id = term_res.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     let entry_res = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -233,20 +243,22 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         .await
         .unwrap();
     assert_eq!(entry_res.status(), 201);
-    let entry_id = entry_res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let entry_id = entry_res.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     // 2. Collision tests (409): Core `post` and other-owner `portfolio`
-    let rev_core_claim = install_v2(
+    let rev_core_claim = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-b",
             "name": "Theme B",
             "version": "1.0.0",
-            "templates": { "home": "templates/home.html" },
+            "templates": [{ "kind": "index", "file": "index.html" }],
             "declarations": {
                 "content_types": [{
                     "key": "post", "label": "Hijack Post",
@@ -261,41 +273,41 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         }),
     )
     .await;
-    let act_core = activate_v2(&client, &srv.base_url, &cookie, &csrf, 2, &rev_core_claim).await;
+    let act_core = activate_v3(&client, &srv.base_url, &cookie, &csrf, 2, &rev_core_claim).await;
     assert_eq!(act_core.status(), 409);
 
-    let rev_b_collide = install_v2(
+    let rev_b_collide = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-b",
             "name": "Theme B",
             "version": "1.0.1",
-            "templates": { "home": "templates/home.html" },
+            "templates": [{ "kind": "index", "file": "index.html" }],
             "declarations": {
                 "content_types": [{ "key": "portfolio", "label": "Stolen Portfolio" }]
             }
         }),
     )
     .await;
-    let act_collide = activate_v2(&client, &srv.base_url, &cookie, &csrf, 2, &rev_b_collide).await;
+    let act_collide = activate_v3(&client, &srv.base_url, &cookie, &csrf, 2, &rev_b_collide).await;
     assert_eq!(act_collide.status(), 409);
 
     // 3. Same-owner compatible re-declare (update label + add optional field) -> 200
-    let rev_a2 = install_v2(
+    let rev_a2 = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "2.0.0",
-            "templates": { "home": "templates/home.html" },
+            "templates": [{ "kind": "index", "file": "index.html" }],
             "declarations": {
                 "content_types": [{
                     "key": "portfolio",
@@ -320,22 +332,22 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         }),
     )
     .await;
-    let act2 = activate_v2(&client, &srv.base_url, &cookie, &csrf, 2, &rev_a2).await;
+    let act2 = activate_v3(&client, &srv.base_url, &cookie, &csrf, 2, &rev_a2).await;
     assert_eq!(act2.status(), 200);
 
     // 4. Incompatible schema changes rejected (422) without mutating active or data:
     // 4a. Changing field type (`short_text` -> `number`)
-    let rev_a_bad_type = install_v2(
+    let rev_a_bad_type = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "2.1.0",
-            "templates": { "home": "templates/home.html" },
+            "templates": [{ "kind": "index", "file": "index.html" }],
             "declarations": {
                 "content_types": [{
                     "key": "portfolio",
@@ -359,24 +371,24 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
     )
     .await;
     assert_eq!(
-        activate_v2(&client, &srv.base_url, &cookie, &csrf, 3, &rev_a_bad_type)
+        activate_v3(&client, &srv.base_url, &cookie, &csrf, 3, &rev_a_bad_type)
             .await
             .status(),
         422
     );
 
     // 4b. Adding a `required: true` field
-    let rev_a_bad_req = install_v2(
+    let rev_a_bad_req = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "2.2.0",
-            "templates": { "home": "templates/home.html" },
+            "templates": [{ "kind": "index", "file": "index.html" }],
             "declarations": {
                 "content_types": [{
                     "key": "portfolio",
@@ -401,24 +413,24 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
     )
     .await;
     assert_eq!(
-        activate_v2(&client, &srv.base_url, &cookie, &csrf, 3, &rev_a_bad_req)
+        activate_v3(&client, &srv.base_url, &cookie, &csrf, 3, &rev_a_bad_req)
             .await
             .status(),
         422
     );
 
     // 4c. Removing a select choice (`live`) when existing entries exist
-    let rev_a_bad_opt = install_v2(
+    let rev_a_bad_opt = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "2.3.0",
-            "templates": { "home": "templates/home.html" },
+            "templates": [{ "kind": "index", "file": "index.html" }],
             "declarations": {
                 "content_types": [{
                     "key": "portfolio",
@@ -441,33 +453,33 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
     )
     .await;
     assert_eq!(
-        activate_v2(&client, &srv.base_url, &cookie, &csrf, 3, &rev_a_bad_opt)
+        activate_v3(&client, &srv.base_url, &cookie, &csrf, 3, &rev_a_bad_opt)
             .await
             .status(),
         422
     );
 
     // 5. Omitting `portfolio` in Theme A v3 marks it `withdrawn`, keeping entries & term links editable
-    let rev_a3_withdraw = install_v2(
+    let rev_a3_withdraw = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-a",
             "name": "Theme A",
             "version": "3.0.0",
-            "templates": { "home": "templates/home.html" }
+            "templates": [{ "kind": "index", "file": "index.html" }]
         }),
     )
     .await;
-    let act3 = activate_v2(&client, &srv.base_url, &cookie, &csrf, 3, &rev_a3_withdraw).await;
+    let act3 = activate_v3(&client, &srv.base_url, &cookie, &csrf, 3, &rev_a3_withdraw).await;
     assert_eq!(act3.status(), 200);
 
     // Other owner still gets 409 on withdrawn `portfolio`
     assert_eq!(
-        activate_v2(&client, &srv.base_url, &cookie, &csrf, 4, &rev_b_collide)
+        activate_v3(&client, &srv.base_url, &cookie, &csrf, 4, &rev_b_collide)
             .await
             .status(),
         409
@@ -496,21 +508,21 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
     assert_eq!(upd_entry.status(), 200);
 
     // 6. Switch to Theme B (empty) -> `portfolio` becomes `provider_inactive` + stays `withdrawn`
-    let rev_b_clean = install_v2(
+    let rev_b_clean = install_v3(
         &client,
         &srv.base_url,
         &cookie,
         &csrf,
         json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": "theme-b",
             "name": "Theme B",
             "version": "2.0.0",
-            "templates": { "home": "templates/home.html" }
+            "templates": [{ "kind": "index", "file": "index.html" }]
         }),
     )
     .await;
-    let act4 = activate_v2(&client, &srv.base_url, &cookie, &csrf, 4, &rev_b_clean).await;
+    let act4 = activate_v3(&client, &srv.base_url, &cookie, &csrf, 4, &rev_b_clean).await;
     assert_eq!(act4.status(), 200);
 
     // 7. Restart server and verify state restored from DB
@@ -566,12 +578,11 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
             ),
         ]
     );
-    let term_links: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM entry_terms WHERE entry_id = ?")
-            .bind(entry_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let term_links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entry_terms WHERE entry_id = ?")
+        .bind(entry_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(term_links, 1);
     pool.close().await;
     let _ = fs::remove_dir_all(&site_root);

@@ -1,15 +1,21 @@
-//! Site-owned template overrides (`page`, `header`, `footer`, `archive`, `single`,
-//! `taxonomy_archive`) with CAS versioning, scoped precedence, and RouteContext support.
-use std::collections::BTreeMap;
+//! Site-owned typed templates. Candidate specificity wins before source priority:
+//! for each candidate, site-owned Builder AST precedes active theme v3 HTML.
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use opendash_core::{
-    builder::BuilderDocument,
-    content::{ContentTypeDefinition, valid_content_type_key},
+    builder::{BuilderDocument, ElementContent, KnownElement},
+    content::{ContentMode, ContentTypeDefinition, FieldRole, valid_content_type_key},
+    registry::{DeclarationState, ProviderStatus},
+    theme::{TemplateCandidate, TemplateCandidateKind},
 };
 use serde::{Deserialize, Serialize};
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use crate::{
+    auth::SessionContext,
     content_render::{self, SiteContext},
     error::{ApiError, ApiResult},
     page::{self, RenderedLayout},
@@ -19,8 +25,10 @@ use crate::{
             resolve_lists_in_tx,
         },
         builder_binding::{self, BindingResults},
-        theme::ActiveV2RoleTemplates,
+        content, entries, menu, settings, theme,
+        theme::ActiveThemeV3,
     },
+    template_sec::{self, PreviewCompositionBudget},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,24 +132,341 @@ impl OverrideScope {
     }
 }
 
+/// The route must authenticate publication, provider visibility, archive
+/// eligibility and assigned template eligibility before constructing context.
+#[derive(Debug, Clone)]
+pub enum PublicTemplateContext {
+    Home {
+        page_layout_key: Option<String>,
+    },
+    Page {
+        page_layout_key: Option<String>,
+    },
+    Single {
+        content_type: String,
+        entry_id: i64,
+        slug: String,
+        custom_template_key: Option<String>,
+    },
+    Archive {
+        content_type: String,
+    },
+    Taxonomy {
+        taxonomy: String,
+        term_id: i64,
+        slug: String,
+    },
+    NotFound,
+    Part {
+        part_key: String,
+    },
+}
+
+fn candidate(kind: TemplateCandidateKind) -> TemplateCandidate {
+    TemplateCandidate::new(kind)
+}
+
+pub fn build_candidates(context: &PublicTemplateContext) -> ApiResult<Vec<TemplateCandidate>> {
+    use TemplateCandidateKind as K;
+    let mut result = Vec::new();
+    match context {
+        PublicTemplateContext::Home { page_layout_key } => {
+            result.push(candidate(K::Home));
+            if let Some(layout_key) = page_layout_key {
+                let mut layout = candidate(K::PageLayout);
+                layout.layout_key = Some(layout_key.clone());
+                result.push(layout);
+            }
+            result.push(candidate(K::Page));
+            result.push(candidate(K::Index));
+        }
+        PublicTemplateContext::Page { page_layout_key } => {
+            if let Some(layout_key) = page_layout_key {
+                let mut layout = candidate(K::PageLayout);
+                layout.layout_key = Some(layout_key.clone());
+                result.push(layout);
+            }
+            result.push(candidate(K::Page));
+            result.push(candidate(K::Index));
+        }
+        PublicTemplateContext::Single {
+            content_type,
+            entry_id,
+            slug,
+            custom_template_key,
+        } => {
+            if let Some(custom_key) = custom_template_key {
+                let mut custom = candidate(K::SingleCustom);
+                custom.custom_key = Some(custom_key.clone());
+                result.push(custom);
+            }
+            let mut specific = candidate(K::Single);
+            specific.content_type = Some(content_type.clone());
+            specific.entry_id = Some(*entry_id);
+            result.push(specific);
+            let mut slugged = candidate(K::Single);
+            slugged.content_type = Some(content_type.clone());
+            slugged.selector_slug = Some(slug.clone());
+            result.push(slugged);
+            let mut typed = candidate(K::Single);
+            typed.content_type = Some(content_type.clone());
+            result.push(typed);
+            result.push(candidate(K::Single));
+            result.push(candidate(K::Singular));
+            result.push(candidate(K::Index));
+        }
+        PublicTemplateContext::Archive { content_type } => {
+            let mut typed = candidate(K::Archive);
+            typed.content_type = Some(content_type.clone());
+            result.push(typed);
+            result.push(candidate(K::Archive));
+            result.push(candidate(K::Index));
+        }
+        PublicTemplateContext::Taxonomy {
+            taxonomy,
+            term_id,
+            slug,
+        } => {
+            let mut specific = candidate(K::Taxonomy);
+            specific.taxonomy = Some(taxonomy.clone());
+            specific.term_id = Some(*term_id);
+            result.push(specific);
+            let mut slugged = candidate(K::Taxonomy);
+            slugged.taxonomy = Some(taxonomy.clone());
+            slugged.selector_slug = Some(slug.clone());
+            result.push(slugged);
+            let mut typed = candidate(K::Taxonomy);
+            typed.taxonomy = Some(taxonomy.clone());
+            result.push(typed);
+            result.push(candidate(K::Taxonomy));
+            result.push(candidate(K::Archive));
+            result.push(candidate(K::Index));
+        }
+        PublicTemplateContext::NotFound => {
+            result.push(candidate(K::NotFound));
+            result.push(candidate(K::Index));
+        }
+        PublicTemplateContext::Part { part_key } => {
+            let mut part = candidate(K::Part);
+            part.part_key = Some(part_key.clone());
+            result.push(part);
+        }
+    }
+    for item in &result {
+        item.canonical_key().map_err(ApiError::bad_request)?;
+    }
+    Ok(result)
+}
+
+/// For the Admin reset API, reconstruct the fallback chain from a stored
+/// target. ID-scoped targets recover the saved slug from SQLite so resetting
+/// an ID override can correctly reveal a more specific slug theme template.
+/// Callers with a fully authorized public route context may instead pass
+/// `build_candidates` for that context to `reset_typed_override`.
+pub async fn build_reset_candidate_chain(
+    db: &SqlitePool,
+    target: &TemplateCandidate,
+) -> ApiResult<Vec<TemplateCandidate>> {
+    use TemplateCandidateKind as K;
+    let mut candidates = vec![target.clone()];
+    match target.kind {
+        K::Home => {
+            let layout: Option<String> = sqlx::query_scalar(
+                "SELECT e.page_layout_key FROM site_reading_settings AS reading
+                   JOIN content_entries AS e ON e.id = reading.homepage_page_id
+                  WHERE reading.id=1 AND e.content_type_key='page'
+                    AND e.publication_status='published'",
+            )
+            .fetch_optional(db)
+            .await?
+            .flatten();
+            if let Some(layout_key) = layout {
+                let mut layout_candidate = candidate(K::PageLayout);
+                layout_candidate.layout_key = Some(layout_key);
+                candidates.push(layout_candidate);
+            }
+            candidates.push(candidate(K::Page));
+            candidates.push(candidate(K::Index));
+        }
+        K::PageLayout => {
+            candidates.push(candidate(K::Page));
+            candidates.push(candidate(K::Index));
+        }
+        K::Page => candidates.push(candidate(K::Index)),
+        K::Single => {
+            if let (Some(entry_id), Some(content_type)) =
+                (target.entry_id, target.content_type.as_deref())
+            {
+                let slug: Option<String> = sqlx::query_scalar(
+                    "SELECT slug FROM content_entries WHERE id=? AND content_type_key=?",
+                )
+                .bind(entry_id)
+                .bind(content_type)
+                .fetch_optional(db)
+                .await?;
+                if let Some(selector_slug) = slug {
+                    let mut slugged = candidate(K::Single);
+                    slugged.content_type = Some(content_type.to_owned());
+                    slugged.selector_slug = Some(selector_slug);
+                    candidates.push(slugged);
+                }
+            }
+            if let Some(content_type) = &target.content_type {
+                let mut typed = candidate(K::Single);
+                typed.content_type = Some(content_type.clone());
+                candidates.push(typed);
+            }
+            candidates.push(candidate(K::Single));
+            candidates.push(candidate(K::Singular));
+            candidates.push(candidate(K::Index));
+        }
+        K::SingleCustom => {
+            candidates.push(candidate(K::Single));
+            candidates.push(candidate(K::Singular));
+            candidates.push(candidate(K::Index));
+        }
+        K::Singular => candidates.push(candidate(K::Index)),
+        K::Archive => {
+            candidates.push(candidate(K::Archive));
+            candidates.push(candidate(K::Index));
+        }
+        K::Taxonomy => {
+            if let (Some(term_id), Some(taxonomy)) = (target.term_id, target.taxonomy.as_deref()) {
+                let slug: Option<String> =
+                    sqlx::query_scalar("SELECT slug FROM taxonomy_terms WHERE id=? AND kind=?")
+                        .bind(term_id)
+                        .bind(taxonomy)
+                        .fetch_optional(db)
+                        .await?;
+                if let Some(selector_slug) = slug {
+                    let mut slugged = candidate(K::Taxonomy);
+                    slugged.taxonomy = Some(taxonomy.to_owned());
+                    slugged.selector_slug = Some(selector_slug);
+                    candidates.push(slugged);
+                }
+            }
+            if let Some(taxonomy) = &target.taxonomy {
+                let mut typed = candidate(K::Taxonomy);
+                typed.taxonomy = Some(taxonomy.clone());
+                candidates.push(typed);
+            }
+            candidates.push(candidate(K::Taxonomy));
+            candidates.push(candidate(K::Archive));
+            candidates.push(candidate(K::Index));
+        }
+        K::NotFound => candidates.push(candidate(K::Index)),
+        K::Index | K::Part => {}
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    candidates.retain(|candidate| match candidate.canonical_key() {
+        Ok(key) => seen.insert(key),
+        // Keep malformed candidates for the explicit error pass below.
+        Err(_) => true,
+    });
+    for candidate in &candidates {
+        candidate.canonical_key().map_err(ApiError::bad_request)?;
+    }
+    Ok(candidates)
+}
+
+fn candidate_for_legacy_scope(scope: &OverrideScope) -> ApiResult<TemplateCandidate> {
+    use TemplateCandidateKind as K;
+    let mut result = match scope.role {
+        OverrideRole::Page => candidate(K::Page),
+        OverrideRole::Header | OverrideRole::Footer => {
+            let mut part = candidate(K::Part);
+            part.part_key = Some(scope.role.as_str().to_string());
+            part
+        }
+        OverrideRole::Archive => candidate(K::Archive),
+        OverrideRole::Single => candidate(K::Single),
+        OverrideRole::TaxonomyArchive => candidate(K::Taxonomy),
+    };
+    if scope.role == OverrideRole::Page
+        && (scope.scope_entry_id.is_some() || scope.scope_type_key.is_some())
+    {
+        return Err(ApiError::bad_request(
+            "Legacy Page scope has no typed template identity.",
+        ));
+    }
+    result.content_type = scope.scope_type_key.clone();
+    result.entry_id = scope.scope_entry_id;
+    result.canonical_key().map_err(ApiError::bad_request)?;
+    Ok(result)
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TemplateOverrideRecord {
     pub id: i64,
+    pub target_kind: TemplateCandidateKind,
+    pub canonical_target_key: String,
+    pub target: TemplateCandidate,
+    #[serde(skip_serializing)]
     pub role: String,
+    #[serde(skip_serializing)]
     pub scope_type_key: Option<String>,
+    #[serde(skip_serializing)]
     pub scope_entry_id: Option<i64>,
+    #[serde(rename = "ast_json")]
     pub document: BuilderDocument,
     pub version: i64,
     pub base_theme_id: Option<String>,
+    pub base_revision_digest: Option<String>,
+    #[serde(skip_serializing)]
     pub base_revision_id: Option<String>,
     pub updated_at: String,
+}
+
+pub type TemplateTargetInput = TemplateCandidate;
+
+#[derive(Debug, Clone)]
+pub enum TemplateResolution {
+    DbOverride(TemplateOverrideRecord),
+    ActiveTheme { target_key: String, html: String },
+    CoreFallback,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EffectiveSourceDescriptor {
+    pub kind: &'static str,
+    pub label: String,
+    pub target_key: Option<String>,
+}
+
+impl TemplateResolution {
+    pub fn effective_source(&self) -> EffectiveSourceDescriptor {
+        match self {
+            Self::DbOverride(record) => EffectiveSourceDescriptor {
+                kind: "db_override",
+                label: format!("Site template: {}", record.canonical_target_key),
+                target_key: Some(record.canonical_target_key.clone()),
+            },
+            Self::ActiveTheme { target_key, .. } => EffectiveSourceDescriptor {
+                kind: "active_theme",
+                label: format!("Active theme: {target_key}"),
+                target_key: Some(target_key.clone()),
+            },
+            Self::CoreFallback => EffectiveSourceDescriptor {
+                kind: "core_fallback",
+                label: "Core fallback".into(),
+                target_key: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ResetTemplateOutcome {
+    pub reset_id: i64,
+    pub canonical_target_key: String,
+    pub next_effective_source: EffectiveSourceDescriptor,
 }
 
 type OverrideRow = (
     i64,
     String,
-    Option<String>,
-    Option<i64>,
+    String,
+    String,
     String,
     i64,
     Option<String>,
@@ -150,27 +475,152 @@ type OverrideRow = (
 );
 
 fn row_to_record(row: OverrideRow) -> ApiResult<TemplateOverrideRecord> {
+    let target: TemplateCandidate = serde_json::from_str(&row.3)
+        .map_err(|_| ApiError::internal("Template override target trong DB không hợp lệ."))?;
+    let key = target.canonical_key().map_err(ApiError::internal)?;
+    if key != row.2
+        || serde_json::to_value(target.kind)? != serde_json::Value::String(row.1.clone())
+    {
+        return Err(ApiError::internal(
+            "Template override target và canonical key không khớp.",
+        ));
+    }
     let document = BuilderDocument::from_json(row.4.as_bytes())
         .map_err(|_| ApiError::internal("Template override AST trong DB không hợp lệ."))?;
+    let role = match target.kind {
+        TemplateCandidateKind::Home
+        | TemplateCandidateKind::Page
+        | TemplateCandidateKind::PageLayout => "page",
+        TemplateCandidateKind::Single
+        | TemplateCandidateKind::SingleCustom
+        | TemplateCandidateKind::Singular => "single",
+        TemplateCandidateKind::Archive => "archive",
+        TemplateCandidateKind::Taxonomy => "taxonomy_archive",
+        TemplateCandidateKind::Part => target.part_key.as_deref().unwrap_or("part"),
+        TemplateCandidateKind::Index | TemplateCandidateKind::NotFound => "index",
+    };
     Ok(TemplateOverrideRecord {
         id: row.0,
-        role: row.1,
-        scope_type_key: row.2,
-        scope_entry_id: row.3,
+        target_kind: target.kind,
+        canonical_target_key: key,
+        role: role.to_string(),
+        scope_type_key: target.content_type.clone(),
+        scope_entry_id: target.entry_id,
+        target,
         document,
         version: row.5,
         base_theme_id: row.6,
+        base_revision_digest: row.7.clone(),
         base_revision_id: row.7,
         updated_at: row.8,
     })
 }
 
+async fn get_typed_override_on_connection(
+    conn: &mut SqliteConnection,
+    canonical_key: &str,
+) -> ApiResult<Option<TemplateOverrideRecord>> {
+    let row: Option<OverrideRow> = sqlx::query_as(
+        "SELECT id, target_kind, canonical_target_key, target_json, ast_json, version,
+                base_theme_id, base_revision_digest, updated_at
+           FROM template_overrides WHERE canonical_target_key = ?",
+    )
+    .bind(canonical_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    row.map(row_to_record).transpose()
+}
+
+pub async fn get_typed_override(
+    db: &SqlitePool,
+    target: &TemplateCandidate,
+) -> ApiResult<Option<TemplateOverrideRecord>> {
+    let key = target.canonical_key().map_err(ApiError::bad_request)?;
+    let mut conn = db.acquire().await?;
+    get_typed_override_on_connection(&mut conn, &key).await
+}
+
+pub async fn get_typed_override_by_id(
+    db: &SqlitePool,
+    override_id: i64,
+) -> ApiResult<Option<TemplateOverrideRecord>> {
+    let row: Option<OverrideRow> = sqlx::query_as(
+        "SELECT id, target_kind, canonical_target_key, target_json, ast_json, version,
+                base_theme_id, base_revision_digest, updated_at
+           FROM template_overrides WHERE id = ?",
+    )
+    .bind(override_id)
+    .fetch_optional(db)
+    .await?;
+    row.map(row_to_record).transpose()
+}
+
+fn theme_source_for_candidate<'a>(
+    candidate: &TemplateCandidate,
+    target_key: &str,
+    templates: Option<&'a BTreeMap<String, String>>,
+    parts: Option<&'a BTreeMap<String, String>>,
+    layouts: Option<&'a BTreeMap<String, String>>,
+) -> Option<&'a str> {
+    match candidate.kind {
+        TemplateCandidateKind::Part => candidate
+            .part_key
+            .as_deref()
+            .and_then(|key| parts.and_then(|map| map.get(key)))
+            .map(String::as_str),
+        TemplateCandidateKind::PageLayout => candidate
+            .layout_key
+            .as_deref()
+            .and_then(|key| layouts.and_then(|map| map.get(key)))
+            .map(String::as_str),
+        _ => templates
+            .and_then(|map| map.get(target_key))
+            .map(String::as_str),
+    }
+}
+
+pub(super) async fn resolve_template_2axis_on_connection(
+    conn: &mut SqliteConnection,
+    candidates: &[TemplateCandidate],
+    templates: Option<&BTreeMap<String, String>>,
+    parts: Option<&BTreeMap<String, String>>,
+    layouts: Option<&BTreeMap<String, String>>,
+) -> ApiResult<TemplateResolution> {
+    for candidate in candidates {
+        let key = candidate.canonical_key().map_err(ApiError::bad_request)?;
+        if let Some(record) = get_typed_override_on_connection(conn, &key).await? {
+            return Ok(TemplateResolution::DbOverride(record));
+        }
+        if let Some(html) = theme_source_for_candidate(candidate, &key, templates, parts, layouts) {
+            return Ok(TemplateResolution::ActiveTheme {
+                target_key: key,
+                html: html.to_owned(),
+            });
+        }
+    }
+    Ok(TemplateResolution::CoreFallback)
+}
+
+/// The `templates`, `parts`, `layouts` maps MUST come from the verified active
+/// durable revision (storage::theme::load_active_theme_v3); raw untrusted theme
+/// paths, without verification, must never be passed into this resolver.
+pub async fn resolve_template_2axis(
+    db: &SqlitePool,
+    candidates: &[TemplateCandidate],
+    templates: Option<&BTreeMap<String, String>>,
+    parts: Option<&BTreeMap<String, String>>,
+    layouts: Option<&BTreeMap<String, String>>,
+) -> ApiResult<TemplateResolution> {
+    let mut conn = db.acquire().await?;
+    resolve_template_2axis_on_connection(&mut conn, candidates, templates, parts, layouts).await
+}
+
 pub async fn list_overrides(db: &SqlitePool) -> ApiResult<Vec<TemplateOverrideRecord>> {
     let rows: Vec<OverrideRow> = sqlx::query_as(
-        "SELECT id, role, scope_type_key, scope_entry_id, ast_json, version,
-                base_theme_id, base_revision_id, updated_at
+        "SELECT id, target_kind, canonical_target_key, target_json, ast_json, version,
+                base_theme_id, base_revision_digest, updated_at
            FROM template_overrides
-          ORDER BY role ASC, COALESCE(scope_type_key, '') ASC, COALESCE(scope_entry_id, -1) ASC",
+          ORDER BY canonical_target_key ASC",
     )
     .fetch_all(db)
     .await?;
@@ -192,48 +642,52 @@ async fn get_override_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     scope: &OverrideScope,
 ) -> ApiResult<Option<TemplateOverrideRecord>> {
+    let candidate = candidate_for_legacy_scope(scope)?;
+    let key = candidate.canonical_key().map_err(ApiError::bad_request)?;
     let row: Option<OverrideRow> = sqlx::query_as(
-        "SELECT id, role, scope_type_key, scope_entry_id, ast_json, version,
-                base_theme_id, base_revision_id, updated_at
-           FROM template_overrides
-          WHERE role = ?
-            AND COALESCE(scope_type_key, '') = COALESCE(?, '')
-            AND COALESCE(scope_entry_id, -1) = COALESCE(?, -1)",
+        "SELECT id, target_kind, canonical_target_key, target_json, ast_json, version,
+                base_theme_id, base_revision_digest, updated_at
+           FROM template_overrides WHERE canonical_target_key = ?",
     )
-    .bind(scope.role.as_str())
-    .bind(scope.scope_type_key.as_deref())
-    .bind(scope.scope_entry_id)
+    .bind(key)
     .fetch_optional(&mut **tx)
     .await?;
     row.map(row_to_record).transpose()
 }
 
-/// Resolves the most specific saved override for a public route context:
-/// `(role, type_key, entry_id)` -> `(role, type_key, None)` -> `(role, None, None)`.
+/// Compatibility reader for callers being retired with the v2 public routes.
 pub async fn resolve_effective_override(
     db: &SqlitePool,
     role: OverrideRole,
     type_key: Option<&str>,
     entry_id: Option<i64>,
 ) -> ApiResult<Option<TemplateOverrideRecord>> {
-    let row: Option<OverrideRow> = sqlx::query_as(
-        "SELECT id, role, scope_type_key, scope_entry_id, ast_json, version,
-                base_theme_id, base_revision_id, updated_at
-           FROM template_overrides
-          WHERE role = ?
-            AND (scope_type_key IS NULL OR scope_type_key = ?)
-            AND (scope_entry_id IS NULL OR scope_entry_id = ?)
-          ORDER BY (scope_entry_id IS NOT NULL) DESC,
-                   (scope_type_key IS NOT NULL) DESC,
-                   id DESC
-          LIMIT 1",
-    )
-    .bind(role.as_str())
-    .bind(type_key)
-    .bind(entry_id)
-    .fetch_optional(db)
-    .await?;
-    row.map(row_to_record).transpose()
+    let scope = OverrideScope::new(
+        role,
+        type_key
+            .filter(|_| role.allows_type_scope())
+            .map(str::to_string),
+        entry_id.filter(|_| role.allows_entry_scope()),
+    )?;
+    let mut candidates = vec![candidate_for_legacy_scope(&scope)?];
+    if scope.scope_entry_id.is_some() {
+        candidates.push(candidate_for_legacy_scope(&OverrideScope::new(
+            role,
+            scope.scope_type_key.clone(),
+            None,
+        )?)?);
+    }
+    if scope.scope_type_key.is_some() {
+        candidates.push(candidate_for_legacy_scope(&OverrideScope::new(
+            role, None, None,
+        )?)?);
+    }
+    for candidate in candidates {
+        if let Some(record) = get_typed_override(db, &candidate).await? {
+            return Ok(Some(record));
+        }
+    }
+    Ok(None)
 }
 
 async fn validate_scope_and_load_cpt_fields(
@@ -273,192 +727,753 @@ async fn validate_scope_and_load_cpt_fields(
     Ok(Some(field_keys))
 }
 
-pub async fn preview_override(
-    db: &SqlitePool,
-    scope: &OverrideScope,
-    document: &BuilderDocument,
-    preview_entry: Option<(&str, &str)>,
-) -> ApiResult<RenderedLayout> {
-    check_preview_images(db, document).await?;
-    let mut tx = db.begin().await?;
-    let scoped_fields = validate_scope_and_load_cpt_fields(&mut tx, scope).await?;
-    let state = builder::read_home_tx(&mut tx).await?;
-    let existing = get_override_in_tx(&mut tx, scope).await?;
-    let prior_doc = existing.as_ref().map(|r| &r.document);
-    document
-        .validate_for_save(&state.descriptors()?, prior_doc)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    document
-        .validate_route_context_for_role(Some(scope.role.as_str()), scoped_fields.as_deref())
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-    let effective_entry: Option<(String, String)> = match preview_entry {
-        Some((tk, slug)) => Some((tk.to_string(), slug.to_string())),
-        None => {
-            if let (Some(tk), Some(eid)) = (&scope.scope_type_key, scope.scope_entry_id) {
-                let slug: Option<String> = sqlx::query_scalar(
-                    "SELECT slug FROM content_entries WHERE id = ? AND content_type_key = ?",
-                )
-                .bind(eid)
-                .bind(tk)
-                .fetch_optional(&mut *tx)
-                .await?;
-                slug.map(|s| (tk.clone(), s))
-            } else {
-                None
-            }
-        }
-    };
-    let route_ref = effective_entry
-        .as_ref()
-        .map(|(t, s)| (t.as_str(), s.as_str()));
-    let bindings =
-        builder_binding::resolve_in_tx_with_route(&mut tx, document, true, route_ref).await?;
-    let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
-    let forms = resolve_contact_forms_in_tx(&mut tx, document).await?;
-    tx.commit().await?;
-    page::render_builder_with_lists_and_forms(&state, document, true, &bindings, &lists, &forms)
+fn template_kind_str(kind: TemplateCandidateKind) -> &'static str {
+    use TemplateCandidateKind as K;
+    match kind {
+        K::Home => "home",
+        K::Page => "page",
+        K::PageLayout => "page_layout",
+        K::Single => "single",
+        K::SingleCustom => "single_custom",
+        K::Archive => "archive",
+        K::Taxonomy => "taxonomy",
+        K::Singular => "singular",
+        K::Index => "index",
+        K::NotFound => "not_found",
+        K::Part => "part",
+    }
 }
 
-pub async fn save_override_and_render(
+fn document_parts_and_slot_count(document: &BuilderDocument) -> ApiResult<(Vec<String>, usize)> {
+    let mut parts = Vec::new();
+    let mut slots = 0;
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    match &element.content {
+                        ElementContent::Known(KnownElement::ContentSlot(_)) => slots += 1,
+                        ElementContent::Known(KnownElement::TemplatePart(props)) => {
+                            parts.push(props.part_key.clone());
+                        }
+                        ElementContent::Unresolved(value)
+                            if matches!(
+                                value.get("type").and_then(serde_json::Value::as_str),
+                                Some("core/content_slot" | "core/template_part")
+                            ) =>
+                        {
+                            return Err(ApiError::bad_request(
+                                "Malformed content slot or template part block.",
+                            ));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    Ok((parts, slots))
+}
+
+fn validate_content_slots(target: &TemplateCandidate, slots: usize) -> ApiResult<()> {
+    use TemplateCandidateKind as K;
+    let valid = match target.kind {
+        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular => slots == 1,
+        K::Index => slots <= 1,
+        K::Archive | K::Taxonomy | K::NotFound | K::Part => slots == 0,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(
+            "Invalid content slot count for template target.",
+        ))
+    }
+}
+
+/// Check site-owned part edges in the final post-save graph, not only the
+/// submitted node. A missing part may be provided by the active theme; the
+/// public renderer must enforce the same depth/fan-out budget for theme parts.
+async fn validate_part_graph_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    submitted: &BuilderDocument,
+) -> ApiResult<()> {
+    let target_key = target.canonical_key().map_err(ApiError::bad_request)?;
+    let (initial, _) = document_parts_and_slot_count(submitted)?;
+    let mut stack = vec![(initial, 0_usize, vec![target_key.clone()])];
+    let mut expansions = 0_usize;
+    while let Some((parts, depth, path)) = stack.pop() {
+        for part_key in parts {
+            let part_candidate = TemplateCandidate {
+                part_key: Some(part_key),
+                ..candidate(TemplateCandidateKind::Part)
+            };
+            let key = part_candidate
+                .canonical_key()
+                .map_err(ApiError::bad_request)?;
+            if path.iter().any(|ancestor| ancestor == &key) {
+                return Err(ApiError::bad_request("Template part cycle detected."));
+            }
+            if depth >= 3 {
+                return Err(ApiError::bad_request("Template part depth exceeds 3."));
+            }
+            expansions += 1;
+            if expansions > 32 {
+                return Err(ApiError::bad_request(
+                    "Template parts exceed 32 expansions.",
+                ));
+            }
+            let nested_doc = if key == target_key {
+                Some(submitted.clone())
+            } else {
+                get_typed_override_on_connection(&mut *tx, &key)
+                    .await?
+                    .map(|record| record.document)
+            };
+            if let Some(nested_doc) = nested_doc {
+                let (children, count) = document_parts_and_slot_count(&nested_doc)?;
+                validate_content_slots(&part_candidate, count)?;
+                let mut next_path = path.clone();
+                next_path.push(key);
+                stack.push((children, depth + 1, next_path));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn validate_typed_target_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+) -> ApiResult<Option<Vec<String>>> {
+    target.canonical_key().map_err(ApiError::bad_request)?;
+    if let Some(kind) = target.content_type.as_deref() {
+        let role = if target.kind == TemplateCandidateKind::Archive {
+            OverrideRole::Archive
+        } else {
+            OverrideRole::Single
+        };
+        let scope = OverrideScope::new(role, Some(kind.to_owned()), target.entry_id)?;
+        return validate_scope_and_load_cpt_fields(tx, &scope).await;
+    }
+    if let Some(term_id) = target.term_id {
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM taxonomy_terms WHERE id = ? AND kind = ?)",
+        )
+        .bind(term_id)
+        .bind(target.taxonomy.as_deref())
+        .fetch_one(&mut **tx)
+        .await?;
+        if exists == 0 {
+            return Err(ApiError::not_found(
+                "Taxonomy term for template target not found.",
+            ));
+        }
+    }
+    Ok(None)
+}
+
+/// The same AST and route-binding validation is used by Save and read-only Preview.
+async fn validate_typed_document_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    prior: Option<&BuilderDocument>,
+) -> ApiResult<HomeState> {
+    let scoped_fields = validate_typed_target_in_tx(tx, target).await?;
+    let state = builder::read_home_tx(tx).await?;
+    document
+        .validate_for_save(&state.descriptors()?, prior)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let route_role = match target.kind {
+        TemplateCandidateKind::Single
+        | TemplateCandidateKind::SingleCustom
+        | TemplateCandidateKind::Singular => Some("single"),
+        TemplateCandidateKind::Home
+        | TemplateCandidateKind::Page
+        | TemplateCandidateKind::PageLayout => Some("page"),
+        _ => None,
+    };
+    document
+        .validate_route_context_for_role(route_role, scoped_fields.as_deref())
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let (_, slots) = document_parts_and_slot_count(document)?;
+    validate_content_slots(target, slots)?;
+    builder::validate_media_refs_in_tx(&mut **tx, document).await?;
+    Ok(state)
+}
+
+async fn refresh_override_media_refs_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    override_id: i64,
+    document: &BuilderDocument,
+) -> ApiResult<()> {
+    sqlx::query("DELETE FROM template_override_media_refs WHERE override_id = ?")
+        .bind(override_id)
+        .execute(&mut **tx)
+        .await?;
+    for (role, ids) in [
+        ("image", builder::image_ids(document)),
+        ("video", builder::video_ids(document)),
+        ("poster", builder::poster_image_ids(document)),
+    ] {
+        for media_id in ids {
+            sqlx::query(
+                "INSERT INTO template_override_media_refs (override_id, media_id, ref_role)
+                 VALUES (?, ?, ?)",
+            )
+            .bind(override_id)
+            .bind(media_id)
+            .bind(role)
+            .execute(&mut **tx)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Creates without an ETag, or updates only the exact typed target at If-Match
+/// version. The AST, provenance and media projections commit atomically.
+pub async fn save_typed_override(
     db: &SqlitePool,
-    scope: &OverrideScope,
+    target: &TemplateCandidate,
     document: &BuilderDocument,
     expected_version: Option<i64>,
-) -> ApiResult<(TemplateOverrideRecord, RenderedLayout)> {
+) -> ApiResult<TemplateOverrideRecord> {
+    let key = target.canonical_key().map_err(ApiError::bad_request)?;
     check_preview_images(db, document).await?;
     let mut tx = db.begin().await?;
-    let scoped_fields = validate_scope_and_load_cpt_fields(&mut tx, scope).await?;
-    let state = builder::read_home_tx(&mut tx).await?;
-    let existing = get_override_in_tx(&mut tx, scope).await?;
-
-    match (&existing, expected_version) {
-        (Some(_row), None) => {
+    let existing = get_typed_override_on_connection(&mut tx, &key).await?;
+    match (existing.as_ref(), expected_version) {
+        (Some(_), None) => {
             return Err(ApiError::precondition_required(
-                "Cần If-Match khi cập nhật template override đã tồn tại.",
+                "If-Match required for existing override.",
             ));
         }
-        (Some(row), Some(v)) if v != row.version => {
-            return Err(ApiError::precondition_failed(
-                "Template override đã thay đổi bởi phiên bản khác.",
-            ));
+        (Some(row), Some(version)) if row.version != version => {
+            return Err(ApiError::precondition_failed("Template override changed."));
         }
-        (None, Some(v)) if v != 0 => {
+        (None, Some(_)) => {
             return Err(ApiError::precondition_failed(
-                "Template override chưa tồn tại với phiên bản yêu cầu.",
+                "Template override no longer exists.",
             ));
         }
         _ => {}
     }
+    validate_typed_document_in_tx(
+        &mut tx,
+        target,
+        document,
+        existing.as_ref().map(|row| &row.document),
+    )
+    .await?;
+    validate_part_graph_in_tx(&mut tx, target, document).await?;
 
-    let prior_doc = existing.as_ref().map(|r| &r.document);
-    document
-        .validate_for_save(&state.descriptors()?, prior_doc)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    document
-        .validate_route_context_for_role(Some(scope.role.as_str()), scoped_fields.as_deref())
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    builder::validate_media_refs_in_tx(&mut tx, document).await?;
-
-    let ast_json = serde_json::to_string(document)?;
-    let active_theme: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT r.theme_id, a.revision_id
+    let ast_json = String::from_utf8(
+        document
+            .to_json()
+            .map_err(|e| ApiError::bad_request(e.to_string()))?,
+    )
+    .map_err(|_| ApiError::bad_request("Invalid Builder UTF-8 document."))?;
+    let target_json = serde_json::to_string(target)?;
+    let active: Option<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT r.theme_id, r.revision_digest
            FROM theme_active_selection a
            LEFT JOIN theme_revisions r ON r.revision_id = a.revision_id
           WHERE a.id = 1",
     )
     .fetch_optional(&mut *tx)
     .await?;
-    let (base_theme_id, base_revision_id) = active_theme.unwrap_or((None, None));
+    let (base_theme_id, base_revision_digest) = active.unwrap_or((None, None));
 
-    let next_version = existing.as_ref().map_or(1, |r| r.version + 1);
     if let Some(ref row) = existing {
-        let res = sqlx::query(
-            "UPDATE template_overrides
-                SET ast_json = ?,
-                    version = ?,
-                    base_theme_id = COALESCE(base_theme_id, ?),
-                    base_revision_id = COALESCE(base_revision_id, ?),
-                    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        let affected = sqlx::query(
+            "UPDATE template_overrides SET ast_json = ?, target_json = ?, version = version + 1,
+                   base_theme_id = COALESCE(base_theme_id, ?),
+                   base_revision_digest = COALESCE(base_revision_digest, ?),
+                   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
               WHERE id = ? AND version = ?",
         )
         .bind(&ast_json)
-        .bind(next_version)
+        .bind(&target_json)
         .bind(base_theme_id.as_deref())
-        .bind(base_revision_id.as_deref())
+        .bind(base_revision_digest.as_deref())
         .bind(row.id)
         .bind(row.version)
         .execute(&mut *tx)
-        .await?;
-        if res.rows_affected() == 0 {
+        .await?
+        .rows_affected();
+        if affected != 1 {
             return Err(ApiError::precondition_failed(
-                "Template override đã thay đổi đồng thời.",
+                "Template override changed concurrently.",
             ));
         }
     } else {
         sqlx::query(
             "INSERT INTO template_overrides (
-                role, scope_type_key, scope_entry_id, ast_json, version, base_theme_id, base_revision_id
-             ) VALUES (?, ?, ?, ?, 1, ?, ?)",
+                target_kind, canonical_target_key, target_json, ast_json,
+                base_theme_id, base_revision_digest, version
+             ) VALUES (?, ?, ?, ?, ?, ?, 1)",
         )
-        .bind(scope.role.as_str())
-        .bind(scope.scope_type_key.as_deref())
-        .bind(scope.scope_entry_id)
+        .bind(template_kind_str(target.kind))
+        .bind(&key)
+        .bind(&target_json)
         .bind(&ast_json)
         .bind(base_theme_id.as_deref())
-        .bind(base_revision_id.as_deref())
+        .bind(base_revision_digest.as_deref())
         .execute(&mut *tx)
         .await?;
     }
-
-    let saved = get_override_in_tx(&mut tx, scope)
+    let saved = get_typed_override_on_connection(&mut tx, &key)
         .await?
-        .ok_or_else(|| ApiError::internal("Không đọc lại được template override vừa lưu."))?;
-    sqlx::query("DELETE FROM template_override_media_refs WHERE override_id = ?")
-        .bind(saved.id)
-        .execute(&mut *tx)
-        .await?;
-    for id in builder::image_ids(document) {
-        sqlx::query(
-            "INSERT INTO template_override_media_refs (override_id, media_id, ref_role)
-             VALUES (?, ?, 'image')",
-        )
-        .bind(saved.id)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    }
-    for id in builder::video_ids(document) {
-        sqlx::query(
-            "INSERT INTO template_override_media_refs (override_id, media_id, ref_role)
-             VALUES (?, ?, 'video')",
-        )
-        .bind(saved.id)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    }
-    for id in builder::poster_image_ids(document) {
-        sqlx::query(
-            "INSERT INTO template_override_media_refs (override_id, media_id, ref_role)
-             VALUES (?, ?, 'poster')",
-        )
-        .bind(saved.id)
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
-    }
-    let bindings =
-        builder_binding::resolve_in_tx_with_route(&mut tx, document, false, None).await?;
-    let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
-    let forms = resolve_contact_forms_in_tx(&mut tx, document).await?;
-    let rendered = page::render_builder_with_lists_and_forms(
-        &state, document, false, &bindings, &lists, &forms,
-    )?;
+        .ok_or_else(|| ApiError::internal("Template override not readable after save."))?;
+    refresh_override_media_refs_in_tx(&mut tx, saved.id, document).await?;
     tx.commit().await?;
+    Ok(saved)
+}
+
+pub async fn reset_typed_override(
+    db: &SqlitePool,
+    override_id: i64,
+    expected_version: Option<i64>,
+    candidates: &[TemplateCandidate],
+    templates: Option<&BTreeMap<String, String>>,
+    parts: Option<&BTreeMap<String, String>>,
+    layouts: Option<&BTreeMap<String, String>>,
+) -> ApiResult<ResetTemplateOutcome> {
+    let expected_version = expected_version
+        .ok_or_else(|| ApiError::precondition_required("If-Match required for reset."))?;
+    let mut tx = db.begin().await?;
+    let row: Option<OverrideRow> = sqlx::query_as(
+        "SELECT id, target_kind, canonical_target_key, target_json, ast_json, version,
+                base_theme_id, base_revision_digest, updated_at
+           FROM template_overrides WHERE id = ?",
+    )
+    .bind(override_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let existing = row
+        .map(row_to_record)
+        .transpose()?
+        .ok_or_else(|| ApiError::not_found("Template override not found."))?;
+    if existing.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Template override changed before reset.",
+        ));
+    }
+    if candidates
+        .first()
+        .and_then(|candidate| candidate.canonical_key().ok())
+        .as_deref()
+        != Some(existing.canonical_target_key.as_str())
+    {
+        return Err(ApiError::bad_request(
+            "Reset candidate chain must begin with target.",
+        ));
+    }
+    let affected = sqlx::query("DELETE FROM template_overrides WHERE id = ? AND version = ?")
+        .bind(override_id)
+        .bind(expected_version)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    if affected != 1 {
+        return Err(ApiError::precondition_failed(
+            "Template override changed concurrently.",
+        ));
+    }
+    let next = resolve_template_2axis_on_connection(&mut tx, candidates, templates, parts, layouts)
+        .await?
+        .effective_source();
+    tx.commit().await?;
+    Ok(ResetTemplateOutcome {
+        reset_id: existing.id,
+        canonical_target_key: existing.canonical_target_key,
+        next_effective_source: next,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplatePreviewEntry {
+    pub type_key: String,
+    pub entry_id: i64,
+}
+
+enum PreviewPartSource {
+    Builder(BuilderDocument),
+    Theme(String),
+    Missing,
+}
+
+async fn preview_part_graph(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    active: Option<&theme::CapturedThemeV3>,
+    budget: &mut PreviewCompositionBudget,
+) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
+    let (edges, _) = document_parts_and_slot_count(document)?;
+    let mut pending = vec![(
+        edges,
+        0_usize,
+        vec![target.canonical_key().map_err(ApiError::bad_request)?],
+    )];
+    let mut graph = BTreeMap::new();
+    while let Some((edges, depth, path)) = pending.pop() {
+        budget.stack = path;
+        for part_key in edges {
+            let target = TemplateCandidate {
+                part_key: Some(part_key.clone()),
+                ..candidate(TemplateCandidateKind::Part)
+            };
+            let key = target.canonical_key().map_err(ApiError::bad_request)?;
+            if budget.stack.contains(&key) {
+                return Err(ApiError::bad_request("Template part cycle detected."));
+            }
+            budget.expansions += 1;
+            if depth >= 3 || budget.expansions > 32 {
+                return Err(ApiError::bad_request(
+                    "Template part expansion limit exceeded.",
+                ));
+            }
+            if !graph.contains_key(&part_key) {
+                let source = if let Some(row) = get_typed_override_on_connection(tx, &key).await? {
+                    validate_typed_document_in_tx(tx, &target, &row.document, Some(&row.document))
+                        .await?;
+                    PreviewPartSource::Builder(row.document)
+                } else if let Some(source) =
+                    active.map(|a| a.part(&part_key)).transpose()?.flatten()
+                {
+                    PreviewPartSource::Theme(source)
+                } else {
+                    PreviewPartSource::Missing
+                };
+                graph.insert(part_key.clone(), source);
+            }
+            let children = match &graph[&part_key] {
+                PreviewPartSource::Builder(doc) => document_parts_and_slot_count(doc)?.0,
+                PreviewPartSource::Theme(source) => {
+                    template_sec::preview_csec_part_keys(&part_key, source)
+                        .map_err(ApiError::bad_request)?
+                }
+                PreviewPartSource::Missing => Vec::new(),
+            };
+            let mut path = budget.stack.clone();
+            path.push(key);
+            pending.push((children, depth + 1, path));
+        }
+    }
+    budget.stack.clear();
+    Ok(graph)
+}
+
+struct PreviewRenderContext<'a> {
+    state: &'a HomeState,
+    graph: &'a BTreeMap<String, PreviewPartSource>,
+    theme_context: &'a serde_json::Value,
+    route: Option<(&'a str, &'a str)>,
+}
+
+async fn render_preview_builder(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    slot: Option<&str>,
+    ctx: &PreviewRenderContext<'_>,
+    budget: &mut PreviewCompositionBudget,
+) -> ApiResult<RenderedLayout> {
+    let mut parts = BTreeMap::new();
+    let mut diagnostics = Vec::new();
+    for key in document_parts_and_slot_count(document)?.0 {
+        if parts.contains_key(&key) {
+            continue;
+        }
+        if let Some(mut part) = Box::pin(render_preview_part(tx, &key, ctx, budget)).await? {
+            diagnostics.append(&mut part.diagnostics);
+            parts.insert(key, part.html);
+        }
+    }
+    let bindings = builder_binding::resolve_in_tx_with_route(tx, document, true, ctx.route).await?;
+    let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
+    let forms = resolve_contact_forms_in_tx(tx, document).await?;
+    let mut rendered = page::render_builder_with_template_context(
+        ctx.state,
+        document,
+        true,
+        &bindings,
+        &lists,
+        &forms,
+        Some(&page::BuilderTemplateContext {
+            content_html: slot,
+            parts: &parts,
+        }),
+    )?;
+    rendered.diagnostics.append(&mut diagnostics);
+    Ok(rendered)
+}
+
+async fn render_preview_part(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    ctx: &PreviewRenderContext<'_>,
+    budget: &mut PreviewCompositionBudget,
+) -> ApiResult<Option<RenderedLayout>> {
+    match ctx.graph.get(key) {
+        Some(PreviewPartSource::Builder(doc)) => Ok(Some(
+            Box::pin(render_preview_builder(tx, doc, None, ctx, budget)).await?,
+        )),
+        Some(PreviewPartSource::Theme(source)) => {
+            // Flatten only contiguous Theme-to-Theme edges. Builder boundaries
+            // use the server snapshot rather than the surrounding lexical scope.
+            let mut theme_sources = BTreeMap::new();
+            let mut boundaries = BTreeSet::new();
+            let mut todo =
+                template_sec::preview_csec_part_keys(key, source).map_err(ApiError::bad_request)?;
+            while let Some(child) = todo.pop() {
+                match ctx.graph.get(&child) {
+                    Some(PreviewPartSource::Theme(child_source)) => {
+                        if !theme_sources.contains_key(&child) {
+                            todo.extend(
+                                template_sec::preview_csec_part_keys(&child, child_source)
+                                    .map_err(ApiError::bad_request)?,
+                            );
+                            theme_sources.insert(child, child_source.clone());
+                        }
+                    }
+                    _ => {
+                        boundaries.insert(child);
+                    }
+                }
+            }
+            let mut trusted = BTreeMap::new();
+            let mut diagnostics = Vec::new();
+            for child in boundaries {
+                if let Some(mut rendered) =
+                    Box::pin(render_preview_part(tx, &child, ctx, budget)).await?
+                {
+                    trusted.insert(child, rendered.html);
+                    diagnostics.append(&mut rendered.diagnostics);
+                } else {
+                    diagnostics.push(page::BuilderDiagnostic {
+                        node_id: child.clone(),
+                        code: "template_part_unavailable",
+                    });
+                    trusted.insert(child, String::new());
+                }
+            }
+            let html = template_sec::render_preview_csec_fragment(
+                key,
+                source,
+                template_sec::json_to_safe_value(ctx.theme_context),
+                &theme_sources,
+                &trusted,
+                budget,
+            )
+            .map_err(ApiError::bad_request)?;
+            Ok(Some(RenderedLayout {
+                html,
+                diagnostics,
+                has_active_contact_form: false,
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn resolve_preview_entry(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    sample: Option<&TemplatePreviewEntry>,
+    active: Option<&theme::CapturedThemeV3>,
+) -> ApiResult<Option<(entries::ContentEntryRecord, ContentTypeDefinition)>> {
+    use TemplateCandidateKind as K;
+    let selected = if let Some(sample) = sample {
+        if sample.entry_id <= 0 || !valid_content_type_key(&sample.type_key) {
+            return Err(ApiError::bad_request("Invalid preview entry."));
+        }
+        Some((sample.type_key.clone(), sample.entry_id))
+    } else if target.kind == K::Single {
+        match (&target.content_type, target.entry_id, &target.selector_slug) {
+            (Some(t), Some(id), _) => Some((t.clone(), id)),
+            (Some(t), None, Some(slug)) => {
+                let id: i64 = sqlx::query_scalar(
+                    "SELECT id FROM content_entries WHERE content_type_key = ? AND slug = ?",
+                )
+                .bind(t)
+                .bind(slug)
+                .fetch_optional(&mut **tx)
+                .await?
+                .ok_or_else(|| ApiError::not_found("Preview entry not found."))?;
+                Some((t.clone(), id))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let Some((type_key, id)) = selected else {
+        return Ok(None);
+    };
+    if type_key == "section" {
+        return Err(ApiError::not_found("Preview entry not found."));
+    }
+    let valid = match target.kind {
+        K::Home | K::Page | K::PageLayout => type_key == "page",
+        K::Single => {
+            type_key != "page"
+                && target.content_type.as_ref().is_none_or(|t| t == &type_key)
+                && target.entry_id.is_none_or(|target_id| target_id == id)
+        }
+        K::SingleCustom => {
+            type_key != "page"
+                && active
+                    .and_then(|a| {
+                        a.manifest.templates.iter().find(|d| {
+                            d.kind == K::SingleCustom && d.custom_key == target.custom_key
+                        })
+                    })
+                    .is_none_or(|d| d.allowed_types.contains(&type_key))
+        }
+        K::Singular => type_key != "page",
+        K::Index => true,
+        _ => false,
+    };
+    if !valid {
+        return Err(ApiError::bad_request(
+            "Preview entry does not match template target.",
+        ));
+    }
+    let mut entry = entries::get_entry_in_tx(tx, &type_key, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Preview entry not found."))?;
+    if target.kind == K::Single
+        && target
+            .selector_slug
+            .as_ref()
+            .is_some_and(|s| s != &entry.slug)
+    {
+        return Err(ApiError::bad_request(
+            "Preview entry slug does not match template target.",
+        ));
+    }
+    let schema = content::load_effective_content_schema_in_tx(tx, &type_key)
+        .await?
+        .filter(|s| {
+            s.base.status == ProviderStatus::Active
+                && s.base.declaration_state == DeclarationState::Declared
+        })
+        .ok_or_else(|| ApiError::not_found("Preview entry type not available."))?;
+    entries::filter_entry_values_for_role(&mut entry, &schema, FieldRole::Admin);
+    Ok(Some((entry, schema.base.descriptor)))
+}
+
+pub async fn preview_typed_override(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    expected_version: Option<i64>,
+) -> ApiResult<RenderedLayout> {
+    let key = target.canonical_key().map_err(ApiError::bad_request)?;
+    let mut tx = db.begin().await?;
+    let existing = get_typed_override_on_connection(&mut tx, &key).await?;
+    if expected_version.is_some_and(|v| existing.as_ref().is_none_or(|r| r.version != v)) {
+        return Err(ApiError::precondition_failed("Template override changed."));
+    }
+    let state = validate_typed_document_in_tx(
+        &mut tx,
+        target,
+        document,
+        existing.as_ref().map(|r| &r.document),
+    )
+    .await?;
+    let active = theme::capture_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let mut budget = PreviewCompositionBudget::new();
+    let graph = preview_part_graph(&mut tx, target, document, active.as_ref(), &mut budget).await?;
+    let entry = resolve_preview_entry(&mut tx, target, preview_entry, active.as_ref()).await?;
+    let general = settings::get_general_in_conn(&mut tx).await?;
+    let site = SiteContext {
+        title: &general.site_title,
+        tagline: &general.tagline,
+    };
+    let (options, menus) = if let Some(active) = &active {
+        (
+            settings::get_public_theme_options_in_conn(
+                &mut tx,
+                &active.manifest.theme_id,
+                &serde_json::to_string(&active.manifest)?,
+            )
+            .await?,
+            menu::resolve_slot_menus_in_tx(&mut tx, &active.manifest.theme_id).await?,
+        )
+    } else {
+        (BTreeMap::new(), BTreeMap::new())
+    };
+    let mut theme_context = serde_json::json!({ "site": site, "options": options, "theme_options": options, "menus": menus });
+    let mut body_diagnostics = Vec::new();
+    let mut route = None;
+    let body = if let Some((record, definition)) = &entry {
+        route = Some((record.content_type_key.as_str(), record.slug.as_str()));
+        let view = content_render::authenticated_preview_view(record.clone(), definition);
+        theme_context["entry"] = serde_json::to_value(&view)?;
+        theme_context["content_type"] = serde_json::to_value(definition)?;
+        if record.content_mode == ContentMode::Builder && record.content_type_key == "page" {
+            if let Some(mut rendered) =
+                builder::preview_saved_page_body_in_tx(&mut tx, actor, record.id).await?
+            {
+                body_diagnostics.append(&mut rendered.diagnostics);
+                Some(rendered.html)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+        .map(Ok)
+        .unwrap_or_else(|| {
+            let html = content_render::render_single_with_site_and_archive(
+                definition, &view, None, &site, None,
+            )?;
+            crate::document::normalize_public_document(&html)
+                .map(|doc| doc.body_fragment)
+                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+        })?
+    } else {
+        "<div data-template-preview-placeholder>Preview content</div>".to_owned()
+    };
+    if body.len() > template_sec::MAX_RENDERED_HTML_BYTES {
+        return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
+    }
+    let ctx = PreviewRenderContext {
+        state: &state,
+        graph: &graph,
+        theme_context: &theme_context,
+        route,
+    };
+    let mut rendered =
+        render_preview_builder(&mut tx, document, Some(&body), &ctx, &mut budget).await?;
+    rendered.diagnostics.append(&mut body_diagnostics);
+    tx.commit().await?;
+    Ok(rendered)
+}
+
+/// Kept temporarily for the old Builder endpoint callers until routes migrate.
+pub async fn save_override_and_render(
+    db: &SqlitePool,
+    scope: &OverrideScope,
+    document: &BuilderDocument,
+    expected_version: Option<i64>,
+) -> ApiResult<(TemplateOverrideRecord, RenderedLayout)> {
+    let target = candidate_for_legacy_scope(scope)?;
+    let saved = save_typed_override(db, &target, document, expected_version).await?;
+    let rendered = render_override_for_public(db, &saved, None).await?;
     Ok((saved, rendered))
 }
 
+/// Kept temporarily for old Builder endpoints; v3 reset API uses the typed ID.
 pub async fn reset_override(
     db: &SqlitePool,
     scope: &OverrideScope,
@@ -466,31 +1481,22 @@ pub async fn reset_override(
     confirmed: bool,
 ) -> ApiResult<()> {
     if !confirmed {
-        return Err(ApiError::bad_request(
-            "Reset template override cần xác nhận rõ ràng (confirm=true).",
-        ));
+        return Err(ApiError::bad_request("Reset requires confirmation."));
     }
-    let mut tx = db.begin().await?;
-    validate_scope_and_load_cpt_fields(&mut tx, scope).await?;
-    let existing = get_override_in_tx(&mut tx, scope)
+    let target = candidate_for_legacy_scope(scope)?;
+    let existing = get_typed_override(db, &target)
         .await?
-        .ok_or_else(|| ApiError::not_found("Không có template override để reset."))?;
-    if existing.version != expected_version {
-        return Err(ApiError::precondition_failed(
-            "Template override đã thay đổi, không thể reset.",
-        ));
-    }
-    let res = sqlx::query("DELETE FROM template_overrides WHERE id = ? AND version = ?")
-        .bind(existing.id)
-        .bind(expected_version)
-        .execute(&mut *tx)
-        .await?;
-    if res.rows_affected() == 0 {
-        return Err(ApiError::precondition_failed(
-            "Template override đã thay đổi đồng thời.",
-        ));
-    }
-    tx.commit().await?;
+        .ok_or_else(|| ApiError::not_found("Template override not found."))?;
+    reset_typed_override(
+        db,
+        existing.id,
+        Some(expected_version),
+        &[target],
+        None,
+        None,
+        None,
+    )
+    .await?;
     Ok(())
 }
 
@@ -498,6 +1504,16 @@ pub async fn render_override_for_public(
     db: &SqlitePool,
     record: &TemplateOverrideRecord,
     route_entry: Option<(&str, &str)>,
+) -> ApiResult<RenderedLayout> {
+    render_override_for_public_with_context(db, record, route_entry, None, None).await
+}
+
+pub async fn render_override_for_public_with_context(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    route_entry: Option<(&str, &str)>,
+    content_html: Option<&str>,
+    parts: Option<&BTreeMap<String, String>>,
 ) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let state: HomeState = builder::read_home_tx(&mut tx).await?;
@@ -508,39 +1524,238 @@ pub async fn render_override_for_public(
         resolve_lists_in_tx(&mut tx, &record.document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(&mut tx, &record.document).await?;
     tx.commit().await?;
-    page::render_builder_with_lists_and_forms(
+    let empty_parts = BTreeMap::new();
+    let context = page::BuilderTemplateContext {
+        content_html,
+        parts: parts.unwrap_or(&empty_parts),
+    };
+    page::render_builder_with_template_context(
         &state,
         &record.document,
         false,
         &bindings,
         &lists,
         &forms,
+        Some(&context),
     )
+}
+
+/// The public S02 graph has one budget across Builder and C-SEC segments.
+pub struct PublicCompositionBudget {
+    remaining_fuel: u64,
+    expansions: usize,
+}
+
+impl Default for PublicCompositionBudget {
+    fn default() -> Self {
+        Self {
+            remaining_fuel: template_sec::TEMPLATE_FUEL_LIMIT,
+            expansions: 0,
+        }
+    }
+}
+
+impl PublicCompositionBudget {
+    fn charge(&mut self, count: usize) -> ApiResult<()> {
+        self.expansions = self
+            .expansions
+            .checked_add(count)
+            .filter(|n| *n <= 32)
+            .ok_or_else(|| ApiError::internal("Template parts exceed 32 expansions."))?;
+        Ok(())
+    }
+
+    pub fn render_theme(
+        &mut self,
+        compiled: &template_sec::CompiledCsecComposition,
+        context: &serde_json::Value,
+        slot: Option<&str>,
+    ) -> ApiResult<String> {
+        self.charge(compiled.part_expansions())?;
+        compiled
+            .render_with_remaining_fuel(
+                template_sec::json_to_safe_value(context),
+                slot,
+                &mut self.remaining_fuel,
+            )
+            .map_err(ApiError::internal)
+    }
+}
+
+struct PublicBuilderContext<'a> {
+    state: &'a HomeState,
+    active: Option<&'a ActiveThemeV3>,
+    theme_context: &'a serde_json::Value,
+    route_entry: Option<(&'a str, &'a str)>,
+}
+
+/// Check the full depth of a contiguous theme graph at its actual Builder
+/// boundary; the compiler checks the same graph from its own lexical root.
+fn check_theme_part_depth(
+    key: &str,
+    sources: &BTreeMap<String, String>,
+    depth: usize,
+) -> ApiResult<()> {
+    if depth > 3 {
+        return Err(ApiError::internal("Template part depth exceeds 3."));
+    }
+    let source = sources
+        .get(key)
+        .ok_or_else(|| ApiError::internal("Theme part missing."))?;
+    for child in template_sec::csec_part_keys(key, source).map_err(ApiError::internal)? {
+        check_theme_part_depth(&child, sources, depth + 1)?;
+    }
+    Ok(())
+}
+
+async fn render_public_part(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    depth: usize,
+    stack: &[String],
+    ctx: &PublicBuilderContext<'_>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<Option<RenderedLayout>> {
+    let target = TemplateCandidate {
+        part_key: Some(key.to_owned()),
+        ..candidate(TemplateCandidateKind::Part)
+    };
+    let canonical = target.canonical_key().map_err(ApiError::internal)?;
+    if stack.contains(&canonical) || depth > 3 {
+        return Err(ApiError::internal("Template part cycle or depth limit."));
+    }
+    if let Some(row) = get_typed_override_on_connection(tx, &canonical).await? {
+        let (_, slots) = document_parts_and_slot_count(&row.document)?;
+        validate_content_slots(&target, slots)?;
+        let mut next_stack = stack.to_vec();
+        next_stack.push(canonical);
+        return Ok(Some(
+            Box::pin(render_public_builder(
+                tx,
+                &row.document,
+                None,
+                depth,
+                &next_stack,
+                ctx,
+                budget,
+            ))
+            .await?,
+        ));
+    }
+    let Some(active) = ctx.active else {
+        return Ok(None);
+    };
+    let Some(source) = active.parts.get(key) else {
+        return Ok(None);
+    };
+    let compiled = template_sec::validate_and_compile_csec_composition(
+        &canonical,
+        source,
+        &active.parts,
+        template_sec::CsecContentKind::NonEntry,
+    )
+    .map_err(ApiError::internal)?;
+    check_theme_part_depth(key, &active.parts, depth)?;
+    let html = budget.render_theme(&compiled, ctx.theme_context, None)?;
+    Ok(Some(RenderedLayout {
+        html,
+        diagnostics: Vec::new(),
+        has_active_contact_form: false,
+    }))
+}
+
+async fn render_public_builder(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    slot: Option<&str>,
+    depth: usize,
+    stack: &[String],
+    ctx: &PublicBuilderContext<'_>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<RenderedLayout> {
+    let mut parts = BTreeMap::new();
+    let mut child_diagnostics = Vec::new();
+    let mut child_forms = false;
+    // Count every occurrence, including repeated references. A stored Builder
+    // part wins before consulting the immutable active-theme source.
+    for key in document_parts_and_slot_count(document)?.0 {
+        budget.charge(1)?;
+        if let Some(mut rendered) =
+            Box::pin(render_public_part(tx, &key, depth + 1, stack, ctx, budget)).await?
+        {
+            child_forms |= rendered.has_active_contact_form;
+            child_diagnostics.append(&mut rendered.diagnostics);
+            parts.insert(key, rendered.html);
+        }
+    }
+    let bindings =
+        builder_binding::resolve_in_tx_with_route(tx, document, false, ctx.route_entry).await?;
+    let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
+    let forms = resolve_contact_forms_in_tx(tx, document).await?;
+    let mut rendered = page::render_builder_with_template_context(
+        ctx.state,
+        document,
+        false,
+        &bindings,
+        &lists,
+        &forms,
+        Some(&page::BuilderTemplateContext {
+            content_html: slot,
+            parts: &parts,
+        }),
+    )?;
+    rendered.has_active_contact_form |= child_forms;
+    rendered.diagnostics.append(&mut child_diagnostics);
+    Ok(rendered)
+}
+
+pub async fn render_resolved_public_builder(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    route_entry: Option<(&str, &str)>,
+    slot: Option<&str>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<RenderedLayout> {
+    let mut tx = db.begin().await?;
+    let state = builder::read_home_tx(&mut tx).await?;
+    let context = PublicBuilderContext {
+        state: &state,
+        active,
+        theme_context,
+        route_entry,
+    };
+    let stack = vec![record.canonical_target_key.clone()];
+    let rendered =
+        render_public_builder(&mut tx, &record.document, slot, 0, &stack, &context, budget).await?;
+    tx.commit().await?;
+    Ok(rendered)
 }
 
 pub async fn resolve_and_render_header_footer(
     db: &SqlitePool,
-    active_v2: Option<&ActiveV2RoleTemplates>,
+    active_v3: Option<&ActiveThemeV3>,
     site_ctx: &SiteContext<'_>,
     theme_opts: &BTreeMap<String, serde_json::Value>,
-    type_key: Option<&str>,
-) -> ApiResult<(Option<String>, Option<String>)> {
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
     let menus = crate::storage::menu::resolve_active_slot_menus(db).await?;
-    let header = match resolve_effective_override(db, OverrideRole::Header, type_key, None).await? {
-        Some(record) => Some(render_override_for_public(db, &record, None).await?.html),
-        None => active_v2
-            .and_then(|v2| v2.roles.get("header"))
-            .and_then(|t| {
-                content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)
-            }),
+    let part_context = serde_json::json!({
+        "site": site_ctx, "options": theme_opts, "theme_options": theme_opts, "menus": menus,
+    });
+    let mut tx = db.begin().await?;
+    let state = builder::read_home_tx(&mut tx).await?;
+    let context = PublicBuilderContext {
+        state: &state,
+        active: active_v3,
+        theme_context: &part_context,
+        route_entry: None,
     };
-    let footer = match resolve_effective_override(db, OverrideRole::Footer, type_key, None).await? {
-        Some(record) => Some(render_override_for_public(db, &record, None).await?.html),
-        None => active_v2
-            .and_then(|v2| v2.roles.get("footer"))
-            .and_then(|t| {
-                content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)
-            }),
-    };
-    Ok((header, footer))
+    let header = render_public_part(&mut tx, "header", 0, &[], &context, budget).await?;
+    let footer = render_public_part(&mut tx, "footer", 0, &[], &context, budget).await?;
+    let has_form = header.as_ref().is_some_and(|r| r.has_active_contact_form)
+        || footer.as_ref().is_some_and(|r| r.has_active_contact_form);
+    tx.commit().await?;
+    Ok((header.map(|r| r.html), footer.map(|r| r.html), has_form))
 }

@@ -132,20 +132,23 @@ async fn shared_template_override_rbac_and_admin_shell_bundle() {
         .await
         .unwrap();
     assert_eq!(ed_create.status(), StatusCode::CREATED);
-    let (ed_cookie, _ed_csrf) = login(&client, &srv.base_url, "editor1", "EditorPassword123!").await;
+    let (ed_cookie, _ed_csrf) =
+        login(&client, &srv.base_url, "editor1", "EditorPassword123!").await;
 
-    // Admin is NOT blocked by 403 on site-wide shared override (`single` without entry_id)
+    // Admin can read the typed site-wide shared template override catalog.
     let adm_override = client
-        .get(format!("{}/api/admin/builder/overrides/single?type_key=post", srv.base_url))
+        .get(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &admin_cookie)
         .send()
         .await
         .unwrap();
-    assert_ne!(adm_override.status(), StatusCode::FORBIDDEN);
+    assert_eq!(adm_override.status(), StatusCode::OK);
+    let catalog: Value = adm_override.json().await.unwrap();
+    assert!(catalog["items"].is_array());
 
-    // Editor gets 403 Forbidden on site-wide shared override (`single` without entry_id)
+    // Editor gets 403 Forbidden on the same shared template override catalog.
     let ed_override = client
-        .get(format!("{}/api/admin/builder/overrides/single?type_key=post", srv.base_url))
+        .get(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &ed_cookie)
         .send()
         .await

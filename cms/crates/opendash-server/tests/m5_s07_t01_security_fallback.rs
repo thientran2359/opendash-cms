@@ -114,6 +114,32 @@ async fn login(client: &Client, base_url: &str) -> (String, String) {
     (cookie, csrf)
 }
 
+// S02 retains the independent homepage writer until S03. Seed the actual
+// public homepage through its authenticated CAS API, not the future Reading API.
+async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) {
+    let current = client
+        .get(format!("{base_url}/api/admin/builder/homepage"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(current.status(), 200, "read S02 homepage");
+    let etag = current.headers()["etag"].to_str().unwrap().to_owned();
+    let saved = client
+        .put(format!("{base_url}/api/admin/builder/homepage"))
+        .header("Cookie", cookie).header("Origin", base_url)
+        .header("X-CSRF-Token", csrf).header("If-Match", etag)
+        .json(&serde_json::json!({
+            "schema_version":1, "sections":[{"id":"home-sec","children":[
+                {"id":"home-row","children":[{"id":"home-col","children":[
+                    {"id":"home-title","type":"core/heading","props":{"level":1,"text":"Theme Home Fixture"}}
+                ]}]}
+            ]}]
+        }))
+        .send().await.unwrap();
+    assert_eq!(saved.status(), 200, "seed S02 homepage");
+}
+
 #[tokio::test]
 async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibility() {
     let site_root = std::env::temp_dir().join(format!(
@@ -129,17 +155,11 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
 
     // 1. Install & activate valid Theme A with `public: false` option
     let manifest_a = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "safe-theme",
         "name": "Safe Theme",
         "version": "1.0.0",
-        "templates": {
-            "header": "templates/header.html",
-            "home": "templates/home.html",
-            "single": "templates/single.html",
-            "archive": "templates/archive.html",
-            "footer": "templates/footer.html"
-        },
+        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
         "options": [
             { "key": "public_title", "label": "Title", "type": "string", "default": "SafeSite", "public": true },
             { "key": "secret_key", "label": "Secret", "type": "string", "default": "TOP_SECRET_VALUE_999", "public": false }
@@ -148,11 +168,11 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
     .unwrap();
     let zip_a = build_zip(&[
         ("theme.json", &manifest_a),
-        ("templates/header.html", b"<header><nav><a href=\"/\">{{ options.public_title }}</a></nav></header>"),
-        ("templates/home.html", b"<main><h1>{{ options.public_title }}</h1></main>"),
-        ("templates/single.html", b"<main><h1>{{ entry.title }}</h1></main>"),
-        ("templates/archive.html", b"<main><h1>Archive</h1>{% for e in entries %}<article><h2>{{ e.title }}</h2></article>{% endfor %}</main>"),
-        ("templates/footer.html", b"<footer><p>Footer</p></footer>"),
+        ("header.html", b"<header><nav><a href=\"/\">{{ options.public_title }}</a></nav></header>"),
+        ("home.html", b"<main><h1>{{ options.public_title }}</h1>{{ od_content() }}</main>"),
+        ("single.html", b"<main><h1>{{ entry.title }}</h1>{{ od_content() }}</main>"),
+        ("archive.html", b"<main><h1>Archive</h1>{% for e in entries %}<article><h2>{{ e.title }}</h2></article>{% endfor %}</main>"),
+        ("footer.html", b"<footer><p>Footer</p></footer>"),
     ]);
     let inst_a = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -185,9 +205,14 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
         200
     );
 
+    seed_builder_homepage(&client, &srv.base_url, &cookie, &csrf).await;
+
     // Create published post & draft post & unreferenced private media
     let p_pub: Value = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -201,7 +226,10 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
     let pub_id = p_pub["id"].as_i64().unwrap();
     assert_eq!(
         client
-            .post(format!("{}/api/admin/content-types/post/entries/{pub_id}/publication", srv.base_url))
+            .post(format!(
+                "{}/api/admin/content-types/post/entries/{pub_id}/publication",
+                srv.base_url
+            ))
             .header("Cookie", &cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &csrf)
@@ -215,7 +243,10 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
     );
 
     let _p_draft = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -264,7 +295,11 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
             .status(),
         404
     );
-    let home_res = client.get(format!("{}/", srv.base_url)).send().await.unwrap();
+    let home_res = client
+        .get(format!("{}/", srv.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(home_res.status(), 200);
     assert!(home_res.headers().contains_key("content-security-policy"));
     let home_html = home_res.text().await.unwrap();
@@ -273,40 +308,47 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
 
     // 2. Accessibility & semantic landmarks smoke on public pages
     for path in ["/", "/content/post", "/content/post/public-post"] {
-        let resp = client.get(format!("{}{path}", srv.base_url)).send().await.unwrap();
+        let resp = client
+            .get(format!("{}{path}", srv.base_url))
+            .send()
+            .await
+            .unwrap();
         assert_eq!(resp.status(), 200, "path {path}");
         let body = resp.text().await.unwrap();
         assert!(body.contains("<header"), "missing <header> on {path}");
         assert!(body.contains("<main"), "missing <main> on {path}");
         assert!(body.contains("<footer"), "missing <footer> on {path}");
         assert!(body.contains("<h1"), "missing <h1> on {path}");
-        assert!(!body.contains("SECRET_DRAFT_TITLE"), "draft leaked on {path}");
+        assert!(
+            !body.contains("SECRET_DRAFT_TITLE"),
+            "draft leaked on {path}"
+        );
     }
 
     // 3. Adversarial C-SEC corpus: all dangerous templates must be rejected at install
     let bad_templates: &[(&str, &[u8])] = &[
-        ("script_tag", b"<main><script>alert(1)</script></main>"),
-        ("svg_tag", b"<main><svg onload=alert(1)></svg></main>"),
-        ("math_tag", b"<main><math><mi>x</mi></math></main>"),
-        ("event_handler", b"<main><div onclick=\"alert(1)\">x</div></main>"),
-        ("js_url", b"<main><a href=\"javascript:alert(1)\">x</a></main>"),
-        ("forged_filter", b"<main>{{ entry.title | safe }}</main>"),
-        ("include_stmt", b"<main>{% include 'other.html' %}</main>"),
-        ("import_stmt", b"<main>{% import 'macros.html' as m %}</main>"),
-        ("extends_stmt", b"<main>{% extends 'base.html' %}</main>"),
-        ("css_import", b"<main><style>@import url('https://evil.example/a.css');</style></main>"),
-        ("css_expression", b"<main><style>body{width:expression(alert(1))}</style></main>"),
+        ("script_tag", b"<main><script>alert(1)</script>{{ od_content() }}</main>"),
+        ("svg_tag", b"<main><svg onload=alert(1)></svg>{{ od_content() }}</main>"),
+        ("math_tag", b"<main><math><mi>x</mi></math>{{ od_content() }}</main>"),
+        ("event_handler", b"<main><div onclick=\"alert(1)\">x</div>{{ od_content() }}</main>"),
+        ("js_url", b"<main><a href=\"javascript:alert(1)\">x</a>{{ od_content() }}</main>"),
+        ("forged_filter", b"<main>{{ entry.title | safe }}{{ od_content() }}</main>"),
+        ("include_stmt", b"<main>{% include 'other.html' %}{{ od_content() }}</main>"),
+        ("import_stmt", b"<main>{% import 'macros.html' as m %}{{ od_content() }}</main>"),
+        ("extends_stmt", b"<main>{% extends 'base.html' %}{{ od_content() }}</main>"),
+        ("css_import", b"<main><style>@import url('https://evil.example/a.css');</style>{{ od_content() }}</main>"),
+        ("css_expression", b"<main><style>body{width:expression(alert(1))}</style>{{ od_content() }}</main>"),
     ];
     for (idx, (label, tpl)) in bad_templates.iter().enumerate() {
         let bad_manifest = serde_json::to_vec(&json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": format!("evil-{idx}"),
             "name": "Evil",
             "version": "1.0.0",
-            "templates": { "home": "templates/home.html" }
+            "templates": [{ "kind": "home", "file": "home.html" }]
         }))
         .unwrap();
-        let bad_zip = build_zip(&[("theme.json", &bad_manifest), ("templates/home.html", tpl)]);
+        let bad_zip = build_zip(&[("theme.json", &bad_manifest), ("home.html", tpl)]);
         let resp = client
             .post(format!("{}/api/admin/themes", srv.base_url))
             .header("Content-Type", "application/zip")
@@ -386,10 +428,21 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
         fs::remove_dir_all(&themes_dir).unwrap();
     }
     for path in ["/", "/content/post", "/content/post/public-post"] {
-        let resp = client.get(format!("{}{path}", srv.base_url)).send().await.unwrap();
-        assert_eq!(resp.status(), 200, "damaged theme fallback failed on {path}");
+        let resp = client
+            .get(format!("{}{path}", srv.base_url))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            200,
+            "damaged theme fallback failed on {path}"
+        );
         let body = resp.text().await.unwrap();
-        assert!(!body.contains("opendash_m5_s07_t01"), "host temp path leaked on {path}");
+        assert!(
+            !body.contains("opendash_m5_s07_t01"),
+            "host temp path leaked on {path}"
+        );
         assert!(!body.contains("TOP_SECRET_VALUE_999"));
     }
 

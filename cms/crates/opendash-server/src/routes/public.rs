@@ -17,7 +17,6 @@ use crate::{
     public_context::{CanonicalUrlBuilder, PublicRequestContext},
     routes::themes::ThemeStoreRoot,
     storage::{builder, overrides, settings, theme as theme_storage},
-    theme,
 };
 
 /// Malformed, repeated or unknown list-page parameters cannot become SQL or
@@ -56,8 +55,8 @@ pub async fn public_page(
     let _context = PublicRequestContext::Home {
         canonical_path: CanonicalUrlBuilder::home().to_owned(),
     };
-    let active_v2 = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_v2_role_templates(&db, &root.0).await?,
+    let active_v3 = match themes_root {
+        Some(Extension(root)) => theme_storage::load_active_theme_v3(&db, &root.0).await?,
         None => None,
     };
     // One SQLite read snapshot for source, document, active theme and block
@@ -66,8 +65,9 @@ pub async fn public_page(
         builder::read_public_resolved(&db, &parsed_list_pages(raw.as_deref())).await?;
     if let Some(document) = &state.saved {
         let forms = builder::resolve_contact_forms(&db, document).await?;
-        let rendered_layout_res =
-            render_builder_with_lists_and_forms(&state, document, false, &bindings, &lists, &forms)?;
+        let rendered_layout_res = render_builder_with_lists_and_forms(
+            &state, document, false, &bindings, &lists, &forms,
+        )?;
         let allow_form_self = rendered_layout_res.has_active_contact_form;
         let mut html = rendered_layout_res.html;
         let site = settings::get_general(&db).await?;
@@ -76,12 +76,13 @@ pub async fn public_page(
             title: &site.site_title,
             tagline: &site.tagline,
         };
-        let (header, footer) = overrides::resolve_and_render_header_footer(
+        let mut budget = overrides::PublicCompositionBudget::default();
+        let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer(
             &db,
-            active_v2.as_ref(),
+            active_v3.as_ref(),
             &site_ctx,
             &theme_opts,
-            None,
+            &mut budget,
         )
         .await?;
         let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
@@ -91,31 +92,13 @@ pub async fn public_page(
             footer.as_deref(),
             &seo_view,
         )?;
-        return Ok(rendered_layout_with_form_csp(html, allow_form_self));
+        return Ok(rendered_layout_with_form_csp(
+            html,
+            allow_form_self || shell_has_form,
+        ));
     }
-    if let Some(v2) = &active_v2 {
-        if let Some(home_tpl) = v2.roles.get("home") {
-            let site = settings::get_general(&db).await?;
-            let theme_opts = settings::get_active_public_theme_options(&db).await?;
-            let site_ctx = SiteContext {
-                title: &site.site_title,
-                tagline: &site.tagline,
-            };
-            if let Ok(home_html) = theme::render_content(home_tpl, &serde_json::json!({ "site": site_ctx, "options": theme_opts })) {
-                let (header, footer) = overrides::resolve_and_render_header_footer(
-                    &db,
-                    Some(v2),
-                    &site_ctx,
-                    &theme_opts,
-                    None,
-                )
-                .await?;
-                let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
-                let html = content_render::compose_document_with_seo(header.as_deref(), &home_html, footer.as_deref(), &seo_view)?;
-                return Ok(rendered_layout_with_form_csp(html, false));
-            }
-        }
-    }
+    // S02 does not reassign / to a theme template. The existing Builder/legacy
+    // homepage remains authoritative until the S03 Reading Settings cutover.
     let raw_html = match render_legacy_state(&state)? {
         Some(snapshot) => snapshot.html,
         None => "<p>Chưa lưu block.</p>".into(),

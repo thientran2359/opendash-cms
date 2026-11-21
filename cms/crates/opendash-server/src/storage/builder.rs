@@ -4,18 +4,27 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use opendash_core::{
     builder::{
-        BUILDER_SCHEMA_VERSION, BuilderDocument, ColumnNode, ElementContent, ElementNode,
-        KnownElement, LegacyBlockProps, RowNode, SectionNode,
+        BUILDER_SCHEMA_VERSION, BindingSource, BuilderDocument, ColumnNode, ElementContent,
+        ElementNode, KnownElement, LegacyBlockProps, RowNode, SectionNode,
+    },
+    content::{
+        ContentFieldType, ContentMode, ContentSupport, EffectiveContentSchema,
+        EffectiveFieldStatus, FieldRole, PublicExposure,
     },
     id::valid_namespaced_block_id,
-    registry::{RegistryCatalog, ResourceOwner},
+    registry::{DeclarationState, ProviderStatus, RegistryCatalog, ResourceOwner},
     theme::BlockDescriptor,
 };
+use serde::Serialize;
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::{
+    auth::{Role, SessionContext},
     error::{ApiError, ApiResult},
+    hooks::{ContentBeforeSaveVeto, HookDispatcher},
+    page::{self, RenderedLayout},
     storage::media::valid_media_id,
     storage::{
         builder_binding::{self, BindingResults},
@@ -73,7 +82,8 @@ pub async fn resolve_contact_forms_in_tx(
         for row in &section.children {
             for column in &row.children {
                 for element in &column.children {
-                    if let ElementContent::Known(KnownElement::ContactForm(props)) = &element.content
+                    if let ElementContent::Known(KnownElement::ContactForm(props)) =
+                        &element.content
                     {
                         let rec =
                             crate::storage::contact::get_form_in_conn(&mut *tx, props.form_id)
@@ -147,10 +157,14 @@ pub async fn resolve_lists_in_tx(
                             for entry in result.entries {
                                 let href = if crate::storage::seo::resolve_public_entry_path_in_tx(
                                     &mut **tx, entry.id,
-                                ).await?.is_some() {
+                                )
+                                .await?
+                                .is_some()
+                                {
                                     crate::storage::permalinks::canonical_entry_path_in_tx(
                                         &mut **tx, entry.id,
-                                    ).await?
+                                    )
+                                    .await?
                                 } else {
                                     None
                                 };
@@ -443,7 +457,10 @@ pub async fn validate_media_refs_in_tx(
     conn: &mut sqlx::SqliteConnection,
     document: &BuilderDocument,
 ) -> ApiResult<()> {
-    for id in image_ids(document).into_iter().chain(poster_image_ids(document)) {
+    for id in image_ids(document)
+        .into_iter()
+        .chain(poster_image_ids(document))
+    {
         if !valid_media_id(id) {
             return Err(ApiError::bad_request("Invalid Builder media ID"));
         }
@@ -629,4 +646,515 @@ pub fn register_plugin_block_template(
         },
     );
     Ok(())
+}
+
+/// Page documents are site-owned entry content. Their only version is the
+/// enclosing content entry CAS token; shared site templates are independent.
+#[derive(Debug, Clone, Serialize)]
+pub struct EntryBuilderOpen {
+    pub entry_id: i64,
+    pub type_key: String,
+    pub content_mode: ContentMode,
+    pub version: i64,
+    pub document: Option<BuilderDocument>,
+}
+
+struct EntryBuilderSnapshot {
+    opened: EntryBuilderOpen,
+    schema: EffectiveContentSchema,
+    title: String,
+    slug: String,
+    values: BTreeMap<String, Value>,
+    term_ids: Vec<i64>,
+}
+
+fn actor_field_role(actor: &SessionContext) -> FieldRole {
+    match actor.user.role {
+        Role::Admin => FieldRole::Admin,
+        Role::Editor => FieldRole::Editor,
+    }
+}
+
+async fn entry_builder_snapshot(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    id: i64,
+) -> ApiResult<EntryBuilderSnapshot> {
+    if type_key != "page" {
+        return Err(ApiError::forbidden(
+            "Builder is available only for Page entries.",
+        ));
+    }
+    let row: Option<(String, String, String, String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT e.title, e.slug, e.values_json, e.content_mode, e.version, d.document_json
+           FROM content_entries e LEFT JOIN entry_builder_documents d ON d.entry_id = e.id
+          WHERE e.id = ? AND e.content_type_key = ?",
+    )
+    .bind(id)
+    .bind(type_key)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let (title, slug, values, mode, version, raw) =
+        row.ok_or_else(|| ApiError::not_found("Page entry not found."))?;
+    let schema = crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, type_key)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Page type not found."))?;
+    if schema.base.status != ProviderStatus::Active
+        || schema.base.declaration_state != DeclarationState::Declared
+        || !schema
+            .base
+            .descriptor
+            .settings
+            .supports
+            .contains(&ContentSupport::Builder)
+    {
+        return Err(ApiError::forbidden("Page Builder is not enabled."));
+    }
+    let content_mode = match mode.as_str() {
+        "editor" => ContentMode::Editor,
+        "builder" => ContentMode::Builder,
+        _ => return Err(ApiError::internal("Invalid stored entry content mode.")),
+    };
+    let document = raw
+        .map(|raw| BuilderDocument::from_json(raw.as_bytes()))
+        .transpose()
+        .map_err(|_| ApiError::internal("Stored entry Builder document is not readable."))?;
+    let values = serde_json::from_str(&values)?;
+    let term_ids = entries::read_term_ids(tx, id).await?;
+    Ok(EntryBuilderSnapshot {
+        opened: EntryBuilderOpen {
+            entry_id: id,
+            type_key: type_key.to_owned(),
+            content_mode,
+            version,
+            document,
+        },
+        schema,
+        title,
+        slug,
+        values,
+        term_ids,
+    })
+}
+
+pub async fn read_entry_builder(
+    db: &SqlitePool,
+    _actor: &SessionContext,
+    type_key: &str,
+    id: i64,
+) -> ApiResult<EntryBuilderOpen> {
+    let mut tx = db.begin().await?;
+    let current = entry_builder_snapshot(&mut tx, type_key, id).await?;
+    tx.commit().await?;
+    Ok(current.opened)
+}
+
+fn visible_builder_field(schema: &EffectiveContentSchema, key: &str, role: FieldRole) -> bool {
+    schema.effective_fields.get(key).is_some_and(|field| {
+        field.definition.min_view_role <= role
+            && field.definition.public_exposure == PublicExposure::Public
+            && field.effective_status == EffectiveFieldStatus::Active
+    })
+}
+
+async fn validate_entry_builder_document(
+    tx: &mut Transaction<'_, Sqlite>,
+    current: &EntryBuilderSnapshot,
+    role: FieldRole,
+    document: &BuilderDocument,
+) -> ApiResult<HomeState> {
+    let state = read_home_tx(tx).await?;
+    document
+        .validate_for_save(&state.descriptors()?, current.opened.document.as_ref())
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    // Validate the path Page's field keys using the effective field ACL.
+    let allowed: Vec<String> = current
+        .schema
+        .effective_fields
+        .keys()
+        .filter(|key| visible_builder_field(&current.schema, key, role))
+        .cloned()
+        .collect();
+    document
+        .validate_route_context_for_role(Some("page"), Some(&allowed))
+        .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    let mut exact_schemas = BTreeMap::new();
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    let ElementContent::Known(known) = &element.content else {
+                        continue;
+                    };
+                    if matches!(
+                        known,
+                        KnownElement::ContentSlot(_) | KnownElement::TemplatePart(_)
+                    ) {
+                        return Err(ApiError::bad_request(
+                            "Template-only element in Page Builder.",
+                        ));
+                    }
+                    let Some(binding) = known.binding() else {
+                        continue;
+                    };
+                    match &binding.source {
+                        BindingSource::RouteContext { field_key } if field_key == "cover_url" => {
+                            // The existing resolver picks the first public base image.
+                            if let Some(field) =
+                                current.schema.base.descriptor.fields.iter().find(|f| {
+                                    f.field_type == ContentFieldType::Image
+                                        && f.public_exposure == PublicExposure::Public
+                                })
+                                && !visible_builder_field(&current.schema, &field.key, role)
+                            {
+                                return Err(ApiError::forbidden(
+                                    "Builder cover field is not accessible.",
+                                ));
+                            }
+                        }
+                        BindingSource::Field { key } => {
+                            // Exact-entry bindings may reference other content types.
+                            // Missing/inactive sources keep normal unavailable fallback;
+                            // private or actor-inaccessible fields must not be rendered.
+                            if !exact_schemas.contains_key(&binding.type_key) {
+                                let schema =
+                                    crate::storage::content::load_effective_content_schema_in_tx(
+                                        &mut **tx,
+                                        &binding.type_key,
+                                    )
+                                    .await?;
+                                exact_schemas.insert(binding.type_key.clone(), schema);
+                            }
+                            if let Some(Some(schema)) = exact_schemas.get(&binding.type_key)
+                                && schema.effective_fields.contains_key(key)
+                                && !visible_builder_field(schema, key, role)
+                            {
+                                return Err(ApiError::forbidden(
+                                    "Builder binding field is not accessible.",
+                                ));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    validate_media_refs_in_tx(&mut **tx, document).await?;
+    Ok(state)
+}
+
+async fn render_entry_builder_preview(
+    tx: &mut Transaction<'_, Sqlite>,
+    current: &EntryBuilderSnapshot,
+    state: &HomeState,
+    document: &BuilderDocument,
+    shared_preview: bool,
+) -> ApiResult<RenderedLayout> {
+    let bindings = builder_binding::resolve_in_tx_with_route(
+        tx,
+        document,
+        true,
+        Some((&current.opened.type_key, &current.slug)),
+    )
+    .await?;
+    let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
+    let forms = resolve_contact_forms_in_tx(tx, document).await?;
+    let parts = BTreeMap::new();
+    let context = shared_preview.then_some(page::BuilderTemplateContext {
+        content_html: None,
+        parts: &parts,
+    });
+    page::render_builder_with_template_context(
+        state,
+        document,
+        true,
+        &bindings,
+        &lists,
+        &forms,
+        context.as_ref(),
+    )
+}
+
+/// Shared-template preview uses the selected Page body inside the caller's
+/// read snapshot. A missing saved document is handled by the text renderer.
+pub(super) async fn preview_saved_page_body_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: &SessionContext,
+    id: i64,
+) -> ApiResult<Option<RenderedLayout>> {
+    let current = entry_builder_snapshot(tx, "page", id).await?;
+    if current.opened.content_mode != ContentMode::Builder {
+        return Ok(None);
+    }
+    let Some(document) = current.opened.document.as_ref() else {
+        return Ok(None);
+    };
+    let state =
+        validate_entry_builder_document(tx, &current, actor_field_role(actor), document).await?;
+    Ok(Some(
+        render_entry_builder_preview(tx, &current, &state, document, true).await?,
+    ))
+}
+
+pub async fn preview_entry_builder(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    id: i64,
+    document: &BuilderDocument,
+) -> ApiResult<RenderedLayout> {
+    let mut tx = db.begin().await?;
+    let current = entry_builder_snapshot(&mut tx, type_key, id).await?;
+    let state =
+        validate_entry_builder_document(&mut tx, &current, actor_field_role(actor), document)
+            .await?;
+    let rendered = render_entry_builder_preview(&mut tx, &current, &state, document, false).await?;
+    tx.commit().await?;
+    Ok(rendered)
+}
+
+#[derive(Debug)]
+pub enum EntryBuilderMutationError {
+    Api(ApiError),
+    Veto(ContentBeforeSaveVeto),
+}
+
+impl From<ApiError> for EntryBuilderMutationError {
+    fn from(err: ApiError) -> Self {
+        Self::Api(err)
+    }
+}
+
+impl From<sqlx::Error> for EntryBuilderMutationError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::Api(err.into())
+    }
+}
+
+enum EntryBuilderMutation<'a> {
+    Save(&'a BuilderDocument),
+    Reset,
+}
+
+impl EntryBuilderMutation<'_> {
+    fn operation(&self) -> &'static str {
+        match self {
+            Self::Save(_) => "save",
+            Self::Reset => "reset",
+        }
+    }
+}
+
+fn check_entry_builder_cas(
+    current: &EntryBuilderSnapshot,
+    expected_version: i64,
+    mutation: &EntryBuilderMutation<'_>,
+) -> ApiResult<()> {
+    if current.opened.version != expected_version {
+        return Err(ApiError::precondition_failed("Entry version changed."));
+    }
+    if matches!(mutation, EntryBuilderMutation::Reset) && current.opened.document.is_none() {
+        return Err(ApiError::not_found("No saved Page Builder document."));
+    }
+    Ok(())
+}
+
+async fn replace_entry_builder_refs(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+    document: Option<&BuilderDocument>,
+) -> ApiResult<()> {
+    sqlx::query("DELETE FROM entry_builder_media_refs WHERE entry_id = ?")
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
+    if let Some(document) = document {
+        for (role, ids) in [
+            ("image", image_ids(document)),
+            ("video", video_ids(document)),
+            ("poster", poster_image_ids(document)),
+        ] {
+            for media_id in ids {
+                sqlx::query("INSERT INTO entry_builder_media_refs(entry_id, media_id, ref_role) VALUES (?, ?, ?)")
+                    .bind(id)
+                    .bind(media_id)
+                    .bind(role)
+                    .execute(&mut **tx)
+                    .await?;
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn mutate_entry_builder(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    hooks: &HookDispatcher,
+    type_key: &str,
+    id: i64,
+    expected_version: i64,
+    mutation: EntryBuilderMutation<'_>,
+) -> Result<EntryBuilderOpen, EntryBuilderMutationError> {
+    let role = actor_field_role(actor);
+    // Complete read-only preflight before plugin invocation. No writer lease is
+    // held during the bounded, veto-capable hook.
+    let mut read_tx = db.begin().await?;
+    let before = entry_builder_snapshot(&mut read_tx, type_key, id).await?;
+    check_entry_builder_cas(&before, expected_version, &mutation)?;
+    if let EntryBuilderMutation::Save(document) = &mutation {
+        let state = validate_entry_builder_document(&mut read_tx, &before, role, document).await?;
+        render_entry_builder_preview(&mut read_tx, &before, &state, document, false).await?;
+    }
+    read_tx.commit().await?;
+    let operation = mutation.operation();
+    hooks
+        .dispatch_content_before_save_for_actor(
+            type_key,
+            role,
+            json!({
+                "operation": "update",
+                "type_key": type_key,
+                "entry_id": id,
+                "expected_version": expected_version,
+                "schema_token": &before.schema.schema_token,
+                "title": &before.title,
+                "slug": &before.slug,
+                "candidate_values": &before.values,
+                "term_ids": &before.term_ids,
+                "builder_operation": operation,
+            }),
+        )
+        .await
+        .map_err(EntryBuilderMutationError::Veto)?;
+
+    // Same writer reservation and session/role recheck as ordinary entry edits.
+    let mut tx = entries::begin_entry_write(db, actor).await?;
+    let current = entry_builder_snapshot(&mut tx, type_key, id).await?;
+    check_entry_builder_cas(&current, expected_version, &mutation)?;
+    if current.schema.schema_token != before.schema.schema_token {
+        return Err(
+            ApiError::precondition_failed("Page schema changed during Builder operation.").into(),
+        );
+    }
+
+    let (mode, document) = match mutation {
+        EntryBuilderMutation::Save(document) => {
+            let state = validate_entry_builder_document(&mut tx, &current, role, document).await?;
+            // Enforce the same renderer output/node/list/form limits even when
+            // the caller saves directly without ever requesting Preview.
+            render_entry_builder_preview(&mut tx, &current, &state, document, false).await?;
+            let raw = String::from_utf8(
+                document
+                    .to_json()
+                    .map_err(|err| ApiError::bad_request(err.to_string()))?,
+            )
+            .map_err(|_| ApiError::bad_request("Invalid Builder JSON encoding."))?;
+            sqlx::query(
+                "INSERT INTO entry_builder_documents(entry_id, document_json, updated_at)
+                 VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 ON CONFLICT(entry_id) DO UPDATE SET document_json=excluded.document_json, updated_at=excluded.updated_at"
+            )
+            .bind(id)
+            .bind(raw)
+            .execute(&mut *tx)
+            .await?;
+            (ContentMode::Builder, Some(document))
+        }
+        EntryBuilderMutation::Reset => {
+            sqlx::query("DELETE FROM entry_builder_documents WHERE entry_id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+            (ContentMode::Editor, None)
+        }
+    };
+    replace_entry_builder_refs(&mut tx, id, document).await?;
+    let mode_db = match mode {
+        ContentMode::Editor => "editor",
+        ContentMode::Builder => "builder",
+    };
+    let affected = sqlx::query(
+        "UPDATE content_entries SET content_mode=?, version=version+1,
+                 updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+          WHERE id=? AND content_type_key=? AND version=?",
+    )
+    .bind(mode_db)
+    .bind(id)
+    .bind(type_key)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    if affected != 1 {
+        return Err(
+            ApiError::precondition_failed("Entry changed during Builder operation.").into(),
+        );
+    }
+    let saved = entry_builder_snapshot(&mut tx, type_key, id).await?;
+    tx.commit().await?;
+    hooks
+        .dispatch_content_after_save_for_actor(
+            type_key,
+            role,
+            json!({
+                "operation": "update",
+                "entry_id": id,
+                "version": saved.opened.version,
+                "type_key": type_key,
+                "values": &saved.values,
+                "term_ids": &saved.term_ids,
+                "builder_operation": operation,
+            }),
+        )
+        .await;
+    Ok(saved.opened)
+}
+
+pub async fn save_entry_builder(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    hooks: &HookDispatcher,
+    type_key: &str,
+    id: i64,
+    expected_version: i64,
+    document: &BuilderDocument,
+) -> Result<EntryBuilderOpen, EntryBuilderMutationError> {
+    mutate_entry_builder(
+        db,
+        actor,
+        hooks,
+        type_key,
+        id,
+        expected_version,
+        EntryBuilderMutation::Save(document),
+    )
+    .await
+}
+
+pub async fn reset_entry_builder(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    hooks: &HookDispatcher,
+    type_key: &str,
+    id: i64,
+    expected_version: i64,
+    confirmed: bool,
+) -> Result<EntryBuilderOpen, EntryBuilderMutationError> {
+    if !confirmed {
+        return Err(ApiError::bad_request("Reset requires confirmation.").into());
+    }
+    mutate_entry_builder(
+        db,
+        actor,
+        hooks,
+        type_key,
+        id,
+        expected_version,
+        EntryBuilderMutation::Reset,
+    )
+    .await
 }

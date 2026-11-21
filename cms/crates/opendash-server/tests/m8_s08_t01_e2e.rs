@@ -176,27 +176,26 @@ fn build_theme_zip(theme_id: &str) -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": theme_id,
             "name": theme_id,
             "version": "1.0.0",
-            "templates": {
-                "header": "templates/header.html",
-                "single": "templates/single.html"
-            },
+            "templates": [{ "kind": "single", "file": "single.html" }],
+            "parts": { "header": "header.html" },
             "menus": {
                 "slots": ["primary"]
             }
         });
         zip.start_file("theme.json", opts).unwrap();
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("templates/header.html", opts).unwrap();
+        zip.start_file("header.html", opts).unwrap();
         zip.write_all(
             b"<header>{% if menus.primary is defined %}{% for item in menus.primary.items %}<a href=\"{{ item.url }}\">{{ item.label }}</a>{% endfor %}{% endif %}</header>",
         )
         .unwrap();
-        zip.start_file("templates/single.html", opts).unwrap();
-        zip.write_all(b"<article>{{ entry.title }}</article>").unwrap();
+        zip.start_file("single.html", opts).unwrap();
+        zip.write_all(b"<article>{{ entry.title }}{{ od_content() }}</article>")
+            .unwrap();
         zip.finish().unwrap();
     }
     buf
@@ -227,7 +226,8 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
 
     let srv = spawn_server(&source_root, &source_db).await;
     let client = Client::builder().redirect(Policy::none()).build().unwrap();
-    let (cookie, csrf) = setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
+    let (cookie, csrf) =
+        setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
 
     // 1. Settings (general + public)
     let gen_put = client
@@ -258,7 +258,11 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .send()
         .await
         .unwrap();
-    assert!(pub_put.status().is_success(), "public settings: {}", pub_put.status());
+    assert!(
+        pub_put.status().is_success(),
+        "public settings: {}",
+        pub_put.status()
+    );
 
     // 2. Theme install + activate
     let theme_zip = build_theme_zip("m8-e2e-theme");
@@ -357,7 +361,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
     assert_eq!(ct_resp.status(), StatusCode::CREATED);
 
     let cpt_entry_resp = client
-        .post(format!("{}/api/admin/content-types/case_study/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/case_study/entries",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
@@ -374,7 +381,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap();
 
     let pub_entry_resp = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
@@ -423,7 +433,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
 
     // Draft entry must NOT leak publicly after restore.
     let draft_resp = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
@@ -436,7 +449,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap();
     assert_eq!(draft_resp.status(), StatusCode::CREATED);
 
-    // 5. Media upload + pin in Home SEO + Builder Homepage
+    // 5. Media upload + pin in Home SEO + existing Builder Homepage
+    // S02 preserves homepage route authority until S03 (Aster ACK #7057434954).
+    // Retain this writer and both public / assertions; S03 will migrate the
+    // whole flow to typed home overrides when route authority changes.
     let png_bytes = minimal_1x1_png();
     let media_resp = client
         .post(format!("{}/api/admin/media", srv.base_url))
@@ -536,11 +552,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
 
     // 7. Seed plugin + plugin_kv directly in source DB to assert plugin + KV preservation.
     {
-        let mut conn = SqliteConnection::connect_with(
-            &SqliteConnectOptions::new().filename(&source_db),
-        )
-        .await
-        .unwrap();
+        let mut conn =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&source_db))
+                .await
+                .unwrap();
         sqlx::query(
             "INSERT INTO plugins (id, name, version, enabled, manifest_json, wasm_blob)
              VALUES ('e2e-plugin', 'E2E Plugin', '1.0.0', 0, '{}', X'')",
@@ -576,7 +591,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap()
         .to_string();
     let backup_job = poll_job(&client, &srv.base_url, &cookie, &backup_job_id).await;
-    assert_eq!(backup_job["state"], "succeeded", "backup failed: {backup_job}");
+    assert_eq!(
+        backup_job["state"], "succeeded",
+        "backup failed: {backup_job}"
+    );
 
     let dl_resp = client
         .get(format!(
@@ -610,7 +628,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
 
     // 10. Upload backup + Admin restore to separate root
     let upload_resp = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -642,13 +663,19 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap()
         .to_string();
     let restore_job = poll_job(&client, &srv.base_url, &cookie, &restore_job_id).await;
-    assert_eq!(restore_job["state"], "succeeded", "restore failed: {restore_job}");
+    assert_eq!(
+        restore_job["state"], "succeeded",
+        "restore failed: {restore_job}"
+    );
     let restore_summary: Value =
         serde_json::from_str(restore_job["summary_json"].as_str().unwrap()).unwrap();
     let restored_root = PathBuf::from(restore_summary["target_root"].as_str().unwrap());
     assert!(restored_root.join("READY.json").is_file());
     let rebased_db = restored_root.join("database").join("opendash.sqlite");
-    assert!(rebased_db.is_file(), "external DB must be rebased inside restored root");
+    assert!(
+        rebased_db.is_file(),
+        "external DB must be rebased inside restored root"
+    );
 
     // 11. Stop source server, start target server on restored_root
     drop(srv);
@@ -664,7 +691,11 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
     assert_eq!(old_cookie_check.status(), StatusCode::UNAUTHORIZED);
 
     // Safe mode: public has X-Robots-Tag: noindex, nofollow and contact returns 503.
-    let pub_safe = client.get(format!("{}/", target.base_url)).send().await.unwrap();
+    let pub_safe = client
+        .get(format!("{}/", target.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(pub_safe.status(), StatusCode::OK);
     assert_eq!(
         pub_safe
@@ -763,12 +794,17 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .await
         .unwrap();
     assert_eq!(media_pub.status(), StatusCode::OK);
-    assert_eq!(media_pub.bytes().await.unwrap().as_ref(), source_media_bytes.as_slice());
+    assert_eq!(
+        media_pub.bytes().await.unwrap().as_ref(),
+        source_media_bytes.as_slice()
+    );
 
     // Plugin KV + custom CPT & post entry IDs preserved in DB.
     {
         let mut conn = SqliteConnection::connect_with(
-            &SqliteConnectOptions::new().filename(&rebased_db).read_only(true),
+            &SqliteConnectOptions::new()
+                .filename(&rebased_db)
+                .read_only(true),
         )
         .await
         .unwrap();
@@ -890,11 +926,10 @@ async fn upgrade_0031_to_0033_and_interrupted_job_recovery() {
     drop(srv);
     let inflight_id = "1".repeat(64);
     {
-        let mut conn = SqliteConnection::connect_with(
-            &SqliteConnectOptions::new().filename(&db_path),
-        )
-        .await
-        .unwrap();
+        let mut conn =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&db_path))
+                .await
+                .unwrap();
         sqlx::query(
             "INSERT INTO operation_jobs (id, kind, state, actor_user_id, reason)
              VALUES (?1, 'backup', 'running', '1', 'crash sim')",
@@ -920,7 +955,8 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
 
     let srv = spawn_server(&source_root, &source_db).await;
     let client = Client::new();
-    let (cookie, csrf) = setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
+    let (cookie, csrf) =
+        setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
 
     // Create 1 valid backup so we have a real .odbackup.age payload.
     let passphrase = "neg-corpus-passphrase";
@@ -963,7 +999,10 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
     let last = tampered.len() - 1;
     tampered[last] ^= 0xFF;
     let up_tamper = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -994,7 +1033,10 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
 
     // 2. Wrong passphrase -> restore fails.
     let up_wrong_pw = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -1067,7 +1109,10 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
     }
     let newer_age = encrypt_age_bytes(&newer_zip, passphrase);
     let up_newer = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::CONTENT_TYPE, "application/octet-stream")

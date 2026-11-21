@@ -212,6 +212,25 @@ pub fn render_builder_with_lists_and_forms(
     lists: &ListResults,
     forms: &ContactFormResults,
 ) -> ApiResult<RenderedLayout> {
+    render_builder_with_template_context(state, document, is_preview, bindings, lists, forms, None)
+}
+
+/// The S02 public resolver supplies already sanitized entry HTML and verified
+/// active theme parts. Ordinary page Builder calls have no template context.
+pub struct BuilderTemplateContext<'a> {
+    pub content_html: Option<&'a str>,
+    pub parts: &'a std::collections::BTreeMap<String, String>,
+}
+
+pub fn render_builder_with_template_context(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
+    lists: &ListResults,
+    forms: &ContactFormResults,
+    context: Option<&BuilderTemplateContext<'_>>,
+) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
     let mut html = builder_responsive_css(document);
@@ -462,17 +481,29 @@ pub fn render_builder_with_lists_and_forms(
                                 }
                             }
                         }
-                        // S01: these template-only nodes are recognized by the AST but
-                        // not rendered by the existing page-scoped Builder. The S02
-                        // resolver will supply their authorized content/part context.
-                        ElementContent::Known(
-                            KnownElement::ContentSlot(_) | KnownElement::TemplatePart(_),
-                        ) => {
-                            diagnostics.push(BuilderDiagnostic {
-                                node_id: element.id.clone(),
-                                code: "template_context_unavailable",
-                            });
-                            None
+                        ElementContent::Known(KnownElement::ContentSlot(_)) => {
+                            match context.and_then(|ctx| ctx.content_html) {
+                                Some(html) => Some(html.to_owned()),
+                                None => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "template_context_unavailable",
+                                    });
+                                    None
+                                }
+                            }
+                        }
+                        ElementContent::Known(KnownElement::TemplatePart(props)) => {
+                            match context.and_then(|ctx| ctx.parts.get(&props.part_key)) {
+                                Some(html) => Some(html.clone()),
+                                None => {
+                                    diagnostics.push(BuilderDiagnostic {
+                                        node_id: element.id.clone(),
+                                        code: "template_part_unavailable",
+                                    });
+                                    None
+                                }
+                            }
                         }
                         ElementContent::Known(KnownElement::Legacy(props)) => {
                             match state.themes.get(&props.block_id) {
@@ -534,6 +565,14 @@ pub fn render_builder_with_lists_and_forms(
                         }
                     };
                     if let Some(fragment) = rendered {
+                        if context.is_some()
+                            && html.len().saturating_add(fragment.len())
+                                > crate::template_sec::MAX_RENDERED_HTML_BYTES
+                        {
+                            return Err(ApiError::bad_request(
+                                "Builder template composition exceeds 512 KiB.",
+                            ));
+                        }
                         html.push_str(&format!(
                             "<div class=\"builder-element\" data-node-id=\"{}\">{fragment}</div>",
                             escape_html(&element.id)
@@ -547,6 +586,11 @@ pub fn render_builder_with_lists_and_forms(
         html.push_str("</section>");
     }
     html.push_str("</main>");
+    if context.is_some() && html.len() > crate::template_sec::MAX_RENDERED_HTML_BYTES {
+        return Err(ApiError::bad_request(
+            "Builder template composition exceeds 512 KiB.",
+        ));
+    }
     Ok(RenderedLayout {
         html,
         diagnostics,

@@ -61,6 +61,7 @@
 ## 5. Domain Owner-Neutral Blocks, Templates & Settings (`P03`, `D07`)
 
 - Extend Builder blocks, template selection, and `SITE-01` settings storage with `ResourceOwner` (`Theme` vs `Plugin(id)`), keeping canonical domain registries as the sole authority.
+- D02/0042 stores provider template selections in `owner_template_selections`, uniquely keyed by owner kind, owner ID, role and scope. The opaque AST and selection key survive provider disable/reinstall independently of site-owned `template_overrides`; private references pin media but grant no public access or provider execution API. See [D02](../designs/s02-target-only-page-builder.md).
 - Plugin blocks use canonical Builder AST + validated MiniJinja `C-SEC` safe-subset renderer (no guest raw HTML). Disabling/removing a plugin preserves user AST nodes and retained settings values, omitting execution with safe fallback.
 
 ## 6. Declarative Admin UI & Guarded Actions (`P05`, `D09`)

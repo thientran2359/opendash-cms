@@ -37,9 +37,13 @@ pub struct CompiledCsecComposition {
     source: String,
     name: String,
     content_count: usize,
+    part_expansions: usize,
 }
 
 impl CompiledCsecComposition {
+    pub(crate) fn part_expansions(&self) -> usize {
+        self.part_expansions
+    }
     /// Renders the C-SEC shell before substituting sanitized entry HTML.
     ///
     /// The injected HTML was sanitized by the content renderer and can contain
@@ -50,6 +54,21 @@ impl CompiledCsecComposition {
         context: Value,
         sanitized_content_html: Option<&str>,
     ) -> Result<String, &'static str> {
+        let mut remaining = TEMPLATE_FUEL_LIMIT;
+        self.render_with_remaining_fuel(context, sanitized_content_html, &mut remaining)
+    }
+
+    /// Public Builder composition can contain multiple independently compiled
+    /// theme segments; all of them consume the same request-local fuel.
+    pub(crate) fn render_with_remaining_fuel(
+        &self,
+        context: Value,
+        sanitized_content_html: Option<&str>,
+        fuel_remaining: &mut u64,
+    ) -> Result<String, &'static str> {
+        if *fuel_remaining == 0 || *fuel_remaining > TEMPLATE_FUEL_LIMIT {
+            return Err("Fuel composition không hợp lệ hoặc đã hết.");
+        }
         let nonce = if self.content_count == 1 {
             let mut bytes = [0_u8; 16];
             OsRng.fill_bytes(&mut bytes);
@@ -69,19 +88,29 @@ impl CompiledCsecComposition {
             self.source.clone()
         };
         let mut env = restricted_environment();
+        env.set_fuel(Some(*fuel_remaining));
         env.add_template(&self.name, &source)
             .map_err(|_| "Không thể biên dịch theme composition.")?;
-        let shell = env
+        let captured = env
             .get_template(&self.name)
             .map_err(|_| "Không tìm thấy theme composition.")?
-            .render(context)
+            .render_captured(context)
             .map_err(|_| "Lỗi thực thi theme composition (fuel/recursion/undefined).")?;
+        let (consumed, remaining) = captured
+            .state()
+            .fuel_levels()
+            .ok_or("Thiếu bộ theo dõi fuel composition.")?;
+        if fuel_remaining.checked_sub(consumed) != Some(remaining) {
+            return Err("Fuel composition không hợp lệ.");
+        }
+        *fuel_remaining = remaining;
+        let shell = captured.output();
         if shell.len() > MAX_RENDERED_HTML_BYTES {
             return Err("HTML render vượt quá giới hạn 512 KiB.");
         }
         validate_html_and_css_context(&shell, true)?;
         let Some(nonce) = nonce else {
-            return Ok(shell);
+            return Ok(shell.to_owned());
         };
         if shell.matches(&nonce).count() != 1 {
             return Err("Nonce nội dung của theme không xuất hiện đúng một lần.");
@@ -98,6 +127,238 @@ impl CompiledCsecComposition {
 // A compiler-only marker. It is never passed to MiniJinja as a callable or
 // trusted HTML variable. A fresh 128-bit random value replaces it per render.
 const CONTENT_SLOT_TOKEN: &str = "OD_CONTENT_SLOT_COMPILE_MARKER";
+
+// Reserved only by the preview compiler, never a template variable or helper.
+const PREVIEW_PART_NONCE_PREFIX: &str = "OD_PREVIEW_PART_";
+
+/// One budget per private preview. Storage owns graph discovery and records
+/// edge occurrences and the active canonical-key stack before rendering.
+/// Every contiguous C-SEC segment debits the same remaining fuel.
+#[derive(Debug)]
+pub(crate) struct PreviewCompositionBudget {
+    pub fuel_remaining: u64,
+    pub expansions: usize,
+    pub stack: Vec<String>,
+}
+
+impl Default for PreviewCompositionBudget {
+    fn default() -> Self {
+        Self {
+            fuel_remaining: TEMPLATE_FUEL_LIMIT,
+            expansions: 0,
+            stack: Vec::new(),
+        }
+    }
+}
+
+impl PreviewCompositionBudget {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// Validated literal edges in source order, including repeated occurrences.
+/// No execution is needed to discover the mixed preview graph.
+pub(crate) fn preview_csec_part_keys(
+    name: &str,
+    source: &str,
+) -> Result<Vec<String>, &'static str> {
+    preview_composition_sites(name, source)?
+        .into_iter()
+        .map(|site| match site.call {
+            CompositionCall::Part(key) => Ok(key),
+            CompositionCall::Content => Err("Template part không được chứa od_content()."),
+        })
+        .collect()
+}
+
+/// Literal part edges of a validated public Theme part. Unlike the preview
+/// compiler this does not change the accepted source format or marker rules.
+pub(crate) fn csec_part_keys(name: &str, source: &str) -> Result<Vec<String>, &'static str> {
+    composition_sites(name, source, true)?
+        .into_iter()
+        .map(|site| match site.call {
+            CompositionCall::Part(key) => Ok(key),
+            CompositionCall::Content => Err("Template part không được chứa od_content()."),
+        })
+        .collect()
+}
+
+fn preview_composition_sites(
+    name: &str,
+    source: &str,
+) -> Result<Vec<CompositionSite>, &'static str> {
+    if source.len() > MAX_RENDERED_HTML_BYTES {
+        return Err("Template hoặc part vượt giới hạn 512 KiB.");
+    }
+    if source.contains(PREVIEW_PART_NONCE_PREFIX) {
+        return Err("Theme HTML chứa marker nội bộ bị cấm.");
+    }
+    composition_sites(name, source, true)
+}
+
+/// Private preview bridge. Theme descendants share their parent's lexical
+/// MiniJinja context. Only DB Builder children (or a server-owned missing-part
+/// fallback) are supplied as already rendered, trusted HTML.
+pub(crate) fn render_preview_csec_fragment(
+    name: &str,
+    source: &str,
+    context: Value,
+    theme_sources: &BTreeMap<String, String>,
+    trusted_builder_parts: &BTreeMap<String, String>,
+    budget: &mut PreviewCompositionBudget,
+) -> Result<String, &'static str> {
+    if budget.fuel_remaining == 0 || budget.fuel_remaining > TEMPLATE_FUEL_LIMIT {
+        return Err("Fuel preview không hợp lệ hoặc đã hết.");
+    }
+    if budget.expansions > MAX_COMPOSITION_EXPANSIONS {
+        return Err("od_part vượt quá 32 lần mở rộng.");
+    }
+    let mut compiler = PreviewFragmentCompiler {
+        theme_sources,
+        trusted_builder_parts,
+        nonces: BTreeMap::new(),
+    };
+    let mut program = String::new();
+    compiler.flatten(name, source, 0, &mut program)?;
+    // Revalidate across source boundaries; the original source checks alone
+    // cannot detect markup or syntax introduced by concatenation.
+    validate_template_csec(name, &program)?;
+    let mut env = restricted_environment();
+    env.set_fuel(Some(budget.fuel_remaining));
+    env.add_template(name, &program)
+        .map_err(|_| "Không thể biên dịch theme preview.")?;
+    let captured = env
+        .get_template(name)
+        .map_err(|_| "Không tìm thấy theme preview.")?
+        .render_captured(context)
+        .map_err(|_| "Lỗi thực thi theme preview (fuel/recursion/undefined).")?;
+    let (consumed, remaining) = captured
+        .state()
+        .fuel_levels()
+        .ok_or("Thiếu bộ theo dõi fuel preview.")?;
+    let debited = budget
+        .fuel_remaining
+        .checked_sub(consumed)
+        .ok_or("Fuel preview không hợp lệ.")?;
+    if debited == 0 || debited != remaining {
+        return Err("Fuel preview không hợp lệ hoặc đã hết.");
+    }
+    budget.fuel_remaining = debited;
+    let shell = captured.output();
+    if shell.len() > MAX_RENDERED_HTML_BYTES {
+        return Err("HTML render vượt quá giới hạn 512 KiB.");
+    }
+    validate_html_and_css_context(shell, true)?;
+    insert_preview_fragments(shell, &compiler.nonces)
+}
+
+struct PreviewFragmentCompiler<'a> {
+    theme_sources: &'a BTreeMap<String, String>,
+    trusted_builder_parts: &'a BTreeMap<String, String>,
+    nonces: BTreeMap<String, &'a str>,
+}
+
+impl<'a> PreviewFragmentCompiler<'a> {
+    fn flatten(
+        &mut self,
+        name: &str,
+        source: &str,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), &'static str> {
+        // The mixed graph is already checked by storage. This guard also
+        // bounds recursion if an inconsistent segment is passed internally.
+        if depth > MAX_COMPOSITION_PART_DEPTH {
+            return Err("Độ sâu od_part vượt giới hạn 3.");
+        }
+        let sites = preview_composition_sites(name, source)?;
+        let mut cursor = 0;
+        for site in sites {
+            append_preview_fragment(out, &source[cursor..site.start])?;
+            let CompositionCall::Part(key) = site.call else {
+                return Err("Template part không được chứa od_content().");
+            };
+            if depth >= MAX_COMPOSITION_PART_DEPTH {
+                return Err("Độ sâu od_part vượt giới hạn 3.");
+            }
+            // Resolution follows the request-local DB-before-theme graph.
+            if let Some(html) = self.trusted_builder_parts.get(&key) {
+                if html.len() > MAX_RENDERED_HTML_BYTES {
+                    return Err("HTML part vượt quá giới hạn 512 KiB.");
+                }
+                let mut random = [0_u8; 16];
+                OsRng
+                    .try_fill_bytes(&mut random)
+                    .map_err(|_| "Không tạo được nonce preview.")?;
+                let mut nonce = PREVIEW_PART_NONCE_PREFIX.to_owned();
+                for byte in random {
+                    use std::fmt::Write;
+                    write!(&mut nonce, "{byte:02x}")
+                        .map_err(|_| "Không tạo được nonce preview.")?;
+                }
+                if self.nonces.insert(nonce.clone(), html).is_some() {
+                    return Err("Nonce preview bị trùng.");
+                }
+                append_preview_fragment(out, &nonce)?;
+            } else {
+                let child = self
+                    .theme_sources
+                    .get(&key)
+                    .ok_or("od_part trỏ tới part không tồn tại.")?;
+                // Substitute source at each occurrence, not independently
+                // rendered HTML: set/with locals and conditional paths survive.
+                self.flatten(&key, child, depth + 1, out)?;
+            }
+            cursor = site.end;
+        }
+        append_preview_fragment(out, &source[cursor..])
+    }
+}
+
+fn append_preview_fragment(out: &mut String, fragment: &str) -> Result<(), &'static str> {
+    if fragment.len() > MAX_RENDERED_HTML_BYTES.saturating_sub(out.len()) {
+        return Err("HTML preview vượt quá giới hạn 512 KiB.");
+    }
+    out.push_str(fragment);
+    Ok(())
+}
+
+fn insert_preview_fragments(
+    shell: &str,
+    nonces: &BTreeMap<String, &str>,
+) -> Result<String, &'static str> {
+    // Search the validated shell only. Never interpret marker-like text
+    // inside inserted Builder HTML or accept a client-supplied marker.
+    let mut substitutions = Vec::new();
+    for (nonce, html) in nonces {
+        let mut matches = shell.match_indices(nonce);
+        if let Some((offset, _)) = matches.next() {
+            if matches.next().is_some() {
+                return Err("Nonce preview xuất hiện nhiều hơn một lần.");
+            }
+            substitutions.push((offset, nonce.len(), *html));
+        }
+    }
+    substitutions.sort_unstable_by_key(|(offset, _, _)| *offset);
+    let mut result = String::new();
+    let mut cursor = 0;
+    let mut state = HtmlScanState::Body;
+    for (offset, len, html) in substitutions {
+        let before = shell
+            .get(cursor..offset)
+            .ok_or("Vị trí nonce preview không hợp lệ.")?;
+        state = before.bytes().fold(state, HtmlScanState::consume);
+        if state != HtmlScanState::Body {
+            return Err("Nonce preview không nằm trong thân HTML.");
+        }
+        append_preview_fragment(&mut result, before)?;
+        append_preview_fragment(&mut result, html)?;
+        cursor = offset + len;
+    }
+    append_preview_fragment(&mut result, &shell[cursor..])?;
+    Ok(result)
+}
 
 #[derive(Debug, Clone)]
 enum CompositionCall {
@@ -314,6 +575,7 @@ pub fn validate_and_compile_csec_composition(
         source: compiled_source,
         name: root_name.to_owned(),
         content_count,
+        part_expansions: expansions,
     })
 }
 
@@ -1602,6 +1864,188 @@ mod composition_tests {
         assert_eq!(
             template.render(Value::UNDEFINED, None).unwrap(),
             "<main>safe</main>"
+        );
+    }
+
+    #[test]
+    fn preview_theme_children_share_lexical_parent_and_conditional_execution() {
+        let theme = parts(&[
+            (
+                "heading",
+                "<h1>{{ title | upper }}</h1>{{ od_part('card') }}",
+            ),
+            ("unused", "{{ undefined_value }}"),
+            ("card", "<p>theme card must lose to DB</p>"),
+        ]);
+        let trusted = parts(&[("card", "<article>DB card</article>")]);
+        let root = "{% set title = 'outer' %}{{ od_part('heading') }}\
+                    {% with title = 'inner' %}{{ od_part('heading') }}{% endwith %}\
+                    {% if false %}{{ od_part('unused') }}{% endif %}\
+                    {{ od_part('heading') }}";
+        assert_eq!(
+            preview_csec_part_keys("root", root).unwrap(),
+            ["heading", "heading", "unused", "heading"]
+        );
+        let mut budget = PreviewCompositionBudget::new();
+        budget.expansions = 7;
+        let html = render_preview_csec_fragment(
+            "root",
+            root,
+            Value::UNDEFINED,
+            &theme,
+            &trusted,
+            &mut budget,
+        )
+        .unwrap();
+        assert_eq!(
+            html,
+            "<h1>OUTER</h1><article>DB card</article>\
+             <h1>INNER</h1><article>DB card</article>\
+             <h1>OUTER</h1><article>DB card</article>"
+        );
+        assert!(budget.fuel_remaining < TEMPLATE_FUEL_LIMIT);
+        assert_eq!(budget.expansions, 7);
+        assert!(budget.stack.is_empty());
+    }
+
+    #[test]
+    fn preview_fuel_is_debited_across_independent_theme_segments() {
+        let empty = parts(&[]);
+        let root = "{% for item in items %}{{ item }}{% endfor %}";
+        // Each iteration consumes several VM instructions. Find a fixed
+        // fixture that consumes more than half of the request's total fuel
+        // while remaining valid in a fresh budget.
+        let context = minijinja::context!(items => vec![1_u32; 1500]);
+        let mut budget = PreviewCompositionBudget::new();
+        let first = render_preview_csec_fragment(
+            "first",
+            root,
+            context.clone(),
+            &empty,
+            &empty,
+            &mut budget,
+        )
+        .unwrap();
+        assert_eq!(first.len(), 1500);
+        assert!(budget.fuel_remaining < TEMPLATE_FUEL_LIMIT / 2);
+        assert!(
+            render_preview_csec_fragment(
+                "second",
+                root,
+                context.clone(),
+                &empty,
+                &empty,
+                &mut budget,
+            )
+            .is_err()
+        );
+        assert!(
+            render_preview_csec_fragment(
+                "second",
+                root,
+                context,
+                &empty,
+                &empty,
+                &mut PreviewCompositionBudget::new(),
+            )
+            .is_ok()
+        );
+        budget.fuel_remaining = 0;
+        assert!(
+            render_preview_csec_fragment(
+                "exhausted",
+                "safe",
+                Value::UNDEFINED,
+                &empty,
+                &empty,
+                &mut budget,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn preview_only_inserts_trusted_parts_in_executed_body_sites() {
+        let empty = parts(&[]);
+        let trusted = parts(&[("card", "<form><input disabled></form>")]);
+        let source = "<main>{{ client_text }}{% if show %}{{ od_part('card') }}{% endif %}</main>";
+        let context = minijinja::context!(
+            client_text => "<form>OD_PREVIEW_PART_fake</form>",
+            show => true
+        );
+        let html = render_preview_csec_fragment(
+            "root",
+            source,
+            context,
+            &empty,
+            &trusted,
+            &mut PreviewCompositionBudget::new(),
+        )
+        .unwrap();
+        assert!(
+            html.contains("&lt;form&gt;OD_PREVIEW_PART_fake&lt;&#x2f;form&gt;")
+                || html.contains("&lt;form&gt;OD_PREVIEW_PART_fake&lt;/form&gt;")
+        );
+        assert!(html.contains("<form><input disabled></form>"));
+        let hidden = render_preview_csec_fragment(
+            "root",
+            source,
+            minijinja::context!(client_text => "", show => false),
+            &empty,
+            &trusted,
+            &mut PreviewCompositionBudget::new(),
+        )
+        .unwrap();
+        assert_eq!(hidden, "<main></main>");
+        for bad in [
+            "<div data-x=\"{{ od_part('card') }}\"></div>",
+            "<style>.x{color:{{ od_part('card') }}}</style>",
+            "<form>{{ od_part('card') }}</form>",
+            "<script>{{ od_part('card') }}</script>",
+            "OD_PREVIEW_PART_abcdef",
+            "{{ od_content() }}",
+        ] {
+            assert!(preview_csec_part_keys("root", bad).is_err(), "{bad}");
+            assert!(
+                render_preview_csec_fragment(
+                    "root",
+                    bad,
+                    Value::UNDEFINED,
+                    &empty,
+                    &trusted,
+                    &mut PreviewCompositionBudget::new(),
+                )
+                .is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_nonce_replacement_is_single_pass_and_checks_multiplicity_context_and_size() {
+        let nonce_table = BTreeMap::from([
+            ("marker-first".to_owned(), "<b>marker-second</b>"),
+            ("marker-second".to_owned(), "<i>second</i>"),
+        ]);
+        assert_eq!(
+            insert_preview_fragments("marker-first marker-second", &nonce_table).unwrap(),
+            "<b>marker-second</b> <i>second</i>"
+        );
+        assert!(insert_preview_fragments("marker-first marker-first", &nonce_table).is_err());
+        assert!(insert_preview_fragments("<div id=\"marker-first\"></div>", &nonce_table).is_err());
+        let empty = parts(&[]);
+        let large = "x".repeat(MAX_RENDERED_HTML_BYTES / 2 + 1);
+        let trusted = parts(&[("card", &large)]);
+        assert!(
+            render_preview_csec_fragment(
+                "root",
+                "{{ od_part('card') }}{{ od_part('card') }}",
+                Value::UNDEFINED,
+                &empty,
+                &trusted,
+                &mut PreviewCompositionBudget::new(),
+            )
+            .is_err()
         );
     }
 }

@@ -89,17 +89,17 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
     let routes_dir = manifest_dir.join("src").join("routes");
 
     // All mutating handler functions wired into build_router_with_themes_root
-    // (excludes pure read-only POST preview renders: preview, homepage_preview, override_preview, menus_preview)
+    // (excludes read-only POST previews: homepage_preview, entry_builder_preview,
+    // template_overrides_preview, menus_preview)
     let required_handlers: &[(&str, &[&str])] = &[
         ("auth.rs", &["auth_setup", "auth_login", "auth_logout"]),
         (
             "builder.rs",
             &[
-                "install",
                 "save",
                 "homepage_put",
-                "override_put",
-                "override_reset",
+                "entry_builder_put",
+                "entry_builder_reset",
             ],
         ),
         (
@@ -165,14 +165,29 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
         ),
         (
             "smtp.rs",
-            &["put_smtp_settings", "test_smtp_settings", "notify_submission"],
+            &[
+                "put_smtp_settings",
+                "test_smtp_settings",
+                "notify_submission",
+            ],
         ),
         (
             "taxonomy.rs",
             &["taxonomy_create", "taxonomy_patch", "taxonomy_delete"],
         ),
-        ("themes.rs", &["theme_install", "theme_activate"]),
-        ("operations.rs", &["upload_restore_archive", "activate_recovery"]),
+        (
+            "themes.rs",
+            &[
+                "theme_install",
+                "theme_activate",
+                "template_overrides_put",
+                "template_overrides_reset",
+            ],
+        ),
+        (
+            "operations.rs",
+            &["upload_restore_archive", "activate_recovery"],
+        ),
         (
             "users.rs",
             &[
@@ -205,7 +220,8 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
     }
 
     // Verify background SMTP spawn requires MutationLease
-    let smtp_src = fs::read_to_string(manifest_dir.join("src").join("smtp.rs")).expect("read smtp.rs");
+    let smtp_src =
+        fs::read_to_string(manifest_dir.join("src").join("smtp.rs")).expect("read smtp.rs");
     let spawn_pos = smtp_src
         .find("pub fn spawn_initial_attempt(")
         .expect("spawn_initial_attempt exists");

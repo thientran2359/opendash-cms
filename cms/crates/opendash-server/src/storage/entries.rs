@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use opendash_core::content::{
-    ContentEntryInput, ContentTypeDefinition, ContentTypeSettings, ContentPublication,
-    ContentSupport, EffectiveContentSchema, EffectiveFieldStatus,
-    FieldRole, PatchField, deserialize_patch_field,
+    ContentEntryInput, ContentMode, ContentPublication, ContentSupport, ContentTypeDefinition,
+    ContentTypeSettings, EffectiveContentSchema, EffectiveFieldStatus, FieldRole, PatchField,
+    deserialize_patch_field,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -70,6 +70,10 @@ pub struct ContentEntryRecord {
     pub values: BTreeMap<String, Value>,
     /// Site-owned term IDs. Stable across content slug edits, publication and provider disable.
     pub term_ids: Vec<i64>,
+    /// Site-owned theme selection; retained even if its provider is withdrawn.
+    pub page_layout_key: Option<String>,
+    pub custom_template_key: Option<String>,
+    pub content_mode: ContentMode,
     /// Server-owned status; legacy CPT entries remain published on Save.
     pub publication_status: String,
     pub version: i64,
@@ -77,7 +81,7 @@ pub struct ContentEntryRecord {
     pub updated_at: String,
 }
 
-type EntryRow = (
+pub(super) type EntryRow = (
     i64,
     String,
     String,
@@ -110,6 +114,9 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
         title,
         values,
         term_ids: Vec::new(),
+        page_layout_key: None,
+        custom_template_key: None,
+        content_mode: ContentMode::Editor,
         publication_status,
         version,
         created_at,
@@ -156,7 +163,10 @@ pub enum PublishedListResult {
     MissingConfig(PublishedListMissing),
 }
 
-async fn read_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64) -> ApiResult<Vec<i64>> {
+pub(super) async fn read_term_ids(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> ApiResult<Vec<i64>> {
     Ok(
         sqlx::query_scalar("SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id")
             .bind(id)
@@ -165,12 +175,25 @@ async fn read_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64) -> ApiResult<V
     )
 }
 
-async fn decoded_with_terms(
+pub(super) async fn decoded_with_terms(
     tx: &mut Transaction<'_, Sqlite>,
     row: EntryRow,
 ) -> ApiResult<ContentEntryRecord> {
     let mut record = decode_row(row)?;
     record.term_ids = read_term_ids(tx, record.id).await?;
+    let (layout, custom, mode): (Option<String>, Option<String>, String) = sqlx::query_as(
+        "SELECT page_layout_key, custom_template_key, content_mode FROM content_entries WHERE id = ?",
+    )
+    .bind(record.id)
+    .fetch_one(&mut **tx)
+    .await?;
+    record.page_layout_key = layout;
+    record.custom_template_key = custom;
+    record.content_mode = match mode.as_str() {
+        "editor" => ContentMode::Editor,
+        "builder" => ContentMode::Builder,
+        _ => return Err(ApiError::internal("Chế độ nội dung không hợp lệ.")),
+    };
     Ok(record)
 }
 
@@ -212,7 +235,7 @@ async fn verify_plugin_action_fence(
     Ok(())
 }
 
-async fn begin_entry_write<'a>(
+pub(super) async fn begin_entry_write<'a>(
     db: &'a SqlitePool,
     actor: &SessionContext,
 ) -> ApiResult<Transaction<'a, Sqlite>> {
@@ -238,31 +261,36 @@ async fn begin_entry_write<'a>(
 }
 
 async fn validate_term_ids(
-    tx: &mut Transaction<'_, Sqlite>, type_key: &str, ids: &[i64],
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    ids: &[i64],
 ) -> ApiResult<()> {
     if ids.len() > 96 || ids.iter().any(|id| *id <= 0) {
         return Err(ApiError::bad_request("term_ids không hợp lệ."));
     }
     let mut unique = std::collections::HashSet::new();
     let mut counts = std::collections::HashMap::<String, usize>::new();
-    let eligible = crate::storage::content::load_effective_taxonomies_in_tx(
-        &mut **tx, type_key,
-    ).await?;
+    let eligible =
+        crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
     for &id in ids {
         if !unique.insert(id) {
             return Err(ApiError::bad_request("term_ids không được trùng lặp."));
         }
-        let kind: Option<String> =
-            sqlx::query_scalar("SELECT t.kind FROM taxonomy_terms t
+        let kind: Option<String> = sqlx::query_scalar(
+            "SELECT t.kind FROM taxonomy_terms t
                JOIN taxonomy_definitions d ON d.key=t.kind
               WHERE t.id=? AND d.provider_status='active'
-                AND d.declaration_state='declared'")
-                .bind(id)
-                .fetch_optional(&mut **tx)
-                .await?;
-        let kind = kind.ok_or_else(|| ApiError::bad_request("Term ID không tồn tại hoặc inactive."))?;
+                AND d.declaration_state='declared'",
+        )
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        let kind =
+            kind.ok_or_else(|| ApiError::bad_request("Term ID không tồn tại hoặc inactive."))?;
         if !eligible.contains(&kind) {
-            return Err(ApiError::bad_request("Taxonomy của term không được phép dùng cho CPT."));
+            return Err(ApiError::bad_request(
+                "Taxonomy của term không được phép dùng cho CPT.",
+            ));
         }
         let count = counts.entry(kind.clone()).or_insert(0);
         *count += 1;
@@ -288,7 +316,7 @@ async fn replace_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64, ids: &[i64]
     Ok(())
 }
 
-async fn current_entry_in_write(
+pub(super) async fn current_entry_in_write(
     tx: &mut Transaction<'_, Sqlite>,
     type_key: &str,
     id: i64,
@@ -316,19 +344,28 @@ pub async fn get_entry(
     id: i64,
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let mut tx = db.begin().await?;
+    let entry = get_entry_in_tx(&mut tx, type_key, id).await?;
+    tx.commit().await?;
+    Ok(entry)
+}
+
+pub(super) async fn get_entry_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    id: i64,
+) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<EntryRow> = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     let entry = match row {
-        Some(row) => Some(decoded_with_terms(&mut tx, row).await?),
+        Some(row) => Some(decoded_with_terms(tx, row).await?),
         None => None,
     };
-    tx.commit().await?;
     Ok(entry)
 }
 
@@ -351,7 +388,9 @@ pub async fn list_published_filtered(
     offset: i64,
     filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
-    if type_key == "section" { return Err(ApiError::not_found("Section là nội dung riêng tư.")); }
+    if type_key == "section" {
+        return Err(ApiError::not_found("Section là nội dung riêng tư."));
+    }
     list_entries_filtered(db, type_key, limit, offset, filters, true).await
 }
 
@@ -384,15 +423,19 @@ pub async fn list_published_page_in_tx(
     filters: EntryFilters,
 ) -> ApiResult<PublishedListResult> {
     if type_key == "section" {
-        return Ok(PublishedListResult::MissingConfig(PublishedListMissing::ContentType));
+        return Ok(PublishedListResult::MissingConfig(
+            PublishedListMissing::ContentType,
+        ));
     }
     if !(1..=100).contains(&page) || !(1..=20).contains(&page_size) {
         return Err(ApiError::bad_request(
             "Trang danh sách phải từ 1–100 và page_size từ 1–20.",
         ));
     }
-    if filters.include_descendants && filters.category_id.is_none()
-        && filters.taxonomy_key.is_none() {
+    if filters.include_descendants
+        && filters.category_id.is_none()
+        && filters.taxonomy_key.is_none()
+    {
         return Err(ApiError::bad_request(
             "include_descendants yêu cầu category_id hoặc generic taxonomy.",
         ));
@@ -447,9 +490,9 @@ pub async fn list_published_page_in_tx(
                   WHERE term.id=? AND d.public=1 AND d.provider_status='active'
                     AND d.declaration_state='declared'",
             )
-                    .bind(id)
-                    .fetch_optional(&mut **tx)
-                    .await?;
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
             if actual.as_deref() != Some(kind)
                 || !effective_taxonomies.iter().any(|enabled| enabled == kind)
             {
@@ -530,22 +573,37 @@ async fn list_entries_filtered(
 /// the query. Inactive, private or unassociated terms cannot be used to probe
 /// published entry existence; Admin may still manage private taxonomies.
 pub(crate) async fn validate_filter_in_tx(
-    tx: &mut Transaction<'_, Sqlite>, type_key: &str,
-    filters: &EntryFilters, published_only: bool,
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    filters: &EntryFilters,
+    published_only: bool,
 ) -> ApiResult<()> {
     if filters.taxonomy_key.is_some() != filters.term_id.is_some()
         || (filters.taxonomy_key.is_some()
             && (filters.category_id.is_some() || filters.tag_id.is_some()))
     {
-        return Err(ApiError::bad_request("Trộn hoặc thiếu cặp taxonomy_key + term_id."));
+        return Err(ApiError::bad_request(
+            "Trộn hoặc thiếu cặp taxonomy_key + term_id.",
+        ));
     }
-    if filters.include_descendants && filters.category_id.is_none()
-        && filters.taxonomy_key.is_none() {
-        return Err(ApiError::bad_request("include_descendants cần taxonomy filter."));
+    if filters.include_descendants
+        && filters.category_id.is_none()
+        && filters.taxonomy_key.is_none()
+    {
+        return Err(ApiError::bad_request(
+            "include_descendants cần taxonomy filter.",
+        ));
     }
-    let allowed = crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
-    for (id, kind) in [(filters.category_id, "category"), (filters.tag_id, "tag"),
-        (filters.term_id, filters.taxonomy_key.as_deref().unwrap_or(""))] {
+    let allowed =
+        crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
+    for (id, kind) in [
+        (filters.category_id, "category"),
+        (filters.tag_id, "tag"),
+        (
+            filters.term_id,
+            filters.taxonomy_key.as_deref().unwrap_or(""),
+        ),
+    ] {
         if let Some(id) = id {
             if id <= 0 {
                 return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
@@ -556,24 +614,27 @@ pub(crate) async fn validate_filter_in_tx(
                  WHERE t.id=? AND d.provider_status='active'
                    AND d.declaration_state='declared'",
             )
-                    .bind(id)
-                .fetch_optional(&mut **tx)
-                    .await?;
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
             if !actual.as_ref().is_some_and(|(actual, _, _)| actual == kind) {
                 return Err(ApiError::bad_request(
                     "Term trong bộ lọc không tồn tại hoặc sai taxonomy.",
                 ));
             }
             let (_, is_public, hierarchical) = actual.expect("checked term");
-            if !allowed.iter().any(|a| a == kind)
-                || (published_only && is_public == 0)
-            {
-                return Err(ApiError::bad_request("Taxonomy không được dùng cho CPT này."));
+            if !allowed.iter().any(|a| a == kind) || (published_only && is_public == 0) {
+                return Err(ApiError::bad_request(
+                    "Taxonomy không được dùng cho CPT này.",
+                ));
             }
-            if filters.include_descendants && filters.taxonomy_key.as_deref() == Some(kind)
+            if filters.include_descendants
+                && filters.taxonomy_key.as_deref() == Some(kind)
                 && hierarchical == 0
             {
-                return Err(ApiError::bad_request("Taxonomy không phân cấp không nhận descendants."));
+                return Err(ApiError::bad_request(
+                    "Taxonomy không phân cấp không nhận descendants.",
+                ));
             }
         }
     }
@@ -680,13 +741,18 @@ pub async fn create_entry_with_fence(
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None)
+        .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
-    let status = if settings.publication == ContentPublication::DraftPublish { "draft" } else { "published" };
+    let status = if settings.publication == ContentPublication::DraftPublish {
+        "draft"
+    } else {
+        "published"
+    };
     let result = sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
          VALUES (?, ?, ?, ?, ?)",
@@ -730,7 +796,17 @@ pub async fn update_entry(
     expected_version: i64,
     input: &ContentEntryInput,
 ) -> ApiResult<ContentEntryRecord> {
-    update_entry_with_fence(db, actor, type_key, schema, id, expected_version, input, None).await
+    update_entry_with_fence(
+        db,
+        actor,
+        type_key,
+        schema,
+        id,
+        expected_version,
+        input,
+        None,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -759,7 +835,8 @@ pub async fn update_entry_with_fence(
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id))
+        .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
@@ -792,7 +869,14 @@ pub async fn update_entry_with_fence(
             if let Some(ids) = &input.term_ids {
                 replace_term_ids(&mut tx, id, ids).await?;
             }
-            crate::storage::seo::record_slug_change_redirect_in_tx(&mut tx, id, type_key, &old_slug, &input.slug).await?;
+            crate::storage::seo::record_slug_change_redirect_in_tx(
+                &mut tx,
+                id,
+                type_key,
+                &old_slug,
+                &input.slug,
+            )
+            .await?;
             let row: EntryRow = sqlx::query_as(
                 "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -809,7 +893,6 @@ pub async fn update_entry_with_fence(
     }
 }
 
-
 pub fn filter_entry_values_for_role(
     record: &mut ContentEntryRecord,
     effective: &EffectiveContentSchema,
@@ -824,12 +907,14 @@ pub fn filter_entry_values_for_role(
     });
 }
 
-async fn verify_schema_token_in_tx(
+pub(super) async fn verify_schema_token_in_tx(
     tx: &mut sqlx::SqliteConnection,
     type_key: &str,
     expected_schema_token: &str,
 ) -> ApiResult<EffectiveContentSchema> {
-    let Some(eff) = crate::storage::content::load_effective_content_schema_in_tx(tx, type_key).await? else {
+    let Some(eff) =
+        crate::storage::content::load_effective_content_schema_in_tx(tx, type_key).await?
+    else {
         return Err(ApiError::not_found(format!(
             "Kh?ng t?m th?y lo?i n?i dung '{type_key}'."
         )));
@@ -856,13 +941,18 @@ pub async fn create_entry_with_schema_fence(
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     let settings = &effective.base.descriptor.settings;
     verify_supported_values(type_key, &input.values, settings)?;
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None)
+        .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
-    let status = if settings.publication == ContentPublication::DraftPublish { "draft" } else { "published" };
+    let status = if settings.publication == ContentPublication::DraftPublish {
+        "draft"
+    } else {
+        "published"
+    };
     let result = sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
          VALUES (?, ?, ?, ?, ?)",
@@ -919,7 +1009,8 @@ pub async fn update_entry_with_schema_fence(
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
+    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id))
+        .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
@@ -952,7 +1043,14 @@ pub async fn update_entry_with_schema_fence(
             if let Some(ids) = &input.term_ids {
                 replace_term_ids(&mut tx, id, ids).await?;
             }
-            crate::storage::seo::record_slug_change_redirect_in_tx(&mut tx, id, type_key, &old_slug, &input.slug).await?;
+            crate::storage::seo::record_slug_change_redirect_in_tx(
+                &mut tx,
+                id,
+                type_key,
+                &old_slug,
+                &input.slug,
+            )
+            .await?;
             let row: EntryRow = sqlx::query_as(
                 "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -987,6 +1085,12 @@ pub struct CompositeEntrySaveInput {
     #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub custom_path: PatchField<String>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub page_layout_key: PatchField<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub custom_template_key: PatchField<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub content_mode: PatchField<ContentMode>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub seo: PatchField<crate::seo::SeoMetadataInput>,
 }
 
@@ -1004,6 +1108,88 @@ pub struct CompositePreflightPlan {
     pub effective_ct_def: ContentTypeDefinition,
     pub merged_input: ContentEntryInput,
     pub publication_status: Option<String>,
+}
+
+/// Check a selection under the same SQLite writer as the entry mutation. A
+/// theme switch and entry Save cannot silently race and validate against two
+/// different active revisions. Existing values are retained on omission even
+/// if their original provider is no longer active.
+async fn resolve_entry_template_patches_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    entry_id: Option<i64>,
+    input: &CompositeEntrySaveInput,
+) -> ApiResult<(Option<String>, Option<String>)> {
+    let existing: (Option<String>, Option<String>) = match entry_id {
+        Some(id) => sqlx::query_as(
+            "SELECT page_layout_key, custom_template_key FROM content_entries WHERE id = ? AND content_type_key = ?",
+        )
+        .bind(id)
+        .bind(type_key)
+        .fetch_one(&mut **tx)
+        .await?,
+        None => (None, None),
+    };
+
+    let mut next = existing.clone();
+    let mut needs_layout_validation = false;
+    let mut needs_custom_validation = false;
+    match &input.page_layout_key {
+        PatchField::Omitted => {}
+        PatchField::Clear => next.0 = None,
+        PatchField::Set(key) => {
+            needs_layout_validation = existing.0.as_deref() != Some(key.as_str());
+            next.0 = Some(key.clone());
+        }
+    }
+    match &input.custom_template_key {
+        PatchField::Omitted => {}
+        PatchField::Clear => next.1 = None,
+        PatchField::Set(key) => {
+            needs_custom_validation = existing.1.as_deref() != Some(key.as_str());
+            next.1 = Some(key.clone());
+        }
+    }
+    if !needs_layout_validation && !needs_custom_validation {
+        return Ok(next);
+    }
+    let manifest_json: Option<String> = sqlx::query_scalar(
+        "SELECT r.manifest_json FROM theme_active_selection s
+           JOIN theme_revisions r ON r.revision_id = s.revision_id
+          WHERE s.id = 1 AND r.source_format = 'v3'",
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(manifest_json) = manifest_json else {
+        return Err(ApiError::unprocessable(
+            "Chưa có theme v3 hoạt động để chọn layout/template.",
+        ));
+    };
+    let manifest: opendash_core::theme::ThemeV3Manifest = serde_json::from_str(&manifest_json)
+        .map_err(|_| ApiError::internal("Manifest theme hoạt động không hợp lệ."))?;
+    manifest.validate().map_err(ApiError::internal)?;
+    if needs_layout_validation
+        && !manifest
+            .page_layouts
+            .iter()
+            .any(|layout| Some(layout.key.as_str()) == next.0.as_deref())
+    {
+        return Err(ApiError::unprocessable(
+            "Page Layout không có trong theme đang hoạt động.",
+        ));
+    }
+    if needs_custom_validation
+        && !manifest.templates.iter().any(|tpl| {
+            tpl.kind == opendash_core::theme::TemplateCandidateKind::SingleCustom
+                && tpl.custom_key.as_deref() == next.1.as_deref()
+                && tpl.allowed_types.iter().any(|allowed| allowed == type_key)
+        })
+    {
+        return Err(ApiError::unprocessable(
+            "Custom Single Template không dành cho loại nội dung này.",
+        ));
+    }
+    Ok(next)
 }
 
 fn actor_field_role(role: auth::Role) -> FieldRole {
@@ -1048,7 +1234,9 @@ pub async fn prepare_composite_entry_save(
 
     let effective = crate::storage::content::load_effective_content_schema(db, type_key)
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("Kh?ng t?m th?y lo?i n?i dung '{type_key}'.")))?;
+        .ok_or_else(|| {
+            ApiError::not_found(format!("Kh?ng t?m th?y lo?i n?i dung '{type_key}'."))
+        })?;
 
     if client_token != effective.schema_token {
         return Err(ApiError::conflict(format!(
@@ -1110,6 +1298,46 @@ pub async fn prepare_composite_entry_save(
     if let PatchField::Set(seo_in) = &input.seo {
         crate::seo::validate_seo_input(seo_in)?;
     }
+    // A missing provider must never erase a previously saved choice. New
+    // assignments are validated against the *currently active* v3 manifest
+    // again after the writer lock is acquired at commit time.
+    if type_key != "page" && !matches!(input.page_layout_key, PatchField::Omitted) {
+        return Err(ApiError::bad_request(
+            "page_layout_key chỉ áp dụng cho Page.",
+        ));
+    }
+    if type_key == "page" && !matches!(input.custom_template_key, PatchField::Omitted) {
+        return Err(ApiError::bad_request(
+            "custom_template_key không áp dụng cho Page.",
+        ));
+    }
+    if !matches!(input.content_mode, PatchField::Omitted) {
+        if type_key != "page"
+            || !effective
+                .base
+                .descriptor
+                .settings
+                .supports(ContentSupport::Builder)
+        {
+            return Err(ApiError::unprocessable(
+                "Builder chưa được bật cho loại nội dung này.",
+            ));
+        }
+        if matches!(input.content_mode, PatchField::Clear) {
+            return Err(ApiError::bad_request("content_mode không được null."));
+        }
+        if entry_id.is_none() && matches!(input.content_mode, PatchField::Set(ContentMode::Builder))
+        {
+            return Err(ApiError::unprocessable("Cần lưu tài liệu Builder trước."));
+        }
+    }
+    for patch in [&input.page_layout_key, &input.custom_template_key] {
+        if let PatchField::Set(key) = patch {
+            if !opendash_core::id::valid_snake_key(key) {
+                return Err(ApiError::unprocessable("Tên layout/template không hợp lệ."));
+            }
+        }
+    }
 
     let merged_values = match entry_id {
         None => {
@@ -1162,7 +1390,8 @@ pub async fn prepare_composite_entry_save(
         .map_err(ApiError::unprocessable)?;
 
     let effective_ct_def = effective_as_ct_def(&effective);
-    crate::storage::media::require_existing_references(db, &effective_ct_def, &merged_input).await?;
+    crate::storage::media::require_existing_references(db, &effective_ct_def, &merged_input)
+        .await?;
 
     Ok(CompositePreflightPlan {
         preflight_schema_token: effective.schema_token.clone(),
@@ -1182,10 +1411,46 @@ pub async fn commit_composite_entry_save(
     plan: &CompositePreflightPlan,
 ) -> ApiResult<CompositeEntrySaveResult> {
     let mut tx = begin_entry_write(db, actor).await?;
-    let effective = verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
+    let effective =
+        verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
-    let is_draft_capable = effective.base.descriptor.settings.publication
-        == ContentPublication::DraftPublish;
+    if let Some(id) = entry_id {
+        let expected_ver = input
+            .expected_version
+            .ok_or_else(|| ApiError::bad_request("Thiếu phiên bản nội dung."))?;
+        current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
+    }
+    let requested_mode = match &input.content_mode {
+        PatchField::Omitted => None,
+        PatchField::Clear => return Err(ApiError::bad_request("content_mode không được null.")),
+        PatchField::Set(mode) => {
+            if type_key != "page"
+                || !effective
+                    .base
+                    .descriptor
+                    .settings
+                    .supports(ContentSupport::Builder)
+            {
+                return Err(ApiError::unprocessable(
+                    "Builder chưa được bật cho loại nội dung này.",
+                ));
+            }
+            if *mode == ContentMode::Builder {
+                let exists: i64 = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM entry_builder_documents WHERE entry_id = ?)",
+                )
+                .bind(entry_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                if exists == 0 {
+                    return Err(ApiError::unprocessable("Cần lưu tài liệu Builder trước."));
+                }
+            }
+            Some(mode.as_str())
+        }
+    };
+    let is_draft_capable =
+        effective.base.descriptor.settings.publication == ContentPublication::DraftPublish;
     if !is_draft_capable && plan.publication_status.as_deref() == Some("draft") {
         return Err(ApiError::unprocessable(
             "Loại nội dung lưu ngay không hỗ trợ trạng thái bản nháp.",
@@ -1210,22 +1475,30 @@ pub async fn commit_composite_entry_save(
     }
 
     let values_json = serde_json::to_string(&plan.merged_input.values)?;
+    let (page_layout_key, custom_template_key) =
+        resolve_entry_template_patches_in_tx(&mut tx, type_key, entry_id, input).await?;
     let saved_id = match entry_id {
         None => {
             // Migration 0008 deliberately rejects a directly published INSERT
             // for the built-in types. Keep that security trigger intact and
             // transition to published *within this same writer transaction*.
             // No intermediate draft can be observed or committed.
-            let status_clause = if is_draft_capable { "draft" } else { "published" };
+            let status_clause = if is_draft_capable {
+                "draft"
+            } else {
+                "published"
+            };
             let res = sqlx::query(
-                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, page_layout_key, custom_template_key)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(type_key)
             .bind(&plan.merged_input.slug)
             .bind(&plan.merged_input.title)
             .bind(&values_json)
             .bind(status_clause)
+            .bind(page_layout_key.as_deref())
+            .bind(custom_template_key.as_deref())
             .execute(&mut *tx)
             .await;
             let new_id = match res {
@@ -1262,6 +1535,8 @@ pub async fn commit_composite_entry_save(
                 "UPDATE content_entries
                  SET slug = ?, title = ?, values_json = ?,
                      publication_status = COALESCE(?, publication_status),
+                     page_layout_key = ?, custom_template_key = ?,
+                     content_mode = COALESCE(?, content_mode),
                      version = version + 1,
                      updated_at = datetime('now')
                  WHERE content_type_key = ? AND id = ? AND version = ?",
@@ -1270,6 +1545,9 @@ pub async fn commit_composite_entry_save(
             .bind(&plan.merged_input.title)
             .bind(&values_json)
             .bind(plan.publication_status.as_deref())
+            .bind(page_layout_key.as_deref())
+            .bind(custom_template_key.as_deref())
+            .bind(requested_mode)
             .bind(type_key)
             .bind(id)
             .bind(expected_ver)
@@ -1356,10 +1634,12 @@ pub async fn delete_entry(
     if result.rows_affected() == 0 {
         return Err(missing_or_stale(db, type_key, id).await?);
     }
-    sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(())
@@ -1383,7 +1663,9 @@ pub async fn set_publication_status(
         .await?;
     let settings = current_settings_in_tx(&mut tx, type_key).await?;
     if settings.publication != ContentPublication::DraftPublish {
-        return Err(ApiError::bad_request("Loại nội dung này sử dụng chế độ lưu ngay."));
+        return Err(ApiError::bad_request(
+            "Loại nội dung này sử dụng chế độ lưu ngay.",
+        ));
     }
     let result = sqlx::query(
         "UPDATE content_entries
@@ -1484,9 +1766,13 @@ mod tests {
         .unwrap();
         // Page stays unassociated by default; this fixture explicitly opts in
         // Page and the custom CPT, as a real C2 Admin configuration would.
-        sqlx::query("INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
-                     VALUES ('page','[\"category\",\"tag\"]'),('news','[\"category\",\"tag\"]')")
-            .execute(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
+                     VALUES ('page','[\"category\",\"tag\"]'),('news','[\"category\",\"tag\"]')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
         let root = sqlx::query(
             "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Root','list-root')",
         )
@@ -1571,9 +1857,16 @@ mod tests {
         assert!(!exact.has_next);
         for (type_key, id) in [("page", page_id), ("news", cpt_id)] {
             let result = expect_list_page(
-                list_published_page(&db, type_key, 1, 20, PublishedListSort::IdDesc, filters.clone())
-                    .await
-                    .unwrap(),
+                list_published_page(
+                    &db,
+                    type_key,
+                    1,
+                    20,
+                    PublishedListSort::IdDesc,
+                    filters.clone(),
+                )
+                .await
+                .unwrap(),
             );
             assert_eq!(
                 result.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
@@ -1583,9 +1876,16 @@ mod tests {
         }
 
         let past_end = expect_list_page(
-            list_published_page(&db, "post", 100, 1, PublishedListSort::IdAsc, filters.clone())
-                .await
-                .unwrap(),
+            list_published_page(
+                &db,
+                "post",
+                100,
+                1,
+                PublishedListSort::IdAsc,
+                filters.clone(),
+            )
+            .await
+            .unwrap(),
         );
         assert!(past_end.entries.is_empty());
         assert!(!past_end.has_next);
@@ -1820,11 +2120,24 @@ mod tests {
             ..EntryFilters::default()
         };
         let page = expect_list_page(
-            list_published_page(&db, "post", 1, 1, PublishedListSort::IdDesc, filters.clone())
-                .await
-                .unwrap(),
+            list_published_page(
+                &db,
+                "post",
+                1,
+                1,
+                PublishedListSort::IdDesc,
+                filters.clone(),
+            )
+            .await
+            .unwrap(),
         );
-        assert_eq!(page.entries.iter().map(|entry| entry.id).collect::<Vec<_>>(), [published]);
+        assert_eq!(
+            page.entries
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>(),
+            [published]
+        );
         assert!(!page.has_next, "drafts must not create a next page");
 
         // A malformed query remains a 400, even though a withdrawn persisted
@@ -1833,11 +2146,9 @@ mod tests {
             tag_id: Some(child),
             ..filters.clone()
         };
-        let error = list_published_page(
-            &db, "post", 1, 6, PublishedListSort::IdDesc, malformed,
-        )
-        .await
-        .unwrap_err();
+        let error = list_published_page(&db, "post", 1, 6, PublishedListSort::IdDesc, malformed)
+            .await
+            .unwrap_err();
         assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
 
         for change in [
@@ -1848,7 +2159,12 @@ mod tests {
         ] {
             sqlx::query(change).execute(&db).await.unwrap();
             let result = list_published_page(
-                &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+                &db,
+                "post",
+                1,
+                6,
+                PublishedListSort::IdDesc,
+                filters.clone(),
             )
             .await
             .unwrap();
@@ -1873,7 +2189,12 @@ mod tests {
         .await
         .unwrap();
         let withdrawn = list_published_page(
-            &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+            &db,
+            "post",
+            1,
+            6,
+            PublishedListSort::IdDesc,
+            filters.clone(),
         )
         .await
         .unwrap();
@@ -1899,8 +2220,15 @@ mod tests {
             .await
             .unwrap();
         let deleted = list_published_page(
-            &db, "post", 1, 6, PublishedListSort::IdDesc,
-            EntryFilters { term_id: Some(child), ..filters.clone() },
+            &db,
+            "post",
+            1,
+            6,
+            PublishedListSort::IdDesc,
+            EntryFilters {
+                term_id: Some(child),
+                ..filters.clone()
+            },
         )
         .await
         .unwrap();
@@ -1912,17 +2240,32 @@ mod tests {
         // is a root. An older saved Builder node with descendants=true must
         // not turn the entire public homepage into HTTP 400.
         sqlx::query("UPDATE taxonomy_definitions SET hierarchical=0 WHERE key='genre'")
-            .execute(&db).await.unwrap();
+            .execute(&db)
+            .await
+            .unwrap();
         let incompatible = list_published_page(
-            &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
-        ).await.unwrap();
-        assert!(matches!(incompatible,
-            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)));
+            &db,
+            "post",
+            1,
+            6,
+            PublishedListSort::IdDesc,
+            filters.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            incompatible,
+            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
+        ));
         let mut tx = db.begin().await.unwrap();
         let query_error = validate_filter_in_tx(&mut tx, "post", &filters, true)
-            .await.unwrap_err();
-        assert_eq!(query_error.0, axum::http::StatusCode::BAD_REQUEST,
-            "user-provided filters remain strict after the definition change");
+            .await
+            .unwrap_err();
+        assert_eq!(
+            query_error.0,
+            axum::http::StatusCode::BAD_REQUEST,
+            "user-provided filters remain strict after the definition change"
+        );
     }
 
     #[tokio::test]
@@ -2008,7 +2351,9 @@ mod tests {
         assert_eq!(second.iter().map(|e| e.id).collect::<Vec<_>>(), [ids[0]]);
         assert!(last.is_empty());
         assert_eq!(first[0].term_ids, [root, child, tag]);
-        let admin = list_entries(&db, "post", 10, 0, filters.clone()).await.unwrap();
+        let admin = list_entries(&db, "post", 10, 0, filters.clone())
+            .await
+            .unwrap();
         assert_eq!(
             admin.len(),
             3,

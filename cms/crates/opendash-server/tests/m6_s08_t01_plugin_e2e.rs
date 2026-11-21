@@ -118,7 +118,12 @@ async fn spawn_server(site_root: &Path) -> (ServerHandle, String) {
     panic!("server did not become healthy in time");
 }
 
-async fn login_user(client: &Client, base_url: &str, username: &str, password: &str) -> (String, String) {
+async fn login_user(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> (String, String) {
     let login = client
         .post(format!("{base_url}/auth/login"))
         .header("Origin", base_url)
@@ -343,7 +348,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     assert!(ui_schema.to_string().contains("sync_jobs"));
 
     let action_res = client
-        .post(format!("{base_url}/api/admin/plugins/e2e-suite/actions/sync_jobs"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/e2e-suite/actions/sync_jobs"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .header("X-CSRF-Token", &editor_csrf)
@@ -359,7 +366,10 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     );
     let action_json: Value = action_res.json().await.unwrap();
     assert!(
-        action_json["output"].as_str().unwrap_or("").contains("mock-egress")
+        action_json["output"]
+            .as_str()
+            .unwrap_or("")
+            .contains("mock-egress")
             || action_json.to_string().contains("mock-egress"),
         "expected mock-egress payload in action output: {action_json}"
     );
@@ -376,7 +386,10 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .unwrap();
     let cat_status = cat_res.status();
     let cat_body = cat_res.text().await.unwrap();
-    assert!(cat_status.is_success(), "create category failed ({cat_status}): {cat_body}");
+    assert!(
+        cat_status.is_success(),
+        "create category failed ({cat_status}): {cat_body}"
+    );
     let cat_json: Value = serde_json::from_str(&cat_body).unwrap();
     let cat_id = cat_json["id"].as_i64().unwrap();
 
@@ -408,7 +421,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
 
     // Attempt entry create -> vetoed (422)
     let vetoed_entry = client
-        .post(format!("{base_url}/api/admin/content-types/job_posting/entries"))
+        .post(format!(
+            "{base_url}/api/admin/content-types/job_posting/entries"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .header("X-CSRF-Token", &editor_csrf)
@@ -423,8 +438,14 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .unwrap();
     let veto_status = vetoed_entry.status().as_u16();
     let veto_body = vetoed_entry.text().await.unwrap();
-    assert_eq!(veto_status, 422, "expected ContentBeforeSave veto: {veto_body}");
-    assert!(veto_body.contains("policy hold"), "expected veto reason in {veto_body}");
+    assert_eq!(
+        veto_status, 422,
+        "expected ContentBeforeSave veto: {veto_body}"
+    );
+    assert!(
+        veto_body.contains("policy hold"),
+        "expected veto reason in {veto_body}"
+    );
 
     // Disable veto-guard -> entry create & publish succeeds
     let disable_veto = client
@@ -438,7 +459,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     assert_eq!(disable_veto.status().as_u16(), 200);
 
     let created_entry = client
-        .post(format!("{base_url}/api/admin/content-types/job_posting/entries"))
+        .post(format!(
+            "{base_url}/api/admin/content-types/job_posting/entries"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .header("X-CSRF-Token", &editor_csrf)
@@ -476,10 +499,12 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
                     responsive: None,
                     children: vec![ElementNode {
                         id: "el-1".into(),
-                        content: ElementContent::Known(KnownElement::PluginBlock(PluginBlockProps {
-                            block_id: "e2e-suite/jobs-card".into(),
-                            values: block_vals,
-                        })),
+                        content: ElementContent::Known(KnownElement::PluginBlock(
+                            PluginBlockProps {
+                                block_id: "e2e-suite/jobs-card".into(),
+                                values: block_vals,
+                            },
+                        )),
                     }],
                 }],
             }],
@@ -496,7 +521,10 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     )
     .unwrap();
     assert!(doc.validate_for_save(&reg, None).is_ok());
-    assert!(doc.validate_for_save(&RegistryCatalog::default(), Some(&doc)).is_ok());
+    assert!(
+        doc.validate_for_save(&RegistryCatalog::default(), Some(&doc))
+            .is_ok()
+    );
 
     // 6. Disable e2e-suite, stop server #1, take site snapshot, restart server #2
     let disable_suite = client
@@ -532,9 +560,10 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO template_overrides (role, scope_type_key, scope_entry_id, ast_json, version, base_theme_id, owner_kind, owner_id, template_selection_key)
-             VALUES ('single', 'job_posting', NULL, '{\"schema_version\":1,\"sections\":[]}', 1, 'e2e-suite', 'plugin', 'e2e-suite', 'job-single-v1')",
+            "INSERT INTO owner_template_selections (owner_kind, owner_id, role, scope_type_key, template_selection_key, ast_json, updated_at)
+             VALUES ('plugin', 'e2e-suite', 'single', 'job_posting', 'job-single-v1', ?, datetime('now'))",
         )
+        .bind(serde_json::to_string(&doc).unwrap())
         .execute(&pool)
         .await
         .unwrap();
@@ -551,7 +580,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         login_user(&client, &base_url2, "editor1", "EditorPassword123!").await;
 
     let get_entry = client
-        .get(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .get(format!(
+            "{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &editor_cookie2)
         .send()
         .await
@@ -563,7 +594,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
 
     // Disabled plugin action is blocked
     let blocked_action = client
-        .post(format!("{base_url2}/api/admin/plugins/e2e-suite/actions/sync_jobs"))
+        .post(format!(
+            "{base_url2}/api/admin/plugins/e2e-suite/actions/sync_jobs"
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &base_url2)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -576,7 +609,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     // Explicit term selection is rejected while the provider is inactive, and
     // must not mutate title, version, or the prior category association.
     let inactive_selection = client
-        .put(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .put(format!(
+            "{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &base_url2)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -592,9 +627,14 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .unwrap();
     let inactive_status = inactive_selection.status().as_u16();
     let inactive_body = inactive_selection.text().await.unwrap();
-    assert_eq!(inactive_status, 400, "inactive selection should be rejected: {inactive_body}");
+    assert_eq!(
+        inactive_status, 400,
+        "inactive selection should be rejected: {inactive_body}"
+    );
     let unchanged: Value = client
-        .get(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .get(format!(
+            "{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &editor_cookie2)
         .send()
         .await
@@ -609,7 +649,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     // Mutate only entry title/value while retaining existing memberships;
     // the snapshot restore below must roll this title edit back.
     let update_entry = client
-        .put(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .put(format!(
+            "{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &base_url2)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -624,9 +666,14 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .unwrap();
     let update_status = update_entry.status().as_u16();
     let update_body = update_entry.text().await.unwrap();
-    assert_eq!(update_status, 200, "inactive title/value update: {update_body}");
+    assert_eq!(
+        update_status, 200,
+        "inactive title/value update: {update_body}"
+    );
     let preserved: Value = client
-        .get(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .get(format!(
+            "{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &editor_cookie2)
         .send()
         .await
@@ -660,9 +707,12 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .unwrap();
     assert_eq!(second_category.status().as_u16(), 201);
     let second_cat_id = second_category.json::<Value>().await.unwrap()["id"]
-        .as_i64().unwrap();
+        .as_i64()
+        .unwrap();
     let select_after_enable = client
-        .put(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .put(format!(
+            "{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &base_url2)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -677,9 +727,14 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         .unwrap();
     let select_status = select_after_enable.status().as_u16();
     let select_body = select_after_enable.text().await.unwrap();
-    assert_eq!(select_status, 200, "reactivated membership edit: {select_body}");
+    assert_eq!(
+        select_status, 200,
+        "reactivated membership edit: {select_body}"
+    );
     let selected: Value = client
-        .get(format!("{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .get(format!(
+            "{base_url2}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &editor_cookie2)
         .send()
         .await
@@ -690,7 +745,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     assert_eq!(selected["term_ids"], json!([cat_id, second_cat_id]));
 
     let action_after_enable = client
-        .post(format!("{base_url2}/api/admin/plugins/e2e-suite/actions/sync_jobs"))
+        .post(format!(
+            "{base_url2}/api/admin/plugins/e2e-suite/actions/sync_jobs"
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &base_url2)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -709,7 +766,9 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     let (editor_cookie3, _editor_csrf3) =
         login_user(&client, &base_url3, "editor1", "EditorPassword123!").await;
     let restored_entry: Value = client
-        .get(format!("{base_url3}/api/admin/content-types/job_posting/entries/{entry_id}"))
+        .get(format!(
+            "{base_url3}/api/admin/content-types/job_posting/entries/{entry_id}"
+        ))
         .header("Cookie", &editor_cookie3)
         .send()
         .await
@@ -733,13 +792,17 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     .await
     .unwrap();
     assert_eq!(opt_val, "\"OpenDash Careers\"");
-    let (tpl_sel,): (String,) = sqlx::query_as(
-        "SELECT template_selection_key FROM template_overrides WHERE owner_kind = 'plugin' AND owner_id = 'e2e-suite'",
+    let (tpl_sel, ast_json): (String, String) = sqlx::query_as(
+        "SELECT template_selection_key, ast_json FROM owner_template_selections WHERE owner_kind = 'plugin' AND owner_id = 'e2e-suite'",
     )
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(tpl_sel, "job-single-v1");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&ast_json).unwrap(),
+        serde_json::to_value(&doc).unwrap()
+    );
 
     egress_task.abort();
 }

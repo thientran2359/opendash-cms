@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AuthUser } from '../../types.ts';
 import { ApiClientError } from '../../api/client.ts';
-import { getOverride, type OverrideRole } from '../../api/builder.ts';
 import {
-  applyLocalThemeTemplate, getLocalTemplateLibrary,
-  type LocalTemplateLibrary, type LocalThemeTemplateDescriptor,
-} from '../../api/sections.ts';
+  getTemplateOverrides, resetTemplateOverride, type TypedTemplateOverride,
+} from '../../api/builder.ts';
+import { getLocalTemplateLibrary, type LocalTemplateLibrary } from '../../api/sections.ts';
 
 interface Props {
   user: AuthUser | null;
@@ -16,10 +15,9 @@ interface Props {
   onApplied: () => void;
 }
 
-const GLOBAL_ROLES: OverrideRole[] = ['header', 'footer', 'archive', 'taxonomy_archive'];
-
 export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigateHash, onApiError, onApplied }: Props) {
   const [catalog, setCatalog] = useState<LocalTemplateLibrary | null>(null);
+  const [overrides, setOverrides] = useState<TypedTemplateOverride[]>([]);
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
@@ -31,8 +29,11 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
     if (currentRole !== 'admin' || !csrfToken) return;
     const seq = ++requestSeq.current;
     setLoading(true);
-    getLocalTemplateLibrary().then(data => {
-      if (seq === requestSeq.current) setCatalog(data);
+    Promise.all([getLocalTemplateLibrary(), getTemplateOverrides()]).then(([data, rows]) => {
+      if (seq === requestSeq.current) {
+        setCatalog(data);
+        setOverrides(rows.items);
+      }
     }).catch(error => {
       if (seq === requestSeq.current) onApiError(error, 'Không tải được thư viện mẫu.');
     }).finally(() => { if (seq === requestSeq.current) setLoading(false); });
@@ -41,47 +42,42 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
   useEffect(() => {
     requestSeq.current += 1;
     setCatalog(null);
+    setOverrides([]);
     setApplying(null);
     if (currentRole !== 'admin' || !csrfToken) return;
     const seq = ++requestSeq.current;
     setLoading(true);
-    getLocalTemplateLibrary().then(data => {
-      if (seq === requestSeq.current) setCatalog(data);
+    Promise.all([getLocalTemplateLibrary(), getTemplateOverrides()]).then(([data, rows]) => {
+      if (seq === requestSeq.current) {
+        setCatalog(data);
+        setOverrides(rows.items);
+      }
     }).catch(error => {
       if (seq === requestSeq.current) onApiError(error, 'Không tải được thư viện mẫu.');
     }).finally(() => { if (seq === requestSeq.current) setLoading(false); });
     return () => { requestSeq.current += 1; };
   }, [currentAccount, currentRole, csrfToken, themeRevision]);
 
-  // A supported theme role is already the fallback. Applying it explicitly
-  // resets only its own override, using the version from an authenticated GET.
-  // The server compares If-Match again; a stale version must never erase the
-  // other editor's changes. Cancel does not write anything.
-  const applyTheme = async (item: LocalThemeTemplateDescriptor) => {
-    const role = item.role;
-    if (!user || user.role !== 'admin' || !csrfToken || applying || !GLOBAL_ROLES.includes(role as OverrideRole)) return;
+  // Only reset the confirmed site-owned row. Never translate a theme role into
+  // a global write: the typed row ID and If-Match make the operation specific
+  // and protect another editor's concurrent modifications.
+  const resetSiteOverride = async (item: TypedTemplateOverride) => {
+    if (!user || user.role !== 'admin' || !csrfToken || applying) return;
     const seq = requestSeq.current;
-    setApplying(role);
+    const key = item.canonical_target_key;
+    if (!window.confirm(`Reset site template “${key}” về nguồn theme/core tiếp theo? Bản AST hiện tại sẽ bị xóa và không thể hoàn tác.`)) return;
+    setApplying(key);
     try {
-      const opened = await getOverride(role as OverrideRole);
+      const result = await resetTemplateOverride(item.id, item.version, csrfToken);
       if (seq !== requestSeq.current) return;
-      if (!window.confirm(`Áp dụng mẫu theme cho ${role}? ${opened.exists ? 'Override hiện tại sẽ bị reset, không thể hoàn tác.' : 'Vai trò này đã dùng mẫu theme; không có override cần reset.'} Chỉ ảnh hưởng role này.`)) {
-        setNotice('Đã hủy. Thiết kế hiện tại giữ nguyên.');
-        return;
-      }
-      // The server compares the catalog's exact active revision AND override
-      // version inside one SQLite writer transaction. A theme switch between
-      // opening the dialog and confirming fails closed with 412.
-      const result = await applyLocalThemeTemplate(item, opened.version, csrfToken);
-      if (seq === requestSeq.current) {
-        setNotice(`Mẫu theme cho ${role} ${result.reset ? 'đã được áp dụng.' : 'đang được sử dụng.'}`);
-        onApplied();
-      }
+      setNotice(`Đã reset ${result.canonical_target_key}. Nguồn hiệu lực: ${result.next_effective_source.label}.`);
+      setOverrides(rows => rows.filter(row => row.id !== item.id));
+      onApplied();
     } catch (error) {
       if (seq !== requestSeq.current) return;
       if (error instanceof ApiClientError && error.status === 412) {
         setNotice('Xung đột 412: bản trên server đã thay đổi; không reset. Hãy mở lại và so sánh.');
-      } else onApiError(error, 'Không thể áp dụng mẫu theme.');
+      } else onApiError(error, 'Không thể reset site template override.');
     } finally { if (seq === requestSeq.current) setApplying(null); }
   };
 
@@ -116,12 +112,24 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
             <p className="break-all text-xs text-slate-500">Revision: {item.revision_id} · {item.revision_digest.slice(0, 12)}</p>
             {item.reason && <p className="text-xs text-amber-800">{item.reason}</p>}
           </div>
-          {item.can_apply && GLOBAL_ROLES.includes(item.role as OverrideRole) &&
-            <button type="button" disabled={!!applying} onClick={() => void applyTheme(item)}>
-              {applying === item.role ? 'Đang áp dụng…' : 'Áp dụng mẫu theme'}
-            </button>}
+          {item.can_apply && <span className="text-xs text-slate-600">Mẫu thuộc active theme</span>}
         </article>)}
         {!catalog.theme_templates.length && <p className="text-sm text-slate-600">Theme không cung cấp mẫu role cục bộ hợp lệ. Section vẫn được bảo toàn; không tải nội dung từ mạng.</p>}
+      </section>
+      <section className="space-y-3 border-t border-slate-200 pt-4" aria-label="Site template overrides">
+        <h3 className="font-semibold">Site template overrides ({overrides.length})</h3>
+        <p className="text-sm text-slate-600">Bản AST thuộc website ưu tiên hơn template của theme ở cùng target. Reset đúng target sẽ hiện nguồn theme/core kế tiếp; không thay đổi các template khác.</p>
+        {overrides.map(item => <article key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
+          <div className="min-w-0">
+            <strong className="break-all">{item.canonical_target_key}</strong>
+            <p className="text-xs text-slate-600">Phiên bản v{item.version} · {item.effective_source?.label ?? 'Site override'}</p>
+            <p className="break-all text-xs text-slate-500">Theme gốc: {item.base_theme_id ?? 'Core'} · {item.base_revision_digest?.slice(0, 12) ?? 'Không có revision'}</p>
+          </div>
+          <button type="button" className="btn-secondary" disabled={!!applying || loading} onClick={() => void resetSiteOverride(item)}>
+            {applying === item.canonical_target_key ? 'Đang reset…' : 'Reset override'}
+          </button>
+        </article>)}
+        {!overrides.length && <p className="text-sm text-slate-600">Chưa có site-owned override; resolver sử dụng active theme/core theo thứ tự candidate.</p>}
       </section>
     </>}
   </main>;
