@@ -648,7 +648,7 @@ pub fn register_plugin_block_template(
     Ok(())
 }
 
-/// Page documents are site-owned entry content. Their only version is the
+/// Builder documents are site-owned entry content. Their only version is the
 /// enclosing content entry CAS token; shared site templates are independent.
 #[derive(Debug, Clone, Serialize)]
 pub struct EntryBuilderOpen {
@@ -680,10 +680,24 @@ async fn entry_builder_snapshot(
     type_key: &str,
     id: i64,
 ) -> ApiResult<EntryBuilderSnapshot> {
-    if type_key != "page" {
-        return Err(ApiError::forbidden(
-            "Builder is available only for Page entries.",
-        ));
+    // Section still uses its private legacy APIs in S01. Pattern replaces it
+    // in S02, so a malformed Section registration must not unlock this path.
+    if type_key == "section" {
+        return Err(ApiError::forbidden("Content Builder is not enabled."));
+    }
+    let schema = crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, type_key)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Content type not found."))?;
+    if schema.base.status != ProviderStatus::Active
+        || schema.base.declaration_state != DeclarationState::Declared
+        || !schema
+            .base
+            .descriptor
+            .settings
+            .supports
+            .contains(&ContentSupport::Builder)
+    {
+        return Err(ApiError::forbidden("Content Builder is not enabled."));
     }
     let row: Option<(String, String, String, String, i64, Option<String>)> = sqlx::query_as(
         "SELECT e.title, e.slug, e.values_json, e.content_mode, e.version, d.document_json
@@ -695,21 +709,7 @@ async fn entry_builder_snapshot(
     .fetch_optional(&mut **tx)
     .await?;
     let (title, slug, values, mode, version, raw) =
-        row.ok_or_else(|| ApiError::not_found("Page entry not found."))?;
-    let schema = crate::storage::content::load_effective_content_schema_in_tx(&mut **tx, type_key)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Page type not found."))?;
-    if schema.base.status != ProviderStatus::Active
-        || schema.base.declaration_state != DeclarationState::Declared
-        || !schema
-            .base
-            .descriptor
-            .settings
-            .supports
-            .contains(&ContentSupport::Builder)
-    {
-        return Err(ApiError::forbidden("Page Builder is not enabled."));
-    }
+        row.ok_or_else(|| ApiError::not_found("Content entry not found."))?;
     let content_mode = match mode.as_str() {
         "editor" => ContentMode::Editor,
         "builder" => ContentMode::Builder,
@@ -768,7 +768,7 @@ async fn validate_entry_builder_document(
         .validate_for_save(&state.descriptors()?, current.opened.document.as_ref())
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
-    // Validate the path Page's field keys using the effective field ACL.
+    // Validate this entry's field keys using its effective field ACL.
     let allowed: Vec<String> = current
         .schema
         .effective_fields
@@ -776,8 +776,15 @@ async fn validate_entry_builder_document(
         .filter(|key| visible_builder_field(&current.schema, key, role))
         .cloned()
         .collect();
+    // Content Builder is always a singular route; only the Page CPT uses
+    // the Page role. Other CPTs bind to their own singular route context.
+    let route_role = if current.opened.type_key == "page" {
+        "page"
+    } else {
+        "single"
+    };
     document
-        .validate_route_context_for_role(Some("page"), Some(&allowed))
+        .validate_route_context_for_role(Some(route_role), Some(&allowed))
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
     let mut exact_schemas = BTreeMap::new();
@@ -793,7 +800,7 @@ async fn validate_entry_builder_document(
                         KnownElement::ContentSlot(_) | KnownElement::TemplatePart(_)
                     ) {
                         return Err(ApiError::bad_request(
-                            "Template-only element in Page Builder.",
+                            "Template-only element in Content Builder.",
                         ));
                     }
                     let Some(binding) = known.binding() else {
@@ -878,14 +885,15 @@ async fn render_entry_builder_preview(
     )
 }
 
-/// Shared-template preview uses the selected Page body inside the caller's
+/// Shared-template preview uses the selected CPT body inside the caller's
 /// read snapshot. A missing saved document is handled by the text renderer.
 pub(super) async fn preview_saved_page_body_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     actor: &SessionContext,
+    type_key: &str,
     id: i64,
 ) -> ApiResult<Option<RenderedLayout>> {
-    let current = entry_builder_snapshot(tx, "page", id).await?;
+    let current = entry_builder_snapshot(tx, type_key, id).await?;
     if current.opened.content_mode != ContentMode::Builder {
         return Ok(None);
     }
@@ -957,7 +965,7 @@ fn check_entry_builder_cas(
         return Err(ApiError::precondition_failed("Entry version changed."));
     }
     if matches!(mutation, EntryBuilderMutation::Reset) && current.opened.document.is_none() {
-        return Err(ApiError::not_found("No saved Page Builder document."));
+        return Err(ApiError::not_found("No saved Content Builder document."));
     }
     Ok(())
 }
@@ -1036,9 +1044,10 @@ async fn mutate_entry_builder(
     let current = entry_builder_snapshot(&mut tx, type_key, id).await?;
     check_entry_builder_cas(&current, expected_version, &mutation)?;
     if current.schema.schema_token != before.schema.schema_token {
-        return Err(
-            ApiError::precondition_failed("Page schema changed during Builder operation.").into(),
-        );
+        return Err(ApiError::precondition_failed(
+            "Content schema changed during Builder operation.",
+        )
+        .into());
     }
 
     let (mode, document) = match mutation {

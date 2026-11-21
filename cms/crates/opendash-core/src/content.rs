@@ -500,6 +500,9 @@ impl ContentTypeSettings {
 
     pub fn builtin_page() -> Self {
         let mut settings = Self::builtin_publication();
+        // Page has no archive of its own; its Builder capability is an
+        // entry-owned content surface, not a shared template or archive.
+        settings.has_archive = false;
         settings.supports.push(ContentSupport::Builder);
         settings
     }

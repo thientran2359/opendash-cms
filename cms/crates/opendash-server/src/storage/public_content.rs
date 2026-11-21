@@ -152,13 +152,16 @@ pub async fn load_entry_render_snapshot(
         active.as_ref().map(|v| &v.page_layouts),
     )
     .await?;
-    let body = if entry.content_type_key == "page"
-        && entry.content_mode == ContentMode::Builder
+    let body = if entry.content_mode == ContentMode::Builder
         && schema.settings.supports(ContentSupport::Builder)
     {
         let raw: Option<String> = sqlx::query_scalar(
-            "SELECT document_json FROM entry_builder_documents WHERE entry_id = ?",
+            "SELECT d.document_json FROM entry_builder_documents d
+             JOIN content_types t ON t.key = ? AND t.provider_status = 'active'
+                                  AND t.declaration_state = 'declared'
+             WHERE d.entry_id = ?",
         )
+        .bind(&entry.content_type_key)
         .bind(entry.id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -168,7 +171,7 @@ pub async fn load_entry_render_snapshot(
                 &mut tx,
                 &doc,
                 false,
-                Some(("page", &entry.slug)),
+                Some((&entry.content_type_key, &entry.slug)),
             )
             .await?;
             let lists =
@@ -619,9 +622,10 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            JOIN entry_builder_documents AS doc ON doc.entry_id = r.entry_id
            JOIN content_entries AS e ON e.id = r.entry_id
            JOIN content_types AS t ON t.key = e.content_type_key
-           WHERE r.media_id = ? AND e.content_type_key = 'page'
+           WHERE r.media_id = ? AND e.content_type_key != 'section'
              AND e.publication_status = 'published' AND e.content_mode = 'builder'
              AND t.provider_status = 'active'
+             AND t.declaration_state = 'declared'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND EXISTS (SELECT 1 FROM json_each(t.definition_json, '$.settings.supports') WHERE value = 'builder')
          ) OR EXISTS (
@@ -1443,5 +1447,143 @@ mod m5_public_context_tests {
                 .0,
             StatusCode::NOT_FOUND
         );
+    }
+
+    #[tokio::test]
+    async fn s01_generic_builder_body_and_media_follow_mode_capability_and_publication() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            r#"INSERT INTO content_types(key, definition_json, owner_kind)
+                VALUES('project', '{"key":"project","label":"Project","fields":[],"settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let entry_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
+             VALUES('project', 's01-builder', 'Builder project', '{}', 'published', 'builder')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let media_id = "7".repeat(64);
+        let document = serde_json::json!({
+            "schema_version": 1,
+            "sections": [{"id":"section", "children":[{"id":"row", "children":[
+                {"id":"column", "children":[
+                    {"id":"heading", "type":"core/heading",
+                        "props":{"level":2,"text":"S01 generic project body"}},
+                    {"id":"route-title", "type":"core/heading",
+                        "props":{"level":3,"text":"Unresolved title",
+                            "binding":{"source":{"kind":"route_context","field_key":"title"},"target":"text"}}},
+                    {"id":"picture", "type":"core/image",
+                        "props":{"media_id":media_id,"alt":"Project picture"}}
+                ]}
+            ]}]}]
+        });
+        sqlx::query(
+            "INSERT INTO entry_builder_documents(entry_id, document_json, updated_at) VALUES(?, ?, datetime('now'))",
+        )
+        .bind(entry_id)
+        .bind(document.to_string())
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO media_assets(id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height)
+             VALUES(?, 'image', 'builder-test.png', 'image/png', 'png', 128, 10, 10, 10, 10)",
+        )
+        .bind(&media_id)
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO entry_builder_media_refs(entry_id, media_id, ref_role) VALUES(?, ?, 'image')",
+        )
+        .bind(entry_id)
+        .bind(&media_id)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let rendered = load_entry_render_snapshot(&db, entry_id, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let body = rendered.body.unwrap().html;
+        assert!(body.contains("S01 generic project body"));
+        assert!(body.contains("Builder project"));
+        assert!(!body.contains("Unresolved title"));
+        assert!(media_is_referenced(&db, &media_id).await.unwrap());
+
+        // Editor mode must leave the saved document intact while revoking
+        // its public rendering and media grant immediately.
+        sqlx::query("UPDATE content_entries SET content_mode = 'editor' WHERE id = ?")
+            .bind(entry_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        assert!(
+            load_entry_render_snapshot(&db, entry_id, None)
+                .await
+                .unwrap()
+                .unwrap()
+                .body
+                .is_none()
+        );
+        assert!(!media_is_referenced(&db, &media_id).await.unwrap());
+        sqlx::query("UPDATE content_entries SET content_mode = 'builder' WHERE id = ?")
+            .bind(entry_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.supports', json('[\"editor\"]')) WHERE key = 'project'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        assert!(
+            load_entry_render_snapshot(&db, entry_id, None)
+                .await
+                .unwrap()
+                .unwrap()
+                .body
+                .is_none()
+        );
+        assert!(!media_is_referenced(&db, &media_id).await.unwrap());
+        let saved: String = sqlx::query_scalar(
+            "SELECT document_json FROM entry_builder_documents WHERE entry_id = ?",
+        )
+        .bind(entry_id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&saved).unwrap(),
+            document
+        );
+
+        sqlx::query("UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.supports', json('[\"editor\",\"builder\"]')) WHERE key = 'project'")
+            .execute(&db).await.unwrap();
+        assert!(media_is_referenced(&db, &media_id).await.unwrap());
+        sqlx::query("UPDATE content_entries SET publication_status = 'draft' WHERE id = ?")
+            .bind(entry_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        assert!(
+            load_entry_render_snapshot(&db, entry_id, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(!media_is_referenced(&db, &media_id).await.unwrap());
     }
 }

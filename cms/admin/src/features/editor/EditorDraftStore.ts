@@ -1,4 +1,5 @@
-import type { ContentFieldValue, ContentMode, EffectiveEditorConfigProjection } from '../content/types.ts';
+import type { ContentFieldValue, ContentMode } from '../content/types.ts';
+import type { EffectiveEditorConfigWithSettings } from '../../api/content.ts';
 
 export type DraftStatus = 'active' | 'quarantined';
 
@@ -129,7 +130,7 @@ export class EditorDraftStore {
     draftKey: string,
     siteInstanceId: string,
     userId: number,
-    freshConfig: EffectiveEditorConfigProjection,
+    freshConfig: EffectiveEditorConfigWithSettings,
     authGeneration: number,
     fresh: EditorDraftPayload,
     routeReadable: boolean,
@@ -168,7 +169,10 @@ export class EditorDraftStore {
       slug_touched: saved.payload.slug_touched ?? fresh.slug_touched,
       publication_status: savedDirty.has('publication_status')
         ? saved.payload.publication_status : fresh.publication_status,
-      content_mode: freshConfig.type_key === 'page' && savedDirty.has('content_mode')
+      // Switching back to Editor remains authorized after Builder is disabled;
+      // do not restore a pending switch *to* Builder without the capability.
+      content_mode: savedDirty.has('content_mode') &&
+        (freshConfig.settings?.supports.includes('builder') || saved.payload.content_mode === 'editor')
         ? saved.payload.content_mode : fresh.content_mode,
       term_ids: savedDirty.has('term_ids') ? [...saved.payload.term_ids] : [...fresh.term_ids],
       values,

@@ -43,6 +43,7 @@ export interface PanelRegionRendererProps {
   onRunAction: (pluginId: string, actionId: string, panelId: string) => void;
   onSave: (intent?: 'draft' | 'published') => void;
   onOpenBuilder: () => void;
+  canOpenBuilder: boolean;
   saving: boolean;
   dirty: boolean;
 }
@@ -105,6 +106,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   onRunAction,
   onSave,
   onOpenBuilder,
+  canOpenBuilder,
   saving,
   dirty,
 }) => {
@@ -317,13 +319,15 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   </select>
                 </label>
               )}
-              <button
-                type="button"
-                onClick={onOpenBuilder}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
-              >
-                Mở Visual Builder
-              </button>
+              {canOpenBuilder && (
+                <button
+                  type="button"
+                  onClick={onOpenBuilder}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                >
+                  Mở Visual Builder
+                </button>
+              )}
             </div>
           );
         case 'taxonomies':

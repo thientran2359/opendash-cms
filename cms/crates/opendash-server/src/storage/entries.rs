@@ -1312,8 +1312,11 @@ pub async fn prepare_composite_entry_save(
         ));
     }
     if !matches!(input.content_mode, PatchField::Omitted) {
-        if type_key != "page"
-            || !effective
+        // The editor mode is always available as a safe fallback (including
+        // after an Admin disables Builder). Entering Builder mode requires an
+        // explicit capability, regardless of CPT key.
+        if matches!(input.content_mode, PatchField::Set(ContentMode::Builder))
+            && !effective
                 .base
                 .descriptor
                 .settings
@@ -1424,8 +1427,8 @@ pub async fn commit_composite_entry_save(
         PatchField::Omitted => None,
         PatchField::Clear => return Err(ApiError::bad_request("content_mode không được null.")),
         PatchField::Set(mode) => {
-            if type_key != "page"
-                || !effective
+            if *mode == ContentMode::Builder
+                && !effective
                     .base
                     .descriptor
                     .settings

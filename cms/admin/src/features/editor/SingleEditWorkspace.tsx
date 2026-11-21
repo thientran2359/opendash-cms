@@ -335,11 +335,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             getContentEntry(typeKey, entryId),
             optional(getEntryRoute(typeKey, entryId)),
             optional(getEntrySeo(typeKey, entryId)),
-            typeKey === 'page' && freshCfg.settings?.supports.includes('builder')
-              ? getEntryBuilder(entryId) : Promise.resolve(null),
+            typeKey !== 'section' && freshCfg.settings?.supports.includes('builder')
+              ? optional(getEntryBuilder(typeKey, entryId)) : Promise.resolve(null),
           ]);
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
-          setHasBuilderDocument(Boolean(builderSnap?.document && builderSnap.version === rec.version));
+          setHasBuilderDocument(Boolean(builderSnap?.document));
           const themeKey = typeKey === 'page'
             ? (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null
             : (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
@@ -359,7 +359,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           baseline = {
             id: rec.id, version: rec.version, title: rec.title, slug: rec.slug,
             slug_touched: true, publication_status: rec.publication_status,
-            content_mode: typeKey === 'page' ? rec.content_mode : undefined,
+            content_mode: rec.content_mode,
             values: allowedValues, cleared_fields: [], term_ids: rec.term_ids ?? [],
             custom_path: routeSnap?.custom_path ?? '',
             seo: seoSnap ? {
@@ -378,7 +378,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             id: null, version: null, title: '', slug: '', slug_touched: false,
             publication_status: effectiveContentTypeSettings(typeKey, freshCfg.settings).publication === 'draft_publish'
               ? 'draft' : 'published',
-            content_mode: typeKey === 'page' ? 'editor' : undefined,
+            content_mode: 'editor',
             values: {}, cleared_fields: [], term_ids: [], custom_path: '', seo: emptySeo,
           };
         }
@@ -503,7 +503,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         title: snapshot.title.trim(),
         slug: snapshot.slug.trim(),
         publication_status: nextPublication,
-        ...(typeKey === 'page' && effectiveSettings.supports.includes('builder') &&
+        ...((effectiveSettings.supports.includes('builder') || snapshot.content_mode === 'editor') &&
             baselineRef.current?.content_mode !== snapshot.content_mode
           ? { content_mode: snapshot.content_mode } : {}),
         values: submitValues,
@@ -531,7 +531,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         ...snapshot,
         id: res.entry.id, version: res.entry.version, title: res.entry.title, slug: res.entry.slug,
         slug_touched: true, publication_status: res.entry.publication_status,
-        content_mode: typeKey === 'page' ? res.entry.content_mode : undefined,
+        content_mode: res.entry.content_mode,
         values: res.entry.values, cleared_fields: [], term_ids: res.entry.term_ids ?? snapshot.term_ids,
         custom_path: res.custom_path ?? '',
         seo: res.seo ? {
@@ -707,19 +707,32 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           Xem trước bản nháp đã lưu (yêu cầu đăng nhập)
         </a>
       )}
-      {typeKey === 'page' && settings?.supports.includes('builder') && entryId !== null && (
+      {typeKey !== 'section' && entryId !== null &&
+        (settings?.supports.includes('builder') || contentMode === 'builder' ||
+          baselineRef.current?.content_mode === 'builder') && (
         <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
-          <label htmlFor="page-content-mode" className="block text-sm font-semibold">Nguồn nội dung Page</label>
-          <select id="page-content-mode" value={contentMode} disabled={saving || !csrfToken}
+          <label htmlFor={typeKey === 'page' ? 'page-content-mode' : 'entry-content-mode'}
+            className="block text-sm font-semibold">Nguồn nội dung {typeKey === 'page' ? 'Page' : typeKey}</label>
+          <select id={typeKey === 'page' ? 'page-content-mode' : 'entry-content-mode'}
+            value={contentMode} disabled={saving || !csrfToken}
             onChange={event => {
               const next = event.target.value as ContentMode;
+              if (next === 'builder' &&
+                  (!settings?.supports.includes('builder') || (!hasBuilderDocument && contentMode !== 'builder'))) return;
               setContentMode(next);
               persistDraftPatch({ content_mode: next });
             }}>
             <option value="editor">Văn bản</option>
-            <option value="builder" disabled={!hasBuilderDocument && contentMode !== 'builder'}>Visual Builder</option>
+            <option value="builder" disabled={!settings?.supports.includes('builder') ||
+              (!hasBuilderDocument && contentMode !== 'builder')}>
+              Visual Builder{!settings?.supports.includes('builder') ? ' (đã tắt)' : ''}
+            </option>
           </select>
-          <p className="text-xs text-slate-600">Chuyển nguồn khi lưu giữ nguyên văn bản và thiết kế đã lưu.</p>
+          <p className="text-xs text-slate-600">
+            {!settings?.supports.includes('builder')
+              ? 'Builder đã tắt; hệ thống hiển thị văn bản. Chọn Văn bản rồi lưu để cập nhật nguồn, thiết kế cũ vẫn được giữ.'
+              : 'Chuyển nguồn khi lưu giữ nguyên văn bản và thiết kế đã lưu.'}
+          </p>
         </div>
       )}
       {isDraftPublishCpt && (
@@ -860,8 +873,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           }
         }}
         onSave={intent => void handleSave(intent)}
+        canOpenBuilder={typeKey !== 'section' && Boolean(settings?.supports.includes('builder'))}
         onOpenBuilder={() => {
-          if (typeKey !== 'page' || !settings?.supports.includes('builder')) {
+          if (typeKey === 'section' || !settings?.supports.includes('builder')) {
             setStatusNote('Loại nội dung này chưa hỗ trợ Visual Builder.');
             return;
           }
@@ -869,7 +883,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             setStatusNote('Vui lòng Lưu nội dung trước khi mở Visual Builder.');
             return;
           }
-          onNavigateHash(`#/builder?template=page&type=page&entry=${entryId}`);
+          // Preserve the existing Page Builder deep link. Other opted-in CPTs
+          // use the new generic entry target without changing Page bookmarks.
+          const target = typeKey === 'page' ? 'page' : 'entry';
+          onNavigateHash(`#/builder?template=${target}&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
         }}
       />
       </div>
