@@ -279,7 +279,7 @@ Mọi comment block bám sát **100%** các trường thực tế của `Builder
 
 ## Detailed Implementation Plan
 
-### Target Files to Create / Modify
+### Target Files to Create/Modify
 
 | File | Hành động | Slice | Mục tiêu |
 | :--- | :--- | :--- | :--- |
