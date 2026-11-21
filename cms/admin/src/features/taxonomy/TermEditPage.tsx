@@ -5,6 +5,7 @@ import { createTaxonomyTerm, getTaxonomyTerm, getEffectiveTermConfig, getTaxonom
   type TaxonomyDefinition, type TaxonomyKind, type TaxonomyTerm, type TaxonomyTermChanges } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
 import { AdminTermPanels, type EffectiveTermConfig, type TermExtensionValues } from '../extensions/AdminContributionRenderer.tsx';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface TermEditProps {
   kind: TaxonomyKind;
@@ -45,8 +46,8 @@ const blank = (): FormValues => ({ name: '', slug: '', parentId: '' });
 const fromTerm = (term: TaxonomyTerm): FormValues => ({
   name: term.name, slug: term.slug, parentId: term.parent_id === null ? '' : String(term.parent_id),
 });
-const fieldClass = 'mt-1 block w-full min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-50';
-const buttonClass = 'rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50';
+const fieldClass = 'h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50';
+const selectClass = 'h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50';
 
 function slugFromName(name: string): string {
   return name.replace(/[đĐ]/g, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
@@ -342,67 +343,67 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
   if (!user) return null;
   if (notFound) return (
     <section data-testid="term-not-found" className="space-y-3">
-      <h2 className="text-xl font-bold text-slate-900">404 Không tìm thấy term {kind}</h2>
-      <p className="text-sm text-slate-600">ID không tồn tại hoặc thuộc loại taxonomy khác.</p>
-      {recoveredRef.current && <div className="space-y-2 rounded-lg border border-amber-200 p-3 text-sm">
+      <h2 className="text-xl font-bold text-zinc-950">404 Không tìm thấy term {kind}</h2>
+      <p className="text-sm text-zinc-600">ID không tồn tại hoặc thuộc loại taxonomy khác.</p>
+      {recoveredRef.current && <AdminAlert tone="warning" className="space-y-2">
         <p role="status">Bản nháp từ phiên trước vẫn được giữ để sao chép, nhưng đích lưu hiện không còn khả dụng.</p>
-        <pre className="max-w-full overflow-auto whitespace-pre-wrap break-words">{JSON.stringify({ form, extensions }, null, 2)}</pre>
-      </div>}
-      <button type="button" className={buttonClass} onClick={discardAndBack}>Bỏ bản nhập / Về danh sách</button>
+        <pre className="max-w-full overflow-auto whitespace-pre-wrap break-words rounded bg-white/80 p-2 font-mono text-xs">{JSON.stringify({ form, extensions }, null, 2)}</pre>
+      </AdminAlert>}
+      <AdminButton variant="secondary" size="md" onClick={discardAndBack}>Bỏ bản nhập / Về danh sách</AdminButton>
     </section>
   );
-  if (loading) return <p role="status">Đang tải màn hình chỉnh sửa taxonomy...</p>;
+  if (loading) return <p role="status" className="text-sm text-zinc-600">Đang tải màn hình chỉnh sửa taxonomy...</p>;
 
   return (
     <section className="mx-auto w-full min-w-0 max-w-4xl space-y-5" data-testid="term-edit-page"
       data-term-kind={kind} data-term-id={current?.id ?? ''}>
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-widest text-sky-700">Nội dung / {definition?.label ?? kind}</p>
-          <h2 className="mt-1 text-2xl font-bold text-slate-900">
+          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">Nội dung / {definition?.label ?? kind}</p>
+          <h2 className="mt-1 text-xl font-bold tracking-tight text-zinc-950">
             {mode === 'new' ? `Thêm term ${definition?.label ?? kind}` : `Chỉnh sửa term ${definition?.label ?? kind} #${current?.id}`}
           </h2>
-          {current && <p className="text-xs text-slate-600">ID #{current.id} · Phiên bản v{version} · {dirty ? 'Chưa lưu' : 'Đã đồng bộ'}</p>}
+          {current && <p className="mt-0.5 text-xs text-zinc-500">ID #{current.id} · Phiên bản v{version} · {dirty ? 'Chưa lưu' : 'Đã đồng bộ'}</p>}
         </div>
-        <button type="button" className={buttonClass} disabled={busy} onClick={discardAndBack}>
+        <AdminButton variant="secondary" size="sm" disabled={busy} onClick={discardAndBack}>
           Hủy / Về danh sách
-        </button>
+        </AdminButton>
       </header>
 
-      {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-      {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
-      {providerUnavailable && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
+      {providerUnavailable && <AdminAlert tone="warning">
         Taxonomy này không còn hoạt động hoặc đã rút khai báo. Có thể giữ/chỉnh sửa term hiện có; không tạo term mới.
-      </p>}
+      </AdminAlert>}
 
       <div data-extension-slot="term-before-core" aria-hidden="true" />
-      <form onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-5"
+      <form onSubmit={submit} className="min-w-0 space-y-4 rounded-xl border border-zinc-200 bg-white p-5"
         aria-label="Biểu mẫu chỉnh sửa taxonomy">
-        <label className="block text-sm font-medium text-slate-800" htmlFor="term-name">
-          Tên *
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-name">
+          <span>Tên *</span>
           <input id="term-name" className={fieldClass} maxLength={120} required disabled={busy || user.role !== 'admin'}
             value={form.name} onChange={event => setForm(previous => ({
               ...previous, name: event.target.value,
               slug: manualSlug ? previous.slug : slugFromName(event.target.value),
             }))} />
         </label>
-        <label className="block text-sm font-medium text-slate-800" htmlFor="term-slug">
-          Slug *
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-slug">
+          <span>Slug *</span>
           <input id="term-slug" className={fieldClass} maxLength={64} required
             pattern="[a-z](?:[a-z0-9]|-)*" disabled={busy || user.role !== 'admin'} value={form.slug}
             onChange={event => { setManualSlug(true); setForm(previous => ({...previous, slug: event.target.value})); }} />
-          <span className="mt-1 block text-xs font-normal text-slate-600">Slug duy nhất trong loại, bắt đầu bằng a-z, tối đa 64 ký tự.</span>
+          <span className="text-xs font-normal text-zinc-500">Slug duy nhất trong loại, bắt đầu bằng a-z, tối đa 64 ký tự.</span>
         </label>
-        {hierarchical && <label className="block text-sm font-medium text-slate-800" htmlFor="term-parent">
-          Term cha
-          <select id="term-parent" className={fieldClass} value={form.parentId} disabled={busy || user.role !== 'admin'}
+        {hierarchical && <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-parent">
+          <span>Term cha</span>
+          <select id="term-parent" className={selectClass} value={form.parentId} disabled={busy || user.role !== 'admin'}
             onChange={event => setForm(previous => ({...previous, parentId: event.target.value}))}>
             <option value="">Không có (term gốc)</option>
             {parentOptions.map(term => <option key={term.id} value={term.id}>{term.name} (#{term.id})</option>)}
             {form.parentId && !parentOptions.some(term => String(term.id) === form.parentId) &&
               <option value={form.parentId} disabled>Cha không còn hợp lệ (#{form.parentId})</option>}
           </select>
-          <span className="mt-1 block text-xs font-normal text-slate-600">Không thể chọn hậu duệ hoặc chuyển nhánh vượt 8 cấp.</span>
+          <span className="text-xs font-normal text-zinc-500">Không thể chọn hậu duệ hoặc chuyển nhánh vượt 8 cấp.</span>
         </label>}
 
         {mode === 'edit' && extensionConfig && <AdminTermPanels config={extensionConfig}
@@ -412,24 +413,24 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
             [panelKey]: { ...(previous[panelKey] ?? {}), [key]: value },
           }))} />}
 
-        {conflict && <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+        {conflict && <AdminAlert tone="warning" className="space-y-2">
           <p role="status">Dữ liệu máy chủ thay đổi. Các trường đã nhập vẫn được giữ.</p>
-          {!latest ? <button className={buttonClass} type="button" disabled={busy}
-            onClick={() => void inspectConflict()}>Tải bản mới để so sánh</button> : <>
-            <p>Bản trên máy chủ: v{latest.version} · {latest.name} · /{latest.slug}</p>
-            <button className={buttonClass} type="button" disabled={busy} onClick={continueWithLatest}>
+          {!latest ? <AdminButton variant="secondary" size="sm" disabled={busy}
+            onClick={() => void inspectConflict()}>Tải bản mới để so sánh</AdminButton> : <>
+            <p className="text-xs">Bản trên máy chủ: v{latest.version} · {latest.name} · /{latest.slug}</p>
+            <AdminButton variant="secondary" size="sm" disabled={busy} onClick={continueWithLatest}>
               Tiếp tục với v{latest.version} (giữ trường đã sửa)
-            </button>
+            </AdminButton>
           </>}
-        </div>}
-        <div className="flex flex-wrap gap-3">
-          <button type="submit" className="od-primary-action"
+        </AdminAlert>}
+        <div className="flex flex-wrap gap-2.5 pt-1">
+          <AdminButton type="submit" variant="primary" size="md"
             disabled={busy || conflict || !csrfToken || (mode === 'new' && (user.role !== 'admin' || providerUnavailable))}>
             {busy ? 'Đang lưu...' : mode === 'new' ? 'Tạo mới' : 'Lưu thay đổi'}
-          </button>
-          <button type="button" className={buttonClass} disabled={busy} onClick={discardAndBack}>
+          </AdminButton>
+          <AdminButton variant="secondary" size="md" disabled={busy} onClick={discardAndBack}>
             Hủy sửa
-          </button>
+          </AdminButton>
         </div>
       </form>
       <div data-extension-slot="term-after-core" aria-hidden="true" />
