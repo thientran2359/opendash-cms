@@ -93,13 +93,88 @@ async fn setup_admin(client: &Client, base_url: &str) -> (String, String) {
     (cookie, csrf)
 }
 
+// S03 public Home is selected from a published Page through Reading Settings.
+// Keep this setup through HTTP so the tests exercise publication and CAS.
+async fn create_s03_home(client: &Client, base: &str, cookie: &str, csrf: &str) -> i64 {
+    let created = client
+        .post(format!("{base}/api/admin/content-types/page/entries"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({"title":"S03 Home","slug":"s03-home","values":{"body":"Home"}}))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let text = created.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "create S03 Page: {text}");
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    let id = entry["id"].as_i64().unwrap();
+    let publish = client
+        .post(format!(
+            "{base}/api/admin/content-types/page/entries/{id}/publication"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(
+            "If-Match",
+            format!("\"v{}\"", entry["version"].as_i64().unwrap()),
+        )
+        .json(&json!({"status":"published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status().as_u16(), 200, "publish Home Page");
+    let reading = client
+        .get(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status().as_u16(), 200);
+    let token = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let selected = client
+        .put(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", token)
+        .json(&json!({"homepage_page_id":id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = selected.status();
+    let text = selected.text().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "save S03 Reading: {text}");
+    id
+}
+
+async fn save_s03_home_doc(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    page_id: i64,
+    version: i64,
+    document: &Value,
+) -> reqwest::Response {
+    client
+        .put(format!("{base}/api/admin/entries/page/{page_id}/builder"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .json(document)
+        .send()
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
     let srv = spawn_server().await;
-    let client = Client::builder()
-        .redirect(Policy::none())
-        .build()
-        .unwrap();
+    let client = Client::builder().redirect(Policy::none()).build().unwrap();
     let (cookie, csrf) = setup_admin(&client, &srv.base_url).await;
 
     // 1. Initial GET returns has_password=false and no secret fields
@@ -245,22 +320,8 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
             }]
         }]
     });
-    let hp_get = client
-        .get(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header(header::COOKIE, &cookie)
-        .send()
-        .await
-        .unwrap();
-    let hp_etag = hp_get.headers().get(header::ETAG).unwrap().to_str().unwrap().to_owned();
-    let hp_put = client
-        .put(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header(header::COOKIE, &cookie)
-        .header("X-CSRF-Token", &csrf)
-        .header(header::IF_MATCH, hp_etag)
-        .json(&doc)
-        .send()
-        .await
-        .unwrap();
+    let home_id = create_s03_home(&client, &srv.base_url, &cookie, &csrf).await;
+    let hp_put = save_s03_home_doc(&client, &srv.base_url, &cookie, &csrf, home_id, 2, &doc).await;
     assert_eq!(hp_put.status(), 200);
 
     let home_html = client
@@ -281,7 +342,9 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
         .post(format!("{}/api/public/contact/{form_id}", srv.base_url))
         .header(header::ORIGIN, &srv.base_url)
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-        .body(format!("form_version={form_ver}&nonce={nonce}&name=A&email=a@example.com"))
+        .body(format!(
+            "form_version={form_ver}&nonce={nonce}&name=A&email=a@example.com"
+        ))
         .send()
         .await
         .unwrap();
@@ -302,7 +365,10 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
         assert_eq!(subs.len(), 1);
         let sub_id = subs[0]["id"].as_i64().unwrap();
         let det: Value = client
-            .get(format!("{}/api/admin/contact/submissions/{sub_id}", srv.base_url))
+            .get(format!(
+                "{}/api/admin/contact/submissions/{sub_id}",
+                srv.base_url
+            ))
             .header(header::COOKIE, &cookie)
             .send()
             .await
@@ -326,7 +392,10 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
 
     // 4. Manual retry without acknowledge_duplicate_risk=true -> 409
     let retry_no_ack = client
-        .post(format!("{}/api/admin/contact/submissions/{sub_id}/notify", srv.base_url))
+        .post(format!(
+            "{}/api/admin/contact/submissions/{sub_id}/notify",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::IF_MATCH, format!("\"v{att1_ver}\""))
@@ -338,7 +407,10 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
 
     // Manual retry #2 and #3 with ack -> succeed in creating attempts up to max 3; 4th -> 409
     let retry2 = client
-        .post(format!("{}/api/admin/contact/submissions/{sub_id}/notify", srv.base_url))
+        .post(format!(
+            "{}/api/admin/contact/submissions/{sub_id}/notify",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::IF_MATCH, format!("\"v{att1_ver}\""))
@@ -352,7 +424,10 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
     let att2_ver = att2["version"].as_i64().unwrap();
 
     let retry3 = client
-        .post(format!("{}/api/admin/contact/submissions/{sub_id}/notify", srv.base_url))
+        .post(format!(
+            "{}/api/admin/contact/submissions/{sub_id}/notify",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::IF_MATCH, format!("\"v{att2_ver}\""))
@@ -366,7 +441,10 @@ async fn smtp_settings_secrets_cas_receipt_preservation_and_manual_retry() {
     let att3_ver = att3["version"].as_i64().unwrap();
 
     let retry4 = client
-        .post(format!("{}/api/admin/contact/submissions/{sub_id}/notify", srv.base_url))
+        .post(format!(
+            "{}/api/admin/contact/submissions/{sub_id}/notify",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::IF_MATCH, format!("\"v{att3_ver}\""))

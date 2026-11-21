@@ -49,7 +49,12 @@ async fn spawn_server() -> TestServer {
     let base_url = format!("http://127.0.0.1:{port}");
     let client = Client::new();
     for _ in 0..80 {
-        if client.get(format!("{base_url}/api/health")).send().await.is_ok() {
+        if client
+            .get(format!("{base_url}/api/health"))
+            .send()
+            .await
+            .is_ok()
+        {
             return TestServer {
                 child,
                 site_root,
@@ -284,6 +289,84 @@ fn build_valid_mp4() -> (Vec<u8>, String) {
     (bytes, sha)
 }
 
+// S03 public Home is selected from a published Page through Reading Settings.
+// Keep this setup through HTTP so the tests exercise publication and CAS.
+async fn create_s03_home(client: &Client, base: &str, cookie: &str, csrf: &str) -> i64 {
+    let created = client
+        .post(format!("{base}/api/admin/content-types/page/entries"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({"title":"S03 Home","slug":"s03-home","values":{"body":"Home"}}))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let text = created.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "create S03 Page: {text}");
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    let id = entry["id"].as_i64().unwrap();
+    let publish = client
+        .post(format!(
+            "{base}/api/admin/content-types/page/entries/{id}/publication"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(
+            "If-Match",
+            format!("\"v{}\"", entry["version"].as_i64().unwrap()),
+        )
+        .json(&json!({"status":"published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status().as_u16(), 200, "publish Home Page");
+    let reading = client
+        .get(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status().as_u16(), 200);
+    let token = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let selected = client
+        .put(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", token)
+        .json(&json!({"homepage_page_id":id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = selected.status();
+    let text = selected.text().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "save S03 Reading: {text}");
+    id
+}
+
+async fn save_s03_home_doc(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    page_id: i64,
+    version: i64,
+    document: &Value,
+) -> reqwest::Response {
+    client
+        .put(format!("{base}/api/admin/entries/page/{page_id}/builder"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .json(document)
+        .send()
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn video_range_head_conditional_csp_and_public_acl() {
     let server = spawn_server().await;
@@ -347,9 +430,14 @@ async fn video_range_head_conditional_csp_and_public_acl() {
         }]
     });
 
+    let home_id = create_s03_home(&client, &server.base_url, &cookie, &csrf).await;
+
     // 1. Unreferenced / preview-only must be 404 on public /media/{id}/file (even HEAD / If-None-Match / Range)
     let preview = client
-        .post(format!("{}/api/admin/builder/homepage/preview", server.base_url))
+        .post(format!(
+            "{}/api/admin/entries/page/{home_id}/builder/preview",
+            server.base_url
+        ))
         .header(header::ORIGIN, &server.base_url)
         .header(header::COOKIE, &cookie)
         .header("x-csrf-token", &csrf)
@@ -381,7 +469,10 @@ async fn video_range_head_conditional_csp_and_public_acl() {
 
     // Admin endpoint works with 206 Range + private, no-store
     let admin_range = client
-        .get(format!("{}/api/admin/media/{}/file", server.base_url, video_id))
+        .get(format!(
+            "{}/api/admin/media/{}/file",
+            server.base_url, video_id
+        ))
         .header(header::COOKIE, &cookie)
         .header(header::RANGE, "bytes=0-3")
         .send()
@@ -395,19 +486,23 @@ async fn video_range_head_conditional_csp_and_public_acl() {
     assert_eq!(admin_range.bytes().await.unwrap().as_ref(), &mp4_bytes[..4]);
 
     // 2. Save homepage grants public access and sets media-src 'self' CSP
-    let save_res = client
-        .put(format!("{}/api/admin/builder/homepage", server.base_url))
-        .header(header::ORIGIN, &server.base_url)
-        .header(header::COOKIE, &cookie)
-        .header("x-csrf-token", &csrf)
-        .header(header::IF_MATCH, "\"v1\"")
-        .json(&doc_with_video)
+    let save_res = save_s03_home_doc(
+        &client,
+        &server.base_url,
+        &cookie,
+        &csrf,
+        home_id,
+        2,
+        &doc_with_video,
+    )
+    .await;
+    assert_eq!(save_res.status(), StatusCode::OK);
+
+    let home = client
+        .get(format!("{}/", server.base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(save_res.status(), StatusCode::OK);
-
-    let home = client.get(format!("{}/", server.base_url)).send().await.unwrap();
     assert_eq!(home.status(), StatusCode::OK);
     let home_csp = home
         .headers()
@@ -476,7 +571,11 @@ async fn video_range_head_conditional_csp_and_public_acl() {
             .send()
             .await
             .unwrap();
-        assert_eq!(r_bad.status(), StatusCode::RANGE_NOT_SATISFIABLE, "range {bad}");
+        assert_eq!(
+            r_bad.status(),
+            StatusCode::RANGE_NOT_SATISFIABLE,
+            "range {bad}"
+        );
         assert_eq!(
             r_bad.headers().get(header::CONTENT_RANGE).unwrap(),
             &format!("bytes */{total_len}")
@@ -535,16 +634,16 @@ async fn video_range_head_conditional_csp_and_public_acl() {
             }]
         }]
     });
-    let resave = client
-        .put(format!("{}/api/admin/builder/homepage", server.base_url))
-        .header(header::ORIGIN, &server.base_url)
-        .header(header::COOKIE, &cookie)
-        .header("x-csrf-token", &csrf)
-        .header(header::IF_MATCH, "\"v2\"")
-        .json(&doc_without_video)
-        .send()
-        .await
-        .unwrap();
+    let resave = save_s03_home_doc(
+        &client,
+        &server.base_url,
+        &cookie,
+        &csrf,
+        home_id,
+        3,
+        &doc_without_video,
+    )
+    .await;
     assert_eq!(resave.status(), StatusCode::OK);
 
     assert_eq!(

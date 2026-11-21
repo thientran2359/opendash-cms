@@ -136,30 +136,68 @@ fn csec_accepts_safe_subset_and_rejects_dangerous_constructs() {
     assert!(!rendered.contains("<script>"));
 }
 
-// S02 retains the independent homepage writer until S03. Seed the actual
-// public homepage through its authenticated CAS API, not the future Reading API.
-async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) {
-    let current = client
-        .get(format!("{base_url}/api/admin/builder/homepage"))
+// S03: Home is a published Page selected atomically in Reading Settings.
+async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) -> i64 {
+    let types: Vec<Value> = client
+        .get(format!("{base_url}/api/admin/content-types"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let schema_token = types
+        .iter()
+        .find(|v| v["descriptor"]["key"] == "page")
+        .unwrap()["schema_token"]
+        .as_str()
+        .unwrap();
+    let created = client
+        .post(format!(
+            "{base_url}/api/admin/content-types/page/entries/composite"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base_url)
+        .header("X-CSRF-Token", csrf)
+        .json(&serde_json::json!({
+            "expected_schema_token": schema_token,
+            "slug":"theme-home-fixture",
+            "title":"Theme Home Fixture",
+            "values":{"body":"Theme Home Fixture"},
+            "publication_status":"published"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let raw = created.text().await.unwrap();
+    assert_eq!(status, 201, "S03 Home Page create: {raw}");
+    let page_id = serde_json::from_str::<Value>(&raw).unwrap()["entry"]["id"]
+        .as_i64()
+        .unwrap();
+    let reading = client
+        .get(format!("{base_url}/api/admin/settings/reading"))
         .header("Cookie", cookie)
         .send()
         .await
         .unwrap();
-    assert_eq!(current.status(), 200, "read S02 homepage");
-    let etag = current.headers()["etag"].to_str().unwrap().to_owned();
-    let saved = client
-        .put(format!("{base_url}/api/admin/builder/homepage"))
-        .header("Cookie", cookie).header("Origin", base_url)
-        .header("X-CSRF-Token", csrf).header("If-Match", etag)
-        .json(&serde_json::json!({
-            "schema_version":1, "sections":[{"id":"home-sec","children":[
-                {"id":"home-row","children":[{"id":"home-col","children":[
-                    {"id":"home-title","type":"core/heading","props":{"level":1,"text":"Theme Home Fixture"}}
-                ]}]}
-            ]}]
-        }))
-        .send().await.unwrap();
-    assert_eq!(saved.status(), 200, "seed S02 homepage");
+    assert_eq!(reading.status(), 200);
+    let etag = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let assigned = client
+        .put(format!("{base_url}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base_url)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", etag)
+        .json(&serde_json::json!({"homepage_page_id":page_id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = assigned.status();
+    let body = assigned.text().await.unwrap();
+    assert_eq!(status, 200, "S03 Reading assignment: {body}");
+    page_id
 }
 
 #[tokio::test]
@@ -300,7 +338,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         .unwrap();
     assert_eq!(activate_resp.status(), 200);
 
-    seed_builder_homepage(&client, &srv.base_url, &cookie, &csrf).await;
+    let home_id = seed_builder_homepage(&client, &srv.base_url, &cookie, &csrf).await;
 
     // 4. Create and publish a post entry
     let create_entry = client
@@ -367,20 +405,8 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         assert!(body.contains("data-role=\"footer\""), "{path}: {body}");
     }
 
-    // 6. The typed Home template is saved independently of the existing
-    // homepage body; S03 alone will assign its public route. Prove both stores.
-    let home_get = client
-        .get(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header("Cookie", &cookie)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(home_get.status(), 200);
-    let home_etag = home_get.headers()["etag"].to_str().unwrap().to_owned();
-    let home_doc: Value = home_get.json().await.unwrap();
-    let mut updated = home_doc["document"].clone();
-    updated["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"] =
-        serde_json::json!("Saved Builder Home");
+    // 6. S03 selects the typed Home override for the assigned published Page.
+    // Editing the Page's own Builder document leaves the shared override intact.
     let shared = client.put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie).header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -394,14 +420,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
             ]}]}
         })).send().await.unwrap();
     assert_eq!(shared.status(), 201);
-    let unchanged = client
-        .get(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header("Cookie", &cookie)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(unchanged.headers()["etag"], home_etag);
-    assert_eq!(unchanged.json::<Value>().await.unwrap(), home_doc);
+
     let public_before = client
         .get(format!("{}/", srv.base_url))
         .send()
@@ -411,20 +430,41 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         .await
         .unwrap();
     assert!(public_before.contains("Theme Home Fixture"));
-    assert!(!public_before.contains("Shared Home Template"));
-    let reading = client
-        .get(format!("{}/api/admin/settings/reading", srv.base_url))
+    assert!(public_before.contains("Shared Home Template"));
+
+    // The retired standalone homepage writer must remain unreachable.
+    assert_eq!(
+        client
+            .get(format!("{}/api/admin/builder/homepage", srv.base_url))
+            .header("Cookie", &cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        404
+    );
+    let entry_path = format!("{}/api/admin/entries/page/{home_id}/builder", srv.base_url);
+    let current = client
+        .get(&entry_path)
         .header("Cookie", &cookie)
         .send()
         .await
         .unwrap();
-    assert_eq!(reading.status(), 404);
+    assert_eq!(current.status(), 200);
+    let etag = current.headers()["etag"].to_str().unwrap().to_owned();
+    let updated = serde_json::json!({
+        "schema_version":1,"sections":[{"id":"home-sec","children":[
+            {"id":"home-row","children":[{"id":"home-col","children":[
+                {"id":"home-title","type":"core/heading","props":{"level":1,"text":"Saved Builder Home"}}
+            ]}]}
+        ]}]
+    });
     let saved = client
-        .put(format!("{}/api/admin/builder/homepage", srv.base_url))
+        .put(&entry_path)
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
-        .header("If-Match", home_etag)
+        .header("If-Match", etag)
         .json(&updated)
         .send()
         .await
@@ -438,14 +478,11 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         .unwrap();
     assert_eq!(home_after.status(), 200);
     let home_body = home_after.text().await.unwrap();
-    assert!(
-        home_body.contains("data-builder-version=\"1\""),
-        "{home_body}"
-    );
     assert!(home_body.contains("Saved Builder Home"), "{home_body}");
-    assert!(!home_body.contains("Shared Home Template"), "{home_body}");
+    assert!(home_body.contains("Shared Home Template"), "{home_body}");
     assert!(home_body.contains("data-role=\"header\""), "{home_body}");
     assert!(home_body.contains("data-role=\"footer\""), "{home_body}");
+    assert!(!home_body.contains("<script>"), "{home_body}");
 
     // 7. Corrupt v3 revision on disk -> public routes fall back cleanly to core default
     let rev_single = srv

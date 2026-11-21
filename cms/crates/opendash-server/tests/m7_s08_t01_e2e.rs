@@ -50,7 +50,12 @@ impl TestServer {
 async fn wait_ready(base_url: &str) {
     let client = Client::new();
     for _ in 0..80 {
-        if client.get(format!("{base_url}/api/health")).send().await.is_ok() {
+        if client
+            .get(format!("{base_url}/api/health"))
+            .send()
+            .await
+            .is_ok()
+        {
             return;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -103,7 +108,12 @@ async fn setup_and_login(client: &Client, base_url: &str) -> (String, String) {
     login_user(client, base_url, "admin", "correct-horse-battery-staple").await
 }
 
-async fn login_user(client: &Client, base_url: &str, username: &str, password: &str) -> (String, String) {
+async fn login_user(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> (String, String) {
     let login = client
         .post(format!("{base_url}/auth/login"))
         .header(header::ORIGIN, base_url)
@@ -131,6 +141,84 @@ fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../fixtures/m7")
         .join(name)
+}
+
+// S03 public Home is selected from a published Page through Reading Settings.
+// Keep this setup through HTTP so the tests exercise publication and CAS.
+async fn create_s03_home(client: &Client, base: &str, cookie: &str, csrf: &str) -> i64 {
+    let created = client
+        .post(format!("{base}/api/admin/content-types/page/entries"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({"title":"S03 Home","slug":"s03-home","values":{"body":"Home"}}))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let text = created.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "create S03 Page: {text}");
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    let id = entry["id"].as_i64().unwrap();
+    let publish = client
+        .post(format!(
+            "{base}/api/admin/content-types/page/entries/{id}/publication"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(
+            "If-Match",
+            format!("\"v{}\"", entry["version"].as_i64().unwrap()),
+        )
+        .json(&json!({"status":"published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status().as_u16(), 200, "publish Home Page");
+    let reading = client
+        .get(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status().as_u16(), 200);
+    let token = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let selected = client
+        .put(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", token)
+        .json(&json!({"homepage_page_id":id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = selected.status();
+    let text = selected.text().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "save S03 Reading: {text}");
+    id
+}
+
+async fn save_s03_home_doc(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    page_id: i64,
+    version: i64,
+    document: &Value,
+) -> reqwest::Response {
+    client
+        .put(format!("{base}/api/admin/entries/page/{page_id}/builder"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .json(document)
+        .send()
+        .await
+        .unwrap()
 }
 
 #[tokio::test]
@@ -249,7 +337,9 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
         .await
         .unwrap();
     assert_eq!(form_res.status(), StatusCode::CREATED);
-    let form_id = form_res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let form_id = form_res.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     // Save SMTP config with secret (tests Windows secret DACL)
     let smtp_get = client
@@ -292,15 +382,25 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
 
     #[cfg(windows)]
     {
-        let secret_dir = server.site_root.join("database").join("secrets").join("smtp");
+        let secret_dir = server
+            .site_root
+            .join("database")
+            .join("secrets")
+            .join("smtp");
         if secret_dir.exists() {
             let out = Command::new("icacls")
                 .arg(&secret_dir)
                 .output()
                 .expect("run icacls");
             let stdout = String::from_utf8_lossy(&out.stdout);
-            assert!(!stdout.contains("Everyone"), "Unexpected Everyone ACE: {stdout}");
-            assert!(!stdout.contains("BUILTIN\\Users"), "Unexpected Users ACE: {stdout}");
+            assert!(
+                !stdout.contains("Everyone"),
+                "Unexpected Everyone ACE: {stdout}"
+            );
+            assert!(
+                !stdout.contains("BUILTIN\\Users"),
+                "Unexpected Users ACE: {stdout}"
+            );
         }
     }
 
@@ -382,39 +482,28 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
             }]
         }]
     });
+    let home_id = create_s03_home(&client, &server.base_url, &cookie, &csrf).await;
     assert_eq!(
-        client
-            .put(format!("{}/api/admin/builder/homepage", server.base_url))
-            .header(header::ORIGIN, &server.base_url)
-            .header(header::COOKIE, &cookie)
-            .header("x-csrf-token", &csrf)
-            .header(header::IF_MATCH, "\"v1\"")
-            .json(&doc)
-            .send()
+        save_s03_home_doc(&client, &server.base_url, &cookie, &csrf, home_id, 2, &doc)
             .await
-            .unwrap()
             .status(),
         StatusCode::OK
     );
 
-    // Stale If-Match must return 412
+    // Stale Page Builder CAS must still return 412.
     assert_eq!(
-        client
-            .put(format!("{}/api/admin/builder/homepage", server.base_url))
-            .header(header::ORIGIN, &server.base_url)
-            .header(header::COOKIE, &cookie)
-            .header("x-csrf-token", &csrf)
-            .header(header::IF_MATCH, "\"v1\"")
-            .json(&doc)
-            .send()
+        save_s03_home_doc(&client, &server.base_url, &cookie, &csrf, home_id, 2, &doc)
             .await
-            .unwrap()
             .status(),
         StatusCode::PRECONDITION_FAILED
     );
 
     // Public homepage escapes XSS, includes <video> and media-src 'self'
-    let home = client.get(format!("{}/", server.base_url)).send().await.unwrap();
+    let home = client
+        .get(format!("{}/", server.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(home.status(), StatusCode::OK);
     let csp = home
         .headers()
@@ -481,17 +570,31 @@ async fn m7_s08_t01_deterministic_e2e_and_adversarial_corpus() {
     assert_eq!(pub_put.status(), StatusCode::OK);
 
     assert_eq!(
-        client.get(format!("{}/sitemap.xml", server.base_url)).send().await.unwrap().status(),
+        client
+            .get(format!("{}/sitemap.xml", server.base_url))
+            .send()
+            .await
+            .unwrap()
+            .status(),
         StatusCode::OK
     );
     assert_eq!(
-        client.get(format!("{}/robots.txt", server.base_url)).send().await.unwrap().status(),
+        client
+            .get(format!("{}/robots.txt", server.base_url))
+            .send()
+            .await
+            .unwrap()
+            .status(),
         StatusCode::OK
     );
 
     // 7. Restart persistence check
     server.restart().await;
-    let after_restart = client.get(format!("{}/", server.base_url)).send().await.unwrap();
+    let after_restart = client
+        .get(format!("{}/", server.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(after_restart.status(), StatusCode::OK);
     let after_html = after_restart.text().await.unwrap();
     assert!(after_html.contains(&format!("<video src=\"/media/{expected_sha}/file\"")));

@@ -183,20 +183,26 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .status(),
         StatusCode::NOT_FOUND
     );
-    for url in [
-        format!("{}/api/admin/builder/homepage", site.base),
-        format!("{}/api/admin/template-overrides", site.base),
-    ] {
-        assert_eq!(
-            http.get(url)
-                .header("Cookie", &editor_cookie)
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            StatusCode::FORBIDDEN
-        );
-    }
+    // S03 removed the independent homepage API for every role. The typed
+    // override endpoint still enforces Admin RBAC.
+    assert_eq!(
+        http.get(format!("{}/api/admin/builder/homepage", site.base))
+            .header("Cookie", &editor_cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        http.get(format!("{}/api/admin/template-overrides", site.base))
+            .header("Cookie", &editor_cookie)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
     assert_eq!(
         http.get(format!(
             "{}/api/admin/builder/overrides/page?type_key=page&entry_id={}",
