@@ -20,7 +20,10 @@ use crate::{
     plugin::PluginManager,
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
-        builder::{builder, page, preview, registry, save, serve_asset},
+        builder::{
+            builder, homepage_get, homepage_preview, homepage_put, page, preview, registry, save,
+            serve_asset,
+        },
         content::{
             MAX_CONTENT_TYPE_JSON_BYTES, content_entry_preview, content_entry_publication,
             content_type_create, content_type_list, content_type_update, editor_layout_get,
@@ -232,6 +235,16 @@ pub fn build_router_with_themes_root(
             "/api/admin/sections/{id}/document/preview",
             post(crate::routes::sections::section_document_preview)
                 .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/builder/homepage",
+            get(homepage_get)
+                .put(homepage_put)
+                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/builder/homepage/preview",
+            post(homepage_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
         )
         .route(
             "/api/admin/template-overrides",
