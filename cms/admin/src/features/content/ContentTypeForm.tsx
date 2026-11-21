@@ -41,7 +41,8 @@ export const blankContentTypeCreationDraft = (): ContentTypeCreationDraft => ({
 
 export const isContentTypeCreationDraftDirty = (draft: ContentTypeCreationDraft): boolean =>
   Boolean(draft.key || draft.label || draft.fields.length || !draft.isPublic || !draft.hasArchive
-    || draft.publication !== 'immediate' || draft.supports.length !== 2);
+    || draft.publication !== 'immediate' || draft.supports.length !== 2
+    || !draft.supports.includes('editor') || !draft.supports.includes('featured_image'));
 
 const copyDraft = (draft: ContentTypeCreationDraft): ContentTypeCreationDraft => ({
   ...draft, fields: draft.fields.map(field => ({ ...field })), supports: [...draft.supports],
@@ -195,7 +196,10 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
           <CheckboxField id="new-cpt-featured-image" label="Ảnh đại diện (featured_image)"
             checked={supports.includes('featured_image')} disabled={disabled}
             onChange={checked => toggleSupport('featured_image', checked)} />
-          <p className="text-xs text-slate-600">Tắt thành phần chỉ ẩn quyền chỉnh sửa, không xóa nội dung hoặc ảnh đã lưu.</p>
+          <CheckboxField id="new-cpt-builder" label="Visual Builder (builder)"
+            checked={supports.includes('builder')} disabled={disabled}
+            onChange={checked => toggleSupport('builder', checked)} />
+          <p className="text-xs text-slate-600">Bật Builder để thiết kế nội dung riêng từng bản ghi. Tắt thành phần giữ nguyên văn bản, ảnh và thiết kế đã lưu.</p>
         </fieldset>
       </fieldset>
       <div className="content-section-heading">

@@ -774,7 +774,13 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                       onChange={event => toggleSupport('featured_image', event.target.checked)} />
                     Ảnh đại diện (featured_image)
                   </label>
-                  <p className="text-xs text-slate-600">Tắt thành phần không xóa dữ liệu hay ảnh đã lưu.</p>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={editSettings.supports.includes('builder')}
+                      disabled={!csrfToken || savingSettings}
+                      onChange={event => toggleSupport('builder', event.target.checked)} />
+                    Visual Builder (builder)
+                  </label>
+                  <p className="text-xs text-slate-600">Bật Builder cho phép thiết kế riêng từng bản ghi. Tắt thành phần không xóa văn bản, ảnh hay thiết kế Builder đã lưu.</p>
                 </fieldset>
                 {settingsError && <p className="text-sm text-rose-700" role="alert">{settingsError}</p>}
                 {settingsStale && <div role="alert" className="space-y-2 text-sm text-amber-800">

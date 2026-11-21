@@ -18,7 +18,7 @@ export type OverrideRole = 'page' | 'header' | 'footer' | 'archive' | 'single' |
 
 export interface EntryBuilderOpen {
   entry_id: number;
-  type_key: 'page';
+  type_key: string;
   content_mode: ContentMode;
   version: number;
   document: BuilderDocument | null;
@@ -116,42 +116,42 @@ export function resetTemplateOverride(id: number, version: number, csrfToken: st
   });
 }
 
-const entryBuilderPath = (id: number): string =>
-  `/api/admin/entries/page/${encodeURIComponent(id)}/builder`;
+const entryBuilderPath = (typeKey: string, id: number): string =>
+  `/api/admin/entries/${encodeURIComponent(typeKey)}/${encodeURIComponent(id)}/builder`;
 
-export function getEntryBuilder(id: number): Promise<EntryBuilderOpen> {
-  return requestJson(entryBuilderPath(id), {
-    defaultErrorMessage: 'Không thể mở Page Builder.',
+export function getEntryBuilder(typeKey: string, id: number): Promise<EntryBuilderOpen> {
+  return requestJson(entryBuilderPath(typeKey, id), {
+    defaultErrorMessage: 'Không thể mở Builder của nội dung.',
   });
 }
 
 export function previewEntryBuilder(
-  id: number, document: BuilderDocument, csrfToken: string, signal?: AbortSignal,
+  typeKey: string, id: number, document: BuilderDocument, csrfToken: string, signal?: AbortSignal,
 ): Promise<HomepagePreview> {
-  return requestJson(entryBuilderPath(id) + '/preview', {
+  return requestJson(entryBuilderPath(typeKey, id) + '/preview', {
     method: 'POST', csrfToken, contentType: 'application/json',
     body: JSON.stringify(document), signal,
-    defaultErrorMessage: 'Không thể xem trước Page Builder.',
+    defaultErrorMessage: 'Không thể xem trước Builder của nội dung.',
   });
 }
 
 export function saveEntryBuilder(
-  id: number, document: BuilderDocument, version: number, csrfToken: string,
+  typeKey: string, id: number, document: BuilderDocument, version: number, csrfToken: string,
 ): Promise<EntryBuilderOpen> {
-  return requestJson(entryBuilderPath(id), {
+  return requestJson(entryBuilderPath(typeKey, id), {
     method: 'PUT', csrfToken, contentType: 'application/json', ifMatchVersion: version,
     body: JSON.stringify(document),
-    defaultErrorMessage: 'Không thể lưu Page Builder.',
+    defaultErrorMessage: 'Không thể lưu Builder của nội dung.',
   });
 }
 
 export function resetEntryBuilder(
-  id: number, version: number, csrfToken: string,
+  typeKey: string, id: number, version: number, csrfToken: string,
 ): Promise<EntryBuilderOpen> {
-  return requestJson(entryBuilderPath(id) + '/reset', {
+  return requestJson(entryBuilderPath(typeKey, id) + '/reset', {
     method: 'POST', csrfToken, contentType: 'application/json', ifMatchVersion: version,
     body: JSON.stringify({ confirm: true }),
-    defaultErrorMessage: 'Không thể reset Page Builder.',
+    defaultErrorMessage: 'Không thể reset Builder của nội dung.',
   });
 }
 
