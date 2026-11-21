@@ -48,3 +48,5 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 
 - [Spec 2 S01–S03 closure and drift gate (2026-11-21)](2026-11-21-spec2-closure.md) — merged-source/native artifact verification; remains Implemented pending conformance fixes.
 - [Spec 2 D1–D3 conformance macOS Intel (#451, 2026-11-21)](2026-11-21-egm-spec2-conformance-d1-d3-macos.md) — Media sidebar, selected Pattern placement and Builder timestamp native receipts; final `Verified` promotion remains a coordinator drift-review gate.
+
+- [Spec 2 post-conformance closure (2026-11-22)](2026-11-22-spec2-closure.md) — no remaining feature drift; exact-main verification and outstanding formatter gate.
