@@ -22,8 +22,8 @@ OpenDash áp dụng quy trình **EGM (Elephant soạn spec → Goldfish review �
    - **Elephant** chạy `/egm-resolve` để phân loại findings (`PROPOSE FIX` vs `CONTEST`), lưu tóm tắt kết quả review vào PR Design Spec, và cập nhật đầy đủ 3 trường provenance bắt buộc khi chuyển sang `Status: Approved`: `**Approved By:**`, `**Approval Evidence:**`, `**Goldfish Review:**` (không còn `Open Questions` mở hay `TODO`/`TBD`).
    - **Phân quyền duyệt Spec (3 tầng — đồng bộ [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)):**
      - **Owner bắt buộc duyệt:** Đổi PRD/phạm vi sản phẩm, đổi kiến trúc lõi/schema breaking, đổi quy trình/phân quyền hoặc release public (`Approved By: Owner`).
-     - **Coordinator (`Atlas`, `Aster`) được ủy quyền duyệt:** Design Spec nằm trong phạm vi PRD đã chốt, bản sửa lỗi có phạm vi thiết kế (`Approved By: Atlas (delegated)` hoặc `Aster (delegated)`).
-     - **Implementer (`Nova`, `Forge`, `Harbor`) tự chủ:** Nhận Issue `Ready`, triển khai đúng `Detailed Implementation Plan`, tự review & tự merge PR của mình khi đạt 100% required CI (`governance-*`, `cms-ci`) và `Verification Plan`.
+     - **Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) được ủy quyền duyệt:** Design Spec nằm trong phạm vi PRD đã chốt, bản sửa lỗi có phạm vi thiết kế (`Approved By: Atlas (delegated)` / `Aster (delegated)` / `Nova (delegated)` / `Orion (delegated)`).
+     - **Implementer (`Nova`, `Orion`, `Forge`, `Harbor`) tự chủ:** Nhận Issue `Ready`, triển khai đúng `Detailed Implementation Plan`, tự review & tự merge PR của mình khi đạt 100% required CI (`governance-*`, `cms-ci`) và `Verification Plan`.
 5. **Bước 4 — Triển khai & Kiểm chứng (`Implement & Verify`):**
    - Chỉ bắt đầu viết code sau khi Design Spec đạt `Status: Approved` (đủ provenance) và đã merge vào `main`. Với Design Spec lớn, chia `### Slice S01: ...` trong `## Detailed Implementation Plan` (mỗi slice bắt buộc có `**Dependencies:**`, `**File Ownership:**`, `**Acceptance Criteria:**`, `**Rollback:**`) và tạo Issue từng slice bằng `prepare-github-issue.py --source docs/designs/<feature>.md --slice S01`.
    - Sau khi triển khai, bắt buộc chạy bộ kiểm tra chuẩn và ghi nhận kết quả thực tế (kèm giới hạn nếu có); với các đợt kiểm chứng lớn hoặc release, lưu biên bản tại [`docs/verification/`](docs/verification/README.md).
@@ -32,19 +32,19 @@ OpenDash áp dụng quy trình **EGM (Elephant soạn spec → Goldfish review �
    - Dùng `/egm-bootstrap` để cập nhật hệ thống `README.md` theo cấu trúc cây trong `cms/`.
    - **Trigger `/egm-drift-report`:** Coordinator đóng spec bắt buộc chạy `/egm-drift-report` **sau khi mỗi Design Spec chuyển sang `Implemented`** (trước khi đánh dấu `**Verified**` trên `SITEMAP.md`) và trước mỗi đợt release, lưu báo cáo tại `.agents/research/` hoặc đính kèm PR closure.
 
-### 1.2. Phối hợp Đa-Agent (`Atlas / Nova / Aster → Forge / Harbor`)
+### 1.2. Phối hợp Đa-Agent (`Atlas / Nova / Aster / Orion → Forge / Harbor`)
 
 EGM phụ trách **tạo và review đặc tả kỹ thuật**, còn việc triển khai và kiểm chứng đa nền tảng (Windows / macOS) tiếp tục tận dụng đội ngũ agent độc lập thông qua GitHub Issues/PR và 3 skill điều phối đã chuẩn hóa theo EGM:
 
-- **Nghiên cứu, soạn spec & điều phối (`Atlas`, `Nova`, `Aster`):** Đóng vai **Elephant** chạy `/egm-brainstorm` → `/egm-draft` → `/egm-review` + `/egm-resolve` để chốt `docs/designs/<feature>.md` (`Status: Approved`), mở GitHub Issue trỏ thẳng tới `## Detailed Implementation Plan` và `source_sha` trên `origin/main`.
+- **Nghiên cứu, soạn spec & điều phối (`Atlas`, `Nova`, `Aster`, `Orion`):** Đóng vai **Elephant** chạy `/egm-brainstorm` → `/egm-draft` → `/egm-review` + `/egm-resolve` để chốt `docs/designs/<feature>.md` (`Status: Approved`), mở GitHub Issue trỏ thẳng tới `## Detailed Implementation Plan` và `source_sha` trên `origin/main`.
 - **Giao việc sang subagent (`atlas-task-dispatch`):** `Atlas` (Windows) hoặc `Aster` (macOS) dùng [`.agents/skills/atlas-task-dispatch/SKILL.md`](.agents/skills/atlas-task-dispatch/SKILL.md) để `RUN` / `RESUME` / `STATUS` các Issue giao cho **Forge** (Windows) và **Harbor** (macOS) qua `cos_dispatch.py`.
-- **Nhận việc & triển khai (`github-task-pickup`):** **Forge** và **Harbor** dùng [`.agents/skills/github-task-pickup/SKILL.md`](.agents/skills/github-task-pickup/SKILL.md) để nhận Issue trên nhánh mặc định `agent/<name>`, triển khai đúng `## Detailed Implementation Plan`, chạy đủ kiểm chứng native và mở PR.
-- **Review & Merge PR (`github-pr-review-merge`):** `Atlas`, `Aster`, `Nova` dùng [`.agents/skills/github-pr-review-merge/SKILL.md`](.agents/skills/github-pr-review-merge/SKILL.md) để review diff đối chiếu với Design Spec EGM, kiểm tra required CI checks và merge với `expected_head_sha` (theo thẩm quyền [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)).
+- **Nhận việc & triển khai (`github-task-pickup`):** **Nova**, **Orion**, **Forge** và **Harbor** dùng [`.agents/skills/github-task-pickup/SKILL.md`](.agents/skills/github-task-pickup/SKILL.md) để nhận Issue trên nhánh mặc định `agent/<name>`, triển khai đúng `## Detailed Implementation Plan`, chạy đủ kiểm chứng native và mở PR.
+- **Review & Merge PR (`github-pr-review-merge`):** `Atlas`, `Aster`, `Nova`, `Orion` dùng [`.agents/skills/github-pr-review-merge/SKILL.md`](.agents/skills/github-pr-review-merge/SKILL.md) để review diff đối chiếu với Design Spec EGM, kiểm tra required CI checks và merge với `expected_head_sha` (theo thẩm quyền [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)).
 - Các quy định về định danh agent và vận hành GitHub/CoS đặt tại [`.agents/agents.yaml`](.agents/agents.yaml), [`.agents/AGENT_OPERATING_STANDARD.md`](.agents/AGENT_OPERATING_STANDARD.md) và [`.agents/GITHUB_WORKFLOW.md`](.agents/GITHUB_WORKFLOW.md).
 
 ### 1.3. Quy tắc Tự chủ Thực thi, Kết thúc Lượt & Bàn giao Hai Chiều (`Owner Directive 2026-11-21`)
 
-Áp dụng bắt buộc cho **MỌI agent** (`Atlas`, `Aster`, `Nova`, `Forge`, `Harbor`):
+Áp dụng bắt buộc cho **MỌI agent** (`Atlas`, `Aster`, `Nova`, `Orion`, `Forge`, `Harbor`):
 
 1. **Làm trọn luồng trong thẩm quyền (Default to Action):** Khi mục tiêu đã rõ và các bước kế tiếp nằm trong thẩm quyền theo [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md) (khảo sát, soạn Design Delta, chạy Goldfish review, viết code, chạy test, commit/push, mở PR, chờ CI, merge PR đủ gate, cập nhật Issue/Project, dispatch Harbor/Forge), **làm liền mạch cho đến điểm hoàn tất trong cùng một lượt** — KHÔNG dừng giữa chừng để hỏi xác nhận từng bước con hiển nhiên.
 2. **Chỉ được dừng giữa chừng khi gặp đúng 1 trong 3 ngưỡng thật:** (a) cần **Owner quyết định** (đổi PRD/phạm vi sản phẩm, đổi kiến trúc lõi/breaking cross-spec, đổi phân quyền/ruleset, phát hành public); (b) yêu cầu có ≥ 2 hướng trái ngược không thể suy từ trạng thái GitHub/repo hiện hành; (c) gặp Blocker bảo mật/dữ liệu/kỹ thuật thật sự hoặc chạm Circuit Breaker (2 lượt CI fail liên tiếp).
