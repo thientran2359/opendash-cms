@@ -1,6 +1,6 @@
 //! Site-owned typed templates. Candidate specificity wins before source priority:
 //! for each candidate, site-owned Builder AST precedes active theme v3 HTML.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use opendash_core::{
     builder::{BuilderDocument, ElementContent, KnownElement},
@@ -1200,19 +1200,43 @@ pub async fn render_override_for_public_with_context(
     )
 }
 
+/// Request only parts actually referenced by this AST. Other valid theme parts
+/// may require entry-specific variables unavailable on a header/archive route.
+pub fn referenced_theme_part_keys(document: &BuilderDocument) -> BTreeSet<String> {
+    let mut requested = BTreeSet::new();
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::TemplatePart(props)) =
+                        &element.content
+                    {
+                        requested.insert(props.part_key.clone());
+                    }
+                }
+            }
+        }
+    }
+    requested
+}
+
 /// Never inject the raw source of an active theme part into a Builder AST.
-/// Validate the entire C-SEC DAG and render each part under the same bounded
-/// context rules as an active template, then hand only safe HTML to the AST
-/// renderer. The caller must supply only the verified active v3 part map.
+/// Validate and compile only the requested C-SEC part DAGs under bounded
+/// context and output limits. The source map must be a verified v3 revision.
 pub fn render_theme_parts_for_builder(
     parts: &BTreeMap<String, String>,
     context: &serde_json::Value,
+    requested: &BTreeSet<String>,
 ) -> ApiResult<BTreeMap<String, String>> {
     use crate::template_sec::{
         CsecContentKind, json_to_safe_value, validate_and_compile_csec_composition,
     };
     let mut rendered = BTreeMap::new();
-    for (key, source) in parts {
+    let mut total_bytes = 0_usize;
+    for key in requested {
+        let Some(source) = parts.get(key) else {
+            continue;
+        };
         let compiled = validate_and_compile_csec_composition(
             &format!("part:{key}"),
             source,
@@ -1223,6 +1247,12 @@ pub fn render_theme_parts_for_builder(
         let html = compiled
             .render(json_to_safe_value(context), None)
             .map_err(ApiError::internal)?;
+        total_bytes = total_bytes
+            .checked_add(html.len())
+            .filter(|total| *total <= crate::template_sec::MAX_RENDERED_HTML_BYTES)
+            .ok_or_else(|| {
+                ApiError::internal("Tổng HTML các theme parts vượt giới hạn 512 KiB.")
+            })?;
         rendered.insert(key.clone(), html);
     }
     Ok(rendered)
@@ -1242,11 +1272,26 @@ pub async fn resolve_and_render_header_footer(
         "theme_options": theme_opts,
         "menus": menus,
     });
+    let header_override =
+        resolve_effective_override(db, OverrideRole::Header, type_key, None).await?;
+    let footer_override =
+        resolve_effective_override(db, OverrideRole::Footer, type_key, None).await?;
+    let mut requested = BTreeSet::new();
+    if let Some(record) = &header_override {
+        requested.extend(referenced_theme_part_keys(&record.document));
+    } else {
+        requested.insert("header".to_owned());
+    }
+    if let Some(record) = &footer_override {
+        requested.extend(referenced_theme_part_keys(&record.document));
+    } else {
+        requested.insert("footer".to_owned());
+    }
     let rendered_parts = match active_v3 {
-        Some(active) => render_theme_parts_for_builder(&active.parts, &part_context)?,
+        Some(active) => render_theme_parts_for_builder(&active.parts, &part_context, &requested)?,
         None => BTreeMap::new(),
     };
-    let header = match resolve_effective_override(db, OverrideRole::Header, type_key, None).await? {
+    let header = match header_override {
         Some(record) => Some(
             render_override_for_public_with_context(db, &record, None, None, Some(&rendered_parts))
                 .await?
@@ -1254,7 +1299,7 @@ pub async fn resolve_and_render_header_footer(
         ),
         None => rendered_parts.get("header").cloned(),
     };
-    let footer = match resolve_effective_override(db, OverrideRole::Footer, type_key, None).await? {
+    let footer = match footer_override {
         Some(record) => Some(
             render_override_for_public_with_context(db, &record, None, None, Some(&rendered_parts))
                 .await?

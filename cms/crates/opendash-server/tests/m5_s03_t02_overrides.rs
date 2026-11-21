@@ -109,12 +109,18 @@ fn build_theme_v3_zip(id: &str, header_html: &str, single_html: &str) -> Vec<u8>
             "theme_id": id,
             "name": id,
             "version": "1.0.0",
-            "templates": [{ "kind": "single", "file": "single.html" }], "parts": { "header": "header.html" }
+            "templates": [{ "kind": "single", "file": "single.html" }],
+            "parts": { "header": "header.html", "post-card": "template-part/post-card.html" }
         });
         zip.start_file("theme.json", opts).unwrap();
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
         zip.start_file("header.html", opts).unwrap();
         zip.write_all(header_html.as_bytes()).unwrap();
+        // This valid entry-scoped part is never requested by the global
+        // header. Eagerly evaluating it without `entry` must not break SSR.
+        zip.start_file("template-part/post-card.html", opts)
+            .unwrap();
+        zip.write_all(b"<aside>{{ entry.title }}</aside>").unwrap();
         zip.start_file("single.html", opts).unwrap();
         zip.write_all(single_html.as_bytes()).unwrap();
         zip.finish().unwrap();

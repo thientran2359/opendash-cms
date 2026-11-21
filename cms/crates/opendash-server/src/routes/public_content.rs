@@ -109,8 +109,11 @@ async fn resolve_public_template_html(
         TemplateResolution::DbOverride(record) => {
             let canvas_layout =
                 record.target.kind == opendash_core::theme::TemplateCandidateKind::PageLayout;
+            let requested = overrides::referenced_theme_part_keys(&record.document);
             let rendered_parts = match active {
-                Some(active) => overrides::render_theme_parts_for_builder(&active.parts, &context)?,
+                Some(active) => {
+                    overrides::render_theme_parts_for_builder(&active.parts, &context, &requested)?
+                }
                 None => BTreeMap::new(),
             };
             let rendered = overrides::render_override_for_public_with_context(
