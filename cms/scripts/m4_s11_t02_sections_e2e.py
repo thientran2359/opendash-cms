@@ -253,7 +253,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     page.on("pageerror", lambda exc: errors.append(str(exc)))
                     api_json(admin, "POST", base, "/auth/setup", {"username": "site_admin", "password": "AdminPassword123!"}, expected=201)
                     csrf = admin_login(admin, base, "site_admin", "AdminPassword123!")
-                    homepage_before = api_json(admin, "GET", base, "/api/admin/builder/homepage")
+                    reading_before = api_json(admin, "GET", base, "/api/admin/settings/reading")
                     a = create_ui_section(page, base, "Section A UI", "section-a")
                     b = create_ui_section(page, base, "Section B UI", "section-b")
                     assert a != b
@@ -263,15 +263,15 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     expect(page.get_by_text("Section B UI")).to_be_visible(timeout=15000)
                     checks.append("Section_list_routes_reopen_both_entries")
 
-                    homepage_calls = []
-                    page.on("request", lambda req: homepage_calls.append(req.url)
-                            if "/api/admin/builder/homepage" in req.url else None)
+                    reading_calls = []
+                    page.on("request", lambda req: reading_calls.append(req.url)
+                            if "/api/admin/settings/reading" in req.url else None)
                     page.goto(base + f"/admin/#/sections/{a}/edit", wait_until="domcontentloaded")
                     page.get_by_role("button", name="Mở Section Builder").click()
                     expect(page).to_have_url(base + f"/admin/#/builder?template=section&type=section&entry={a}", timeout=20000)
                     expect(page.get_by_role("heading", name=f"Section Builder #{a}")).to_be_visible(timeout=20000)
                     expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã mở", timeout=20000)
-                    assert not homepage_calls, homepage_calls
+                    assert not reading_calls, reading_calls
                     checks.append("Section_editor_Builder_exact_ID_never_fetches_homepage")
                     page.screenshot(path=str(artifacts / "section-a-before.png"), full_page=True)
 
@@ -287,7 +287,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     assert doc_a["entry_id"] == a and doc_a["version"] == 2
                     assert "PRIVATE SECTION A DESIGN" in json.dumps(doc_a)
                     assert api_json(admin, "GET", base, url_b)["document"]["sections"] == []
-                    assert api_json(admin, "GET", base, "/api/admin/builder/homepage") == homepage_before
+                    assert api_json(admin, "GET", base, "/api/admin/settings/reading") == reading_before
                     checks.append("Authenticated_preview_read_only_save_Section_A_CAS_B_and_homepage_isolated")
 
                     # A private Section media pin never grants public URL access.
@@ -415,7 +415,7 @@ def run(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     editor_page.get_by_role("button", name="Mở Section Builder").click()
                     expect(editor_page.get_by_role("heading", name=f"Section Builder #{b}")).to_be_visible(timeout=20000)
                     assert editor.request.get(base + url_b).status == 200
-                    assert editor.request.get(base + "/api/admin/builder/homepage").status == 403
+                    assert editor.request.get(base + "/api/admin/settings/reading").status == 403
                     assert editor_page.locator("#builder-role-target").is_disabled()
                     bad_csrf = editor.request.post(base + url_b + "/preview", data=json.dumps(doc_b["document"]),
                         headers={"Origin":base,"Content-Type":"application/json"})
