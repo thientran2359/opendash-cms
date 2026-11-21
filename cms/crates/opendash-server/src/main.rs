@@ -70,6 +70,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         config::RuntimeConfigV1::load(&paths).map_err(|e| format!("{}: {}", e.0, e.1))?;
     let recovery = config::RecoveryState::new(runtime_cfg.portable.recovery_safe_mode);
     let db = storage::init_db(paths.db_path()).await?;
+    storage::builder::migrate_demo_entry_builder_docs_on_startup(&db)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
     storage::import::recover_orphaned_import_runs(&db, &paths.uploads_dir())
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;

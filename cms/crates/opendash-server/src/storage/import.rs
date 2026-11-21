@@ -1184,6 +1184,27 @@ pub async fn execute_sample_import_with_cutpoint(
                 .fetch_one(&mut *conn)
                 .await?;
 
+                if let Some(effective) = crate::storage::content::load_effective_content_schema_in_tx(
+                    &mut *conn,
+                    &p.content_type,
+                )
+                .await?
+                {
+                    let values_map: BTreeMap<String, serde_json::Value> = p
+                        .values
+                        .as_object()
+                        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                        .unwrap_or_default();
+                    crate::storage::entries::sync_entry_body_refs_in_conn(
+                        &mut *conn,
+                        entry_id,
+                        &effective,
+                        &values_map,
+                        None,
+                    )
+                    .await?;
+                }
+
                 page_id_by_object.insert(p.object_key.clone(), entry_id);
                 let target_hash = sha256_hex(format!("{}:{}:draft", p.slug, p.title).as_bytes());
                 sqlx::query(

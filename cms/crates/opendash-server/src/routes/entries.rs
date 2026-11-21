@@ -25,7 +25,7 @@ use crate::{
     },
 };
 
-pub const MAX_CONTENT_ENTRY_JSON_BYTES: usize = 512 * 1024;
+pub const MAX_CONTENT_ENTRY_JSON_BYTES: usize = 768 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -396,11 +396,15 @@ pub async fn entry_create(
     Json(input): Json<ContentEntryInput>,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    let schema = content_schema(&db, &type_key).await?;
-    let preflight_schema_token =
-        crate::storage::content::load_effective_content_schema(&db, &type_key)
-            .await?
-            .map(|e| e.schema_token);
+    let mut schema = content_schema(&db, &type_key).await?;
+    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
+    let preflight_schema_token = effective.as_ref().map(|e| e.schema_token.clone());
+    if let Some(eff) = &effective
+        && !schema.fields.iter().any(|f| f.key == "body")
+        && let Some(body_fe) = eff.effective_fields.get("body")
+    {
+        schema.fields.push(body_fe.definition.clone());
+    }
     input
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
@@ -460,11 +464,15 @@ pub async fn entry_update(
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     let version = expected_version(&headers)?;
-    let schema = content_schema(&db, &type_key).await?;
-    let preflight_schema_token =
-        crate::storage::content::load_effective_content_schema(&db, &type_key)
-            .await?
-            .map(|e| e.schema_token);
+    let mut schema = content_schema(&db, &type_key).await?;
+    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
+    let preflight_schema_token = effective.as_ref().map(|e| e.schema_token.clone());
+    if let Some(eff) = &effective
+        && !schema.fields.iter().any(|f| f.key == "body")
+        && let Some(body_fe) = eff.effective_fields.get("body")
+    {
+        schema.fields.push(body_fe.definition.clone());
+    }
     input
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
@@ -543,27 +551,73 @@ pub async fn entry_publication(
     Ok(([(header::ETAG, etag(record.version))], Json(record)).into_response())
 }
 
-/// Persisted Post/Page preview is private and never shares the public reader.
+/// Persisted entry preview is private and never shares the public reader.
 pub async fn entry_preview(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
 ) -> ApiResult<Response> {
-    require_session(&headers, &db).await?;
+    let actor = require_session(&headers, &db).await?;
     valid_type_key(&type_key)?;
-    if !is_builtin(&type_key) {
-        return Err(ApiError::bad_request("Preview chỉ hỗ trợ Post/Page."));
+    if matches!(type_key.as_str(), "pattern" | "section") {
+        return Err(ApiError::bad_request(
+            "Preview không hỗ trợ Pattern/Section.",
+        ));
     }
-    let schema = content_schema(&db, &type_key).await?;
-    let entry = entry_storage::get_entry(&db, &type_key, id)
+    let mut schema = content_schema(&db, &type_key).await?;
+    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
+    if let Some(eff) = &effective
+        && !schema.fields.iter().any(|f| f.key == "body")
+        && let Some(body_fe) = eff.effective_fields.get("body")
+    {
+        schema.fields.push(body_fe.definition.clone());
+    }
+    let supports_builder = schema
+        .settings
+        .supports(opendash_core::content::ContentSupport::Builder);
+    if !is_builtin(&type_key) && !supports_builder {
+        return Err(ApiError::bad_request(
+            "Preview chỉ hỗ trợ Post/Page hoặc CPT bật Builder.",
+        ));
+    }
+    let mut entry = entry_storage::get_entry(&db, &type_key, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-    let view = content_render::authenticated_preview_view(entry, &schema);
-    let (_, selected_template) = active_content_templates(&db).await?;
-    let raw_html = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    let actor_role = match actor.user.role {
+        crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+        crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+    };
+    if let Some(eff) = &effective {
+        entry_storage::filter_entry_values_for_role(&mut entry, eff, actor_role);
+    }
+    let body_view_allowed = effective.as_ref().is_none_or(|eff| {
+        eff.effective_fields
+            .get("body")
+            .is_none_or(|fe| actor_role >= fe.definition.min_view_role)
+    });
+    let has_blocks = entry
+        .values
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(opendash_core::builder_blocks::contains_blocks);
     let pub_settings = crate::storage::settings::get_public(&db).await?;
     let seo_view =
-        crate::seo::SeoView::for_noindex_page(&pub_settings.content_language, &view.title);
+        crate::seo::SeoView::for_noindex_page(&pub_settings.content_language, &entry.title);
+    let raw_html = if supports_builder && body_view_allowed && has_blocks {
+        if let Some(rendered) =
+            crate::storage::builder::preview_saved_entry_body(&db, &actor, &type_key, id).await?
+        {
+            rendered.html
+        } else {
+            let view = content_render::authenticated_preview_view(entry, &schema);
+            let (_, selected_template) = active_content_templates(&db).await?;
+            content_render::render_single(&schema, &view, selected_template.as_deref())?
+        }
+    } else {
+        let view = content_render::authenticated_preview_view(entry, &schema);
+        let (_, selected_template) = active_content_templates(&db).await?;
+        content_render::render_single(&schema, &view, selected_template.as_deref())?
+    };
     let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
     Ok((
         [

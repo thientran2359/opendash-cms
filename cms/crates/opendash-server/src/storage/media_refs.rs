@@ -100,10 +100,12 @@ pub async fn collect_pins_in_tx(
     let entry_rows = sqlx::query("SELECT id, values_json FROM content_entries ORDER BY id ASC")
         .fetch_all(&mut *conn)
         .await?;
+    let mut pinned_content_entries = HashSet::new();
     for row in entry_rows {
         let id: i64 = row.try_get("id")?;
         let values_json: String = row.try_get("values_json")?;
         if parse_json_and_check_pin(&values_json, media_id, "content_entries")? {
+            pinned_content_entries.insert(id);
             push_pin(&mut summary, "content_entry", id.to_string());
         }
     }
@@ -197,6 +199,7 @@ pub async fn collect_pins_in_tx(
     }
 
     // Entry-owned Builder documents remain pinned even in editor mode or draft.
+    // Deduplicate against `content_entries.values_json` pins above after unification.
     let documents: Vec<(i64, String)> = sqlx::query_as(
         "SELECT entry_id, document_json FROM entry_builder_documents ORDER BY entry_id",
     )
@@ -206,14 +209,16 @@ pub async fn collect_pins_in_tx(
     for (entry_id, raw) in documents {
         if parse_json_and_check_pin(&raw, media_id, "entry_builder_documents")? {
             pinned_entries.insert(entry_id);
-            push_pin(&mut summary, "entry_builder_document", entry_id.to_string());
+            if !pinned_content_entries.contains(&entry_id) {
+                push_pin(&mut summary, "entry_builder_document", entry_id.to_string());
+            }
         }
     }
     let refs: Vec<i64> = sqlx::query_scalar(
         "SELECT DISTINCT entry_id FROM entry_builder_media_refs WHERE media_id = ? ORDER BY entry_id",
     ).bind(media_id).fetch_all(&mut *conn).await?;
     for entry_id in refs {
-        if pinned_entries.insert(entry_id) {
+        if !pinned_content_entries.contains(&entry_id) && pinned_entries.insert(entry_id) {
             push_pin(&mut summary, "entry_builder_document", entry_id.to_string());
         }
     }
