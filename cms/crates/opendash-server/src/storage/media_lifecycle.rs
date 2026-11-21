@@ -32,7 +32,9 @@ impl MediaDeletePhase {
             "moving" => Ok(Self::Moving),
             "quarantined" => Ok(Self::Quarantined),
             "finalized" => Ok(Self::Finalized),
-            _ => Err(ApiError::internal("Trạng thái media delete job không hợp lệ.")),
+            _ => Err(ApiError::internal(
+                "Trạng thái media delete job không hợp lệ.",
+            )),
         }
     }
 }
@@ -178,10 +180,7 @@ pub async fn tombstone_media_in_tx(
     .await?;
 
     if updated.rows_affected() == 0 {
-        return Err(ApiError::precondition_failed(
-            "Phiên bản media đã thay đổi đồng thời.",
-        )
-        .into());
+        return Err(ApiError::precondition_failed("Phiên bản media đã thay đổi đồng thời.").into());
     }
 
     let job_id = crate::auth::generate_random_token();

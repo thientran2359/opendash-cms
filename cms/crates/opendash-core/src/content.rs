@@ -1254,7 +1254,9 @@ impl CntDeclarations {
             if !seen_keys.insert(ct.key.as_str()) {
                 return Err("Khóa content_type bị trùng lặp trong declarations.");
             }
-            if matches!(ct.key.as_str(), "post" | "page" | "pattern" | "section") && ct.rewrite_base.is_some() {
+            if matches!(ct.key.as_str(), "post" | "page" | "pattern" | "section")
+                && ct.rewrite_base.is_some()
+            {
                 return Err("Core Post/Page/Pattern không hỗ trợ rewrite_base riêng của provider.");
             }
             validate_provider_rewrite_base(ct.rewrite_base.as_deref())?;

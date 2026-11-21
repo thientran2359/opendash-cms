@@ -20,10 +20,12 @@ struct TempDirGuard(PathBuf);
 impl TempDirGuard {
     fn new(label: &str) -> Self {
         let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = fs::canonicalize(std::env::temp_dir()).expect("canonical temp root").join(format!(
-            "opendash-m7-s09-t01-{label}-{}-{id}",
-            std::process::id()
-        ));
+        let dir = fs::canonicalize(std::env::temp_dir())
+            .expect("canonical temp root")
+            .join(format!(
+                "opendash-m7-s09-t01-{label}-{}-{id}",
+                std::process::id()
+            ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp dir");
         Self(dir)

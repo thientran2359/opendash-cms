@@ -18,7 +18,9 @@ use opendash_core::{
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::{Role, require_admin, require_admin_with_csrf, require_session, require_session_with_csrf},
+    auth::{
+        Role, require_admin, require_admin_with_csrf, require_session, require_session_with_csrf,
+    },
     content_render,
     error::{ApiError, ApiResult},
     routes::settings::{no_store_headers, parse_if_match},
@@ -36,13 +38,17 @@ pub async fn content_type_list(
     headers: HeaderMap,
 ) -> ApiResult<Json<Vec<ContentTypeApiItem>>> {
     require_session(&headers, &db).await?;
-    Ok(Json(content_storage::list_content_types_with_meta(&db).await?))
+    Ok(Json(
+        content_storage::list_content_types_with_meta(&db).await?,
+    ))
 }
 
 pub async fn content_type_create(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
-    State(content_registry): State<Arc<tokio::sync::RwLock<RegistryCatalog<ContentTypeDefinition>>>>,
+    State(content_registry): State<
+        Arc<tokio::sync::RwLock<RegistryCatalog<ContentTypeDefinition>>>,
+    >,
     headers: HeaderMap,
     Json(input): Json<ContentTypeDefinitionInput>,
 ) -> ApiResult<impl IntoResponse> {
@@ -59,7 +65,9 @@ pub async fn content_type_create(
 pub async fn content_type_update(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
-    State(content_registry): State<Arc<tokio::sync::RwLock<RegistryCatalog<ContentTypeDefinition>>>>,
+    State(content_registry): State<
+        Arc<tokio::sync::RwLock<RegistryCatalog<ContentTypeDefinition>>>,
+    >,
     headers: HeaderMap,
     Path(type_key): Path<String>,
     Json(input): Json<ContentTypeDefinitionInput>,
@@ -89,14 +97,9 @@ pub async fn content_entry_publication(
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     }
     let expected_version = parse_if_match(&headers)?;
-    let entry = entry_storage::set_publication_status(
-        &db,
-        &type_key,
-        id,
-        expected_version,
-        &input.status,
-    )
-    .await?;
+    let entry =
+        entry_storage::set_publication_status(&db, &type_key, id, expected_version, &input.status)
+            .await?;
     Ok((no_store_headers(Some(entry.version)), Json(entry)))
 }
 
@@ -127,10 +130,8 @@ pub async fn content_entry_preview(
     let (_, selected_template) = active_content_templates(&db).await?;
     let raw = content_render::render_single(&schema, &view, selected_template.as_deref())?;
     let public_settings = crate::storage::settings::get_public(&db).await?;
-    let seo_view = crate::seo::SeoView::for_noindex_page(
-        &public_settings.content_language,
-        &view.title,
-    );
+    let seo_view =
+        crate::seo::SeoView::for_noindex_page(&public_settings.content_language, &view.title);
     let html = content_render::compose_document_with_seo(None, &raw, None, &seo_view)?;
     Ok((
         [
@@ -200,7 +201,12 @@ fn parse_if_match_allow_zero(headers: &HeaderMap) -> ApiResult<i64> {
         .get(axum::http::header::IF_MATCH)
         .and_then(|v| v.to_str().ok())
         .map(str::trim)
-        .ok_or_else(|| ApiError(StatusCode::PRECONDITION_REQUIRED, "Thiếu header If-Match.".into()))?;
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::PRECONDITION_REQUIRED,
+                "Thiếu header If-Match.".into(),
+            )
+        })?;
     let trimmed = raw.trim_matches('"');
     let digits = trimmed.strip_prefix('v').unwrap_or(trimmed);
     let version = digits

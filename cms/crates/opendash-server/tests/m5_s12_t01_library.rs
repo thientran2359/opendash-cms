@@ -125,7 +125,12 @@ async fn local_library_catalog_is_authenticated_and_pattern_scoped() {
     let patterns: Value = client
         .get(format!("{}/api/admin/patterns", site.base))
         .header("Cookie", &cookie)
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(patterns["items"].as_array().unwrap().len(), 1);
     assert_eq!(patterns["items"][0]["id"], created["id"]);
     assert_eq!(patterns["items"][0]["title"], "Private local banner");

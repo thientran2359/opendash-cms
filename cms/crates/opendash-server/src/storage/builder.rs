@@ -474,26 +474,45 @@ pub fn pattern_ids(document: &BuilderDocument) -> BTreeSet<i64> {
 }
 
 fn node_count(document: &BuilderDocument) -> usize {
-    document.sections.iter().map(|section| {
-        1 + section.children.iter().map(|row| {
-            1 + row.children.iter().map(|col| 1 + col.children.len()).sum::<usize>()
-        }).sum::<usize>()
-    }).sum()
+    document
+        .sections
+        .iter()
+        .map(|section| {
+            1 + section
+                .children
+                .iter()
+                .map(|row| {
+                    1 + row
+                        .children
+                        .iter()
+                        .map(|col| 1 + col.children.len())
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
+        })
+        .sum()
 }
 
 fn has_nested_pattern_or_list(document: &BuilderDocument) -> bool {
-    document.sections.iter().any(|section| section.children.iter().any(|row| {
-        row.children.iter().any(|column| column.children.iter().any(|element| {
-            match &element.content {
-                ElementContent::Known(KnownElement::PatternRef(_) | KnownElement::List(_)) => true,
-                ElementContent::Unresolved(raw) => matches!(
-                    raw.get("type").and_then(Value::as_str),
-                    Some("core/pattern_ref" | "core/list")
-                ),
-                _ => false,
-            }
-        }))
-    }))
+    document.sections.iter().any(|section| {
+        section.children.iter().any(|row| {
+            row.children.iter().any(|column| {
+                column
+                    .children
+                    .iter()
+                    .any(|element| match &element.content {
+                        ElementContent::Known(
+                            KnownElement::PatternRef(_) | KnownElement::List(_),
+                        ) => true,
+                        ElementContent::Unresolved(raw) => matches!(
+                            raw.get("type").and_then(Value::as_str),
+                            Some("core/pattern_ref" | "core/list")
+                        ),
+                        _ => false,
+                    })
+            })
+        })
+    })
 }
 
 /// One batched query inside the caller's read/write transaction, maximum 16
@@ -506,7 +525,9 @@ async fn load_pattern_rows_in_tx(
         return Ok(Vec::new());
     }
     if ids.len() > 16 || ids.iter().any(|id| *id <= 0) {
-        return Err(ApiError::bad_request("Builder exceeds 16 Pattern references."));
+        return Err(ApiError::bad_request(
+            "Builder exceeds 16 Pattern references.",
+        ));
     }
     let mut sql = QueryBuilder::<Sqlite>::new(
         "SELECT e.id, e.slug, d.document_json FROM content_entries e \
@@ -541,7 +562,9 @@ pub async fn resolve_patterns_in_tx(
     let mut parsed = BTreeMap::new();
     for (id, slug, raw) in rows {
         let Some(raw) = raw else { continue };
-        let Ok(doc) = BuilderDocument::from_json(raw.as_bytes()) else { continue };
+        let Ok(doc) = BuilderDocument::from_json(raw.as_bytes()) else {
+            continue;
+        };
         if has_nested_pattern_or_list(&doc) {
             continue;
         }
@@ -552,7 +575,8 @@ pub async fn resolve_patterns_in_tx(
         for row in &section.children {
             for column in &row.children {
                 for element in &column.children {
-                    if let ElementContent::Known(KnownElement::PatternRef(props)) = &element.content {
+                    if let ElementContent::Known(KnownElement::PatternRef(props)) = &element.content
+                    {
                         if let Some((_, doc)) = parsed.get(&props.pattern_id) {
                             expanded_count = expanded_count.saturating_add(node_count(doc));
                         }
@@ -562,16 +586,29 @@ pub async fn resolve_patterns_in_tx(
         }
     }
     if expanded_count > 1024 {
-        return Err(ApiError::bad_request("Expanded Pattern exceeds 1024 Builder nodes."));
+        return Err(ApiError::bad_request(
+            "Expanded Pattern exceeds 1024 Builder nodes.",
+        ));
     }
     for (id, (slug, doc)) in parsed {
         let bindings = builder_binding::resolve_in_tx_with_route(
-            tx, &doc, is_preview, Some(("pattern", &slug)),
-        ).await?;
+            tx,
+            &doc,
+            is_preview,
+            Some(("pattern", &slug)),
+        )
+        .await?;
         let forms = resolve_contact_forms_in_tx(tx, &doc).await?;
         let rendered = page::render_builder_with_patterns(
-            state, &doc, is_preview, &bindings, &ListResults::new(), &forms,
-            None, &page::PatternResults::new(), true,
+            state,
+            &doc,
+            is_preview,
+            &bindings,
+            &ListResults::new(),
+            &forms,
+            None,
+            &page::PatternResults::new(),
+            true,
         )?;
         results.insert(id, rendered);
     }
@@ -922,7 +959,12 @@ async fn validate_entry_builder_document(
     let refs = pattern_ids(document);
     let rows = load_pattern_rows_in_tx(tx, &refs).await?;
     let found: BTreeSet<i64> = rows.into_iter().map(|(id, _, _)| id).collect();
-    let previous_refs = current.opened.document.as_ref().map(pattern_ids).unwrap_or_default();
+    let previous_refs = current
+        .opened
+        .document
+        .as_ref()
+        .map(pattern_ids)
+        .unwrap_or_default();
     for id in refs {
         if !found.contains(&id) && !previous_refs.contains(&id) {
             return Err(ApiError::bad_request("Referenced Pattern does not exist."));

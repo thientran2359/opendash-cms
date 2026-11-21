@@ -84,7 +84,9 @@ pub async fn put_smtp_settings(
     let body = parse_json(payload)?;
 
     if body.port == 0 {
-        return Err(ApiError::bad_request("Cổng SMTP phải trong khoảng 1..=65535."));
+        return Err(ApiError::bad_request(
+            "Cổng SMTP phải trong khoảng 1..=65535.",
+        ));
     }
     if body.username.len() > 256
         || body
@@ -176,7 +178,11 @@ pub async fn test_smtp_settings(
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     smtp_service.send_test_email().await?;
-    Ok((no_store_headers(None), Json(serde_json::json!({ "ok": true }))).into_response())
+    Ok((
+        no_store_headers(None),
+        Json(serde_json::json!({ "ok": true })),
+    )
+        .into_response())
 }
 
 pub async fn notify_submission(

@@ -236,8 +236,15 @@ pub fn render_builder_with_template_context(
     context: Option<&BuilderTemplateContext<'_>>,
 ) -> ApiResult<RenderedLayout> {
     render_builder_with_patterns(
-        state, document, is_preview, bindings, lists, forms, context,
-        &PatternResults::new(), false,
+        state,
+        document,
+        is_preview,
+        bindings,
+        lists,
+        forms,
+        context,
+        &PatternResults::new(),
+        false,
     )
 }
 
@@ -615,7 +622,7 @@ pub fn render_builder_with_patterns(
                     };
                     if let Some(fragment) = rendered {
                         if html.len().saturating_add(fragment.len())
-                                > crate::template_sec::MAX_RENDERED_HTML_BYTES
+                            > crate::template_sec::MAX_RENDERED_HTML_BYTES
                         {
                             return Err(ApiError::bad_request(
                                 "Builder template composition exceeds 512 KiB.",
@@ -633,7 +640,11 @@ pub fn render_builder_with_patterns(
         }
         html.push_str("</section>");
     }
-    html.push_str(if pattern_document { "</div>" } else { "</main>" });
+    html.push_str(if pattern_document {
+        "</div>"
+    } else {
+        "</main>"
+    });
     if html.len() > crate::template_sec::MAX_RENDERED_HTML_BYTES {
         return Err(ApiError::bad_request(
             "Builder template composition exceeds 512 KiB.",

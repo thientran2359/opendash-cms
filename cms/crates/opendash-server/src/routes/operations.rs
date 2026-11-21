@@ -11,9 +11,7 @@ use serde::Deserialize;
 use crate::app::AppState;
 use crate::auth::{require_admin, require_admin_with_csrf};
 use crate::error::{ApiError, ApiResult};
-use crate::media_lifecycle::{
-    self, ApplyReconcileRequest,
-};
+use crate::media_lifecycle::{self, ApplyReconcileRequest};
 use crate::operations::{MAX_MAINTENANCE_DRAIN, MaintenanceError};
 use crate::storage::operations::OperationKind;
 
@@ -42,9 +40,12 @@ pub async fn diagnostics(
 ) -> ApiResult<impl IntoResponse> {
     require_admin(&headers, &state.db).await?;
     let secrets_dir = state.coordinator.paths().smtp_secrets_dir();
-    let report =
-        media_lifecycle::collect_operations_diagnostics(&state.db, &state.media_store, &secrets_dir)
-            .await?;
+    let report = media_lifecycle::collect_operations_diagnostics(
+        &state.db,
+        &state.media_store,
+        &secrets_dir,
+    )
+    .await?;
     Ok((StatusCode::OK, Json(report)))
 }
 
@@ -414,7 +415,13 @@ pub async fn list_backups(
         if !path.is_file() {
             continue;
         }
-        if let (Some(filename), Some(size_bytes), Some(sha256), Some(schema_version), Some(file_count)) = (
+        if let (
+            Some(filename),
+            Some(size_bytes),
+            Some(sha256),
+            Some(schema_version),
+            Some(file_count),
+        ) = (
             meta.archive_filename,
             meta.archive_size,
             meta.archive_sha256,
@@ -428,7 +435,10 @@ pub async fn list_backups(
                 sha256,
                 schema_version,
                 file_count,
-                created_at: job.finished_at.clone().unwrap_or_else(|| job.requested_at.clone()),
+                created_at: job
+                    .finished_at
+                    .clone()
+                    .unwrap_or_else(|| job.requested_at.clone()),
                 version: job.version,
             });
         }
@@ -463,7 +473,9 @@ pub async fn download_backup_file(
     if job.kind != OperationKind::Backup
         || job.state != crate::storage::operations::OperationState::Succeeded
     {
-        return Err(ApiError::not_found("Bản sao lưu chưa hoàn tất hoặc không tồn tại."));
+        return Err(ApiError::not_found(
+            "Bản sao lưu chưa hoàn tất hoặc không tồn tại.",
+        ));
     }
     let meta: crate::backup::BackupSummaryMetadata = job
         .summary_json
@@ -528,9 +540,18 @@ pub async fn download_backup_file(
             match file.read(&mut buf).await {
                 Ok(0) => break,
                 Ok(n) => {
-                    if tx.send(Ok(axum::body::Bytes::copy_from_slice(&buf[..n]))).await.is_err() { break; }
+                    if tx
+                        .send(Ok(axum::body::Bytes::copy_from_slice(&buf[..n])))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
-                Err(e) => { let _ = tx.send(Err(e)).await; break; }
+                Err(e) => {
+                    let _ = tx.send(Err(e)).await;
+                    break;
+                }
             }
         }
     });
@@ -541,9 +562,14 @@ pub async fn download_backup_file(
     impl http_body::Body for FileStreamBody {
         type Data = axum::body::Bytes;
         type Error = std::io::Error;
-        fn poll_frame(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        fn poll_frame(
+            mut self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
             match self.rx.poll_recv(cx) {
-                std::task::Poll::Ready(Some(Ok(bytes))) => std::task::Poll::Ready(Some(Ok(http_body::Frame::data(bytes)))),
+                std::task::Poll::Ready(Some(Ok(bytes))) => {
+                    std::task::Poll::Ready(Some(Ok(http_body::Frame::data(bytes))))
+                }
                 std::task::Poll::Ready(Some(Err(e))) => std::task::Poll::Ready(Some(Err(e))),
                 std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
                 std::task::Poll::Pending => std::task::Poll::Pending,
@@ -609,7 +635,6 @@ pub async fn delete_backup_artifact(
     Ok((StatusCode::OK, Json(updated_job)))
 }
 
-
 #[derive(Debug, serde::Serialize)]
 pub struct RestoreUploadResponse {
     pub upload_id: String,
@@ -666,13 +691,8 @@ pub async fn upload_restore_archive(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     body: axum::body::Body,
 ) -> ApiResult<impl IntoResponse> {
-    upload_restore_archive_with_timeout(
-        state,
-        headers,
-        body,
-        std::time::Duration::from_secs(300),
-    )
-    .await
+    upload_restore_archive_with_timeout(state, headers, body, std::time::Duration::from_secs(300))
+        .await
 }
 
 pub async fn upload_restore_archive_with_timeout(
@@ -681,8 +701,8 @@ pub async fn upload_restore_archive_with_timeout(
     mut body: axum::body::Body,
     upload_timeout: std::time::Duration,
 ) -> ApiResult<impl IntoResponse> {
-    use std::io::Write;
     use sha2::{Digest, Sha256};
+    use std::io::Write;
 
     require_admin_with_csrf(&headers, &state.db).await?;
     let content_type = headers
@@ -796,7 +816,11 @@ pub async fn upload_restore_archive_with_timeout(
         ApiError::internal("Không hoàn tất được tệp upload restore.")
     })?;
 
-    let sha256: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let sha256: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     Ok((
         StatusCode::CREATED,
         Json(RestoreUploadResponse {
@@ -863,7 +887,9 @@ async fn spawn_restore_worker_process(
                     let _ = child.kill();
                     let _ = child.wait();
                     drop(stdin);
-                    return Err(ApiError::internal("Lỗi theo dõi tiến trình restore worker."));
+                    return Err(ApiError::internal(
+                        "Lỗi theo dõi tiến trình restore worker.",
+                    ));
                 }
             }
         }
@@ -942,7 +968,9 @@ pub async fn create_restore(
     .await?;
 
     let target_root = paths.backups_restored_dir().join(&job_id);
-    let private_dir = paths.backups_staging_dir().join(format!("restore-{job_id}"));
+    let private_dir = paths
+        .backups_staging_dir()
+        .join(format!("restore-{job_id}"));
     let db_clone = state.db.clone();
     let reg_clone = std::sync::Arc::clone(&state.backup_registry);
     let job_id_clone = job_id.clone();
@@ -987,46 +1015,46 @@ pub async fn create_restore(
             .await;
         } else {
             match res {
-            Ok(resp) => {
-                let summary = RestoreSummaryMetadata {
-                    upload_id: upload_id_clone,
-                    request_id,
-                    target_root: resp
-                        .target_root
-                        .unwrap_or(target_root)
-                        .to_string_lossy()
-                        .into_owned(),
-                    schema_version: resp.schema_version.unwrap_or(0),
-                    db_sha256: resp.db_sha256.unwrap_or_default(),
-                    file_count: resp.file_count.unwrap_or(0),
-                };
-                let _ = crate::storage::operations::transition_job_cas(
-                    &db_clone,
-                    &job_id_clone,
-                    crate::storage::operations::JobTransitionInput {
-                        expected_version: running_version,
-                        next_state: crate::storage::operations::OperationState::Succeeded,
-                        summary_json: Some(serde_json::to_string(&summary).unwrap_or_default()),
-                        error_code: None,
-                        error_message: None,
-                    },
-                )
-                .await;
-            }
-            Err(err) => {
-                let _ = crate::storage::operations::transition_job_cas(
-                    &db_clone,
-                    &job_id_clone,
-                    crate::storage::operations::JobTransitionInput {
-                        expected_version: running_version,
-                        next_state: crate::storage::operations::OperationState::Failed,
-                        summary_json: None,
-                        error_code: Some("restore_failed".into()),
-                        error_message: Some(err.1.into_owned()),
-                    },
-                )
-                .await;
-            }
+                Ok(resp) => {
+                    let summary = RestoreSummaryMetadata {
+                        upload_id: upload_id_clone,
+                        request_id,
+                        target_root: resp
+                            .target_root
+                            .unwrap_or(target_root)
+                            .to_string_lossy()
+                            .into_owned(),
+                        schema_version: resp.schema_version.unwrap_or(0),
+                        db_sha256: resp.db_sha256.unwrap_or_default(),
+                        file_count: resp.file_count.unwrap_or(0),
+                    };
+                    let _ = crate::storage::operations::transition_job_cas(
+                        &db_clone,
+                        &job_id_clone,
+                        crate::storage::operations::JobTransitionInput {
+                            expected_version: running_version,
+                            next_state: crate::storage::operations::OperationState::Succeeded,
+                            summary_json: Some(serde_json::to_string(&summary).unwrap_or_default()),
+                            error_code: None,
+                            error_message: None,
+                        },
+                    )
+                    .await;
+                }
+                Err(err) => {
+                    let _ = crate::storage::operations::transition_job_cas(
+                        &db_clone,
+                        &job_id_clone,
+                        crate::storage::operations::JobTransitionInput {
+                            expected_version: running_version,
+                            next_state: crate::storage::operations::OperationState::Failed,
+                            summary_json: None,
+                            error_code: Some("restore_failed".into()),
+                            error_message: Some(err.1.into_owned()),
+                        },
+                    )
+                    .await;
+                }
             }
         }
         reg_clone.clear_job(&job_id_clone);
@@ -1107,10 +1135,8 @@ mod tests {
     use std::time::Duration;
 
     async fn test_app_state(label: &str, safe_mode: bool) -> (std::path::PathBuf, AppState) {
-        let root = std::env::temp_dir().join(format!(
-            "opendash-ops-unit-{label}-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("opendash-ops-unit-{label}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let site_root = root.join("site");
         let db_path = root.join("cms.sqlite");
@@ -1204,7 +1230,9 @@ mod tests {
 
         let client = reqwest::Client::new();
         let resp = client
-            .post(format!("http://{addr}/api/admin/operations/recovery/activate"))
+            .post(format!(
+                "http://{addr}/api/admin/operations/recovery/activate"
+            ))
             .json(&serde_json::json!({
                 "expected_generation": "a".repeat(64),
                 "password": "Password123!"

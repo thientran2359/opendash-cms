@@ -2040,7 +2040,9 @@ pub async fn put_site_taxonomy_eligibility(
     expected_version: i64,
     taxonomies: &[String],
 ) -> ApiResult<ContentTypeApiItem> {
-    if !opendash_core::content::valid_content_type_key(type_key) || matches!(type_key, "pattern" | "section") {
+    if !opendash_core::content::valid_content_type_key(type_key)
+        || matches!(type_key, "pattern" | "section")
+    {
         return Err(ApiError::bad_request(
             "Không thể cấu hình taxonomy cho Section.",
         ));

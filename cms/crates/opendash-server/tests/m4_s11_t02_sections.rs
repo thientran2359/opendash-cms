@@ -140,7 +140,12 @@ async fn pattern_private_crud_document_cas_and_public_fences() {
         .unwrap();
     assert_eq!(preview.status(), StatusCode::OK);
     assert_eq!(preview.headers().get("cache-control").unwrap(), "no-store");
-    assert!(preview.json::<Value>().await.unwrap()["html"].as_str().unwrap().contains("Never Public"));
+    assert!(
+        preview.json::<Value>().await.unwrap()["html"]
+            .as_str()
+            .unwrap()
+            .contains("Never Public")
+    );
     let saved = client
         .put(&doc_url)
         .header("Cookie", &cookie)

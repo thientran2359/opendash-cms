@@ -180,8 +180,7 @@ pub async fn load_entry_render_snapshot(
             let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
             let patterns = builder::resolve_patterns_in_tx(&mut tx, &state, &doc, false).await?;
             Some(crate::page::render_builder_with_patterns(
-                &state, &doc, false, &bindings, &lists, &forms,
-                None, &patterns, false,
+                &state, &doc, false, &bindings, &lists, &forms, None, &patterns, false,
             )?)
         } else {
             None
