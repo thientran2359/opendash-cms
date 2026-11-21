@@ -526,6 +526,33 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .await
         .unwrap();
     assert_eq!(missing.status(), 404);
+    // Public Builder part resolution must honor site-owned parts even when
+    // the active theme declares the same key, including nested Builder edges.
+    for (key, document) in [
+        (
+            "post-card",
+            doc_with_heading("db-card", "DB post card wins", None),
+        ),
+        ("public-card", preview_part_document(&["post-card"])),
+    ] {
+        let saved_part = client
+            .put(format!("{}/api/admin/template-overrides", srv.base_url))
+            .header("Cookie", &cookie)
+            .header("Origin", &origin)
+            .header("X-CSRF-Token", &csrf)
+            .json(&json!({"target":{"kind":"part","part_key":key},"document":document}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(saved_part.status(), 201);
+    }
+    single_doc["sections"][0]["children"][0]["children"][0]["children"]
+        .as_array_mut()
+        .unwrap()
+        .push(
+            json!({"id":"nested-public-card","type":"core/template_part",
+                     "props":{"part_key":"public-card"}}),
+        );
     let save_single = client
         .put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
@@ -569,9 +596,18 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .unwrap();
     assert!(body1.contains("Site Header v1"));
     assert!(body1.contains("First Post"));
+    assert!(body1.contains("data-node-id=\"entry-slot\""));
+    assert!(body1.contains("DB post card wins"));
+    assert!(!body1.contains("<aside>First Post</aside>"));
+    assert!(!body1.contains("data-doc-diagnostic"));
+    assert_eq!(body1.matches("<!doctype html>").count(), 1);
     assert!(!body1.contains("Second Post"));
     assert!(body2.contains("Site Header v1"));
     assert!(body2.contains("Second Post"));
+    assert!(body2.contains("data-node-id=\"entry-slot\""));
+    assert!(body2.contains("DB post card wins"));
+    assert!(!body2.contains("data-doc-diagnostic"));
+    assert_eq!(body2.matches("<!doctype html>").count(), 1);
     assert!(!body2.contains("First Post"));
     assert_eq!(draft_res.status(), 404);
 

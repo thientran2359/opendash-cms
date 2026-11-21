@@ -114,68 +114,30 @@ async fn login(client: &Client, base_url: &str) -> (String, String) {
     (cookie, csrf)
 }
 
-// S02: Home themes render an explicitly assigned published Page. An
-// unconfigured homepage intentionally returns the safe core view instead.
-async fn assign_published_homepage(
-    client: &Client,
-    base_url: &str,
-    cookie: &str,
-    csrf: &str,
-) -> i64 {
-    let created = client
-        .post(format!("{base_url}/api/admin/content-types/page/entries"))
+// S02 retains the independent homepage writer until S03. Seed the actual
+// public homepage through its authenticated CAS API, not the future Reading API.
+async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) {
+    let current = client
+        .get(format!("{base_url}/api/admin/builder/homepage"))
         .header("Cookie", cookie)
-        .header("Origin", base_url)
-        .header("X-CSRF-Token", csrf)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(current.status(), 200, "read S02 homepage");
+    let etag = current.headers()["etag"].to_str().unwrap().to_owned();
+    let saved = client
+        .put(format!("{base_url}/api/admin/builder/homepage"))
+        .header("Cookie", cookie).header("Origin", base_url)
+        .header("X-CSRF-Token", csrf).header("If-Match", etag)
         .json(&serde_json::json!({
-            "slug":"theme-home-fixture","title":"Theme Home Fixture","values":{}
+            "schema_version":1, "sections":[{"id":"home-sec","children":[
+                {"id":"home-row","children":[{"id":"home-col","children":[
+                    {"id":"home-title","type":"core/heading","props":{"level":1,"text":"Theme Home Fixture"}}
+                ]}]}
+            ]}]
         }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(created.status(), 201, "create Homepage Page");
-    let page: Value = created.json().await.unwrap();
-    let id = page["id"].as_i64().unwrap();
-    let version = page["version"].as_i64().unwrap();
-    let published = client
-        .post(format!(
-            "{base_url}/api/admin/content-types/page/entries/{id}/publication"
-        ))
-        .header("Cookie", cookie)
-        .header("Origin", base_url)
-        .header("X-CSRF-Token", csrf)
-        .header("If-Match", format!("\"v{version}\""))
-        .json(&serde_json::json!({"status":"published"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(published.status(), 200, "publish Homepage Page");
-    let reading = client
-        .get(format!("{base_url}/api/admin/settings/reading"))
-        .header("Cookie", cookie)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(reading.status(), 200, "read Reading Settings");
-    let etag = reading
-        .headers()
-        .get("etag")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
-    let selected = client
-        .put(format!("{base_url}/api/admin/settings/reading"))
-        .header("Cookie", cookie)
-        .header("Origin", base_url)
-        .header("X-CSRF-Token", csrf)
-        .header("If-Match", etag)
-        .json(&serde_json::json!({"homepage_page_id":id,"posts_page_id":null}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(selected.status(), 200, "assign published Homepage Page");
-    id
+        .send().await.unwrap();
+    assert_eq!(saved.status(), 200, "seed S02 homepage");
 }
 
 #[tokio::test]
@@ -281,7 +243,7 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
         200
     );
 
-    let _home_id = assign_published_homepage(&client, &srv.base_url, &cookie, &csrf).await;
+    seed_builder_homepage(&client, &srv.base_url, &cookie, &csrf).await;
 
     // 2. Selective sample import dry-run + execute + idempotent retry
     let plan: Value = client

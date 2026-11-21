@@ -136,68 +136,30 @@ fn csec_accepts_safe_subset_and_rejects_dangerous_constructs() {
     assert!(!rendered.contains("<script>"));
 }
 
-// S02: Home themes render an explicitly assigned published Page. An
-// unconfigured homepage intentionally returns the safe core view instead.
-async fn assign_published_homepage(
-    client: &Client,
-    base_url: &str,
-    cookie: &str,
-    csrf: &str,
-) -> i64 {
-    let created = client
-        .post(format!("{base_url}/api/admin/content-types/page/entries"))
+// S02 retains the independent homepage writer until S03. Seed the actual
+// public homepage through its authenticated CAS API, not the future Reading API.
+async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) {
+    let current = client
+        .get(format!("{base_url}/api/admin/builder/homepage"))
         .header("Cookie", cookie)
-        .header("Origin", base_url)
-        .header("X-CSRF-Token", csrf)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(current.status(), 200, "read S02 homepage");
+    let etag = current.headers()["etag"].to_str().unwrap().to_owned();
+    let saved = client
+        .put(format!("{base_url}/api/admin/builder/homepage"))
+        .header("Cookie", cookie).header("Origin", base_url)
+        .header("X-CSRF-Token", csrf).header("If-Match", etag)
         .json(&serde_json::json!({
-            "slug":"theme-home-fixture","title":"Theme Home Fixture","values":{}
+            "schema_version":1, "sections":[{"id":"home-sec","children":[
+                {"id":"home-row","children":[{"id":"home-col","children":[
+                    {"id":"home-title","type":"core/heading","props":{"level":1,"text":"Theme Home Fixture"}}
+                ]}]}
+            ]}]
         }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(created.status(), 201, "create Homepage Page");
-    let page: Value = created.json().await.unwrap();
-    let id = page["id"].as_i64().unwrap();
-    let version = page["version"].as_i64().unwrap();
-    let published = client
-        .post(format!(
-            "{base_url}/api/admin/content-types/page/entries/{id}/publication"
-        ))
-        .header("Cookie", cookie)
-        .header("Origin", base_url)
-        .header("X-CSRF-Token", csrf)
-        .header("If-Match", format!("\"v{version}\""))
-        .json(&serde_json::json!({"status":"published"}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(published.status(), 200, "publish Homepage Page");
-    let reading = client
-        .get(format!("{base_url}/api/admin/settings/reading"))
-        .header("Cookie", cookie)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(reading.status(), 200, "read Reading Settings");
-    let etag = reading
-        .headers()
-        .get("etag")
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
-    let selected = client
-        .put(format!("{base_url}/api/admin/settings/reading"))
-        .header("Cookie", cookie)
-        .header("Origin", base_url)
-        .header("X-CSRF-Token", csrf)
-        .header("If-Match", etag)
-        .json(&serde_json::json!({"homepage_page_id":id,"posts_page_id":null}))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(selected.status(), 200, "assign published Homepage Page");
-    id
+        .send().await.unwrap();
+    assert_eq!(saved.status(), 200, "seed S02 homepage");
 }
 
 #[tokio::test]
@@ -338,7 +300,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         .unwrap();
     assert_eq!(activate_resp.status(), 200);
 
-    let _home_id = assign_published_homepage(&client, &srv.base_url, &cookie, &csrf).await;
+    seed_builder_homepage(&client, &srv.base_url, &cookie, &csrf).await;
 
     // 4. Create and publish a post entry
     let create_entry = client
@@ -378,7 +340,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
 
     // 5. Verify public routes compose header + role + footer and include CSP style-src 'self' 'unsafe-inline'
     for (path, marker) in [
-        ("/", "data-role=\"home\""),
+        ("/", "Theme Home Fixture"),
         ("/content/post", "data-role=\"archive\""),
         ("/content/post/hello-roles", "data-role=\"single\""),
     ] {
@@ -405,47 +367,69 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         assert!(body.contains("data-role=\"footer\""), "{path}: {body}");
     }
 
-    // 6. Typed Home override preserves the authorized homepage content slot
-    // and surrounding theme parts after saving the Builder AST.
-    let retired_homepage = client
+    // 6. The typed Home template is saved independently of the existing
+    // homepage body; S03 alone will assign its public route. Prove both stores.
+    let home_get = client
         .get(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header(reqwest::header::COOKIE, &cookie)
+        .header("Cookie", &cookie)
         .send()
         .await
         .unwrap();
-    assert_eq!(retired_homepage.status(), 404);
-    let save_builder = client
-        .put(format!("{}/api/admin/template-overrides", srv.base_url))
-        .header(reqwest::header::COOKIE, &cookie)
-        .header("x-csrf-token", &csrf)
+    assert_eq!(home_get.status(), 200);
+    let home_etag = home_get.headers()["etag"].to_str().unwrap().to_owned();
+    let home_doc: Value = home_get.json().await.unwrap();
+    let mut updated = home_doc["document"].clone();
+    updated["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"] =
+        serde_json::json!("Saved Builder Home");
+    let shared = client.put(format!("{}/api/admin/template-overrides", srv.base_url))
+        .header("Cookie", &cookie).header("Origin", &srv.base_url)
+        .header("X-CSRF-Token", &csrf)
         .json(&serde_json::json!({
-            "target": {"kind":"home"},
-            "document": {
-              "schema_version": 1,
-              "sections": [{
-                "id": "sec-1",
-                "children": [{
-                    "id": "row-1",
-                    "children": [{
-                        "id": "col-1",
-                        "children": [{
-                            "id": "h-1",
-                            "type": "core/heading",
-                            "props": { "text": "Saved Builder Home", "level": 1 }
-                        }, {
-                            "id": "slot-1",
-                            "type": "core/content_slot",
-                            "props": {}
-                        }]
-                    }]
-                }]
-              }]
-            }
-        }))
+            "target":{"kind":"home"},
+            "document":{"schema_version":1,"sections":[{"id":"shared-sec","children":[
+                {"id":"shared-row","children":[{"id":"shared-col","children":[
+                    {"id":"shared-title","type":"core/heading","props":{"level":1,"text":"Shared Home Template"}},
+                    {"id":"shared-slot","type":"core/content_slot","props":{}}
+                ]}]}
+            ]}]}
+        })).send().await.unwrap();
+    assert_eq!(shared.status(), 201);
+    let unchanged = client
+        .get(format!("{}/api/admin/builder/homepage", srv.base_url))
+        .header("Cookie", &cookie)
         .send()
         .await
         .unwrap();
-    assert_eq!(save_builder.status(), 201);
+    assert_eq!(unchanged.headers()["etag"], home_etag);
+    assert_eq!(unchanged.json::<Value>().await.unwrap(), home_doc);
+    let public_before = client
+        .get(format!("{}/", srv.base_url))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(public_before.contains("Theme Home Fixture"));
+    assert!(!public_before.contains("Shared Home Template"));
+    let reading = client
+        .get(format!("{}/api/admin/settings/reading", srv.base_url))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status(), 404);
+    let saved = client
+        .put(format!("{}/api/admin/builder/homepage", srv.base_url))
+        .header("Cookie", &cookie)
+        .header("Origin", &srv.base_url)
+        .header("X-CSRF-Token", &csrf)
+        .header("If-Match", home_etag)
+        .json(&updated)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), 200);
 
     let home_after = client
         .get(format!("{}/", srv.base_url))
@@ -459,6 +443,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
         "{home_body}"
     );
     assert!(home_body.contains("Saved Builder Home"), "{home_body}");
+    assert!(!home_body.contains("Shared Home Template"), "{home_body}");
     assert!(home_body.contains("data-role=\"header\""), "{home_body}");
     assert!(home_body.contains("data-role=\"footer\""), "{home_body}");
 

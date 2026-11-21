@@ -37,9 +37,13 @@ pub struct CompiledCsecComposition {
     source: String,
     name: String,
     content_count: usize,
+    part_expansions: usize,
 }
 
 impl CompiledCsecComposition {
+    pub(crate) fn part_expansions(&self) -> usize {
+        self.part_expansions
+    }
     /// Renders the C-SEC shell before substituting sanitized entry HTML.
     ///
     /// The injected HTML was sanitized by the content renderer and can contain
@@ -50,6 +54,21 @@ impl CompiledCsecComposition {
         context: Value,
         sanitized_content_html: Option<&str>,
     ) -> Result<String, &'static str> {
+        let mut remaining = TEMPLATE_FUEL_LIMIT;
+        self.render_with_remaining_fuel(context, sanitized_content_html, &mut remaining)
+    }
+
+    /// Public Builder composition can contain multiple independently compiled
+    /// theme segments; all of them consume the same request-local fuel.
+    pub(crate) fn render_with_remaining_fuel(
+        &self,
+        context: Value,
+        sanitized_content_html: Option<&str>,
+        fuel_remaining: &mut u64,
+    ) -> Result<String, &'static str> {
+        if *fuel_remaining == 0 || *fuel_remaining > TEMPLATE_FUEL_LIMIT {
+            return Err("Fuel composition không hợp lệ hoặc đã hết.");
+        }
         let nonce = if self.content_count == 1 {
             let mut bytes = [0_u8; 16];
             OsRng.fill_bytes(&mut bytes);
@@ -69,19 +88,29 @@ impl CompiledCsecComposition {
             self.source.clone()
         };
         let mut env = restricted_environment();
+        env.set_fuel(Some(*fuel_remaining));
         env.add_template(&self.name, &source)
             .map_err(|_| "Không thể biên dịch theme composition.")?;
-        let shell = env
+        let captured = env
             .get_template(&self.name)
             .map_err(|_| "Không tìm thấy theme composition.")?
-            .render(context)
+            .render_captured(context)
             .map_err(|_| "Lỗi thực thi theme composition (fuel/recursion/undefined).")?;
+        let (consumed, remaining) = captured
+            .state()
+            .fuel_levels()
+            .ok_or("Thiếu bộ theo dõi fuel composition.")?;
+        if fuel_remaining.checked_sub(consumed) != Some(remaining) {
+            return Err("Fuel composition không hợp lệ.");
+        }
+        *fuel_remaining = remaining;
+        let shell = captured.output();
         if shell.len() > MAX_RENDERED_HTML_BYTES {
             return Err("HTML render vượt quá giới hạn 512 KiB.");
         }
         validate_html_and_css_context(&shell, true)?;
         let Some(nonce) = nonce else {
-            return Ok(shell);
+            return Ok(shell.to_owned());
         };
         if shell.matches(&nonce).count() != 1 {
             return Err("Nonce nội dung của theme không xuất hiện đúng một lần.");
@@ -135,6 +164,18 @@ pub(crate) fn preview_csec_part_keys(
     source: &str,
 ) -> Result<Vec<String>, &'static str> {
     preview_composition_sites(name, source)?
+        .into_iter()
+        .map(|site| match site.call {
+            CompositionCall::Part(key) => Ok(key),
+            CompositionCall::Content => Err("Template part không được chứa od_content()."),
+        })
+        .collect()
+}
+
+/// Literal part edges of a validated public Theme part. Unlike the preview
+/// compiler this does not change the accepted source format or marker rules.
+pub(crate) fn csec_part_keys(name: &str, source: &str) -> Result<Vec<String>, &'static str> {
+    composition_sites(name, source, true)?
         .into_iter()
         .map(|site| match site.call {
             CompositionCall::Part(key) => Ok(key),
@@ -534,6 +575,7 @@ pub fn validate_and_compile_csec_composition(
         source: compiled_source,
         name: root_name.to_owned(),
         content_count,
+        part_expansions: expansions,
     })
 }
 

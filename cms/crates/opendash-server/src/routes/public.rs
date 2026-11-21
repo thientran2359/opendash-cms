@@ -76,12 +76,13 @@ pub async fn public_page(
             title: &site.site_title,
             tagline: &site.tagline,
         };
-        let (header, footer) = overrides::resolve_and_render_header_footer(
+        let mut budget = overrides::PublicCompositionBudget::default();
+        let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer(
             &db,
             active_v3.as_ref(),
             &site_ctx,
             &theme_opts,
-            None,
+            &mut budget,
         )
         .await?;
         let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
@@ -91,7 +92,10 @@ pub async fn public_page(
             footer.as_deref(),
             &seo_view,
         )?;
-        return Ok(rendered_layout_with_form_csp(html, allow_form_self));
+        return Ok(rendered_layout_with_form_csp(
+            html,
+            allow_form_self || shell_has_form,
+        ));
     }
     // S02 does not reassign / to a theme template. The existing Builder/legacy
     // homepage remains authoritative until the S03 Reading Settings cutover.

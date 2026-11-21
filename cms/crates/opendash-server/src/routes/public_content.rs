@@ -70,6 +70,7 @@ async fn resolve_public_template_html(
     fallback_html: &str,
     route_entry: Option<(&str, &str)>,
     route_context: serde_json::Value,
+    budget: &mut overrides::PublicCompositionBudget,
 ) -> ApiResult<ResolvedPublicHtml> {
     let resolution = overrides::resolve_template_2axis(
         db,
@@ -88,6 +89,7 @@ async fn resolve_public_template_html(
         fallback_html,
         route_entry,
         route_context,
+        budget,
     )
     .await
 }
@@ -101,6 +103,7 @@ async fn render_resolved_public_template_html(
     fallback_html: &str,
     route_entry: Option<(&str, &str)>,
     route_context: serde_json::Value,
+    budget: &mut overrides::PublicCompositionBudget,
 ) -> ApiResult<ResolvedPublicHtml> {
     let context = if matches!(&resolution, TemplateResolution::CoreFallback) {
         serde_json::Value::Null
@@ -123,6 +126,29 @@ async fn render_resolved_public_template_html(
         }
         context
     };
+    // A fallback renderer can return a complete HTML document. Only its
+    // normalized body fragment and authorized styles may enter a typed slot;
+    // injecting a second document envelope would invalidate the whole page.
+    let slot_html = if matches!(&resolution, TemplateResolution::CoreFallback) {
+        String::new()
+    } else {
+        match crate::document::normalize_public_document(fallback_html) {
+            Ok(parts) => {
+                let mut fragment = parts.authorized_styles.concat();
+                fragment.push_str(&parts.body_fragment);
+                fragment
+            }
+            Err(_) => {
+                // Keep the existing outer normalizer's safe diagnostic
+                // fallback rather than injecting malformed content.
+                return Ok(ResolvedPublicHtml {
+                    html: fallback_html.to_owned(),
+                    has_active_contact_form: false,
+                    canvas_layout: false,
+                });
+            }
+        }
+    };
     match resolution {
         TemplateResolution::CoreFallback => Ok(ResolvedPublicHtml {
             html: fallback_html.to_owned(),
@@ -132,19 +158,14 @@ async fn render_resolved_public_template_html(
         TemplateResolution::DbOverride(record) => {
             let canvas_layout =
                 record.target.kind == opendash_core::theme::TemplateCandidateKind::PageLayout;
-            let requested = overrides::referenced_theme_part_keys(&record.document);
-            let rendered_parts = match active {
-                Some(active) => {
-                    overrides::render_theme_parts_for_builder(&active.parts, &context, &requested)?
-                }
-                None => BTreeMap::new(),
-            };
-            let rendered = overrides::render_override_for_public_with_context(
+            let rendered = overrides::render_resolved_public_builder(
                 db,
                 &record,
+                active,
+                &context,
                 route_entry,
-                Some(fallback_html),
-                Some(&rendered_parts),
+                Some(&slot_html),
+                budget,
             )
             .await?;
             Ok(ResolvedPublicHtml {
@@ -173,12 +194,7 @@ async fn render_resolved_public_template_html(
             let composition =
                 validate_and_compile_csec_composition(&target_key, &html, &parts, kind)
                     .map_err(ApiError::internal)?;
-            let html = composition
-                .render(
-                    crate::template_sec::json_to_safe_value(&context),
-                    Some(fallback_html),
-                )
-                .map_err(ApiError::internal)?;
+            let html = budget.render_theme(&composition, &context, Some(&slot_html))?;
             Ok(ResolvedPublicHtml {
                 html,
                 has_active_contact_form: false,
@@ -322,6 +338,7 @@ pub(crate) async fn render_canonical_archive(
     let candidates = overrides::build_candidates(&PublicTemplateContext::Archive {
         content_type: type_key.clone(),
     })?;
+    let mut budget = overrides::PublicCompositionBudget::default();
     let body = resolve_public_template_html(
         &db,
         &candidates,
@@ -340,14 +357,15 @@ pub(crate) async fn render_canonical_archive(
             "next_url": next,
             "route": {"kind":"archive", "path":canonical_base},
         }),
+        &mut budget,
     )
     .await?;
-    let (header, footer) = overrides::resolve_and_render_header_footer(
+    let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer(
         &db,
         active_v3.as_ref(),
         &site_ctx,
         &theme_opts,
-        Some(&type_key),
+        &mut budget,
     )
     .await?;
     let seo_view = crate::storage::seo::build_simple_seo_view(
@@ -364,7 +382,7 @@ pub(crate) async fn render_canonical_archive(
             footer.as_deref(),
             &seo_view,
         )?,
-        body.has_active_contact_form,
+        body.has_active_contact_form || shell_has_form,
     ))
 }
 
@@ -459,6 +477,7 @@ pub(crate) async fn render_single_entry_response(
             archive_path.as_deref(),
         )?,
     };
+    let mut budget = overrides::PublicCompositionBudget::default();
     let body = render_resolved_public_template_html(
         &db, resolution, active_v3.as_ref(), &site_ctx, &theme_opts,
         &fallback_html, Some((&type_key, &entry.slug)),
@@ -468,16 +487,17 @@ pub(crate) async fn render_single_entry_response(
             "archive_url": archive_path,
             "route": {"kind":"single", "path":canonical_path_for_seo},
         }),
+        &mut budget,
     ).await?;
-    let (header, footer) = if body.canvas_layout {
-        (None, None)
+    let (header, footer, shell_has_form) = if body.canvas_layout {
+        (None, None, false)
     } else {
         overrides::resolve_and_render_header_footer(
             &db,
             active_v3.as_ref(),
             &site_ctx,
             &theme_opts,
-            Some(&type_key),
+            &mut budget,
         )
         .await?
     };
@@ -495,7 +515,7 @@ pub(crate) async fn render_single_entry_response(
             footer.as_deref(),
             &seo_view,
         )?,
-        body.has_active_contact_form || entry_has_form,
+        body.has_active_contact_form || entry_has_form || shell_has_form,
     ))
 }
 
@@ -749,6 +769,7 @@ pub(crate) async fn render_canonical_taxonomy(
         term_id,
         slug: term.slug.clone(),
     })?;
+    let mut budget = overrides::PublicCompositionBudget::default();
     let body = resolve_public_template_html(
         db,
         &candidates,
@@ -765,14 +786,15 @@ pub(crate) async fn render_canonical_taxonomy(
             "next_url": next,
             "route": {"kind":"taxonomy", "path":canonical_base},
         }),
+        &mut budget,
     )
     .await?;
-    let (header, footer) = overrides::resolve_and_render_header_footer(
+    let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer(
         db,
         active_v3.as_ref(),
         &site_ctx,
         &theme_opts,
-        None,
+        &mut budget,
     )
     .await?;
     let seo_view =
@@ -785,7 +807,7 @@ pub(crate) async fn render_canonical_taxonomy(
             footer.as_deref(),
             &seo_view,
         )?,
-        body.has_active_contact_form,
+        body.has_active_contact_form || shell_has_form,
     ))
 }
 

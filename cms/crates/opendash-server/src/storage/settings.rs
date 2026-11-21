@@ -567,7 +567,7 @@ pub async fn get_active_public_theme_options(
         "SELECT r.theme_id, r.manifest_json
          FROM theme_active_selection AS a
          JOIN theme_revisions AS r ON r.revision_id = a.revision_id
-         WHERE a.id = 1 AND r.source_format = 'v2'",
+         WHERE a.id = 1 AND r.source_format = 'v3'",
     )
     .fetch_optional(db)
     .await?;

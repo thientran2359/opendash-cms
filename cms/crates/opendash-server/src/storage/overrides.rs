@@ -1540,61 +1540,196 @@ pub async fn render_override_for_public_with_context(
     )
 }
 
-/// Request only parts actually referenced by this AST. Other valid theme parts
-/// may require entry-specific variables unavailable on a header/archive route.
-pub fn referenced_theme_part_keys(document: &BuilderDocument) -> BTreeSet<String> {
-    let mut requested = BTreeSet::new();
-    for section in &document.sections {
-        for row in &section.children {
-            for column in &row.children {
-                for element in &column.children {
-                    if let ElementContent::Known(KnownElement::TemplatePart(props)) =
-                        &element.content
-                    {
-                        requested.insert(props.part_key.clone());
-                    }
-                }
-            }
-        }
-    }
-    requested
+/// The public S02 graph has one budget across Builder and C-SEC segments.
+pub struct PublicCompositionBudget {
+    remaining_fuel: u64,
+    expansions: usize,
 }
 
-/// Never inject the raw source of an active theme part into a Builder AST.
-/// Validate and compile only the requested C-SEC part DAGs under bounded
-/// context and output limits. The source map must be a verified v3 revision.
-pub fn render_theme_parts_for_builder(
-    parts: &BTreeMap<String, String>,
-    context: &serde_json::Value,
-    requested: &BTreeSet<String>,
-) -> ApiResult<BTreeMap<String, String>> {
-    use crate::template_sec::{
-        CsecContentKind, json_to_safe_value, validate_and_compile_csec_composition,
-    };
-    let mut rendered = BTreeMap::new();
-    let mut total_bytes = 0_usize;
-    for key in requested {
-        let Some(source) = parts.get(key) else {
-            continue;
-        };
-        let compiled = validate_and_compile_csec_composition(
-            &format!("part:{key}"),
-            source,
-            parts,
-            CsecContentKind::NonEntry,
-        )
-        .map_err(ApiError::internal)?;
-        let html = compiled
-            .render(json_to_safe_value(context), None)
-            .map_err(ApiError::internal)?;
-        total_bytes = total_bytes
-            .checked_add(html.len())
-            .filter(|total| *total <= crate::template_sec::MAX_RENDERED_HTML_BYTES)
-            .ok_or_else(|| {
-                ApiError::internal("Tổng HTML các theme parts vượt giới hạn 512 KiB.")
-            })?;
-        rendered.insert(key.clone(), html);
+impl Default for PublicCompositionBudget {
+    fn default() -> Self {
+        Self {
+            remaining_fuel: template_sec::TEMPLATE_FUEL_LIMIT,
+            expansions: 0,
+        }
     }
+}
+
+impl PublicCompositionBudget {
+    fn charge(&mut self, count: usize) -> ApiResult<()> {
+        self.expansions = self
+            .expansions
+            .checked_add(count)
+            .filter(|n| *n <= 32)
+            .ok_or_else(|| ApiError::internal("Template parts exceed 32 expansions."))?;
+        Ok(())
+    }
+
+    pub fn render_theme(
+        &mut self,
+        compiled: &template_sec::CompiledCsecComposition,
+        context: &serde_json::Value,
+        slot: Option<&str>,
+    ) -> ApiResult<String> {
+        self.charge(compiled.part_expansions())?;
+        compiled
+            .render_with_remaining_fuel(
+                template_sec::json_to_safe_value(context),
+                slot,
+                &mut self.remaining_fuel,
+            )
+            .map_err(ApiError::internal)
+    }
+}
+
+struct PublicBuilderContext<'a> {
+    state: &'a HomeState,
+    active: Option<&'a ActiveThemeV3>,
+    theme_context: &'a serde_json::Value,
+    route_entry: Option<(&'a str, &'a str)>,
+}
+
+/// Check the full depth of a contiguous theme graph at its actual Builder
+/// boundary; the compiler checks the same graph from its own lexical root.
+fn check_theme_part_depth(
+    key: &str,
+    sources: &BTreeMap<String, String>,
+    depth: usize,
+) -> ApiResult<()> {
+    if depth > 3 {
+        return Err(ApiError::internal("Template part depth exceeds 3."));
+    }
+    let source = sources
+        .get(key)
+        .ok_or_else(|| ApiError::internal("Theme part missing."))?;
+    for child in template_sec::csec_part_keys(key, source).map_err(ApiError::internal)? {
+        check_theme_part_depth(&child, sources, depth + 1)?;
+    }
+    Ok(())
+}
+
+async fn render_public_part(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    depth: usize,
+    stack: &[String],
+    ctx: &PublicBuilderContext<'_>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<Option<RenderedLayout>> {
+    let target = TemplateCandidate {
+        part_key: Some(key.to_owned()),
+        ..candidate(TemplateCandidateKind::Part)
+    };
+    let canonical = target.canonical_key().map_err(ApiError::internal)?;
+    if stack.contains(&canonical) || depth > 3 {
+        return Err(ApiError::internal("Template part cycle or depth limit."));
+    }
+    if let Some(row) = get_typed_override_on_connection(tx, &canonical).await? {
+        let (_, slots) = document_parts_and_slot_count(&row.document)?;
+        validate_content_slots(&target, slots)?;
+        let mut next_stack = stack.to_vec();
+        next_stack.push(canonical);
+        return Ok(Some(
+            Box::pin(render_public_builder(
+                tx,
+                &row.document,
+                None,
+                depth,
+                &next_stack,
+                ctx,
+                budget,
+            ))
+            .await?,
+        ));
+    }
+    let Some(active) = ctx.active else {
+        return Ok(None);
+    };
+    let Some(source) = active.parts.get(key) else {
+        return Ok(None);
+    };
+    let compiled = template_sec::validate_and_compile_csec_composition(
+        &canonical,
+        source,
+        &active.parts,
+        template_sec::CsecContentKind::NonEntry,
+    )
+    .map_err(ApiError::internal)?;
+    check_theme_part_depth(key, &active.parts, depth)?;
+    let html = budget.render_theme(&compiled, ctx.theme_context, None)?;
+    Ok(Some(RenderedLayout {
+        html,
+        diagnostics: Vec::new(),
+        has_active_contact_form: false,
+    }))
+}
+
+async fn render_public_builder(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    slot: Option<&str>,
+    depth: usize,
+    stack: &[String],
+    ctx: &PublicBuilderContext<'_>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<RenderedLayout> {
+    let mut parts = BTreeMap::new();
+    let mut child_diagnostics = Vec::new();
+    let mut child_forms = false;
+    // Count every occurrence, including repeated references. A stored Builder
+    // part wins before consulting the immutable active-theme source.
+    for key in document_parts_and_slot_count(document)?.0 {
+        budget.charge(1)?;
+        if let Some(mut rendered) =
+            Box::pin(render_public_part(tx, &key, depth + 1, stack, ctx, budget)).await?
+        {
+            child_forms |= rendered.has_active_contact_form;
+            child_diagnostics.append(&mut rendered.diagnostics);
+            parts.insert(key, rendered.html);
+        }
+    }
+    let bindings =
+        builder_binding::resolve_in_tx_with_route(tx, document, false, ctx.route_entry).await?;
+    let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
+    let forms = resolve_contact_forms_in_tx(tx, document).await?;
+    let mut rendered = page::render_builder_with_template_context(
+        ctx.state,
+        document,
+        false,
+        &bindings,
+        &lists,
+        &forms,
+        Some(&page::BuilderTemplateContext {
+            content_html: slot,
+            parts: &parts,
+        }),
+    )?;
+    rendered.has_active_contact_form |= child_forms;
+    rendered.diagnostics.append(&mut child_diagnostics);
+    Ok(rendered)
+}
+
+pub async fn render_resolved_public_builder(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    route_entry: Option<(&str, &str)>,
+    slot: Option<&str>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<RenderedLayout> {
+    let mut tx = db.begin().await?;
+    let state = builder::read_home_tx(&mut tx).await?;
+    let context = PublicBuilderContext {
+        state: &state,
+        active,
+        theme_context,
+        route_entry,
+    };
+    let stack = vec![record.canonical_target_key.clone()];
+    let rendered =
+        render_public_builder(&mut tx, &record.document, slot, 0, &stack, &context, budget).await?;
+    tx.commit().await?;
     Ok(rendered)
 }
 
@@ -1603,49 +1738,24 @@ pub async fn resolve_and_render_header_footer(
     active_v3: Option<&ActiveThemeV3>,
     site_ctx: &SiteContext<'_>,
     theme_opts: &BTreeMap<String, serde_json::Value>,
-    type_key: Option<&str>,
-) -> ApiResult<(Option<String>, Option<String>)> {
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
     let menus = crate::storage::menu::resolve_active_slot_menus(db).await?;
     let part_context = serde_json::json!({
-        "site": site_ctx,
-        "options": theme_opts,
-        "theme_options": theme_opts,
-        "menus": menus,
+        "site": site_ctx, "options": theme_opts, "theme_options": theme_opts, "menus": menus,
     });
-    let header_override =
-        resolve_effective_override(db, OverrideRole::Header, type_key, None).await?;
-    let footer_override =
-        resolve_effective_override(db, OverrideRole::Footer, type_key, None).await?;
-    let mut requested = BTreeSet::new();
-    if let Some(record) = &header_override {
-        requested.extend(referenced_theme_part_keys(&record.document));
-    } else {
-        requested.insert("header".to_owned());
-    }
-    if let Some(record) = &footer_override {
-        requested.extend(referenced_theme_part_keys(&record.document));
-    } else {
-        requested.insert("footer".to_owned());
-    }
-    let rendered_parts = match active_v3 {
-        Some(active) => render_theme_parts_for_builder(&active.parts, &part_context, &requested)?,
-        None => BTreeMap::new(),
+    let mut tx = db.begin().await?;
+    let state = builder::read_home_tx(&mut tx).await?;
+    let context = PublicBuilderContext {
+        state: &state,
+        active: active_v3,
+        theme_context: &part_context,
+        route_entry: None,
     };
-    let header = match header_override {
-        Some(record) => Some(
-            render_override_for_public_with_context(db, &record, None, None, Some(&rendered_parts))
-                .await?
-                .html,
-        ),
-        None => rendered_parts.get("header").cloned(),
-    };
-    let footer = match footer_override {
-        Some(record) => Some(
-            render_override_for_public_with_context(db, &record, None, None, Some(&rendered_parts))
-                .await?
-                .html,
-        ),
-        None => rendered_parts.get("footer").cloned(),
-    };
-    Ok((header, footer))
+    let header = render_public_part(&mut tx, "header", 0, &[], &context, budget).await?;
+    let footer = render_public_part(&mut tx, "footer", 0, &[], &context, budget).await?;
+    let has_form = header.as_ref().is_some_and(|r| r.has_active_contact_form)
+        || footer.as_ref().is_some_and(|r| r.has_active_contact_form);
+    tx.commit().await?;
+    Ok((header.map(|r| r.html), footer.map(|r| r.html), has_form))
 }
