@@ -18,7 +18,9 @@ use sqlx::sqlite::SqliteConnectOptions;
 
 use crate::error::{ApiError, ApiResult};
 use crate::paths::SitePaths;
-use crate::secrets::{create_private_file, ensure_no_reparse_or_symlink, ensure_private_directory_tree};
+use crate::secrets::{
+    create_private_file, ensure_no_reparse_or_symlink, ensure_private_directory_tree,
+};
 use crate::storage::backup::{collect_backup_inventory, vacuum_into_snapshot};
 
 pub const WORKER_MEMORY_LIMIT_BYTES: usize =
@@ -503,7 +505,6 @@ fn run_restore_worker_from_stdio() -> i32 {
 }
 
 fn run_snapshot_worker_from_stdio() -> i32 {
-
     let mut req_line = String::new();
     let mut reader = io::BufReader::new(io::stdin().take((MAX_WORKER_REQUEST_BYTES + 1) as u64));
     if io::BufRead::read_line(&mut reader, &mut req_line).is_err()
@@ -614,7 +615,9 @@ fn stream_copy_and_hash(src_path: &Path, dst_path: &Path) -> ApiResult<(u64, Str
     let meta = fs::symlink_metadata(src_path)
         .map_err(|_| ApiError::conflict(format!("Thiếu tệp tham chiếu: {}", src_path.display())))?;
     if meta.file_type().is_symlink() || !meta.is_file() {
-        return Err(ApiError::conflict("Từ chối symlink hoặc đối tượng không phải tệp."));
+        return Err(ApiError::conflict(
+            "Từ chối symlink hoặc đối tượng không phải tệp.",
+        ));
     }
 
     let mut src = File::open(src_path)
@@ -743,7 +746,9 @@ async fn execute_snapshot_worker(req: &SnapshotWorkerRequest) -> ApiResult<PathB
             let shard_path = shard_ent.path();
             ensure_no_reparse_or_symlink(&shard_path)?;
             if !shard_path.is_dir() || shard_name.len() != 2 {
-                return Err(ApiError::conflict("Phát hiện đối tượng lạ trong uploads/media."));
+                return Err(ApiError::conflict(
+                    "Phát hiện đối tượng lạ trong uploads/media.",
+                ));
             }
             let files = fs::read_dir(&shard_path)
                 .map_err(|_| ApiError::conflict("Không đọc được shard uploads/media."))?;
@@ -773,7 +778,7 @@ async fn execute_snapshot_worker(req: &SnapshotWorkerRequest) -> ApiResult<PathB
     }
 
     for rev in &inventory.theme_revisions {
-        if rev.source_format == "v2" {
+        if matches!(rev.source_format.as_str(), "v2" | "v3") {
             let rev_dir = paths
                 .themes_dir()
                 .join("revisions")
