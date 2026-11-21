@@ -35,6 +35,8 @@ export interface PanelRegionRendererProps {
   publicationPolicy?: 'immediate' | 'draft_publish';
   createdAt?: string | null;
   updatedAt?: string | null;
+  onCreatedAtChange?: (isoUtc: string | null) => void;
+  onUpdatedAtChange?: (isoUtc: string | null) => void;
   templatePanelNode?: React.ReactNode;
   onToggleCollapse: (panelId: string) => void;
   onTitleChange: (title: string) => void;
@@ -105,6 +107,8 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   publicationPolicy,
   createdAt,
   updatedAt,
+  onCreatedAtChange,
+  onUpdatedAtChange,
   templatePanelNode,
   onToggleCollapse,
   onTitleChange,
@@ -127,19 +131,37 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
 }) => {
   const [editingPermalink, setEditingPermalink] = useState(false);
   const [editingStatus, setEditingStatus] = useState(false);
+  const [editingCreatedAt, setEditingCreatedAt] = useState(false);
+  const [editingUpdatedAt, setEditingUpdatedAt] = useState(false);
   const isBuiltInContent = config.type_key === 'post' || config.type_key === 'page';
   const isDraftPublish = publicationPolicy === 'draft_publish' || isBuiltInContent;
   const permalinkPreview = customPath.trim()
     ? (customPath.trim().startsWith('/') ? customPath.trim() : `/${customPath.trim()}`)
     : `/${slug || '...'}`;
-  const formatTimestamp = (iso?: string | null): string => {
-    if (!iso) return 'Ngay khi lưu';
+  const parseUtcTimestamp = (raw?: string | null): Date | null => {
+    if (!raw) return null;
+    const iso = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`;
     const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const formatTimestamp = (raw?: string | null): string => {
+    const d = parseUtcTimestamp(raw);
+    if (!d) return raw || 'Ngay khi lưu';
     return d.toLocaleString('vi-VN', {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
+  };
+  const toDatetimeLocalValue = (raw?: string | null): string => {
+    const d = parseUtcTimestamp(raw) ?? new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const fromDatetimeLocalValue = (localVal: string): string | null => {
+    if (!localVal) return null;
+    const d = new Date(localVal);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 19).replace('T', ' ');
   };
   const renderField = (fieldKey: string) => {
     const eff: EffectiveFieldProjection | undefined = config.effective_fields[fieldKey];
@@ -462,14 +484,83 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   {dirty && <span className="font-medium text-amber-700">● Chưa lưu</span>}
                 </div>
 
-                <div className="flex items-center justify-between gap-1.5">
-                  <span>
-                    {entryId === null ? 'Xuất bản:' : 'Cập nhật:'}{' '}
-                    <strong className="font-medium text-zinc-800">
-                      {formatTimestamp(updatedAt ?? createdAt)}
-                    </strong>
-                  </span>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span>
+                      Ngày tạo:{' '}
+                      <strong className="font-medium text-zinc-800">
+                        {formatTimestamp(createdAt)}
+                      </strong>
+                    </span>
+                    {onCreatedAtChange && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingCreatedAt(prev => !prev)}
+                        className="text-od-accent hover:underline"
+                      >
+                        {editingCreatedAt ? 'Đóng' : 'Chỉnh sửa'}
+                      </button>
+                    )}
+                  </div>
+                  {editingCreatedAt && onCreatedAtChange && (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="datetime-local"
+                        aria-label="Ngày tạo"
+                        className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                        value={toDatetimeLocalValue(createdAt)}
+                        onChange={e => onCreatedAtChange(fromDatetimeLocalValue(e.target.value))}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditingCreatedAt(false)}
+                        className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  )}
                 </div>
+
+                {entryId !== null && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span>
+                        Cập nhật:{' '}
+                        <strong className="font-medium text-zinc-800">
+                          {formatTimestamp(updatedAt)}
+                        </strong>
+                      </span>
+                      {onUpdatedAtChange && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingUpdatedAt(prev => !prev)}
+                          className="text-od-accent hover:underline"
+                        >
+                          {editingUpdatedAt ? 'Đóng' : 'Chỉnh sửa'}
+                        </button>
+                      )}
+                    </div>
+                    {editingUpdatedAt && onUpdatedAtChange && (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="datetime-local"
+                          aria-label="Ngày cập nhật"
+                          className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                          value={toDatetimeLocalValue(updatedAt)}
+                          onChange={e => onUpdatedAtChange(fromDatetimeLocalValue(e.target.value))}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditingUpdatedAt(false)}
+                          className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+                        >
+                          OK
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {canOpenBuilder && (

@@ -64,9 +64,9 @@ function slugFromTitle(title: string): string {
 }
 
 function supportAllowsField(typeKey: string, key: string, settings: ContentTypeSettings): boolean {
+  if (key === 'featured_image' && typeKey !== 'section') return settings.supports.includes('featured_image');
   if (typeKey !== 'post' && typeKey !== 'page') return true;
   if (key === 'body') return settings.supports.includes('editor');
-  if (key === 'featured_image') return settings.supports.includes('featured_image');
   return true;
 }
 
@@ -142,6 +142,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [selectedThemeKey, setSelectedThemeKey] = useState<string | null>(null);
   const [themeKeyDirty, setThemeKeyDirty] = useState(false);
   const [entryTimestamps, setEntryTimestamps] = useState<{ createdAt: string; updatedAt: string } | null>(null);
+  const [customCreatedAt, setCustomCreatedAt] = useState<string | null>(null);
+  const [customUpdatedAt, setCustomUpdatedAt] = useState<string | null>(null);
   const savedThemeKeyRef = useRef<string | null>(null);
   const selectedThemeKeyRef = useRef<string | null>(null);
   const themeKeyDirtyRef = useRef(false);
@@ -343,6 +345,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
           setHasBuilderDocument(Boolean(builderSnap?.document));
           setEntryTimestamps({ createdAt: rec.created_at, updatedAt: rec.updated_at });
+          setCustomCreatedAt(null);
+          setCustomUpdatedAt(null);
           const themeKey = typeKey === 'page'
             ? (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null
             : (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
@@ -373,6 +377,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           };
         } else {
           setEntryTimestamps(null);
+          setCustomCreatedAt(null);
+          setCustomUpdatedAt(null);
           savedThemeKeyRef.current = null;
           selectedThemeKeyRef.current = null;
           themeKeyDirtyRef.current = false;
@@ -524,6 +530,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           canonical_url: snapshot.seo?.canonical_url?.trim() || null,
           noindex: Boolean(snapshot.seo?.noindex),
         }} : {}),
+        ...(customCreatedAt ? { created_at: customCreatedAt } : {}),
+        ...(customUpdatedAt ? { updated_at: customUpdatedAt } : {}),
       };
 
       const res =
@@ -546,6 +554,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       };
       baselineRef.current = saved;
       setEntryTimestamps({ createdAt: res.entry.created_at, updatedAt: res.entry.updated_at });
+      setCustomCreatedAt(null);
+      setCustomUpdatedAt(null);
       const savedSelection = typeKey === 'page'
         ? (res.entry as typeof res.entry & { page_layout_key?: string | null }).page_layout_key ?? null
         : (res.entry as typeof res.entry & { custom_template_key?: string | null }).custom_template_key ?? null;
@@ -782,8 +792,16 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         draftPreviewPath={draftPreviewPath}
         isPublic={settings?.public ?? true}
         publicationPolicy={publicationPolicy}
-        createdAt={entryTimestamps?.createdAt ?? null}
-        updatedAt={entryTimestamps?.updatedAt ?? null}
+        createdAt={customCreatedAt ?? entryTimestamps?.createdAt ?? null}
+        updatedAt={customUpdatedAt ?? entryTimestamps?.updatedAt ?? null}
+        onCreatedAtChange={val => {
+          setCustomCreatedAt(val);
+          setDirty(true);
+        }}
+        onUpdatedAtChange={val => {
+          setCustomUpdatedAt(val);
+          setDirty(true);
+        }}
         templatePanelNode={templatePanelNode}
         saving={saving}
         dirty={dirty}

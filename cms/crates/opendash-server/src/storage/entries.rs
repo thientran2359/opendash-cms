@@ -1092,6 +1092,68 @@ pub struct CompositeEntrySaveInput {
     pub content_mode: PatchField<ContentMode>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub seo: PatchField<crate::seo::SeoMetadataInput>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+fn normalize_entry_timestamp(raw: &str, field_name: &str) -> ApiResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 32 || !trimmed.is_ascii() {
+        return Err(ApiError::unprocessable(format!(
+            "Định dạng thời gian {field_name} không hợp lệ (dùng YYYY-MM-DD HH:MM:SS hoặc ISO-8601)."
+        )));
+    }
+    let normalized = trimmed.trim_end_matches('Z').trim_end_matches('z');
+    let normalized = normalized.split('.').next().unwrap_or(normalized);
+    let (date_part, time_part) = normalized
+        .split_once('T')
+        .or_else(|| normalized.split_once('t'))
+        .or_else(|| normalized.split_once(' '))
+        .ok_or_else(|| {
+            ApiError::unprocessable(format!(
+                "Định dạng thời gian {field_name} không hợp lệ (thiếu ngày hoặc giờ)."
+            ))
+        })?;
+    let mut date_it = date_part.split('-');
+    let year: u32 = date_it
+        .next()
+        .and_then(|s| (s.len() == 4).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Năm trong {field_name} không hợp lệ.")))?;
+    let month: u32 = date_it
+        .next()
+        .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Tháng trong {field_name} không hợp lệ.")))?;
+    let day: u32 = date_it
+        .next()
+        .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Ngày trong {field_name} không hợp lệ.")))?;
+    if date_it.next().is_some() || !(1970..=2100).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return Err(ApiError::unprocessable(format!("Ngày trong {field_name} nằm ngoài phạm vi hợp lệ.")));
+    }
+    let mut time_it = time_part.split(':');
+    let hour: u32 = time_it
+        .next()
+        .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Giờ trong {field_name} không hợp lệ.")))?;
+    let minute: u32 = time_it
+        .next()
+        .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Phút trong {field_name} không hợp lệ.")))?;
+    let second: u32 = match time_it.next() {
+        Some(s) => (s.len() == 2)
+            .then(|| s.parse().ok())
+            .flatten()
+            .ok_or_else(|| ApiError::unprocessable(format!("Giây trong {field_name} không hợp lệ.")))?,
+        None => 0,
+    };
+    if time_it.next().is_some() || hour > 23 || minute > 59 || second > 59 {
+        return Err(ApiError::unprocessable(format!("Giờ phút giây trong {field_name} không hợp lệ.")));
+    }
+    Ok(format!(
+        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}"
+    ))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1480,6 +1542,15 @@ pub async fn commit_composite_entry_save(
     let values_json = serde_json::to_string(&plan.merged_input.values)?;
     let (page_layout_key, custom_template_key) =
         resolve_entry_template_patches_in_tx(&mut tx, type_key, entry_id, input).await?;
+    let custom_created_at = match input.created_at.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => Some(normalize_entry_timestamp(raw, "created_at")?),
+        _ => None,
+    };
+    let custom_updated_at = match input.updated_at.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => Some(normalize_entry_timestamp(raw, "updated_at")?),
+        _ => None,
+    };
+
     let saved_id = match entry_id {
         None => {
             // Migration 0008 deliberately rejects a directly published INSERT
@@ -1492,8 +1563,8 @@ pub async fn commit_composite_entry_save(
                 "published"
             };
             let res = sqlx::query(
-                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, page_layout_key, custom_template_key)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, page_layout_key, custom_template_key, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
             )
             .bind(type_key)
             .bind(&plan.merged_input.slug)
@@ -1502,6 +1573,9 @@ pub async fn commit_composite_entry_save(
             .bind(status_clause)
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
+            .bind(custom_created_at.as_deref())
+            .bind(custom_updated_at.as_deref())
+            .bind(custom_created_at.as_deref())
             .execute(&mut *tx)
             .await;
             let new_id = match res {
@@ -1540,8 +1614,9 @@ pub async fn commit_composite_entry_save(
                      publication_status = COALESCE(?, publication_status),
                      page_layout_key = ?, custom_template_key = ?,
                      content_mode = COALESCE(?, content_mode),
+                     created_at = COALESCE(?, created_at),
                      version = version + 1,
-                     updated_at = datetime('now')
+                     updated_at = COALESCE(?, datetime('now'))
                  WHERE content_type_key = ? AND id = ? AND version = ?",
             )
             .bind(&plan.merged_input.slug)
@@ -1551,6 +1626,8 @@ pub async fn commit_composite_entry_save(
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
             .bind(requested_mode)
+            .bind(custom_created_at.as_deref())
+            .bind(custom_updated_at.as_deref())
             .bind(type_key)
             .bind(id)
             .bind(expected_ver)
