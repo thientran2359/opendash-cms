@@ -818,6 +818,7 @@ pub struct EntryBuilderOpen {
     pub type_key: String,
     pub content_mode: ContentMode,
     pub version: i64,
+    pub updated_at: String,
     pub document: Option<BuilderDocument>,
 }
 
@@ -860,8 +861,8 @@ async fn entry_builder_snapshot(
     {
         return Err(ApiError::forbidden("Content Builder is not enabled."));
     }
-    let row: Option<(String, String, String, String, i64, Option<String>)> = sqlx::query_as(
-        "SELECT e.title, e.slug, e.values_json, e.content_mode, e.version, d.document_json
+    let row: Option<(String, String, String, String, i64, String, Option<String>)> = sqlx::query_as(
+        "SELECT e.title, e.slug, e.values_json, e.content_mode, e.version, e.updated_at, d.document_json
            FROM content_entries e LEFT JOIN entry_builder_documents d ON d.entry_id = e.id
           WHERE e.id = ? AND e.content_type_key = ?",
     )
@@ -869,7 +870,7 @@ async fn entry_builder_snapshot(
     .bind(type_key)
     .fetch_optional(&mut **tx)
     .await?;
-    let (title, slug, values, mode, version, raw) =
+    let (title, slug, values, mode, version, updated_at, raw) =
         row.ok_or_else(|| ApiError::not_found("Content entry not found."))?;
     let content_mode = match mode.as_str() {
         "editor" => ContentMode::Editor,
@@ -888,6 +889,7 @@ async fn entry_builder_snapshot(
             type_key: type_key.to_owned(),
             content_mode,
             version,
+            updated_at,
             document,
         },
         schema,

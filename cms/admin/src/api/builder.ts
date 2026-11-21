@@ -21,6 +21,7 @@ export interface EntryBuilderOpen {
   type_key: string;
   content_mode: ContentMode;
   version: number;
+  updated_at: string;
   document: BuilderDocument | null;
 }
 
