@@ -42,6 +42,18 @@ EGM phụ trách **tạo và review đặc tả kỹ thuật**, còn việc tri�
 - **Review & Merge PR (`github-pr-review-merge`):** `Atlas`, `Aster`, `Nova` dùng [`.agents/skills/github-pr-review-merge/SKILL.md`](.agents/skills/github-pr-review-merge/SKILL.md) để review diff đối chiếu với Design Spec EGM, kiểm tra required CI checks và merge với `expected_head_sha` (theo thẩm quyền [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md)).
 - Các quy định về định danh agent và vận hành GitHub/CoS đặt tại [`.agents/agents.yaml`](.agents/agents.yaml), [`.agents/AGENT_OPERATING_STANDARD.md`](.agents/AGENT_OPERATING_STANDARD.md) và [`.agents/GITHUB_WORKFLOW.md`](.agents/GITHUB_WORKFLOW.md).
 
+### 1.3. Quy tắc Tự chủ Thực thi, Kết thúc Lượt & Bàn giao Hai Chiều (`Owner Directive 2026-11-21`)
+
+Áp dụng bắt buộc cho **MỌI agent** (`Atlas`, `Aster`, `Nova`, `Forge`, `Harbor`):
+
+1. **Làm trọn luồng trong thẩm quyền (Default to Action):** Khi mục tiêu đã rõ và các bước kế tiếp nằm trong thẩm quyền theo [ADR-0010](docs/decisions/ADR-0010-agent-project-and-merge-authority.md) (khảo sát, soạn Design Delta, chạy Goldfish review, viết code, chạy test, commit/push, mở PR, chờ CI, merge PR đủ gate, cập nhật Issue/Project, dispatch Harbor/Forge), **làm liền mạch cho đến điểm hoàn tất trong cùng một lượt** — KHÔNG dừng giữa chừng để hỏi xác nhận từng bước con hiển nhiên.
+2. **Chỉ được dừng giữa chừng khi gặp đúng 1 trong 3 ngưỡng thật:** (a) cần **Owner quyết định** (đổi PRD/phạm vi sản phẩm, đổi kiến trúc lõi/breaking cross-spec, đổi phân quyền/ruleset, phát hành public); (b) yêu cầu có ≥ 2 hướng trái ngược không thể suy từ trạng thái GitHub/repo hiện hành; (c) gặp Blocker bảo mật/dữ liệu/kỹ thuật thật sự hoặc chạm Circuit Breaker (2 lượt CI fail liên tiếp).
+3. **Không trả lời thụ động kiểu *"không rõ cần hỗ trợ gì"*:** Tự kiểm tra Issue/PR/branch live trước để nắm ngữ cảnh; nếu vẫn cần xác nhận, phải đề xuất sẵn phương án mặc định hợp lý nhất để người dùng chỉ cần gật đầu.
+4. **Bắt buộc có khối `Bước tiếp theo (Next Step)` ở cuối mọi lượt trả lời:** Ghi ngắn gọn 3 ý: **Đã xong** (kèm link Issue/PR/SHA) · **Đang chờ** (ai cần quyết gì, nếu có) · **Bước tiếp theo đề xuất** (1–2 lựa chọn hành động cụ thể).
+5. **Bàn giao hai chiều chủ động `Harbor ↔ Aster` trên macOS** (chi tiết tại [`.agents/AGENT_OPERATING_STANDARD.md`](.agents/AGENT_OPERATING_STANDARD.md) §4–§5):
+   - **Harbor → Aster:** Khi **hoàn tất & merge xong 1 Issue** HOẶC **bị dừng cần Aster review/ACK**, Harbor ghi rõ **công việc tiếp theo cho Aster** lên GitHub Issue/PR rồi gửi handoff vào **cửa sổ Codex đang mở** (dừng tại `SENT`).
+   - **Aster → Harbor:** Ngay khi **Aster review/ACK xong** HOẶC **phát hiện Harbor đang rảnh (`probe` không có active turn) và còn Issue `agent:harbor` đang chờ đủ điều kiện**, Aster chủ động kích hoạt Harbor làm tiếp (dùng `resume-issue` cho task đang dở có PR mở, hoặc mở phiên chat mới qua `send-issue` cho Issue mới đủ gate).
+
 ---
 
 ## 2. Ngữ cảnh Hệ thống và Ranh giới Kỹ thuật Bắt buộc
