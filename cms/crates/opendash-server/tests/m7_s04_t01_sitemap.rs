@@ -32,7 +32,10 @@ async fn spawn_server() -> TestServer {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let site_root = std::env::temp_dir().join(format!("opendash-m7-s04-t01-{nanos}"));
+    // SitePaths forbids symlinked roots; macOS /var is a link to /private/var.
+    let site_root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("opendash-m7-s04-t01-{nanos}"));
     fs::create_dir_all(&site_root).unwrap();
 
     let bin = env!("CARGO_BIN_EXE_opendash");
@@ -586,10 +589,11 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
     let pool = SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
         .await
         .unwrap();
-    // Currently indexable routes: published Reading Homepage '/' (1) + '/content/post' (1) = 2.
-    // Insert 4998 more -> 5000.
+    // Currently indexable routes: published Reading Homepage '/' (1),
+    // '/content/post' (1) and '/content/page' (1) = 3.
+    // Insert 4997 more -> exactly 5000.
     let mut tx = pool.begin().await.unwrap();
-    for i in 1..=4998 {
+    for i in 1..=4997 {
         sqlx::query(
             "INSERT INTO content_entries (content_type_key, slug, title, publication_status, values_json, version)
              VALUES ('post', ?1, ?2, 'draft', '{}', 1)",
@@ -631,13 +635,13 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
     // Insert 1 more -> 5001 routes -> 2 parts.
     sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, publication_status, values_json, version)
-         VALUES ('post', 'bulk-item-4999', 'Bulk 4999', 'draft', '{}', 1)",
+         VALUES ('post', 'bulk-item-4998', 'Bulk 4998', 'draft', '{}', 1)",
     )
     .execute(&pool)
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE content_entries SET publication_status = 'published' WHERE slug = 'bulk-item-4999'",
+        "UPDATE content_entries SET publication_status = 'published' WHERE slug = 'bulk-item-4998'",
     )
     .execute(&pool)
     .await

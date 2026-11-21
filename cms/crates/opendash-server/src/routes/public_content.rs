@@ -460,7 +460,6 @@ pub async fn single(
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
     validate_public_request_path(uri.path()).map_err(ApiError::bad_request)?;
-    validate_single_query(raw.as_deref()).map_err(ApiError::bad_request)?;
     check_type_key(&type_key)?;
     if !valid_kebab_segment_with_limit(&slug, 64) {
         return Err(ApiError::not_found("Không tìm thấy nội dung."));
@@ -473,8 +472,36 @@ pub async fn single(
     let Some(resolved) = permalinks::resolve_public_path(&db, uri.path()).await? else {
         return render_not_found_response(&db, themes_root).await;
     };
-    let PublicRouteTarget::Entry(entry_id) = resolved.target else {
-        return render_not_found_response(&db, themes_root).await;
+    let entry_id = match resolved.target {
+        PublicRouteTarget::Entry(entry_id) => {
+            validate_single_query(raw.as_deref()).map_err(ApiError::bad_request)?;
+            entry_id
+        }
+        // The Posts Page keeps its own Page URL, but it is routed to the
+        // post archive. The explicit /content/page/:slug route must honor the
+        // same claim as the fallback dispatcher (and archive pagination).
+        PublicRouteTarget::Archive(ref archive_type)
+            if type_key == "page" && archive_type == "post" =>
+        {
+            let query = parse_query(raw.as_deref(), QueryScope::ContentArchive)
+                .map_err(ApiError::bad_request)?;
+            if resolved.redirect {
+                return Ok(permanent_redirect(CanonicalUrlBuilder::with_query(
+                    resolved.canonical_path,
+                    query,
+                    QueryScope::ContentArchive,
+                )));
+            }
+            return render_canonical_archive(
+                db,
+                themes_root,
+                "post".to_owned(),
+                resolved.canonical_path,
+                raw,
+            )
+            .await;
+        }
+        _ => return render_not_found_response(&db, themes_root).await,
     };
     // Resolve by stable ID so an old slug never selects a replacement entry.
     let Some(entry) = public_content::get_published_by_id(&db, entry_id).await? else {

@@ -70,6 +70,18 @@ WITH indexable AS (
        AND t.key != 'section'
        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
        AND COALESCE(json_extract(t.definition_json, '$.settings.has_archive'), 1) = 1
+       -- A posts archive claimed by Reading Settings is not indexable when
+       -- its assigned Page was withdrawn/deleted. That URL serves 404 noindex.
+       AND NOT (t.key = 'post' AND EXISTS (
+         SELECT 1 FROM site_reading_settings reading
+           LEFT JOIN content_entries blog ON blog.id = reading.posts_page_id
+           LEFT JOIN content_types blog_type ON blog_type.key = blog.content_type_key
+          WHERE reading.id = 1 AND reading.posts_page_id IS NOT NULL
+            AND (blog.id IS NULL OR blog.content_type_key != 'page'
+              OR blog.publication_status != 'published'
+              OR blog_type.provider_status IS NULL OR blog_type.provider_status != 'active'
+              OR COALESCE(json_extract(blog_type.definition_json, '$.settings.public'), 1) != 1)
+       ))
        AND EXISTS (
            SELECT 1 FROM content_entries e
             WHERE e.content_type_key = t.key
