@@ -385,14 +385,6 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const postsLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
   const pagesLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
   const cptLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
-  const settingsLegacy =
-    route.sub === 'general' ||
-    route.sub === 'reading' ||
-    route.sub === 'permalinks' ||
-    route.sub === 'seo' ||
-    route.sub === 'smtp'
-      ? ''
-      : ' od-legacy-scope';
 
   return (
     <div className="od-root min-h-screen">
@@ -605,7 +597,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 {user && route.view === 'profile' && <div className="od-admin-card min-w-0">{profileContent}</div>}
                 {user?.role === 'admin' && route.view === 'tools' && <div className="od-admin-card min-w-0">{toolsContent}</div>}
                 {user?.role === 'admin' && route.view === 'settings' && (
-                  <div className={`od-admin-card min-w-0${settingsLegacy}`}>
+                  <div className="od-admin-card min-w-0">
                     {route.sub === 'content-types' ? schemaSettingsContent : settingsContent}
                   </div>
                 )}
