@@ -8,15 +8,15 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use opendash_core::builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::{
     app::AdminAssets,
-    auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
+    auth::{require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
-    page::{self as page_usecase, render_block, save_page},
+    page::{render_block, save_page},
     routes::public::rendered,
     storage::{builder as builder_storage, page::list_theme_blocks},
     theme::{Block, Fields},
@@ -114,22 +114,6 @@ fn builder_rendered(result: crate::page::RenderedBlock) -> Response {
     response
 }
 
-#[derive(Serialize)]
-pub struct HomepageOpen {
-    pub document: BuilderDocument,
-    pub source: &'static str,
-    pub version: i64,
-}
-
-#[derive(Serialize)]
-pub struct HomepageSaved {
-    pub document: BuilderDocument,
-    pub source: &'static str,
-    pub version: i64,
-    pub html: String,
-    pub diagnostics: Vec<page_usecase::BuilderDiagnostic>,
-}
-
 fn builder_headers(version: Option<i64>) -> HeaderMap {
     let mut h = HeaderMap::new();
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -188,78 +172,6 @@ fn require_builder_json(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<()> {
 fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocument> {
     require_builder_json(headers, bytes)?;
     BuilderDocument::from_json(bytes).map_err(|error| ApiError::bad_request(error.to_string()))
-}
-
-pub async fn homepage_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
-    let actor = require_session(&headers, &db).await?;
-    if actor.user.role != crate::auth::Role::Admin {
-        return Err(ApiError::forbidden("Chỉ Admin mới được chỉnh homepage."));
-    }
-    let current = builder_storage::read(&db).await?;
-    Ok((
-        builder_headers(Some(current.version)),
-        Json(HomepageOpen {
-            document: current.document(),
-            source: current.source(),
-            version: current.version,
-        }),
-    )
-        .into_response())
-}
-
-pub async fn homepage_preview(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-    bytes: Bytes,
-) -> ApiResult<Response> {
-    require_admin_with_csrf(&headers, &db).await?;
-    let document = decode_document(&headers, &bytes)?;
-    let current = builder_storage::read(&db).await?;
-    current.validate(&document)?;
-    builder_storage::check_preview_images(&db, &document).await?;
-    let (bindings, lists) = builder_storage::resolve_preview(&db, &document).await?;
-    let forms = crate::storage::builder::resolve_contact_forms(&db, &document).await?;
-    let rendered = page_usecase::render_builder_with_lists_and_forms(
-        &current, &document, true, &bindings, &lists, &forms,
-    )?;
-    Ok((builder_headers(None), Json(rendered)).into_response())
-}
-
-pub async fn homepage_put(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
-    State(db): State<SqlitePool>,
-    State(hooks): State<Arc<HookDispatcher>>,
-    headers: HeaderMap,
-    bytes: Bytes,
-) -> ApiResult<Response> {
-    require_admin_with_csrf(&headers, &db).await?;
-    let version = parse_builder_if_match(&headers)?;
-    let document = decode_document(&headers, &bytes)?;
-    let (version, rendered) = builder_storage::save_and_render(
-        &db,
-        &document,
-        version,
-        |current, draft, bindings, lists| {
-            page_usecase::render_builder_with_lists(current, draft, false, bindings, lists)
-        },
-    )
-    .await?;
-    page_usecase::dispatch_saved_hook(
-        &hooks,
-        page_usecase::layout_hook_payload(&document, version),
-    )
-    .await;
-    Ok((
-        builder_headers(Some(version)),
-        Json(HomepageSaved {
-            document,
-            source: "layout",
-            version,
-            html: rendered.html,
-            diagnostics: rendered.diagnostics,
-        }),
-    )
-        .into_response())
 }
 
 fn require_page_builder_type(type_key: &str) -> ApiResult<()> {
@@ -393,7 +305,7 @@ pub async fn entry_builder_reset(
 }
 
 #[cfg(test)]
-mod homepage_tests {
+mod builder_etag_tests {
     use super::*;
 
     #[test]

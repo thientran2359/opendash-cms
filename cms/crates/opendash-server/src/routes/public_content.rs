@@ -28,7 +28,9 @@ use crate::{
         overrides::{self, PublicTemplateContext, TemplateResolution},
         page::active_content_templates,
         permalinks::{self, PublicRouteTarget},
-        public_content, settings, theme as theme_storage,
+        public_content,
+        seo::{self, ReadingPageState},
+        settings, theme as theme_storage,
     },
 };
 
@@ -213,6 +215,62 @@ fn permanent_redirect(location: String) -> Response {
         .into_response()
 }
 
+/// A missing or withdrawn Reading Page renders only a non-entry context. The
+/// status and robots header remain authoritative even if an Index template
+/// supplies the visual shell.
+pub(crate) async fn render_not_found_response(
+    db: &SqlitePool,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
+) -> ApiResult<Response> {
+    let active = match themes_root {
+        Some(Extension(root)) => theme_storage::load_active_theme_v3(db, &root.0).await?,
+        None => None,
+    };
+    let site = settings::get_general(db).await?;
+    let opts = settings::get_active_public_theme_options(db).await?;
+    let site_ctx = SiteContext {
+        title: &site.site_title,
+        tagline: &site.tagline,
+    };
+    let mut budget = overrides::PublicCompositionBudget::default();
+    let body = resolve_public_template_html(
+        db,
+        &overrides::build_candidates(&PublicTemplateContext::NotFound)?,
+        active.as_ref(),
+        &site_ctx,
+        &opts,
+        "<main><h1>404 — Không tìm thấy trang</h1></main>",
+        None,
+        serde_json::json!({ "route": { "kind": "not_found" } }),
+        &mut budget,
+    )
+    .await?;
+    let (header_html, footer_html, shell_has_form) = overrides::resolve_and_render_header_footer(
+        db,
+        active.as_ref(),
+        &site_ctx,
+        &opts,
+        &mut budget,
+    )
+    .await?;
+    let view = crate::seo::SeoView::for_noindex_page("vi", "404 — Không tìm thấy trang");
+    let html = content_render::compose_document_with_seo(
+        header_html.as_deref(),
+        &body.html,
+        footer_html.as_deref(),
+        &view,
+    )?;
+    let mut response = crate::routes::public::rendered_layout_with_form_csp(
+        html,
+        body.has_active_contact_form || shell_has_form,
+    );
+    *response.status_mut() = StatusCode::NOT_FOUND;
+    response
+        .headers_mut()
+        .insert("X-Robots-Tag", "noindex".parse().expect("static header"));
+    Ok(response)
+}
+
 pub async fn archive(
     State(db): State<SqlitePool>,
     themes_root: Option<Extension<ThemeStoreRoot>>,
@@ -227,11 +285,11 @@ pub async fn archive(
     if uri.path() != legacy_path {
         return Err(ApiError::not_found("Đường dẫn nội dung không hợp lệ."));
     }
-    let resolved = permalinks::resolve_public_path(&db, uri.path())
-        .await?
-        .ok_or_else(|| ApiError::not_found("Archive nội dung không tồn tại."))?;
+    let Some(resolved) = permalinks::resolve_public_path(&db, uri.path()).await? else {
+        return render_not_found_response(&db, themes_root).await;
+    };
     if !matches!(&resolved.target, PublicRouteTarget::Archive(key) if key == &type_key) {
-        return Err(ApiError::not_found("Archive nội dung không tồn tại."));
+        return render_not_found_response(&db, themes_root).await;
     }
     let query =
         parse_query(raw.as_deref(), QueryScope::ContentArchive).map_err(ApiError::bad_request)?;
@@ -254,6 +312,14 @@ pub(crate) async fn render_canonical_archive(
     canonical_base: String,
     raw: Option<String>,
 ) -> ApiResult<Response> {
+    if type_key == "post"
+        && matches!(
+            seo::reading_page_state(&db, false).await?,
+            ReadingPageState::Missing
+        )
+    {
+        return render_not_found_response(&db, themes_root).await;
+    }
     // Enforce the CPT's public/archive settings before loading or rendering
     // content. The storage archive query independently checks this policy.
     public_content::require_public_archive(&db, &type_key).await?;
@@ -404,16 +470,16 @@ pub async fn single(
     if uri.path() != legacy_path {
         return Err(ApiError::not_found("Đường dẫn nội dung không hợp lệ."));
     }
-    let resolved = permalinks::resolve_public_path(&db, uri.path())
-        .await?
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+    let Some(resolved) = permalinks::resolve_public_path(&db, uri.path()).await? else {
+        return render_not_found_response(&db, themes_root).await;
+    };
     let PublicRouteTarget::Entry(entry_id) = resolved.target else {
-        return Err(ApiError::not_found("Không tìm thấy nội dung."));
+        return render_not_found_response(&db, themes_root).await;
     };
     // Resolve by stable ID so an old slug never selects a replacement entry.
-    let entry = public_content::get_published_by_id(&db, entry_id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+    let Some(entry) = public_content::get_published_by_id(&db, entry_id).await? else {
+        return render_not_found_response(&db, themes_root).await;
+    };
     if resolved.redirect {
         return Ok(permanent_redirect(resolved.canonical_path));
     }
@@ -426,32 +492,88 @@ pub(crate) async fn render_single_entry_response(
     entry: crate::storage::entries::ContentEntryRecord,
     canonical_path_override: Option<String>,
 ) -> ApiResult<Response> {
+    render_entry_response(db, themes_root, entry, canonical_path_override, false).await
+}
+
+pub(crate) async fn render_homepage_entry_response(
+    db: &SqlitePool,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
+    entry: crate::storage::entries::ContentEntryRecord,
+) -> ApiResult<Response> {
+    if entry.content_type_key != "page" {
+        return render_not_found_response(db, themes_root).await;
+    }
+    render_entry_response(db, themes_root, entry, Some("/".to_owned()), true).await
+}
+
+async fn render_entry_response(
+    db: &SqlitePool,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
+    entry: crate::storage::entries::ContentEntryRecord,
+    canonical_path_override: Option<String>,
+    is_home: bool,
+) -> ApiResult<Response> {
     let db = db.clone();
     let snapshot = public_content::load_entry_render_snapshot(
         &db,
         entry.id,
         themes_root.as_ref().map(|Extension(root)| root.0.as_path()),
     )
-    .await?
-    .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+    .await?;
+    let Some(snapshot) = snapshot else {
+        return render_not_found_response(&db, themes_root).await;
+    };
     let public_content::PublicEntryRenderSnapshot {
         entry,
         schema,
         active: active_v3,
-        resolution,
+        mut resolution,
         body: entry_body,
     } = snapshot;
+    if is_home {
+        let page_layout_key = entry
+            .page_layout_key
+            .as_ref()
+            .filter(|key| {
+                active_v3.as_ref().is_some_and(|theme| {
+                    theme
+                        .manifest
+                        .page_layouts
+                        .iter()
+                        .any(|layout| &layout.key == *key)
+                })
+            })
+            .cloned();
+        // Preserve the Page's own Builder body. Only the shared template
+        // candidate chain changes: Home -> PageLayout -> Page -> Index.
+        let candidates =
+            overrides::build_candidates(&PublicTemplateContext::Home { page_layout_key })?;
+        resolution = overrides::resolve_template_2axis(
+            &db,
+            &candidates,
+            active_v3.as_ref().map(|v| &v.templates),
+            active_v3.as_ref().map(|v| &v.parts),
+            active_v3.as_ref().map(|v| &v.page_layouts),
+        )
+        .await?;
+    }
     let type_key = entry.content_type_key.clone();
     let entry_id_for_seo = entry.id;
     let entry_title_for_seo = entry.title.clone();
     let canonical_path = canonical_path_override
         .ok_or_else(|| ApiError::not_found("Không tìm thấy canonical nội dung."))?;
     let canonical_path_for_seo = canonical_path.clone();
-    let _context = PublicRequestContext::Single {
-        entry_id: entry.id,
-        type_key: type_key.clone(),
-        slug: entry.slug.clone(),
-        canonical_path: canonical_path.clone(),
+    let _context = if is_home {
+        PublicRequestContext::Home {
+            canonical_path: canonical_path.clone(),
+        }
+    } else {
+        PublicRequestContext::Single {
+            entry_id: entry.id,
+            type_key: type_key.clone(),
+            slug: entry.slug.clone(),
+            canonical_path: canonical_path.clone(),
+        }
     };
     let (_, single_template) = active_content_templates(&db).await?;
     let site = settings::get_general(&db).await?;
@@ -485,7 +607,7 @@ pub(crate) async fn render_single_entry_response(
             "content_type": {"key": schema.key, "label": schema.label},
             "entry": entry_view_with_url(entry.clone(), &schema, Some(canonical_path_for_seo.clone())),
             "archive_url": archive_path,
-            "route": {"kind":"single", "path":canonical_path_for_seo},
+            "route": {"kind":if is_home { "home" } else { "single" }, "path":canonical_path_for_seo},
         }),
         &mut budget,
     ).await?;
@@ -501,13 +623,17 @@ pub(crate) async fn render_single_entry_response(
         )
         .await?
     };
-    let seo_view = crate::storage::seo::build_entry_seo_view(
-        &db,
-        entry_id_for_seo,
-        &entry_title_for_seo,
-        &canonical_path_for_seo,
-    )
-    .await?;
+    let seo_view = if is_home {
+        seo::build_home_seo_view(&db).await?
+    } else {
+        seo::build_entry_seo_view(
+            &db,
+            entry_id_for_seo,
+            &entry_title_for_seo,
+            &canonical_path_for_seo,
+        )
+        .await?
+    };
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::compose_document_with_seo(
             header.as_deref(),

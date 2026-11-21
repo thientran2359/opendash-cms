@@ -21,13 +21,22 @@ pub struct SitemapRouteList {
 const INDEXABLE_ROUTES_UNION: &str = r#"
 WITH indexable AS (
     SELECT 1 AS route_kind,
-           1 AS stable_id,
+           e.id AS stable_id,
            '/' AS path,
-           NULL AS lastmod
-      FROM site_home_seo h
-     WHERE h.id = 1
-       AND h.noindex = 0
-       AND (h.canonical_url IS NULL OR h.canonical_url = ?1 OR h.canonical_url LIKE (?1 || '/%'))
+           e.updated_at AS lastmod
+      FROM site_reading_settings reading
+      JOIN content_entries e ON e.id = reading.homepage_page_id
+      JOIN content_types t ON t.key = e.content_type_key
+      LEFT JOIN entry_seo s ON s.entry_id = e.id
+      LEFT JOIN site_home_seo h ON h.id = 1
+     WHERE reading.id = 1 AND e.content_type_key = 'page'
+       AND e.publication_status = 'published'
+       AND t.provider_status = 'active'
+       AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+       AND COALESCE(s.noindex, h.noindex, 0) = 0
+       AND (COALESCE(s.canonical_url, h.canonical_url) IS NULL
+         OR COALESCE(s.canonical_url, h.canonical_url) = ?1
+         OR COALESCE(s.canonical_url, h.canonical_url) LIKE (?1 || '/%'))
 
     UNION ALL
 
@@ -40,6 +49,11 @@ WITH indexable AS (
       LEFT JOIN entry_seo s ON s.entry_id = e.id
      WHERE e.publication_status = 'published'
        AND e.content_type_key != 'section'
+       AND NOT EXISTS (
+           SELECT 1 FROM site_reading_settings reading
+            WHERE reading.id = 1
+              AND (reading.homepage_page_id = e.id OR reading.posts_page_id = e.id)
+       )
        AND t.provider_status = 'active'
        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
        AND COALESCE(s.noindex, 0) = 0
