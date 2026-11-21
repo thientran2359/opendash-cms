@@ -8,14 +8,14 @@ use opendash_core::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    package::{
-        V2_MAX_RASTER_BYTES, V2_MAX_TEXT_BYTES, V2_MAX_ZIP_BYTES, V2ZipError,
-        ensure_safe_flat_entry, open_bounded_zip, read_bounded_entry, read_v2_zip_entries,
-        validate_v2_relative_path,
-    },
-    storage::theme::valid_v2_theme_id,
+use crate::package::{
+    V2_MAX_DECODED_BYTES, V2_MAX_FILES, V2_MAX_RASTER_BYTES, V2_MAX_TEXT_BYTES, V2ZipError,
+    read_v2_zip_entries, validate_v2_relative_path,
 };
+#[cfg(test)]
+use crate::package::{V2_MAX_ZIP_BYTES, open_bounded_zip};
+#[cfg(test)]
+use crate::storage::theme::valid_v2_theme_id;
 
 pub const MAX_ZIP_BYTES: usize = 64 * 1024;
 
@@ -26,116 +26,6 @@ pub struct Theme {
     pub content_single_template: Option<String>,
     /// Explicitly supported block from another installed theme; never rewrites home_page.
     pub compatible_block_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct HomepageCompat {
-    version: u8,
-    accepts: String,
-}
-
-impl Theme {
-    pub fn from_zip(bytes: &[u8]) -> Result<Self, &'static str> {
-        let mut archive = open_bounded_zip(
-            bytes,
-            MAX_ZIP_BYTES,
-            "ZIP vượt quá giới hạn kích thước.",
-            "ZIP không hợp lệ.",
-        )?;
-        if !(2..=5).contains(&archive.len()) {
-            return Err(
-                "ZIP cần block.json, block.html và chỉ thêm content-list.html/content-single.html/homepage-compat.json.",
-            );
-        }
-
-        let mut descriptor = None;
-        let mut template = None;
-        let mut content_list_template = None;
-        let mut content_single_template = None;
-        let mut homepage_compat = None;
-        let mut remaining = MAX_ZIP_BYTES;
-        for index in 0..archive.len() {
-            let mut entry = archive.by_index(index).map_err(|_| "Không đọc được ZIP.")?;
-            let name = ensure_safe_flat_entry(
-                &entry,
-                "Đường dẫn ZIP không an toàn.",
-                "ZIP không được chứa symlink.",
-                "ZIP không được chứa thư mục con.",
-            )?;
-            let slot = match name.as_str() {
-                "block.json" if descriptor.is_none() => &mut descriptor,
-                "block.html" if template.is_none() => &mut template,
-                "content-list.html" if content_list_template.is_none() => {
-                    &mut content_list_template
-                }
-                "content-single.html" if content_single_template.is_none() => {
-                    &mut content_single_template
-                }
-                "homepage-compat.json" if homepage_compat.is_none() => &mut homepage_compat,
-                _ => return Err("ZIP chứa đường dẫn lạ hoặc mục bị trùng."),
-            };
-            if entry.size() > remaining as u64 {
-                return Err("Nội dung ZIP vượt quá giới hạn kích thước.");
-            }
-            let raw_bytes = read_bounded_entry(
-                &mut entry,
-                remaining,
-                "Không đọc được nội dung ZIP dạng UTF-8.",
-            )?;
-            let content = String::from_utf8(raw_bytes)
-                .map_err(|_| "Không đọc được nội dung ZIP dạng UTF-8.")?;
-            remaining = remaining
-                .checked_sub(content.len())
-                .ok_or("Nội dung ZIP vượt quá giới hạn kích thước.")?;
-            *slot = Some(content);
-        }
-
-        let descriptor: BlockDescriptor =
-            serde_json::from_str(&descriptor.ok_or("Thiếu block.json.")?)
-                .map_err(|_| "block.json không hợp lệ.")?;
-        descriptor.validate()?;
-        let compatible_block_id = if let Some(raw) = homepage_compat {
-            let compat: HomepageCompat =
-                serde_json::from_str(&raw).map_err(|_| "homepage-compat.json không hợp lệ.")?;
-            if compat.version != 1
-                || !opendash_core::id::valid_namespaced_block_id(&compat.accepts)
-                || compat.accepts == descriptor.id
-            {
-                return Err("Alias homepage phải là một block khác có ID hợp lệ (version 1).");
-            }
-            Some(compat.accepts)
-        } else {
-            None
-        };
-
-        let template = template.ok_or("Thiếu block.html.")?;
-        if template.trim().is_empty()
-            || crate::template_sec::restricted_environment()
-                .template_from_str(&template)
-                .is_err()
-        {
-            return Err("Template block không hợp lệ.");
-        }
-        for optional in [&content_list_template, &content_single_template] {
-            if let Some(template) = optional {
-                if template.trim().is_empty()
-                    || crate::template_sec::restricted_environment()
-                        .template_from_str(template)
-                        .is_err()
-                {
-                    return Err("Template CPT không hợp lệ.");
-                }
-            }
-        }
-        Ok(Self {
-            descriptor,
-            template,
-            content_list_template,
-            content_single_template,
-            compatible_block_id,
-        })
-    }
 }
 
 pub fn render(template: &str, fields: &Fields, block: &Block) -> Result<String, &'static str> {
@@ -153,6 +43,7 @@ pub fn render_content(template: &str, data: &serde_json::Value) -> Result<String
         .map_err(|_| "Không thể render template nội dung.")
 }
 
+#[cfg(test)]
 const ALLOWED_V2_ROLES: &[&str] = &[
     "home",
     "page",
@@ -163,6 +54,7 @@ const ALLOWED_V2_ROLES: &[&str] = &[
     "taxonomy_archive",
 ];
 
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeV2Manifest {
@@ -186,6 +78,7 @@ pub struct ThemeV2Manifest {
     pub admin_extensions: Option<opendash_core::admin_extensions::AdminExtensions>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct ThemeV2Package {
     pub manifest: ThemeV2Manifest,
@@ -266,10 +159,33 @@ fn required_v3_utf8<'a>(
 }
 
 /// Read a v3 ZIP through the shared bounded, symlink-safe package reader,
-/// then validate manifest paths, content AST and C-SEC before any persistence.
-/// Keeps the v1/v2 reader untouched until the coordinated S02 cutover.
+/// then validate manifest paths, content AST and C-SEC before persistence.
 pub fn parse_theme_zip_v3(bytes: &[u8]) -> Result<ThemeV3Package, V2ZipError> {
     let files = read_v2_zip_entries(bytes, v3_entry_cap_and_allowlist)?;
+    validate_theme_v3_files(files)
+}
+
+/// Revalidate direct storage callers with the same manifest, path and
+/// composition guarantees as the bounded ZIP parser.
+pub(crate) fn validate_theme_v3_files(
+    files: BTreeMap<String, Vec<u8>>,
+) -> Result<ThemeV3Package, V2ZipError> {
+    if files.len() > V2_MAX_FILES {
+        return Err(V2ZipError::PayloadTooLarge(
+            "Theme v3 vượt quá giới hạn file.",
+        ));
+    }
+    let mut decoded_total = 0usize;
+    for (path, data) in &files {
+        validate_v2_relative_path(path).map_err(V2ZipError::BadRequest)?;
+        let cap = v3_entry_cap_and_allowlist(path).map_err(V2ZipError::BadRequest)?;
+        decoded_total = decoded_total.saturating_add(data.len());
+        if data.len() > cap || decoded_total > V2_MAX_DECODED_BYTES {
+            return Err(V2ZipError::PayloadTooLarge(
+                "Theme v3 vượt quá giới hạn kích thước file.",
+            ));
+        }
+    }
     let manifest_json = required_v3_utf8(&files, "theme.json")?.to_owned();
     let manifest: ThemeV3Manifest = serde_json::from_str(&manifest_json)
         .map_err(|_| V2ZipError::BadRequest("theme.json không đúng schema theme v3."))?;
@@ -377,6 +293,8 @@ pub fn parse_theme_zip_v3(bytes: &[u8]) -> Result<ThemeV3Package, V2ZipError> {
     })
 }
 
+/// Retained only for historical ZIP-parser unit tests during the v3 cutover.
+#[cfg(test)]
 /// Returns `true` if the ZIP contains `theme.json` (v2), `false` if v1 legacy (`block.json`).
 /// Rejects ambiguous packages containing both manifests.
 pub fn is_v2_theme_zip(bytes: &[u8]) -> Result<bool, V2ZipError> {
@@ -416,6 +334,7 @@ pub fn is_v2_theme_zip(bytes: &[u8]) -> Result<bool, V2ZipError> {
     Ok(has_v2)
 }
 
+#[cfg(test)]
 fn v2_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
     let ext = rel_path
         .rsplit_once('.')
@@ -430,6 +349,7 @@ fn v2_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
     }
 }
 
+#[cfg(test)]
 pub fn parse_theme_zip_v2(bytes: &[u8]) -> Result<ThemeV2Package, V2ZipError> {
     let files = read_v2_zip_entries(bytes, v2_entry_cap_and_allowlist)?;
     let raw_manifest = files.get("theme.json").ok_or(V2ZipError::BadRequest(

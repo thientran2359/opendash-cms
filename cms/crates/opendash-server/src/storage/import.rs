@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use axum::http::StatusCode;
 use opendash_core::id::{valid_kebab_segment_with_limit, valid_snake_key};
+use opendash_core::theme::ThemeV3Manifest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -13,7 +14,6 @@ use crate::{
     error::{ApiError, ApiResult},
     package::validate_v2_relative_path,
     storage::theme::{ThemeSourceFormat, find_revision_by_id, get_active_selection},
-    theme::ThemeV2Manifest,
 };
 
 pub const MAX_SAMPLE_MEDIA: usize = 50;
@@ -390,7 +390,7 @@ pub async fn plan_sample_import(
         (None, Some(active_rid)) => active_rid.clone(),
         (None, None) => {
             return Err(ApiError::not_found(
-                "Chưa có revision theme v2 đang hoạt động.",
+                "Chưa có revision theme v3 đang hoạt động.",
             ));
         }
     };
@@ -398,14 +398,15 @@ pub async fn plan_sample_import(
     let rev = find_revision_by_id(db, &target_rev_id)
         .await?
         .ok_or_else(|| ApiError::not_found("Revision theme chưa được cài đặt."))?;
-    if rev.theme_id != theme_id || rev.source_format != ThemeSourceFormat::V2 {
+    if rev.theme_id != theme_id || rev.source_format != ThemeSourceFormat::V3 {
         return Err(ApiError::not_found(
-            "Revision không thuộc theme yêu cầu hoặc không phải v2.",
+            "Revision không thuộc theme yêu cầu hoặc không phải v3.",
         ));
     }
 
-    let manifest: ThemeV2Manifest = serde_json::from_str(&rev.manifest_json)
-        .map_err(|_| ApiError::internal("Manifest theme v2 không hợp lệ."))?;
+    let manifest: ThemeV3Manifest = serde_json::from_str(&rev.manifest_json)
+        .map_err(|_| ApiError::internal("Manifest theme v3 không hợp lệ."))?;
+    manifest.validate().map_err(ApiError::internal)?;
     let Some(raw_sample) = manifest.sample else {
         return Err(ApiError::not_found("Theme không khai báo dữ liệu mẫu (sample)."));
     };
@@ -962,7 +963,11 @@ pub async fn execute_sample_import_with_cutpoint(
     let rev = find_revision_by_id(db, &plan.revision_id)
         .await?
         .ok_or_else(|| ApiError::not_found("Revision theme chưa được cài đặt."))?;
-    let manifest: ThemeV2Manifest = serde_json::from_str(&rev.manifest_json)?;
+    if rev.source_format != ThemeSourceFormat::V3 {
+        return Err(ApiError::not_found("Revision theme v3 không tồn tại."));
+    }
+    let manifest: ThemeV3Manifest = serde_json::from_str(&rev.manifest_json)?;
+    manifest.validate().map_err(ApiError::bad_request)?;
     let sample: ThemeSampleManifest = serde_json::from_value(
         manifest
             .sample

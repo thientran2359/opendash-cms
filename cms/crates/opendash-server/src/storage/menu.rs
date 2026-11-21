@@ -1175,9 +1175,12 @@ pub async fn preview_menu(
 }
 
 pub fn extract_declared_menu_slots(manifest_json: &str) -> Vec<String> {
-    let Ok(manifest) = serde_json::from_str::<crate::theme::ThemeV2Manifest>(manifest_json) else {
+    let Ok(manifest) = serde_json::from_str::<opendash_core::theme::ThemeV3Manifest>(manifest_json) else {
         return Vec::new();
     };
+    if manifest.validate().is_err() {
+        return Vec::new();
+    }
     let Some(menus_val) = manifest.menus else {
         return Vec::new();
     };
