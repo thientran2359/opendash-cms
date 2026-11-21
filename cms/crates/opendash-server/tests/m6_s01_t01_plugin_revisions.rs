@@ -114,7 +114,11 @@ async fn setup_and_login_admin(client: &Client, base_url: &str) -> (String, Stri
         .send()
         .await
         .unwrap();
-    assert!(resp.status().is_success(), "setup status: {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "setup status: {}",
+        resp.status()
+    );
     let login_resp = client
         .post(format!("{base_url}/auth/login"))
         .header("Origin", base_url)
@@ -125,7 +129,11 @@ async fn setup_and_login_admin(client: &Client, base_url: &str) -> (String, Stri
         .send()
         .await
         .unwrap();
-    assert!(login_resp.status().is_success(), "login status: {}", login_resp.status());
+    assert!(
+        login_resp.status().is_success(),
+        "login status: {}",
+        login_resp.status()
+    );
     let cookie = login_resp
         .headers()
         .get(reqwest::header::SET_COOKIE)
@@ -273,7 +281,10 @@ async fn m6_s01_t01_plugin_revisions_durability_cas_and_quarantine() {
         .unwrap();
     assert_eq!(resp.status(), 201);
     let summary2: Value = resp.json().await.unwrap();
-    assert_eq!(summary2["active_revision_id"], summary["active_revision_id"]);
+    assert_eq!(
+        summary2["active_revision_id"],
+        summary["active_revision_id"]
+    );
     assert_eq!(summary2["revision_generation"], 2);
     assert_eq!(summary2["cas_version"], 2);
 
@@ -294,7 +305,10 @@ async fn m6_s01_t01_plugin_revisions_durability_cas_and_quarantine() {
 
     // 5. CAS If-Match on disable/enable: stale 412, valid 200
     let resp = client
-        .post(format!("{}/api/admin/plugins/rev-plugin/disable", server.base_url))
+        .post(format!(
+            "{}/api/admin/plugins/rev-plugin/disable",
+            server.base_url
+        ))
         .header("Origin", &server.base_url)
         .header("Cookie", &cookie)
         .header("X-CSRF-Token", &csrf)
@@ -305,7 +319,10 @@ async fn m6_s01_t01_plugin_revisions_durability_cas_and_quarantine() {
     assert_eq!(resp.status(), 412);
 
     let resp = client
-        .post(format!("{}/api/admin/plugins/rev-plugin/disable", server.base_url))
+        .post(format!(
+            "{}/api/admin/plugins/rev-plugin/disable",
+            server.base_url
+        ))
         .header("Origin", &server.base_url)
         .header("Cookie", &cookie)
         .header("X-CSRF-Token", &csrf)
@@ -318,7 +335,10 @@ async fn m6_s01_t01_plugin_revisions_durability_cas_and_quarantine() {
     assert_eq!(dis_json["cas_version"], 3);
 
     let resp = client
-        .post(format!("{}/api/admin/plugins/rev-plugin/enable", server.base_url))
+        .post(format!(
+            "{}/api/admin/plugins/rev-plugin/enable",
+            server.base_url
+        ))
         .header("Origin", &server.base_url)
         .header("Cookie", &cookie)
         .header("X-CSRF-Token", &csrf)
@@ -331,7 +351,10 @@ async fn m6_s01_t01_plugin_revisions_durability_cas_and_quarantine() {
     // 6. Corrupt .complete marker on disk -> run fails closed (409 corrupt_revision)
     fs::remove_file(rev_dir.join(".complete")).unwrap();
     let resp = client
-        .post(format!("{}/api/admin/plugins/rev-plugin/run", server.base_url))
+        .post(format!(
+            "{}/api/admin/plugins/rev-plugin/run",
+            server.base_url
+        ))
         .header("Origin", &server.base_url)
         .header("Cookie", &cookie)
         .header("X-CSRF-Token", &csrf)

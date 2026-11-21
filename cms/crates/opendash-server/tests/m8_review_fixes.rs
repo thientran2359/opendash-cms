@@ -288,7 +288,10 @@ async fn r2_cancel_restore_kills_worker_and_preserves_source_and_previous_restor
     let mut last_json = Value::Null;
     for _ in 0..300 {
         let st = client
-            .get(format!("{}/api/admin/operations/jobs/{backup_id}", server.base_url))
+            .get(format!(
+                "{}/api/admin/operations/jobs/{backup_id}",
+                server.base_url
+            ))
             .header(reqwest::header::COOKIE, &cookie)
             .send()
             .await
@@ -324,10 +327,16 @@ async fn r2_cancel_restore_kills_worker_and_preserves_source_and_previous_restor
     assert!(!archive_bytes.is_empty());
 
     // Preserve a previous completed restore directory sentinel
-    let prev_restore_dir = site_root.join("backups").join("restored").join("previous-ok");
+    let prev_restore_dir = site_root
+        .join("backups")
+        .join("restored")
+        .join("previous-ok");
     fs::create_dir_all(&prev_restore_dir).expect("prev restore dir");
-    fs::write(prev_restore_dir.join("READY.json"), b"{\"job_id\":\"previous-ok\"}")
-        .expect("prev ready");
+    fs::write(
+        prev_restore_dir.join("READY.json"),
+        b"{\"job_id\":\"previous-ok\"}",
+    )
+    .expect("prev ready");
 
     // Upload restore archive
     let upload_resp = client

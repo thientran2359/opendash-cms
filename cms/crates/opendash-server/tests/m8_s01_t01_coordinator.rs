@@ -129,7 +129,8 @@ async fn dual_process_same_site_root_fails_second_instance_without_breaking_firs
     let alias_root = site_root.join(".");
     let stderr = run_expect_fail(&alias_root, None);
     assert!(
-        stderr.contains("Busy") && (stderr.contains("site.lock") || stderr.contains("opendash.sqlite.opendash.lock")),
+        stderr.contains("Busy")
+            && (stderr.contains("site.lock") || stderr.contains("opendash.sqlite.opendash.lock")),
         "unexpected stderr: {stderr}"
     );
 
@@ -302,11 +303,13 @@ async fn upgrade_from_0031_preserves_data_and_startup_marks_inflight_jobs_interr
     let running_id = format!("{:064x}", 2);
     let succeeded_id = format!("{:064x}", 3);
 
-    sqlx::query("INSERT INTO operation_jobs (id, kind, state) VALUES (?, 'media_delete', 'queued')")
-        .bind(&queued_id)
-        .execute(&pool)
-        .await
-        .expect("insert queued job");
+    sqlx::query(
+        "INSERT INTO operation_jobs (id, kind, state) VALUES (?, 'media_delete', 'queued')",
+    )
+    .bind(&queued_id)
+    .execute(&pool)
+    .await
+    .expect("insert queued job");
     sqlx::query("INSERT INTO operation_jobs (id, kind, state) VALUES (?, 'backup', 'running')")
         .bind(&running_id)
         .execute(&pool)
@@ -320,12 +323,11 @@ async fn upgrade_from_0031_preserves_data_and_startup_marks_inflight_jobs_interr
 
     // Partial unique index enforces single active heavy job
     let heavy_conflict_id = format!("{:064x}", 4);
-    let conflict = sqlx::query(
-        "INSERT INTO operation_jobs (id, kind, state) VALUES (?, 'purge', 'queued')",
-    )
-    .bind(&heavy_conflict_id)
-    .execute(&pool)
-    .await;
+    let conflict =
+        sqlx::query("INSERT INTO operation_jobs (id, kind, state) VALUES (?, 'purge', 'queued')")
+            .bind(&heavy_conflict_id)
+            .execute(&pool)
+            .await;
     assert!(conflict.is_err(), "expected partial unique index conflict");
 
     pool.close().await;

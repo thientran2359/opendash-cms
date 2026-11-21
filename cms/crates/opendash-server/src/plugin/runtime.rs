@@ -268,7 +268,9 @@ impl PluginRuntime {
         };
 
         let start = Instant::now();
-        let effective_budget = timeout_override.unwrap_or(INVOCATION_DEADLINE).min(INVOCATION_DEADLINE);
+        let effective_budget = timeout_override
+            .unwrap_or(INVOCATION_DEADLINE)
+            .min(INVOCATION_DEADLINE);
         let deadline = start + effective_budget;
         let remaining = effective_budget;
 
@@ -497,31 +499,32 @@ impl PluginRuntime {
             *lock = Some(thread_handle);
         }
 
-        let (output_val, staged_writes, staged_content) = match tokio::time::timeout(remaining, rx).await {
-            Ok(Ok(res)) => match res {
-                Ok((out, writes, content_cmd)) => {
-                    // Disarm child kill in guard on normal completion
-                    if let Ok(mut lock) = guard.child.lock() {
-                        let _ = lock.take();
+        let (output_val, staged_writes, staged_content) =
+            match tokio::time::timeout(remaining, rx).await {
+                Ok(Ok(res)) => match res {
+                    Ok((out, writes, content_cmd)) => {
+                        // Disarm child kill in guard on normal completion
+                        if let Ok(mut lock) = guard.child.lock() {
+                            let _ = lock.take();
+                        }
+                        (out, writes, content_cmd)
                     }
-                    (out, writes, content_cmd)
-                }
-                Err(err) => {
+                    Err(err) => {
+                        guard.cleanup();
+                        return Err(err);
+                    }
+                },
+                Ok(Err(_)) => {
                     guard.cleanup();
-                    return Err(err);
+                    return Err(PluginError::Trap(
+                        "Worker process hoặc thread kết thúc bất ngờ".into(),
+                    ));
                 }
-            },
-            Ok(Err(_)) => {
-                guard.cleanup();
-                return Err(PluginError::Trap(
-                    "Worker process hoặc thread kết thúc bất ngờ".into(),
-                ));
-            }
-            Err(_) => {
-                guard.cleanup();
-                return Err(PluginError::Timeout);
-            }
-        };
+                Err(_) => {
+                    guard.cleanup();
+                    return Err(PluginError::Timeout);
+                }
+            };
 
         if !staged_writes.is_empty() && staged_content.is_some() {
             guard.cleanup();
@@ -614,13 +617,15 @@ impl PluginRuntime {
                     Ok(true) => {}
                     Ok(false) => {
                         let _ = plugin_kv::rollback(conn).await;
-                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        let _ =
+                            plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                         guard.cleanup();
                         return Err(PluginError::Disabled);
                     }
                     Err(e) => {
                         let _ = plugin_kv::rollback(conn).await;
-                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        let _ =
+                            plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                         guard.cleanup();
                         return Err(PluginError::Internal(format!(
                             "Lỗi kiểm tra generation plugin: {e}"
@@ -640,7 +645,8 @@ impl PluginRuntime {
                     Ok(true) => {}
                     Ok(false) => {
                         let _ = plugin_kv::rollback(conn).await;
-                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        let _ =
+                            plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                         guard.cleanup();
                         return Err(PluginError::Internal(
                             "rbac_revoked: Quyền của tài khoản đã bị thu hồi.".into(),
@@ -648,7 +654,8 @@ impl PluginRuntime {
                     }
                     Err(e) => {
                         let _ = plugin_kv::rollback(conn).await;
-                        let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                        let _ =
+                            plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                         guard.cleanup();
                         return Err(PluginError::Internal(format!(
                             "Lỗi kiểm tra RBAC actor: {e}"

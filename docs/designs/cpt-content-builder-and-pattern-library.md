@@ -1,7 +1,7 @@
 # Generic CPT Content Builder, Pattern CPT (`core/pattern_ref`) & Pattern Library
 
 * **Author:** Nova (tổng hợp theo quyết định sản phẩm ngày 19–20/11/2026 của chủ dự án)
-* **Status:** Approved
+* **Status:** Verified
 * **Date:** 2026-11-20
 * **Baseline:** `main@7f29bcf` (xây tiếp sau [Design Spec 1: Theme Format v3 & Template Resolver](theme-format-and-template-resolver.md), migration `0042`)
 * **Approved By:** Owner

@@ -11,7 +11,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use egress::{is_forbidden_ip, read_bounded_chunks, redact_headers_for_log, verify_resolved_addrs, MAX_HTTP_BODY_BYTES};
+use egress::{
+    MAX_HTTP_BODY_BYTES, is_forbidden_ip, read_bounded_chunks, redact_headers_for_log,
+    verify_resolved_addrs,
+};
 use reqwest::Client;
 use serde_json::{Value, json};
 use sqlx::sqlite::SqlitePoolOptions;
@@ -111,17 +114,25 @@ async fn spawn_server(site_root: &Path) -> (ServerHandle, String) {
 #[tokio::test]
 async fn m6_s07_t01_adversarial_isolation_ssrf_trap_disable_and_zero_late_writes() {
     // 1. SSRF / DNS rebinding / chunked cap / redaction assertions
-    assert!(is_forbidden_ip(IpAddr::V4(Ipv4Addr::new(169, 254, 169, 254))));
-    assert!(is_forbidden_ip(IpAddr::V6("::ffff:127.0.0.1".parse().unwrap())));
-    assert!(is_forbidden_ip(IpAddr::V6("64:ff9b::10.0.0.1".parse().unwrap())));
-    assert!(verify_resolved_addrs(
-        &[
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34)), 443),
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 443),
-        ],
-        false,
-    )
-    .is_err());
+    assert!(is_forbidden_ip(IpAddr::V4(Ipv4Addr::new(
+        169, 254, 169, 254
+    ))));
+    assert!(is_forbidden_ip(IpAddr::V6(
+        "::ffff:127.0.0.1".parse().unwrap()
+    )));
+    assert!(is_forbidden_ip(IpAddr::V6(
+        "64:ff9b::10.0.0.1".parse().unwrap()
+    )));
+    assert!(
+        verify_resolved_addrs(
+            &[
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(93, 184, 216, 34)), 443),
+                SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 443),
+            ],
+            false,
+        )
+        .is_err()
+    );
     let oversized = vec![b'z'; MAX_HTTP_BODY_BYTES + 1];
     assert!(read_bounded_chunks(&oversized[..], MAX_HTTP_BODY_BYTES).is_err());
     let mut hdrs = BTreeMap::new();
@@ -256,7 +267,9 @@ async fn m6_s07_t01_adversarial_isolation_ssrf_trap_disable_and_zero_late_writes
 
     // Disable trap-kv-plugin -> subsequent run & action must NOT execute
     let dis = client
-        .post(format!("{base_url}/api/admin/plugins/trap-kv-plugin/disable"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/trap-kv-plugin/disable"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("X-CSRF-Token", &csrf)
@@ -277,7 +290,9 @@ async fn m6_s07_t01_adversarial_isolation_ssrf_trap_disable_and_zero_late_writes
     assert!(!run_disabled.status().is_success());
 
     let act_disabled = client
-        .post(format!("{base_url}/api/admin/plugins/trap-kv-plugin/actions/act"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/trap-kv-plugin/actions/act"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("X-CSRF-Token", &csrf)
@@ -288,8 +303,24 @@ async fn m6_s07_t01_adversarial_isolation_ssrf_trap_disable_and_zero_late_writes
     assert!(!act_disabled.status().is_success());
 
     // Admin & Public endpoints remain healthy and responsive
-    assert!(client.get(format!("{base_url}/api/health")).send().await.unwrap().status().is_success());
-    assert!(client.get(format!("{base_url}/")).send().await.unwrap().status().is_success());
+    assert!(
+        client
+            .get(format!("{base_url}/api/health"))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success()
+    );
+    assert!(
+        client
+            .get(format!("{base_url}/"))
+            .send()
+            .await
+            .unwrap()
+            .status()
+            .is_success()
+    );
 
     // Stop server, wait briefly, reopen SQLite DB, and verify ZERO late KV writes exist
     drop(srv);
@@ -300,9 +331,13 @@ async fn m6_s07_t01_adversarial_isolation_ssrf_trap_disable_and_zero_late_writes
         .connect(&format!("sqlite://{}", db_path.display()))
         .await
         .unwrap();
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plugin_kv WHERE plugin_id = 'trap-kv-plugin'")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(count, 0, "trapped plugin must leave zero KV writes in SQLite");
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM plugin_kv WHERE plugin_id = 'trap-kv-plugin'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        count, 0,
+        "trapped plugin must leave zero KV writes in SQLite"
+    );
 }

@@ -98,8 +98,16 @@ fn host_call_wasm(req_json: &str) -> Vec<u8> {
 /// Builds a WASM module that performs two sequential `host_call`s (`req1` then `req2`),
 /// returning 1 if either returns `"ok":false`.
 fn two_host_calls_wasm(req1: &str, req2: &str) -> Vec<u8> {
-    let esc1: String = req1.as_bytes().iter().map(|b| format!("\\{b:02x}")).collect();
-    let esc2: String = req2.as_bytes().iter().map(|b| format!("\\{b:02x}")).collect();
+    let esc1: String = req1
+        .as_bytes()
+        .iter()
+        .map(|b| format!("\\{b:02x}"))
+        .collect();
+    let esc2: String = req2
+        .as_bytes()
+        .iter()
+        .map(|b| format!("\\{b:02x}"))
+        .collect();
     let wat_src = format!(
         r#"(module
             (import "opendash_v1" "host_call" (func $host_call (param i32 i32 i32 i32) (result i32)))
@@ -289,7 +297,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
     assert_eq!(r.status(), 201);
 
     let act_unknown = client
-        .post(format!("{base_url}/api/admin/plugins/unknown-op-plugin/actions/probe"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/unknown-op-plugin/actions/probe"
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &admin_csrf)
@@ -327,7 +337,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
         .unwrap();
     assert_eq!(r.status(), 201);
     let act_loop = client
-        .post(format!("{base_url}/api/admin/plugins/loopback-admin/actions/call-admin"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/loopback-admin/actions/call-admin"
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &admin_csrf)
@@ -389,7 +401,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
         .unwrap();
     assert_eq!(r.status(), 201);
     let act_mix = client
-        .post(format!("{base_url}/api/admin/plugins/mixed-rt/actions/save-post"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/mixed-rt/actions/save-post"
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &admin_csrf)
@@ -432,7 +446,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
 
     // Editor cannot invoke admin-only-save -> 403
     let editor_denied = client
-        .post(format!("{base_url}/api/admin/plugins/content-action-plugin/actions/admin-only-save"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/content-action-plugin/actions/admin-only-save"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &editor_csrf)
@@ -444,7 +460,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
 
     // Editor CAN invoke editor-save -> 200 and creates entry!
     let editor_ok = client
-        .post(format!("{base_url}/api/admin/plugins/content-action-plugin/actions/editor-save"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/content-action-plugin/actions/editor-save"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &editor_csrf)
@@ -548,7 +566,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
 
     // Concurrent re-entrant dispatch on same plugin -> 409 recursive_dispatch
     let reentrant = client
-        .post(format!("{base_url}/api/admin/plugins/slow-fenced-plugin/actions/sync-kv"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/slow-fenced-plugin/actions/sync-kv"
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &admin_csrf)
@@ -560,7 +580,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
 
     // Disable plugin mid-flight -> generation fencing rejects commit
     let dis = client
-        .post(format!("{base_url}/api/admin/plugins/slow-fenced-plugin/disable"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/slow-fenced-plugin/disable"
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &admin_csrf)
@@ -577,9 +599,12 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
     assert_eq!(inflight_status, 409, "inflight_body: {inflight_body}");
 
     // Verify nothing was committed to plugin_kv
-    let pool = SqlitePool::connect(&format!("sqlite://{}", temp.path.join("database/opendash.sqlite").display()))
-        .await
-        .unwrap();
+    let pool = SqlitePool::connect(&format!(
+        "sqlite://{}",
+        temp.path.join("database/opendash.sqlite").display()
+    ))
+    .await
+    .unwrap();
     let kv_count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM plugin_kv WHERE plugin_id = 'slow-fenced-plugin' AND key = 'fenced'",
     )
@@ -590,7 +615,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
 
     // Re-enable and verify lease was cleaned up so action can run again and commit!
     let en = client
-        .post(format!("{base_url}/api/admin/plugins/slow-fenced-plugin/enable"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/slow-fenced-plugin/enable"
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &admin_csrf)
@@ -601,7 +628,9 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
     assert_eq!(en.status(), 200);
 
     let after_cleanup = client
-        .post(format!("{base_url}/api/admin/plugins/slow-fenced-plugin/actions/sync-kv"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/slow-fenced-plugin/actions/sync-kv"
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &admin_csrf)

@@ -172,8 +172,14 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             }
             if let Ok(parsed) = url::Url::parse(&url) {
                 let path = parsed.path();
-                if path.starts_with("/api/admin") || path == "/save" || path == "/preview" || path == "/theme" {
-                    return HostOperationResponse::err("Cấm gọi HTTP loopback tới Admin/CMS nội bộ.");
+                if path.starts_with("/api/admin")
+                    || path == "/save"
+                    || path == "/preview"
+                    || path == "/theme"
+                {
+                    return HostOperationResponse::err(
+                        "Cấm gọi HTTP loopback tới Admin/CMS nội bộ.",
+                    );
                 }
             }
             handle_http_request(ctx, &method, &url, headers, body)
@@ -455,7 +461,10 @@ mod egress_quota_tests {
         );
         assert!(!res.ok);
         assert!(
-            res.error.as_deref().unwrap_or("").contains("quota_exceeded"),
+            res.error
+                .as_deref()
+                .unwrap_or("")
+                .contains("quota_exceeded"),
             "expected quota_exceeded, got {:?}",
             res.error
         );

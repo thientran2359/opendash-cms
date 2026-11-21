@@ -80,7 +80,11 @@ async fn setup_and_login_admin(client: &Client, base_url: &str) -> (String, Stri
         .send()
         .await
         .unwrap();
-    assert!(setup.status().is_success(), "setup failed: {}", setup.status());
+    assert!(
+        setup.status().is_success(),
+        "setup failed: {}",
+        setup.status()
+    );
 
     let resp = client
         .post(format!("{base_url}/auth/login"))
@@ -91,7 +95,11 @@ async fn setup_and_login_admin(client: &Client, base_url: &str) -> (String, Stri
         .send()
         .await
         .unwrap();
-    assert!(resp.status().is_success(), "login failed: {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "login failed: {}",
+        resp.status()
+    );
     let cookies = extract_cookies(resp.headers());
     let body: Value = resp.json().await.unwrap();
     let csrf = body["csrf_token"].as_str().unwrap().to_string();
@@ -108,7 +116,9 @@ async fn create_entry(
     title: &str,
 ) -> (i64, i64) {
     let resp = client
-        .post(format!("{base_url}/api/admin/content-types/{type_key}/entries"))
+        .post(format!(
+            "{base_url}/api/admin/content-types/{type_key}/entries"
+        ))
         .header(header::COOKIE, cookies)
         .header("x-csrf-token", csrf)
         .json(&json!({
@@ -184,15 +194,47 @@ async fn custom_entry_routes_redirects_cas_and_privacy() {
     let (cookies, csrf) = setup_and_login_admin(&client, &srv.base_url).await;
 
     // 1. Create two posts and publish the first.
-    let (post1_id, mut post1_ver) =
-        create_entry(&client, &srv.base_url, &cookies, &csrf, "post", "alpha-post", "Alpha Post")
-            .await;
-    post1_ver = publish_entry(&client, &srv.base_url, &cookies, &csrf, "post", post1_id, post1_ver).await;
+    let (post1_id, mut post1_ver) = create_entry(
+        &client,
+        &srv.base_url,
+        &cookies,
+        &csrf,
+        "post",
+        "alpha-post",
+        "Alpha Post",
+    )
+    .await;
+    post1_ver = publish_entry(
+        &client,
+        &srv.base_url,
+        &cookies,
+        &csrf,
+        "post",
+        post1_id,
+        post1_ver,
+    )
+    .await;
 
-    let (post2_id, mut post2_ver) =
-        create_entry(&client, &srv.base_url, &cookies, &csrf, "post", "beta-post", "Beta Post")
-            .await;
-    post2_ver = publish_entry(&client, &srv.base_url, &cookies, &csrf, "post", post2_id, post2_ver).await;
+    let (post2_id, mut post2_ver) = create_entry(
+        &client,
+        &srv.base_url,
+        &cookies,
+        &csrf,
+        "post",
+        "beta-post",
+        "Beta Post",
+    )
+    .await;
+    post2_ver = publish_entry(
+        &client,
+        &srv.base_url,
+        &cookies,
+        &csrf,
+        "post",
+        post2_id,
+        post2_ver,
+    )
+    .await;
 
     // 2. Auth, CSRF, and If-Match enforcement on route endpoints.
     let unauth_get = client
@@ -520,7 +562,10 @@ async fn custom_entry_routes_redirects_cas_and_privacy() {
     assert_eq!(menu_put.status(), 200);
 
     let menu_preview = client
-        .post(format!("{}/api/admin/menus/{menu_id}/preview", srv.base_url))
+        .post(format!(
+            "{}/api/admin/menus/{menu_id}/preview",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookies)
         .header("x-csrf-token", &csrf)
         .json(&json!({
@@ -539,10 +584,22 @@ async fn custom_entry_routes_redirects_cas_and_privacy() {
         .unwrap();
     assert_eq!(menu_preview.status(), 200);
     let preview_body: Value = menu_preview.json().await.unwrap();
-    assert_eq!(preview_body["items"][0]["url"].as_str(), Some("/ve-chung-toi"));
+    assert_eq!(
+        preview_body["items"][0]["url"].as_str(),
+        Some("/ve-chung-toi")
+    );
 
     // 11. Unpublishing post1 makes /ve-chung-toi and /gioi-thieu return 404 WITHOUT Location.
-    post1_ver = unpublish_entry(&client, &srv.base_url, &cookies, &csrf, "post", post1_id, post1_ver).await;
+    post1_ver = unpublish_entry(
+        &client,
+        &srv.base_url,
+        &cookies,
+        &csrf,
+        "post",
+        post1_id,
+        post1_ver,
+    )
+    .await;
     for path in ["/ve-chung-toi", "/gioi-thieu", "/content/post/alpha-post"] {
         let resp = client
             .get(format!("{}{path}", srv.base_url))
@@ -557,7 +614,16 @@ async fn custom_entry_routes_redirects_cas_and_privacy() {
     }
 
     // 12. Re-publish and reclaim own alias /gioi-thieu works; post2 still cannot.
-    post1_ver = publish_entry(&client, &srv.base_url, &cookies, &csrf, "post", post1_id, post1_ver).await;
+    post1_ver = publish_entry(
+        &client,
+        &srv.base_url,
+        &cookies,
+        &csrf,
+        "post",
+        post1_id,
+        post1_ver,
+    )
+    .await;
     let reclaim = client
         .put(format!(
             "{}/api/admin/content-types/post/entries/{post1_id}/route",
@@ -574,6 +640,10 @@ async fn custom_entry_routes_redirects_cas_and_privacy() {
     let _ = post2_ver;
 
     // 13. Explicit system routes precede fallback.
-    let health = client.get(format!("{}/api/health", srv.base_url)).send().await.unwrap();
+    let health = client
+        .get(format!("{}/api/health", srv.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(health.status(), 200);
 }

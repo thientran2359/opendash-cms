@@ -205,7 +205,10 @@ async fn composite_entry_save_patch_semantics_acl_fence_and_profile_api() {
 
     // 1. Missing expected_schema_token -> 428; stale expected_schema_token -> 409
     let missing_tok = client
-        .post(format!("{}/api/admin/content-types/project/entries/composite", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/project/entries/composite",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -237,7 +240,10 @@ async fn composite_entry_save_patch_semantics_acl_fence_and_profile_api() {
 
     // 2. Atomic composite POST (entry + custom_path + seo) -> version 1
     let create_comp = client
-        .post(format!("{}/api/admin/content-types/project/entries/composite", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/project/entries/composite",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)

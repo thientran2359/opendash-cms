@@ -153,13 +153,7 @@ async fn setup_and_login(
     (cookie, csrf)
 }
 
-async fn upload_png(
-    client: &Client,
-    base_url: &str,
-    cookie: &str,
-    csrf: &str,
-    seed: u8,
-) -> Value {
+async fn upload_png(client: &Client, base_url: &str, cookie: &str, csrf: &str, seed: u8) -> Value {
     let resp = client
         .post(format!("{base_url}/api/admin/media"))
         .header(reqwest::header::COOKIE, cookie)
@@ -359,10 +353,12 @@ async fn media_pins_acl_preconditions_aba_generation_quarantine_and_crash_recove
     let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db_path))
         .await
         .expect("reconnect db");
-    sqlx::query("UPDATE plugin_kv SET value_json = '{bad-json' WHERE plugin_id = 'p1' AND key = 'k1'")
-        .execute(&pool)
-        .await
-        .expect("corrupt plugin_kv json");
+    sqlx::query(
+        "UPDATE plugin_kv SET value_json = '{bad-json' WHERE plugin_id = 'p1' AND key = 'k1'",
+    )
+    .execute(&pool)
+    .await
+    .expect("corrupt plugin_kv json");
     pool.close().await;
 
     server.restart().await;
@@ -407,27 +403,30 @@ async fn media_pins_acl_preconditions_aba_generation_quarantine_and_crash_recove
     let job_id = del_job["job_id"].as_str().expect("job_id");
 
     let shard = &id[..2];
-    assert!(!dir
-        .path()
-        .join("uploads")
-        .join("media")
-        .join(shard)
-        .join(format!("{id}.png"))
-        .exists());
-    assert!(dir
-        .path()
-        .join("uploads")
-        .join(".quarantine")
-        .join(job_id)
-        .join(format!("{id}.png"))
-        .exists());
-    assert!(dir
-        .path()
-        .join("uploads")
-        .join(".quarantine")
-        .join(job_id)
-        .join(format!("{id}.thumb.png"))
-        .exists());
+    assert!(
+        !dir.path()
+            .join("uploads")
+            .join("media")
+            .join(shard)
+            .join(format!("{id}.png"))
+            .exists()
+    );
+    assert!(
+        dir.path()
+            .join("uploads")
+            .join(".quarantine")
+            .join(job_id)
+            .join(format!("{id}.png"))
+            .exists()
+    );
+    assert!(
+        dir.path()
+            .join("uploads")
+            .join(".quarantine")
+            .join(job_id)
+            .join(format!("{id}.thumb.png"))
+            .exists()
+    );
 
     // Reader on deleted asset returns 404
     let get_deleted = client
@@ -504,12 +503,11 @@ async fn media_pins_acl_preconditions_aba_generation_quarantine_and_crash_recove
     let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db_path))
         .await
         .expect("reconnect db");
-    let phase: String =
-        sqlx::query_scalar("SELECT phase FROM media_delete_jobs WHERE job_id = ?")
-            .bind(&crash_job_id)
-            .fetch_one(&pool)
-            .await
-            .expect("query recovered job");
+    let phase: String = sqlx::query_scalar("SELECT phase FROM media_delete_jobs WHERE job_id = ?")
+        .bind(&crash_job_id)
+        .fetch_one(&pool)
+        .await
+        .expect("query recovered job");
     assert_eq!(phase, "finalized");
     let still_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM media_assets WHERE id = ?")
         .bind(&id2)

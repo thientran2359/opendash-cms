@@ -1,3 +1,4 @@
+pub mod admin_extensions;
 pub mod backup;
 pub mod builder;
 pub mod contact;
@@ -7,4 +8,3 @@ pub mod id;
 pub mod plugin;
 pub mod registry;
 pub mod theme;
-pub mod admin_extensions;

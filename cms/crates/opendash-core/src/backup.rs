@@ -69,8 +69,8 @@ pub fn canonicalize_trusted_origin(raw: &str) -> Result<String, &'static str> {
     if trimmed.is_empty() || trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err("trusted_public_origin không phải URL hợp lệ.");
     }
-    let parsed = url::Url::parse(trimmed)
-        .map_err(|_| "trusted_public_origin không phải URL hợp lệ.")?;
+    let parsed =
+        url::Url::parse(trimmed).map_err(|_| "trusted_public_origin không phải URL hợp lệ.")?;
     if !matches!(parsed.scheme(), "http" | "https") || parsed.host_str().is_none() {
         return Err("trusted_public_origin phải dùng http/https và có host.");
     }
@@ -382,8 +382,11 @@ mod tests {
             .is_ok()
         );
         assert!(
-            validate_logical_key(BackupFileKind::SmtpSecret, &format!("secrets/smtp/{h}.json"))
-                .is_ok()
+            validate_logical_key(
+                BackupFileKind::SmtpSecret,
+                &format!("secrets/smtp/{h}.json")
+            )
+            .is_ok()
         );
         assert!(validate_logical_key(BackupFileKind::Db, "db/../main.sqlite").is_err());
         assert!(validate_logical_key(BackupFileKind::Db, "db/CON").is_err());

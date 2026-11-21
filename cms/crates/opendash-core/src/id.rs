@@ -163,7 +163,9 @@ impl ScopedResourceId {
     ) -> Result<Self, &'static str> {
         let local_key = local_key.into();
         if !valid_snake_key(&local_key) {
-            return Err("local_key trong ScopedResourceId phải là snake_case hợp lệ (1..=64 ký tự).");
+            return Err(
+                "local_key trong ScopedResourceId phải là snake_case hợp lệ (1..=64 ký tự).",
+            );
         }
         match &owner {
             crate::registry::ResourceOwner::Core | crate::registry::ResourceOwner::User => {}

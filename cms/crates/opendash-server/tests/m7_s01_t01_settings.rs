@@ -83,7 +83,12 @@ async fn setup_and_login_admin(client: &Client, base_url: &str) -> (String, Stri
     login(client, base_url, "admin", "AdminPassword123!").await
 }
 
-async fn login(client: &Client, base_url: &str, username: &str, password: &str) -> (String, String) {
+async fn login(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> (String, String) {
     let resp = client
         .post(format!("{base_url}/auth/login"))
         .json(&json!({
@@ -387,8 +392,7 @@ async fn m7_s01_t01_public_settings_validation_rbac_cas_and_restart() {
     // Restart server and verify persistence.
     drop(srv);
     let srv2 = spawn_server_at(site_root.clone(), true).await;
-    let (admin2_cookie, csrf2) =
-        login(&client, &srv2.base_url, "admin", "AdminPassword123!").await;
+    let (admin2_cookie, csrf2) = login(&client, &srv2.base_url, "admin", "AdminPassword123!").await;
     let persisted: Value = client
         .get(format!("{}/api/admin/settings/public", srv2.base_url))
         .header(header::COOKIE, &admin2_cookie)

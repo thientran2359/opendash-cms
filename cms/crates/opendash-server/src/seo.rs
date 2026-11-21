@@ -39,7 +39,12 @@ pub fn validate_custom_entry_path(raw: &str) -> Result<String, &'static str> {
     if raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
         return Err("Đường dẫn tùy chỉnh không được chứa khoảng trắng hoặc ký tự điều khiển.");
     }
-    if raw.contains('?') || raw.contains('#') || raw.contains('%') || raw.contains('\\') || raw.contains('.') {
+    if raw.contains('?')
+        || raw.contains('#')
+        || raw.contains('%')
+        || raw.contains('\\')
+        || raw.contains('.')
+    {
         return Err("Đường dẫn tùy chỉnh không được chứa ?, #, %, \\ hoặc dấu chấm.");
     }
     let segments: Vec<&str> = raw[1..].split('/').collect();
@@ -133,11 +138,7 @@ impl SeoView {
     }
 }
 
-fn clean_plain_text(
-    raw: Option<&str>,
-    max_chars: usize,
-    label: &str,
-) -> ApiResult<Option<String>> {
+fn clean_plain_text(raw: Option<&str>, max_chars: usize, label: &str) -> ApiResult<Option<String>> {
     let Some(raw) = raw else {
         return Ok(None);
     };

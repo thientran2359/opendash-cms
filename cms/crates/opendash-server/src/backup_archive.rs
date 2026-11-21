@@ -134,7 +134,13 @@ pub fn write_encrypted_archive(
             .unwrap_or("backup.odbackup.age")
     ));
 
-    let res = write_encrypted_archive_inner(snapshot, passphrase, &staging_zip_path, &part_path, out_path);
+    let res = write_encrypted_archive_inner(
+        snapshot,
+        passphrase,
+        &staging_zip_path,
+        &part_path,
+        out_path,
+    );
     if res.is_err() {
         let _ = fs::remove_file(&part_path);
         let _ = fs::remove_file(&staging_zip_path);
@@ -229,8 +235,9 @@ fn write_encrypted_archive_inner(
 
     let mut recipient = age::scrypt::Recipient::new(passphrase.clone());
     recipient.set_work_factor(BACKUP_SCRYPT_WORK_FACTOR);
-    let encryptor = age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
-        .map_err(|_| ApiError::internal("Không khởi tạo được age encryptor."))?;
+    let encryptor =
+        age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
+            .map_err(|_| ApiError::internal("Không khởi tạo được age encryptor."))?;
     let mut age_writer = encryptor
         .wrap_output(hashing_writer)
         .map_err(|_| ApiError::internal("Không mở được luồng mã hóa age."))?;
@@ -296,18 +303,14 @@ pub fn preflight_age_header_file(file: &mut File) -> ApiResult<()> {
         .position(|w| w == b"\n--- ")
         .map(|idx| idx + 1)
         .ok_or_else(|| {
-            ApiError::bad_request(
-                "Header age của gói backup không hợp lệ hoặc vượt quá 8 KiB.",
-            )
+            ApiError::bad_request("Header age của gói backup không hợp lệ hoặc vượt quá 8 KiB.")
         })?;
     let line_end = slice[mac_line_start..]
         .iter()
         .position(|&b| b == b'\n')
         .map(|p| mac_line_start + p)
         .ok_or_else(|| {
-            ApiError::bad_request(
-                "Header age của gói backup không hợp lệ hoặc vượt quá 8 KiB.",
-            )
+            ApiError::bad_request("Header age của gói backup không hợp lệ hoặc vượt quá 8 KiB.")
         })?;
     if line_end > MAX_AGE_HEADER_BYTES {
         return Err(ApiError::bad_request(
@@ -334,9 +337,13 @@ pub fn preflight_age_header_file(file: &mut File) -> ApiResult<()> {
     let salt_b64 = parts[2];
     if salt_b64.is_empty()
         || salt_b64.len() > 32
-        || !salt_b64.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+        || !salt_b64
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
     {
-        return Err(ApiError::bad_request("Salt scrypt trong header age không hợp lệ."));
+        return Err(ApiError::bad_request(
+            "Salt scrypt trong header age không hợp lệ.",
+        ));
     }
     let log_n: u8 = parts[3]
         .parse()
@@ -350,7 +357,11 @@ pub fn preflight_age_header_file(file: &mut File) -> ApiResult<()> {
     let body_line = lines
         .next()
         .ok_or_else(|| ApiError::bad_request("Thiếu thân stanza scrypt trong header age."))?;
-    if body_line.is_empty() || body_line.len() > 128 || body_line.starts_with("->") || body_line.starts_with("---") {
+    if body_line.is_empty()
+        || body_line.len() > 128
+        || body_line.starts_with("->")
+        || body_line.starts_with("---")
+    {
         return Err(ApiError::bad_request("Thân stanza scrypt không hợp lệ."));
     }
 
@@ -402,8 +413,8 @@ fn decrypt_and_validate_archive_inner(
     zip_path: &Path,
     payload_dir: &Path,
 ) -> ApiResult<ValidatedArchive> {
-    let mut enc_file = File::open(input_path)
-        .map_err(|_| ApiError::bad_request("Không mở được gói backup."))?;
+    let mut enc_file =
+        File::open(input_path).map_err(|_| ApiError::bad_request("Không mở được gói backup."))?;
     preflight_age_header_file(&mut enc_file)?;
 
     let decryptor = age::Decryptor::new_buffered(BufReader::new(enc_file))
@@ -429,9 +440,7 @@ fn decrypt_and_validate_archive_inner(
             .checked_add(n as u64)
             .ok_or_else(|| ApiError::bad_request("Gói backup giải mã vượt quá 4 GiB."))?;
         if total_zip_bytes > MAX_BACKUP_DECRYPTED_ZIP_BYTES {
-            return Err(ApiError::bad_request(
-                "Gói backup giải mã vượt quá 4 GiB.",
-            ));
+            return Err(ApiError::bad_request("Gói backup giải mã vượt quá 4 GiB."));
         }
         zip_file
             .write_all(&buf[..n])
@@ -442,10 +451,10 @@ fn decrypt_and_validate_archive_inner(
         .map_err(|_| ApiError::internal("Không fsync được ZIP giải mã."))?;
     drop(zip_file);
 
-    let zip_read_file = File::open(zip_path)
-        .map_err(|_| ApiError::internal("Không mở lại được ZIP giải mã."))?;
-    let mut archive = preflight_and_open_backup_zip(zip_read_file)
-        .map_err(ApiError::bad_request)?;
+    let zip_read_file =
+        File::open(zip_path).map_err(|_| ApiError::internal("Không mở lại được ZIP giải mã."))?;
+    let mut archive =
+        preflight_and_open_backup_zip(zip_read_file).map_err(ApiError::bad_request)?;
 
     let manifest = {
         let mut mf = archive
@@ -510,9 +519,9 @@ fn decrypt_and_validate_archive_inner(
             continue;
         }
 
-        let record = expected_by_entry
-            .get(name.as_str())
-            .ok_or_else(|| ApiError::bad_request("Backup ZIP chứa entry thừa không có trong manifest."))?;
+        let record = expected_by_entry.get(name.as_str()).ok_or_else(|| {
+            ApiError::bad_request("Backup ZIP chứa entry thừa không có trong manifest.")
+        })?;
 
         let dest_path = payload_dir.join(&record.entry_name);
         let mut dest_file = create_private_file(&dest_path)?;
