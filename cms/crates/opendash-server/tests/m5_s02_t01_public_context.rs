@@ -339,7 +339,8 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
     for (path, expected_status) in [
         ("/", 200),
         ("/content/post", 200),
-        ("/content/page", 200),
+        // EGM S01: untouched Core Page defaults to a singular-only CPT.
+        ("/content/page", 404),
         ("/content/post/public-article?utm_source=test", 200),
         ("/content/post/public-article?page=1", 400),
         ("/content/page/secret-page", 404),
