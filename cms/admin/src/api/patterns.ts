@@ -1,4 +1,5 @@
 import { requestJson, requestText } from './client.ts';
+import type { BuilderDocument } from '../builder/document.ts';
 
 export interface PatternRecord {
   id: number;
@@ -44,3 +45,38 @@ export const deletePattern = (id: number, version: number, csrfToken: string, fo
     method: 'DELETE', csrfToken, ifMatchVersion: version,
     defaultErrorMessage: 'Không xóa được Pattern.',
   });
+
+/** Theme patterns are immutable COPY sources; they are distinct from the
+ * database-backed, synchronized Pattern CPT records above. */
+export interface ThemePatternItem {
+  source: 'theme';
+  id: string;
+  key: string;
+  title: string;
+  category: string;
+  description: string | null;
+  preview_url: string | null;
+}
+export interface ThemePatternCatalog { categories: string[]; items: ThemePatternItem[] }
+export interface ThemePatternDocument {
+  source: 'theme';
+  key: string;
+  title: string;
+  document: BuilderDocument;
+}
+
+export function listThemePatterns(category = 'all', q = '', signal?: AbortSignal): Promise<ThemePatternCatalog> {
+  const params = new URLSearchParams();
+  if (category !== 'all') params.set('category', category);
+  if (q.trim()) params.set('q', q.trim());
+  const query = params.toString();
+  return requestJson(root + '/library' + (query ? '?' + query : ''), {
+    signal, defaultErrorMessage: 'Không tải được thư viện mẫu của theme.',
+  });
+}
+
+export function getThemePattern(key: string, signal?: AbortSignal): Promise<ThemePatternDocument> {
+  return requestJson(root + '/library/theme/' + encodeURIComponent(key), {
+    signal, defaultErrorMessage: 'Không tải được nội dung mẫu từ theme.',
+  });
+}
