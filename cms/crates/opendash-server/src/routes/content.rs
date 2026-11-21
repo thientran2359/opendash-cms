@@ -85,7 +85,7 @@ pub async fn content_entry_publication(
     Json(input): Json<crate::routes::entries::PublicationInput>,
 ) -> ApiResult<impl IntoResponse> {
     require_session_with_csrf(&headers, &db).await?;
-    if !valid_content_type_key(&type_key) || type_key == "section" {
+    if !valid_content_type_key(&type_key) || type_key == "pattern" {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     }
     let expected_version = parse_if_match(&headers)?;
@@ -107,7 +107,7 @@ pub async fn content_entry_preview(
     Path((type_key, id)): Path<(String, i64)>,
 ) -> ApiResult<Response> {
     let actor = require_session(&headers, &db).await?;
-    if !valid_content_type_key(&type_key) || type_key == "section" {
+    if !valid_content_type_key(&type_key) || type_key == "pattern" {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     }
     let schema = content_storage::load_content_type_definition(&db, &type_key)

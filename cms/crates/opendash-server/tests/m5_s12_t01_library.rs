@@ -1,5 +1,5 @@
-//! #356 local template library: server-owned catalog, no remote fetch or
-//! public Section AST, and no theme template metadata exposed to Editors.
+//! Local template catalog remains authenticated; Pattern CPT is a separate
+//! private collection after EGM S02 migration.
 use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
 use std::{
@@ -66,7 +66,7 @@ async fn start() -> Site {
 }
 
 #[tokio::test]
-async fn local_library_catalog_is_authenticated_and_section_scoped() {
+async fn local_library_catalog_is_authenticated_and_pattern_scoped() {
     let site = start().await;
     let client = Client::new();
     let root = format!("{}/api/admin/library", site.base);
@@ -99,7 +99,7 @@ async fn local_library_catalog_is_authenticated_and_section_scoped() {
     let csrf: Value = login.json().await.unwrap();
     let csrf = csrf["csrf_token"].as_str().unwrap();
     let create = client
-        .post(format!("{}/api/admin/sections", site.base))
+        .post(format!("{}/api/admin/patterns", site.base))
         .header("Cookie", &cookie)
         .header("Origin", &site.base)
         .header("X-CSRF-Token", csrf)
@@ -122,17 +122,21 @@ async fn local_library_catalog_is_authenticated_and_section_scoped() {
     );
     assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
     let data: Value = response.json().await.unwrap();
-    assert_eq!(data["sections"].as_array().unwrap().len(), 1);
-    assert_eq!(data["sections"][0]["id"], created["id"]);
-    assert_eq!(data["sections"][0]["title"], "Private local banner");
+    let patterns: Value = client
+        .get(format!("{}/api/admin/patterns", site.base))
+        .header("Cookie", &cookie)
+        .send().await.unwrap().json().await.unwrap();
+    assert_eq!(patterns["items"].as_array().unwrap().len(), 1);
+    assert_eq!(patterns["items"][0]["id"], created["id"]);
+    assert_eq!(patterns["items"][0]["title"], "Private local banner");
     assert_eq!(data["theme_templates"], json!([]));
     assert!(
-        data["sections"][0].get("document").is_none(),
+        patterns["items"][0].get("document").is_none(),
         "catalog must not leak private AST"
     );
     assert_eq!(
         client
-            .get(format!("{}/content/section/local-banner", site.base))
+            .get(format!("{}/content/pattern/local-banner", site.base))
             .send()
             .await
             .unwrap()

@@ -310,7 +310,7 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
     assert_eq!(client.get(format!("{}/t02-hidden/private", srv.base))
         .send().await.unwrap().status(), 404);
     let section = client
-        .post(format!("{}/api/admin/sections", srv.base))
+        .post(format!("{}/api/admin/patterns", srv.base))
         .header(header::COOKIE, &cookie)
         .header("x-csrf-token", &csrf)
         .json(&json!({"title":"T02 Private Section", "slug":"t02-section"}))
@@ -318,7 +318,7 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
     assert_eq!(section.status(), 201);
     let section_id = section.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
     let section_route = client
-        .get(format!("{}/api/admin/content-types/section/entries/{section_id}/route", srv.base))
+        .get(format!("{}/api/admin/content-types/pattern/entries/{section_id}/route", srv.base))
         .header(header::COOKIE, &cookie).send().await.unwrap();
     assert_eq!(section_route.status(), 200);
     assert!(section_route.json::<Value>().await.unwrap()["public_url"].is_null());

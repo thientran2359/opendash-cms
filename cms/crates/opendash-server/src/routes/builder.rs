@@ -16,7 +16,7 @@ use sqlx::SqlitePool;
 
 use crate::{
     app::AdminAssets,
-    auth::{require_session, require_session_with_csrf},
+    auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
     page::{render_block, save_page},
@@ -222,7 +222,11 @@ pub async fn entry_builder_put(
     Path((type_key, id)): Path<(String, i64)>,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    let actor = require_session_with_csrf(&headers, &db).await?;
+    let actor = if type_key == "pattern" {
+        require_admin_with_csrf(&headers, &db).await?
+    } else {
+        require_session_with_csrf(&headers, &db).await?
+    };
     validate_entry_builder_type(&type_key)?;
     let expected_version = parse_builder_if_match(&headers)?;
     let document = decode_document(&headers, &bytes)?;
@@ -247,7 +251,11 @@ pub async fn entry_builder_preview(
     RawQuery(raw): RawQuery,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    let actor = require_session_with_csrf(&headers, &db).await?;
+    let actor = if type_key == "pattern" {
+        require_admin_with_csrf(&headers, &db).await?
+    } else {
+        require_session_with_csrf(&headers, &db).await?
+    };
     validate_entry_builder_type(&type_key)?;
     if raw.as_deref().is_some_and(|query| !query.is_empty()) {
         return Err(ApiError::bad_request(
@@ -285,7 +293,11 @@ pub async fn entry_builder_reset(
     Path((type_key, id)): Path<(String, i64)>,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    let actor = require_session_with_csrf(&headers, &db).await?;
+    let actor = if type_key == "pattern" {
+        require_admin_with_csrf(&headers, &db).await?
+    } else {
+        require_session_with_csrf(&headers, &db).await?
+    };
     validate_entry_builder_type(&type_key)?;
     let expected_version = parse_builder_if_match(&headers)?;
     require_builder_json(&headers, &bytes)?;

@@ -13,7 +13,7 @@ pub async fn get_by_slug(
     type_key: &str,
     slug: &str,
 ) -> ApiResult<Option<ContentEntryRecord>> {
-    if type_key == "section" {
+    if type_key == "pattern" {
         return Ok(None);
     }
     let mut tx = db.begin().await?;
@@ -58,7 +58,7 @@ async fn get_published_by_id_in_tx(
          FROM content_entries e
          JOIN content_types t ON t.key = e.content_type_key
          WHERE e.id = ? AND e.publication_status = 'published'
-           AND e.content_type_key != 'section' AND t.provider_status = 'active'
+           AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(id)
@@ -178,8 +178,10 @@ pub async fn load_entry_render_snapshot(
                 builder::resolve_lists_in_tx(&mut tx, &doc, &std::collections::BTreeMap::new())
                     .await?;
             let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
-            Some(crate::page::render_builder_with_lists_and_forms(
+            let patterns = builder::resolve_patterns_in_tx(&mut tx, &state, &doc, false).await?;
+            Some(crate::page::render_builder_with_patterns(
                 &state, &doc, false, &bindings, &lists, &forms,
+                None, &patterns, false,
             )?)
         } else {
             None
@@ -203,7 +205,7 @@ pub async fn require_public_archive(db: &SqlitePool, type_key: &str) -> ApiResul
     let visible: i64 = sqlx::query_scalar(
         "SELECT EXISTS(
             SELECT 1 FROM content_types
-            WHERE key = ? AND key != 'section' AND provider_status = 'active'
+            WHERE key = ? AND key != 'pattern' AND provider_status = 'active'
               AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1
               AND COALESCE(json_extract(definition_json, '$.settings.has_archive'), 1) = 1
         )",
@@ -459,7 +461,7 @@ async fn list_taxonomy_published_in_tx(
           LEFT JOIN content_type_taxonomy_overrides override
             ON override.content_type_key=e.content_type_key
          WHERE e.publication_status = 'published'
-           AND e.content_type_key != 'section'
+           AND e.content_type_key != 'pattern'
            AND t.provider_status = 'active'
            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
            AND (? IS NULL OR EXISTS (
@@ -568,7 +570,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            FROM content_entries AS e
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN json_each(t.definition_json, '$.fields') AS f
-           WHERE e.publication_status = 'published' AND e.content_type_key != 'section'
+           WHERE e.publication_status = 'published' AND e.content_type_key != 'pattern'
              AND t.provider_status = 'active'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND COALESCE(json_extract(f.value, '$.public_exposure'), 'public') = 'public'
@@ -598,7 +600,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              ON g.group_id = gt.group_id
             AND g.status IN ('active', 'provider_inactive', 'withdrawn')
            JOIN json_each(g.fields_json) AS f
-           WHERE e.publication_status = 'published' AND e.content_type_key != 'section'
+           WHERE e.publication_status = 'published' AND e.content_type_key != 'pattern'
              AND t.provider_status = 'active'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND COALESCE(json_extract(f.value, '$.public_exposure'), 'private') = 'public'
@@ -622,10 +624,24 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            JOIN entry_builder_documents AS doc ON doc.entry_id = r.entry_id
            JOIN content_entries AS e ON e.id = r.entry_id
            JOIN content_types AS t ON t.key = e.content_type_key
-           WHERE r.media_id = ? AND e.content_type_key != 'section'
+           WHERE r.media_id = ? AND e.content_type_key != 'pattern'
              AND e.publication_status = 'published' AND e.content_mode = 'builder'
              AND t.provider_status = 'active'
              AND t.declaration_state = 'declared'
+             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+             AND EXISTS (SELECT 1 FROM json_each(t.definition_json, '$.settings.supports') WHERE value = 'builder')
+         ) OR EXISTS (
+           -- One-hop Pattern media are public only through an actively
+           -- published, Builder-enabled parent entry. Pattern itself stays
+           -- private and never directly grants media ACL.
+           SELECT 1 FROM entry_builder_media_refs AS r
+           JOIN entry_pattern_refs AS pref ON pref.target_pattern_id = r.entry_id
+           JOIN content_entries AS e ON e.id = pref.source_entry_id
+           JOIN content_types AS t ON t.key = e.content_type_key
+           JOIN entry_builder_documents AS doc ON doc.entry_id = e.id
+           WHERE r.media_id = ? AND e.content_type_key != 'pattern'
+             AND e.publication_status = 'published' AND e.content_mode = 'builder'
+             AND t.provider_status = 'active' AND t.declaration_state = 'declared'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND EXISTS (SELECT 1 FROM json_each(t.definition_json, '$.settings.supports') WHERE value = 'builder')
          ) OR EXISTS (
@@ -654,7 +670,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            WHERE sm.media_id = ?
              AND e.publication_status = 'published'
              AND t.provider_status = 'active'
-             AND e.content_type_key != 'section'
+             AND e.content_type_key != 'pattern'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
          ) OR EXISTS (
            SELECT 1
@@ -691,14 +707,14 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                  JOIN content_types AS t ON t.key = e.content_type_key
                  WHERE e.custom_template_key = json_extract(ov.target_json, '$.custom_key')
                    AND e.publication_status = 'published'
-                   AND t.provider_status = 'active' AND t.key != 'section' AND t.key != 'page'
+                   AND t.provider_status = 'active' AND t.key != 'pattern' AND t.key != 'page'
                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                ))
                OR (ov.target_kind = 'single' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
                  JOIN content_types AS t ON t.key = e.content_type_key
                  WHERE e.publication_status = 'published'
-                   AND t.provider_status = 'active' AND t.key NOT IN ('section', 'page')
+                   AND t.provider_status = 'active' AND t.key NOT IN ('pattern', 'page')
                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                    AND (json_extract(ov.target_json, '$.content_type') IS NULL
                      OR e.content_type_key = json_extract(ov.target_json, '$.content_type'))
@@ -709,7 +725,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                ))
                OR (ov.target_kind = 'archive' AND EXISTS (
                  SELECT 1 FROM content_types AS t
-                 WHERE t.provider_status = 'active' AND t.key != 'section'
+                 WHERE t.provider_status = 'active' AND t.key != 'pattern'
                    AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                    AND COALESCE(json_extract(t.definition_json, '$.settings.has_archive'), 0) = 1
                    AND (json_extract(ov.target_json, '$.content_type') IS NULL
@@ -730,6 +746,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              )
          )"#,
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)
@@ -1435,13 +1452,13 @@ mod m5_public_context_tests {
             1
         );
         assert!(
-            get_by_slug(&db, "section", "hidden-news")
+            get_by_slug(&db, "pattern", "hidden-news")
                 .await
                 .unwrap()
                 .is_none()
         );
         assert_eq!(
-            list_published(&db, "section", 10, 0, EntryFilters::default())
+            list_published(&db, "pattern", 10, 0, EntryFilters::default())
                 .await
                 .unwrap_err()
                 .0,

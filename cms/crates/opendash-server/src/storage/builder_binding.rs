@@ -91,7 +91,7 @@ pub async fn resolve_in_tx_with_route(
                                 AND t.provider_status = 'active'
                                 AND (? = 1 OR (
                                     e.publication_status = 'published'
-                                    AND e.content_type_key != 'section'
+                                    AND e.content_type_key != 'pattern'
                                     AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                                 ))",
                         )

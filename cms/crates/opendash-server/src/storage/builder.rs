@@ -18,7 +18,7 @@ use opendash_core::{
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::{Sqlite, SqlitePool, Transaction};
+use sqlx::{QueryBuilder, Sqlite, SqlitePool, Transaction};
 
 use crate::{
     auth::{Role, SessionContext},
@@ -453,6 +453,131 @@ pub fn poster_image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
     ids
 }
 
+/// A Pattern is a private, single-hop Builder document. References are stored
+/// separately so delete guards and public media ACL never parse client JSON.
+pub fn pattern_ids(document: &BuilderDocument) -> BTreeSet<i64> {
+    let mut ids = BTreeSet::new();
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::PatternRef(pattern)) =
+                        &element.content
+                    {
+                        ids.insert(pattern.pattern_id);
+                    }
+                }
+            }
+        }
+    }
+    ids
+}
+
+fn node_count(document: &BuilderDocument) -> usize {
+    document.sections.iter().map(|section| {
+        1 + section.children.iter().map(|row| {
+            1 + row.children.iter().map(|col| 1 + col.children.len()).sum::<usize>()
+        }).sum::<usize>()
+    }).sum()
+}
+
+fn has_nested_pattern_or_list(document: &BuilderDocument) -> bool {
+    document.sections.iter().any(|section| section.children.iter().any(|row| {
+        row.children.iter().any(|column| column.children.iter().any(|element| {
+            match &element.content {
+                ElementContent::Known(KnownElement::PatternRef(_) | KnownElement::List(_)) => true,
+                ElementContent::Unresolved(raw) => matches!(
+                    raw.get("type").and_then(Value::as_str),
+                    Some("core/pattern_ref" | "core/list")
+                ),
+                _ => false,
+            }
+        }))
+    }))
+}
+
+/// One batched query inside the caller's read/write transaction, maximum 16
+/// distinct IDs. Invalid or missing Pattern data is not rendered publicly.
+async fn load_pattern_rows_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    ids: &BTreeSet<i64>,
+) -> ApiResult<Vec<(i64, String, Option<String>)>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    if ids.len() > 16 || ids.iter().any(|id| *id <= 0) {
+        return Err(ApiError::bad_request("Builder exceeds 16 Pattern references."));
+    }
+    let mut sql = QueryBuilder::<Sqlite>::new(
+        "SELECT e.id, e.slug, d.document_json FROM content_entries e \
+         JOIN content_types t ON t.key = e.content_type_key \
+         LEFT JOIN entry_builder_documents d ON d.entry_id = e.id \
+         WHERE e.content_type_key = 'pattern' AND t.owner_kind = 'core' \
+           AND t.provider_status = 'active' AND t.declaration_state = 'declared' \
+           AND e.id IN (",
+    );
+    {
+        let mut list = sql.separated(", ");
+        for id in ids {
+            list.push_bind(id);
+        }
+        list.push_unseparated(")");
+    }
+    Ok(sql.build_query_as().fetch_all(&mut **tx).await?)
+}
+
+/// Resolve references once for the entire parent AST. Missing IDs (for
+/// example after an explicit force-delete) produce safe public omissions and
+/// preview diagnostics. A Pattern cannot pull a second Pattern or ContentList.
+pub async fn resolve_patterns_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+) -> ApiResult<page::PatternResults> {
+    let ids = pattern_ids(document);
+    let rows = load_pattern_rows_in_tx(tx, &ids).await?;
+    let mut results = page::PatternResults::new();
+    let mut parsed = BTreeMap::new();
+    for (id, slug, raw) in rows {
+        let Some(raw) = raw else { continue };
+        let Ok(doc) = BuilderDocument::from_json(raw.as_bytes()) else { continue };
+        if has_nested_pattern_or_list(&doc) {
+            continue;
+        }
+        parsed.insert(id, (slug, doc));
+    }
+    let mut expanded_count = node_count(document);
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::PatternRef(props)) = &element.content {
+                        if let Some((_, doc)) = parsed.get(&props.pattern_id) {
+                            expanded_count = expanded_count.saturating_add(node_count(doc));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if expanded_count > 1024 {
+        return Err(ApiError::bad_request("Expanded Pattern exceeds 1024 Builder nodes."));
+    }
+    for (id, (slug, doc)) in parsed {
+        let bindings = builder_binding::resolve_in_tx_with_route(
+            tx, &doc, is_preview, Some(("pattern", &slug)),
+        ).await?;
+        let forms = resolve_contact_forms_in_tx(tx, &doc).await?;
+        let rendered = page::render_builder_with_patterns(
+            state, &doc, is_preview, &bindings, &ListResults::new(), &forms,
+            None, &page::PatternResults::new(), true,
+        )?;
+        results.insert(id, rendered);
+    }
+    Ok(results)
+}
+
 pub async fn validate_media_refs_in_tx(
     conn: &mut sqlx::SqliteConnection,
     document: &BuilderDocument,
@@ -680,8 +805,7 @@ async fn entry_builder_snapshot(
     type_key: &str,
     id: i64,
 ) -> ApiResult<EntryBuilderSnapshot> {
-    // Section still uses its private legacy APIs in S01. Pattern replaces it
-    // in S02, so a malformed Section registration must not unlock this path.
+    // The deprecated Section CPT must never be reopened via the generic API.
     if type_key == "section" {
         return Err(ApiError::forbidden("Content Builder is not enabled."));
     }
@@ -763,6 +887,9 @@ async fn validate_entry_builder_document(
     role: FieldRole,
     document: &BuilderDocument,
 ) -> ApiResult<HomeState> {
+    if current.opened.type_key == "pattern" && role != FieldRole::Admin {
+        return Err(ApiError::forbidden("Pattern Builder requires Admin."));
+    }
     let state = read_home_tx(tx).await?;
     document
         .validate_for_save(&state.descriptors()?, current.opened.document.as_ref())
@@ -786,6 +913,21 @@ async fn validate_entry_builder_document(
     document
         .validate_route_context_for_role(Some(route_role), Some(&allowed))
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
+
+    if current.opened.type_key == "pattern" && has_nested_pattern_or_list(document) {
+        return Err(ApiError::bad_request(
+            "Pattern cannot contain PatternRef or ContentList (depth = 1).",
+        ));
+    }
+    let refs = pattern_ids(document);
+    let rows = load_pattern_rows_in_tx(tx, &refs).await?;
+    let found: BTreeSet<i64> = rows.into_iter().map(|(id, _, _)| id).collect();
+    let previous_refs = current.opened.document.as_ref().map(pattern_ids).unwrap_or_default();
+    for id in refs {
+        if !found.contains(&id) && !previous_refs.contains(&id) {
+            return Err(ApiError::bad_request("Referenced Pattern does not exist."));
+        }
+    }
 
     let mut exact_schemas = BTreeMap::new();
     for section in &document.sections {
@@ -869,12 +1011,13 @@ async fn render_entry_builder_preview(
     .await?;
     let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
+    let patterns = resolve_patterns_in_tx(tx, state, document, true).await?;
     let parts = BTreeMap::new();
     let context = shared_preview.then_some(page::BuilderTemplateContext {
         content_html: None,
         parts: &parts,
     });
-    page::render_builder_with_template_context(
+    page::render_builder_with_patterns(
         state,
         document,
         true,
@@ -882,6 +1025,8 @@ async fn render_entry_builder_preview(
         &lists,
         &forms,
         context.as_ref(),
+        &patterns,
+        false,
     )
 }
 
@@ -975,11 +1120,34 @@ async fn replace_entry_builder_refs(
     id: i64,
     document: Option<&BuilderDocument>,
 ) -> ApiResult<()> {
+    sqlx::query("DELETE FROM entry_pattern_refs WHERE source_entry_id = ?")
+        .bind(id)
+        .execute(&mut **tx)
+        .await?;
     sqlx::query("DELETE FROM entry_builder_media_refs WHERE entry_id = ?")
         .bind(id)
         .execute(&mut **tx)
         .await?;
     if let Some(document) = document {
+        for pattern_id in pattern_ids(document) {
+            // The target may later be force-deleted; the FK cascade and
+            // warning-only renderer safely preserve that historical AST.
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM content_entries WHERE id=? AND content_type_key='pattern')",
+            )
+            .bind(pattern_id)
+            .fetch_one(&mut **tx)
+            .await?;
+            if exists != 0 {
+                sqlx::query(
+                    "INSERT INTO entry_pattern_refs(source_entry_id,target_pattern_id) VALUES(?,?)",
+                )
+                .bind(id)
+                .bind(pattern_id)
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
         for (role, ids) in [
             ("image", image_ids(document)),
             ("video", video_ids(document)),
@@ -1007,6 +1175,9 @@ async fn mutate_entry_builder(
     expected_version: i64,
     mutation: EntryBuilderMutation<'_>,
 ) -> Result<EntryBuilderOpen, EntryBuilderMutationError> {
+    if type_key == "pattern" && !matches!(actor.user.role, Role::Admin) {
+        return Err(ApiError::forbidden("Pattern Builder requires Admin.").into());
+    }
     let role = actor_field_role(actor);
     // Complete read-only preflight before plugin invocation. No writer lease is
     // held during the bounded, veto-capable hook.

@@ -1317,7 +1317,7 @@ async fn resolve_preview_entry(
     let Some((type_key, id)) = selected else {
         return Ok(None);
     };
-    if type_key == "section" {
+    if type_key == "pattern" {
         return Err(ApiError::not_found("Preview entry not found."));
     }
     let valid = match target.kind {
@@ -1424,7 +1424,7 @@ pub async fn preview_typed_override(
         theme_context["content_type"] = serde_json::to_value(definition)?;
         if record.content_mode == ContentMode::Builder
             && definition.settings.supports(ContentSupport::Builder)
-            && record.content_type_key != "section"
+            && record.content_type_key != "pattern"
         {
             if let Some(mut rendered) = builder::preview_saved_page_body_in_tx(
                 &mut tx,

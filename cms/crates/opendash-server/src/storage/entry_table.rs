@@ -161,7 +161,7 @@ pub async fn query(
     caller_role: FieldRole,
     filter: &EntryTableFilter,
 ) -> ApiResult<EntryTableResult> {
-    if type_key == "section" {
+    if type_key == "pattern" {
         return Err(ApiError::forbidden("Section dùng bảng quản lý riêng tư."));
     }
     let mut tx = db.begin().await?;

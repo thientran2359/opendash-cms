@@ -150,7 +150,7 @@ pub async fn sync_provider_rewrite_defaults_in_tx(
         if !matches!(item.resource_kind, "content_type" | "taxonomy")
             || !valid_content_type_key(&item.resource_key)
             || (item.resource_kind == "content_type"
-                && matches!(item.resource_key.as_str(), "post" | "page" | "section"))
+                && matches!(item.resource_key.as_str(), "post" | "page" | "pattern"))
             || item
                 .rewrite_base
                 .as_deref()
@@ -331,7 +331,7 @@ async fn validate_input_in_tx(
     validate_post_structure(&input.post_structure)?;
     let persisted = read_settings(conn).await?;
     for (key, base) in &input.content_type_bases {
-        if !valid_content_type_key(key) || key == "section" {
+        if !valid_content_type_key(key) || key == "pattern" {
             return Err(ApiError::bad_request(format!(
                 "CPT key không hợp lệ: {key}"
             )));
@@ -473,7 +473,7 @@ pub async fn canonical_entry_path_in_tx(
         "SELECT c.path FROM permalink_route_claims c
            JOIN content_entries e ON c.target_kind='entry' AND c.target_id=CAST(e.id AS TEXT)
            JOIN content_types t ON t.key=e.content_type_key
-          WHERE e.id=? AND e.content_type_key!='section' AND t.provider_status='active'
+          WHERE e.id=? AND e.content_type_key!='pattern' AND t.provider_status='active'
             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1",
     )
     .bind(id)
@@ -506,7 +506,7 @@ pub async fn canonical_archive_path_in_tx(
     sqlx::query_scalar(
         "SELECT c.path FROM permalink_route_claims c
            JOIN content_types t ON c.target_kind='archive' AND c.target_id=t.key
-          WHERE t.key=? AND t.key!='section' AND t.provider_status='active'
+          WHERE t.key=? AND t.key!='pattern' AND t.provider_status='active'
             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1
             AND COALESCE(json_extract(t.definition_json,'$.settings.has_archive'),1)=1",
     )
@@ -668,7 +668,7 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
 
     let cpts: Vec<(String, i64)> = sqlx::query_as(
         "SELECT key, COALESCE(json_extract(definition_json,'$.settings.has_archive'),1)
-           FROM content_types WHERE key!='section' ORDER BY key",
+           FROM content_types WHERE key!='pattern' ORDER BY key",
     )
     .fetch_all(&mut *conn)
     .await?;
@@ -711,7 +711,7 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     let entries: Vec<(i64, String, String, Option<String>)> = sqlx::query_as(
         "SELECT e.id,e.content_type_key,e.slug,p.path
            FROM content_entries e LEFT JOIN entry_public_paths p ON p.entry_id=e.id
-          WHERE e.content_type_key!='section' ORDER BY e.id",
+          WHERE e.content_type_key!='pattern' ORDER BY e.id",
     )
     .fetch_all(&mut *conn)
     .await?;
@@ -1101,7 +1101,7 @@ pub async fn resolve_public_path(
                 "SELECT EXISTS(
                    SELECT 1 FROM content_entries e JOIN content_types t ON t.key=e.content_type_key
                    WHERE e.id=? AND e.publication_status='published'
-                     AND e.content_type_key!='section' AND t.provider_status='active'
+                     AND e.content_type_key!='pattern' AND t.provider_status='active'
                      AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1
                  )",
             )
