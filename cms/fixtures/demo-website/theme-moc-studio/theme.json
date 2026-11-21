@@ -1,17 +1,22 @@
 {
-  "manifest_version": 2,
+  "manifest_version": 3,
   "theme_id": "moc-studio",
   "name": "Mộc Studio Editorial",
   "version": "1.0.0",
-  "templates": {
-    "header": "templates/header.html",
-    "footer": "templates/footer.html",
-    "home": "templates/home.html",
-    "page": "templates/page.html",
-    "archive": "templates/archive.html",
-    "single": "templates/single.html",
-    "taxonomy_archive": "templates/taxonomy_archive.html"
+  "parts": {
+    "header": "header.html",
+    "footer": "footer.html"
   },
+  "templates": [
+    { "kind": "home", "file": "home.html" },
+    { "kind": "page", "file": "page.html" },
+    { "kind": "archive", "file": "archive.html" },
+    { "kind": "single", "file": "single.html" },
+    { "kind": "taxonomy", "file": "taxonomy.html" }
+  ],
+  "assets": [
+    "assets/style.css"
+  ],
   "menus": [
     "primary",
     "footer"
