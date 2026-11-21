@@ -515,3 +515,227 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
     assert!(!body1_after_reset.contains("Site Header v1"));
     assert!(body1_after_reset.contains("ThemeB Header"));
 }
+
+#[tokio::test]
+async fn v3_page_canvas_and_custom_single_selections_survive_theme_switch() {
+    let srv = spawn_server().await;
+    let client = Client::new();
+    let origin = &srv.base_url;
+    let setup = client
+        .post(format!("{origin}/auth/setup"))
+        .header("Origin", origin)
+        .json(&json!({"username":"admin","password":"AdminPassword123!"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(setup.status(), 201);
+    let (cookie, csrf) = login(&client, origin, "admin", "AdminPassword123!").await;
+
+    let mut bytes = Vec::new();
+    {
+        let mut writer = ZipWriter::new(std::io::Cursor::new(&mut bytes));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let manifest = json!({
+            "manifest_version":3,"theme_id":"layout-v3","name":"Layout V3","version":"1.0.0",
+            "templates":[
+                {"kind":"single","file":"single.html"},
+                {"kind":"single_custom","custom_key":"feature","label":"Feature",
+                    "allowed_types":["post"],"file":"feature.html"}
+            ],
+            "page_layouts":[{"key":"canvas","label":"Canvas","file":"page-layouts/canvas.html"}],
+            "parts":{"header":"header.html"}
+        });
+        for (path, contents) in [
+            ("theme.json", manifest.to_string()),
+            (
+                "single.html",
+                "<article>Ordinary {{ entry.title }}{{ od_content() }}</article>".into(),
+            ),
+            (
+                "feature.html",
+                "<article>Feature {{ entry.title }}{{ od_content() }}</article>".into(),
+            ),
+            (
+                "page-layouts/canvas.html",
+                "<main>Canvas {{ od_content() }}</main>".into(),
+            ),
+            ("header.html", "<header>HEADER_MARKER</header>".into()),
+        ] {
+            writer.start_file(path, options).unwrap();
+            writer.write_all(contents.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+    let installed = client
+        .post(format!("{origin}/api/admin/themes"))
+        .header("Cookie", &cookie)
+        .header("Origin", origin)
+        .header("X-CSRF-Token", &csrf)
+        .header("Content-Type", "application/zip")
+        .body(bytes)
+        .send()
+        .await
+        .unwrap();
+    let status = installed.status();
+    let raw = installed.text().await.unwrap();
+    assert_eq!(status, 201, "install v3: {raw}");
+    let installed: Value = serde_json::from_str(&raw).unwrap();
+    let revision = installed["revision_id"].as_str().unwrap();
+    let activated = client
+        .put(format!("{origin}/api/admin/themes/active"))
+        .header("Cookie", &cookie)
+        .header("Origin", origin)
+        .header("X-CSRF-Token", &csrf)
+        .header("If-Match", "\"v1\"")
+        .json(&json!({"revision_id":revision}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(activated.status(), 200);
+    let choices: Value = client
+        .get(format!("{origin}/api/admin/themes/active/layouts"))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(choices["page_layouts"][0]["key"], "canvas");
+    assert_eq!(choices["custom_templates"][0]["custom_key"], "feature");
+
+    let make_entry = |kind: &'static str, slug: &'static str, selected: &'static str| {
+        let base = origin.clone();
+        let token = csrf.clone();
+        let cookie = cookie.clone();
+        let client = client.clone();
+        async move {
+            let config = client
+                .get(format!(
+                    "{base}/api/admin/content-types/{kind}/effective-editor-config"
+                ))
+                .header("Cookie", &cookie)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(config.status(), 200);
+            let config: Value = config.json().await.unwrap();
+            let mut body = json!({"title":"Fixture Entry","slug":slug,
+                "values":{},"publication_status":"published",
+                "expected_schema_token":config["schema_token"]});
+            body[if kind == "page" {
+                "page_layout_key"
+            } else {
+                "custom_template_key"
+            }] = json!(selected);
+            let res = client
+                .post(format!(
+                    "{base}/api/admin/content-types/{kind}/entries/composite"
+                ))
+                .header("Cookie", cookie)
+                .header("Origin", base.as_str())
+                .header("X-CSRF-Token", token)
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            let status = res.status();
+            let text = res.text().await.unwrap();
+            assert_eq!(status, 201, "create {kind}: {text}");
+            serde_json::from_str::<Value>(&text).unwrap()
+        }
+    };
+    let page = make_entry("page", "canvas-visit", "canvas").await;
+    let post = make_entry("post", "feature-visit", "feature").await;
+    assert_eq!(page["entry"]["page_layout_key"], "canvas");
+    assert_eq!(post["entry"]["custom_template_key"], "feature");
+    let page_public = client
+        .get(format!("{origin}/content/page/canvas-visit"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(page_public.status(), 200);
+    let page_html = page_public.text().await.unwrap();
+    assert!(page_html.contains("Canvas "), "{page_html}");
+    assert!(
+        !page_html.contains("HEADER_MARKER"),
+        "canvas must omit site header"
+    );
+    let post_public = client
+        .get(format!("{origin}/content/post/feature-visit"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(post_public.status(), 200);
+    let post_html = post_public.text().await.unwrap();
+    assert!(post_html.contains("Feature Fixture Entry"), "{post_html}");
+    assert!(post_html.contains("HEADER_MARKER"));
+
+    let other = build_theme_v3_zip(
+        "no-layout-v3",
+        "<header>Other Header</header>",
+        "<article>Other {{ entry.title }}{{ od_content() }}</article>",
+    );
+    let res = client
+        .post(format!("{origin}/api/admin/themes"))
+        .header("Cookie", &cookie)
+        .header("Origin", origin)
+        .header("X-CSRF-Token", &csrf)
+        .header("Content-Type", "application/zip")
+        .body(other)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 201);
+    let other_revision: Value = res.json().await.unwrap();
+    let act = client
+        .put(format!("{origin}/api/admin/themes/active"))
+        .header("Cookie", &cookie)
+        .header("Origin", origin)
+        .header("X-CSRF-Token", &csrf)
+        .header("If-Match", "\"v2\"")
+        .json(&json!({"revision_id":other_revision["revision_id"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(act.status(), 200);
+    // Previously saved keys remain durable after provider withdrawal; public
+    // renders core/theme fallback instead of a broken or cross-type template.
+    for (kind, slug, id, selection_key, selection) in [
+        (
+            "page",
+            "canvas-visit",
+            page["entry"]["id"].as_i64().unwrap(),
+            "page_layout_key",
+            "canvas",
+        ),
+        (
+            "post",
+            "feature-visit",
+            post["entry"]["id"].as_i64().unwrap(),
+            "custom_template_key",
+            "feature",
+        ),
+    ] {
+        let loaded = client
+            .get(format!(
+                "{origin}/api/admin/content-types/{kind}/entries/{id}"
+            ))
+            .header("Cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(loaded.status(), 200);
+        let record: Value = loaded.json().await.unwrap();
+        assert_eq!(
+            record[selection_key], selection,
+            "saved key must survive switching theme"
+        );
+        let public = client
+            .get(format!("{origin}/content/{kind}/{slug}"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(public.status(), 200);
+    }
+}

@@ -7,6 +7,25 @@ use super::entries::{self, ContentEntryRecord, EntryFilters, decode_row};
 use crate::error::ApiResult;
 use crate::public_context::{PublicFilters, TaxonomyKind};
 
+/// Public entry lookup must include the two persisted template choices. The
+/// historical nine-column `decode_row` intentionally cannot infer them, and
+/// returning None silently bypasses Page Layout/Custom Single resolution.
+/// This read occurs only *after* publication and CPT ACL predicates succeed.
+async fn hydrate_public_template_keys(
+    db: &SqlitePool,
+    record: &mut ContentEntryRecord,
+) -> ApiResult<()> {
+    let (layout, custom): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT page_layout_key, custom_template_key FROM content_entries WHERE id = ?",
+    )
+    .bind(record.id)
+    .fetch_one(db)
+    .await?;
+    record.page_layout_key = layout;
+    record.custom_template_key = custom;
+    Ok(())
+}
+
 /// Slug is unique within each CPT; lookup never relies on a numeric admin ID.
 pub async fn get_by_slug(
     db: &SqlitePool,
@@ -39,7 +58,10 @@ pub async fn get_by_slug(
     .bind(slug)
     .fetch_optional(db)
     .await?;
-    let res = row.map(decode_row).transpose()?;
+    let mut res = row.map(decode_row).transpose()?;
+    if let Some(record) = &mut res {
+        hydrate_public_template_keys(db, record).await?;
+    }
     Ok(res)
 }
 
@@ -69,7 +91,11 @@ pub async fn get_published_by_id(
     .bind(id)
     .fetch_optional(db)
     .await?;
-    row.map(decode_row).transpose()
+    let mut result = row.map(decode_row).transpose()?;
+    if let Some(record) = &mut result {
+        hydrate_public_template_keys(db, record).await?;
+    }
+    Ok(result)
 }
 
 /// Deny public archives independently from entry visibility. Legacy CPTs
