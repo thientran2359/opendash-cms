@@ -78,7 +78,9 @@ impl PluginManager {
         Self {
             db_pool,
             runtime: PluginRuntime::new(),
-            active_action_leases: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+            active_action_leases: std::sync::Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
             allow_loopback,
             plugins_root,
             recovery: crate::config::RecoveryState::new(false),
@@ -99,7 +101,9 @@ impl PluginManager {
         input: Value,
         content_registry: &std::sync::Arc<
             tokio::sync::RwLock<
-                opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>,
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
             >,
         >,
         hooks: &crate::hooks::HookDispatcher,
@@ -126,10 +130,13 @@ impl PluginManager {
                     "Hệ thống đang ở safe mode sau khi khôi phục; plugin bị tạm khóa.".into(),
                 ));
             }
-            let mut leases = self
-                .active_action_leases
-                .lock()
-                .map_err(|_| mk_err(StatusCode::INTERNAL_SERVER_ERROR, "lease_lock", "Lỗi khóa action lease.".into()))?;
+            let mut leases = self.active_action_leases.lock().map_err(|_| {
+                mk_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "lease_lock",
+                    "Lỗi khóa action lease.".into(),
+                )
+            })?;
             if !leases.insert(id.to_string()) {
                 return Err(mk_err(
                     StatusCode::CONFLICT,
@@ -145,7 +152,13 @@ impl PluginManager {
 
         let row_opt = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
             .await
-            .map_err(|e| mk_err(StatusCode::INTERNAL_SERVER_ERROR, "db_error", format!("Lỗi cơ sở dữ liệu: {e}")))?;
+            .map_err(|e| {
+                mk_err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "db_error",
+                    format!("Lỗi cơ sở dữ liệu: {e}"),
+                )
+            })?;
 
         if self.recovery.is_safe_mode() {
             return Err((
@@ -161,8 +174,14 @@ impl PluginManager {
                 },
             ));
         }
-        let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) = row_opt else {
-            return Err(mk_err(StatusCode::NOT_FOUND, "not_found", "Plugin không tồn tại.".into()));
+        let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) =
+            row_opt
+        else {
+            return Err(mk_err(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                "Plugin không tồn tại.".into(),
+            ));
         };
         if !enabled {
             return Err(mk_err(
@@ -172,10 +191,19 @@ impl PluginManager {
             ));
         }
 
-        let manifest = serde_json::from_str::<PluginManifest>(&manifest_json)
-            .map_err(|e| mk_err(StatusCode::INTERNAL_SERVER_ERROR, "corrupt_manifest", format!("Manifest không hợp lệ: {e}")))?;
+        let manifest = serde_json::from_str::<PluginManifest>(&manifest_json).map_err(|e| {
+            mk_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "corrupt_manifest",
+                format!("Manifest không hợp lệ: {e}"),
+            )
+        })?;
         let Some(action_decl) = manifest.action(action_id).cloned() else {
-            return Err(mk_err(StatusCode::NOT_FOUND, "action_not_found", "Action không tồn tại trong manifest.".into()));
+            return Err(mk_err(
+                StatusCode::NOT_FOUND,
+                "action_not_found",
+                "Action không tồn tại trong manifest.".into(),
+            ));
         };
 
         if action_decl.required_role == "admin" && actor.user.role != crate::auth::Role::Admin {
@@ -210,7 +238,9 @@ impl PluginManager {
         }
 
         if let Some(digest) = &revision_digest_opt {
-            if let Err(err) = plugin_storage::verify_plugin_revision_durability(&self.plugins_root, digest) {
+            if let Err(err) =
+                plugin_storage::verify_plugin_revision_durability(&self.plugins_root, digest)
+            {
                 return Err(mk_err(StatusCode::CONFLICT, "corrupt_revision", err));
             }
         }
@@ -278,17 +308,29 @@ impl PluginManager {
                 ));
             }
             let _ = &content_registry;
-            let effective_schema = crate::storage::content::load_effective_content_schema(&self.db_pool, &cmd.type_key)
-                .await
-                .map_err(|e| mk_err(e.0, "schema_load_failed", e.1.to_string()))?
-                .ok_or_else(|| mk_err(StatusCode::NOT_FOUND, "content_type_not_found", "Kh?ng t?m th?y lo?i n?i dung.".into()))?;
+            let effective_schema = crate::storage::content::load_effective_content_schema(
+                &self.db_pool,
+                &cmd.type_key,
+            )
+            .await
+            .map_err(|e| mk_err(e.0, "schema_load_failed", e.1.to_string()))?
+            .ok_or_else(|| {
+                mk_err(
+                    StatusCode::NOT_FOUND,
+                    "content_type_not_found",
+                    "Kh?ng t?m th?y lo?i n?i dung.".into(),
+                )
+            })?;
 
             for field_key in cmd.values.keys() {
                 let Some(field_entry) = effective_schema.effective_fields.get(field_key) else {
                     return Err(mk_err(
                         StatusCode::UNPROCESSABLE_ENTITY,
                         "unknown_field_key",
-                        format!("Tr??ng '{field_key}' kh?ng t?n t?i trong schema c?a '{}'.", cmd.type_key),
+                        format!(
+                            "Tr??ng '{field_key}' kh?ng t?n t?i trong schema c?a '{}'.",
+                            cmd.type_key
+                        ),
                     ));
                 };
                 if !opendash_core::plugin::plugin_can_write_field(
@@ -330,7 +372,11 @@ impl PluginManager {
                 term_ids: cmd.term_ids,
             };
             if let Err(msg) = entry_input.validate_against_effective(&effective_schema) {
-                return Err(mk_err(StatusCode::BAD_REQUEST, "invalid_entry_input", msg.to_string()));
+                return Err(mk_err(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_entry_input",
+                    msg.to_string(),
+                ));
             }
             if let Err(err) = crate::storage::media::require_existing_effective_references(
                 &self.db_pool,
@@ -342,7 +388,11 @@ impl PluginManager {
                 return Err(mk_err(err.0, "media_reference_error", err.1.to_string()));
             }
 
-            let operation = if cmd.entry_id.is_some() { "update" } else { "create" };
+            let operation = if cmd.entry_id.is_some() {
+                "update"
+            } else {
+                "create"
+            };
             let candidate = serde_json::json!({
                 "operation": operation,
                 "type_key": &cmd.type_key,
@@ -579,10 +629,11 @@ impl PluginManager {
             .ok()
             .flatten()
             .and_then(|(_, manifest_json, _)| PluginManifest::from_json_str(&manifest_json).ok());
-        let schema_opt = crate::storage::content::load_effective_content_schema(&self.db_pool, type_key)
-            .await
-            .ok()
-            .flatten();
+        let schema_opt =
+            crate::storage::content::load_effective_content_schema(&self.db_pool, type_key)
+                .await
+                .ok()
+                .flatten();
 
         for field_map_key in ["candidate_values", "values"] {
             if let Some(Value::Object(map)) = payload.get_mut(field_map_key) {
@@ -591,11 +642,7 @@ impl PluginManager {
                         map.retain(|k, _| {
                             effective.effective_fields.get(k).is_some_and(|fe| {
                                 opendash_core::plugin::plugin_can_read_field(
-                                    manifest,
-                                    None,
-                                    actor_role,
-                                    type_key,
-                                    fe,
+                                    manifest, None, actor_role, type_key, fe,
                                 )
                             })
                         });
@@ -714,7 +761,9 @@ impl PluginManager {
                 },
             ));
         }
-        let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) = row_opt else {
+        let Some((wasm_blob, manifest_json, enabled, revision_generation, revision_digest_opt)) =
+            row_opt
+        else {
             return Err((
                 StatusCode::NOT_FOUND,
                 PluginRunResponse {
@@ -754,7 +803,9 @@ impl PluginManager {
         })?;
 
         if let Some(digest) = &revision_digest_opt {
-            if let Err(err) = plugin_storage::verify_plugin_revision_durability(&self.plugins_root, digest) {
+            if let Err(err) =
+                plugin_storage::verify_plugin_revision_durability(&self.plugins_root, digest)
+            {
                 return Err((
                     StatusCode::CONFLICT,
                     PluginRunResponse {

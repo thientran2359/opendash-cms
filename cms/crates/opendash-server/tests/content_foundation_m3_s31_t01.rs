@@ -49,7 +49,8 @@ fn settings_deny_unknown_keys_and_duplicate_supports() {
             "public": true, "has_archive": true, "publication": "draft_publish",
             "supports": ["editor", "editor"]
         }
-    })).unwrap();
+    }))
+    .unwrap();
     assert!(duplicate.into_canonical().is_err());
 }
 
@@ -57,9 +58,13 @@ fn settings_deny_unknown_keys_and_duplicate_supports() {
 fn builtin_status_mode_is_immutable_even_if_requested_on_create() {
     let legacy: ContentTypeDefinitionInput = serde_json::from_value(json!({
         "key": "post", "label": "Bài viết", "fields": []
-    })).unwrap();
+    }))
+    .unwrap();
     let default = legacy.into_canonical().unwrap();
-    assert_eq!(serde_json::to_value(default).unwrap()["settings"]["publication"], "draft_publish");
+    assert_eq!(
+        serde_json::to_value(default).unwrap()["settings"]["publication"],
+        "draft_publish"
+    );
 
     let attempt: ContentTypeDefinitionInput = serde_json::from_value(json!({
         "key": "page", "label": "Trang", "fields": [],
@@ -67,7 +72,8 @@ fn builtin_status_mode_is_immutable_even_if_requested_on_create() {
             "public": true, "has_archive": true,
             "publication": "immediate", "supports": []
         }
-    })).unwrap();
+    }))
+    .unwrap();
     assert!(attempt.into_canonical().is_err());
 }
 
@@ -79,12 +85,17 @@ fn provider_declarations_accept_policy_but_legacy_omission_remains_optional() {
             "settings": {"public": false, "has_archive": false,
                          "publication": "draft_publish", "supports": ["featured_image", "editor"]}
         }]
-    })).unwrap();
+    }))
+    .unwrap();
     manifest.validate().unwrap();
-    assert_eq!(manifest.content_types[0].settings.as_ref().unwrap().public, false);
+    assert_eq!(
+        manifest.content_types[0].settings.as_ref().unwrap().public,
+        false
+    );
     let legacy: CntDeclarations = serde_json::from_value(json!({
         "content_types": [{"key": "legacy_c1", "label": "Legacy"}]
-    })).unwrap();
+    }))
+    .unwrap();
     legacy.validate().unwrap();
     assert!(legacy.content_types[0].settings.is_none());
 }

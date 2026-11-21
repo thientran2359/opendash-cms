@@ -188,12 +188,19 @@ impl SitePaths {
 
         let db_file_name = abs_db_path
             .file_name()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "db_path must have a file name"))?
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "db_path must have a file name")
+            })?
             .to_os_string();
         let db_parent = abs_db_path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "db_path must have a parent directory"))?;
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "db_path must have a parent directory",
+                )
+            })?;
 
         fs::create_dir_all(db_parent)?;
         reject_reparse_or_symlink_entry(db_parent)?;
@@ -213,7 +220,10 @@ impl SitePaths {
             if meta.is_dir() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("db_path points to a directory: {}", canonical_db_path.display()),
+                    format!(
+                        "db_path points to a directory: {}",
+                        canonical_db_path.display()
+                    ),
                 ));
             }
         }
@@ -422,14 +432,21 @@ mod tests {
         let ext_db = temp.path().join("external").join("custom.sqlite");
         let raw = SitePaths::from_parts(nested_root, ext_db);
 
-        let canon = raw.canonicalize_for_runtime().expect("canonicalize runtime paths");
+        let canon = raw
+            .canonicalize_for_runtime()
+            .expect("canonicalize runtime paths");
         assert!(canon.runtime_dir().exists());
-        assert_eq!(canon.site_lock_path(), canon.runtime_dir().join("site.lock"));
-        assert!(canon
-            .db_lock_path()
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n == "custom.sqlite.opendash.lock"));
+        assert_eq!(
+            canon.site_lock_path(),
+            canon.runtime_dir().join("site.lock")
+        );
+        assert!(
+            canon
+                .db_lock_path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n == "custom.sqlite.opendash.lock")
+        );
         let ordered = canon.ordered_lock_paths();
         assert_eq!(ordered.len(), 2);
         assert!(ordered[0] < ordered[1]);

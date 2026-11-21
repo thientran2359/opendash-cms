@@ -146,9 +146,10 @@ async fn create_snapshot_with_timeout_and_cancel(
         .await
         .map_err(|_| ApiError::internal("Lỗi join tác vụ snapshot worker."))??;
 
-        let resp: SnapshotWorkerResponse = serde_json::from_slice(&output.stdout).map_err(|_| {
-            ApiError::internal("Phản hồi từ operations worker không hợp lệ hoặc bị ngắt.")
-        })?;
+        let resp: SnapshotWorkerResponse =
+            serde_json::from_slice(&output.stdout).map_err(|_| {
+                ApiError::internal("Phản hồi từ operations worker không hợp lệ hoặc bị ngắt.")
+            })?;
         if !resp.ok || !output.status.success() {
             let msg = resp
                 .error
@@ -191,8 +192,11 @@ pub struct BackupSummaryMetadata {
 
 #[derive(Default)]
 pub struct BackupRuntimeRegistry {
-    active_cancels: std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>>,
-    active_handles: tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>,
+    active_cancels: std::sync::Mutex<
+        std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    >,
+    active_handles:
+        tokio::sync::Mutex<std::collections::HashMap<String, tokio::task::JoinHandle<()>>>,
     download_leases: std::sync::Mutex<std::collections::HashMap<String, usize>>,
     lease_notify: tokio::sync::Notify,
 }
@@ -221,7 +225,10 @@ impl BackupRuntimeRegistry {
         Self::default()
     }
 
-    pub fn register_cancel_flag(&self, job_id: &str) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    pub fn register_cancel_flag(
+        &self,
+        job_id: &str,
+    ) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
         let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.active_cancels
             .lock()
@@ -301,10 +308,7 @@ impl BackupRuntimeRegistry {
         }
     }
 
-    pub fn acquire_download_lease(
-        self: &std::sync::Arc<Self>,
-        job_id: &str,
-    ) -> DownloadLeaseGuard {
+    pub fn acquire_download_lease(self: &std::sync::Arc<Self>, job_id: &str) -> DownloadLeaseGuard {
         let mut map = self.download_leases.lock().expect("lease mutex");
         *map.entry(job_id.to_string()).or_insert(0) += 1;
         DownloadLeaseGuard {
@@ -313,7 +317,11 @@ impl BackupRuntimeRegistry {
         }
     }
 
-    pub async fn wait_for_download_leases_drain(&self, job_id: &str, timeout: Duration) -> ApiResult<()> {
+    pub async fn wait_for_download_leases_drain(
+        &self,
+        job_id: &str,
+        timeout: Duration,
+    ) -> ApiResult<()> {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             let notified = self.lease_notify.notified();
@@ -364,8 +372,8 @@ pub async fn archive_snapshot_via_worker(
     wall_timeout: Duration,
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> ApiResult<(u64, String)> {
-    use age::secrecy::ExposeSecret;
     use crate::backup_worker::{ArchiveWorkerRequest, ArchiveWorkerResponse};
+    use age::secrecy::ExposeSecret;
 
     let req = ArchiveWorkerRequest {
         snapshot_dir: snapshot_dir.clone(),
@@ -424,7 +432,9 @@ pub async fn archive_snapshot_via_worker(
                     let _ = child.kill();
                     let _ = child.wait();
                     drop(stdin);
-                    return Err(ApiError::internal("Lỗi theo dõi tiến trình archive worker."));
+                    return Err(ApiError::internal(
+                        "Lỗi theo dõi tiến trình archive worker.",
+                    ));
                 }
             }
         }
@@ -432,9 +442,8 @@ pub async fn archive_snapshot_via_worker(
     .await
     .map_err(|_| ApiError::internal("Lỗi join tác vụ archive worker."))??;
 
-    let resp: ArchiveWorkerResponse = serde_json::from_slice(&output.stdout).map_err(|_| {
-        ApiError::internal("Phản hồi từ archive worker không hợp lệ hoặc bị ngắt.")
-    })?;
+    let resp: ArchiveWorkerResponse = serde_json::from_slice(&output.stdout)
+        .map_err(|_| ApiError::internal("Phản hồi từ archive worker không hợp lệ hoặc bị ngắt."))?;
     if !resp.ok || !output.status.success() {
         let msg = resp
             .error
@@ -563,7 +572,9 @@ pub async fn run_backup_job_background(
                 next_state,
                 summary_json: Some(serde_json::to_string(&summary_meta).unwrap_or_default()),
                 error_code: Some("actor_revoked_or_cancelled".to_string()),
-                error_message: Some("Tài khoản Admin không còn hợp lệ hoặc tác vụ đã bị hủy.".to_string()),
+                error_message: Some(
+                    "Tài khoản Admin không còn hợp lệ hoặc tác vụ đã bị hủy.".to_string(),
+                ),
             },
         )
         .await;

@@ -194,14 +194,20 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
 
     // 1. Editor RBAC => 403, unauthenticated => 401
     let unauth_diag = client
-        .get(format!("{}/api/admin/operations/diagnostics", server.base_url))
+        .get(format!(
+            "{}/api/admin/operations/diagnostics",
+            server.base_url
+        ))
         .send()
         .await
         .expect("unauth diag");
     assert_eq!(unauth_diag.status(), StatusCode::UNAUTHORIZED);
 
     let editor_diag = client
-        .get(format!("{}/api/admin/operations/diagnostics", server.base_url))
+        .get(format!(
+            "{}/api/admin/operations/diagnostics",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &editor_cookie)
         .send()
         .await
@@ -209,7 +215,10 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     assert_eq!(editor_diag.status(), StatusCode::FORBIDDEN);
 
     let editor_plan = client
-        .post(format!("{}/api/admin/operations/reconcile/plan", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/reconcile/plan",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &editor_cookie)
         .header("X-CSRF-Token", &editor_csrf)
         .send()
@@ -260,14 +269,20 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     fs::write(&young_path, tiny_png(22)).expect("write young orphan");
     fs::write(&aged_path, tiny_png(33)).expect("write aged orphan");
     {
-        let f = File::options().write(true).open(&aged_path).expect("open aged");
+        let f = File::options()
+            .write(true)
+            .open(&aged_path)
+            .expect("open aged");
         let old_time = SystemTime::now() - Duration::from_secs(26 * 3600);
         f.set_modified(old_time).expect("set aged mtime >= 24h");
     }
 
     // 4. Plan reconcile -> reports missing_canonical_files (DB kept!), young orphan skipped, aged orphan candidate
     let plan_resp = client
-        .post(format!("{}/api/admin/operations/reconcile/plan", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/reconcile/plan",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .send()
@@ -276,7 +291,10 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     assert_eq!(plan_resp.status(), StatusCode::OK);
     let plan: Value = plan_resp.json().await.expect("plan json");
     assert_eq!(plan["recent_orphans_under_grace"].as_u64(), Some(1));
-    assert_eq!(plan["orphan_candidates"].as_array().map(|a| a.len()), Some(1));
+    assert_eq!(
+        plan["orphan_candidates"].as_array().map(|a| a.len()),
+        Some(1)
+    );
     assert_eq!(
         plan["orphan_candidates"][0]["media_id"].as_str(),
         Some(aged_id.as_str())
@@ -301,12 +319,18 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     // 5. Mutate aged orphan bytes after plan -> apply must reject 412!
     fs::write(&aged_path, tiny_png(44)).expect("mutate aged orphan");
     {
-        let f = File::options().write(true).open(&aged_path).expect("reopen aged");
+        let f = File::options()
+            .write(true)
+            .open(&aged_path)
+            .expect("reopen aged");
         f.set_modified(SystemTime::now() - Duration::from_secs(26 * 3600))
             .expect("restore aged mtime");
     }
     let stale_apply = client
-        .post(format!("{}/api/admin/operations/reconcile/apply", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/reconcile/apply",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
@@ -323,7 +347,10 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
 
     // 6. Re-plan and apply -> moves aged orphan to quarantine, leaves young orphan untouched
     let plan2_resp = client
-        .post(format!("{}/api/admin/operations/reconcile/plan", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/reconcile/plan",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .send()
@@ -333,7 +360,10 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     let plan2: Value = plan2_resp.json().await.expect("plan2 json");
 
     let apply_resp = client
-        .post(format!("{}/api/admin/operations/reconcile/apply", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/reconcile/apply",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
@@ -349,12 +379,21 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     assert_eq!(apply_resp.status(), StatusCode::OK);
     let apply_json: Value = apply_resp.json().await.expect("apply json");
     assert_eq!(apply_json["quarantined_files"].as_u64(), Some(1));
-    assert!(!aged_path.exists(), "aged orphan must be moved to quarantine");
-    assert!(young_path.exists(), "young orphan <24h must remain untouched");
+    assert!(
+        !aged_path.exists(),
+        "aged orphan must be moved to quarantine"
+    );
+    assert!(
+        young_path.exists(),
+        "young orphan <24h must remain untouched"
+    );
 
     // Re-applying old plan2 after generation bumped must return 412
     let replay_apply = client
-        .post(format!("{}/api/admin/operations/reconcile/apply", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/reconcile/apply",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({
@@ -373,7 +412,10 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     let stray = dir.path().join("uploads").join("stray-unknown.txt");
     fs::write(&stray, b"stray").expect("write stray");
     let fail_plan = client
-        .post(format!("{}/api/admin/operations/reconcile/plan", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/reconcile/plan",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .send()
@@ -409,7 +451,10 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     fs::write(&young_sec_path, b"YOUNG_ORPHAN_SECRET").expect("write young secret");
     fs::write(&aged_sec_path, b"AGED_ORPHAN_SECRET").expect("write aged secret");
     for p in [&ref_path, &aged_sec_path] {
-        let f = File::options().write(true).open(p).expect("open old secret");
+        let f = File::options()
+            .write(true)
+            .open(p)
+            .expect("open old secret");
         f.set_modified(SystemTime::now() - Duration::from_secs(8 * 24 * 3600))
             .expect("set mtime >= 7d");
     }
@@ -426,7 +471,10 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
 
     // Diagnostics must redact secret payloads/paths
     let diag_resp = client
-        .get(format!("{}/api/admin/operations/diagnostics", server.base_url))
+        .get(format!(
+            "{}/api/admin/operations/diagnostics",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .send()
         .await
@@ -441,7 +489,10 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
 
     // Purge >=7d: removes aged_sec_path, preserves young_sec_path, ref_path, and <7d quarantine
     let purge_resp = client
-        .post(format!("{}/api/admin/operations/quarantine/purge", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/quarantine/purge",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({ "confirm": true }))
@@ -452,12 +503,18 @@ async fn reconcile_grace_periods_412_identity_checks_unknown_file_fail_closed_an
     let purge_json: Value = purge_resp.json().await.expect("purge json");
     assert_eq!(purge_json["purged_secret_blobs"].as_u64(), Some(1));
     assert!(!aged_sec_path.exists(), "aged orphan secret must be purged");
-    assert!(young_sec_path.exists(), "young orphan secret <7d must remain");
+    assert!(
+        young_sec_path.exists(),
+        "young orphan secret <7d must remain"
+    );
     assert!(ref_path.exists(), "referenced secret must never be purged");
 
     // Second purge is idempotent
     let purge2 = client
-        .post(format!("{}/api/admin/operations/quarantine/purge", server.base_url))
+        .post(format!(
+            "{}/api/admin/operations/quarantine/purge",
+            server.base_url
+        ))
         .header(reqwest::header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .json(&json!({ "confirm": true }))

@@ -114,11 +114,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn invoke_snapshot_worker(
-    site_root: &Path,
-    db_path: &Path,
-    snapshot_dir: &Path,
-) -> (bool, Value) {
+fn invoke_snapshot_worker(site_root: &Path, db_path: &Path, snapshot_dir: &Path) -> (bool, Value) {
     let bin = env!("CARGO_BIN_EXE_opendash");
     let mut child = operations_worker_process::spawn(Path::new(bin), "snapshot")
         .expect("spawn snapshot worker");
@@ -217,7 +213,11 @@ async fn snapshot_worker_vacuums_external_db_verifies_manifest_and_fails_closed_
     pool.close().await;
 
     // Run isolated --operations-worker snapshot
-    let snap_dir = site_root.join("backups").join(".staging").join("job1").join("snapshot");
+    let snap_dir = site_root
+        .join("backups")
+        .join(".staging")
+        .join("job1")
+        .join("snapshot");
     let (ok, resp) = invoke_snapshot_worker(&site_root, &ext_db_path, &snap_dir);
     assert!(ok, "snapshot worker should succeed: {resp:?}");
     assert_eq!(resp["ok"].as_bool(), Some(true));
@@ -270,7 +270,11 @@ async fn snapshot_worker_vacuums_external_db_verifies_manifest_and_fails_closed_
 
     // Negative 1: Missing referenced secret fails closed
     fs::remove_file(&secret_file).expect("remove secret");
-    let snap_dir2 = site_root.join("backups").join(".staging").join("job2").join("snapshot");
+    let snap_dir2 = site_root
+        .join("backups")
+        .join(".staging")
+        .join("job2")
+        .join("snapshot");
     let (ok2, resp2) = invoke_snapshot_worker(&site_root, &ext_db_path, &snap_dir2);
     assert!(!ok2);
     assert_eq!(resp2["ok"].as_bool(), Some(false));
@@ -283,7 +287,11 @@ async fn snapshot_worker_vacuums_external_db_verifies_manifest_and_fails_closed_
         .join(&media_id[..2])
         .join(format!("{media_id}.png"));
     fs::remove_file(&orig_media).expect("remove media");
-    let snap_dir3 = site_root.join("backups").join(".staging").join("job3").join("snapshot");
+    let snap_dir3 = site_root
+        .join("backups")
+        .join(".staging")
+        .join("job3")
+        .join("snapshot");
     let (ok3, resp3) = invoke_snapshot_worker(&site_root, &ext_db_path, &snap_dir3);
     assert!(!ok3);
     assert_eq!(resp3["ok"].as_bool(), Some(false));

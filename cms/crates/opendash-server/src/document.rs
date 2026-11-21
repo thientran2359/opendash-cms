@@ -249,10 +249,7 @@ fn tokenize(raw: &str) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormaliza
                     format!("Thẻ `{name_lower}` không được phép."),
                 ));
             }
-            out.push((
-                TokenKind::CloseTag { name_lower: "" },
-                name_lower,
-            ));
+            out.push((TokenKind::CloseTag { name_lower: "" }, name_lower));
             i = end + 1;
             continue;
         }
@@ -330,9 +327,7 @@ pub fn normalize_public_document(
             match tok {
                 TokenKind::Text(t) | TokenKind::Comment(t) => body_fragment.push_str(t),
                 TokenKind::StyleBlock(s) => authorized_styles.push(s.to_string()),
-                TokenKind::OpenTag {
-                    raw, attrs_raw, ..
-                } => {
+                TokenKind::OpenTag { raw, attrs_raw, .. } => {
                     if name == "link" {
                         let attrs = parse_attributes(attrs_raw)?;
                         if is_authorized_stylesheet_link(&attrs) {
@@ -390,7 +385,11 @@ pub fn normalize_public_document(
             TokenKind::Text(t) => match phase {
                 Phase::InBody => body_fragment.push_str(t),
                 Phase::InHead => {}
-                Phase::BeforeHtml | Phase::InHtmlBeforeHead | Phase::InHtmlBetweenHeadAndBody | Phase::AfterBody | Phase::AfterHtml => {
+                Phase::BeforeHtml
+                | Phase::InHtmlBeforeHead
+                | Phase::InHtmlBetweenHeadAndBody
+                | Phase::AfterBody
+                | Phase::AfterHtml => {
                     if !t.trim().is_empty() {
                         return Err(DocumentNormalizationDiagnostic::new(
                             "text_outside_body",

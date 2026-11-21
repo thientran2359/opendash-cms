@@ -221,7 +221,10 @@ async fn proxy_authority_secure_cookies_and_mandatory_origin() {
         .expect("set-cookie");
     assert!(set_cookie.contains("HttpOnly"));
     assert!(set_cookie.contains("SameSite=Lax"));
-    assert!(set_cookie.contains("; Secure"), "expected Secure flag: {set_cookie}");
+    assert!(
+        set_cookie.contains("; Secure"),
+        "expected Secure flag: {set_cookie}"
+    );
 
     // Null Origin rejected
     let null_origin = client

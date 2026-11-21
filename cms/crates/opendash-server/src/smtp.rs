@@ -1,10 +1,4 @@
-use std::{
-    future::Future,
-    net::IpAddr,
-    pin::Pin,
-    sync::Arc,
-    time::Duration,
-};
+use std::{future::Future, net::IpAddr, pin::Pin, sync::Arc, time::Duration};
 
 use lettre::{
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
@@ -108,11 +102,9 @@ impl SmtpSender for LettreSmtpSender {
 
             let tls_params = self.build_tls_parameters(&req.host)?;
             let mut transport_builder = match req.tls_mode {
-                TlsMode::ImplicitTls => {
-                    AsyncSmtpTransport::<Tokio1Executor>::relay(&req.host)
-                        .map_err(|e| SmtpTransportError(format!("relay init: {e}")))?
-                        .tls(Tls::Wrapper(tls_params))
-                }
+                TlsMode::ImplicitTls => AsyncSmtpTransport::<Tokio1Executor>::relay(&req.host)
+                    .map_err(|e| SmtpTransportError(format!("relay init: {e}")))?
+                    .tls(Tls::Wrapper(tls_params)),
                 TlsMode::Starttls => {
                     AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&req.host)
                         .map_err(|e| SmtpTransportError(format!("starttls init: {e}")))?
@@ -142,7 +134,9 @@ impl SmtpSender for LettreSmtpSender {
 pub fn validate_smtp_host(raw: &str) -> ApiResult<String> {
     let host = raw.trim();
     if host.is_empty() || host.len() > MAX_SMTP_HOST_BYTES {
-        return Err(ApiError::bad_request("Host SMTP không hợp lệ (1..=253 ký tự ASCII)."));
+        return Err(ApiError::bad_request(
+            "Host SMTP không hợp lệ (1..=253 ký tự ASCII).",
+        ));
     }
     if !host.is_ascii()
         || host.contains("://")
@@ -151,7 +145,9 @@ pub fn validate_smtp_host(raw: &str) -> ApiResult<String> {
         || host.contains('@')
         || host.contains('?')
         || host.contains('#')
-        || host.chars().any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
+        || host
+            .chars()
+            .any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
     {
         return Err(ApiError::bad_request(
             "Host SMTP chỉ chấp nhận tên miền ASCII hoặc địa chỉ IP, không chứa URL/path/thông tin đăng nhập.",
@@ -186,9 +182,9 @@ pub fn validate_mailbox(raw: &str, label: &str) -> ApiResult<Mailbox> {
     {
         return Err(ApiError::bad_request(format!("{label} không hợp lệ.")));
     }
-    let mailbox: Mailbox = trimmed
-        .parse()
-        .map_err(|_| ApiError::bad_request(format!("{label} phải là đúng 1 địa chỉ email hợp lệ.")))?;
+    let mailbox: Mailbox = trimmed.parse().map_err(|_| {
+        ApiError::bad_request(format!("{label} phải là đúng 1 địa chỉ email hợp lệ."))
+    })?;
     Ok(mailbox)
 }
 
@@ -221,11 +217,7 @@ impl SmtpService {
     }
 
     #[cfg(test)]
-    pub fn with_sender(
-        db: SqlitePool,
-        secrets: SecretStore,
-        sender: Arc<dyn SmtpSender>,
-    ) -> Self {
+    pub fn with_sender(db: SqlitePool, secrets: SecretStore, sender: Arc<dyn SmtpSender>) -> Self {
         Self {
             db,
             secrets,
@@ -239,7 +231,8 @@ impl SmtpService {
         let svc = self.clone();
         tokio::spawn(async move {
             let _lease = lease;
-            if let Ok(Some(attempt)) = smtp_store::claim_pending_attempt(&svc.db, attempt_id).await {
+            if let Ok(Some(attempt)) = smtp_store::claim_pending_attempt(&svc.db, attempt_id).await
+            {
                 let _ = svc.execute_claimed_attempt(attempt).await;
             }
         });
@@ -330,9 +323,10 @@ impl SmtpService {
                 reply_to = Some(mb);
             }
         } else if let Some(rt_key) = schema.reply_to_field.as_deref() {
-            let is_email_field = schema.fields.iter().any(|f| {
-                f.key == rt_key && f.kind == opendash_core::contact::FormKind::Email
-            });
+            let is_email_field = schema
+                .fields
+                .iter()
+                .any(|f| f.key == rt_key && f.kind == opendash_core::contact::FormKind::Email);
             if is_email_field {
                 if let Some(val) = payload.get(rt_key).and_then(|v| v.as_str()) {
                     if let Ok(mb) = validate_mailbox(val, "reply_to") {
@@ -406,15 +400,12 @@ impl SmtpService {
                 .acquire()
                 .await
                 .map_err(|_| ApiError::internal("Không thể cấp phép kết nối SMTP."))?;
-            self.sender
-                .send_mail(&req)
-                .await
-                .map_err(|_| {
-                    ApiError(
-                        axum::http::StatusCode::BAD_GATEWAY,
-                        "Không thể gửi email kiểm tra qua máy chủ SMTP.".into(),
-                    )
-                })
+            self.sender.send_mail(&req).await.map_err(|_| {
+                ApiError(
+                    axum::http::StatusCode::BAD_GATEWAY,
+                    "Không thể gửi email kiểm tra qua máy chủ SMTP.".into(),
+                )
+            })
         })
         .await;
 
@@ -505,7 +496,10 @@ mE4G5NyfpexQdboNjHVeP8NeJW7EPynxxzATDYD4STTRks5xeL5r0ikX4DGnvD0Y\n\
 
     #[test]
     fn validates_host_and_mailboxes_strictly() {
-        assert_eq!(validate_smtp_host("SMTP.Example.com").unwrap(), "smtp.example.com");
+        assert_eq!(
+            validate_smtp_host("SMTP.Example.com").unwrap(),
+            "smtp.example.com"
+        );
         assert_eq!(validate_smtp_host("127.0.0.1").unwrap(), "127.0.0.1");
         assert!(validate_smtp_host("https://smtp.example.com").is_err());
         assert!(validate_smtp_host("smtp.example.com/path").is_err());
@@ -588,7 +582,10 @@ mE4G5NyfpexQdboNjHVeP8NeJW7EPynxxzATDYD4STTRks5xeL5r0ikX4DGnvD0Y\n\
             body: "Hello".into(),
         };
         let sender_ok = LettreSmtpSender::with_test_ca_pem(TEST_CA_PEM.as_bytes().to_vec());
-        sender_ok.send_mail(&req).await.expect("valid TLS CA must succeed");
+        sender_ok
+            .send_mail(&req)
+            .await
+            .expect("valid TLS CA must succeed");
         let _ = srv_task.await;
 
         // 2. Untrusted cert rejected by default LettreSmtpSender::new()

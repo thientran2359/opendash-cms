@@ -256,7 +256,6 @@ impl MediaStore {
         self.uploads_root().join(".quarantine").join(job_id)
     }
 
-
     pub fn uploads_root(&self) -> PathBuf {
         self.root
             .parent()
@@ -353,7 +352,6 @@ impl MediaStore {
     }
 }
 
-
 struct RangeFileBody {
     file: fs::File,
     remaining: u64,
@@ -374,7 +372,8 @@ impl axum::body::HttpBody for RangeFileBody {
         let max_read = self.remaining.min(64 * 1024) as usize;
         let mut buf = vec![0u8; max_read];
         let mut read_buf = tokio::io::ReadBuf::new(&mut buf);
-        match tokio::io::AsyncRead::poll_read(std::pin::Pin::new(&mut self.file), cx, &mut read_buf) {
+        match tokio::io::AsyncRead::poll_read(std::pin::Pin::new(&mut self.file), cx, &mut read_buf)
+        {
             std::task::Poll::Pending => std::task::Poll::Pending,
             std::task::Poll::Ready(Err(e)) => std::task::Poll::Ready(Some(Err(e))),
             std::task::Poll::Ready(Ok(())) => {
@@ -385,9 +384,9 @@ impl axum::body::HttpBody for RangeFileBody {
                 }
                 self.remaining -= n as u64;
                 buf.truncate(n);
-                std::task::Poll::Ready(Some(Ok(http_body::Frame::data(
-                    axum::body::Bytes::from(buf),
-                ))))
+                std::task::Poll::Ready(Some(Ok(http_body::Frame::data(axum::body::Bytes::from(
+                    buf,
+                )))))
             }
         }
     }
@@ -471,9 +470,15 @@ pub async fn stream_authorized_video(
         .map_err(|_| ApiError::not_found("Không đọc được thông tin file video."))?;
     let file_size = meta.len();
     let etag = format!("\"{}\"", asset.id);
-    let cache_control = if is_admin { "private, no-store" } else { "no-store" };
+    let cache_control = if is_admin {
+        "private, no-store"
+    } else {
+        "no-store"
+    };
 
-    if let Some(inm) = headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok())
+    if let Some(inm) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
         && etag_matches_if_none_match(inm, &etag)
     {
         return Ok((
