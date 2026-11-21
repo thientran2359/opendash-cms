@@ -1046,6 +1046,32 @@ impl EffectiveContentSchema {
             }
         }
 
+        if !is_builtin
+            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
+            && !effective_fields.contains_key("featured_image")
+        {
+            effective_fields.insert(
+                "featured_image".into(),
+                EffectiveFieldEntry {
+                    definition: ContentFieldDefinition {
+                        key: "featured_image".into(),
+                        label: "Ảnh đại diện".into(),
+                        field_type: ContentFieldType::Image,
+                        required: false,
+                        options: Vec::new(),
+                        min_view_role: FieldRole::Editor,
+                        min_edit_role: FieldRole::Editor,
+                        public_exposure: PublicExposure::Public,
+                        default_value: None,
+                        declaration_state: DeclarationState::Declared,
+                    },
+                    owner: ResourceOwner::Core,
+                    source_id: base_source_id.clone(),
+                    effective_status: EffectiveFieldStatus::Active,
+                },
+            );
+        }
+
         Ok(Self {
             base,
             base_version,
@@ -1963,13 +1989,17 @@ fn panel_sort_key(def: &PanelDefinition, placement: &PanelPlacementConfig) -> (i
 }
 
 pub fn eligible_base_field_keys(effective: &EffectiveContentSchema) -> Vec<String> {
-    let is_builtin = matches!(effective.base.descriptor.key.as_str(), "post" | "page");
+    let type_key = effective.base.descriptor.key.as_str();
+    let is_builtin = matches!(type_key, "post" | "page");
+    let is_private_reusable = matches!(type_key, "section" | "pattern");
     effective
         .base
         .descriptor
         .fields
         .iter()
-        .filter(|f| !(is_builtin && matches!(f.key.as_str(), "body" | "featured_image")))
+        .filter(|f| {
+            !(is_builtin && f.key == "body") && !(!is_private_reusable && f.key == "featured_image")
+        })
         .map(|f| f.key.clone())
         .collect()
 }
@@ -2114,7 +2144,9 @@ pub fn build_core_and_group_panels(
         });
     }
 
-    if is_builtin && effective.effective_fields.contains_key("featured_image") {
+    if !matches!(type_key.as_str(), "section" | "pattern")
+        && effective.effective_fields.contains_key("featured_image")
+    {
         panels.push(PanelDefinition {
             panel_id: "core:featured_image".into(),
             owner: ResourceOwner::Core,

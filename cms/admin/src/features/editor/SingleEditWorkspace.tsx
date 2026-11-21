@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEntryComposite,
   contentEntryPreviewPath,
+  deleteContentEntry,
   effectiveContentTypeSettings,
   getContentEntry,
   getEffectiveEditorConfig,
@@ -63,9 +64,11 @@ function slugFromTitle(title: string): string {
 }
 
 function supportAllowsField(typeKey: string, key: string, settings: ContentTypeSettings): boolean {
+  if (key === 'featured_image' && typeKey !== 'section' && typeKey !== 'pattern') {
+    return settings.supports.includes('featured_image');
+  }
   if (typeKey !== 'post' && typeKey !== 'page') return true;
   if (key === 'body') return settings.supports.includes('editor');
-  if (key === 'featured_image') return settings.supports.includes('featured_image');
   return true;
 }
 
@@ -144,6 +147,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [themeLayouts, setThemeLayouts] = useState<ThemeLayoutCatalog | null>(null);
   const [selectedThemeKey, setSelectedThemeKey] = useState<string | null>(null);
   const [themeKeyDirty, setThemeKeyDirty] = useState(false);
+  const [entryTimestamps, setEntryTimestamps] = useState<{ createdAt: string; updatedAt: string } | null>(null);
+  const [customCreatedAt, setCustomCreatedAt] = useState<string | null>(null);
+  const [customUpdatedAt, setCustomUpdatedAt] = useState<string | null>(null);
   const savedThemeKeyRef = useRef<string | null>(null);
   const selectedThemeKeyRef = useRef<string | null>(null);
   const themeKeyDirtyRef = useRef(false);
@@ -351,6 +357,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           ]);
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
           setHasBuilderDocument(Boolean(builderSnap?.document));
+          setEntryTimestamps({ createdAt: rec.created_at, updatedAt: rec.updated_at });
+          setCustomCreatedAt(null);
+          setCustomUpdatedAt(null);
           const themeKey = typeKey === 'page'
             ? (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null
             : (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
@@ -380,6 +389,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             } : emptySeo,
           };
         } else {
+          setEntryTimestamps(null);
+          setCustomCreatedAt(null);
+          setCustomUpdatedAt(null);
           savedThemeKeyRef.current = null;
           selectedThemeKeyRef.current = null;
           themeKeyDirtyRef.current = false;
@@ -530,6 +542,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           canonical_url: snapshot.seo?.canonical_url?.trim() || null,
           noindex: Boolean(snapshot.seo?.noindex),
         }} : {}),
+        ...(customCreatedAt ? { created_at: customCreatedAt } : {}),
+        ...(customUpdatedAt ? { updated_at: customUpdatedAt } : {}),
       };
 
       const res =
@@ -551,6 +565,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         } : snapshot.seo,
       };
       baselineRef.current = saved;
+      setEntryTimestamps({ createdAt: res.entry.created_at, updatedAt: res.entry.updated_at });
+      setCustomCreatedAt(null);
+      setCustomUpdatedAt(null);
       const savedSelection = typeKey === 'page'
         ? (res.entry as typeof res.entry & { page_layout_key?: string | null }).page_layout_key ?? null
         : (res.entry as typeof res.entry & { custom_template_key?: string | null }).custom_template_key ?? null;
@@ -673,45 +690,66 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     && confirmed.publication_status === 'draft' && entryId !== null
     ? contentEntryPreviewPath(typeKey, entryId) : null;
   const isBuiltIn = typeKey === 'post' || typeKey === 'page';
-  const isDraftPublishCpt = !isBuiltIn && !isPattern
-    && settings?.publication === 'draft_publish';
+  const publicationPolicy = settings?.publication ?? (isBuiltIn ? 'draft_publish' : 'immediate');
+  const templateChoices = typeKey === 'page'
+    ? (themeLayouts?.page_layouts.map(layout => ({ key: layout.key, label: layout.label })) ?? [])
+    : (themeLayouts?.custom_templates
+        .filter(tpl => tpl.allowed_types.includes(typeKey))
+        .map(tpl => ({ key: tpl.custom_key, label: tpl.label })) ?? []);
+  const showTemplateBox = typeKey === 'page' || templateChoices.length > 0 || Boolean(selectedThemeKey);
+  const templatePanelNode = showTemplateBox ? (
+    <div className="space-y-1.5" data-testid="theme-template-selection">
+      <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-theme-selector">
+        <span>{typeKey === 'page' ? 'Page Template / Layout' : 'Custom Single Template'}</span>
+        <select
+          id="entry-theme-selector"
+          className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+          value={selectedThemeKey ?? ''}
+          disabled={saving || !csrfToken || !themeLayouts}
+          onChange={event => {
+            const choice = event.target.value || null;
+            selectedThemeKeyRef.current = choice;
+            setSelectedThemeKey(choice);
+            const differs = choice !== savedThemeKeyRef.current;
+            themeKeyDirtyRef.current = differs;
+            setThemeKeyDirty(differs);
+            if (differs) editRevisionRef.current++;
+            setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
+          }}
+        >
+          <option value="">Theo theme mặc định</option>
+          {templateChoices.map(choice => (
+            <option key={choice.key} value={choice.key}>{choice.label}</option>
+          ))}
+          {selectedThemeKey && !templateChoices.some(choice => choice.key === selectedThemeKey) && (
+            <option value={selectedThemeKey}>{selectedThemeKey} (theme hiện tại không còn cung cấp — được bảo toàn)</option>
+          )}
+        </select>
+      </label>
+      {themeKeyDirty && <p className="text-xs font-medium text-amber-700">● Chưa lưu</p>}
+    </div>
+  ) : null;
+
+  const handleDelete = async () => {
+    const version = baselineRef.current?.version;
+    if (entryId === null || version === null || version === undefined || !csrfToken || saving) return;
+    if (!window.confirm('Xóa vĩnh viễn nội dung này? Hành động này không thể hoàn tác.')) return;
+    setSaving(true);
+    try {
+      await deleteContentEntry(typeKey, entryId, version, csrfToken);
+      editorDraftStore.delete(draftKey);
+      setDirty(false);
+      onDirtyChange(false);
+      onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)));
+    } catch (err) {
+      onApiError(err, 'Không thể xóa nội dung.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <button type="button" className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
-          onClick={() => onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)))}>
-          ← Về danh sách
-        </button>
-        <div className="flex flex-wrap items-center gap-2" data-testid="theme-template-selection">
-          <label className="text-xs font-medium text-zinc-600" htmlFor="entry-theme-selector">
-            {typeKey === 'page' ? 'Page Layout' : 'Template'}
-          </label>
-          <select id="entry-theme-selector" className="h-8 rounded-md border border-zinc-300 bg-white px-2.5 text-xs text-zinc-900"
-            value={selectedThemeKey ?? ''} disabled={saving || !csrfToken || !themeLayouts}
-            onChange={event => {
-              const choice = event.target.value || null;
-              selectedThemeKeyRef.current = choice;
-              setSelectedThemeKey(choice);
-              const differs = choice !== savedThemeKeyRef.current;
-              themeKeyDirtyRef.current = differs;
-              setThemeKeyDirty(differs);
-              if (differs) editRevisionRef.current++;
-              setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
-            }}>
-            <option value="">Theo theme mặc định</option>
-            {(typeKey === 'page' ? themeLayouts?.page_layouts.map(layout => ({ key: layout.key, label: layout.label }))
-              : themeLayouts?.custom_templates.filter(tpl => tpl.allowed_types.includes(typeKey))
-                  .map(tpl => ({ key: tpl.custom_key, label: tpl.label })))?.map(choice =>
-                <option key={choice.key} value={choice.key}>{choice.label}</option>)}
-            {selectedThemeKey && !(typeKey === 'page'
-              ? themeLayouts?.page_layouts.some(layout => layout.key === selectedThemeKey)
-              : themeLayouts?.custom_templates.some(tpl => tpl.custom_key === selectedThemeKey && tpl.allowed_types.includes(typeKey))) &&
-              <option value={selectedThemeKey}>{selectedThemeKey} (theme hiện tại không còn cung cấp — được bảo toàn)</option>}
-          </select>
-          {themeKeyDirty && <span className="text-xs text-amber-700">Chưa lưu</span>}
-        </div>
-      </div>
       {statusNote && (
         <div className={statusNote.includes('(412)') || statusNote.includes('(409)')
           ? 'rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800'
@@ -720,77 +758,38 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           {statusNote}
         </div>
       )}
-      {draftPreviewPath && (
-        <a href={draftPreviewPath} target="_blank" rel="noopener noreferrer"
-          className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
-          Xem trước bản nháp đã lưu (yêu cầu đăng nhập)
-        </a>
-      )}
       {!isPattern && entryId !== null &&
         (settings?.supports.includes('builder') || contentMode === 'builder' ||
           baselineRef.current?.content_mode === 'builder') && (
-        <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+        <div className="rounded-xl border border-zinc-200 bg-white p-3.5 space-y-2">
           <label htmlFor={typeKey === 'page' ? 'page-content-mode' : 'entry-content-mode'}
-            className="block text-sm font-semibold">Nguồn nội dung {typeKey === 'page' ? 'Page' : typeKey}</label>
-          <select id={typeKey === 'page' ? 'page-content-mode' : 'entry-content-mode'}
-            value={contentMode} disabled={saving || !csrfToken}
-            onChange={event => {
-              const next = event.target.value as ContentMode;
-              if (next === 'builder' &&
-                  (!settings?.supports.includes('builder') || (!hasBuilderDocument && contentMode !== 'builder'))) return;
-              setContentMode(next);
-              persistDraftPatch({ content_mode: next });
-            }}>
-            <option value="editor">Văn bản</option>
-            <option value="builder" disabled={!settings?.supports.includes('builder') ||
-              (!hasBuilderDocument && contentMode !== 'builder')}>
-              Visual Builder{!settings?.supports.includes('builder') ? ' (đã tắt)' : ''}
-            </option>
-          </select>
-          <p className="text-xs text-slate-600">
+            className="flex flex-col gap-1 text-xs font-semibold text-zinc-800">
+            <span>Nguồn nội dung {typeKey === 'page' ? 'Page' : typeKey}</span>
+            <select id={typeKey === 'page' ? 'page-content-mode' : 'entry-content-mode'}
+              className="h-9 max-w-xs rounded-md border border-zinc-300 bg-white px-2.5 text-sm font-normal text-zinc-900"
+              value={contentMode} disabled={saving || !csrfToken}
+              onChange={event => {
+                const next = event.target.value as ContentMode;
+                if (next === 'builder' &&
+                    (!settings?.supports.includes('builder') || (!hasBuilderDocument && contentMode !== 'builder'))) return;
+                setContentMode(next);
+                persistDraftPatch({ content_mode: next });
+              }}>
+              <option value="editor">Văn bản</option>
+              <option value="builder" disabled={!settings?.supports.includes('builder') ||
+                (!hasBuilderDocument && contentMode !== 'builder')}>
+                Visual Builder{!settings?.supports.includes('builder') ? ' (đã tắt)' : ''}
+              </option>
+            </select>
+          </label>
+          <p className="text-xs text-zinc-500">
             {!settings?.supports.includes('builder')
               ? 'Builder đã tắt; hệ thống hiển thị văn bản. Chọn Văn bản rồi lưu để cập nhật nguồn, thiết kế cũ vẫn được giữ.'
               : 'Chuyển nguồn khi lưu giữ nguyên văn bản và thiết kế đã lưu.'}
           </p>
         </div>
       )}
-      {isDraftPublishCpt && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3"
-          role="group" aria-label="Lưu nháp và xuất bản">
-          <span className="text-sm text-slate-700">
-            {publicationStatus === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
-          </span>
-          <button type="button" disabled={saving || !csrfToken}
-            onClick={() => void handleSave('draft')}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-50">
-            {publicationStatus === 'published' ? 'Chuyển về nháp' : 'Lưu nháp'}
-          </button>
-          <button type="button" disabled={saving || !csrfToken}
-            onClick={() => void handleSave('published')}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
-            {publicationStatus === 'published' ? 'Cập nhật' : 'Đăng bài'}
-          </button>
-          {publicPath && <a href={publicPath} target="_blank" rel="noopener noreferrer"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
-            Xem nội dung
-          </a>}
-        </div>
-      )}
-      {!isBuiltIn && !isDraftPublishCpt && publicPath && (
-        <a href={publicPath} target="_blank" rel="noopener noreferrer"
-          className="inline-flex rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50">
-          Xem nội dung
-        </a>
-      )}
-      {/* Legacy renderer has a fixed CPT status select and generic Save button.
-          Keep its Builder action and layout while showing policy-aware actions above. */}
-      <style>{`
-        .c1-immediate [data-panel-id="core:publish_box"] label { display: none; }
-        .c1-draft-publish [data-panel-id="core:publish_box"] label { display: none; }
-        .c1-draft-publish [data-region="header_bar"] > div:last-child > button { display: none; }
-        .c1-draft-publish [data-panel-id="core:publish_box"] div.flex.flex-wrap.items-center.gap-2 > button { display: none; }
-      `}</style>
-      <div className={isDraftPublishCpt ? 'c1-draft-publish' : !isBuiltIn ? 'c1-immediate' : ''}>
+      <div>
       <PanelRegionRenderer
         config={editorConfig ?? config}
         values={values}
@@ -811,8 +810,23 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         userId={user?.id ?? null}
         termIds={termIds}
         publicPath={publicPath}
+        draftPreviewPath={draftPreviewPath}
+        isPublic={settings?.public ?? true}
+        publicationPolicy={publicationPolicy}
+        createdAt={customCreatedAt ?? entryTimestamps?.createdAt ?? null}
+        updatedAt={customUpdatedAt ?? entryTimestamps?.updatedAt ?? null}
+        onCreatedAtChange={val => {
+          setCustomCreatedAt(val);
+          setDirty(true);
+        }}
+        onUpdatedAtChange={val => {
+          setCustomUpdatedAt(val);
+          setDirty(true);
+        }}
+        templatePanelNode={templatePanelNode}
         saving={saving}
         dirty={dirty}
+        onDelete={entryId !== null && baselineRef.current?.version !== null && baselineRef.current?.version !== undefined ? () => void handleDelete() : undefined}
         onToggleCollapse={pid => setCollapsedPanels(prev => ({ ...prev, [pid]: !prev[pid] }))}
         onTitleChange={nextTitle => {
           const nextSlug = draftRef.current?.slug_touched ? slug : slugFromTitle(nextTitle);
