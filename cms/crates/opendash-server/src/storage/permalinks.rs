@@ -140,7 +140,9 @@ pub async fn sync_provider_rewrite_defaults_in_tx(
     declarations: &[ProviderRewriteDeclaration],
 ) -> ApiResult<()> {
     if !matches!(owner_kind, "plugin" | "theme") || owner_id.is_empty() {
-        return Err(ApiError::bad_request("Provider rewrite owner không hợp lệ."));
+        return Err(ApiError::bad_request(
+            "Provider rewrite owner không hợp lệ.",
+        ));
     }
     let before = read_effective_settings(conn).await?;
     let mut incoming = std::collections::BTreeSet::new();
@@ -149,26 +151,31 @@ pub async fn sync_provider_rewrite_defaults_in_tx(
             || !valid_content_type_key(&item.resource_key)
             || (item.resource_kind == "content_type"
                 && matches!(item.resource_key.as_str(), "post" | "page" | "section"))
-            || item.rewrite_base.as_deref().is_some_and(|base| !valid_base(base))
+            || item
+                .rewrite_base
+                .as_deref()
+                .is_some_and(|base| !valid_base(base))
         {
             return Err(ApiError::bad_request("Provider rewrite_base không hợp lệ."));
         }
         if !incoming.insert((item.resource_kind, item.resource_key.as_str())) {
-            return Err(ApiError::bad_request("Provider rewrite khai báo key trùng."));
+            return Err(ApiError::bad_request(
+                "Provider rewrite khai báo key trùng.",
+            ));
         }
         let (existing_owner, existing_id): (String, Option<String>) = match item.resource_kind {
-            "content_type" => sqlx::query_as(
-                "SELECT owner_kind, owner_id FROM content_types WHERE key=?",
-            )
-            .bind(&item.resource_key)
-            .fetch_optional(&mut *conn)
-            .await?,
-            _ => sqlx::query_as(
-                "SELECT owner_kind, owner_id FROM taxonomy_definitions WHERE key=?",
-            )
-            .bind(&item.resource_key)
-            .fetch_optional(&mut *conn)
-            .await?,
+            "content_type" => {
+                sqlx::query_as("SELECT owner_kind, owner_id FROM content_types WHERE key=?")
+                    .bind(&item.resource_key)
+                    .fetch_optional(&mut *conn)
+                    .await?
+            }
+            _ => {
+                sqlx::query_as("SELECT owner_kind, owner_id FROM taxonomy_definitions WHERE key=?")
+                    .bind(&item.resource_key)
+                    .fetch_optional(&mut *conn)
+                    .await?
+            }
         }
         .ok_or_else(|| ApiError::conflict("Provider rewrite target chưa được khai báo."))?;
         if existing_owner != owner_kind || existing_id.as_deref() != Some(owner_id) {
@@ -186,7 +193,9 @@ pub async fn sync_provider_rewrite_defaults_in_tx(
             .as_ref()
             .is_some_and(|(kind, id)| kind != owner_kind || id != owner_id)
         {
-            return Err(ApiError::conflict("Provider rewrite key đã thuộc owner khác."));
+            return Err(ApiError::conflict(
+                "Provider rewrite key đã thuộc owner khác.",
+            ));
         }
         sqlx::query(
             "INSERT INTO provider_rewrite_defaults
@@ -234,7 +243,11 @@ pub async fn set_provider_rewrite_status_in_tx(
     active: bool,
 ) -> ApiResult<()> {
     let before = read_effective_settings(conn).await?;
-    let status = if active { "active" } else { "provider_inactive" };
+    let status = if active {
+        "active"
+    } else {
+        "provider_inactive"
+    };
     sqlx::query(
         "UPDATE provider_rewrite_defaults SET provider_status=?
          WHERE owner_kind=? AND owner_id=?
@@ -1167,7 +1180,8 @@ mod tests {
         let db = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
-            .await.unwrap();
+            .await
+            .unwrap();
         sqlx::migrate!("../../migrations").run(&db).await.unwrap();
         db
     }
@@ -1409,7 +1423,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            resolve_public_path(&db, "/news").await.unwrap().unwrap().target,
+            resolve_public_path(&db, "/news")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
             PublicRouteTarget::Archive("post".into())
         );
         let alias = resolve_public_path(&db, "/content/page/blog")
@@ -1430,7 +1448,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            resolve_public_path(&db, "/news").await.unwrap().unwrap().target,
+            resolve_public_path(&db, "/news")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
             PublicRouteTarget::Entry(blog)
         );
         let page_alias = resolve_public_path(&db, "/content/page/blog")
@@ -1451,7 +1473,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            resolve_public_path(&db, "/news").await.unwrap().unwrap().target,
+            resolve_public_path(&db, "/news")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
             PublicRouteTarget::Archive("post".into())
         );
     }
@@ -1610,9 +1636,14 @@ mod tests {
             rewrite_base: Some("library".to_owned()),
         };
         let mut tx = db.begin().await.unwrap();
-        sync_provider_rewrite_defaults_in_tx(&mut tx, "plugin", "books_plugin", &[declaration.clone()])
-            .await
-            .unwrap();
+        sync_provider_rewrite_defaults_in_tx(
+            &mut tx,
+            "plugin",
+            "books_plugin",
+            &[declaration.clone()],
+        )
+        .await
+        .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         let enabled = get_settings(&db).await.unwrap();
@@ -1620,7 +1651,10 @@ mod tests {
         assert!(!enabled.content_type_bases.contains_key("books"));
         let mut conn = db.acquire().await.unwrap();
         let effective = read_effective_settings(&mut conn).await.unwrap();
-        assert_eq!(effective.content_type_bases["books"], Some("library".into()));
+        assert_eq!(
+            effective.content_type_bases["books"],
+            Some("library".into())
+        );
         drop(conn);
 
         let mut changed = declaration.clone();
@@ -1632,16 +1666,26 @@ mod tests {
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         let modified = get_settings(&db).await.unwrap();
-        assert_eq!(modified.version, enabled.version + 1,
-            "updating an effective provider default invalidates an older site editor CAS");
+        assert_eq!(
+            modified.version,
+            enabled.version + 1,
+            "updating an effective provider default invalidates an older site editor CAS"
+        );
         assert!(!modified.content_type_bases.contains_key("books"));
         let mut conn = db.acquire().await.unwrap();
-        assert_eq!(read_effective_settings(&mut conn).await.unwrap().content_type_bases["books"],
-            Some("catalog".to_owned()));
+        assert_eq!(
+            read_effective_settings(&mut conn)
+                .await
+                .unwrap()
+                .content_type_bases["books"],
+            Some("catalog".to_owned())
+        );
         drop(conn);
 
         let mut explicit_legacy = get_settings(&db).await.unwrap().input();
-        explicit_legacy.content_type_bases.insert("books".into(), None);
+        explicit_legacy
+            .content_type_bases
+            .insert("books".into(), None);
         let saved = put_settings(&db, modified.version, &explicit_legacy)
             .await
             .unwrap();
@@ -1653,22 +1697,38 @@ mod tests {
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         let final_site = get_settings(&db).await.unwrap();
-        assert_eq!(final_site.version, saved.version, "provider defaults hidden by site choice");
+        assert_eq!(
+            final_site.version, saved.version,
+            "provider defaults hidden by site choice"
+        );
         assert_eq!(final_site.content_type_bases.get("books"), Some(&None));
         let mut conn = db.acquire().await.unwrap();
-        assert_eq!(read_effective_settings(&mut conn).await.unwrap().content_type_bases["books"], None);
+        assert_eq!(
+            read_effective_settings(&mut conn)
+                .await
+                .unwrap()
+                .content_type_bases["books"],
+            None
+        );
         drop(conn);
         let mut tx = db.begin().await.unwrap();
-        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", false).await.unwrap();
+        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", false)
+            .await
+            .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         assert_eq!(get_settings(&db).await.unwrap().version, saved.version);
         let mut tx = db.begin().await.unwrap();
-        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", true).await.unwrap();
+        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", true)
+            .await
+            .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
-        assert_eq!(get_settings(&db).await.unwrap().version, saved.version,
-            "explicit null must survive disable and re-enable");
+        assert_eq!(
+            get_settings(&db).await.unwrap().version,
+            saved.version,
+            "explicit null must survive disable and re-enable"
+        );
     }
 
     #[tokio::test]
@@ -2272,7 +2332,9 @@ mod tests {
         tx.commit().await.unwrap();
         assert_eq!(resolve_public_path(&db, "/blog/gone").await.unwrap(), None);
         assert_eq!(
-            resolve_public_path(&db, "/content/post/gone").await.unwrap(),
+            resolve_public_path(&db, "/content/post/gone")
+                .await
+                .unwrap(),
             None,
         );
     }
@@ -2285,9 +2347,7 @@ mod tests {
         genres
             .taxonomy_bases
             .insert("category".to_owned(), Some("genres".to_owned()));
-        put_settings(&db, original.version, &genres)
-            .await
-            .unwrap();
+        put_settings(&db, original.version, &genres).await.unwrap();
         let term_id = sqlx::query(
             "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Gone','gone')",
         )
@@ -2315,7 +2375,10 @@ mod tests {
             .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
-        assert_eq!(resolve_public_path(&db, "/genres/gone").await.unwrap(), None);
+        assert_eq!(
+            resolve_public_path(&db, "/genres/gone").await.unwrap(),
+            None
+        );
         assert_eq!(
             resolve_public_path(&db, "/taxonomy/category/gone")
                 .await
