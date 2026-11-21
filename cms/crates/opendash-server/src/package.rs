@@ -33,7 +33,14 @@ pub fn open_bounded_zip<'a>(
     if bytes.len() > max_zip_bytes {
         return Err(oversize_err);
     }
-    ZipArchive::new(Cursor::new(bytes)).map_err(|_| invalid_zip_err)
+    let archive = ZipArchive::new(Cursor::new(bytes)).map_err(|_| invalid_zip_err)?;
+    // zip 9.3.0 deduplicates equal raw central-directory names in its
+    // IndexMap before by_index() is called. Compare its raw entry count first
+    // so an overwritten regular member can never bypass our path/cap checks.
+    if archive.has_duplicate_names() {
+        return Err("ZIP chứa đường dẫn trùng lặp.");
+    }
+    Ok(archive)
 }
 
 /// Validates that a ZIP entry name is a flat, safe file name (no `/`, `\`, `..`,
@@ -231,11 +238,12 @@ where
             ));
         }
 
-        total_decoded = total_decoded
-            .checked_add(data.len())
-            .ok_or(V2ZipError::PayloadTooLarge(
-                "Tổng dung lượng giải nén ZIP v2 vượt quá 32 MiB.",
-            ))?;
+        total_decoded =
+            total_decoded
+                .checked_add(data.len())
+                .ok_or(V2ZipError::PayloadTooLarge(
+                    "Tổng dung lượng giải nén ZIP v2 vượt quá 32 MiB.",
+                ))?;
         files.insert(rel_path, data);
     }
 
@@ -366,7 +374,9 @@ pub fn preflight_and_open_backup_zip(
             return Err("Tên entry backup ZIP vượt quá Central Directory.");
         }
         let name_bytes = &cd_buf[name_start..name_end];
-        if !name_bytes.iter().all(|b| b.is_ascii() && !b.is_ascii_control())
+        if !name_bytes
+            .iter()
+            .all(|b| b.is_ascii() && !b.is_ascii_control())
             || name_bytes.contains(&b'/')
             || name_bytes.contains(&b'\\')
         {
@@ -404,6 +414,47 @@ pub fn preflight_and_open_backup_zip(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
+
+    fn zip_with_members(files: &[(&str, &[u8])], directories: &[&str]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            for directory in directories {
+                writer.add_directory(*directory, options).unwrap();
+            }
+            for (name, data) in files {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(data).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        bytes
+    }
+
+    // Fixed, ordinary ZIP32 fixture with two central-directory regular entries
+    // both named "one.txt" (payloads "a" and "b"). The pinned zip writer
+    // correctly refuses to create duplicates, so the fixture was generated
+    // once with Python's stdlib zipfile; no runtime byte scanner is involved.
+    const DUPLICATE_REGULAR_ZIP: &[u8] = &[
+        0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x75, 0x5d, 0x43,
+        0xbe, 0xb7, 0xe8, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
+        0x6f, 0x6e, 0x65, 0x2e, 0x74, 0x78, 0x74, 0x61, 0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x75, 0x5d, 0xf9, 0xef, 0xbe, 0x71, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x6f, 0x6e, 0x65, 0x2e, 0x74, 0x78, 0x74,
+        0x62, 0x50, 0x4b, 0x01, 0x02, 0x14, 0x03, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x75, 0x5d, 0x43, 0xbe, 0xb7, 0xe8, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x07,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x01, 0x00, 0x00,
+        0x00, 0x00, 0x6f, 0x6e, 0x65, 0x2e, 0x74, 0x78, 0x74, 0x50, 0x4b, 0x01, 0x02, 0x14, 0x03,
+        0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x75, 0x5d, 0xf9, 0xef, 0xbe, 0x71, 0x01,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x80, 0x01, 0x26, 0x00, 0x00, 0x00, 0x6f, 0x6e, 0x65, 0x2e, 0x74,
+        0x78, 0x74, 0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x02, 0x00, 0x6a,
+        0x00, 0x00, 0x00, 0x4c, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
 
     #[test]
     fn validates_zip_content_types() {
@@ -417,5 +468,68 @@ mod tests {
             false
         ));
         assert!(!is_valid_zip_content_type(Some("text/plain"), false));
+    }
+
+    #[test]
+    fn shared_zip_reader_rejects_exact_regular_duplicates_before_indexmap_dedup() {
+        let raw = ZipArchive::new(Cursor::new(DUPLICATE_REGULAR_ZIP)).unwrap();
+        assert!(raw.has_duplicate_names());
+        assert_eq!(raw.len(), 1, "zip 9.3.0 deduplicates exact names");
+        let failure = open_bounded_zip(
+            DUPLICATE_REGULAR_ZIP,
+            V2_MAX_ZIP_BYTES,
+            "too big",
+            "invalid",
+        );
+        assert!(matches!(failure, Err(message) if message.contains("trùng lặp")));
+        assert!(matches!(
+            read_v2_zip_entries(DUPLICATE_REGULAR_ZIP, |_| Ok(V2_MAX_TEXT_BYTES)),
+            Err(V2ZipError::BadRequest(message)) if message.contains("trùng lặp")
+        ));
+    }
+
+    #[test]
+    fn shared_zip_reader_preserves_case_collision_rejection_for_distinct_raw_names() {
+        let bytes = zip_with_members(
+            &[("Assets/Cover.PNG", b"a"), ("assets/cover.png", b"b")],
+            &[],
+        );
+        assert!(
+            !ZipArchive::new(Cursor::new(bytes.as_slice()))
+                .unwrap()
+                .has_duplicate_names()
+        );
+        assert!(matches!(
+            read_v2_zip_entries(&bytes, |_| Ok(V2_MAX_TEXT_BYTES)),
+            Err(V2ZipError::BadRequest(message))
+                if message.contains("trùng lặp") || message.contains("chữ hoa")
+        ));
+    }
+
+    #[test]
+    fn shared_zip_reader_accepts_distinct_files_and_ignores_safe_empty_directories() {
+        let bytes = zip_with_members(
+            &[("theme.json", b"{}"), ("assets/hero.png", b"png")],
+            &["assets/", "assets/images/", "assets/.empty/"],
+        );
+        let files = read_v2_zip_entries(&bytes, |_| Ok(V2_MAX_TEXT_BYTES)).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files["theme.json"], b"{}");
+        assert_eq!(files["assets/hero.png"], b"png");
+        assert!(open_bounded_zip(&bytes, V2_MAX_ZIP_BYTES, "too big", "invalid").is_ok());
+    }
+
+    #[test]
+    fn shared_zip_reader_rejects_malformed_and_truncated_archives() {
+        assert!(matches!(
+            read_v2_zip_entries(b"not a zip", |_| Ok(V2_MAX_TEXT_BYTES)),
+            Err(V2ZipError::BadRequest(_))
+        ));
+        let mut truncated = zip_with_members(&[("theme.json", b"{}")], &[]);
+        truncated.truncate(truncated.len() - 22);
+        assert!(matches!(
+            read_v2_zip_entries(&truncated, |_| Ok(V2_MAX_TEXT_BYTES)),
+            Err(V2ZipError::BadRequest(_))
+        ));
     }
 }

@@ -357,6 +357,9 @@ pub struct ThemeV3Manifest {
     pub page_layouts: Vec<PageLayoutDecl>,
     #[serde(default)]
     pub patterns: Vec<ThemePatternDecl>,
+    /// Explicit allowlist of static files within assets/. Omission means none.
+    #[serde(default)]
+    pub assets: Vec<String>,
     #[serde(default)]
     pub options: Option<serde_json::Value>,
     #[serde(default)]
@@ -422,9 +425,15 @@ impl ThemeV3Manifest {
                 || pattern
                     .preview_asset
                     .as_deref()
-                    .is_some_and(|path| !valid_asset_path(path))
+                    .is_some_and(|path| !valid_v3_asset_path(path))
             {
                 return Err("Invalid or duplicate theme pattern");
+            }
+        }
+        let mut asset_paths = BTreeSet::new();
+        for path in &self.assets {
+            if !valid_v3_asset_path(path) || !asset_paths.insert(path.as_str()) {
+                return Err("Invalid or duplicate theme asset path");
             }
         }
         Ok(())
@@ -456,21 +465,54 @@ fn valid_subdir_file(value: &str, prefix: &str, suffix: &str) -> bool {
         .is_some_and(|name| valid_file_name(name, suffix))
 }
 
-fn valid_asset_path(value: &str) -> bool {
+/// Validate a canonical theme v3 static-file path without accessing the ZIP.
+///
+/// The byte limit applies after "assets/"; directories use [a-z0-9_-]+,
+/// filenames use [a-z0-9_.-] with a non-dot first byte, no ".." and only
+/// the inert file extensions supported by the v3 archive reader.
+pub fn valid_v3_asset_path(value: &str) -> bool {
     let Some(path) = value.strip_prefix("assets/") else {
         return false;
     };
-    path.len() <= 240
-        && !path.is_empty()
-        && path.split('/').all(|segment| {
-            !segment.is_empty()
-                && segment != "."
-                && segment != ".."
-                && !segment.starts_with('.')
-                && segment.bytes().all(|c| {
+    if path.is_empty() || path.len() > 240 || !path.is_ascii() {
+        return false;
+    }
+    let mut components = path.split('/').peekable();
+    while let Some(component) = components.next() {
+        if components.peek().is_some() {
+            if component.is_empty()
+                || !component.bytes().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'-' | b'_')
+                })
+            {
+                return false;
+            }
+        } else {
+            if component.is_empty()
+                || component.starts_with('.')
+                || component.contains("..")
+                || !component.bytes().all(|c| {
                     c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'-' | b'_' | b'.')
                 })
-        })
+            {
+                return false;
+            }
+            let Some((stem, extension)) = component.rsplit_once('.') else {
+                return false;
+            };
+            return !stem.is_empty()
+                && matches!(
+                    extension,
+                    "css" | "txt" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "woff2"
+                );
+        }
+    }
+    false
+}
+
+/// Backwards-compatible alias: both server callers use identical D01 grammar.
+pub fn valid_asset_path(value: &str) -> bool {
+    valid_v3_asset_path(value)
 }
 
 #[cfg(test)]
@@ -522,6 +564,7 @@ mod tests {
                 preview_asset: Some("assets/images/hero.webp".into()),
                 file: "patterns/hero.json".into(),
             }],
+            assets: vec!["assets/images/hero.webp".into(), "assets/styles.css".into()],
             options: None,
             menus: None,
             sample: None,
@@ -551,6 +594,123 @@ mod tests {
         let mut unknown = serde_json::to_value(manifest).unwrap();
         unknown["unexpected"] = json!("value");
         assert!(serde_json::from_value::<ThemeV3Manifest>(unknown).is_err());
+    }
+
+    #[test]
+    fn v3_assets_missing_field_defaults_to_empty_and_explicit_empty_is_valid() {
+        let mut without_assets = serde_json::to_value(v3_manifest()).unwrap();
+        without_assets.as_object_mut().unwrap().remove("assets");
+        let omitted: ThemeV3Manifest = serde_json::from_value(without_assets).unwrap();
+        assert!(omitted.assets.is_empty());
+        omitted.validate().unwrap();
+
+        let mut explicit_empty = v3_manifest();
+        explicit_empty.assets.clear();
+        explicit_empty.validate().unwrap();
+        let roundtrip: ThemeV3Manifest =
+            serde_json::from_value(serde_json::to_value(&explicit_empty).unwrap()).unwrap();
+        assert_eq!(roundtrip.assets, Vec::<String>::new());
+
+        let mut declared = v3_manifest();
+        declared.assets = vec![
+            "assets/styles.css".into(),
+            "assets/images/logo.v2.png".into(),
+            "assets/fonts/headline.woff2".into(),
+            "assets/README.txt".to_ascii_lowercase(),
+        ];
+        declared.validate().unwrap();
+        let decoded: ThemeV3Manifest =
+            serde_json::from_value(serde_json::to_value(&declared).unwrap()).unwrap();
+        assert_eq!(decoded.assets, declared.assets);
+    }
+
+    #[test]
+    fn v3_asset_path_grammar_accepts_only_safe_canonical_files() {
+        for path in [
+            "assets/x.css",
+            "assets/note.txt",
+            "assets/photo.png",
+            "assets/photo.jpg",
+            "assets/photo.jpeg",
+            "assets/photo.webp",
+            "assets/animation.gif",
+            "assets/fonts/theme.woff2",
+            "assets/images_2/ui-state.v2.png",
+            "assets/_.png",
+            "assets/_hidden-style.css",
+        ] {
+            assert!(valid_v3_asset_path(path), "should accept: {path}");
+            assert_eq!(valid_asset_path(path), valid_v3_asset_path(path));
+        }
+        let exactly_240 = format!("assets/{}.png", "a".repeat(236));
+        assert_eq!(exactly_240.len() - "assets/".len(), 240);
+        assert!(valid_v3_asset_path(&exactly_240));
+        let too_long = format!("assets/{}.png", "a".repeat(237));
+        assert!(!valid_v3_asset_path(&too_long));
+
+        for path in [
+            "",
+            "assets",
+            "assets/",
+            "assets/logo",
+            "assets/.env",
+            "assets/.private/logo.png",
+            "assets/icons/.logo.png",
+            "assets/icons.v2/logo.png",
+            "assets/a..b.png",
+            "assets/a../logo.png",
+            "assets/a..b/logo.png",
+            "assets/../logo.png",
+            "assets/./logo.png",
+            "assets//logo.png",
+            "assets/logos//logo.png",
+            "assets/logos/",
+            "/assets/logo.png",
+            "assets\\logo.png",
+            "assets/logos\\logo.png",
+            "assets/logo.PnG",
+            "assets/Logo.png",
+            "assets/other.svg",
+            "assets/other.js",
+            "assets/other.wasm",
+            "assets/page.html",
+            "assets/archive.zip",
+            "assets/img.png?foo=bar",
+            "assets/img.png#fragment",
+            "https://example.test/assets/logo.png",
+            "assets/ü.png",
+            "assets/test\n.png",
+            "assets/img.png.",
+        ] {
+            assert!(!valid_v3_asset_path(path), "should reject: {path:?}");
+            assert_eq!(valid_asset_path(path), valid_v3_asset_path(path));
+        }
+    }
+
+    #[test]
+    fn v3_manifest_rejects_duplicate_and_noncanonical_asset_declarations() {
+        let baseline = v3_manifest();
+        baseline.validate().unwrap();
+        for bad in [
+            "assets/.hidden/logo.png",
+            "assets/icons.v2/logo.png",
+            "assets/a..b.png",
+            "assets/payload.js",
+            "assets/icons/../../logo.png",
+            "assets/icons//logo.png",
+            "assets/img.PNG",
+        ] {
+            let mut manifest = baseline.clone();
+            manifest.assets.push(bad.into());
+            assert!(manifest.validate().is_err(), "{bad}");
+        }
+        let mut duplicated = baseline.clone();
+        duplicated.assets.push("assets/styles.css".into());
+        assert!(duplicated.validate().is_err());
+
+        let mut invalid_preview = baseline.clone();
+        invalid_preview.patterns[0].preview_asset = Some("assets/icons.v2/logo.png".into());
+        assert!(invalid_preview.validate().is_err());
     }
 
     #[test]

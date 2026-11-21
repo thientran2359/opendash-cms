@@ -433,7 +433,11 @@ pub fn render_builder_with_lists_and_forms(
                             }
                         }
                         ElementContent::Known(KnownElement::PluginBlock(props)) => {
-                            match state.themes.get(&props.block_id).map(|d| d.template.as_str()) {
+                            match state
+                                .themes
+                                .get(&props.block_id)
+                                .map(|d| d.template.as_str())
+                            {
                                 Some(template_src) => {
                                     let rendered = render_plugin_block_csec(
                                         &props.block_id,
@@ -457,6 +461,18 @@ pub fn render_builder_with_lists_and_forms(
                                     ))
                                 }
                             }
+                        }
+                        // S01: these template-only nodes are recognized by the AST but
+                        // not rendered by the existing page-scoped Builder. The S02
+                        // resolver will supply their authorized content/part context.
+                        ElementContent::Known(
+                            KnownElement::ContentSlot(_) | KnownElement::TemplatePart(_),
+                        ) => {
+                            diagnostics.push(BuilderDiagnostic {
+                                node_id: element.id.clone(),
+                                code: "template_context_unavailable",
+                            });
+                            None
                         }
                         ElementContent::Known(KnownElement::Legacy(props)) => {
                             match state.themes.get(&props.block_id) {
@@ -547,7 +563,9 @@ fn render_contact_form_html(
     use opendash_core::contact::FormKind;
     let mut out = String::new();
     if is_preview {
-        out.push_str("<div class=\"builder-contact-form builder-contact-preview\"><fieldset disabled>");
+        out.push_str(
+            "<div class=\"builder-contact-form builder-contact-preview\"><fieldset disabled>",
+        );
     } else {
         let nonce = crate::auth::generate_random_token();
         out.push_str(&format!(
@@ -616,7 +634,9 @@ fn render_contact_form_html(
             "<button type=\"button\" disabled>{btn_label}</button></fieldset></div>"
         ));
     } else {
-        out.push_str(&format!("<button type=\"submit\">{btn_label}</button></form>"));
+        out.push_str(&format!(
+            "<button type=\"submit\">{btn_label}</button></form>"
+        ));
     }
     out
 }
@@ -941,28 +961,29 @@ pub fn render_plugin_block_csec(
         ctx_map.insert(k.clone(), crate::template_sec::json_to_safe_value(v));
     }
     let ctx = minijinja::Value::from(ctx_map);
-    crate::template_sec::render_csec(block_id, template_source, ctx)
-        .map_err(ApiError::bad_request)
+    crate::template_sec::render_csec(block_id, template_source, ctx).map_err(ApiError::bad_request)
 }
 
 #[cfg(test)]
 mod m6_s05_tests {
-    use std::collections::BTreeMap;
     use super::*;
     use opendash_core::builder::{
         BuilderDocument, ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps,
         RowNode, SectionNode,
     };
+    use std::collections::BTreeMap;
 
     #[test]
     fn plugin_block_csec_escapes_values_blocks_xss_and_falls_back_safely() {
         // 1. C-SEC rejects dangerous template constructs
-        assert!(render_plugin_block_csec(
-            "acme-plugin/hero",
-            "<script>alert(1)</script>",
-            &BTreeMap::new()
-        )
-        .is_err());
+        assert!(
+            render_plugin_block_csec(
+                "acme-plugin/hero",
+                "<script>alert(1)</script>",
+                &BTreeMap::new()
+            )
+            .is_err()
+        );
 
         // 2. C-SEC auto-escapes prop values
         let mut vals = BTreeMap::new();
@@ -1030,7 +1051,11 @@ mod m6_s05_tests {
             &BTreeMap::new(),
         )
         .expect("active render");
-        assert!(rendered_active.html.contains("data-block-id=\"acme-plugin/hero\""));
+        assert!(
+            rendered_active
+                .html
+                .contains("data-block-id=\"acme-plugin/hero\"")
+        );
         assert!(rendered_active.html.contains("&lt;script&gt;xss()"));
         assert!(rendered_active.html.contains("Hello"));
         assert!(rendered_active.diagnostics.is_empty());
@@ -1054,7 +1079,10 @@ mod m6_s05_tests {
         )
         .expect("disabled fallback render must not fail");
         assert!(rendered_disabled.html.contains("builder-block-unavailable"));
-        assert_eq!(rendered_disabled.diagnostics[0].code, "plugin_block_unavailable");
+        assert_eq!(
+            rendered_disabled.diagnostics[0].code,
+            "plugin_block_unavailable"
+        );
     }
 
     #[test]
@@ -1112,9 +1140,8 @@ mod m6_s05_tests {
                 out_of_range: false,
             },
         );
-        let rendered = render_builder_with_lists(
-            &state, &doc, false, &BTreeMap::new(), &lists,
-        ).unwrap();
+        let rendered =
+            render_builder_with_lists(&state, &doc, false, &BTreeMap::new(), &lists).unwrap();
         assert!(rendered.html.contains("/blog/new-slug"));
         assert!(!rendered.html.contains("/content/post/old-slug"));
         assert!(!rendered.html.contains("href=\"/content/post/hidden\""));
