@@ -38,17 +38,164 @@ fn verify_supported_values(
     if !matches!(type_key, "post" | "page") {
         return Ok(());
     }
-    for (key, feature) in [
-        ("body", ContentSupport::Editor),
-        ("featured_image", ContentSupport::FeaturedImage),
+    if values.contains_key("body")
+        && !(settings.supports(ContentSupport::Editor)
+            || settings.supports(ContentSupport::Builder))
+    {
+        return Err(ApiError::unprocessable(
+            "Không thể chỉnh sửa 'body' khi tính năng này bị tắt.",
+        ));
+    }
+    if values.contains_key("featured_image") && !settings.supports(ContentSupport::FeaturedImage) {
+        return Err(ApiError::unprocessable(
+            "Không thể chỉnh sửa 'featured_image' khi tính năng này bị tắt.",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) async fn sync_entry_body_refs_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    entry_id: i64,
+    schema: &EffectiveContentSchema,
+    values: &BTreeMap<String, Value>,
+    previous_body: Option<&str>,
+) -> ApiResult<()> {
+    if matches!(schema.base.descriptor.key.as_str(), "pattern" | "section") {
+        return Ok(());
+    }
+    sqlx::query("DELETE FROM entry_pattern_refs WHERE source_entry_id = ?")
+        .bind(entry_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("DELETE FROM entry_builder_media_refs WHERE entry_id = ?")
+        .bind(entry_id)
+        .execute(&mut *conn)
+        .await?;
+
+    let Some(body_field) = schema.effective_fields.get("body") else {
+        return Ok(());
+    };
+    if body_field.definition.field_type != opendash_core::content::ContentFieldType::RichText {
+        return Ok(());
+    }
+    let Some(raw_body) = values.get("body").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    if !opendash_core::builder_blocks::contains_blocks(raw_body) {
+        return Ok(());
+    }
+
+    let refs = opendash_core::builder_blocks::extract_block_refs_lenient(raw_body);
+    for id in refs.image_ids.iter().chain(refs.poster_image_ids.iter()) {
+        if !crate::storage::media::valid_media_id(id) {
+            return Err(ApiError::unprocessable(
+                "ID ảnh trong comment block không hợp lệ.",
+            ));
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')",
+        )
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists == 0 {
+            return Err(ApiError::unprocessable(
+                "Ảnh tham chiếu trong comment block không tồn tại trong Media Library.",
+            ));
+        }
+    }
+    for id in &refs.video_ids {
+        if !crate::storage::media::valid_media_id(id) {
+            return Err(ApiError::unprocessable(
+                "ID video trong comment block không hợp lệ.",
+            ));
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'video' AND lifecycle_state = 'active')",
+        )
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists == 0 {
+            return Err(ApiError::unprocessable(
+                "Video tham chiếu trong comment block không tồn tại trong Media Library.",
+            ));
+        }
+    }
+    if refs.pattern_ids.len() > 16 {
+        return Err(ApiError::unprocessable(
+            "Builder exceeds 16 Pattern references.",
+        ));
+    }
+    let prev_patterns = previous_body
+        .map(|b| opendash_core::builder_blocks::extract_block_refs_lenient(b).pattern_ids)
+        .unwrap_or_default();
+    let mut existing_patterns = Vec::new();
+    for &pid in &refs.pattern_ids {
+        if pid <= 0 || pid == entry_id {
+            return Err(ApiError::unprocessable(
+                "Pattern tham chiếu không hợp lệ hoặc tự tham chiếu.",
+            ));
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE id = ? AND content_type_key = 'pattern')",
+        )
+        .bind(pid)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists != 0 {
+            existing_patterns.push(pid);
+        } else if !prev_patterns.contains(&pid) {
+            return Err(ApiError::unprocessable(
+                "Pattern tham chiếu trong comment block không tồn tại.",
+            ));
+        }
+    }
+
+    let body_is_public = body_field.definition.public_exposure
+        == opendash_core::content::PublicExposure::Public
+        && body_field.definition.min_view_role == FieldRole::Editor;
+    if !body_is_public {
+        return Ok(());
+    }
+
+    for pid in existing_patterns {
+        sqlx::query(
+            "INSERT INTO entry_pattern_refs(source_entry_id, target_pattern_id) VALUES (?, ?)",
+        )
+        .bind(entry_id)
+        .bind(pid)
+        .execute(&mut *conn)
+        .await?;
+    }
+    for (role, ids) in [
+        ("image", &refs.image_ids),
+        ("video", &refs.video_ids),
+        ("poster", &refs.poster_image_ids),
     ] {
-        if values.contains_key(key) && !settings.supports(feature) {
-            return Err(ApiError::unprocessable(format!(
-                "Không thể chỉnh sửa '{key}' khi tính năng này bị tắt."
-            )));
+        for media_id in ids {
+            sqlx::query(
+                "INSERT INTO entry_builder_media_refs(entry_id, media_id, ref_role) VALUES (?, ?, ?)",
+            )
+            .bind(entry_id)
+            .bind(media_id)
+            .bind(role)
+            .execute(&mut *conn)
+            .await?;
         }
     }
     Ok(())
+}
+
+fn extract_body_from_values_json(values_json: &str) -> Option<String> {
+    serde_json::from_str::<BTreeMap<String, Value>>(values_json)
+        .ok()
+        .and_then(|map| {
+            map.get("body")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
 }
 
 async fn current_settings_in_tx(
@@ -736,8 +883,12 @@ pub async fn create_entry_with_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
-    let settings = current_settings_in_tx(&mut tx, type_key).await?;
-    verify_supported_values(type_key, &input.values, &settings)?;
+    let effective =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let settings = &effective.base.descriptor.settings;
+    verify_supported_values(type_key, &input.values, settings)?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
@@ -773,6 +924,7 @@ pub async fn create_entry_with_fence(
     if let Some(ids) = &input.term_ids {
         replace_term_ids(&mut tx, id, ids).await?;
     }
+    sync_entry_body_refs_in_conn(&mut *tx, id, &effective, &input.values, None).await?;
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -822,19 +974,24 @@ pub async fn update_entry_with_fence(
 ) -> ApiResult<ContentEntryRecord> {
     forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
-    let settings = current_settings_in_tx(&mut tx, type_key).await?;
-    verify_supported_values(type_key, &input.values, &settings)?;
+    let effective =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let settings = &effective.base.descriptor.settings;
+    verify_supported_values(type_key, &input.values, settings)?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let old_slug: String = sqlx::query_scalar(
-        "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let (old_slug, old_values_json): (String, String) = sqlx::query_as(
+        "SELECT slug, values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
+    let previous_body = extract_body_from_values_json(&old_values_json);
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id))
         .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
@@ -869,6 +1026,14 @@ pub async fn update_entry_with_fence(
             if let Some(ids) = &input.term_ids {
                 replace_term_ids(&mut tx, id, ids).await?;
             }
+            sync_entry_body_refs_in_conn(
+                &mut *tx,
+                id,
+                &effective,
+                &input.values,
+                previous_body.as_deref(),
+            )
+            .await?;
             crate::storage::seo::record_slug_change_redirect_in_tx(
                 &mut tx,
                 id,
@@ -973,6 +1138,7 @@ pub async fn create_entry_with_schema_fence(
     if let Some(ids) = &input.term_ids {
         replace_term_ids(&mut tx, id, ids).await?;
     }
+    sync_entry_body_refs_in_conn(&mut *tx, id, &effective, &input.values, None).await?;
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -1002,13 +1168,14 @@ pub async fn update_entry_with_schema_fence(
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let old_slug: String = sqlx::query_scalar(
-        "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let (old_slug, old_values_json): (String, String) = sqlx::query_as(
+        "SELECT slug, values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
+    let previous_body = extract_body_from_values_json(&old_values_json);
     crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id))
         .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
@@ -1043,6 +1210,14 @@ pub async fn update_entry_with_schema_fence(
             if let Some(ids) = &input.term_ids {
                 replace_term_ids(&mut tx, id, ids).await?;
             }
+            sync_entry_body_refs_in_conn(
+                &mut *tx,
+                id,
+                &effective,
+                &input.values,
+                previous_body.as_deref(),
+            )
+            .await?;
             crate::storage::seo::record_slug_change_redirect_in_tx(
                 &mut tx,
                 id,
@@ -1403,10 +1578,6 @@ pub async fn prepare_composite_entry_save(
         if matches!(input.content_mode, PatchField::Clear) {
             return Err(ApiError::bad_request("content_mode không được null."));
         }
-        if entry_id.is_none() && matches!(input.content_mode, PatchField::Set(ContentMode::Builder))
-        {
-            return Err(ApiError::unprocessable("Cần lưu tài liệu Builder trước."));
-        }
     }
     for patch in [&input.page_layout_key, &input.custom_template_key] {
         if let PatchField::Set(key) = patch {
@@ -1512,17 +1683,6 @@ pub async fn commit_composite_entry_save(
                     "Builder chưa được bật cho loại nội dung này.",
                 ));
             }
-            if *mode == ContentMode::Builder {
-                let exists: i64 = sqlx::query_scalar(
-                    "SELECT EXISTS(SELECT 1 FROM entry_builder_documents WHERE entry_id = ?)",
-                )
-                .bind(entry_id)
-                .fetch_one(&mut *tx)
-                .await?;
-                if exists == 0 {
-                    return Err(ApiError::unprocessable("Cần lưu tài liệu Builder trước."));
-                }
-            }
             Some(mode.as_str())
         }
     };
@@ -1563,7 +1723,7 @@ pub async fn commit_composite_entry_save(
         _ => None,
     };
 
-    let saved_id = match entry_id {
+    let (saved_id, previous_body) = match entry_id {
         None => {
             // Migration 0008 deliberately rejects a directly published INSERT
             // for the built-in types. Keep that security trigger intact and
@@ -1575,14 +1735,15 @@ pub async fn commit_composite_entry_save(
                 "published"
             };
             let res = sqlx::query(
-                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, page_layout_key, custom_template_key, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
+                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
             )
             .bind(type_key)
             .bind(&plan.merged_input.slug)
             .bind(&plan.merged_input.title)
             .bind(&values_json)
             .bind(status_clause)
+            .bind(requested_mode)
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
             .bind(custom_created_at.as_deref())
@@ -1608,18 +1769,19 @@ pub async fn commit_composite_entry_save(
                 .execute(&mut *tx)
                 .await?;
             }
-            new_id
+            (new_id, None)
         }
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
             current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
-            let old_slug: String = sqlx::query_scalar(
-                "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+            let (old_slug, old_values_json): (String, String) = sqlx::query_as(
+                "SELECT slug, values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
             )
             .bind(type_key)
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
+            let prev_body = extract_body_from_values_json(&old_values_json);
             let res = sqlx::query(
                 "UPDATE content_entries
                  SET slug = ?, title = ?, values_json = ?,
@@ -1665,13 +1827,21 @@ pub async fn commit_composite_entry_save(
                 &plan.merged_input.slug,
             )
             .await?;
-            id
+            (id, prev_body)
         }
     };
 
     if let Some(ids) = &plan.merged_input.term_ids {
         replace_term_ids(&mut tx, saved_id, ids).await?;
     }
+    sync_entry_body_refs_in_conn(
+        &mut *tx,
+        saved_id,
+        &effective,
+        &plan.merged_input.values,
+        previous_body.as_deref(),
+    )
+    .await?;
 
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at

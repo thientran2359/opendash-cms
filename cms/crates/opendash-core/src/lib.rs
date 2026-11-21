@@ -1,6 +1,7 @@
 pub mod admin_extensions;
 pub mod backup;
 pub mod builder;
+pub mod builder_blocks;
 pub mod contact;
 pub mod content;
 pub mod hooks;

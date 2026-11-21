@@ -282,7 +282,15 @@ fn extract_field_value(
         return Err(BindingResult::Unavailable);
     };
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => {
+            if field.field_type == ContentFieldType::RichText
+                && opendash_core::builder_blocks::contains_blocks(s)
+            {
+                Ok(opendash_core::builder_blocks::extract_visible_text(s))
+            } else {
+                Ok(s.clone())
+            }
+        }
         Value::Number(n) if target == BindingTarget::Text => Ok(n.to_string()),
         Value::Bool(v) if target == BindingTarget::Text => Ok(v.to_string()),
         _ => Err(BindingResult::Incompatible),

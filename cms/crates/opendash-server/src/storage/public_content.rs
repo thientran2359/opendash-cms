@@ -89,17 +89,26 @@ pub async fn load_entry_render_snapshot(
     use super::{builder, builder_binding, content, overrides, theme};
     use crate::error::ApiError;
     use opendash_core::{
-        builder::BuilderDocument,
-        content::{ContentMode, ContentSupport},
+        content::{ContentFieldType, ContentSupport, FieldRole, PublicExposure},
+        registry::{DeclarationState, ProviderStatus},
         theme::TemplateCandidateKind,
     };
     let mut tx = db.begin().await?;
     let Some(entry) = get_published_by_id_in_tx(&mut tx, id).await? else {
         return Ok(None);
     };
-    let schema = content::load_content_type_definition_in_conn(&mut tx, &entry.content_type_key)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let mut schema =
+        content::load_content_type_definition_in_conn(&mut tx, &entry.content_type_key)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let effective =
+        content::load_effective_content_schema_in_tx(&mut tx, &entry.content_type_key).await?;
+    if let Some(eff) = &effective
+        && !schema.fields.iter().any(|f| f.key == "body")
+        && let Some(body_fe) = eff.effective_fields.get("body")
+    {
+        schema.fields.push(body_fe.definition.clone());
+    }
     let active = match themes_root {
         Some(root) => theme::load_active_theme_v3_in_conn(&mut tx, root).await?,
         None => None,
@@ -152,39 +161,39 @@ pub async fn load_entry_render_snapshot(
         active.as_ref().map(|v| &v.page_layouts),
     )
     .await?;
-    let body = if entry.content_mode == ContentMode::Builder
+    let body_allows_public_builder = effective.as_ref().is_some_and(|eff| {
+        eff.base.status == ProviderStatus::Active
+            && eff.base.declaration_state == DeclarationState::Declared
+            && eff.effective_fields.get("body").is_some_and(|fe| {
+                fe.definition.field_type == ContentFieldType::RichText
+                    && fe.definition.public_exposure == PublicExposure::Public
+                    && fe.definition.min_view_role == FieldRole::Editor
+            })
+    });
+    let raw_body = entry.values.get("body").and_then(serde_json::Value::as_str);
+    let body = if !matches!(entry.content_type_key.as_str(), "pattern" | "section")
         && schema.settings.supports(ContentSupport::Builder)
+        && body_allows_public_builder
+        && raw_body.is_some_and(opendash_core::builder_blocks::contains_blocks)
     {
-        let raw: Option<String> = sqlx::query_scalar(
-            "SELECT d.document_json FROM entry_builder_documents d
-             JOIN content_types t ON t.key = ? AND t.provider_status = 'active'
-                                  AND t.declaration_state = 'declared'
-             WHERE d.entry_id = ?",
+        let doc =
+            opendash_core::builder_blocks::parse_blocks_lenient_or_recover(raw_body.unwrap_or(""))
+                .document;
+        let state = builder::read_home_tx(&mut tx).await?;
+        let bindings = builder_binding::resolve_in_tx_with_route(
+            &mut tx,
+            &doc,
+            false,
+            Some((&entry.content_type_key, &entry.slug)),
         )
-        .bind(&entry.content_type_key)
-        .bind(entry.id)
-        .fetch_optional(&mut *tx)
         .await?;
-        if let Some(doc) = raw.and_then(|raw| BuilderDocument::from_json(raw.as_bytes()).ok()) {
-            let state = builder::read_home_tx(&mut tx).await?;
-            let bindings = builder_binding::resolve_in_tx_with_route(
-                &mut tx,
-                &doc,
-                false,
-                Some((&entry.content_type_key, &entry.slug)),
-            )
-            .await?;
-            let lists =
-                builder::resolve_lists_in_tx(&mut tx, &doc, &std::collections::BTreeMap::new())
-                    .await?;
-            let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
-            let patterns = builder::resolve_patterns_in_tx(&mut tx, &state, &doc, false).await?;
-            Some(crate::page::render_builder_with_patterns(
-                &state, &doc, false, &bindings, &lists, &forms, None, &patterns, false,
-            )?)
-        } else {
-            None
-        }
+        let lists =
+            builder::resolve_lists_in_tx(&mut tx, &doc, &std::collections::BTreeMap::new()).await?;
+        let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
+        let patterns = builder::resolve_patterns_in_tx(&mut tx, &state, &doc, false).await?;
+        Some(crate::page::render_builder_with_patterns(
+            &state, &doc, false, &bindings, &lists, &forms, None, &patterns, false,
+        )?)
     } else {
         None
     };
@@ -620,11 +629,10 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            LIMIT 1
          ) OR EXISTS (
            SELECT 1 FROM entry_builder_media_refs AS r
-           JOIN entry_builder_documents AS doc ON doc.entry_id = r.entry_id
            JOIN content_entries AS e ON e.id = r.entry_id
            JOIN content_types AS t ON t.key = e.content_type_key
-           WHERE r.media_id = ? AND e.content_type_key != 'pattern'
-             AND e.publication_status = 'published' AND e.content_mode = 'builder'
+           WHERE r.media_id = ? AND e.content_type_key NOT IN ('pattern', 'section')
+             AND e.publication_status = 'published'
              AND t.provider_status = 'active'
              AND t.declaration_state = 'declared'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
@@ -637,9 +645,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            JOIN entry_pattern_refs AS pref ON pref.target_pattern_id = r.entry_id
            JOIN content_entries AS e ON e.id = pref.source_entry_id
            JOIN content_types AS t ON t.key = e.content_type_key
-           JOIN entry_builder_documents AS doc ON doc.entry_id = e.id
-           WHERE r.media_id = ? AND e.content_type_key != 'pattern'
-             AND e.publication_status = 'published' AND e.content_mode = 'builder'
+           WHERE r.media_id = ? AND e.content_type_key NOT IN ('pattern', 'section')
+             AND e.publication_status = 'published'
              AND t.provider_status = 'active' AND t.declaration_state = 'declared'
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
              AND EXISTS (SELECT 1 FROM json_each(t.definition_json, '$.settings.supports') WHERE value = 'builder')
@@ -1466,7 +1473,8 @@ mod m5_public_context_tests {
     }
 
     #[tokio::test]
-    async fn s01_generic_builder_body_and_media_follow_mode_capability_and_publication() {
+    async fn s01_generic_builder_body_and_media_follow_capability_and_publication_without_mode_gate()
+     {
         let db = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
@@ -1480,16 +1488,8 @@ mod m5_public_context_tests {
         .execute(&db)
         .await
         .unwrap();
-        let entry_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
-             VALUES('project', 's01-builder', 'Builder project', '{}', 'published', 'builder')",
-        )
-        .execute(&db)
-        .await
-        .unwrap()
-        .last_insert_rowid();
         let media_id = "7".repeat(64);
-        let document = serde_json::json!({
+        let document: opendash_core::builder::BuilderDocument = serde_json::from_value(serde_json::json!({
             "schema_version": 1,
             "sections": [{"id":"section", "children":[{"id":"row", "children":[
                 {"id":"column", "children":[
@@ -1502,15 +1502,20 @@ mod m5_public_context_tests {
                         "props":{"media_id":media_id,"alt":"Project picture"}}
                 ]}
             ]}]}]
-        });
-        sqlx::query(
-            "INSERT INTO entry_builder_documents(entry_id, document_json, updated_at) VALUES(?, ?, datetime('now'))",
+        }))
+        .unwrap();
+        let blocks =
+            opendash_core::builder_blocks::serialize_builder_document_to_blocks(&document).unwrap();
+        let values_json = serde_json::json!({ "body": blocks }).to_string();
+        let entry_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
+             VALUES('project', 's01-builder', 'Builder project', ?, 'published', 'builder')",
         )
-        .bind(entry_id)
-        .bind(document.to_string())
+        .bind(&values_json)
         .execute(&db)
         .await
-        .unwrap();
+        .unwrap()
+        .last_insert_rowid();
         sqlx::query(
             "INSERT INTO media_assets(id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height)
              VALUES(?, 'image', 'builder-test.png', 'image/png', 'png', 128, 10, 10, 10, 10)",
@@ -1538,27 +1543,28 @@ mod m5_public_context_tests {
         assert!(!body.contains("Unresolved title"));
         assert!(media_is_referenced(&db, &media_id).await.unwrap());
 
-        // Editor mode must leave the saved document intact while revoking
-        // its public rendering and media grant immediately.
+        // Unified `values_json["body"]` renders Builder blocks & grants public media ACL
+        // regardless of `content_mode` preference (`editor` vs `builder`).
         sqlx::query("UPDATE content_entries SET content_mode = 'editor' WHERE id = ?")
             .bind(entry_id)
             .execute(&db)
             .await
             .unwrap();
-        assert!(
-            load_entry_render_snapshot(&db, entry_id, None)
-                .await
-                .unwrap()
-                .unwrap()
-                .body
-                .is_none()
-        );
-        assert!(!media_is_referenced(&db, &media_id).await.unwrap());
-        sqlx::query("UPDATE content_entries SET content_mode = 'builder' WHERE id = ?")
-            .bind(entry_id)
-            .execute(&db)
+        let rendered_in_editor_mode = load_entry_render_snapshot(&db, entry_id, None)
             .await
+            .unwrap()
             .unwrap();
+        assert!(
+            rendered_in_editor_mode
+                .body
+                .unwrap()
+                .html
+                .contains("S01 generic project body")
+        );
+        assert!(media_is_referenced(&db, &media_id).await.unwrap());
+
+        // Disabling ContentSupport::Builder revokes Builder rendering and public media grant
+        // immediately while keeping `values_json["body"]` intact.
         sqlx::query(
             "UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.supports', json('[\"editor\"]')) WHERE key = 'project'",
         )
@@ -1574,16 +1580,15 @@ mod m5_public_context_tests {
                 .is_none()
         );
         assert!(!media_is_referenced(&db, &media_id).await.unwrap());
-        let saved: String = sqlx::query_scalar(
-            "SELECT document_json FROM entry_builder_documents WHERE entry_id = ?",
-        )
-        .bind(entry_id)
-        .fetch_one(&db)
-        .await
-        .unwrap();
+        let saved_values: String =
+            sqlx::query_scalar("SELECT values_json FROM content_entries WHERE id = ?")
+                .bind(entry_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
         assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&saved).unwrap(),
-            document
+            serde_json::from_str::<serde_json::Value>(&saved_values).unwrap()["body"],
+            blocks
         );
 
         sqlx::query("UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.supports', json('[\"editor\",\"builder\"]')) WHERE key = 'project'")
@@ -1600,6 +1605,111 @@ mod m5_public_context_tests {
                 .unwrap()
                 .is_none()
         );
+        assert!(!media_is_referenced(&db, &media_id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn s01_one_hop_pattern_acl_and_private_cpt_follow_unified_body_without_content_mode() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        sqlx::query(
+            r#"INSERT INTO content_types(key, definition_json, owner_kind)
+                VALUES('service', '{"key":"service","label":"Service","fields":[],"settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor","builder"]}}', 'user')"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let media_id = "9".repeat(64);
+        sqlx::query(
+            "INSERT INTO media_assets(id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height)
+             VALUES(?, 'image', 'pattern-img.png', 'image/png', 'png', 128, 10, 10, 10, 10)",
+        )
+        .bind(&media_id)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let pattern_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
+             VALUES('pattern', 'hero-pat', 'Hero Pattern', '{}', 'draft', 'builder')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let pat_doc = serde_json::json!({
+            "schema_version": 1,
+            "sections": [{"id":"s1","children":[{"id":"r1","children":[{"id":"c1","children":[
+                {"id":"img1","type":"core/image","props":{"media_id":media_id,"alt":"Pattern photo"}}
+            ]}]}]}]
+        });
+        sqlx::query(
+            "INSERT INTO entry_builder_documents(entry_id, document_json, updated_at) VALUES(?, ?, datetime('now'))",
+        )
+        .bind(pattern_id)
+        .bind(pat_doc.to_string())
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO entry_builder_media_refs(entry_id, media_id, ref_role) VALUES(?, ?, 'image')",
+        )
+        .bind(pattern_id)
+        .bind(&media_id)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let blocks = format!(
+            "<!-- od:section {{\"id\":\"sec-1\"}} -->\n\
+             <!-- od:row {{\"id\":\"row-1\"}} -->\n\
+             <!-- od:column {{\"id\":\"col-1\"}} -->\n\
+             <!-- od:pattern_ref {{\"id\":\"pat-1\",\"pattern_id\":{pattern_id}}} /-->\n\
+             <!-- /od:column -->\n\
+             <!-- /od:row -->\n\
+             <!-- /od:section -->"
+        );
+        let parent_id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
+             VALUES('service', 'svc-a', 'Service A', ?, 'draft', 'editor')",
+        )
+        .bind(serde_json::json!({ "body": blocks }).to_string())
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query(
+            "INSERT INTO entry_pattern_refs(source_entry_id, target_pattern_id) VALUES(?, ?)",
+        )
+        .bind(parent_id)
+        .bind(pattern_id)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        // Draft parent keeps pattern media private.
+        assert!(!media_is_referenced(&db, &media_id).await.unwrap());
+
+        // Published public Builder parent unlocks 1-hop pattern media even with `content_mode = 'editor'`.
+        sqlx::query("UPDATE content_entries SET publication_status = 'published' WHERE id = ?")
+            .bind(parent_id)
+            .execute(&db)
+            .await
+            .unwrap();
+        assert!(media_is_referenced(&db, &media_id).await.unwrap());
+
+        // Private CPT (`public = false`) hides 1-hop pattern media again.
+        sqlx::query(
+            "UPDATE content_types SET definition_json = json_set(definition_json, '$.settings.public', json('false')) WHERE key = 'service'",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
         assert!(!media_is_referenced(&db, &media_id).await.unwrap());
     }
 }
