@@ -153,6 +153,9 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const templateRole = params.get('template') ?? undefined;
     const typeKey = params.get('type') ?? undefined;
     const scopedPage = templateRole === 'page' && typeKey === 'page' && entryId !== undefined;
+    // Section keeps its existing private Admin-only protocol until Spec 2 S02.
+    const scopedEntry = templateRole === 'entry' && !!typeKey && typeKey !== 'section'
+      && /^[a-z][a-z0-9_]{0,63}$/.test(typeKey) && entryId !== undefined;
     const scopedSection = templateRole === 'section' && typeKey === 'section' && entryId !== undefined;
     const noScope = !entryParam && !templateRole && !typeKey && !queryPart;
     const validGlobal = !entryParam && templateRole !== 'page' &&
@@ -162,7 +165,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const validAdminScopedSingle = templateRole === 'single' && !!typeKey && entryId !== undefined;
     return {
       view: 'builder',
-      sub: scopedPage || scopedSection || noScope || validGlobal || validAdminScopedSingle ? 'builder' : 'invalid',
+      sub: scopedEntry || scopedPage || scopedSection || noScope || validGlobal || validAdminScopedSingle ? 'builder' : 'invalid',
       templateRole,
       typeKey,
       entryId,
@@ -211,7 +214,9 @@ export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
     return false;
   }
   if (route.view === 'builder') {
-    return ((route.templateRole === 'page' && route.typeKey === 'page')
+    return ((route.templateRole === 'entry' && !!route.typeKey && route.typeKey !== 'section'
+      && /^[a-z][a-z0-9_]{0,63}$/.test(route.typeKey))
+      || (route.templateRole === 'page' && route.typeKey === 'page')
       || (route.templateRole === 'section' && route.typeKey === 'section'))
       && Number.isSafeInteger(route.entryId) && (route.entryId ?? 0) > 0;
   }

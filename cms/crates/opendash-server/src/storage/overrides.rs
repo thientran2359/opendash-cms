@@ -7,7 +7,9 @@ use std::{
 
 use opendash_core::{
     builder::{BuilderDocument, ElementContent, KnownElement},
-    content::{ContentMode, ContentTypeDefinition, FieldRole, valid_content_type_key},
+    content::{
+        ContentMode, ContentSupport, ContentTypeDefinition, FieldRole, valid_content_type_key,
+    },
     registry::{DeclarationState, ProviderStatus},
     theme::{TemplateCandidate, TemplateCandidateKind},
 };
@@ -1420,9 +1422,17 @@ pub async fn preview_typed_override(
         let view = content_render::authenticated_preview_view(record.clone(), definition);
         theme_context["entry"] = serde_json::to_value(&view)?;
         theme_context["content_type"] = serde_json::to_value(definition)?;
-        if record.content_mode == ContentMode::Builder && record.content_type_key == "page" {
-            if let Some(mut rendered) =
-                builder::preview_saved_page_body_in_tx(&mut tx, actor, record.id).await?
+        if record.content_mode == ContentMode::Builder
+            && definition.settings.supports(ContentSupport::Builder)
+            && record.content_type_key != "section"
+        {
+            if let Some(mut rendered) = builder::preview_saved_page_body_in_tx(
+                &mut tx,
+                actor,
+                &record.content_type_key,
+                record.id,
+            )
+            .await?
             {
                 body_diagnostics.append(&mut rendered.diagnostics);
                 Some(rendered.html)

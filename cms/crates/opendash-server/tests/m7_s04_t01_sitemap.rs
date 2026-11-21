@@ -589,11 +589,11 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
     let pool = SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
         .await
         .unwrap();
-    // Currently indexable routes: published Reading Homepage '/' (1),
-    // '/content/post' (1) and '/content/page' (1) = 3.
-    // Insert 4997 more -> exactly 5000.
+    // EGM S01 migration 0043 makes the untouched Core Page non-archived.
+    // Currently indexable routes: published Reading Homepage '/' (1)
+    // and '/content/post' (1) = 2. Insert 4998 more -> exactly 5000.
     let mut tx = pool.begin().await.unwrap();
-    for i in 1..=4997 {
+    for i in 1..=4998 {
         sqlx::query(
             "INSERT INTO content_entries (content_type_key, slug, title, publication_status, values_json, version)
              VALUES ('post', ?1, ?2, 'draft', '{}', 1)",
@@ -635,13 +635,13 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
     // Insert 1 more -> 5001 routes -> 2 parts.
     sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, publication_status, values_json, version)
-         VALUES ('post', 'bulk-item-4998', 'Bulk 4998', 'draft', '{}', 1)",
+         VALUES ('post', 'bulk-item-4999', 'Bulk 4999', 'draft', '{}', 1)",
     )
     .execute(&pool)
     .await
     .unwrap();
     sqlx::query(
-        "UPDATE content_entries SET publication_status = 'published' WHERE slug = 'bulk-item-4998'",
+        "UPDATE content_entries SET publication_status = 'published' WHERE slug = 'bulk-item-4999'",
     )
     .execute(&pool)
     .await

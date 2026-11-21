@@ -883,7 +883,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             setStatusNote('Vui lòng Lưu nội dung trước khi mở Visual Builder.');
             return;
           }
-          onNavigateHash(`#/builder?template=entry&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
+          // Preserve the existing Page Builder deep link. Other opted-in CPTs
+          // use the new generic entry target without changing Page bookmarks.
+          const target = typeKey === 'page' ? 'page' : 'entry';
+          onNavigateHash(`#/builder?template=${target}&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
         }}
       />
       </div>

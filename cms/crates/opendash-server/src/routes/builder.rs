@@ -7,7 +7,10 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use opendash_core::builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES};
+use opendash_core::{
+    builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES},
+    content::valid_content_type_key,
+};
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
@@ -174,11 +177,9 @@ fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocum
     BuilderDocument::from_json(bytes).map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
-fn require_page_builder_type(type_key: &str) -> ApiResult<()> {
-    if type_key != "page" {
-        return Err(ApiError::forbidden(
-            "Builder is available only for Page entries.",
-        ));
+fn validate_entry_builder_type(type_key: &str) -> ApiResult<()> {
+    if !valid_content_type_key(type_key) {
+        return Err(ApiError::bad_request("Content type key không hợp lệ."));
     }
     Ok(())
 }
@@ -208,7 +209,7 @@ pub async fn entry_builder_get(
     Path((type_key, id)): Path<(String, i64)>,
 ) -> ApiResult<Response> {
     let actor = require_session(&headers, &db).await?;
-    require_page_builder_type(&type_key)?;
+    validate_entry_builder_type(&type_key)?;
     let result = builder_storage::read_entry_builder(&db, &actor, &type_key, id).await?;
     Ok(entry_builder_response(result))
 }
@@ -222,7 +223,7 @@ pub async fn entry_builder_put(
     bytes: Bytes,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    require_page_builder_type(&type_key)?;
+    validate_entry_builder_type(&type_key)?;
     let expected_version = parse_builder_if_match(&headers)?;
     let document = decode_document(&headers, &bytes)?;
     entry_builder_mutation_response(
@@ -247,10 +248,10 @@ pub async fn entry_builder_preview(
     bytes: Bytes,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    require_page_builder_type(&type_key)?;
+    validate_entry_builder_type(&type_key)?;
     if raw.as_deref().is_some_and(|query| !query.is_empty()) {
         return Err(ApiError::bad_request(
-            "Page Builder preview target is fixed by the path.",
+            "Entry Builder preview target is fixed by the path.",
         ));
     }
     let document = decode_document(&headers, &bytes)?;
@@ -285,7 +286,7 @@ pub async fn entry_builder_reset(
     bytes: Bytes,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    require_page_builder_type(&type_key)?;
+    validate_entry_builder_type(&type_key)?;
     let expected_version = parse_builder_if_match(&headers)?;
     require_builder_json(&headers, &bytes)?;
     let input: EntryBuilderReset =
