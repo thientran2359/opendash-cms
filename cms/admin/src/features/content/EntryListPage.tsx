@@ -433,14 +433,90 @@ export function EntryListPage({
       ? 'asc' : 'desc';
     updateFilter({ sort: column, order: nextOrder });
   };
+  const deleteSingleRow = async (row: EntryTableRow) => {
+    if (bulkBusyRef.current || !csrfToken) return;
+    if (!window.confirm(`Xóa vĩnh viễn "${row.title}" (#${row.id})? Hành động này không thể hoàn tác.`)) return;
+    const startingScope = scope;
+    bulkBusyRef.current = true;
+    setBulkBusy(true);
+    try {
+      await deleteContentEntry(typeKey, row.id, row.version, csrfToken);
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      setSelected(prev => {
+        const next = new Set(prev);
+        next.delete(row.id);
+        return next;
+      });
+      setRetry(prev => prev + 1);
+    } catch (cause) {
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      if (cause instanceof ApiClientError && cause.status === 401) {
+        onApiError(cause, 'Phiên đăng nhập hết hạn khi xóa mục.');
+      } else {
+        setBulkResults([{ id: row.id, message: `#${row.id}: ${readableError(cause)}`, ok: false }]);
+      }
+    } finally {
+      bulkBusyRef.current = false;
+      if (aliveRef.current) setBulkBusy(false);
+    }
+  };
+
   const editSuffix = queryHash.includes('?') ? queryHash.slice(queryHash.indexOf('?')) : '';
-  const namesFor = (row: EntryTableRow, kind: string) => {
-    if (!row.term_ids.length) return '—';
-    if (!resolved) return 'Đang tải…';
-    const names = row.term_ids.map(id => resolved.labels.get(id))
-      .filter((term): term is TaxonomyTermLabel => term?.kind === kind)
-      .map(term => term.name);
-    return names.join(', ') || (resolved.failed ? 'Không tải được' : '—');
+  const renderTermsCell = (row: EntryTableRow, kind: string) => {
+    if (!row.term_ids.length) return <span className="text-zinc-400">—</span>;
+    if (!resolved) return <span className="text-xs text-zinc-400">Đang tải…</span>;
+    const matched = row.term_ids
+      .map(id => {
+        const term = resolved.labels.get(id);
+        return term?.kind === kind ? { id, name: term.name } : null;
+      })
+      .filter((item): item is { id: number; name: string } => item !== null);
+    if (!matched.length) {
+      return <span className="text-zinc-400">{resolved.failed ? 'Không tải được' : '—'}</span>;
+    }
+    return (
+      <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-0.5">
+        {matched.map((term, idx) => (
+          <span key={term.id} className="inline-flex items-center">
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => {
+                if (kind === 'category') {
+                  updateFilter({
+                    category_id: term.id,
+                    taxonomy_key: undefined,
+                    term_id: undefined,
+                    include_descendants: false,
+                  });
+                } else if (kind === 'tag') {
+                  updateFilter({
+                    tag_id: term.id,
+                    taxonomy_key: undefined,
+                    term_id: undefined,
+                    include_descendants: Boolean(filters.category_id && filters.include_descendants),
+                  });
+                } else {
+                  setTaxonomyChoice(kind);
+                  updateFilter({
+                    taxonomy_key: kind,
+                    term_id: term.id,
+                    category_id: undefined,
+                    tag_id: undefined,
+                    include_descendants: false,
+                  });
+                }
+              }}
+              className="text-left text-zinc-700 hover:text-od-accent hover:underline disabled:opacity-50"
+              title={`Lọc theo ${term.name}`}
+            >
+              {term.name}
+            </button>
+            {idx < matched.length - 1 && <span className="text-zinc-400">,</span>}
+          </span>
+        ))}
+      </span>
+    );
   };
   const selectedOptionLabel = (kind: string, id: number): string => {
     const term = resolved?.labels.get(id);
@@ -506,9 +582,9 @@ export function EntryListPage({
               const q = searchInput.trim().slice(0, 200);
               updateFilter({ q: q || undefined });
             }}>
-            <label htmlFor={`entry-table-search-${typeKey}`} className="min-w-0 flex-1 text-xs font-medium text-zinc-600">
-              Tìm tiêu đề hoặc slug
-              <input id={`entry-table-search-${typeKey}`} type="search" className={`${control} mt-1 block w-full`}
+            <label htmlFor={`entry-table-search-${typeKey}`} className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
+              <span>Tìm tiêu đề hoặc slug</span>
+              <input id={`entry-table-search-${typeKey}`} type="search" className={`${control} w-full`}
                 value={searchInput} maxLength={200} disabled={bulkBusy}
                 onChange={event => setSearchInput(event.target.value)}
                 placeholder="Nhập từ khóa…" />
@@ -751,20 +827,20 @@ export function EntryListPage({
                   )}
                 </td>
                 <td className="break-words px-3 py-2.5">
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="leading-snug">
                     <button
                       type="button"
                       disabled={bulkBusy}
                       onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
-                      className="text-left text-sm font-semibold text-zinc-950 hover:text-od-accent"
+                      className="inline text-left text-sm font-semibold text-zinc-950 hover:text-od-accent"
                     >
                       {row.title}
                     </button>
-                    <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-zinc-500">
+                    <span className="ml-1.5 inline-block align-middle rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-zinc-500">
                       #{row.id}
                     </span>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                     <button
                       type="button"
                       className="font-medium text-od-accent hover:underline"
@@ -802,8 +878,20 @@ export function EntryListPage({
                         </a>
                       </>
                     )}
-                    <span className="text-zinc-300" aria-hidden="true">·</span>
-                    <span className="break-all font-mono text-[11px] text-zinc-400">/{row.slug}</span>
+                    {csrfToken && (
+                      <>
+                        <span className="text-zinc-300" aria-hidden="true">·</span>
+                        <button
+                          type="button"
+                          className="font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
+                          disabled={bulkBusy}
+                          aria-label={`Xóa ${row.title}, ID ${row.id}`}
+                          onClick={() => void deleteSingleRow(row)}
+                        >
+                          Xóa
+                        </button>
+                      </>
+                    )}
                   </div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5">
@@ -811,9 +899,9 @@ export function EntryListPage({
                     {row.publication_status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
                   </AdminBadge>
                 </td>
-                {terms?.categoryEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{namesFor(row, 'category')}</td>}
-                {terms?.tagEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{namesFor(row, 'tag')}</td>}
-                {customDefinitions.map(def => <td key={def.key} className="break-words px-3 py-2.5 text-zinc-700">{namesFor(row, def.key)}</td>)}
+                {terms?.categoryEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'category')}</td>}
+                {terms?.tagEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'tag')}</td>}
+                {customDefinitions.map(def => <td key={def.key} className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, def.key)}</td>)}
                 {providerColumns.map(column => <td key={column.key} className="break-words px-3 py-2.5">
                   <AdminColumnCell column={column} row={row} busy={providerBusy || bulkBusy}
                     onRun={(col, entry) => void performProviderAction(col, entry)} />

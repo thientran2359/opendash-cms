@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AuthUser, PluginSummary, type Role } from './types.ts';
 import * as api from './api/index.ts';
 import { AdminShell, isRouteAllowed, parseAdminRoute, type ParsedRoute } from './shell/AdminShell.tsx';
-import { listContentTypes } from './api/content.ts';
+import { getEffectiveContentTypeTaxonomies, listContentTypes } from './api/content.ts';
+import { listTaxonomyDefinitions } from './api/taxonomy.ts';
 import type { OwnedContentType } from './features/content/types.ts';
 import { ContentTypeSchemaSettings } from './features/content/ContentTypeSchemaSettings.tsx';
 import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
@@ -72,6 +73,7 @@ export const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
   const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
+  const [cptTaxonomies, setCptTaxonomies] = useState<Record<string, Array<{ key: string; label: string }>>>({});
   const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
   const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
   const siteInstanceIdRef = useRef(siteInstanceId);
@@ -148,8 +150,26 @@ export const App: React.FC = () => {
   // The existing editors stay mounted in AdminShell across route changes.
   const loadCptTypes = useCallback(async () => {
     try {
-      const list = await listContentTypes();
+      const [list, definitions] = await Promise.all([
+        listContentTypes(),
+        listTaxonomyDefinitions().catch(() => []),
+      ]);
       setCptTypes(list);
+      const defMap = new Map(definitions.map(def => [def.key, def]));
+      const customTypes = list.filter(
+        ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section',
+      );
+      const entries = await Promise.all(
+        customTypes.map(async ct => {
+          const keys = await getEffectiveContentTypeTaxonomies(ct.descriptor.key).catch(() => []);
+          const items = keys.map(key => ({
+            key,
+            label: key === 'category' ? 'Chuyên mục' : key === 'tag' ? 'Thẻ' : (defMap.get(key)?.label ?? key),
+          }));
+          return [ct.descriptor.key, items] as const;
+        }),
+      );
+      setCptTaxonomies(Object.fromEntries(entries));
     } catch {
       // Non-fatal on boot; panels handle explicit errors.
     }
@@ -555,6 +575,7 @@ export const App: React.FC = () => {
       route={route}
       routeForbidden={Boolean(user && !isRouteAllowed(route, user.role))}
       cptTypes={cptTypes}
+      cptTaxonomies={cptTaxonomies}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}

@@ -40,7 +40,11 @@ interface ParentMenuItem {
   children?: SubMenuItem[];
 }
 
-function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMenuItem[] {
+function buildMenuTree(
+  cptTypes: OwnedContentType[],
+  isAdmin: boolean,
+  cptTaxonomies: Record<string, Array<{ key: string; label: string }>> = {},
+): ParentMenuItem[] {
   const customTypes = cptTypes.filter(
     ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section',
   );
@@ -79,6 +83,15 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       children: [
         { label: `Tất cả ${ct.descriptor.label}`, hash: `#/cpt/${ct.descriptor.key}` },
         { label: 'Thêm mới', hash: `#/cpt/${ct.descriptor.key}/new` },
+        ...(cptTaxonomies[ct.descriptor.key] ?? []).map(tax => ({
+          label: tax.label,
+          hash:
+            tax.key === 'category'
+              ? '#/posts/categories'
+              : tax.key === 'tag'
+                ? '#/posts/tags'
+                : `#/taxonomy/${encodeURIComponent(tax.key)}/terms`,
+        })),
       ],
     })),
     {
@@ -241,6 +254,7 @@ interface AdminShellProps {
   route: ParsedRoute;
   routeForbidden: boolean;
   cptTypes: OwnedContentType[];
+  cptTaxonomies?: Record<string, Array<{ key: string; label: string }>>;
   onNavigateHash: (hash: string) => void;
   hasUnsavedChanges: boolean;
   sidebarContent: React.ReactNode;
@@ -267,7 +281,7 @@ interface AdminShellProps {
 export const AdminShell: React.FC<AdminShellProps> = ({
   user, authUsername, authPassword, statusMessage, isError, isProcessing,
   onUsernameChange, onPasswordChange, onSetup, onLogin, onLogout,
-  route, routeForbidden, cptTypes, onNavigateHash, hasUnsavedChanges,
+  route, routeForbidden, cptTypes, cptTaxonomies, onNavigateHash, hasUnsavedChanges,
   sidebarContent, previewContent, contentContent, schemaSettingsContent,
   postsContent, pagesContent, sectionsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
@@ -276,7 +290,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin');
+  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin', cptTaxonomies);
   const activeParentId =
     route.view === 'cpt' && route.typeKey
       ? `cpt:${route.typeKey}`
