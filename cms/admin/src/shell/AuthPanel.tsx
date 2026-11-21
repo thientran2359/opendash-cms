@@ -1,4 +1,5 @@
 import React from 'react';
+import { AdminButton } from '../components/AdminPrimitives.tsx';
 import { TextInput } from '../components/FormPrimitives.tsx';
 import { AuthUser } from '../types.ts';
 
@@ -16,6 +17,11 @@ interface AuthPanelProps {
   onLogout: () => void;
 }
 
+const AUTH_INPUT_CLASS =
+  'h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 ' +
+  'placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent ' +
+  'disabled:cursor-not-allowed disabled:bg-zinc-50 disabled:opacity-60';
+
 export const AuthPanel: React.FC<AuthPanelProps> = ({
   user,
   authUsername,
@@ -32,9 +38,17 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   return (
     <div id="auth-bar">
       {!user ? (
-        <form id="guest-panel" className="panel-row" onSubmit={event => { event.preventDefault(); onLogin(); }}>
+        <form
+          id="guest-panel"
+          className="flex flex-col gap-3"
+          onSubmit={event => {
+            event.preventDefault();
+            onLogin();
+          }}
+        >
           <TextInput
             id="auth-username"
+            className={AUTH_INPUT_CLASS}
             placeholder="Tên đăng nhập"
             autoComplete="username"
             value={authUsername}
@@ -44,35 +58,60 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           <TextInput
             id="auth-password"
             type="password"
+            className={AUTH_INPUT_CLASS}
             placeholder="Mật khẩu"
             autoComplete="current-password"
             value={authPassword}
             onValueChange={onPasswordChange}
             disabled={isProcessing}
           />
-          <button type="button" id="auth-setup" onClick={onSetup} disabled={isProcessing}>
-            Thiết lập Admin
-          </button>
-          <button type="submit" id="auth-login" disabled={isProcessing}>
-            Đăng nhập
-          </button>
+          <div className="mt-1 flex flex-col gap-2">
+            <AdminButton
+              type="submit"
+              id="auth-login"
+              variant="primary"
+              className="h-10 w-full"
+              disabled={isProcessing}
+            >
+              Đăng nhập
+            </AdminButton>
+            <AdminButton
+              type="button"
+              id="auth-setup"
+              variant="secondary"
+              className="h-9 w-full text-zinc-700"
+              onClick={onSetup}
+              disabled={isProcessing}
+            >
+              Thiết lập Admin (lần đầu)
+            </AdminButton>
+          </div>
         </form>
       ) : (
-        <div id="user-panel" className="panel-row">
-          <span id="user-info">
-            Đang đăng nhập: {user.username} ({user.role})
+        <div id="user-panel" className="flex items-center gap-3">
+          <span id="user-info" className="text-xs font-medium text-zinc-600">
+            {user.username} <span className="text-zinc-400">({user.role})</span>
           </span>
-          <button
+          <AdminButton
             id="auth-logout"
-            className="btn-secondary"
+            variant="secondary"
+            size="sm"
             onClick={onLogout}
             disabled={isProcessing}
           >
             Đăng xuất
-          </button>
+          </AdminButton>
         </div>
       )}
-      <p id="status" role="status" className={isError ? 'error' : 'success'}>
+      <p
+        id="status"
+        role="status"
+        className={
+          isError
+            ? 'error mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700'
+            : 'success mt-3 text-xs text-zinc-500'
+        }
+      >
         {statusMessage}
       </p>
     </div>

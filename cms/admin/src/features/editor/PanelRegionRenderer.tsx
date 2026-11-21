@@ -317,7 +317,6 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   </select>
                 </label>
               )}
-              {renderSaveActions()}
               <button
                 type="button"
                 onClick={onOpenBuilder}
@@ -405,7 +404,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                     type="button"
                     aria-expanded={!isCollapsed}
                     onClick={() => onToggleCollapse(proj.panel.panel_id)}
-                    className="text-xs font-medium text-slate-500 hover:text-slate-900"
+                    className="rounded border-0 bg-transparent px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
                   >
                     {isCollapsed ? 'Mở rộng' : 'Thu gọn'}
                   </button>
@@ -420,19 +419,19 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
 
   // Exact DOM order: header_bar -> main_top -> main_primary -> main_bottom -> sidebar (AC-04d)
   return (
-    <div className="space-y-4" data-testid="single-edit-5-regions">
+    <div className="space-y-3.5" data-testid="single-edit-5-regions">
       <header
-        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+        className="flex flex-wrap items-center justify-between gap-2.5 rounded-lg border border-zinc-200 bg-white px-3.5 py-2"
         data-region="header_bar"
       >
-        <div>
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-            {config.label} ({config.type_key})
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
+            {config.type_key}
           </span>
-          <h2 className="text-base font-bold text-slate-900">
+          <h2 className="m-0 text-sm font-semibold text-zinc-900">
             {entryId === null ? `Thêm ${config.label} mới` : `Chỉnh sửa #${entryId}`}
-            {dirty && <span className="ml-2 text-xs font-normal text-amber-700">(Chưa lưu)</span>}
           </h2>
+          {dirty && <span className="text-xs font-medium text-amber-700">● Chưa lưu</span>}
         </div>
         {renderSaveActions(true)}
       </header>
