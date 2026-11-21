@@ -147,6 +147,87 @@ pub async fn template_overrides_reset(
     Ok((headers(None), Json(reset)).into_response())
 }
 
+pub const MAX_STUDIO_PREVIEW_JSON_BYTES: usize = 512 * 1024;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StudioPreviewRequest {
+    target: TemplateCandidate,
+    #[serde(default)]
+    document: Option<opendash_core::builder::BuilderDocument>,
+    #[serde(default)]
+    preview_entry: Option<overrides::TemplatePreviewEntry>,
+    #[serde(default)]
+    preview_annotations: bool,
+    #[serde(default)]
+    transient: Option<overrides::TransientStudioOverrides>,
+}
+
+pub async fn studio_targets(
+    State(db): State<SqlitePool>,
+    Extension(themes_root): Extension<ThemeStoreRoot>,
+    request_headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_admin(&request_headers, &db).await?;
+    let result = overrides::list_studio_targets(&db, &themes_root.0).await?;
+    let mut response_headers = headers(None);
+    response_headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    Ok((response_headers, Json(result)).into_response())
+}
+
+pub async fn studio_preview(
+    State(db): State<SqlitePool>,
+    Extension(themes_root): Extension<ThemeStoreRoot>,
+    request_headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let actor = require_admin_with_csrf(&request_headers, &db).await?;
+    let content_type = request_headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim);
+    if !content_type.is_some_and(|value| value.eq_ignore_ascii_case("application/json")) {
+        return Err(ApiError::unsupported_media_type(
+            "Expected application/json.",
+        ));
+    }
+    if body.len() > MAX_STUDIO_PREVIEW_JSON_BYTES {
+        return Err(ApiError::bad_request("Studio preview exceeds 512 KiB."));
+    }
+    let input: StudioPreviewRequest = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::bad_request("Invalid studio preview JSON."))?;
+    let rendered = overrides::preview_studio(
+        &db,
+        &themes_root.0,
+        &actor,
+        &input.target,
+        input.document.as_ref(),
+        input.preview_entry.as_ref(),
+        input.preview_annotations,
+        input.transient.as_ref(),
+    )
+    .await?;
+    let mut response_headers = headers(None);
+    response_headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    let layout_response = super::public::rendered_layout_with_form_csp(
+        rendered.html.clone(),
+        rendered.has_active_contact_form,
+    );
+    for name in [header::CONTENT_SECURITY_POLICY, header::REFERRER_POLICY] {
+        if let Some(value) = layout_response.headers().get(&name) {
+            response_headers.insert(name, value.clone());
+        }
+    }
+    Ok((response_headers, Json(rendered)).into_response())
+}
+
 /// Render a shared template draft against one private read snapshot.
 pub async fn template_overrides_preview(
     State(db): State<SqlitePool>,

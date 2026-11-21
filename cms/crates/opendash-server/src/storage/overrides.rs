@@ -8,7 +8,8 @@ use std::{
 use opendash_core::{
     builder::{BuilderDocument, ElementContent, KnownElement},
     content::{
-        ContentMode, ContentSupport, ContentTypeDefinition, FieldRole, valid_content_type_key,
+        ContentSupport, ContentTypeDefinition, EffectiveContentSchema, FieldRole,
+        valid_content_type_key,
     },
     registry::{DeclarationState, ProviderStatus},
     theme::{TemplateCandidate, TemplateCandidateKind},
@@ -20,14 +21,16 @@ use crate::{
     auth::SessionContext,
     content_render::{self, SiteContext},
     error::{ApiError, ApiResult},
-    page::{self, RenderedLayout},
+    page::{self, RenderAnnotationScope, RenderedLayout},
     storage::{
         builder::{
             self, HomeState, ListResults, check_preview_images, resolve_contact_forms_in_tx,
             resolve_lists_in_tx,
         },
         builder_binding::{self, BindingResults},
-        content, entries, menu, settings, theme,
+        content, entries,
+        media::valid_media_id,
+        menu, settings, theme,
         theme::ActiveThemeV3,
     },
     template_sec::{self, PreviewCompositionBudget},
@@ -269,6 +272,14 @@ pub async fn build_reset_candidate_chain(
     db: &SqlitePool,
     target: &TemplateCandidate,
 ) -> ApiResult<Vec<TemplateCandidate>> {
+    let mut conn = db.acquire().await?;
+    build_reset_candidate_chain_in_conn(&mut conn, target).await
+}
+
+pub(super) async fn build_reset_candidate_chain_in_conn(
+    conn: &mut SqliteConnection,
+    target: &TemplateCandidate,
+) -> ApiResult<Vec<TemplateCandidate>> {
     use TemplateCandidateKind as K;
     let mut candidates = vec![target.clone()];
     match target.kind {
@@ -279,7 +290,7 @@ pub async fn build_reset_candidate_chain(
                   WHERE reading.id=1 AND e.content_type_key='page'
                     AND e.publication_status='published'",
             )
-            .fetch_optional(db)
+            .fetch_optional(&mut *conn)
             .await?
             .flatten();
             if let Some(layout_key) = layout {
@@ -304,7 +315,7 @@ pub async fn build_reset_candidate_chain(
                 )
                 .bind(entry_id)
                 .bind(content_type)
-                .fetch_optional(db)
+                .fetch_optional(&mut *conn)
                 .await?;
                 if let Some(selector_slug) = slug {
                     let mut slugged = candidate(K::Single);
@@ -338,7 +349,7 @@ pub async fn build_reset_candidate_chain(
                     sqlx::query_scalar("SELECT slug FROM taxonomy_terms WHERE id=? AND kind=?")
                         .bind(term_id)
                         .bind(taxonomy)
-                        .fetch_optional(db)
+                        .fetch_optional(&mut *conn)
                         .await?;
                 if let Some(selector_slug) = slug {
                     let mut slugged = candidate(K::Taxonomy);
@@ -1118,19 +1129,14 @@ enum PreviewPartSource {
     Missing,
 }
 
-async fn preview_part_graph(
+async fn preview_part_graph_from_edges(
     tx: &mut Transaction<'_, Sqlite>,
-    target: &TemplateCandidate,
-    document: &BuilderDocument,
-    active: Option<&theme::CapturedThemeV3>,
+    root_key: &str,
+    edges: Vec<String>,
+    active: Option<&ActiveThemeV3>,
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
-    let (edges, _) = document_parts_and_slot_count(document)?;
-    let mut pending = vec![(
-        edges,
-        0_usize,
-        vec![target.canonical_key().map_err(ApiError::bad_request)?],
-    )];
+    let mut pending = vec![(edges, 0_usize, vec![root_key.to_owned()])];
     let mut graph = BTreeMap::new();
     while let Some((edges, depth, path)) = pending.pop() {
         budget.stack = path;
@@ -1154,9 +1160,7 @@ async fn preview_part_graph(
                     validate_typed_document_in_tx(tx, &target, &row.document, Some(&row.document))
                         .await?;
                     PreviewPartSource::Builder(row.document)
-                } else if let Some(source) =
-                    active.map(|a| a.part(&part_key)).transpose()?.flatten()
-                {
+                } else if let Some(source) = active.and_then(|a| a.parts.get(&part_key)).cloned() {
                     PreviewPartSource::Theme(source)
                 } else {
                     PreviewPartSource::Missing
@@ -1180,6 +1184,18 @@ async fn preview_part_graph(
     Ok(graph)
 }
 
+async fn preview_part_graph(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    active: Option<&ActiveThemeV3>,
+    budget: &mut PreviewCompositionBudget,
+) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
+    let (edges, _) = document_parts_and_slot_count(document)?;
+    let root_key = target.canonical_key().map_err(ApiError::bad_request)?;
+    preview_part_graph_from_edges(tx, &root_key, edges, active, budget).await
+}
+
 struct PreviewRenderContext<'a> {
     state: &'a HomeState,
     graph: &'a BTreeMap<String, PreviewPartSource>,
@@ -1193,6 +1209,7 @@ async fn render_preview_builder(
     slot: Option<&str>,
     ctx: &PreviewRenderContext<'_>,
     budget: &mut PreviewCompositionBudget,
+    annotation_scope: RenderAnnotationScope,
 ) -> ApiResult<RenderedLayout> {
     let mut parts = BTreeMap::new();
     let mut diagnostics = Vec::new();
@@ -1208,7 +1225,8 @@ async fn render_preview_builder(
     let bindings = builder_binding::resolve_in_tx_with_route(tx, document, true, ctx.route).await?;
     let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
-    let mut rendered = page::render_builder_with_template_context(
+    let empty_patterns = page::PatternResults::new();
+    let mut rendered = page::render_builder_with_annotations(
         ctx.state,
         document,
         true,
@@ -1219,6 +1237,9 @@ async fn render_preview_builder(
             content_html: slot,
             parts: &parts,
         }),
+        &empty_patterns,
+        false,
+        annotation_scope,
     )?;
     rendered.diagnostics.append(&mut diagnostics);
     Ok(rendered)
@@ -1232,7 +1253,15 @@ async fn render_preview_part(
 ) -> ApiResult<Option<RenderedLayout>> {
     match ctx.graph.get(key) {
         Some(PreviewPartSource::Builder(doc)) => Ok(Some(
-            Box::pin(render_preview_builder(tx, doc, None, ctx, budget)).await?,
+            Box::pin(render_preview_builder(
+                tx,
+                doc,
+                None,
+                ctx,
+                budget,
+                RenderAnnotationScope::None,
+            ))
+            .await?,
         )),
         Some(PreviewPartSource::Theme(source)) => {
             // Flatten only contiguous Theme-to-Theme edges. Builder boundaries
@@ -1296,7 +1325,7 @@ async fn resolve_preview_entry(
     tx: &mut Transaction<'_, Sqlite>,
     target: &TemplateCandidate,
     sample: Option<&TemplatePreviewEntry>,
-    active: Option<&theme::CapturedThemeV3>,
+    active: Option<&ActiveThemeV3>,
 ) -> ApiResult<Option<(entries::ContentEntryRecord, ContentTypeDefinition)>> {
     use TemplateCandidateKind as K;
     let selected = if let Some(sample) = sample {
@@ -1401,7 +1430,7 @@ pub async fn preview_typed_override(
         existing.as_ref().map(|r| &r.document),
     )
     .await?;
-    let active = theme::capture_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
     let mut budget = PreviewCompositionBudget::new();
     let graph = preview_part_graph(&mut tx, target, document, active.as_ref(), &mut budget).await?;
     let entry = resolve_preview_entry(&mut tx, target, preview_entry, active.as_ref()).await?;
@@ -1431,7 +1460,12 @@ pub async fn preview_typed_override(
         let view = content_render::authenticated_preview_view(record.clone(), definition);
         theme_context["entry"] = serde_json::to_value(&view)?;
         theme_context["content_type"] = serde_json::to_value(definition)?;
-        if record.content_mode == ContentMode::Builder
+        let raw_body_has_blocks = record
+            .values
+            .get("body")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(opendash_core::builder_blocks::contains_blocks);
+        if raw_body_has_blocks
             && definition.settings.supports(ContentSupport::Builder)
             && record.content_type_key != "pattern"
         {
@@ -1472,10 +1506,17 @@ pub async fn preview_typed_override(
         theme_context: &theme_context,
         route,
     };
-    let mut rendered =
-        render_preview_builder(&mut tx, document, Some(&body), &ctx, &mut budget).await?;
+    let mut rendered = render_preview_builder(
+        &mut tx,
+        document,
+        Some(&body),
+        &ctx,
+        &mut budget,
+        RenderAnnotationScope::None,
+    )
+    .await?;
     rendered.diagnostics.append(&mut body_diagnostics);
-    tx.commit().await?;
+    tx.rollback().await?;
     Ok(rendered)
 }
 
@@ -1777,4 +1818,944 @@ pub async fn resolve_and_render_header_footer(
         || footer.as_ref().is_some_and(|r| r.has_active_contact_form);
     tx.commit().await?;
     Ok((header.map(|r| r.html), footer.map(|r| r.html), has_form))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransientStudioOverrides {
+    #[serde(default)]
+    pub general: Option<settings::GeneralSettingsInput>,
+    #[serde(default)]
+    pub theme_options: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
+    pub menu_slots: Option<BTreeMap<String, Option<i64>>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StudioTargetItem {
+    pub canonical_target_key: String,
+    pub label: String,
+    pub group: &'static str,
+    pub target: TemplateCandidate,
+    pub override_id: Option<i64>,
+    pub version: Option<i64>,
+    pub effective_source: EffectiveSourceDescriptor,
+    pub requires_content_slot: bool,
+    pub forbids_content_slot: bool,
+    pub has_theme_source: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StudioTargetsResponse {
+    pub active_theme_id: Option<String>,
+    pub active_theme_name: Option<String>,
+    pub items: Vec<StudioTargetItem>,
+}
+
+fn target_requires_and_forbids_slot(kind: TemplateCandidateKind) -> (bool, bool) {
+    use TemplateCandidateKind as K;
+    let requires = matches!(
+        kind,
+        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular
+    );
+    let forbids = matches!(kind, K::Archive | K::Taxonomy | K::NotFound | K::Part);
+    (requires, forbids)
+}
+
+fn push_studio_target_item(
+    items: &mut Vec<StudioTargetItem>,
+    seen: &mut BTreeSet<String>,
+    overrides_map: &BTreeMap<String, &TemplateOverrideRecord>,
+    active: Option<&ActiveThemeV3>,
+    target: TemplateCandidate,
+    label: String,
+    group: &'static str,
+) -> ApiResult<()> {
+    let key = target.canonical_key().map_err(ApiError::bad_request)?;
+    if !seen.insert(key.clone()) {
+        return Ok(());
+    }
+    let has_theme_source = theme_source_for_candidate(
+        &target,
+        &key,
+        active.map(|a| &a.templates),
+        active.map(|a| &a.parts),
+        active.map(|a| &a.page_layouts),
+    )
+    .is_some();
+    let existing = overrides_map.get(&key).copied();
+    let effective_source = if let Some(record) = existing {
+        TemplateResolution::DbOverride(record.clone()).effective_source()
+    } else if has_theme_source {
+        TemplateResolution::ActiveTheme {
+            target_key: key.clone(),
+            html: String::new(),
+        }
+        .effective_source()
+    } else {
+        TemplateResolution::CoreFallback.effective_source()
+    };
+    let (requires_content_slot, forbids_content_slot) =
+        target_requires_and_forbids_slot(target.kind);
+    items.push(StudioTargetItem {
+        canonical_target_key: key,
+        label,
+        group,
+        target,
+        override_id: existing.map(|r| r.id),
+        version: existing.map(|r| r.version),
+        effective_source,
+        requires_content_slot,
+        forbids_content_slot,
+        has_theme_source,
+    });
+    Ok(())
+}
+
+pub async fn list_studio_targets(
+    db: &SqlitePool,
+    themes_root: &Path,
+) -> ApiResult<StudioTargetsResponse> {
+    use TemplateCandidateKind as K;
+    let active = theme::load_active_theme_v3(db, themes_root).await?;
+    let overrides_list = list_overrides(db).await?;
+    let overrides_map: BTreeMap<String, &TemplateOverrideRecord> = overrides_list
+        .iter()
+        .map(|row| (row.canonical_target_key.clone(), row))
+        .collect();
+    let content_types = content::list_content_types_with_meta(db).await?;
+
+    let mut items = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for (part_key, label) in [("header", "Header"), ("footer", "Footer")] {
+        let mut target = candidate(K::Part);
+        target.part_key = Some(part_key.to_owned());
+        push_studio_target_item(
+            &mut items,
+            &mut seen,
+            &overrides_map,
+            active.as_ref(),
+            target,
+            label.to_owned(),
+            "parts",
+        )?;
+    }
+    if let Some(ref theme) = active {
+        for part_key in theme.manifest.parts.keys() {
+            if part_key == "header" || part_key == "footer" {
+                continue;
+            }
+            let mut target = candidate(K::Part);
+            target.part_key = Some(part_key.clone());
+            push_studio_target_item(
+                &mut items,
+                &mut seen,
+                &overrides_map,
+                active.as_ref(),
+                target,
+                format!("Part: {part_key}"),
+                "parts",
+            )?;
+        }
+    }
+
+    for (kind, label) in [
+        (K::Home, "Trang chủ (Home)"),
+        (K::Page, "Trang mặc định (Page)"),
+        (K::Single, "Chi tiết bài viết (Single)"),
+        (K::Archive, "Danh sách lưu trữ (Archive)"),
+        (K::Index, "Index dự phòng (Index)"),
+    ] {
+        push_studio_target_item(
+            &mut items,
+            &mut seen,
+            &overrides_map,
+            active.as_ref(),
+            candidate(kind),
+            label.to_owned(),
+            "core",
+        )?;
+    }
+
+    for ct in content_types {
+        if ct.base.status != ProviderStatus::Active
+            || ct.base.declaration_state != DeclarationState::Declared
+        {
+            continue;
+        }
+        let d = &ct.base.descriptor;
+        if d.key == "pattern" || d.key == "section" || d.key == "page" || !d.settings.public {
+            continue;
+        }
+        let mut single_target = candidate(K::Single);
+        single_target.content_type = Some(d.key.clone());
+        push_studio_target_item(
+            &mut items,
+            &mut seen,
+            &overrides_map,
+            active.as_ref(),
+            single_target,
+            format!("Chi tiết: {}", d.label),
+            "content_types",
+        )?;
+        if d.settings.has_archive {
+            let mut archive_target = candidate(K::Archive);
+            archive_target.content_type = Some(d.key.clone());
+            push_studio_target_item(
+                &mut items,
+                &mut seen,
+                &overrides_map,
+                active.as_ref(),
+                archive_target,
+                format!("Lưu trữ: {}", d.label),
+                "content_types",
+            )?;
+        }
+    }
+
+    if let Some(ref theme) = active {
+        for layout in &theme.manifest.page_layouts {
+            let mut target = candidate(K::PageLayout);
+            target.layout_key = Some(layout.key.clone());
+            push_studio_target_item(
+                &mut items,
+                &mut seen,
+                &overrides_map,
+                active.as_ref(),
+                target,
+                format!("Bố cục trang: {}", layout.label),
+                "page_layouts",
+            )?;
+        }
+        for tpl in &theme.manifest.templates {
+            if tpl.kind == K::SingleCustom
+                && let Some(ck) = &tpl.custom_key
+            {
+                let mut target = candidate(K::SingleCustom);
+                target.custom_key = Some(ck.clone());
+                let label = tpl
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| format!("Mẫu tùy chỉnh: {ck}"));
+                push_studio_target_item(
+                    &mut items,
+                    &mut seen,
+                    &overrides_map,
+                    active.as_ref(),
+                    target,
+                    label,
+                    "custom_templates",
+                )?;
+            }
+        }
+    }
+
+    for row in &overrides_list {
+        push_studio_target_item(
+            &mut items,
+            &mut seen,
+            &overrides_map,
+            active.as_ref(),
+            row.target.clone(),
+            row.canonical_target_key.clone(),
+            "overrides",
+        )?;
+    }
+
+    Ok(StudioTargetsResponse {
+        active_theme_id: active.as_ref().map(|a| a.manifest.theme_id.clone()),
+        active_theme_name: active.as_ref().map(|a| a.manifest.name.clone()),
+        items,
+    })
+}
+
+async fn build_preview_context_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    active: Option<&ActiveThemeV3>,
+    transient: Option<&TransientStudioOverrides>,
+) -> ApiResult<(
+    settings::GeneralSettings,
+    BTreeMap<String, serde_json::Value>,
+    BTreeMap<String, menu::MenuViewModel>,
+)> {
+    let mut general = settings::get_general_in_conn(&mut **tx).await?;
+    if let Some(g) = transient.and_then(|t| t.general.as_ref()) {
+        let valid = settings::GeneralSettingsInput {
+            site_title: g.site_title.clone(),
+            tagline: g.tagline.clone(),
+            timezone: g.timezone.clone(),
+        }
+        .validate()
+        .map_err(ApiError::unprocessable)?;
+        if valid.timezone != general.timezone && !settings::is_current_timezone(&valid.timezone) {
+            return Err(ApiError::unprocessable(
+                "Múi giờ không có trong danh mục IANA tzdb 2026f.",
+            ));
+        }
+        general.site_title = valid.site_title;
+        general.tagline = valid.tagline;
+        general.timezone = valid.timezone;
+    }
+
+    let mut options = BTreeMap::new();
+    let mut menus = BTreeMap::new();
+    if let Some(active) = active {
+        let manifest_json = serde_json::to_string(&active.manifest)?;
+        let schema = settings::parse_theme_options_schema(&manifest_json).unwrap_or_default();
+        let saved_rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
+        )
+        .bind(&active.manifest.theme_id)
+        .fetch_all(&mut **tx)
+        .await?;
+        let mut effective_raw = BTreeMap::new();
+        for (k, v_json) in saved_rows {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
+                effective_raw.insert(k, v);
+            }
+        }
+        if let Some(ov) = transient.and_then(|t| t.theme_options.as_ref()) {
+            let schema_map: BTreeMap<&str, &settings::ThemeOptionDef> =
+                schema.iter().map(|d| (d.key.as_str(), d)).collect();
+            for (k, v) in ov {
+                let Some(def) = schema_map.get(k.as_str()) else {
+                    return Err(ApiError::unprocessable(
+                        "Option key không tồn tại trong schema của theme.",
+                    ));
+                };
+                settings::validate_option_value(def, v).map_err(ApiError::unprocessable)?;
+                if def.option_type == settings::ThemeOptionType::ImageRef
+                    && let Some(media_id) = v.as_str()
+                {
+                    let exists: Option<i64> = sqlx::query_scalar(
+                        "SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
+                    )
+                    .bind(media_id)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+                    if exists.is_none() {
+                        return Err(ApiError::unprocessable(
+                            "media_id của image_ref không tồn tại.",
+                        ));
+                    }
+                }
+                effective_raw.insert(k.clone(), v.clone());
+            }
+        }
+        for def in schema {
+            if !def.public {
+                continue;
+            }
+            let val = match def.option_type {
+                settings::ThemeOptionType::ImageRef => {
+                    match effective_raw
+                        .get(&def.key)
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        Some(media_id) if valid_media_id(media_id) => {
+                            serde_json::Value::String(format!("/api/admin/media/{media_id}/file"))
+                        }
+                        _ => serde_json::Value::Null,
+                    }
+                }
+                _ => effective_raw.get(&def.key).cloned().unwrap_or(def.default),
+            };
+            options.insert(def.key, val);
+        }
+
+        let mut assignments =
+            menu::list_slot_assignments_in_tx(tx, &active.manifest.theme_id).await?;
+        if let Some(slot_ov) = transient.and_then(|t| t.menu_slots.as_ref()) {
+            let declared = menu::extract_declared_menu_slots(&manifest_json);
+            for (slot_key, maybe_id) in slot_ov {
+                if !declared.iter().any(|s| s == slot_key) {
+                    return Err(ApiError::unprocessable(
+                        "Vị trí menu không được khai báo trong theme.",
+                    ));
+                }
+                match maybe_id {
+                    None => {
+                        assignments.remove(slot_key);
+                    }
+                    Some(id) => {
+                        if *id <= 0 || menu::get_menu_in_tx(tx, *id).await?.is_none() {
+                            return Err(ApiError::unprocessable("Menu không tồn tại."));
+                        }
+                        assignments.insert(slot_key.clone(), *id);
+                    }
+                }
+            }
+        }
+        for (slot_key, menu_id) in assignments {
+            if let Some(view) = menu::resolve_menu_view_in_tx(tx, menu_id).await? {
+                menus.insert(slot_key, view);
+            }
+        }
+    } else {
+        if transient
+            .and_then(|t| t.theme_options.as_ref())
+            .is_some_and(|m| !m.is_empty())
+        {
+            return Err(ApiError::unprocessable(
+                "Không có theme v3 đang kích hoạt để xem trước theme_options.",
+            ));
+        }
+        if transient
+            .and_then(|t| t.menu_slots.as_ref())
+            .is_some_and(|m| !m.is_empty())
+        {
+            return Err(ApiError::unprocessable(
+                "Không có theme v3 đang kích hoạt để xem trước menu_slots.",
+            ));
+        }
+    }
+    Ok((general, options, menus))
+}
+
+async fn render_preview_named_part_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    state: &HomeState,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    route: Option<(&str, &str)>,
+    budget: &mut PreviewCompositionBudget,
+) -> ApiResult<Option<RenderedLayout>> {
+    let part_target = TemplateCandidate {
+        part_key: Some(key.to_owned()),
+        ..candidate(TemplateCandidateKind::Part)
+    };
+    let canonical = part_target.canonical_key().map_err(ApiError::bad_request)?;
+    if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+        validate_typed_document_in_tx(tx, &part_target, &row.document, Some(&row.document)).await?;
+        let graph = preview_part_graph(tx, &part_target, &row.document, active, budget).await?;
+        let ctx = PreviewRenderContext {
+            state,
+            graph: &graph,
+            theme_context,
+            route,
+        };
+        let rendered = render_preview_builder(
+            tx,
+            &row.document,
+            None,
+            &ctx,
+            budget,
+            RenderAnnotationScope::None,
+        )
+        .await?;
+        return Ok(Some(rendered));
+    }
+    if let Some(source) = active.and_then(|a| a.parts.get(key)) {
+        let edges =
+            template_sec::preview_csec_part_keys(key, source).map_err(ApiError::bad_request)?;
+        let mut graph =
+            preview_part_graph_from_edges(tx, &canonical, edges, active, budget).await?;
+        graph.insert(key.to_owned(), PreviewPartSource::Theme(source.clone()));
+        let ctx = PreviewRenderContext {
+            state,
+            graph: &graph,
+            theme_context,
+            route,
+        };
+        return render_preview_part(tx, key, &ctx, budget).await;
+    }
+    Ok(None)
+}
+
+fn render_csec_template_for_preview(
+    target_key: &str,
+    html: &str,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    slot_html: Option<&str>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<String> {
+    use crate::template_sec::{CsecContentKind, validate_and_compile_csec_composition};
+    let kind = if target_key == "index" {
+        CsecContentKind::Index
+    } else if matches!(target_key, "home" | "page" | "singular" | "single")
+        || target_key.starts_with("single:")
+        || target_key.starts_with("single_custom:")
+        || target_key.starts_with("page_layout:")
+    {
+        CsecContentKind::Entry
+    } else {
+        CsecContentKind::NonEntry
+    };
+    let empty_parts = BTreeMap::new();
+    let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
+    let composition = validate_and_compile_csec_composition(target_key, html, parts, kind)
+        .map_err(ApiError::bad_request)?;
+    budget.render_theme(&composition, theme_context, slot_html)
+}
+
+fn escape_preview_text(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+pub async fn preview_studio(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: Option<&BuilderDocument>,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    preview_annotations: bool,
+    transient: Option<&TransientStudioOverrides>,
+) -> ApiResult<RenderedLayout> {
+    use TemplateCandidateKind as K;
+    let key = target.canonical_key().map_err(ApiError::bad_request)?;
+    let mut tx = db.begin().await?;
+    validate_typed_target_in_tx(&mut tx, target).await?;
+    let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let state = builder::read_home_tx(&mut tx).await?;
+    let (general, options, menus) =
+        build_preview_context_in_tx(&mut tx, active.as_ref(), transient).await?;
+    let site = SiteContext {
+        title: &general.site_title,
+        tagline: &general.tagline,
+    };
+
+    let default_home_entry: Option<TemplatePreviewEntry> =
+        if preview_entry.is_none() && target.kind == K::Home {
+            let reading = settings::get_reading_in_conn(&mut *tx).await?;
+            match reading.homepage_page_id {
+                Some(id) => {
+                    let exists: Option<i64> = sqlx::query_scalar(
+                        "SELECT id FROM content_entries WHERE id = ? AND content_type_key = 'page'",
+                    )
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    exists.map(|entry_id| TemplatePreviewEntry {
+                        type_key: "page".to_owned(),
+                        entry_id,
+                    })
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+    let effective_sample = preview_entry.or(default_home_entry.as_ref());
+    let entry = resolve_preview_entry(&mut tx, target, effective_sample, active.as_ref()).await?;
+
+    let mut theme_context = serde_json::json!({
+        "site": site,
+        "options": options,
+        "theme_options": options,
+        "menus": menus,
+    });
+    let mut diagnostics = Vec::new();
+    let mut has_active_contact_form = false;
+    let mut route = None;
+    let body = if let Some((record, definition)) = &entry {
+        route = Some((record.content_type_key.as_str(), record.slug.as_str()));
+        let view = content_render::authenticated_preview_view(record.clone(), definition);
+        theme_context["entry"] = serde_json::to_value(&view)?;
+        theme_context["content_type"] = serde_json::to_value(definition)?;
+        let raw_body_has_blocks = record
+            .values
+            .get("body")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(opendash_core::builder_blocks::contains_blocks);
+        if raw_body_has_blocks
+            && definition.settings.supports(ContentSupport::Builder)
+            && record.content_type_key != "pattern"
+        {
+            if let Some(mut rendered) = builder::preview_saved_page_body_in_tx(
+                &mut tx,
+                actor,
+                &record.content_type_key,
+                record.id,
+            )
+            .await?
+            {
+                diagnostics.append(&mut rendered.diagnostics);
+                Some(rendered.html)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+        .map(Ok)
+        .unwrap_or_else(|| {
+            let html = content_render::render_single_with_site_and_archive(
+                definition, &view, None, &site, None,
+            )?;
+            crate::document::normalize_public_document(&html)
+                .map(|doc| doc.body_fragment)
+                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+        })?
+    } else {
+        if matches!(
+            target.kind,
+            K::Home
+                | K::Page
+                | K::PageLayout
+                | K::Single
+                | K::SingleCustom
+                | K::Singular
+                | K::Index
+        ) {
+            theme_context["entry"] = serde_json::json!({
+                "title": "Nội dung xem trước",
+                "slug": "preview",
+                "url": "/",
+                "excerpt": "",
+                "values": {},
+                "fields": {},
+            });
+            theme_context["content_type"] = serde_json::json!({
+                "key": target.content_type.as_deref().unwrap_or("page"),
+                "label": "Trang",
+            });
+        } else if target.kind == K::Archive {
+            let ct_key = target.content_type.as_deref().unwrap_or("post");
+            theme_context["content_type"] = serde_json::json!({
+                "key": ct_key,
+                "label": ct_key,
+            });
+            theme_context["entries"] = serde_json::json!([]);
+            theme_context["previous_url"] = serde_json::Value::Null;
+            theme_context["next_url"] = serde_json::Value::Null;
+        }
+        "<div data-template-preview-placeholder>Preview content</div>".to_owned()
+    };
+    if body.len() > template_sec::MAX_RENDERED_HTML_BYTES {
+        return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
+    }
+
+    let slot_fragment = crate::document::normalize_public_document(&body)
+        .map(|parts| {
+            let mut f = parts.authorized_styles.concat();
+            f.push_str(&parts.body_fragment);
+            f
+        })
+        .unwrap_or_else(|_| body.clone());
+
+    let scope = if preview_annotations {
+        RenderAnnotationScope::TemplateAll
+    } else {
+        RenderAnnotationScope::None
+    };
+    let mut preview_budget = PreviewCompositionBudget::new();
+    let mut public_budget = PublicCompositionBudget::default();
+    let mut canvas_layout = target.kind == K::PageLayout;
+
+    let main_html = if let Some(doc) = document {
+        let existing = get_typed_override_on_connection(&mut tx, &key).await?;
+        validate_typed_document_in_tx(&mut tx, target, doc, existing.as_ref().map(|r| &r.document))
+            .await?;
+        let graph =
+            preview_part_graph(&mut tx, target, doc, active.as_ref(), &mut preview_budget).await?;
+        let ctx = PreviewRenderContext {
+            state: &state,
+            graph: &graph,
+            theme_context: &theme_context,
+            route,
+        };
+        let mut rendered = render_preview_builder(
+            &mut tx,
+            doc,
+            Some(&slot_fragment),
+            &ctx,
+            &mut preview_budget,
+            scope,
+        )
+        .await?;
+        diagnostics.append(&mut rendered.diagnostics);
+        has_active_contact_form |= rendered.has_active_contact_form;
+        rendered.html
+    } else {
+        let chain = build_reset_candidate_chain_in_conn(&mut tx, target).await?;
+        let resolved = resolve_template_2axis_on_connection(
+            &mut tx,
+            &chain,
+            active.as_ref().map(|a| &a.templates),
+            active.as_ref().map(|a| &a.parts),
+            active.as_ref().map(|a| &a.page_layouts),
+        )
+        .await?;
+        match resolved {
+            TemplateResolution::DbOverride(record) => {
+                canvas_layout = record.target.kind == K::PageLayout;
+                let graph = preview_part_graph(
+                    &mut tx,
+                    &record.target,
+                    &record.document,
+                    active.as_ref(),
+                    &mut preview_budget,
+                )
+                .await?;
+                let ctx = PreviewRenderContext {
+                    state: &state,
+                    graph: &graph,
+                    theme_context: &theme_context,
+                    route,
+                };
+                let slot = if target.kind == K::Part {
+                    None
+                } else {
+                    Some(slot_fragment.as_str())
+                };
+                let mut rendered = render_preview_builder(
+                    &mut tx,
+                    &record.document,
+                    slot,
+                    &ctx,
+                    &mut preview_budget,
+                    scope,
+                )
+                .await?;
+                diagnostics.append(&mut rendered.diagnostics);
+                has_active_contact_form |= rendered.has_active_contact_form;
+                rendered.html
+            }
+            TemplateResolution::ActiveTheme { target_key, html } => {
+                if target_key.starts_with("page_layout:") {
+                    canvas_layout = true;
+                }
+                let slot = if target.kind == K::Part {
+                    None
+                } else {
+                    Some(slot_fragment.as_str())
+                };
+                render_csec_template_for_preview(
+                    &target_key,
+                    &html,
+                    active.as_ref(),
+                    &theme_context,
+                    slot,
+                    &mut public_budget,
+                )?
+            }
+            TemplateResolution::CoreFallback => {
+                if target.kind == K::Part {
+                    String::new()
+                } else {
+                    format!(
+                        "<main><h1>{}</h1><p>{}</p>{}</main>",
+                        escape_preview_text(&general.site_title),
+                        escape_preview_text(&general.tagline),
+                        slot_fragment
+                    )
+                }
+            }
+        }
+    };
+
+    let (header_html, footer_html) = if target.kind != K::Part && !canvas_layout {
+        let hdr = render_preview_named_part_in_tx(
+            &mut tx,
+            "header",
+            &state,
+            active.as_ref(),
+            &theme_context,
+            route,
+            &mut preview_budget,
+        )
+        .await?;
+        let ftr = render_preview_named_part_in_tx(
+            &mut tx,
+            "footer",
+            &state,
+            active.as_ref(),
+            &theme_context,
+            route,
+            &mut preview_budget,
+        )
+        .await?;
+        if let Some(ref h) = hdr {
+            has_active_contact_form |= h.has_active_contact_form;
+        }
+        if let Some(ref f) = ftr {
+            has_active_contact_form |= f.has_active_contact_form;
+        }
+        (hdr.map(|r| r.html), ftr.map(|r| r.html))
+    } else {
+        (None, None)
+    };
+
+    let seo = crate::seo::SeoView::for_noindex_page("vi", &general.site_title);
+    let full_html = content_render::compose_document_with_seo(
+        header_html.as_deref(),
+        &main_html,
+        footer_html.as_deref(),
+        &seo,
+    )?;
+    tx.rollback().await?;
+    Ok(RenderedLayout {
+        has_active_contact_form,
+        html: full_html,
+        diagnostics,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    themes_root: &Path,
+    actor_role: FieldRole,
+    schema: &EffectiveContentSchema,
+    entry_id: i64,
+    page_layout_key: Option<&str>,
+    custom_template_key: Option<&str>,
+    entry_rendered: RenderedLayout,
+) -> ApiResult<RenderedLayout> {
+    let mut record = entries::get_entry_in_tx(tx, &schema.base.descriptor.key, entry_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Content entry not found."))?;
+    entries::filter_entry_values_for_role(&mut record, schema, actor_role);
+    let definition = &schema.base.descriptor;
+    let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
+    let state = builder::read_home_tx(tx).await?;
+    let (general, options, menus) = build_preview_context_in_tx(tx, active.as_ref(), None).await?;
+    let site = SiteContext {
+        title: &general.site_title,
+        tagline: &general.tagline,
+    };
+    let view = content_render::authenticated_preview_view(record.clone(), definition);
+    let theme_context = serde_json::json!({
+        "site": site,
+        "options": options,
+        "theme_options": options,
+        "menus": menus,
+        "entry": view,
+        "content_type": definition,
+    });
+    let ctx_target = if schema.base.descriptor.key == "page" {
+        PublicTemplateContext::Page {
+            page_layout_key: page_layout_key.map(ToOwned::to_owned),
+        }
+    } else {
+        PublicTemplateContext::Single {
+            content_type: schema.base.descriptor.key.clone(),
+            entry_id: record.id,
+            slug: record.slug.clone(),
+            custom_template_key: custom_template_key.map(ToOwned::to_owned),
+        }
+    };
+    let candidates = build_candidates(&ctx_target)?;
+    let resolution = resolve_template_2axis_on_connection(
+        &mut **tx,
+        &candidates,
+        active.as_ref().map(|a| &a.templates),
+        active.as_ref().map(|a| &a.parts),
+        active.as_ref().map(|a| &a.page_layouts),
+    )
+    .await?;
+    let slot_fragment = crate::document::normalize_public_document(&entry_rendered.html)
+        .map(|parts| {
+            let mut f = parts.authorized_styles.concat();
+            f.push_str(&parts.body_fragment);
+            f
+        })
+        .unwrap_or_else(|_| entry_rendered.html.clone());
+
+    let mut preview_budget = PreviewCompositionBudget::new();
+    let mut public_budget = PublicCompositionBudget::default();
+    let route = Some((record.content_type_key.as_str(), record.slug.as_str()));
+    let mut diagnostics = entry_rendered.diagnostics;
+    let mut has_active_contact_form = entry_rendered.has_active_contact_form;
+    let mut canvas_layout = false;
+
+    let template_html = match resolution {
+        TemplateResolution::DbOverride(override_rec) => {
+            canvas_layout = override_rec.target.kind == TemplateCandidateKind::PageLayout;
+            let graph = preview_part_graph(
+                tx,
+                &override_rec.target,
+                &override_rec.document,
+                active.as_ref(),
+                &mut preview_budget,
+            )
+            .await?;
+            let ctx = PreviewRenderContext {
+                state: &state,
+                graph: &graph,
+                theme_context: &theme_context,
+                route,
+            };
+            let mut tpl_rendered = render_preview_builder(
+                tx,
+                &override_rec.document,
+                Some(&slot_fragment),
+                &ctx,
+                &mut preview_budget,
+                RenderAnnotationScope::None,
+            )
+            .await?;
+            diagnostics.append(&mut tpl_rendered.diagnostics);
+            has_active_contact_form |= tpl_rendered.has_active_contact_form;
+            tpl_rendered.html
+        }
+        TemplateResolution::ActiveTheme { target_key, html } => {
+            if target_key.starts_with("page_layout:") {
+                canvas_layout = true;
+            }
+            render_csec_template_for_preview(
+                &target_key,
+                &html,
+                active.as_ref(),
+                &theme_context,
+                Some(&slot_fragment),
+                &mut public_budget,
+            )?
+        }
+        TemplateResolution::CoreFallback => slot_fragment,
+    };
+
+    let (header_html, footer_html) = if !canvas_layout {
+        let hdr = render_preview_named_part_in_tx(
+            tx,
+            "header",
+            &state,
+            active.as_ref(),
+            &theme_context,
+            route,
+            &mut preview_budget,
+        )
+        .await?;
+        let ftr = render_preview_named_part_in_tx(
+            tx,
+            "footer",
+            &state,
+            active.as_ref(),
+            &theme_context,
+            route,
+            &mut preview_budget,
+        )
+        .await?;
+        (hdr.map(|r| r.html), ftr.map(|r| r.html))
+    } else {
+        (None, None)
+    };
+
+    let seo = crate::seo::SeoView::for_noindex_page("vi", &record.title);
+    let full_html = content_render::compose_document_with_seo(
+        header_html.as_deref(),
+        &template_html,
+        footer_html.as_deref(),
+        &seo,
+    )?;
+    Ok(RenderedLayout {
+        has_active_contact_form,
+        html: full_html,
+        diagnostics,
+    })
 }

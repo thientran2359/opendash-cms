@@ -264,6 +264,16 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route(
+            "/api/admin/studio/targets",
+            get(crate::routes::themes::studio_targets),
+        )
+        .route(
+            "/api/admin/studio/preview",
+            post(crate::routes::themes::studio_preview).layer(DefaultBodyLimit::max(
+                crate::routes::themes::MAX_STUDIO_PREVIEW_JSON_BYTES,
+            )),
+        )
+        .route(
             "/api/admin/settings/general",
             get(general_get)
                 .put(general_put)
