@@ -409,4 +409,4 @@ See [S02 target-only Page Builder and provider selections](s02-target-only-page-
 
 ## D03 shared-template draft preview supplement
 
-See [D03 typed shared-template draft preview](typed-template-draft-preview.md). While Draft this is a proposal, not implementation authority. It supplies the previously missing shared-template unsaved Preview API; entry Page Preview and existing publication semantics remain unchanged.
+See [D03 typed shared-template draft preview](typed-template-draft-preview.md). This Approved supplement requires merge and exact-source handoff before implementation. It supplies the previously missing shared-template unsaved Preview API; entry Page Preview and existing publication semantics remain unchanged.
