@@ -16,7 +16,7 @@ pub mod operations;
 pub mod restore;
 pub mod overrides;
 pub mod permalinks;
-pub mod sections;
+pub mod patterns;
 pub mod page;
 pub mod plugin;
 pub mod plugin_kv;
