@@ -34,7 +34,7 @@
 1. **Đăng ký `ContentSupport::Builder` tường minh cho mọi CPT:** Built-in `page` mặc định bật `[Editor, FeaturedImage, Builder]`; built-in `post` mặc định **tắt** (`[Editor, FeaturedImage]`, Admin có thể bật khi cần); CPT tùy chỉnh khai báo rõ trong `ContentTypeSettings.supports`. UI và backend cùng kiểm tra khả năng này.
 2. **Thống nhất 1 cặp bảng lưu trữ AST (`entry_builder_documents` + `entry_builder_media_refs`):** Dùng chung cho cả bài viết CPT lẫn `pattern` CPT, khóa theo `content_entries.id` và dùng chung CAS `content_entries.version`. Tách biệt tuyệt đối với `content_entries.values_json["body"]`.
 3. **Pattern CPT (`pattern`) + Block `core/pattern_ref` (depth = 1, Admin-only write):** Đổi tên private CPT `section` → `pattern` (cập nhật đủ mọi guard bảo mật); bổ sung `KnownElement::PatternRef(PatternRefProps)` cho phép nhúng đồng bộ vào mọi trang, giới hạn **depth = 1** (cấm lồng `core/pattern_ref` bên trong Pattern), bảo vệ xóa Pattern đang dùng (`409 Conflict` trừ khi `?force=true`) và cập nhật public media ACL qua bảng chỉ mục `entry_pattern_refs`.
-4. **Pattern Library (`Explore all patterns`):** Cung cấp API `GET /api/admin/patterns/library` và `GET /api/admin/patterns/library/theme/{key}` đọc từ `patterns/*.json` của active theme v3 (ảnh dùng `/theme/<theme_id>/assets/...` hiện hành), bấm chèn sẽ COPY AST với `node_id` mới vào canvas hiện tại.
+4. **Pattern Library (`Explore all patterns`):** Cung cấp API `GET /api/admin/patterns/library` và `GET /api/admin/patterns/library/theme/{key}` đọc từ `patterns/*.json` của active theme v3 (ảnh dùng `/theme/<revision_digest>/assets/...` hiện hành), bấm chèn sẽ COPY AST với `node_id` mới vào canvas hiện tại.
 
 ---
 
@@ -86,7 +86,7 @@
    - `content_mode` (`"editor" | "builder"`) lưu trên `content_entries` và được cập nhật qua `PUT /api/admin/entries/{type_key}/{id}` (`CompositeEntrySaveInput`, trường `content_mode: PatchField<ContentMode>`). Nếu đặt `"builder"` trên CPT chưa bật `ContentSupport::Builder`, trả `422 Unprocessable Entity`.
    - `GET /api/admin/entries/{type_key}/{id}/builder` (`require_session`): kiểm tra `(type_key, id)` tồn tại và CPT có `ContentSupport::Builder` (trả `403` nếu tắt) → trả `200` + `ETag: "vN"` + `{ entry_id, type_key, content_mode, version, document: Option<BuilderDocument> }`.
    - `PUT /api/admin/entries/{type_key}/{id}/builder` (`require_session_with_csrf` + `AdmittedMutation` + `If-Match: "vN"` + `Content-Type: application/json`, body ≤ `256 KiB`): kiểm tra quyền (riêng `type_key == "pattern"` yêu cầu **`require_admin_with_csrf`**), kiểm tra `ContentSupport::Builder` (`403`), cập nhật `entry_builder_documents`, `entry_builder_media_refs`, `entry_pattern_refs`, tăng `content_entries.version = version + 1` và `updated_at = datetime('now')`, phát `HookEvent::ContentAfterSave` sau commit → trả `200` + `ETag: "vN+1"` + `{ entry_id, version, updated_at }`. Lỗi: `428` (thiếu `If-Match`), `412` (stale), `415` (sai Content-Type), `400` (AST/depth không hợp lệ).
-   - `POST /api/admin/entries/{type_key}/{id}/builder/preview` (`require_session_with_csrf`, body `BuilderDocument`): render preview HTML với cùng giới hạn bảo mật (`16` pattern, `1024` node, `512 KiB`), **không ghi DB**, **không cấp quyền media public** → trả `200` `{ html, has_active_contact_form }`.
+   - `POST /api/admin/entries/{type_key}/{id}/builder/preview` (`require_session_with_csrf`, body `BuilderDocument`): render preview HTML với cùng giới hạn bảo mật (`16` pattern, `1024` node, `512 KiB`), **không ghi DB**, **không cấp quyền media public** → trả `200` `{ html, diagnostics }`; `has_active_contact_form` là cờ nội bộ để dựng CSP, không serialize, theo hợp đồng Preview dùng chung của [D02](s02-target-only-page-builder.md).
    - **Render vào `{{ od_content() }}` (Spec 1):** Nếu `entry.content_mode == "builder"` **và** CPT đang bật `ContentSupport::Builder` **và** có row trong `entry_builder_documents`, render Builder AST (truyền cờ `has_active_contact_form` ra CSP response); ngược lại fallback an toàn về `values_json["body"]`.
 
 ### B. Pattern CPT (`pattern`) & Block `core/pattern_ref` (Depth = 1)
@@ -120,11 +120,11 @@
 ### C. Pattern Library (`Explore all patterns`)
 
 - **Endpoints (`routes/patterns.rs` + `app.rs`, `require_session`):**
-  - `GET /api/admin/patterns/library?category=&q=` → `200` `{ categories: ["all", ...], items: [{ source: "theme", id: "theme:<theme_id>:<key>", key, title, category, description, preview_url: Option<String> }] }`. Trả `items: []` nếu chưa có theme active. *(Đọc trực tiếp từ `ThemeV3Manifest.patterns` của active theme via hàm `list_theme_patterns()`, không tạo trait thừa; `preview_url` dùng đường dẫn `/theme/<theme_id>/<rel_path>` hiện hành.)*
+  - `GET /api/admin/patterns/library?category=&q=` → `200` `{ categories: ["all", ...], items: [{ source: "theme", id: "theme:<theme_id>:<key>", key, title, category, description, preview_url: Option<String> }] }`. Trả `items: []` nếu chưa có theme active. *(Đọc trực tiếp từ `ThemeV3Manifest.patterns` của active theme via hàm `list_theme_patterns()`, không tạo trait thừa; `preview_url` dùng đường dẫn `/theme/<revision_digest>/<rel_path>` hiện hành.)*
   - `GET /api/admin/patterns/library/theme/{key}` (`key` kiểm qua `valid_snake_key`) → `200` `{ source: "theme", key, title, document: BuilderDocument }` (`404` nếu không tồn tại hoặc không có active theme).
 - **Copy AST & ảnh tĩnh trong Theme Pattern:**
   - Khi người dùng bấm chọn mẫu trong `PatternLibraryModal.tsx`, helper `cloneWithFreshNodeIds(doc)` tái tạo toàn bộ `node_id` trước khi chèn vào canvas.
-  - Ảnh minh họa tĩnh của Theme Pattern dùng URL `/theme/<theme_id>/<rel_path>` (đã có trong allowlist của `template_sec.rs`, không tạo media rác vào `media_assets`; nếu đổi theme sau này, ảnh hiển thị fallback an toàn mà không làm hỏng AST).
+  - Ảnh minh họa tĩnh của Theme Pattern dùng URL `/theme/<revision_digest>/<rel_path>` (đã có trong allowlist của `template_sec.rs`, không tạo media rác vào `media_assets`; nếu đổi theme sau này, ảnh hiển thị fallback an toàn mà không làm hỏng AST).
 - **Giao diện Visual Builder (`BuilderWorkspace.tsx`, `BuilderInspector.tsx`, `PatternLibraryModal.tsx`):**
   - Sidebar trái có 3 tab (`Blocks` | `Patterns` | `Media`) giống Gutenberg:
     - Tab **Blocks**: có block `Reusable Pattern` (`core/pattern_ref`); Inspector hiển thị `<SelectField>` chọn 1 Pattern từ `GET /api/admin/patterns`.
@@ -243,7 +243,7 @@ CREATE INDEX idx_entry_pattern_refs_target ON entry_pattern_refs(target_pattern_
 * **Dependencies:** Spec 1 Slice `S02` (Theme v3 `patterns`) và Spec 2 Slice `S02` (`storage/patterns.rs`, `routes/patterns.rs`).
 * **File Ownership:** `cms/crates/opendash-server/src/storage/patterns.rs`, `cms/crates/opendash-server/src/routes/patterns.rs`, `cms/crates/opendash-server/src/app.rs`, `cms/admin/src/api/patterns.ts`, `cms/admin/src/builder/{BuilderWorkspace.tsx,PatternLibraryModal.tsx,document.ts}`.
 * **Công việc chính:**
-  1. Triển khai `list_theme_patterns()` và 2 endpoint `GET /api/admin/patterns/library` (`?category=&q=`) & `GET /api/admin/patterns/library/theme/{key}` đọc từ `ThemeV3Manifest.patterns` của active theme v3 (ảnh dùng `/theme/<theme_id>/<rel_path>`).
+  1. Triển khai `list_theme_patterns()` và 2 endpoint `GET /api/admin/patterns/library` (`?category=&q=`) & `GET /api/admin/patterns/library/theme/{key}` đọc từ `ThemeV3Manifest.patterns` của active theme v3 (ảnh dùng `/theme/<revision_digest>/<rel_path>`).
   2. Cài đặt `cloneWithFreshNodeIds(doc)` trong `cms/admin/src/builder/document.ts`.
   3. Thêm tab `Patterns` ở sidebar trái của `BuilderWorkspace.tsx` và modal `PatternLibraryModal.tsx` (`Explore all patterns` với tìm kiếm, cột danh mục, lưới xem trước và chèn COPY AST vào canvas).
 * **Acceptance Criteria:**
