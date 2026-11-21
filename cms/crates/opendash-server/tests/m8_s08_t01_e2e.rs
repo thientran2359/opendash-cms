@@ -214,6 +214,84 @@ fn encrypt_age_bytes(plaintext: &[u8], passphrase: &str) -> Vec<u8> {
     out
 }
 
+// S03 public Home is selected from a published Page through Reading Settings.
+// Keep this setup through HTTP so the tests exercise publication and CAS.
+async fn create_s03_home(client: &Client, base: &str, cookie: &str, csrf: &str) -> i64 {
+    let created = client
+        .post(format!("{base}/api/admin/content-types/page/entries"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({"title":"S03 Home","slug":"s03-home","values":{"body":"Home"}}))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let text = created.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "create S03 Page: {text}");
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    let id = entry["id"].as_i64().unwrap();
+    let publish = client
+        .post(format!(
+            "{base}/api/admin/content-types/page/entries/{id}/publication"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(
+            "If-Match",
+            format!("\"v{}\"", entry["version"].as_i64().unwrap()),
+        )
+        .json(&json!({"status":"published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status().as_u16(), 200, "publish Home Page");
+    let reading = client
+        .get(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status().as_u16(), 200);
+    let token = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let selected = client
+        .put(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", token)
+        .json(&json!({"homepage_page_id":id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = selected.status();
+    let text = selected.text().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "save S03 Reading: {text}");
+    id
+}
+
+async fn save_s03_home_doc(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    page_id: i64,
+    version: i64,
+    document: &Value,
+) -> reqwest::Response {
+    client
+        .put(format!("{base}/api/admin/entries/page/{page_id}/builder"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .json(document)
+        .send()
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn full_v1_backup_restore_reedit_and_equivalence() {
     let tmp = TempDirGuard::new("full-v1");
@@ -449,10 +527,7 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap();
     assert_eq!(draft_resp.status(), StatusCode::CREATED);
 
-    // 5. Media upload + pin in Home SEO + existing Builder Homepage
-    // S02 preserves homepage route authority until S03 (Aster ACK #7057434954).
-    // Retain this writer and both public / assertions; S03 will migrate the
-    // whole flow to typed home overrides when route authority changes.
+    // 5. Media upload + pin in Home SEO + published Reading Page Builder.
     let png_bytes = minimal_1x1_png();
     let media_resp = client
         .post(format!("{}/api/admin/media", srv.base_url))
@@ -497,33 +572,36 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap()
         .to_vec();
 
-    let builder_put = client
-        .put(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header(header::COOKIE, &cookie)
-        .header("X-CSRF-Token", &csrf)
-        .header(header::IF_MATCH, "\"v1\"")
-        .json(&json!({
-            "schema_version": 1,
-            "sections": [{
-                "id": "sec1",
+    let home_id = create_s03_home(&client, &srv.base_url, &cookie, &csrf).await;
+    let hero_doc = json!({
+        "schema_version": 1,
+        "sections": [{
+            "id": "sec1",
+            "children": [{
+                "id": "row1",
                 "children": [{
-                    "id": "row1",
+                    "id": "col1",
                     "children": [{
-                        "id": "col1",
-                        "children": [{
-                            "id": "el1",
-                            "type": "core/text",
-                            "props": {
-                                "text": "M8_E2E_BASELINE_HERO"
-                            }
-                        }]
+                        "id": "el1",
+                        "type": "core/text",
+                        "props": {
+                            "text": "M8_E2E_BASELINE_HERO"
+                        }
                     }]
                 }]
             }]
-        }))
-        .send()
-        .await
-        .unwrap();
+        }]
+    });
+    let builder_put = save_s03_home_doc(
+        &client,
+        &srv.base_url,
+        &cookie,
+        &csrf,
+        home_id,
+        2,
+        &hero_doc,
+    )
+    .await;
     assert_eq!(builder_put.status(), StatusCode::OK);
 
     // 6. Contact form
@@ -830,33 +908,35 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
     }
 
     // 13. Re-edit & Save on restored target -> verify public reflects edit
-    let reedit_put = client
-        .put(format!("{}/api/admin/builder/homepage", target.base_url))
-        .header(header::COOKIE, &t_cookie)
-        .header("X-CSRF-Token", &t_csrf)
-        .header(header::IF_MATCH, "\"v2\"")
-        .json(&json!({
-            "schema_version": 1,
-            "sections": [{
-                "id": "sec1",
+    let reedit_doc = json!({
+        "schema_version": 1,
+        "sections": [{
+            "id": "sec1",
+            "children": [{
+                "id": "row1",
                 "children": [{
-                    "id": "row1",
+                    "id": "col1",
                     "children": [{
-                        "id": "col1",
-                        "children": [{
-                            "id": "el1",
-                            "type": "core/text",
-                            "props": {
-                                "text": "M8_E2E_REEDITED_HERO"
-                            }
-                        }]
+                        "id": "el1",
+                        "type": "core/text",
+                        "props": {
+                            "text": "M8_E2E_REEDITED_HERO"
+                        }
                     }]
                 }]
             }]
-        }))
-        .send()
-        .await
-        .unwrap();
+        }]
+    });
+    let reedit_put = save_s03_home_doc(
+        &client,
+        &target.base_url,
+        &t_cookie,
+        &t_csrf,
+        home_id,
+        3,
+        &reedit_doc,
+    )
+    .await;
     assert_eq!(reedit_put.status(), StatusCode::OK);
     let reedited_home = client
         .get(format!("{}/", target.base_url))

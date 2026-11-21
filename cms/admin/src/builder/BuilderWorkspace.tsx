@@ -90,12 +90,13 @@ export function BuilderWorkspace({
   const draftRef = useRef<BuilderDocument>(EMPTY_DOCUMENT);
   // The accepted route owns the target identity. Never change this independently
   // of App's dirty-navigation guard (including browser Back/Forward).
-  const targetRole = (route.templateRole ?? 'homepage') as 'homepage' | OverrideRole | 'section';
+  // The global Builder opens a valid typed template; Homepage is now Page-scoped.
+  const targetRole = (route.templateRole ?? 'header') as OverrideRole | 'section';
   const scopeTypeKey = route.typeKey ?? '';
   const scopeEntryId = route.entryId ?? null;
   const scopedPage = targetRole === 'page' && scopeTypeKey === 'page' && scopeEntryId !== null;
   const scopedSection = targetRole === 'section' && scopeTypeKey === 'section' && scopeEntryId !== null;
-  const sharedTarget: TemplateTargetInput | null = scopedPage || scopedSection || targetRole === 'homepage' || (scopeEntryId !== null && targetRole !== 'single')
+  const sharedTarget: TemplateTargetInput | null = scopedPage || scopedSection || (scopeEntryId !== null && targetRole !== 'single')
     ? null
     : targetRole === 'header' || targetRole === 'footer'
       ? { kind: 'part', part_key: targetRole }
@@ -122,7 +123,7 @@ export function BuilderWorkspace({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [elementType, setElementType] = useState<ElementType>('core/heading');
   const [mode, setMode] = useState<'canvas' | 'preview'>('canvas');
-  // Pure UI state: changing viewport never changes homepage JSON or revision.
+  // Pure UI state: changing viewport never changes document JSON or revision.
   const [viewport, setViewport] = useState<BuilderViewport>('desktop');
   const [previewHtml, setPreviewHtml] = useState('');
   const [diagnostics, setDiagnostics] = useState<BuilderDiagnostic[]>([]);
@@ -135,7 +136,7 @@ export function BuilderWorkspace({
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [conflict, setConflict] = useState(false);
-  const [notice, setNotice] = useState('Mở Builder để chỉnh homepage.');
+  const [notice, setNotice] = useState('Mở Builder để chỉnh template hoặc bố cục Page.');
   const [error, setError] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [librarySections, setLibrarySections] = useState<sectionApi.SectionRecord[]>([]);
@@ -154,7 +155,6 @@ export function BuilderWorkspace({
   const authorityRef = useRef(authority);
   authorityRef.current = authority;
   const openedTarget = async () => {
-    if (targetRole === 'homepage') return { ...await api.getHomepage(), exists: false, sharedId: null, contentMode: null };
     if (scopedSection && scopeEntryId !== null) {
       return { ...await sectionApi.getSectionDocument(scopeEntryId), exists: true, sharedId: null, contentMode: null };
     }
@@ -231,7 +231,7 @@ export function BuilderWorkspace({
     setInsertingId(null);
   }, [route.rawHash, user?.id, user?.role, csrfToken, resetToken]);
 
-  // Fetch only the accepted target. An inactive Builder must not fetch homepage
+  // Fetch only the accepted target. An inactive Builder must not fetch templates
   // in the background while an Editor is working on a Page.
   useEffect(() => {
     if (resetRef.current !== resetToken) {
@@ -279,7 +279,7 @@ export function BuilderWorkspace({
           setSavedRevision(0);
           setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
         }
-        setSource('source' in opened && opened.source ? opened.source : opened.exists ? 'layout' : 'empty');
+        setSource(opened.exists ? 'layout' : 'empty');
         setOverrideExists(opened.exists);
         setPageDetails(details);
         setRegistry(descriptors);
@@ -442,9 +442,7 @@ export function BuilderWorkspace({
     setPreviewing(true);
     message('Đang tạo bản Preview từ nháp...');
     try {
-      const result = targetRole === 'homepage'
-        ? await api.previewHomepage(snapshot, csrfToken, controller.signal)
-        : scopedSection && scopeEntryId !== null
+      const result = scopedSection && scopeEntryId !== null
           ? await sectionApi.previewSectionDocument(scopeEntryId, snapshot, csrfToken, controller.signal)
           : scopedPage && scopeEntryId !== null
             ? await builderApi.previewEntryBuilder(scopeEntryId, snapshot, csrfToken, controller.signal)
@@ -496,44 +494,30 @@ export function BuilderWorkspace({
     const requestAuthority = authority;
     message('Đang lưu snapshot (If-Match "v' + snapshotVersion + '")...');
     try {
-      if (targetRole === 'homepage') {
-        const result = await api.saveHomepage(snapshot, snapshotVersion, csrfToken);
-        if (ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
-        versionRef.current = result.version;
-        setVersion(result.version);
-        setSource(result.source);
-        savedRevisionRef.current = snapshotRevision;
-        setSavedRevision(snapshotRevision);
-        if (snapshotRevision === revisionRef.current) {
-          invalidatePreview();
-          setDiagnostics(result.diagnostics);
-        }
-      } else {
-        const result = scopedSection && scopeEntryId !== null
+      const result = scopedSection && scopeEntryId !== null
           ? await sectionApi.saveSectionDocument(scopeEntryId, snapshot, snapshotVersion, csrfToken)
           : scopedPage && scopeEntryId !== null
             ? await builderApi.saveEntryBuilder(scopeEntryId, snapshot, snapshotVersion, csrfToken)
             : sharedTarget
               ? await builderApi.putTemplateOverride(sharedTarget, snapshot, csrfToken, snapshotVersion || undefined)
               : (() => { throw new Error('Target Builder không hợp lệ.'); })();
-        if (ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
-        versionRef.current = result.version;
-        setVersion(result.version);
-        if ('content_mode' in result) entryModeRef.current = result.content_mode;
-        if ('canonical_target_key' in result) sharedIdRef.current = result.id;
-        setOverrideExists(true);
-        setSource('layout');
-        savedRevisionRef.current = snapshotRevision;
-        setSavedRevision(snapshotRevision);
-        if (snapshotRevision === revisionRef.current) {
-          invalidatePreview();
-          if ('diagnostics' in result) setDiagnostics(result.diagnostics);
-        }
-        if (scopedPage) {
-          const details = await freshPageDetails();
-          if (authorityRef.current !== requestAuthority) return;
-          setPageDetails(details);
-        }
+      if (ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
+      versionRef.current = result.version;
+      setVersion(result.version);
+      if ('content_mode' in result) entryModeRef.current = result.content_mode;
+      if ('canonical_target_key' in result) sharedIdRef.current = result.id;
+      setOverrideExists(true);
+      setSource('layout');
+      savedRevisionRef.current = snapshotRevision;
+      setSavedRevision(snapshotRevision);
+      if (snapshotRevision === revisionRef.current) {
+        invalidatePreview();
+        if ('diagnostics' in result) setDiagnostics(result.diagnostics);
+      }
+      if (scopedPage) {
+        const details = await freshPageDetails();
+        if (authorityRef.current !== requestAuthority) return;
+        setPageDetails(details);
       }
       message(snapshotRevision === revisionRef.current
         ? scopedSection
@@ -578,7 +562,7 @@ export function BuilderWorkspace({
       sharedIdRef.current = opened.sharedId;
       entryModeRef.current = opened.contentMode ?? 'editor';
       setOverrideExists(opened.exists);
-      setSource('source' in opened && opened.source ? opened.source : opened.exists ? 'layout' : 'empty');
+      setSource(opened.exists ? 'layout' : 'empty');
       setPageDetails(details);
       revisionRef.current = 0;
       savedRevisionRef.current = 0;
@@ -601,7 +585,7 @@ export function BuilderWorkspace({
   const reload = () => loadRoleTarget(true);
 
   const resetRoleOverride = async () => {
-    if (!active || targetRole === 'homepage' || scopedSection || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
+    if (!active || scopedSection || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
     if (revisionRef.current !== savedRevision
         && !window.confirm('Reset sẽ bỏ nháp chưa lưu. Tiếp tục?')) return;
     if (!window.confirm('Reset bố cục ' + targetRole + ' để sử dụng nội dung dự phòng?')) return;
@@ -648,7 +632,7 @@ export function BuilderWorkspace({
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
         <div>
           <h2 className="!m-0 text-lg font-bold text-slate-900">
-            {scopedPage ? `Page Builder #${scopeEntryId}` : scopedSection ? `Section Builder #${scopeEntryId}` : targetRole === 'homepage' ? 'Homepage Builder' : 'Override: ' + targetRole}
+            {scopedPage ? `Page Builder #${scopeEntryId}` : scopedSection ? `Section Builder #${scopeEntryId}` : 'Override: ' + targetRole}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
             Nguồn: {source} · ETag: {version === null ? 'Chưa tải' : '"v' + version + '"'}
@@ -661,13 +645,10 @@ export function BuilderWorkspace({
           <select id="builder-role-target" aria-label="Role Builder" className="text-sm"
             disabled={user.role !== 'admin' || scopedPage || scopedSection}
             value={targetRole} onChange={event => {
-              const next = event.target.value as 'homepage' | OverrideRole | 'section';
+              const next = event.target.value as OverrideRole | 'section';
               if (next === 'page' || next === 'section') return;
-              onNavigateHash(next === 'homepage' ? '#/builder'
-                : `#/builder?template=${next}${scopeTypeKey && (next === 'archive' || next === 'single') ? `&type=${encodeURIComponent(scopeTypeKey)}` : ''}`);
+              onNavigateHash(`#/builder?template=${next}${scopeTypeKey && (next === 'archive' || next === 'single') ? `&type=${encodeURIComponent(scopeTypeKey)}` : ''}`);
             }}>
-
-            <option value="homepage">homepage</option>
 
             <option value="page" disabled={!scopedPage}>page</option>
             <option value="section" disabled={!scopedSection}>section · riêng tư</option>
@@ -713,8 +694,8 @@ export function BuilderWorkspace({
             disabled={!user || loading || previewing || !loadedRef.current || (Boolean(sharedTarget) && user.role !== 'admin')}
             onClick={() => void preview()}>Xem trước</button>
           <button id="save" type="button" disabled={!user || loading || saving || !loadedRef.current || !dirty}
-            onClick={() => void save()}> {saving ? 'Đang lưu…' : scopedSection ? 'Lưu Section' : scopedPage ? 'Lưu Page' : targetRole === 'homepage' ? 'Lưu homepage' : 'Lưu override'} </button>
-          {targetRole !== 'homepage' && !scopedSection && overrideExists && (
+            onClick={() => void save()}> {saving ? 'Đang lưu…' : scopedSection ? 'Lưu Section' : scopedPage ? 'Lưu Page' : 'Lưu override'} </button>
+          {!scopedSection && overrideExists && (
             <button type="button" className="btn-secondary" disabled={!user || loading || saving}
               onClick={() => void resetRoleOverride()}>Reset mặc định</button>
           )}

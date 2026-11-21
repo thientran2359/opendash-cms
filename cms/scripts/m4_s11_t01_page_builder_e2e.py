@@ -85,8 +85,9 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                              {"username":"site_admin","password":"AdminPassword123!"},expected=201)
                     csrf = admin_login(admin, base, "site_admin", "AdminPassword123!")
                     # Existing site header and footer must be composed once;
-                    # Page-specific Save cannot mutate their AST or homepage.
-                    homepage_initial = api_json(admin,"GET",base,"/api/admin/builder/homepage")
+                    # Page-specific Save cannot mutate shared ASTs or site
+                    # Reading Settings (the supported homepage configuration).
+                    reading_initial = api_json(admin,"GET",base,"/api/admin/settings/reading")
                     shared = {}
                     for role, title in [("header","SITE HEADER EXACTLY ONCE"),
                                         ("footer","SITE FOOTER EXACTLY ONCE")]:
@@ -112,10 +113,10 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                              csrf,expected=201)
 
                     # Open actual Page editor, then its Builder button.
-                    homepage_calls = []
+                    reading_calls = []
                     def record_request(req):
-                        if "/api/admin/builder/homepage" in req.url:
-                            homepage_calls.append(req.url)
+                        if "/api/admin/settings/reading" in req.url:
+                            reading_calls.append(req.url)
                     page.on("request",record_request)
                     page.goto(editor_page(base, a),wait_until="domcontentloaded")
                     page.get_by_role("button",name="Mở Visual Builder").click()
@@ -123,7 +124,7 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                         base + f"/admin/#/builder?template=page&type=page&entry={a}",timeout=20000)
                     expect(page.get_by_role("heading",name=f"Page Builder #{a}")).to_be_visible(timeout=20000)
                     expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=20000)
-                    assert homepage_calls == [],homepage_calls
+                    assert reading_calls == [],reading_calls
                     assert api_json(admin,"GET",base,page_scope(a))["entry_id"] == a
                     assert api_json(admin,"GET",base,page_scope(b))["document"] is None
                     checks.append("Page_editor_to_exact_scope_no_homepage_requests")
@@ -201,7 +202,7 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     expect(page.get_by_test_id("builder-workspace")).to_contain_text("Đã mở",timeout=15000)
                     assert "PAGE A UNSAVED MUST STAY" not in page.get_by_test_id("builder-workspace").inner_text()
                     assert api_json(admin,"GET",base,page_scope(a))["document"] == a_doc["document"]
-                    assert api_json(admin,"GET",base,"/api/admin/builder/homepage") == homepage_initial
+                    assert api_json(admin,"GET",base,"/api/admin/settings/reading") == reading_initial
                     for role in shared:
                         assert next(row for row in api_json(admin,"GET",base,"/api/admin/template-overrides")["items"] if row["canonical_target_key"] == f"part:{role}") == shared[role]
                     checks.append("dirty_target_cancel_retains_url_AST_discard_loads_B_only")
@@ -344,7 +345,7 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     checks.append("body_fallback_and_header_footer_once_after_Page_A_reset")
 
                     # Editor is allowed Page scope but forbidden global
-                    # template/homepage/entry-scoped single, including direct API.
+                    # template/Reading Settings/entry-scoped single, including direct API.
                     editor = browser.new_context(viewport={"width":390,"height":844})
                     ec = admin_login(editor,base,"page_editor","EditorPassword123!")
                     epage = editor.new_page()
@@ -353,7 +354,7 @@ def test_page_scope(binary: pathlib.Path, artifacts: pathlib.Path) -> dict:
                     expect(epage.get_by_role("heading",name=f"Page Builder #{b}")).to_be_visible(timeout=20000)
                     editor_scope = editor.request.get(base + page_scope(b))
                     assert editor_scope.status == 200
-                    for path in ["/api/admin/builder/homepage",
+                    for path in ["/api/admin/settings/reading",
                                  "/api/admin/template-overrides"]:
                         assert editor.request.get(base + path).status == 403,path
                     for path, expected in [
