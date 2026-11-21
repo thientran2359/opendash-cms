@@ -71,7 +71,12 @@ fn extract_cookies(headers: &header::HeaderMap) -> String {
         .join("; ")
 }
 
-async fn login(client: &Client, base_url: &str, username: &str, password: &str) -> (String, String) {
+async fn login(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> (String, String) {
     let resp = client
         .post(format!("{base_url}/auth/login"))
         .json(&json!({ "username": username, "password": password }))
@@ -112,7 +117,13 @@ fn build_theme_zip(id: &str, slots: &[&str]) -> Vec<u8> {
     buf
 }
 
-async fn install_theme(client: &Client, base: &str, cookie: &str, csrf: &str, zip: Vec<u8>) -> String {
+async fn install_theme(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    zip: Vec<u8>,
+) -> String {
     let resp = client
         .post(format!("{base}/api/admin/themes"))
         .header(header::COOKIE, cookie)
@@ -412,7 +423,10 @@ async fn m7_s02_t01_menus_crud_validation_preview_slots_cas_and_restart() {
 
     // Create a draft post and verify preview omits unpublished target with diagnostic and does NOT write DB.
     let draft_post: Value = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
@@ -474,8 +488,22 @@ async fn m7_s02_t01_menus_crud_validation_preview_slots_cas_and_restart() {
     assert_eq!(after_preview["items"][1]["id"], child_item_id);
 
     // Install and activate theme-a (slots: primary, footer) and theme-b (slots: top).
-    let rev_a = install_theme(&client, &srv.base_url, &cookie, &csrf, build_theme_zip("theme-a", &["primary", "footer"])).await;
-    let rev_b = install_theme(&client, &srv.base_url, &cookie, &csrf, build_theme_zip("theme-b", &["top"])).await;
+    let rev_a = install_theme(
+        &client,
+        &srv.base_url,
+        &cookie,
+        &csrf,
+        build_theme_zip("theme-a", &["primary", "footer"]),
+    )
+    .await;
+    let rev_b = install_theme(
+        &client,
+        &srv.base_url,
+        &cookie,
+        &csrf,
+        build_theme_zip("theme-b", &["top"]),
+    )
+    .await;
     activate_theme(&client, &srv.base_url, &cookie, &csrf, &rev_a).await;
 
     // Non-active theme slot PUT rejected with 409.

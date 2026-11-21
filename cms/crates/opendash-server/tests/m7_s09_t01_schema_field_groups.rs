@@ -145,12 +145,15 @@ fn assert_core_builtins(cts: &[Value]) {
         assert_eq!(ct["owner"]["kind"], "core");
     }
     let section = &cts[2];
-    assert_eq!(section["descriptor"]["settings"], json!({
-        "public": false,
-        "has_archive": false,
-        "publication": "draft_publish",
-        "supports": []
-    }));
+    assert_eq!(
+        section["descriptor"]["settings"],
+        json!({
+            "public": false,
+            "has_archive": false,
+            "publication": "draft_publish",
+            "supports": []
+        })
+    );
     assert_eq!(section["status"], "active");
 }
 
@@ -194,9 +197,11 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v1\"")
-        .json(&json!({"key":"section", "label":"Public Section", "fields":[],
+        .json(
+            &json!({"key":"section", "label":"Public Section", "fields":[],
             "settings":{"public":true,"has_archive":true,"publication":"draft_publish",
-                "supports":["editor","featured_image"]}}))
+                "supports":["editor","featured_image"]}}),
+        )
         .send()
         .await
         .unwrap();
@@ -238,7 +243,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // Create an entry so has_existing_entries = true for portfolio
     let create_entry = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &ed_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &ed_csrf)
@@ -255,7 +263,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // 3. PUT /api/admin/content-types/{type_key}: If-Match 428 / 412, Editor 403, Core 403
     assert_eq!(
         client
-            .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+            .put(format!(
+                "{}/api/admin/content-types/portfolio",
+                srv.base_url
+            ))
             .header("Cookie", &ed_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &ed_csrf)
@@ -269,7 +280,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     );
     assert_eq!(
         client
-            .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+            .put(format!(
+                "{}/api/admin/content-types/portfolio",
+                srv.base_url
+            ))
             .header("Cookie", &admin_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &admin_csrf)
@@ -389,7 +403,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // AC-03e: portfolio has_existing_entries = true, client_name is required=true, min_edit_role=editor, default_value=None
     // Attempt PUT changing min_edit_role -> admin WITHOUT default_value -> 422 admin_required_field_missing_default
     let e_fail = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -423,7 +440,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // Now provide valid default_value -> 200 OK (version becomes 2)
     let e_ok = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -450,11 +470,17 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     assert_eq!(e_ok.status(), StatusCode::OK);
     let updated_cpt: Value = e_ok.json().await.unwrap();
     assert_eq!(updated_cpt["version"], 2);
-    assert_ne!(updated_cpt["schema_token"].as_str().unwrap(), old_schema_token);
+    assert_ne!(
+        updated_cpt["schema_token"].as_str().unwrap(),
+        old_schema_token
+    );
 
     // AC-03f: Try removing default_value while required=true, min_edit_role=admin -> 422 admin_required_field_missing_default
     let f_fail = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -589,7 +615,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     );
 
     let collide_cpt_put = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -625,7 +654,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // AC-01b: User PUT trying to remove `budget` completely when entries exist -> 409 cannot_remove_field_with_data
     let remove_with_data = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -660,7 +692,8 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // 6. Restart round-trip verification: normalized public_exposure & groups persist cleanly
     drop(srv);
     let srv2 = RunningServer::start(site_root).await;
-    let (admin_cookie2, admin_csrf2) = login(&client, &srv2.base_url, "admin", "Password123!").await;
+    let (admin_cookie2, admin_csrf2) =
+        login(&client, &srv2.base_url, "admin", "Password123!").await;
 
     let cts2: Vec<Value> = client
         .get(format!("{}/api/admin/content-types", srv2.base_url))
@@ -848,7 +881,8 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     }
 
     let srv3 = RunningServer::start(site_root).await;
-    let (admin_cookie3, admin_csrf3) = login(&client, &srv3.base_url, "admin", "Password123!").await;
+    let (admin_cookie3, admin_csrf3) =
+        login(&client, &srv3.base_url, "admin", "Password123!").await;
 
     // Remove "page" from `user:project_meta` target_types -> `page` association becomes `withdrawn`
     let upd_fg = client

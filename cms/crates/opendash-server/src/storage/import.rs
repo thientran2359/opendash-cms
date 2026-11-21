@@ -408,7 +408,9 @@ pub async fn plan_sample_import(
         .map_err(|_| ApiError::internal("Manifest theme v3 không hợp lệ."))?;
     manifest.validate().map_err(ApiError::internal)?;
     let Some(raw_sample) = manifest.sample else {
-        return Err(ApiError::not_found("Theme không khai báo dữ liệu mẫu (sample)."));
+        return Err(ApiError::not_found(
+            "Theme không khai báo dữ liệu mẫu (sample).",
+        ));
     };
     let sample: ThemeSampleManifest = serde_json::from_value(raw_sample).map_err(|_| {
         ApiError(
@@ -428,24 +430,29 @@ pub async fn plan_sample_import(
         let mut sorted = sample.media.clone();
         sorted.sort_by(|a, b| a.object_key.cmp(&b.object_key));
         for m in sorted {
-            let (action, reason) =
-                if has_tombstone(db, theme_id, &sample.sample_key, SampleGroup::Media, &m.object_key)
-                    .await?
-                {
-                    (PlanAction::Skip, Some("tombstone_exists".to_string()))
-                } else if has_provenance(
-                    db,
-                    theme_id,
-                    &sample.sample_key,
-                    SampleGroup::Media,
-                    &m.object_key,
-                )
-                .await?
-                {
-                    (PlanAction::Skip, Some("already_imported".to_string()))
-                } else {
-                    (PlanAction::Create, None)
-                };
+            let (action, reason) = if has_tombstone(
+                db,
+                theme_id,
+                &sample.sample_key,
+                SampleGroup::Media,
+                &m.object_key,
+            )
+            .await?
+            {
+                (PlanAction::Skip, Some("tombstone_exists".to_string()))
+            } else if has_provenance(
+                db,
+                theme_id,
+                &sample.sample_key,
+                SampleGroup::Media,
+                &m.object_key,
+            )
+            .await?
+            {
+                (PlanAction::Skip, Some("already_imported".to_string()))
+            } else {
+                (PlanAction::Create, None)
+            };
             implications_set.insert("media: private_until_referenced".to_string());
             items.push(ImportPlanItem {
                 resource_kind: SampleGroup::Media,
@@ -920,12 +927,11 @@ pub async fn execute_sample_import_with_cutpoint(
     });
 
     // Idempotent retry check for same run_id
-    let existing_run: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT state, plan_digest, outcome_json FROM import_runs WHERE run_id = ?",
-    )
-    .bind(&run_id)
-    .fetch_optional(db)
-    .await?;
+    let existing_run: Option<(String, String, Option<String>)> =
+        sqlx::query_as("SELECT state, plan_digest, outcome_json FROM import_runs WHERE run_id = ?")
+            .bind(&run_id)
+            .fetch_optional(db)
+            .await?;
     if let Some((state, old_digest, outcome_json)) = existing_run {
         if state == "committed" && old_digest == input.plan_digest {
             if let Some(raw) = outcome_json {
@@ -993,7 +999,9 @@ pub async fn execute_sample_import_with_cutpoint(
     }
 
     if cutpoint == ImportCutpoint::AfterPhase1Staged {
-        return Err(ApiError::internal("Simulated crash after Phase 1 (staged)."));
+        return Err(ApiError::internal(
+            "Simulated crash after Phase 1 (staged).",
+        ));
     }
 
     // Phase 2: files_verified
@@ -1027,7 +1035,11 @@ pub async fn execute_sample_import_with_cutpoint(
                 &decoded.thumbnail,
             )
             .await?;
-            let filename = safe_rel.rsplit('/').next().unwrap_or("sample.png").to_string();
+            let filename = safe_rel
+                .rsplit('/')
+                .next()
+                .unwrap_or("sample.png")
+                .to_string();
             let asset = decoded.metadata(filename);
             media_id_by_object.insert(m.object_key.clone(), asset.id.clone());
             media_entries.push(StagedMediaEntry {

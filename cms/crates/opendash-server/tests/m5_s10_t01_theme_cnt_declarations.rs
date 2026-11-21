@@ -57,7 +57,12 @@ async fn spawn_server_at(site_root: PathBuf, run_setup: bool) -> TestServer {
 
     let client = Client::new();
     for _ in 0..80 {
-        if client.get(format!("{base_url}/api/health")).send().await.is_ok() {
+        if client
+            .get(format!("{base_url}/api/health"))
+            .send()
+            .await
+            .is_ok()
+        {
             break;
         }
         if let Some(status) = child.try_wait().unwrap() {
@@ -216,10 +221,15 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         .await
         .unwrap();
     assert_eq!(term_res.status(), 201);
-    let term_id = term_res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let term_id = term_res.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     let entry_res = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -233,7 +243,9 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
         .await
         .unwrap();
     assert_eq!(entry_res.status(), 201);
-    let entry_id = entry_res.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let entry_id = entry_res.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     // 2. Collision tests (409): Core `post` and other-owner `portfolio`
     let rev_core_claim = install_v3(
@@ -566,12 +578,11 @@ async fn theme_cnt_declarations_lifecycle_collisions_compatibility_withdrawal_an
             ),
         ]
     );
-    let term_links: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM entry_terms WHERE entry_id = ?")
-            .bind(entry_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let term_links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entry_terms WHERE entry_id = ?")
+        .bind(entry_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(term_links, 1);
     pool.close().await;
     let _ = fs::remove_dir_all(&site_root);

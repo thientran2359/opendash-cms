@@ -374,7 +374,7 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
             .put(format!("{}/api/admin/themes/active", srv.base))
             .header(header::COOKIE, &admin)
             .header("x-csrf-token", &csrf)
-        .header(header::IF_MATCH, "\"v2\"")
+            .header(header::IF_MATCH, "\"v2\"")
             .json(&json!({"revision_id":"rev-missing"}))
             .send()
             .await

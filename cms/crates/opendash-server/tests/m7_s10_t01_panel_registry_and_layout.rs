@@ -198,13 +198,20 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
         .unwrap();
     let create_cpt_status = create_cpt.status();
     let create_cpt_text = create_cpt.text().await.unwrap();
-    assert_eq!(create_cpt_status, StatusCode::CREATED, "create_cpt failed: {create_cpt_text}");
+    assert_eq!(
+        create_cpt_status,
+        StatusCode::CREATED,
+        "create_cpt failed: {create_cpt_text}"
+    );
     let cpt_created: Value = serde_json::from_str(&create_cpt_text).unwrap();
     let initial_schema_token = cpt_created["schema_token"].as_str().unwrap().to_string();
 
     // 2. Editor gets 403 on GET & PUT /editor-layout
     let ed_get_layout = client
-        .get(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &ed_cookie)
         .send()
         .await
@@ -212,7 +219,10 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     assert_eq!(ed_get_layout.status(), StatusCode::FORBIDDEN);
 
     let ed_put_layout = client
-        .put(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &ed_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &ed_csrf)
@@ -236,13 +246,19 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
 
     // 3. Admin gets default layout (version 0, ETag "v0")
     let get_v0 = client
-        .get(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .send()
         .await
         .unwrap();
     assert_eq!(get_v0.status(), StatusCode::OK);
-    assert_eq!(get_v0.headers().get("etag").unwrap().to_str().unwrap(), "\"v0\"");
+    assert_eq!(
+        get_v0.headers().get("etag").unwrap().to_str().unwrap(),
+        "\"v0\""
+    );
     let v0_body: Value = get_v0.json().await.unwrap();
     assert_eq!(v0_body["version"], 0);
 
@@ -294,7 +310,10 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
         }));
 
     let put_v1 = client
-        .put(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -304,7 +323,10 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
         .await
         .unwrap();
     assert_eq!(put_v1.status(), StatusCode::OK);
-    assert_eq!(put_v1.headers().get("etag").unwrap().to_str().unwrap(), "\"v1\"");
+    assert_eq!(
+        put_v1.headers().get("etag").unwrap().to_str().unwrap(),
+        "\"v1\""
+    );
     let v1_body: Value = put_v1.json().await.unwrap();
     assert_eq!(v1_body["version"], 1);
 
@@ -335,11 +357,20 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
         .find(|c| c["descriptor"]["key"] == "project")
         .unwrap();
     assert_eq!(project_after["schema_token"], initial_schema_token);
-    assert_eq!(project_after["descriptor"]["fields"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        project_after["descriptor"]["fields"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
 
     // Verify stale If-Match "v0" returns 409 Conflict
     let stale_put = client
-        .put(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -364,7 +395,10 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
             "subgroups": []
         }));
     let bad_region_resp = client
-        .put(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -383,7 +417,10 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
         }
     }
     let hide_req_resp = client
-        .put(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -400,7 +437,10 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     let mut dup_field = v1_body["layout"].clone();
     dup_field["base_field_panels"][1]["field_keys"] = json!(["completion_date", "client_name"]);
     let dup_resp = client
-        .put(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -570,7 +610,10 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
 
     // Verify GET /editor-layout keeps old placements & auto-appends new user/plugin panels
     let get_after_append: Value = client
-        .get(format!("{}/api/admin/content-types/project/editor-layout", srv.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/project/editor-layout",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .send()
         .await
@@ -587,25 +630,35 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     let sidebar = get_after_append["layout"]["regions"]["sidebar"]
         .as_array()
         .unwrap();
-    assert!(main_top
-        .iter()
-        .any(|p| p["panel_id"] == "layout:project_info" && p["order"] == 25));
-    assert!(sidebar
-        .iter()
-        .any(|p| p["panel_id"] == "layout:project_status" && p["order"] == 35));
-    assert!(main_bottom
-        .iter()
-        .chain(sidebar.iter())
-        .chain(main_top.iter())
-        .any(|p| p["panel_id"] == "user:project_links"));
-    assert!(main_bottom
-        .iter()
-        .chain(sidebar.iter())
-        .chain(main_top.iter())
-        .any(|p| p["panel_id"] == "plugin:seo-panel-plugin:seo_fields"));
-    assert!(sidebar
-        .iter()
-        .any(|p| p["panel_id"] == "plugin:seo-panel-plugin:seo_action"));
+    assert!(
+        main_top
+            .iter()
+            .any(|p| p["panel_id"] == "layout:project_info" && p["order"] == 25)
+    );
+    assert!(
+        sidebar
+            .iter()
+            .any(|p| p["panel_id"] == "layout:project_status" && p["order"] == 35)
+    );
+    assert!(
+        main_bottom
+            .iter()
+            .chain(sidebar.iter())
+            .chain(main_top.iter())
+            .any(|p| p["panel_id"] == "user:project_links")
+    );
+    assert!(
+        main_bottom
+            .iter()
+            .chain(sidebar.iter())
+            .chain(main_top.iter())
+            .any(|p| p["panel_id"] == "plugin:seo-panel-plugin:seo_fields")
+    );
+    assert!(
+        sidebar
+            .iter()
+            .any(|p| p["panel_id"] == "plugin:seo-panel-plugin:seo_action")
+    );
 
     // 7. Editor calls GET /effective-editor-config -> 200 OK with ACL filtering (AC-09b)
     let ed_cfg_resp = client
