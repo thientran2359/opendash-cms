@@ -1,14 +1,18 @@
 //! Site-owned Builder homepage. All persistence, version CAS and media ACL
 //! writes stay in this module; preview/open and public snapshot are read-only.
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use opendash_core::{
     builder::{
         BUILDER_SCHEMA_VERSION, BindingSource, BuilderDocument, ColumnNode, ElementContent,
         ElementNode, KnownElement, LegacyBlockProps, RowNode, SectionNode,
     },
+    builder_blocks::BlockDiagnostic,
     content::{
-        ContentFieldType, ContentMode, ContentSupport, EffectiveContentSchema,
+        ContentFieldType, ContentMode, ContentPublication, ContentSupport, EffectiveContentSchema,
         EffectiveFieldStatus, FieldRole, PublicExposure,
     },
     id::valid_namespaced_block_id,
@@ -24,7 +28,7 @@ use crate::{
     auth::{Role, SessionContext},
     error::{ApiError, ApiResult},
     hooks::{ContentBeforeSaveVeto, HookDispatcher},
-    page::{self, RenderedLayout},
+    page::{self, RenderAnnotationScope, RenderedLayout},
     storage::media::valid_media_id,
     storage::{
         builder_binding::{self, BindingResults},
@@ -1066,6 +1070,11 @@ pub struct EntryBuilderOpen {
     pub version: i64,
     pub updated_at: String,
     pub document: Option<BuilderDocument>,
+    pub publication_status: String,
+    pub publication_policy: ContentPublication,
+    pub diagnostics: Vec<BlockDiagnostic>,
+    pub had_freeform_wrap: bool,
+    pub had_recovery: bool,
 }
 
 struct EntryBuilderSnapshot {
@@ -1077,8 +1086,8 @@ struct EntryBuilderSnapshot {
     term_ids: Vec<i64>,
     raw_body: Option<String>,
     raw_body_has_blocks: bool,
-    #[allow(dead_code)]
-    publication_status: String,
+    page_layout_key: Option<String>,
+    custom_template_key: Option<String>,
 }
 
 fn actor_field_role(actor: &SessionContext) -> FieldRole {
@@ -1141,7 +1150,18 @@ async fn entry_builder_snapshot(
     {
         return Err(ApiError::forbidden("Content Builder is not enabled."));
     }
-    let (title, slug, values_json, mode, publication_status, version, updated_at, raw_doc): (
+    let (
+        title,
+        slug,
+        values_json,
+        mode,
+        publication_status,
+        version,
+        updated_at,
+        raw_doc,
+        page_layout_key,
+        custom_template_key,
+    ): (
         String,
         String,
         String,
@@ -1150,8 +1170,19 @@ async fn entry_builder_snapshot(
         i64,
         String,
         Option<String>,
+        Option<String>,
+        Option<String>,
     ) = if type_key == "pattern" {
-        sqlx::query_as(
+        let row: (
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            String,
+            Option<String>,
+        ) = sqlx::query_as(
             "SELECT e.title, e.slug, e.values_json, e.content_mode, e.publication_status, e.version, e.updated_at, d.document_json
                FROM content_entries e LEFT JOIN entry_builder_documents d ON d.entry_id = e.id
               WHERE e.id = ? AND e.content_type_key = ?",
@@ -1160,10 +1191,24 @@ async fn entry_builder_snapshot(
         .bind(type_key)
         .fetch_optional(&mut **tx)
         .await?
-        .ok_or_else(|| ApiError::not_found("Content entry not found."))?
+        .ok_or_else(|| ApiError::not_found("Content entry not found."))?;
+        (
+            row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, None, None,
+        )
     } else {
-        let row: Option<(String, String, String, String, String, i64, String)> = sqlx::query_as(
-            "SELECT title, slug, values_json, content_mode, publication_status, version, updated_at
+        let row: Option<(
+            String,
+            String,
+            String,
+            String,
+            String,
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+        )> = sqlx::query_as(
+            "SELECT title, slug, values_json, content_mode, publication_status, version, updated_at,
+                    page_layout_key, custom_template_key
                FROM content_entries
               WHERE id = ? AND content_type_key = ?",
         )
@@ -1171,8 +1216,17 @@ async fn entry_builder_snapshot(
         .bind(type_key)
         .fetch_optional(&mut **tx)
         .await?;
-        let (title, slug, values_json, mode, publication_status, version, updated_at) =
-            row.ok_or_else(|| ApiError::not_found("Content entry not found."))?;
+        let (
+            title,
+            slug,
+            values_json,
+            mode,
+            publication_status,
+            version,
+            updated_at,
+            page_layout_key,
+            custom_template_key,
+        ) = row.ok_or_else(|| ApiError::not_found("Content entry not found."))?;
         (
             title,
             slug,
@@ -1182,6 +1236,8 @@ async fn entry_builder_snapshot(
             version,
             updated_at,
             None,
+            page_layout_key,
+            custom_template_key,
         )
     };
     let content_mode = match mode.as_str() {
@@ -1197,19 +1253,27 @@ async fn entry_builder_snapshot(
     let raw_body_has_blocks = raw_body
         .as_deref()
         .is_some_and(opendash_core::builder_blocks::contains_blocks);
-    let document = if type_key == "pattern" {
-        raw_doc
+    let (document, diagnostics, had_freeform_wrap, had_recovery) = if type_key == "pattern" {
+        let doc = raw_doc
             .map(|raw| BuilderDocument::from_json(raw.as_bytes()))
             .transpose()
-            .map_err(|_| ApiError::internal("Stored entry Builder document is not readable."))?
+            .map_err(|_| ApiError::internal("Stored entry Builder document is not readable."))?;
+        (doc, Vec::new(), false, false)
     } else {
         match raw_body.as_deref() {
             Some(raw) if !raw.trim().is_empty() => {
-                Some(opendash_core::builder_blocks::parse_blocks_lenient_or_recover(raw).document)
+                let parsed = opendash_core::builder_blocks::parse_blocks_lenient_or_recover(raw);
+                (
+                    Some(parsed.document),
+                    parsed.diagnostics,
+                    parsed.had_freeform_wrap,
+                    parsed.had_recovery,
+                )
             }
-            _ => None,
+            _ => (None, Vec::new(), false, false),
         }
     };
+    let publication_policy = schema.base.descriptor.settings.publication;
     let term_ids = entries::read_term_ids(tx, id).await?;
     Ok(EntryBuilderSnapshot {
         opened: EntryBuilderOpen {
@@ -1219,6 +1283,11 @@ async fn entry_builder_snapshot(
             version,
             updated_at,
             document,
+            publication_status,
+            publication_policy,
+            diagnostics,
+            had_freeform_wrap,
+            had_recovery,
         },
         schema,
         title,
@@ -1227,7 +1296,8 @@ async fn entry_builder_snapshot(
         term_ids,
         raw_body,
         raw_body_has_blocks,
-        publication_status,
+        page_layout_key,
+        custom_template_key,
     })
 }
 
@@ -1383,6 +1453,25 @@ async fn render_entry_builder_preview(
     document: &BuilderDocument,
     shared_preview: bool,
 ) -> ApiResult<RenderedLayout> {
+    render_entry_builder_preview_with_scope(
+        tx,
+        current,
+        state,
+        document,
+        shared_preview,
+        RenderAnnotationScope::None,
+    )
+    .await
+}
+
+async fn render_entry_builder_preview_with_scope(
+    tx: &mut Transaction<'_, Sqlite>,
+    current: &EntryBuilderSnapshot,
+    state: &HomeState,
+    document: &BuilderDocument,
+    shared_preview: bool,
+    annotation_scope: RenderAnnotationScope,
+) -> ApiResult<RenderedLayout> {
     let bindings = builder_binding::resolve_in_tx_with_route(
         tx,
         document,
@@ -1398,7 +1487,7 @@ async fn render_entry_builder_preview(
         content_html: None,
         parts: &parts,
     });
-    page::render_builder_with_patterns(
+    page::render_builder_with_annotations(
         state,
         document,
         true,
@@ -1408,6 +1497,7 @@ async fn render_entry_builder_preview(
         context.as_ref(),
         &patterns,
         false,
+        annotation_scope,
     )
 }
 
@@ -1441,12 +1531,13 @@ pub async fn preview_saved_entry_body(
 ) -> ApiResult<Option<RenderedLayout>> {
     let mut tx = db.begin().await?;
     let rendered = preview_saved_page_body_in_tx(&mut tx, actor, type_key, id).await?;
-    tx.commit().await?;
+    tx.rollback().await?;
     Ok(rendered)
 }
 
 pub async fn preview_entry_builder(
     db: &SqlitePool,
+    themes_root: &Path,
     actor: &SessionContext,
     type_key: &str,
     id: i64,
@@ -1457,12 +1548,33 @@ pub async fn preview_entry_builder(
     if type_key != "pattern" {
         check_entry_body_edit_acl(&current.schema, actor)?;
     }
-    let state =
-        validate_entry_builder_document(&mut tx, &current, actor_field_role(actor), document)
+    let actor_role = actor_field_role(actor);
+    let state = validate_entry_builder_document(&mut tx, &current, actor_role, document).await?;
+    let scope = if type_key == "pattern" {
+        RenderAnnotationScope::None
+    } else {
+        RenderAnnotationScope::EntryBodyOnly
+    };
+    let rendered =
+        render_entry_builder_preview_with_scope(&mut tx, &current, &state, document, false, scope)
             .await?;
-    let rendered = render_entry_builder_preview(&mut tx, &current, &state, document, false).await?;
-    tx.commit().await?;
-    Ok(rendered)
+    let out = if type_key == "pattern" {
+        rendered
+    } else {
+        crate::storage::overrides::wrap_entry_body_in_preview_shell_in_tx(
+            &mut tx,
+            themes_root,
+            actor_role,
+            &current.schema,
+            id,
+            current.page_layout_key.as_deref(),
+            current.custom_template_key.as_deref(),
+            rendered,
+        )
+        .await?
+    };
+    tx.rollback().await?;
+    Ok(out)
 }
 
 #[derive(Debug)]

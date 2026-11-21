@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
-    Json,
+    Extension, Json,
     body::Bytes,
     extract::{Path, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
@@ -246,6 +246,7 @@ pub async fn entry_builder_put(
 
 pub async fn entry_builder_preview(
     State(db): State<SqlitePool>,
+    Extension(themes_root): Extension<crate::routes::themes::ThemeStoreRoot>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
     RawQuery(raw): RawQuery,
@@ -263,8 +264,15 @@ pub async fn entry_builder_preview(
         ));
     }
     let document = decode_document(&headers, &bytes)?;
-    let rendered =
-        builder_storage::preview_entry_builder(&db, &actor, &type_key, id, &document).await?;
+    let rendered = builder_storage::preview_entry_builder(
+        &db,
+        &themes_root.0,
+        &actor,
+        &type_key,
+        id,
+        &document,
+    )
+    .await?;
     let mut response_headers = builder_headers(None);
     // Reuse the site's strict layout CSP, including the contact form flag.
     let layout_response = super::public::rendered_layout_with_form_csp(

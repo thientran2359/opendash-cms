@@ -248,6 +248,26 @@ pub fn render_builder_with_template_context(
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RenderAnnotationScope {
+    #[default]
+    None,
+    TemplateAll,
+    EntryBodyOnly,
+}
+
+fn editable_attrs(
+    scope: RenderAnnotationScope,
+    is_preview: bool,
+    pattern_document: bool,
+    kind: &str,
+) -> String {
+    if !is_preview || pattern_document || scope == RenderAnnotationScope::None {
+        return String::new();
+    }
+    format!(" data-od-editable=\"1\" data-od-kind=\"{kind}\"")
+}
+
 /// Render an entry or a trusted, one-hop Pattern body. Only the storage layer
 /// can populate `patterns`, so incoming AST never carries referenced markup.
 pub fn render_builder_with_patterns(
@@ -261,6 +281,33 @@ pub fn render_builder_with_patterns(
     patterns: &PatternResults,
     pattern_document: bool,
 ) -> ApiResult<RenderedLayout> {
+    render_builder_with_annotations(
+        state,
+        document,
+        is_preview,
+        bindings,
+        lists,
+        forms,
+        context,
+        patterns,
+        pattern_document,
+        RenderAnnotationScope::None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_builder_with_annotations(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
+    lists: &ListResults,
+    forms: &ContactFormResults,
+    context: Option<&BuilderTemplateContext<'_>>,
+    patterns: &PatternResults,
+    pattern_document: bool,
+    annotation_scope: RenderAnnotationScope,
+) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
     let mut html = builder_responsive_css(document);
@@ -271,19 +318,23 @@ pub fn render_builder_with_patterns(
     }
     let mut diagnostics = Vec::new();
     let mut has_active_contact_form = false;
+    let sec_attrs = editable_attrs(annotation_scope, is_preview, pattern_document, "section");
+    let row_attrs = editable_attrs(annotation_scope, is_preview, pattern_document, "row");
+    let col_attrs = editable_attrs(annotation_scope, is_preview, pattern_document, "column");
+    let el_attrs = editable_attrs(annotation_scope, is_preview, pattern_document, "element");
     for section in &document.sections {
         html.push_str(&format!(
-            "<section data-node-id=\"{}\">",
+            "<section data-node-id=\"{}\"{sec_attrs}>",
             escape_html(&section.id)
         ));
         for row in &section.children {
             html.push_str(&format!(
-                "<div class=\"builder-row\" data-node-id=\"{}\">",
+                "<div class=\"builder-row\" data-node-id=\"{}\"{row_attrs}>",
                 escape_html(&row.id)
             ));
             for column in &row.children {
                 html.push_str(&format!(
-                    "<div class=\"builder-column\" data-node-id=\"{}\">",
+                    "<div class=\"builder-column\" data-node-id=\"{}\"{col_attrs}>",
                     escape_html(&column.id)
                 ));
                 for element in &column.children {
@@ -629,7 +680,7 @@ pub fn render_builder_with_patterns(
                             ));
                         }
                         html.push_str(&format!(
-                            "<div class=\"builder-element\" data-node-id=\"{}\">{fragment}</div>",
+                            "<div class=\"builder-element\" data-node-id=\"{}\"{el_attrs}>{fragment}</div>",
                             escape_html(&element.id)
                         ));
                     }
@@ -1250,5 +1301,173 @@ mod m6_s05_tests {
         assert!(!rendered.html.contains("href=\"/content/post/hidden\""));
         assert!(rendered.html.contains("&lt;unsafe&gt;"));
         assert!(!rendered.html.contains("<unsafe>"));
+    }
+
+    #[test]
+    fn preview_annotation_scope_isolates_public_pattern_parts_and_slots() {
+        use opendash_core::builder::{
+            ColumnNode, ContentSlotProps, ElementNode, HeadingProps, PatternRefProps, RowNode,
+            SectionNode, TemplatePartProps,
+        };
+        let state = HomeState {
+            version: 1,
+            saved: None,
+            legacy: None,
+            themes: BTreeMap::new(),
+            active_id: None,
+            active_alias: None,
+            active_template: None,
+        };
+        let pattern_doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "psec-1".into(),
+                responsive: None,
+                children: vec![RowNode {
+                    id: "prow-1".into(),
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "pcol-1".into(),
+                        responsive: None,
+                        children: vec![ElementNode {
+                            id: "phead-1".into(),
+                            content: ElementContent::Known(KnownElement::Heading(HeadingProps {
+                                level: 3,
+                                text: "Inner pattern".into(),
+                                binding: None,
+                            })),
+                        }],
+                    }],
+                }],
+            }],
+        };
+        // Pattern AST is always rendered with pattern_document = true and scope None.
+        let inner_pattern = render_builder_with_annotations(
+            &state,
+            &pattern_doc,
+            true,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            true,
+            RenderAnnotationScope::TemplateAll,
+        )
+        .unwrap();
+        assert!(!inner_pattern.html.contains("data-od-editable"));
+        assert!(!inner_pattern.html.contains("data-od-kind"));
+
+        let outer_doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-1".into(),
+                responsive: None,
+                children: vec![RowNode {
+                    id: "row-1".into(),
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "col-1".into(),
+                        responsive: None,
+                        children: vec![
+                            ElementNode {
+                                id: "part-1".into(),
+                                content: ElementContent::Known(KnownElement::TemplatePart(
+                                    TemplatePartProps {
+                                        part_key: "header".into(),
+                                    },
+                                )),
+                            },
+                            ElementNode {
+                                id: "pat-1".into(),
+                                content: ElementContent::Known(KnownElement::PatternRef(
+                                    PatternRefProps { pattern_id: 7 },
+                                )),
+                            },
+                            ElementNode {
+                                id: "slot-1".into(),
+                                content: ElementContent::Known(KnownElement::ContentSlot(
+                                    ContentSlotProps {},
+                                )),
+                            },
+                        ],
+                    }],
+                }],
+            }],
+        };
+        let mut patterns = PatternResults::new();
+        patterns.insert(7, inner_pattern);
+        let mut parts = BTreeMap::new();
+        parts.insert(
+            "header".into(),
+            "<section data-node-id=\"hdr-sec\"><p>Header</p></section>".into(),
+        );
+        let ctx = BuilderTemplateContext {
+            content_html: Some("<main><p data-node-id=\"entry-inner\">Entry</p></main>"),
+            parts: &parts,
+        };
+
+        // Public render (is_preview = false) and Scope::None emit zero data-od-editable attributes.
+        let public_out = render_builder_with_annotations(
+            &state,
+            &outer_doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Some(&ctx),
+            &patterns,
+            false,
+            RenderAnnotationScope::TemplateAll,
+        )
+        .unwrap();
+        assert!(!public_out.html.contains("data-od-editable"));
+        assert!(!public_out.html.contains("data-od-kind"));
+
+        let unscoped_preview = render_builder_with_patterns(
+            &state,
+            &outer_doc,
+            true,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Some(&ctx),
+            &patterns,
+            false,
+        )
+        .unwrap();
+        assert!(!unscoped_preview.html.contains("data-od-editable"));
+
+        // Scoped preview annotates only outer template nodes, never embedded pattern/part/slot internals.
+        let scoped = render_builder_with_annotations(
+            &state,
+            &outer_doc,
+            true,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            Some(&ctx),
+            &patterns,
+            false,
+            RenderAnnotationScope::TemplateAll,
+        )
+        .unwrap();
+        assert!(scoped.html.contains(
+            "<section data-node-id=\"sec-1\" data-od-editable=\"1\" data-od-kind=\"section\">"
+        ));
+        assert!(scoped.html.contains(
+            "<div class=\"builder-row\" data-node-id=\"row-1\" data-od-editable=\"1\" data-od-kind=\"row\">"
+        ));
+        assert!(scoped.html.contains(
+            "<div class=\"builder-column\" data-node-id=\"col-1\" data-od-editable=\"1\" data-od-kind=\"column\">"
+        ));
+        assert!(scoped.html.contains(
+            "<div class=\"builder-element\" data-node-id=\"pat-1\" data-od-editable=\"1\" data-od-kind=\"element\">"
+        ));
+        assert!(scoped.html.contains(
+            "<section data-node-id=\"psec-1\"><div class=\"builder-row\" data-node-id=\"prow-1\">"
+        ));
+        assert!(scoped.html.contains("<section data-node-id=\"hdr-sec\">"));
+        assert!(scoped.html.contains("<p data-node-id=\"entry-inner\">"));
     }
 }
