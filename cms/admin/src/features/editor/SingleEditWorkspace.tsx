@@ -13,6 +13,7 @@ import {
 import { runPluginAction } from '../../api/plugins.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
+import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes.ts';
 import type { AuthUser } from '../../types.ts';
 import type {
   ContentFieldValue,
@@ -132,6 +133,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [clearedFields, setClearedFields] = useState<string[]>([]);
   const [termIds, setTermIds] = useState<number[]>([]);
   const [customPath, setCustomPath] = useState('');
+  const [themeLayouts, setThemeLayouts] = useState<ThemeLayoutCatalog | null>(null);
+  const [selectedThemeKey, setSelectedThemeKey] = useState<string | null>(null);
+  const [themeKeyDirty, setThemeKeyDirty] = useState(false);
+  const savedThemeKeyRef = useRef<string | null>(null);
+  const selectedThemeKeyRef = useRef<string | null>(null);
+  const themeKeyDirtyRef = useRef(false);
   const [seoTitle, setSeoTitle] = useState('');
   const [seoDescription, setSeoDescription] = useState('');
   const [seoOgImageId, setSeoOgImageId] = useState('');
@@ -259,6 +266,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
   useEffect(() => {
     setConfirmedPublicLink(null);
+    setThemeLayouts(null);
     if (!user) {
       setConfig(null);
       baselineRef.current = null;
@@ -294,6 +302,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         let baseline: EditorDraftPayload;
         let serverPublicPath: string | null = null;
         let routeReadable = true;
+        const layoutCatalog = await getActiveThemeLayouts();
         let seoReadable = true;
         if (mode === 'edit' && entryId !== null) {
           // Route/SEO can be forbidden after same-user role downgrade. Never
@@ -311,6 +320,14 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             optional(getEntrySeo(typeKey, entryId)),
           ]);
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
+          const themeKey = typeKey === 'page'
+            ? (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null
+            : (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
+          savedThemeKeyRef.current = themeKey;
+          selectedThemeKeyRef.current = themeKey;
+          themeKeyDirtyRef.current = false;
+          setSelectedThemeKey(themeKey);
+          setThemeKeyDirty(false);
           routeReadable = routeSnap !== null;
           seoReadable = seoSnap !== null;
           if (rec.publication_status === 'published' && routeSnap?.entry_version === rec.version) {
@@ -331,6 +348,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             } : emptySeo,
           };
         } else {
+          savedThemeKeyRef.current = null;
+          selectedThemeKeyRef.current = null;
+          themeKeyDirtyRef.current = false;
+          setSelectedThemeKey(null);
+          setThemeKeyDirty(false);
           baseline = {
             id: null, version: null, title: '', slug: '', slug_touched: false,
             publication_status: effectiveContentTypeSettings(typeKey, freshCfg.settings).publication === 'draft_publish'
@@ -343,6 +365,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           routeReadable, seoReadable,
         );
         if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
+        setThemeLayouts(layoutCatalog);
         baselineRef.current = baseline;
         setConfirmedPublicLink({
           scope: mediaScopeKey, version: baseline.version ?? 0, path: serverPublicPath,
@@ -448,6 +471,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
     try {
       const payload = {
+        ...(themeKeyDirtyRef.current ? {
+          [typeKey === 'page' ? 'page_layout_key' : 'custom_template_key']: selectedThemeKeyRef.current,
+        } : {}),
         expected_version: entryId === null ? undefined : (snapshot.version ?? undefined),
         expected_schema_token: expectedSchemaToken,
         title: snapshot.title.trim(),
@@ -487,6 +513,20 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         } : snapshot.seo,
       };
       baselineRef.current = saved;
+      const savedSelection = typeKey === 'page'
+        ? (res.entry as typeof res.entry & { page_layout_key?: string | null }).page_layout_key ?? null
+        : (res.entry as typeof res.entry & { custom_template_key?: string | null }).custom_template_key ?? null;
+      savedThemeKeyRef.current = savedSelection;
+      if (editRevisionRef.current === submittedRevision) {
+        selectedThemeKeyRef.current = savedSelection;
+        setSelectedThemeKey(savedSelection);
+        themeKeyDirtyRef.current = false;
+        setThemeKeyDirty(false);
+      } else {
+        const stillDirty = selectedThemeKeyRef.current !== savedSelection;
+        themeKeyDirtyRef.current = stillDirty;
+        setThemeKeyDirty(stillDirty);
+      }
       // A committed slug, route or publication change can invalidate the old
       // link. Require a matching server response before exposing another URL.
       setConfirmedPublicLink(null);
@@ -516,7 +556,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       if (!hasNewerChanges) {
         draftRef.current = saved;
         applyPayload(saved);
-        setDirty(false);
+        setDirty(themeKeyDirtyRef.current);
       } else if (draftRef.current) {
         const remaining = { ...draftRef.current, id: res.entry.id, version: res.entry.version,
           publication_status: draftRef.current.publication_status === snapshot.publication_status
@@ -534,7 +574,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             payload: { ...remaining, custom_path_dirty: changed.includes('custom_path'), seo_dirty: changed.includes('seo') },
           });
         }
-        setDirty(changed.length > 0);
+        setDirty(changed.length > 0 || themeKeyDirtyRef.current);
       }
       setStatusNote(hasNewerChanges
         ? `Đã lưu snapshot v${res.entry.version}; chỉnh sửa mới hơn vẫn chưa lưu.`
@@ -633,6 +673,34 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           Xem nội dung
         </a>
       )}
+      <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2" data-testid="theme-template-selection">
+        <label className="block text-sm font-semibold text-slate-800" htmlFor="entry-theme-selector">
+          {typeKey === 'page' ? 'Page Layout' : 'Custom Single Template'}
+        </label>
+        <select id="entry-theme-selector" className="w-full max-w-lg rounded-lg border border-slate-300 p-2 text-sm"
+          value={selectedThemeKey ?? ''} disabled={saving || !csrfToken}
+          onChange={event => {
+            const choice = event.target.value || null;
+            selectedThemeKeyRef.current = choice;
+            setSelectedThemeKey(choice);
+            const differs = choice !== savedThemeKeyRef.current;
+            themeKeyDirtyRef.current = differs;
+            setThemeKeyDirty(differs);
+            if (differs) editRevisionRef.current++;
+            setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
+          }}>
+          <option value="">Theo theme mặc định</option>
+          {(typeKey === 'page' ? themeLayouts?.page_layouts.map(layout => ({ key: layout.key, label: layout.label }))
+            : themeLayouts?.custom_templates.filter(tpl => tpl.allowed_types.includes(typeKey))
+                .map(tpl => ({ key: tpl.custom_key, label: tpl.label })))?.map(choice =>
+              <option key={choice.key} value={choice.key}>{choice.label}</option>)}
+          {selectedThemeKey && !(typeKey === 'page'
+            ? themeLayouts?.page_layouts.some(layout => layout.key === selectedThemeKey)
+            : themeLayouts?.custom_templates.some(tpl => tpl.custom_key === selectedThemeKey && tpl.allowed_types.includes(typeKey))) &&
+            <option value={selectedThemeKey}>{selectedThemeKey} (theme hiện tại không còn cung cấp — được bảo toàn)</option>}
+        </select>
+        {themeKeyDirty && <p className="text-xs text-slate-600">Lựa chọn này chưa lưu. Bản nháp khác vẫn được giữ.</p>}
+      </div>
       {/* Legacy renderer has a fixed CPT status select and generic Save button.
           Keep its Builder action and layout while showing policy-aware actions above. */}
       <style>{`

@@ -1165,6 +1165,16 @@ pub async fn render_override_for_public(
     record: &TemplateOverrideRecord,
     route_entry: Option<(&str, &str)>,
 ) -> ApiResult<RenderedLayout> {
+    render_override_for_public_with_context(db, record, route_entry, None, None).await
+}
+
+pub async fn render_override_for_public_with_context(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    route_entry: Option<(&str, &str)>,
+    content_html: Option<&str>,
+    parts: Option<&BTreeMap<String, String>>,
+) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let state: HomeState = builder::read_home_tx(&mut tx).await?;
     let bindings: BindingResults =
@@ -1174,14 +1184,48 @@ pub async fn render_override_for_public(
         resolve_lists_in_tx(&mut tx, &record.document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(&mut tx, &record.document).await?;
     tx.commit().await?;
-    page::render_builder_with_lists_and_forms(
+    let empty_parts = BTreeMap::new();
+    let context = page::BuilderTemplateContext {
+        content_html,
+        parts: parts.unwrap_or(&empty_parts),
+    };
+    page::render_builder_with_template_context(
         &state,
         &record.document,
         false,
         &bindings,
         &lists,
         &forms,
+        Some(&context),
     )
+}
+
+/// Never inject the raw source of an active theme part into a Builder AST.
+/// Validate the entire C-SEC DAG and render each part under the same bounded
+/// context rules as an active template, then hand only safe HTML to the AST
+/// renderer. The caller must supply only the verified active v3 part map.
+pub fn render_theme_parts_for_builder(
+    parts: &BTreeMap<String, String>,
+    context: &serde_json::Value,
+) -> ApiResult<BTreeMap<String, String>> {
+    use crate::template_sec::{
+        CsecContentKind, json_to_safe_value, validate_and_compile_csec_composition,
+    };
+    let mut rendered = BTreeMap::new();
+    for (key, source) in parts {
+        let compiled = validate_and_compile_csec_composition(
+            &format!("part:{key}"),
+            source,
+            parts,
+            CsecContentKind::NonEntry,
+        )
+        .map_err(ApiError::internal)?;
+        let html = compiled
+            .render(json_to_safe_value(context), None)
+            .map_err(ApiError::internal)?;
+        rendered.insert(key.clone(), html);
+    }
+    Ok(rendered)
 }
 
 pub async fn resolve_and_render_header_footer(
@@ -1192,21 +1236,31 @@ pub async fn resolve_and_render_header_footer(
     type_key: Option<&str>,
 ) -> ApiResult<(Option<String>, Option<String>)> {
     let menus = crate::storage::menu::resolve_active_slot_menus(db).await?;
+    let part_context = serde_json::json!({
+        "site": site_ctx,
+        "options": theme_opts,
+        "theme_options": theme_opts,
+        "menus": menus,
+    });
+    let rendered_parts = match active_v3 {
+        Some(active) => render_theme_parts_for_builder(&active.parts, &part_context)?,
+        None => BTreeMap::new(),
+    };
     let header = match resolve_effective_override(db, OverrideRole::Header, type_key, None).await? {
-        Some(record) => Some(render_override_for_public(db, &record, None).await?.html),
-        None => active_v3
-            .and_then(|v3| v3.parts.get("header"))
-            .and_then(|t| {
-                content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)
-            }),
+        Some(record) => Some(
+            render_override_for_public_with_context(db, &record, None, None, Some(&rendered_parts))
+                .await?
+                .html,
+        ),
+        None => rendered_parts.get("header").cloned(),
     };
     let footer = match resolve_effective_override(db, OverrideRole::Footer, type_key, None).await? {
-        Some(record) => Some(render_override_for_public(db, &record, None).await?.html),
-        None => active_v3
-            .and_then(|v3| v3.parts.get("footer"))
-            .and_then(|t| {
-                content_render::render_role_fragment_with_context(t, site_ctx, theme_opts, &menus)
-            }),
+        Some(record) => Some(
+            render_override_for_public_with_context(db, &record, None, None, Some(&rendered_parts))
+                .await?
+                .html,
+        ),
+        None => rendered_parts.get("footer").cloned(),
     };
     Ok((header, footer))
 }

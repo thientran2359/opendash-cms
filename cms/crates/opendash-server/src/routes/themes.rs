@@ -1,4 +1,4 @@
-//! Admin-only theme install/list/CAS activation, v2 revision install/activation/rollback,
+//! Admin-only theme v3 revision install/activation/rollback,
 //! and revision-scoped `/theme/{revision_digest}/{*path}` asset serving.
 use std::{
     fs,
@@ -17,6 +17,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use opendash_core::theme::TemplateCandidate;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
@@ -26,15 +27,113 @@ use crate::{
     error::{ApiError, ApiResult},
     package::{V2ZipError, is_valid_zip_content_type, validate_v2_relative_path},
     storage::{
-        page::insert_theme_block,
-        sections,
+        overrides, sections,
         theme::{
-            self, ActivationOutcome, RevisionActivationOutcome, RevisionInstallOutcome, ThemeItem,
-            ThemeList, ThemeRevisionRecord,
+            self, RevisionActivationOutcome, RevisionInstallOutcome, ThemeList, ThemeRevisionRecord,
         },
     },
-    theme::{Theme, is_v2_theme_zip, parse_theme_zip_v2, theme_asset_mime},
+    theme::{parse_theme_zip_v3, theme_asset_mime},
 };
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateOverrideSaveInput {
+    target: TemplateCandidate,
+    document: opendash_core::builder::BuilderDocument,
+}
+
+fn override_if_match(headers: &HeaderMap) -> ApiResult<Option<i64>> {
+    let Some(raw) = headers.get(header::IF_MATCH) else {
+        return Ok(None);
+    };
+    let val = raw
+        .to_str()
+        .map_err(|_| ApiError::bad_request("If-Match không hợp lệ."))?;
+    let version = val
+        .strip_prefix("\"v")
+        .and_then(|tail| tail.strip_suffix('"'))
+        .and_then(|s| {
+            if s.len() > 1 && s.starts_with('0') {
+                None
+            } else {
+                s.parse::<i64>().ok()
+            }
+        })
+        .filter(|n| *n >= 1)
+        .ok_or_else(|| ApiError::bad_request("If-Match phải có dạng \"vN\"."))?;
+    Ok(Some(version))
+}
+
+pub async fn template_overrides_list(
+    State(db): State<SqlitePool>,
+    request_headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_admin(&request_headers, &db).await?;
+    let items = overrides::list_overrides(&db).await?;
+    let items: Result<Vec<_>, serde_json::Error> = items
+        .into_iter()
+        .map(|record| {
+            let mut value = serde_json::to_value(&record)?;
+            if let Some(map) = value.as_object_mut() {
+                map.insert(
+                    "effective_source".to_owned(),
+                    serde_json::to_value(
+                        overrides::TemplateResolution::DbOverride(record).effective_source(),
+                    )?,
+                );
+            }
+            Ok(value)
+        })
+        .collect();
+    Ok((headers(None), Json(serde_json::json!({"items":items?}))).into_response())
+}
+
+pub async fn template_overrides_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    request_headers: HeaderMap,
+    Json(input): Json<TemplateOverrideSaveInput>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&request_headers, &db).await?;
+    let expected = override_if_match(&request_headers)?;
+    let saved =
+        overrides::save_typed_override(&db, &input.target, &input.document, expected).await?;
+    let status = if saved.version == 1 {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    Ok((status, headers(Some(saved.version)), Json(saved)).into_response())
+}
+
+pub async fn template_overrides_reset(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    Extension(themes_root): Extension<ThemeStoreRoot>,
+    request_headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&request_headers, &db).await?;
+    let expected = override_if_match(&request_headers)?;
+    let rows = overrides::list_overrides(&db).await?;
+    let target = rows
+        .iter()
+        .find(|row| row.id == id)
+        .ok_or_else(|| ApiError::not_found("Không có template override để reset."))?;
+    let candidates = overrides::build_reset_candidate_chain(&db, &target.target).await?;
+    let active = theme::load_active_theme_v3(&db, &themes_root.0).await?;
+    let reset = overrides::reset_typed_override(
+        &db,
+        id,
+        expected,
+        &candidates,
+        active.as_ref().map(|v| &v.templates),
+        active.as_ref().map(|v| &v.parts),
+        active.as_ref().map(|v| &v.page_layouts),
+    )
+    .await?;
+    Ok((headers(None), Json(reset)).into_response())
+}
 
 static RUN_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -44,14 +143,11 @@ pub struct ThemeStoreRoot(pub PathBuf);
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ActivateInput {
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    revision_id: Option<String>,
+    revision_id: String,
 }
 
 #[derive(Serialize)]
-struct ThemeV2InstallResponse {
+struct ThemeV3InstallResponse {
     revision_id: String,
     theme_id: String,
     version: String,
@@ -117,65 +213,6 @@ pub async fn local_library_list(
         .into_response())
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LocalTemplateApplyInput {
-    confirm: bool,
-    revision_id: String,
-    revision_digest: String,
-}
-
-/// Confirmed global override reset guarded by BOTH the override ETag and the
-/// exact active theme revision. A theme switch must not change which template
-/// a confirmation applies; Editors can neither read nor mutate this route.
-pub async fn local_library_apply(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
-    State(db): State<SqlitePool>,
-    Extension(themes_root): Extension<ThemeStoreRoot>,
-    request_headers: HeaderMap,
-    Path(role): Path<String>,
-    Json(body): Json<LocalTemplateApplyInput>,
-) -> ApiResult<Response> {
-    require_admin_with_csrf(&request_headers, &db).await?;
-    if !body.confirm {
-        return Err(ApiError::bad_request("Áp dụng template cần confirm=true."));
-    }
-    let version = request_headers
-        .get(header::IF_MATCH)
-        .ok_or_else(|| ApiError::precondition_required("Cần If-Match để áp dụng template."))?
-        .to_str()
-        .map_err(|_| ApiError::bad_request("If-Match không hợp lệ."))?
-        .strip_prefix("\"v")
-        .and_then(|s| s.strip_suffix('"'))
-        .and_then(|s| s.parse::<i64>().ok())
-        .filter(|v| *v >= 0)
-        .ok_or_else(|| ApiError::bad_request("If-Match phải có dạng \"vN\"."))?;
-    let catalog = theme::list_local_theme_templates(&db, &themes_root.0).await?;
-    if !catalog.theme_templates.iter().any(|item| {
-        item.role == role
-            && item.can_apply
-            && item.revision_id == body.revision_id
-            && item.revision_digest == body.revision_digest
-    }) {
-        return Err(ApiError::precondition_failed(
-            "Template theme không còn khả dụng hoặc đã thay đổi.",
-        ));
-    }
-    let reset = theme::reset_local_template_override_if_active(
-        &db,
-        &role,
-        version,
-        &body.revision_id,
-        &body.revision_digest,
-    )
-    .await?;
-    Ok((
-        headers(None),
-        Json(serde_json::json!({ "reset": reset, "role": role })),
-    )
-        .into_response())
-}
-
 fn parse_version(headers: &HeaderMap) -> ApiResult<i64> {
     let val = headers
         .get(header::IF_MATCH)
@@ -232,6 +269,54 @@ pub async fn theme_list(
     Ok(response(theme::list(&db).await?))
 }
 
+/// Editors can discover the current theme's available design choices without
+/// being exposed to revision directories or server-side template HTML.
+pub async fn active_layouts(
+    State(db): State<SqlitePool>,
+    Extension(themes_root): Extension<ThemeStoreRoot>,
+    request_headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_session(&request_headers, &db).await?;
+    let active = theme::load_active_theme_v3(&db, &themes_root.0).await?;
+    let (active_theme_id, page_layouts, custom_templates) = match active {
+        Some(active) => {
+            let layouts: Vec<_> = active
+                .manifest
+                .page_layouts
+                .iter()
+                .map(|layout| {
+                    serde_json::json!({
+                        "key": layout.key, "label": layout.label,
+                    })
+                })
+                .collect();
+            let customs: Vec<_> = active
+                .manifest
+                .templates
+                .iter()
+                .filter(|tpl| tpl.kind == opendash_core::theme::TemplateCandidateKind::SingleCustom)
+                .map(|tpl| {
+                    serde_json::json!({
+                        "custom_key": tpl.custom_key, "label": tpl.label,
+                        "allowed_types": tpl.allowed_types,
+                    })
+                })
+                .collect();
+            (Some(active.manifest.theme_id), layouts, customs)
+        }
+        None => (None, vec![], vec![]),
+    };
+    Ok((
+        headers(None),
+        Json(serde_json::json!({
+            "active_theme_id": active_theme_id,
+            "page_layouts": page_layouts,
+            "custom_templates": custom_templates,
+        })),
+    )
+        .into_response())
+}
+
 pub async fn theme_install(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
@@ -247,55 +332,43 @@ pub async fn theme_install(
         return Err(ApiError::unsupported_media_type("Cần gói application/zip."));
     }
 
-    if is_v2_theme_zip(&bytes).map_err(map_v2_zip_error)? {
-        let pkg = parse_theme_zip_v2(&bytes).map_err(map_v2_zip_error)?;
-        crate::storage::settings::parse_theme_options_schema(&pkg.manifest_json)
-            .map_err(ApiError::bad_request)?;
-        let run_uuid = next_run_uuid();
-        let provenance_json = serde_json::json!({
-            "source": "admin_upload",
-            "zip_bytes": bytes.len(),
-        })
-        .to_string();
-
-        let outcome = theme::stage_and_commit_v2_revision(
-            &db,
-            &themes_root.0,
-            &run_uuid,
-            &pkg.manifest.theme_id,
-            &pkg.manifest.name,
-            &pkg.manifest.version,
-            &pkg.manifest_json,
-            &provenance_json,
-            &pkg.files,
-        )
-        .await?;
-
-        let (status, rec) = match outcome {
-            RevisionInstallOutcome::Installed(rec) => (StatusCode::CREATED, rec),
-            RevisionInstallOutcome::AlreadyExists(rec) => (StatusCode::OK, rec),
-        };
-        let payload = ThemeV2InstallResponse {
+    let pkg = parse_theme_zip_v3(&bytes).map_err(map_v2_zip_error)?;
+    crate::storage::settings::parse_theme_options_schema(&pkg.manifest_json)
+        .map_err(ApiError::bad_request)?;
+    let provenance_json = serde_json::json!({
+        "source": "admin_upload",
+        "zip_bytes": bytes.len(),
+    })
+    .to_string();
+    let outcome = theme::stage_and_commit_v3_revision(
+        &db,
+        &themes_root.0,
+        &next_run_uuid(),
+        &pkg.manifest.theme_id,
+        &pkg.manifest.name,
+        &pkg.manifest.version,
+        &pkg.manifest_json,
+        &provenance_json,
+        &pkg.files,
+    )
+    .await?;
+    let (status, rec) = match outcome {
+        RevisionInstallOutcome::Installed(rec) => (StatusCode::CREATED, rec),
+        RevisionInstallOutcome::AlreadyExists(rec) => (StatusCode::OK, rec),
+    };
+    Ok((
+        status,
+        headers(None),
+        Json(ThemeV3InstallResponse {
             revision_id: rec.revision_id,
             theme_id: rec.theme_id,
             version: rec.version,
             revision_digest: rec.revision_digest,
-            source_format: "v2",
+            source_format: "v3",
             activated: false,
-        };
-        return Ok((status, headers(None), Json(payload)).into_response());
-    }
-
-    let data = Theme::from_zip(&bytes).map_err(ApiError::bad_request)?;
-    let item = ThemeItem {
-        id: data.descriptor.id.clone(),
-        compatible_block_id: data.compatible_block_id.clone(),
-    };
-    insert_theme_block(&db, &data).await?;
-    // 0015 only backfills blocks present *at migration time*. Preserve the
-    // legacy ZIP install→list→CAS activation workflow for subsequent installs.
-    theme::register_installed_legacy_block(&db, &item.id).await?;
-    Ok((StatusCode::CREATED, headers(None), Json(item)).into_response())
+        }),
+    )
+        .into_response())
 }
 
 pub async fn theme_activate(
@@ -319,15 +392,8 @@ pub async fn theme_activate(
     let Json(input) =
         input.map_err(|_| ApiError::bad_request("Dữ liệu kích hoạt không hợp lệ."))?;
 
-    match (input.id, input.revision_id) {
-        (Some(id), None) => match theme::activate(&db, &id, version).await? {
-            ActivationOutcome::Activated(value) => Ok(response(value)),
-            ActivationOutcome::NotFound => Err(ApiError::not_found("Theme chưa được cài đặt.")),
-            ActivationOutcome::Stale => Err(ApiError::precondition_failed(
-                "Theme đã thay đổi ở phiên khác (412). Tải lại trạng thái trước khi thử tiếp.",
-            )),
-        },
-        (None, Some(revision_id)) => {
+    match input.revision_id {
+        revision_id if !revision_id.trim().is_empty() => {
             let rev = find_revision_by_id(&db, &revision_id)
                 .await?
                 .ok_or_else(|| ApiError::not_found("Revision theme chưa được cài đặt."))?;
@@ -358,9 +424,7 @@ pub async fn theme_activate(
                 )),
             }
         }
-        _ => Err(ApiError::bad_request(
-            "Cần cung cấp đúng một trong hai trường id hoặc revision_id.",
-        )),
+        _ => Err(ApiError::bad_request("Cần revision_id theme v3.")),
     }
 }
 
