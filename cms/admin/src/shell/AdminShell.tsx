@@ -376,7 +376,11 @@ export const AdminShell: React.FC<AdminShellProps> = ({
       (route.view === 'themes' && route.sub === 'library')
     ),
   );
-  const PageContainerTag: 'main' | 'div' = user && !routeOwnsMain ? 'main' : 'div';
+  // Keep the Builder subtree mounted through a transient 401/login cycle so
+  // its quarantined, unsaved AST survives same-account reauthentication.
+  // The admin layout is hidden while logged out, so its <main> is not an
+  // additional visible landmark beside the public login screen.
+  const PageContainerTag: 'main' | 'div' = routeOwnsMain ? 'div' : 'main';
   const postsLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
   const pagesLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
   const cptLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
