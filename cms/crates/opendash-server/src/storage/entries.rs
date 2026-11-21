@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use opendash_core::content::{
-    ContentEntryInput, ContentPublication, ContentSupport, ContentTypeDefinition,
+    ContentEntryInput, ContentMode, ContentPublication, ContentSupport, ContentTypeDefinition,
     ContentTypeSettings, EffectiveContentSchema, EffectiveFieldStatus, FieldRole, PatchField,
     deserialize_patch_field,
 };
@@ -73,6 +73,7 @@ pub struct ContentEntryRecord {
     /// Site-owned theme selection; retained even if its provider is withdrawn.
     pub page_layout_key: Option<String>,
     pub custom_template_key: Option<String>,
+    pub content_mode: ContentMode,
     /// Server-owned status; legacy CPT entries remain published on Save.
     pub publication_status: String,
     pub version: i64,
@@ -80,7 +81,7 @@ pub struct ContentEntryRecord {
     pub updated_at: String,
 }
 
-type EntryRow = (
+pub(super) type EntryRow = (
     i64,
     String,
     String,
@@ -115,6 +116,7 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
         term_ids: Vec::new(),
         page_layout_key: None,
         custom_template_key: None,
+        content_mode: ContentMode::Editor,
         publication_status,
         version,
         created_at,
@@ -161,7 +163,10 @@ pub enum PublishedListResult {
     MissingConfig(PublishedListMissing),
 }
 
-async fn read_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64) -> ApiResult<Vec<i64>> {
+pub(super) async fn read_term_ids(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> ApiResult<Vec<i64>> {
     Ok(
         sqlx::query_scalar("SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id")
             .bind(id)
@@ -170,20 +175,25 @@ async fn read_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64) -> ApiResult<V
     )
 }
 
-async fn decoded_with_terms(
+pub(super) async fn decoded_with_terms(
     tx: &mut Transaction<'_, Sqlite>,
     row: EntryRow,
 ) -> ApiResult<ContentEntryRecord> {
     let mut record = decode_row(row)?;
     record.term_ids = read_term_ids(tx, record.id).await?;
-    let (layout, custom): (Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT page_layout_key, custom_template_key FROM content_entries WHERE id = ?",
+    let (layout, custom, mode): (Option<String>, Option<String>, String) = sqlx::query_as(
+        "SELECT page_layout_key, custom_template_key, content_mode FROM content_entries WHERE id = ?",
     )
     .bind(record.id)
     .fetch_one(&mut **tx)
     .await?;
     record.page_layout_key = layout;
     record.custom_template_key = custom;
+    record.content_mode = match mode.as_str() {
+        "editor" => ContentMode::Editor,
+        "builder" => ContentMode::Builder,
+        _ => return Err(ApiError::internal("Chế độ nội dung không hợp lệ.")),
+    };
     Ok(record)
 }
 
@@ -225,7 +235,7 @@ async fn verify_plugin_action_fence(
     Ok(())
 }
 
-async fn begin_entry_write<'a>(
+pub(super) async fn begin_entry_write<'a>(
     db: &'a SqlitePool,
     actor: &SessionContext,
 ) -> ApiResult<Transaction<'a, Sqlite>> {
@@ -306,7 +316,7 @@ async fn replace_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64, ids: &[i64]
     Ok(())
 }
 
-async fn current_entry_in_write(
+pub(super) async fn current_entry_in_write(
     tx: &mut Transaction<'_, Sqlite>,
     type_key: &str,
     id: i64,
@@ -334,19 +344,28 @@ pub async fn get_entry(
     id: i64,
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let mut tx = db.begin().await?;
+    let entry = get_entry_in_tx(&mut tx, type_key, id).await?;
+    tx.commit().await?;
+    Ok(entry)
+}
+
+pub(super) async fn get_entry_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    id: i64,
+) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<EntryRow> = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     let entry = match row {
-        Some(row) => Some(decoded_with_terms(&mut tx, row).await?),
+        Some(row) => Some(decoded_with_terms(tx, row).await?),
         None => None,
     };
-    tx.commit().await?;
     Ok(entry)
 }
 
@@ -888,7 +907,7 @@ pub fn filter_entry_values_for_role(
     });
 }
 
-async fn verify_schema_token_in_tx(
+pub(super) async fn verify_schema_token_in_tx(
     tx: &mut sqlx::SqliteConnection,
     type_key: &str,
     expected_schema_token: &str,
@@ -1069,6 +1088,8 @@ pub struct CompositeEntrySaveInput {
     pub page_layout_key: PatchField<String>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub custom_template_key: PatchField<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub content_mode: PatchField<ContentMode>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub seo: PatchField<crate::seo::SeoMetadataInput>,
 }
@@ -1290,6 +1311,26 @@ pub async fn prepare_composite_entry_save(
             "custom_template_key không áp dụng cho Page.",
         ));
     }
+    if !matches!(input.content_mode, PatchField::Omitted) {
+        if type_key != "page"
+            || !effective
+                .base
+                .descriptor
+                .settings
+                .supports(ContentSupport::Builder)
+        {
+            return Err(ApiError::unprocessable(
+                "Builder chưa được bật cho loại nội dung này.",
+            ));
+        }
+        if matches!(input.content_mode, PatchField::Clear) {
+            return Err(ApiError::bad_request("content_mode không được null."));
+        }
+        if entry_id.is_none() && matches!(input.content_mode, PatchField::Set(ContentMode::Builder))
+        {
+            return Err(ApiError::unprocessable("Cần lưu tài liệu Builder trước."));
+        }
+    }
     for patch in [&input.page_layout_key, &input.custom_template_key] {
         if let PatchField::Set(key) = patch {
             if !opendash_core::id::valid_snake_key(key) {
@@ -1373,6 +1414,41 @@ pub async fn commit_composite_entry_save(
     let effective =
         verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
+    if let Some(id) = entry_id {
+        let expected_ver = input
+            .expected_version
+            .ok_or_else(|| ApiError::bad_request("Thiếu phiên bản nội dung."))?;
+        current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
+    }
+    let requested_mode = match &input.content_mode {
+        PatchField::Omitted => None,
+        PatchField::Clear => return Err(ApiError::bad_request("content_mode không được null.")),
+        PatchField::Set(mode) => {
+            if type_key != "page"
+                || !effective
+                    .base
+                    .descriptor
+                    .settings
+                    .supports(ContentSupport::Builder)
+            {
+                return Err(ApiError::unprocessable(
+                    "Builder chưa được bật cho loại nội dung này.",
+                ));
+            }
+            if *mode == ContentMode::Builder {
+                let exists: i64 = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM entry_builder_documents WHERE entry_id = ?)",
+                )
+                .bind(entry_id)
+                .fetch_one(&mut *tx)
+                .await?;
+                if exists == 0 {
+                    return Err(ApiError::unprocessable("Cần lưu tài liệu Builder trước."));
+                }
+            }
+            Some(mode.as_str())
+        }
+    };
     let is_draft_capable =
         effective.base.descriptor.settings.publication == ContentPublication::DraftPublish;
     if !is_draft_capable && plan.publication_status.as_deref() == Some("draft") {
@@ -1460,6 +1536,7 @@ pub async fn commit_composite_entry_save(
                  SET slug = ?, title = ?, values_json = ?,
                      publication_status = COALESCE(?, publication_status),
                      page_layout_key = ?, custom_template_key = ?,
+                     content_mode = COALESCE(?, content_mode),
                      version = version + 1,
                      updated_at = datetime('now')
                  WHERE content_type_key = ? AND id = ? AND version = ?",
@@ -1470,6 +1547,7 @@ pub async fn commit_composite_entry_save(
             .bind(plan.publication_status.as_deref())
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
+            .bind(requested_mode)
             .bind(type_key)
             .bind(id)
             .bind(expected_ver)

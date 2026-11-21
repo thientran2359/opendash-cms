@@ -237,7 +237,10 @@ pub struct FieldDefinitionInput {
 }
 
 impl FieldDefinitionInput {
-    pub fn into_canonical(self, scope: FieldScopeKind) -> Result<ContentFieldDefinition, &'static str> {
+    pub fn into_canonical(
+        self,
+        scope: FieldScopeKind,
+    ) -> Result<ContentFieldDefinition, &'static str> {
         let min_view_role = self.min_view_role.unwrap_or(FieldRole::Editor);
         let min_edit_role = self.min_edit_role.unwrap_or(FieldRole::Editor);
         if min_edit_role < min_view_role {
@@ -260,8 +263,7 @@ impl FieldDefinitionInput {
                 "field_key_collision: Khóa custom field trùng với trường hệ thống được bảo vệ.",
             );
         }
-        if scope == FieldScopeKind::BaseCptField
-            && RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
+        if scope == FieldScopeKind::BaseCptField && RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
         {
             return Err(
                 "field_key_collision: Khóa custom field trùng với trường hệ thống được bảo vệ.",
@@ -439,6 +441,24 @@ pub enum ContentPublication {
 pub enum ContentSupport {
     Editor,
     FeaturedImage,
+    Builder,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentMode {
+    #[default]
+    Editor,
+    Builder,
+}
+
+impl ContentMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Builder => "builder",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,14 +484,24 @@ impl Default for ContentTypeSettings {
 impl ContentTypeSettings {
     pub fn default_for_type_key(type_key: &str) -> Self {
         match type_key {
-            "post" | "page" => Self::builtin_publication(),
+            "post" => Self::builtin_publication(),
+            "page" => Self::builtin_page(),
             "section" => Self::private_section(),
             _ => Self::default(),
         }
     }
 
     pub fn builtin_publication() -> Self {
-        Self { publication: ContentPublication::DraftPublish, ..Self::default() }
+        Self {
+            publication: ContentPublication::DraftPublish,
+            ..Self::default()
+        }
+    }
+
+    pub fn builtin_page() -> Self {
+        let mut settings = Self::builtin_publication();
+        settings.supports.push(ContentSupport::Builder);
+        settings
     }
 
     pub fn private_section() -> Self {
@@ -658,7 +688,9 @@ impl ManifestFieldGroupInput {
         let mut canonical_fields = Vec::with_capacity(self.fields.len());
         let mut seen_keys = HashSet::new();
         for f in &self.fields {
-            let cf = f.clone().into_canonical(FieldScopeKind::ExtensionGroupField)?;
+            let cf = f
+                .clone()
+                .into_canonical(FieldScopeKind::ExtensionGroupField)?;
             if !seen_keys.insert(cf.key.clone()) {
                 return Err("field_key_collision: Trùng khóa custom field trong cùng field_group.");
             }
@@ -1149,9 +1181,11 @@ pub fn verify_effective_schema_transition(
             && entry.definition.min_edit_role == FieldRole::Admin
             && entry.definition.default_value.is_none()
         {
-            return Err(SchemaTransitionError::AdminRequiredFieldMissingDefault(format!(
-                "Trường bắt buộc '{key}' có min_edit_role = admin phải khai báo default_value hợp lệ để Editor có thể tạo mới bản ghi."
-            )));
+            return Err(SchemaTransitionError::AdminRequiredFieldMissingDefault(
+                format!(
+                    "Trường bắt buộc '{key}' có min_edit_role = admin phải khai báo default_value hợp lệ để Editor có thể tạo mới bản ghi."
+                ),
+            ));
         }
     }
 
@@ -1214,9 +1248,7 @@ impl CntDeclarations {
             if !seen_keys.insert(ct.key.as_str()) {
                 return Err("Khóa content_type bị trùng lặp trong declarations.");
             }
-            if matches!(ct.key.as_str(), "post" | "page" | "section")
-                && ct.rewrite_base.is_some()
-            {
+            if matches!(ct.key.as_str(), "post" | "page" | "section") && ct.rewrite_base.is_some() {
                 return Err("Post/Page/Section không hỗ trợ rewrite_base riêng của provider.");
             }
             validate_provider_rewrite_base(ct.rewrite_base.as_deref())?;
@@ -1359,7 +1391,9 @@ pub struct TaxonomyDefinition {
     pub declaration_state: DeclarationState,
 }
 
-fn taxonomy_public_default() -> bool { true }
+fn taxonomy_public_default() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1377,8 +1411,10 @@ impl TaxonomyDefinitionInput {
         if !valid_content_type_key(&self.key) {
             return Err("Khóa taxonomy không hợp lệ.");
         }
-        if matches!(self.key.as_str(), "category" | "tag" | "post" | "page" | "section")
-            || RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
+        if matches!(
+            self.key.as_str(),
+            "category" | "tag" | "post" | "page" | "section"
+        ) || RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
         {
             return Err("Khóa taxonomy thuộc namespace Core được bảo vệ.");
         }
@@ -1845,9 +1881,7 @@ impl ManifestActionPanelInput {
             }
         }
         if !self.allowed_regions.contains(&self.default_region) {
-            return Err(
-                "invalid_panel_region: default_region phải nằm trong allowed_regions.",
-            );
+            return Err("invalid_panel_region: default_region phải nằm trong allowed_regions.");
         }
         if !(-1000..=1000).contains(&self.default_order) {
             return Err("default_order của editor_panel phải nằm trong [-1000..=1000].");
@@ -2198,7 +2232,10 @@ fn validate_subgroups_for_panel(
         if !valid_snake_key(&sg.subgroup_id) || !seen_sg_ids.insert(sg.subgroup_id.as_str()) {
             return Err(LayoutValidationError::new(
                 "invalid_subgroup",
-                format!("subgroup_id '{}' không hợp lệ hoặc bị trùng.", sg.subgroup_id),
+                format!(
+                    "subgroup_id '{}' không hợp lệ hoặc bị trùng.",
+                    sg.subgroup_id
+                ),
             ));
         }
         if !valid_label(&sg.title) {
@@ -2211,13 +2248,18 @@ fn validate_subgroups_for_panel(
             if !allowed_set.contains(fk.as_str()) {
                 return Err(LayoutValidationError::new(
                     "unknown_field_in_subgroup",
-                    format!("Trường '{fk}' trong subgroup '{}' không thuộc panel '{panel_id}'.", sg.subgroup_id),
+                    format!(
+                        "Trường '{fk}' trong subgroup '{}' không thuộc panel '{panel_id}'.",
+                        sg.subgroup_id
+                    ),
                 ));
             }
             if !seen_fields.insert(fk.as_str()) {
                 return Err(LayoutValidationError::new(
                     "duplicate_field_in_subgroups",
-                    format!("Trường '{fk}' bị lặp lại trong nhiều subgroup của panel '{panel_id}'."),
+                    format!(
+                        "Trường '{fk}' bị lặp lại trong nhiều subgroup của panel '{panel_id}'."
+                    ),
                 ));
             }
         }
@@ -2286,7 +2328,10 @@ pub fn resolve_and_validate_editor_layout(
         let Some(slice_key) = crate::id::valid_layout_slice_panel_id(&slice.panel_id) else {
             return Err(LayoutValidationError::new(
                 "invalid_or_duplicate_slice_panel_id",
-                format!("panel_id '{}' phải có dạng 'layout:<snake_key>'.", slice.panel_id),
+                format!(
+                    "panel_id '{}' phải có dạng 'layout:<snake_key>'.",
+                    slice.panel_id
+                ),
             ));
         };
         if !seen_slice_ids.insert(slice.panel_id.as_str()) {
@@ -2304,7 +2349,10 @@ pub fn resolve_and_validate_editor_layout(
         if slice.field_keys.is_empty() || slice.field_keys.len() > 64 {
             return Err(LayoutValidationError::new(
                 "layout_quota_exceeded",
-                format!("Panel '{}' phải chứa từ 1 đến 64 field_keys.", slice.panel_id),
+                format!(
+                    "Panel '{}' phải chứa từ 1 đến 64 field_keys.",
+                    slice.panel_id
+                ),
             ));
         }
         let mut min_view = FieldRole::Admin;
@@ -2313,13 +2361,17 @@ pub fn resolve_and_validate_editor_layout(
             if !eligible_set.contains(fk.as_str()) {
                 return Err(LayoutValidationError::new(
                     "unknown_base_field_key",
-                    format!("Trường '{fk}' không thuộc danh sách base fields hợp lệ của '{type_key}'."),
+                    format!(
+                        "Trường '{fk}' không thuộc danh sách base fields hợp lệ của '{type_key}'."
+                    ),
                 ));
             }
             if !assigned_base_fields.insert(fk.as_str()) {
                 return Err(LayoutValidationError::new(
                     "duplicate_base_field_placement",
-                    format!("Base field '{fk}' chỉ được xuất hiện tối đa 1 lần trong base_field_panels."),
+                    format!(
+                        "Base field '{fk}' chỉ được xuất hiện tối đa 1 lần trong base_field_panels."
+                    ),
                 ));
             }
             if let Some(eff) = effective.effective_fields.get(fk) {
@@ -2387,19 +2439,29 @@ pub fn resolve_and_validate_editor_layout(
             let Some(def) = panels_by_id.get(&p.panel_id) else {
                 return Err(LayoutValidationError::new(
                     "unknown_or_inapplicable_panel_id",
-                    format!("panel_id '{}' không tồn tại hoặc không áp dụng cho '{type_key}'.", p.panel_id),
+                    format!(
+                        "panel_id '{}' không tồn tại hoặc không áp dụng cho '{type_key}'.",
+                        p.panel_id
+                    ),
                 ));
             };
             if !placed_ids.insert(p.panel_id.clone()) {
                 return Err(LayoutValidationError::new(
                     "duplicate_panel_placement",
-                    format!("panel_id '{}' chỉ được xuất hiện tối đa 1 lần trong regions.", p.panel_id),
+                    format!(
+                        "panel_id '{}' chỉ được xuất hiện tối đa 1 lần trong regions.",
+                        p.panel_id
+                    ),
                 ));
             }
             if !def.allowed_regions.contains(&region) {
                 return Err(LayoutValidationError::new(
                     "invalid_panel_region",
-                    format!("Panel '{}' không được phép đặt vào vùng '{}'.", p.panel_id, region.as_str()),
+                    format!(
+                        "Panel '{}' không được phép đặt vào vùng '{}'.",
+                        p.panel_id,
+                        region.as_str()
+                    ),
                 ));
             }
             if def.required_core && !p.enabled {
@@ -2419,7 +2481,10 @@ pub fn resolve_and_validate_editor_layout(
                         format!("Panel '{}' không hỗ trợ subgroups.", p.panel_id),
                     ));
                 }
-                let fkeys = panel_fields.get(&p.panel_id).map(Vec::as_slice).unwrap_or(&[]);
+                let fkeys = panel_fields
+                    .get(&p.panel_id)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
                 validate_subgroups_for_panel(&p.subgroups, fkeys, &p.panel_id)?;
             }
             // Rule COMPAT-4: panel containing effective_required == true && min_edit_role == Editor cannot be hidden/admin-only
@@ -2434,7 +2499,10 @@ pub fn resolve_and_validate_editor_layout(
                         {
                             return Err(LayoutValidationError::new(
                                 "required_field_hidden_or_inaccessible",
-                                format!("Không thể ẩn hoặc giới hạn quyền Admin cho panel '{}' vì chứa trường bắt buộc '{fk}'.", p.panel_id),
+                                format!(
+                                    "Không thể ẩn hoặc giới hạn quyền Admin cho panel '{}' vì chứa trường bắt buộc '{fk}'.",
+                                    p.panel_id
+                                ),
                             ));
                         }
                     }
@@ -2448,7 +2516,10 @@ pub fn resolve_and_validate_editor_layout(
         if !placed_ids.contains(&slice.panel_id) {
             return Err(LayoutValidationError::new(
                 "unplaced_base_field_slice",
-                format!("Panel '{}' trong base_field_panels chưa được đặt vào vùng nào.", slice.panel_id),
+                format!(
+                    "Panel '{}' trong base_field_panels chưa được đặt vào vùng nào.",
+                    slice.panel_id
+                ),
             ));
         }
     }
@@ -2545,7 +2616,12 @@ pub fn project_effective_editor_config(
     let group_fields_map: HashMap<&str, Vec<String>> = effective
         .attached_groups
         .iter()
-        .map(|g| (g.group_id.as_str(), g.fields.iter().map(|f| f.key.clone()).collect()))
+        .map(|g| {
+            (
+                g.group_id.as_str(),
+                g.fields.iter().map(|f| f.key.clone()).collect(),
+            )
+        })
         .collect();
 
     let project_region = |placements: &[PanelPlacementConfig]| -> Vec<EffectivePanelProjection> {
@@ -2591,7 +2667,11 @@ pub fn project_effective_editor_config(
             let visible_set: HashSet<&str> = visible_keys.iter().map(String::as_str).collect();
             let raw_subgroups = if !p.subgroups.is_empty() {
                 &p.subgroups
-            } else if let Some(slice) = layout.base_field_panels.iter().find(|s| s.panel_id == p.panel_id) {
+            } else if let Some(slice) = layout
+                .base_field_panels
+                .iter()
+                .find(|s| s.panel_id == p.panel_id)
+            {
                 &slice.subgroups
             } else {
                 &[][..]
@@ -2687,23 +2767,46 @@ mod tests {
         assert_eq!(actual["taxonomy_definitions"][0]["public"], false);
         assert_eq!(actual["taxonomy_definitions"][1]["hierarchical"], false);
         assert_eq!(actual["taxonomy_definitions"][1]["public"], true);
-        assert!(actual["taxonomy_definitions"][1].get("rewrite_base").is_none());
-        assert_eq!(actual["content_types"][0]["rewrite_base"], "library/reviews");
-        assert_eq!(serde_json::from_value::<CntDeclarations>(actual).unwrap(), input);
+        assert!(
+            actual["taxonomy_definitions"][1]
+                .get("rewrite_base")
+                .is_none()
+        );
+        assert_eq!(
+            actual["content_types"][0]["rewrite_base"],
+            "library/reviews"
+        );
+        assert_eq!(
+            serde_json::from_value::<CntDeclarations>(actual).unwrap(),
+            input
+        );
 
         let tax_only: CntDeclarations = serde_json::from_value(json!({
             "taxonomy_definitions":[{"key":"genre","label":"Genre"}]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(!tax_only.is_empty());
     }
 
     #[test]
     fn c4_provider_rejects_duplicate_or_core_owned_taxonomy_declarations() {
-        for key in ["category", "tag", "post", "page", "section", "seo", "Invalid-Key"] {
+        for key in [
+            "category",
+            "tag",
+            "post",
+            "page",
+            "section",
+            "seo",
+            "Invalid-Key",
+        ] {
             let declarations: CntDeclarations = serde_json::from_value(json!({
                 "taxonomy_definitions":[{"key":key,"label":"A"}]
-            })).unwrap();
-            assert!(declarations.validate().is_err(), "reserved or invalid taxonomy: {key}");
+            }))
+            .unwrap();
+            assert!(
+                declarations.validate().is_err(),
+                "reserved or invalid taxonomy: {key}"
+            );
         }
         let duplicate: CntDeclarations = serde_json::from_value(json!({
             "taxonomy_definitions":[{"key":"genre","label":"Genre"}, {"key":"genre","label":"Other"}]
@@ -2714,7 +2817,7 @@ mod tests {
             json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","surprise":3}]}),
             json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","owner":{"kind":"plugin","id":"other"}}]}),
             json!({"content_types":[{"key":"review","label":"Reviews","rewrite_base":"a","surprise":3}]}),
-            json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","rewrite_base":7}]})
+            json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","rewrite_base":7}]}),
         ] {
             assert!(serde_json::from_value::<CntDeclarations>(path).is_err());
         }
@@ -2727,36 +2830,61 @@ mod tests {
                 {"content_type":"review","taxonomies":["genre"]},
                 {"content_type":"review","taxonomies":["genre"]}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(duplicate.validate().is_err());
     }
 
     #[test]
     fn c4_provider_rejects_malformed_rewrite_bases_and_associations() {
-        for base in ["", "/reviews", "reviews/", "a//b", "a/b/c/d", "../x", "X", "review_name", "news?x=1", "a/%term%"] {
+        for base in [
+            "",
+            "/reviews",
+            "reviews/",
+            "a//b",
+            "a/b/c/d",
+            "../x",
+            "X",
+            "review_name",
+            "news?x=1",
+            "a/%term%",
+        ] {
             let cpt: CntDeclarations = serde_json::from_value(json!({
                 "content_types":[{"key":"review","label":"Reviews","rewrite_base":base}]
-            })).unwrap();
+            }))
+            .unwrap();
             assert!(cpt.validate().is_err(), "invalid CPT rewrite base: {base}");
             let tax: CntDeclarations = serde_json::from_value(json!({
                 "taxonomy_definitions":[{"key":"genre","label":"Genre","rewrite_base":base}]
-            })).unwrap();
-            assert!(tax.validate().is_err(), "invalid taxonomy rewrite base: {base}");
+            }))
+            .unwrap();
+            assert!(
+                tax.validate().is_err(),
+                "invalid taxonomy rewrite base: {base}"
+            );
         }
         for taxonomies in [
             json!(["genre", "genre"]),
             json!(["bad-key"]),
             json!([""]),
-            json!(["category", "category"])
+            json!(["category", "category"]),
         ] {
             let cpt: CntDeclarations = serde_json::from_value(json!({
                 "content_types":[{"key":"review","label":"Reviews","taxonomies":taxonomies}]
-            })).unwrap();
-            assert!(cpt.validate().is_err(), "invalid CPT association: {taxonomies}");
+            }))
+            .unwrap();
+            assert!(
+                cpt.validate().is_err(),
+                "invalid CPT association: {taxonomies}"
+            );
             let eligibility: CntDeclarations = serde_json::from_value(json!({
                 "taxonomy_eligibility":[{"content_type":"review","taxonomies":taxonomies}]
-            })).unwrap();
-            assert!(eligibility.validate().is_err(), "invalid eligibility association: {taxonomies}");
+            }))
+            .unwrap();
+            assert!(
+                eligibility.validate().is_err(),
+                "invalid eligibility association: {taxonomies}"
+            );
         }
         let builtin: CntDeclarations = serde_json::from_value(json!({
             "content_types":[{
@@ -2764,7 +2892,10 @@ mod tests {
                 "settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor"]}
             }]
         })).unwrap();
-        assert!(builtin.validate().is_err(), "post URLs belong to global C3 policy");
+        assert!(
+            builtin.validate().is_err(),
+            "post URLs belong to global C3 policy"
+        );
     }
 
     #[test]

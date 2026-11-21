@@ -572,7 +572,7 @@ fn theme_source_for_candidate<'a>(
     }
 }
 
-async fn resolve_template_2axis_on_connection(
+pub(super) async fn resolve_template_2axis_on_connection(
     conn: &mut SqliteConnection,
     candidates: &[TemplateCandidate],
     templates: Option<&BTreeMap<String, String>>,

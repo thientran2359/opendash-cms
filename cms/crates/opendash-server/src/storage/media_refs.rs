@@ -196,6 +196,38 @@ pub async fn collect_pins_in_tx(
         }
     }
 
+    // Entry-owned Builder documents remain pinned even in editor mode or draft.
+    let documents: Vec<(i64, String)> = sqlx::query_as(
+        "SELECT entry_id, document_json FROM entry_builder_documents ORDER BY entry_id",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut pinned_entries = HashSet::new();
+    for (entry_id, raw) in documents {
+        if parse_json_and_check_pin(&raw, media_id, "entry_builder_documents")? {
+            pinned_entries.insert(entry_id);
+            push_pin(&mut summary, "entry_builder_document", entry_id.to_string());
+        }
+    }
+    let refs: Vec<i64> = sqlx::query_scalar(
+        "SELECT DISTINCT entry_id FROM entry_builder_media_refs WHERE media_id = ? ORDER BY entry_id",
+    ).bind(media_id).fetch_all(&mut *conn).await?;
+    for entry_id in refs {
+        if pinned_entries.insert(entry_id) {
+            push_pin(&mut summary, "entry_builder_document", entry_id.to_string());
+        }
+    }
+    // Owner selection ASTs are durable private metadata, never public grants.
+    let selections: Vec<(i64, String)> =
+        sqlx::query_as("SELECT id, ast_json FROM owner_template_selections ORDER BY id")
+            .fetch_all(&mut *conn)
+            .await?;
+    for (id, raw) in selections {
+        if parse_json_and_check_pin(&raw, media_id, "owner_template_selections")? {
+            push_pin(&mut summary, "owner_template_selection", id.to_string());
+        }
+    }
+
     // 5. Theme option values + option media refs (even inactive/private themes)
     let option_rows =
         sqlx::query("SELECT theme_id, option_key, value_json FROM theme_option_values")

@@ -133,25 +133,12 @@
 ### D. SQLite Migrations (Tách 2 migration để từng Slice compile & test độc lập)
 
 **Migration `0043_cpt_content_builder.sql` (Slice S01):**
-```sql
-ALTER TABLE content_entries
-    ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'editor'
-    CHECK (content_mode IN ('editor', 'builder'));
 
-CREATE TABLE entry_builder_documents (
-    entry_id INTEGER PRIMARY KEY REFERENCES content_entries(id) ON DELETE CASCADE,
-    document_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE entry_builder_media_refs (
-    entry_id INTEGER NOT NULL REFERENCES content_entries(id) ON DELETE CASCADE,
-    media_id TEXT NOT NULL,
-    ref_role TEXT NOT NULL,
-    PRIMARY KEY (entry_id, media_id, ref_role)
-);
-CREATE INDEX idx_entry_builder_media_refs_media ON entry_builder_media_refs(media_id);
-```
+Theo [D02](s02-target-only-page-builder.md), migration 0042 đã tạo
+`content_entries.content_mode`, `entry_builder_documents` và
+`entry_builder_media_refs` cho Page. Slice S01 mở rộng capability và
+writer/reader hiện có cho Generic CPT; migration 0043 chỉ bổ sung phần schema
+cần thiết, không tạo lại ba thành phần trên.
 
 **Migration `0044_pattern_cpt_and_refs.sql` (Slice S02):**
 ```sql
@@ -204,7 +191,7 @@ CREATE INDEX idx_entry_pattern_refs_target ON entry_pattern_refs(target_pattern_
 
 | File | Action | Reason |
 |---|---|---|
-| `cms/migrations/0043_cpt_content_builder.sql` | Create | Thêm `content_entries.content_mode`, `entry_builder_documents`, `entry_builder_media_refs`. |
+| `cms/migrations/0043_cpt_content_builder.sql` | Create | Mở rộng schema 0042 cho Generic CPT nếu cần; không tái tạo cột/bảng đã có. |
 | `cms/migrations/0044_pattern_cpt_and_refs.sql` | Create | Đổi `section` → `pattern`, hợp nhất `section_documents*` vào `entry_builder_*`, tạo `entry_pattern_refs`. |
 | `cms/crates/opendash-core/src/content.rs` | Modify | Thêm `ContentSupport::Builder` (`page` bật, `post` tắt); ở S02 đổi `private_section()` → `private_pattern()`. |
 | `cms/crates/opendash-core/src/builder.rs` | Modify | Thêm `KnownElement::PatternRef(PatternRefProps)` (`#[serde(tag = "type", content = "props")]`) và validator cấm `PatternRef`/`ContentList` bên trong Pattern. |
@@ -226,7 +213,7 @@ CREATE INDEX idx_entry_pattern_refs_target ON entry_pattern_refs(target_pattern_
 * **Dependencies:** Spec 1 (`S01`–`S03` đã merge để có slot `{{ od_content() }}` & `core/content_slot`).
 * **File Ownership:** `cms/migrations/0043_cpt_content_builder.sql`, `cms/crates/opendash-core/src/content.rs`, `cms/crates/opendash-server/src/storage/{entries,builder,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/routes/{builder,public,public_content}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/{builder,content}.ts`, `cms/admin/src/features/content/{ContentTypeSchemaSettings,ContentTypeForm}.tsx`, `cms/admin/src/features/editor/SingleEditWorkspace.tsx`.
 * **Công việc chính:**
-  1. Áp dụng Migration `0043` và thêm `ContentSupport::Builder` (`page` mặc định bật, `post` mặc định tắt; giữ nguyên `"section"` ở slice này để không gãy compile/test).
+  1. Áp dụng Migration `0043` và mở rộng `ContentSupport::Builder` đã có từ 0042 (`page` mặc định bật, `post` mặc định tắt; giữ nguyên `"section"` ở slice này để không gãy compile/test).
   2. Triển khai CRUD & preview cho `/api/admin/entries/{type_key}/{id}/builder` (CAS `content_entries.version`, `updated_at`, `ContentAfterSave`, kiểm `ContentSupport::Builder` → `403`, tái sử dụng `routes::settings::{parse_if_match, no_store_headers}`).
   3. Cập nhật `collect_pins_in_tx`, `media_is_referenced` và nối render vào `{{ od_content() }}` (Spec 1) với fallback về `values_json["body"]` + truyền cờ CSP.
   4. Cập nhật UI cấu hình `ContentSupport::Builder` và chuyển chế độ `Editor ↔ Visual Builder` trên `SingleEditWorkspace.tsx`.

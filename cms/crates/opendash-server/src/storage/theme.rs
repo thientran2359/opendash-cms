@@ -852,6 +852,117 @@ pub struct ActiveThemeV3 {
     pub page_layouts: BTreeMap<String, String>,
 }
 
+/// Provider-owned selection metadata is kept separate from site-owned typed
+/// template overrides. A withdrawn provider never changes the stored row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnerTemplateSelection {
+    pub owner_kind: String,
+    pub owner_id: String,
+    pub role: String,
+    pub scope_type_key: Option<String>,
+    pub template_selection_key: Option<String>,
+    pub ast_json: String,
+    pub version: i64,
+}
+
+fn validate_owner_template_selection_key(
+    owner_kind: &str,
+    owner_id: &str,
+    role: &str,
+    scope_type_key: Option<&str>,
+) -> ApiResult<()> {
+    if !matches!(owner_kind, "theme" | "plugin")
+        || !matches!(
+            role,
+            "page" | "header" | "footer" | "archive" | "single" | "taxonomy_archive"
+        )
+        || scope_type_key.is_some_and(|key| !opendash_core::id::valid_snake_key(key))
+    {
+        return Err(ApiError::bad_request(
+            "Định danh template selection không hợp lệ.",
+        ));
+    }
+    validate_package_id(owner_id).map_err(ApiError::bad_request)
+}
+
+pub async fn upsert_owner_template_selection_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    owner_kind: &str,
+    owner_id: &str,
+    role: &str,
+    scope_type_key: Option<&str>,
+    template_selection_key: Option<&str>,
+    ast_json: &str,
+) -> ApiResult<OwnerTemplateSelection> {
+    validate_owner_template_selection_key(owner_kind, owner_id, role, scope_type_key)?;
+    if template_selection_key.is_some_and(|key| {
+        !opendash_core::id::valid_kebab_segment_with_limit(key, 64)
+            && !opendash_core::id::valid_snake_key(key)
+    }) {
+        return Err(ApiError::bad_request(
+            "Tên template selection không hợp lệ.",
+        ));
+    }
+    let _: opendash_core::builder::BuilderDocument = serde_json::from_str(ast_json)
+        .map_err(|_| ApiError::bad_request("AST template selection không hợp lệ."))?;
+    sqlx::query(
+        "INSERT INTO owner_template_selections
+         (owner_kind, owner_id, role, scope_type_key, template_selection_key, ast_json, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(owner_kind, owner_id, role, scope_type_key) DO UPDATE SET
+           template_selection_key = excluded.template_selection_key,
+           ast_json = excluded.ast_json,
+           version = owner_template_selections.version + 1,
+           updated_at = excluded.updated_at",
+    )
+    .bind(owner_kind)
+    .bind(owner_id)
+    .bind(role)
+    .bind(scope_type_key.unwrap_or(""))
+    .bind(template_selection_key)
+    .bind(ast_json)
+    .execute(&mut *conn)
+    .await?;
+    get_owner_template_selection_in_conn(conn, owner_kind, owner_id, role, scope_type_key)
+        .await?
+        .ok_or_else(|| ApiError::internal("Không đọc lại được template selection vừa lưu."))
+}
+
+pub async fn get_owner_template_selection_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    owner_kind: &str,
+    owner_id: &str,
+    role: &str,
+    scope_type_key: Option<&str>,
+) -> ApiResult<Option<OwnerTemplateSelection>> {
+    validate_owner_template_selection_key(owner_kind, owner_id, role, scope_type_key)?;
+    let row: Option<(String, String, String, String, Option<String>, String, i64)> =
+        sqlx::query_as(
+            "SELECT owner_kind, owner_id, role, scope_type_key, template_selection_key, ast_json, version
+               FROM owner_template_selections
+              WHERE owner_kind = ? AND owner_id = ? AND role = ? AND scope_type_key = ?",
+        )
+        .bind(owner_kind)
+        .bind(owner_id)
+        .bind(role)
+        .bind(scope_type_key.unwrap_or(""))
+        .fetch_optional(&mut *conn)
+        .await?;
+    Ok(row.map(
+        |(owner_kind, owner_id, role, scope, template_selection_key, ast_json, version)| {
+            OwnerTemplateSelection {
+                owner_kind,
+                owner_id,
+                role,
+                scope_type_key: (!scope.is_empty()).then_some(scope),
+                template_selection_key,
+                ast_json,
+                version,
+            }
+        },
+    ))
+}
+
 /// Read-only descriptors for the *active*, locally durable theme revision.
 /// Never serialize installed HTML/templates/manifest or arbitrary filesystem
 /// paths into the Admin library catalog.
@@ -936,6 +1047,14 @@ pub async fn load_active_theme_v3(
     db: &SqlitePool,
     themes_root: &Path,
 ) -> ApiResult<Option<ActiveThemeV3>> {
+    let mut conn = db.acquire().await?;
+    load_active_theme_v3_in_conn(&mut conn, themes_root).await
+}
+
+pub(super) async fn load_active_theme_v3_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    themes_root: &Path,
+) -> ApiResult<Option<ActiveThemeV3>> {
     // Snapshot the active revision in a single SQL query. Files may be loaded
     // afterwards because immutable digest/complete marker checks hold.
     let row: Option<RevisionRow> = sqlx::query_as(
@@ -945,7 +1064,7 @@ pub async fn load_active_theme_v3(
            JOIN theme_revisions r ON r.revision_id = a.revision_id
           WHERE a.id = 1",
     )
-    .fetch_optional(db)
+    .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else {
         return Ok(None);

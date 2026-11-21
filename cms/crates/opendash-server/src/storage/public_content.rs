@@ -7,25 +7,6 @@ use super::entries::{self, ContentEntryRecord, EntryFilters, decode_row};
 use crate::error::ApiResult;
 use crate::public_context::{PublicFilters, TaxonomyKind};
 
-/// Public entry lookup must include the two persisted template choices. The
-/// historical nine-column `decode_row` intentionally cannot infer them, and
-/// returning None silently bypasses Page Layout/Custom Single resolution.
-/// This read occurs only *after* publication and CPT ACL predicates succeed.
-async fn hydrate_public_template_keys(
-    db: &SqlitePool,
-    record: &mut ContentEntryRecord,
-) -> ApiResult<()> {
-    let (layout, custom): (Option<String>, Option<String>) = sqlx::query_as(
-        "SELECT page_layout_key, custom_template_key FROM content_entries WHERE id = ?",
-    )
-    .bind(record.id)
-    .fetch_one(db)
-    .await?;
-    record.page_layout_key = layout;
-    record.custom_template_key = custom;
-    Ok(())
-}
-
 /// Slug is unique within each CPT; lookup never relies on a numeric admin ID.
 pub async fn get_by_slug(
     db: &SqlitePool,
@@ -35,17 +16,8 @@ pub async fn get_by_slug(
     if type_key == "section" {
         return Ok(None);
     }
-    let row: Option<(
-        i64,
-        String,
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        String,
-    )> = sqlx::query_as(
+    let mut tx = db.begin().await?;
+    let row: Option<entries::EntryRow> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at
          FROM content_entries e
@@ -56,30 +28,31 @@ pub async fn get_by_slug(
     )
     .bind(type_key)
     .bind(slug)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
-    let mut res = row.map(decode_row).transpose()?;
-    if let Some(record) = &mut res {
-        hydrate_public_template_keys(db, record).await?;
-    }
-    Ok(res)
+    let record = match row {
+        Some(row) => Some(entries::decoded_with_terms(&mut tx, row).await?),
+        None => None,
+    };
+    tx.commit().await?;
+    Ok(record)
 }
 
 pub async fn get_published_by_id(
     db: &SqlitePool,
     id: i64,
 ) -> ApiResult<Option<ContentEntryRecord>> {
-    let row: Option<(
-        i64,
-        String,
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        String,
-    )> = sqlx::query_as(
+    let mut tx = db.begin().await?;
+    let result = get_published_by_id_in_tx(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+async fn get_published_by_id_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> ApiResult<Option<ContentEntryRecord>> {
+    let row: Option<entries::EntryRow> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at
          FROM content_entries e
@@ -89,13 +62,136 @@ pub async fn get_published_by_id(
            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(id)
-    .fetch_optional(db)
+    .fetch_optional(&mut **tx)
     .await?;
-    let mut result = row.map(decode_row).transpose()?;
-    if let Some(record) = &mut result {
-        hydrate_public_template_keys(db, record).await?;
+    match row {
+        Some(row) => Ok(Some(entries::decoded_with_terms(tx, row).await?)),
+        None => Ok(None),
     }
-    Ok(result)
+}
+
+pub struct PublicEntryRenderSnapshot {
+    pub entry: ContentEntryRecord,
+    pub schema: opendash_core::content::ContentTypeDefinition,
+    pub active: Option<super::theme::ActiveThemeV3>,
+    pub resolution: super::overrides::TemplateResolution,
+    pub body: Option<crate::page::RenderedLayout>,
+}
+
+/// Resolve published entry, its own Builder body, and the selected shared
+/// template using one read snapshot. The entry document never participates in
+/// the shared template candidate chain.
+pub async fn load_entry_render_snapshot(
+    db: &SqlitePool,
+    id: i64,
+    themes_root: Option<&std::path::Path>,
+) -> ApiResult<Option<PublicEntryRenderSnapshot>> {
+    use super::{builder, builder_binding, content, overrides, theme};
+    use crate::error::ApiError;
+    use opendash_core::{
+        builder::BuilderDocument,
+        content::{ContentMode, ContentSupport},
+        theme::TemplateCandidateKind,
+    };
+    let mut tx = db.begin().await?;
+    let Some(entry) = get_published_by_id_in_tx(&mut tx, id).await? else {
+        return Ok(None);
+    };
+    let schema = content::load_content_type_definition_in_conn(&mut tx, &entry.content_type_key)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let active = match themes_root {
+        Some(root) => theme::load_active_theme_v3_in_conn(&mut tx, root).await?,
+        None => None,
+    };
+    let context = if entry.content_type_key == "page" {
+        let page_layout_key = entry
+            .page_layout_key
+            .as_ref()
+            .filter(|key| {
+                active.as_ref().is_some_and(|theme| {
+                    theme
+                        .manifest
+                        .page_layouts
+                        .iter()
+                        .any(|layout| &layout.key == *key)
+                })
+            })
+            .cloned();
+        overrides::PublicTemplateContext::Page { page_layout_key }
+    } else {
+        let custom_template_key = entry
+            .custom_template_key
+            .as_ref()
+            .filter(|key| {
+                active.as_ref().is_some_and(|theme| {
+                    theme.manifest.templates.iter().any(|tpl| {
+                        tpl.kind == TemplateCandidateKind::SingleCustom
+                            && tpl.custom_key.as_ref() == Some(*key)
+                            && tpl
+                                .allowed_types
+                                .iter()
+                                .any(|allowed| allowed == &entry.content_type_key)
+                    })
+                })
+            })
+            .cloned();
+        overrides::PublicTemplateContext::Single {
+            content_type: entry.content_type_key.clone(),
+            entry_id: entry.id,
+            slug: entry.slug.clone(),
+            custom_template_key,
+        }
+    };
+    let candidates = overrides::build_candidates(&context)?;
+    let resolution = overrides::resolve_template_2axis_on_connection(
+        &mut tx,
+        &candidates,
+        active.as_ref().map(|v| &v.templates),
+        active.as_ref().map(|v| &v.parts),
+        active.as_ref().map(|v| &v.page_layouts),
+    )
+    .await?;
+    let body = if entry.content_type_key == "page"
+        && entry.content_mode == ContentMode::Builder
+        && schema.settings.supports(ContentSupport::Builder)
+    {
+        let raw: Option<String> = sqlx::query_scalar(
+            "SELECT document_json FROM entry_builder_documents WHERE entry_id = ?",
+        )
+        .bind(entry.id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if let Some(doc) = raw.and_then(|raw| BuilderDocument::from_json(raw.as_bytes()).ok()) {
+            let state = builder::read_home_tx(&mut tx).await?;
+            let bindings = builder_binding::resolve_in_tx_with_route(
+                &mut tx,
+                &doc,
+                false,
+                Some(("page", &entry.slug)),
+            )
+            .await?;
+            let lists =
+                builder::resolve_lists_in_tx(&mut tx, &doc, &std::collections::BTreeMap::new())
+                    .await?;
+            let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
+            Some(crate::page::render_builder_with_lists_and_forms(
+                &state, &doc, false, &bindings, &lists, &forms,
+            )?)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    tx.commit().await?;
+    Ok(Some(PublicEntryRenderSnapshot {
+        entry,
+        schema,
+        active,
+        resolution,
+        body,
+    }))
 }
 
 /// Deny public archives independently from entry visibility. Legacy CPTs
@@ -519,6 +615,16 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              )
            LIMIT 1
          ) OR EXISTS (
+           SELECT 1 FROM entry_builder_media_refs AS r
+           JOIN entry_builder_documents AS doc ON doc.entry_id = r.entry_id
+           JOIN content_entries AS e ON e.id = r.entry_id
+           JOIN content_types AS t ON t.key = e.content_type_key
+           WHERE r.media_id = ? AND e.content_type_key = 'page'
+             AND e.publication_status = 'published' AND e.content_mode = 'builder'
+             AND t.provider_status = 'active'
+             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+             AND EXISTS (SELECT 1 FROM json_each(t.definition_json, '$.settings.supports') WHERE value = 'builder')
+         ) OR EXISTS (
            SELECT 1 FROM builder_homepage_media AS bm
            JOIN builder_homepage AS b ON b.id = 1
            WHERE bm.media_id = ? AND b.document_json IS NOT NULL
@@ -620,6 +726,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              )
          )"#,
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)

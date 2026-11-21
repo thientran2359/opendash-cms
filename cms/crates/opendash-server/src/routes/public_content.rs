@@ -79,6 +79,29 @@ async fn resolve_public_template_html(
         active.map(|v| &v.page_layouts),
     )
     .await?;
+    render_resolved_public_template_html(
+        db,
+        resolution,
+        active,
+        site_ctx,
+        theme_opts,
+        fallback_html,
+        route_entry,
+        route_context,
+    )
+    .await
+}
+
+async fn render_resolved_public_template_html(
+    db: &SqlitePool,
+    resolution: TemplateResolution,
+    active: Option<&theme_storage::ActiveThemeV3>,
+    site_ctx: &SiteContext<'_>,
+    theme_opts: &BTreeMap<String, serde_json::Value>,
+    fallback_html: &str,
+    route_entry: Option<(&str, &str)>,
+    route_context: serde_json::Value,
+) -> ApiResult<ResolvedPublicHtml> {
     let context = if matches!(&resolution, TemplateResolution::CoreFallback) {
         serde_json::Value::Null
     } else {
@@ -386,12 +409,23 @@ pub(crate) async fn render_single_entry_response(
     canonical_path_override: Option<String>,
 ) -> ApiResult<Response> {
     let db = db.clone();
+    let snapshot = public_content::load_entry_render_snapshot(
+        &db,
+        entry.id,
+        themes_root.as_ref().map(|Extension(root)| root.0.as_path()),
+    )
+    .await?
+    .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
+    let public_content::PublicEntryRenderSnapshot {
+        entry,
+        schema,
+        active: active_v3,
+        resolution,
+        body: entry_body,
+    } = snapshot;
     let type_key = entry.content_type_key.clone();
     let entry_id_for_seo = entry.id;
     let entry_title_for_seo = entry.title.clone();
-    let schema = load_content_type_definition(&db, &type_key)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
     let canonical_path = canonical_path_override
         .ok_or_else(|| ApiError::not_found("Không tìm thấy canonical nội dung."))?;
     let canonical_path_for_seo = canonical_path.clone();
@@ -400,10 +434,6 @@ pub(crate) async fn render_single_entry_response(
         type_key: type_key.clone(),
         slug: entry.slug.clone(),
         canonical_path: canonical_path.clone(),
-    };
-    let active_v3 = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_theme_v3(&db, &root.0).await?,
-        None => None,
     };
     let (_, single_template) = active_content_templates(&db).await?;
     let site = settings::get_general(&db).await?;
@@ -416,58 +446,21 @@ pub(crate) async fn render_single_entry_response(
         let mut conn = db.acquire().await?;
         permalinks::canonical_archive_path_in_tx(&mut conn, &type_key).await?
     };
-    let fallback_html = content_render::render_single_with_site_and_archive(
-        &schema,
-        &entry_view_with_url(entry.clone(), &schema, Some(canonical_path)),
-        single_template.as_deref(),
-        &site_ctx,
-        archive_path.as_deref(),
-    )?;
-    // A saved choice is durable even when its provider is withdrawn. Do not
-    // apply a different theme's coincidentally identical key, especially a
-    // SingleCustom declaration that excludes this content type. A restored
-    // provider makes the original choice effective again without rewriting DB.
-    let context = if type_key == "page" {
-        let available_layout = entry
-            .page_layout_key
-            .as_ref()
-            .filter(|key| {
-                active_v3.as_ref().is_some_and(|active| {
-                    active
-                        .manifest
-                        .page_layouts
-                        .iter()
-                        .any(|layout| &layout.key == *key)
-                })
-            })
-            .cloned();
-        PublicTemplateContext::Page {
-            page_layout_key: available_layout,
-        }
-    } else {
-        let available_custom = entry
-            .custom_template_key
-            .as_ref()
-            .filter(|key| {
-                active_v3.as_ref().is_some_and(|active| {
-                    active.manifest.templates.iter().any(|tpl| {
-                        tpl.kind == opendash_core::theme::TemplateCandidateKind::SingleCustom
-                            && tpl.custom_key.as_ref() == Some(*key)
-                            && tpl.allowed_types.iter().any(|allowed| allowed == &type_key)
-                    })
-                })
-            })
-            .cloned();
-        PublicTemplateContext::Single {
-            content_type: type_key.clone(),
-            entry_id: entry.id,
-            slug: entry.slug.clone(),
-            custom_template_key: available_custom,
-        }
+    let entry_has_form = entry_body
+        .as_ref()
+        .is_some_and(|body| body.has_active_contact_form);
+    let fallback_html = match entry_body {
+        Some(body) => body.html,
+        None => content_render::render_single_with_site_and_archive(
+            &schema,
+            &entry_view_with_url(entry.clone(), &schema, Some(canonical_path)),
+            single_template.as_deref(),
+            &site_ctx,
+            archive_path.as_deref(),
+        )?,
     };
-    let candidates = overrides::build_candidates(&context)?;
-    let body = resolve_public_template_html(
-        &db, &candidates, active_v3.as_ref(), &site_ctx, &theme_opts,
+    let body = render_resolved_public_template_html(
+        &db, resolution, active_v3.as_ref(), &site_ctx, &theme_opts,
         &fallback_html, Some((&type_key, &entry.slug)),
         serde_json::json!({
             "content_type": {"key": schema.key, "label": schema.label},
@@ -502,7 +495,7 @@ pub(crate) async fn render_single_entry_response(
             footer.as_deref(),
             &seo_view,
         )?,
-        body.has_active_contact_form,
+        body.has_active_contact_form || entry_has_form,
     ))
 }
 

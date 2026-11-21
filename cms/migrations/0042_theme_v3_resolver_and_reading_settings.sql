@@ -17,6 +17,49 @@ VALUES (1, NULL, NULL, 1);
 ALTER TABLE content_entries ADD COLUMN page_layout_key TEXT NULL;
 ALTER TABLE content_entries ADD COLUMN custom_template_key TEXT NULL;
 
+-- D02: Page content is entry-owned, independent of the shared template.
+ALTER TABLE content_entries ADD COLUMN content_mode TEXT NOT NULL DEFAULT 'editor'
+    CHECK (content_mode IN ('editor', 'builder'));
+CREATE TABLE entry_builder_documents (
+    entry_id INTEGER PRIMARY KEY REFERENCES content_entries(id) ON DELETE CASCADE,
+    document_json TEXT NOT NULL CHECK (json_valid(document_json)),
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE entry_builder_media_refs (
+    entry_id INTEGER NOT NULL REFERENCES content_entries(id) ON DELETE CASCADE,
+    media_id TEXT NOT NULL REFERENCES media_assets(id) ON DELETE RESTRICT,
+    ref_role TEXT NOT NULL CHECK (ref_role IN ('image', 'video', 'poster')),
+    PRIMARY KEY (entry_id, media_id, ref_role)
+);
+CREATE INDEX idx_entry_builder_media_refs_media ON entry_builder_media_refs(media_id);
+
+-- Owner selections are metadata, never a candidate for public site rendering.
+CREATE TABLE owner_template_selections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_kind TEXT NOT NULL CHECK (owner_kind IN ('theme','plugin')),
+    owner_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('page','header','footer','archive','single','taxonomy_archive')),
+    scope_type_key TEXT NOT NULL DEFAULT '',
+    template_selection_key TEXT NULL,
+    ast_json TEXT NOT NULL CHECK (json_valid(ast_json)),
+    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+    updated_at TEXT NOT NULL,
+    UNIQUE (owner_kind, owner_id, role, scope_type_key)
+);
+CREATE INDEX idx_owner_template_selections_owner
+    ON owner_template_selections(owner_kind, owner_id);
+
+-- Fresh target databases get the Page-only capability; Post stays unchanged.
+UPDATE content_types
+   SET definition_json = json_set(
+       definition_json, '$.settings.supports',
+       json_insert(json_extract(definition_json, '$.settings.supports'), '$[#]', 'builder')
+   )
+ WHERE key = 'page' AND owner_kind = 'core'
+   AND NOT EXISTS (
+       SELECT 1 FROM json_each(definition_json, '$.settings.supports') WHERE value = 'builder'
+   );
+
 -- The approved S02 baseline has no production overrides to convert. Site-owned
 -- templates are typed Builder ASTs; identity is a canonical key, not the old
 -- role/scope tuple. Recreate projection refs with their media safety contract.
