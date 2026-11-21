@@ -39,7 +39,7 @@ pub fn builtin_definition(key: &str) -> Option<ContentTypeDefinition> {
     if key == "pattern" {
         return Some(ContentTypeDefinition {
             key: "pattern".into(),
-            label: "Pattern".into(),
+            label: "Patterns".into(),
             fields: Vec::new(),
             settings: ContentTypeSettings::private_pattern(),
         });

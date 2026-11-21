@@ -116,7 +116,6 @@ async fn pattern_private_crud_document_cas_and_public_fences() {
     );
     let record: Value = created.json().await.unwrap();
     let id = record["id"].as_i64().unwrap();
-    let entry = format!("{list}/{id}");
     let doc_url = format!("{}/api/admin/entries/pattern/{id}/builder", site.base);
     let opened = client
         .get(&doc_url)
@@ -128,7 +127,7 @@ async fn pattern_private_crud_document_cas_and_public_fences() {
     let opened_json: Value = opened.json().await.unwrap();
     assert_eq!(opened_json["entry_id"], id);
     assert_eq!(opened_json["version"], 1);
-    assert!(opened_json["document"].is_null());
+    assert_eq!(opened_json["document"]["sections"], json!([]));
     let design = ast("Never Public");
     let preview = client
         .post(format!("{doc_url}/preview"))

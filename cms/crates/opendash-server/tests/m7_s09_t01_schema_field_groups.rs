@@ -20,7 +20,7 @@ struct TempDirGuard(PathBuf);
 impl TempDirGuard {
     fn new(label: &str) -> Self {
         let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
+        let dir = fs::canonicalize(std::env::temp_dir()).expect("canonical temp root").join(format!(
             "opendash-m7-s09-t01-{label}-{}-{id}",
             std::process::id()
         ));
@@ -52,11 +52,13 @@ impl RunningServer {
         drop(listener);
 
         let bin = env!("CARGO_BIN_EXE_opendash");
+        let log_path = site_root.join("server-startup.log");
+        let stderr = fs::File::create(&log_path).expect("create startup log");
         let child = Command::new(bin)
             .env("OPENDASH_SITE_ROOT", site_root)
             .env("OPENDASH_PORT", port.to_string())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr))
             .spawn()
             .expect("spawn opendash server");
 
@@ -73,7 +75,10 @@ impl RunningServer {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        panic!("server failed to become ready at {base_url}");
+        panic!(
+            "server failed to become ready at {base_url}: {}",
+            fs::read_to_string(&log_path).unwrap_or_else(|_| "missing startup log".into())
+        );
     }
 }
 

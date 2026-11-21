@@ -389,7 +389,7 @@ pub async fn list_published_filtered(
     filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
     if type_key == "pattern" {
-        return Err(ApiError::not_found("Section là nội dung riêng tư."));
+        return Err(ApiError::not_found("Pattern là nội dung riêng tư."));
     }
     list_entries_filtered(db, type_key, limit, offset, filters, true).await
 }
