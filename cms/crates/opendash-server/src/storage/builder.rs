@@ -851,6 +851,7 @@ async fn render_entry_builder_preview(
     current: &EntryBuilderSnapshot,
     state: &HomeState,
     document: &BuilderDocument,
+    shared_preview: bool,
 ) -> ApiResult<RenderedLayout> {
     let bindings = builder_binding::resolve_in_tx_with_route(
         tx,
@@ -861,7 +862,41 @@ async fn render_entry_builder_preview(
     .await?;
     let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
-    page::render_builder_with_lists_and_forms(state, document, true, &bindings, &lists, &forms)
+    let parts = BTreeMap::new();
+    let context = shared_preview.then_some(page::BuilderTemplateContext {
+        content_html: None,
+        parts: &parts,
+    });
+    page::render_builder_with_template_context(
+        state,
+        document,
+        true,
+        &bindings,
+        &lists,
+        &forms,
+        context.as_ref(),
+    )
+}
+
+/// Shared-template preview uses the selected Page body inside the caller's
+/// read snapshot. A missing saved document is handled by the text renderer.
+pub(super) async fn preview_saved_page_body_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: &SessionContext,
+    id: i64,
+) -> ApiResult<Option<RenderedLayout>> {
+    let current = entry_builder_snapshot(tx, "page", id).await?;
+    if current.opened.content_mode != ContentMode::Builder {
+        return Ok(None);
+    }
+    let Some(document) = current.opened.document.as_ref() else {
+        return Ok(None);
+    };
+    let state =
+        validate_entry_builder_document(tx, &current, actor_field_role(actor), document).await?;
+    Ok(Some(
+        render_entry_builder_preview(tx, &current, &state, document, true).await?,
+    ))
 }
 
 pub async fn preview_entry_builder(
@@ -876,7 +911,7 @@ pub async fn preview_entry_builder(
     let state =
         validate_entry_builder_document(&mut tx, &current, actor_field_role(actor), document)
             .await?;
-    let rendered = render_entry_builder_preview(&mut tx, &current, &state, document).await?;
+    let rendered = render_entry_builder_preview(&mut tx, &current, &state, document, false).await?;
     tx.commit().await?;
     Ok(rendered)
 }
@@ -972,7 +1007,7 @@ async fn mutate_entry_builder(
     check_entry_builder_cas(&before, expected_version, &mutation)?;
     if let EntryBuilderMutation::Save(document) = &mutation {
         let state = validate_entry_builder_document(&mut read_tx, &before, role, document).await?;
-        render_entry_builder_preview(&mut read_tx, &before, &state, document).await?;
+        render_entry_builder_preview(&mut read_tx, &before, &state, document, false).await?;
     }
     read_tx.commit().await?;
     let operation = mutation.operation();
@@ -1011,7 +1046,7 @@ async fn mutate_entry_builder(
             let state = validate_entry_builder_document(&mut tx, &current, role, document).await?;
             // Enforce the same renderer output/node/list/form limits even when
             // the caller saves directly without ever requesting Preview.
-            render_entry_builder_preview(&mut tx, &current, &state, document).await?;
+            render_entry_builder_preview(&mut tx, &current, &state, document, false).await?;
             let raw = String::from_utf8(
                 document
                     .to_json()

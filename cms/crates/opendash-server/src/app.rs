@@ -268,6 +268,11 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
         )
         .route(
+            "/api/admin/template-overrides/preview",
+            post(crate::routes::themes::template_overrides_preview)
+                .layer(DefaultBodyLimit::max(2 * MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
             "/api/admin/template-overrides/{id}/reset",
             post(crate::routes::themes::template_overrides_reset)
                 .layer(DefaultBodyLimit::max(4096)),

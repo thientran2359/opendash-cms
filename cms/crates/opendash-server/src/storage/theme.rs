@@ -1051,10 +1051,36 @@ pub async fn load_active_theme_v3(
     load_active_theme_v3_in_conn(&mut conn, themes_root).await
 }
 
-pub(super) async fn load_active_theme_v3_in_conn(
+/// Capture the active manifest and verified disk revision once. Preview loads
+/// only the requested part sources from this snapshot.
+pub(super) struct CapturedThemeV3 {
+    pub manifest: ThemeV3Manifest,
+    revision: ThemeRevisionRecord,
+    rev_dir: std::path::PathBuf,
+}
+
+impl CapturedThemeV3 {
+    pub(super) fn part(&self, key: &str) -> ApiResult<Option<String>> {
+        let Some(file) = self.manifest.parts.get(key) else {
+            return Ok(None);
+        };
+        let bytes = fs::read(self.rev_dir.join(file))
+            .map_err(|_| ApiError::bad_request("Preview theme part unavailable."))?;
+        if self.revision.file_digests.get(file) != Some(&sha256_hex(&bytes)) {
+            return Err(ApiError::bad_request(
+                "Preview theme part failed integrity check.",
+            ));
+        }
+        Ok(Some(String::from_utf8(bytes).map_err(|_| {
+            ApiError::bad_request("Invalid theme part UTF-8.")
+        })?))
+    }
+}
+
+pub(super) async fn capture_active_theme_v3_in_conn(
     conn: &mut sqlx::SqliteConnection,
     themes_root: &Path,
-) -> ApiResult<Option<ActiveThemeV3>> {
+) -> ApiResult<Option<CapturedThemeV3>> {
     // Snapshot the active revision in a single SQL query. Files may be loaded
     // afterwards because immutable digest/complete marker checks hold.
     let row: Option<RevisionRow> = sqlx::query_as(
@@ -1096,6 +1122,25 @@ pub(super) async fn load_active_theme_v3_in_conn(
     {
         return Ok(None);
     }
+    Ok(Some(CapturedThemeV3 {
+        manifest,
+        revision,
+        rev_dir,
+    }))
+}
+
+pub(super) async fn load_active_theme_v3_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    themes_root: &Path,
+) -> ApiResult<Option<ActiveThemeV3>> {
+    let Some(CapturedThemeV3 {
+        manifest,
+        revision,
+        rev_dir,
+    }) = capture_active_theme_v3_in_conn(conn, themes_root).await?
+    else {
+        return Ok(None);
+    };
     let mut templates = BTreeMap::new();
     for declaration in &manifest.templates {
         let Ok(key) = declaration.canonical_key() else {

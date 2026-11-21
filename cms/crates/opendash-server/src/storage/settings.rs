@@ -7,7 +7,10 @@ use opendash_core::id::valid_snake_key_with_limit;
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 
-use crate::{error::{ApiError, ApiResult}, storage::media::valid_media_id};
+use crate::{
+    error::{ApiError, ApiResult},
+    storage::media::valid_media_id,
+};
 
 pub const TZDB_VERSION: &str = "2026f";
 pub const MAX_SITE_TITLE_SCALARS: usize = 120;
@@ -69,10 +72,17 @@ impl GeneralSettingsInput {
 }
 
 pub async fn get_general(db: &SqlitePool) -> Result<GeneralSettings, sqlx::Error> {
+    let mut conn = db.acquire().await?;
+    get_general_in_conn(&mut conn).await
+}
+
+pub(super) async fn get_general_in_conn(
+    conn: &mut SqliteConnection,
+) -> Result<GeneralSettings, sqlx::Error> {
     sqlx::query_as::<_, GeneralSettings>(
         "SELECT site_title, tagline, timezone, version FROM site_general_settings WHERE id = 1",
     )
-    .fetch_one(db)
+    .fetch_one(conn)
     .await
 }
 
@@ -336,20 +346,18 @@ pub async fn get_theme_options_in_conn(
         return Ok(None);
     };
     let schema = parse_theme_options_schema(&manifest_json).map_err(ApiError::bad_request)?;
-    let version: i64 = sqlx::query_scalar(
-        "SELECT version FROM theme_option_versions WHERE theme_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_optional(&mut *conn)
-    .await?
-    .unwrap_or(1);
+    let version: i64 =
+        sqlx::query_scalar("SELECT version FROM theme_option_versions WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .unwrap_or(1);
 
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_all(&mut *conn)
-    .await?;
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_all(&mut *conn)
+            .await?;
     let mut saved_map = BTreeMap::new();
     for (k, v_json) in rows {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
@@ -411,29 +419,28 @@ pub async fn put_theme_options_in_conn(
                     .fetch_optional(&mut *conn)
                     .await?;
             if exists.is_none() {
-                return Err(ApiError::bad_request("media_id của image_ref không tồn tại."));
+                return Err(ApiError::bad_request(
+                    "media_id của image_ref không tồn tại.",
+                ));
             }
         }
     }
 
-    let current_ver: Option<i64> = sqlx::query_scalar(
-        "SELECT version FROM theme_option_versions WHERE theme_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+    let current_ver: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM theme_option_versions WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_optional(&mut *conn)
+            .await?;
 
     match current_ver {
         None => {
             if expected_version != 1 {
                 return Ok(ThemeOptionsOutcome::Stale);
             }
-            sqlx::query(
-                "INSERT INTO theme_option_versions (theme_id, version) VALUES (?, 2)",
-            )
-            .bind(theme_id)
-            .execute(&mut *conn)
-            .await?;
+            sqlx::query("INSERT INTO theme_option_versions (theme_id, version) VALUES (?, 2)")
+                .bind(theme_id)
+                .execute(&mut *conn)
+                .await?;
         }
         Some(ver) => {
             if ver != expected_version {
@@ -527,12 +534,11 @@ pub async fn check_theme_options_compatibility(
     let new_map: BTreeMap<&str, &ThemeOptionDef> =
         new_schema.iter().map(|d| (d.key.as_str(), d)).collect();
 
-    let saved_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_all(db)
-    .await?;
+    let saved_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_all(db)
+            .await?;
 
     for (key, value_json) in saved_rows {
         let Some(new_def) = new_map.get(key.as_str()) else {
@@ -568,15 +574,24 @@ pub async fn get_active_public_theme_options(
     let Some((theme_id, manifest_json)) = active else {
         return Ok(BTreeMap::new());
     };
-    let Ok(schema) = parse_theme_options_schema(&manifest_json) else {
+    let mut conn = db.acquire().await?;
+    get_public_theme_options_in_conn(&mut conn, &theme_id, &manifest_json).await
+}
+
+/// Resolve only public values against the revision already captured by the caller.
+pub(super) async fn get_public_theme_options_in_conn(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+    manifest_json: &str,
+) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+    let Ok(schema) = parse_theme_options_schema(manifest_json) else {
         return Ok(BTreeMap::new());
     };
-    let saved_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
-    )
-    .bind(&theme_id)
-    .fetch_all(db)
-    .await?;
+    let saved_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_all(conn)
+            .await?;
     let mut saved_map = BTreeMap::new();
     for (k, v_json) in saved_rows {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
@@ -598,10 +613,7 @@ pub async fn get_active_public_theme_options(
                     _ => serde_json::Value::Null,
                 }
             }
-            _ => saved_map
-                .get(&def.key)
-                .cloned()
-                .unwrap_or(def.default),
+            _ => saved_map.get(&def.key).cloned().unwrap_or(def.default),
         };
         out.insert(def.key, val);
     }

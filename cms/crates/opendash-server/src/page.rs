@@ -565,6 +565,13 @@ pub fn render_builder_with_template_context(
                         }
                     };
                     if let Some(fragment) = rendered {
+                        if is_preview
+                            && context.is_some()
+                            && html.len().saturating_add(fragment.len())
+                                > crate::template_sec::MAX_RENDERED_HTML_BYTES
+                        {
+                            return Err(ApiError::bad_request("Builder preview exceeds 512 KiB."));
+                        }
                         html.push_str(&format!(
                             "<div class=\"builder-element\" data-node-id=\"{}\">{fragment}</div>",
                             escape_html(&element.id)
@@ -578,6 +585,10 @@ pub fn render_builder_with_template_context(
         html.push_str("</section>");
     }
     html.push_str("</main>");
+    if is_preview && context.is_some() && html.len() > crate::template_sec::MAX_RENDERED_HTML_BYTES
+    {
+        return Err(ApiError::bad_request("Builder preview exceeds 512 KiB."));
+    }
     Ok(RenderedLayout {
         html,
         diagnostics,

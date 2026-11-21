@@ -42,6 +42,15 @@ pub struct TemplateOverrideSaveInput {
     document: opendash_core::builder::BuilderDocument,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateOverridePreviewInput {
+    target: TemplateCandidate,
+    document: opendash_core::builder::BuilderDocument,
+    #[serde(default)]
+    preview_entry: Option<overrides::TemplatePreviewEntry>,
+}
+
 fn override_if_match(headers: &HeaderMap) -> ApiResult<Option<i64>> {
     let Some(raw) = headers.get(header::IF_MATCH) else {
         return Ok(None);
@@ -53,7 +62,10 @@ fn override_if_match(headers: &HeaderMap) -> ApiResult<Option<i64>> {
         .strip_prefix("\"v")
         .and_then(|tail| tail.strip_suffix('"'))
         .and_then(|s| {
-            if s.len() > 1 && s.starts_with('0') {
+            if s.is_empty()
+                || !s.bytes().all(|b| b.is_ascii_digit())
+                || (s.len() > 1 && s.starts_with('0'))
+            {
                 None
             } else {
                 s.parse::<i64>().ok()
@@ -133,6 +145,48 @@ pub async fn template_overrides_reset(
     )
     .await?;
     Ok((headers(None), Json(reset)).into_response())
+}
+
+/// Render a shared template draft against one private read snapshot.
+pub async fn template_overrides_preview(
+    State(db): State<SqlitePool>,
+    Extension(themes_root): Extension<ThemeStoreRoot>,
+    request_headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Response> {
+    let actor = require_admin_with_csrf(&request_headers, &db).await?;
+    let content_type = request_headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim);
+    if !content_type.is_some_and(|value| value.eq_ignore_ascii_case("application/json")) {
+        return Err(ApiError::unsupported_media_type(
+            "Expected application/json.",
+        ));
+    }
+    if body.len() > 256 * 1024 {
+        return Err(ApiError::bad_request("Template preview exceeds 256 KiB."));
+    }
+    let expected = override_if_match(&request_headers)?;
+    let input: TemplateOverridePreviewInput = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::bad_request("Invalid template preview JSON."))?;
+    let rendered = overrides::preview_typed_override(
+        &db,
+        &themes_root.0,
+        &actor,
+        &input.target,
+        &input.document,
+        input.preview_entry.as_ref(),
+        expected,
+    )
+    .await?;
+    let mut response_headers = headers(None);
+    response_headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    Ok((response_headers, Json(rendered)).into_response())
 }
 
 static RUN_SEQ: AtomicU64 = AtomicU64::new(1);

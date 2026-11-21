@@ -36,7 +36,7 @@ def zip_v3(theme_id="library-theme", *, parts=True) -> bytes:
         "version": "1.0.0", "templates": [{"kind": "home", "file": "home.html"},
                                          {"kind": "single", "file": "single.html"}],
     }
-    members = {"home.html": "<main>THEME HOME</main>",
+    members = {"home.html": "<main>THEME HOME{{ od_content() }}</main>",
                "single.html": "<main>{{ od_content() }}</main>"}
     if parts:
         manifest["parts"] = {"header": "header.html", "footer": "footer.html"}

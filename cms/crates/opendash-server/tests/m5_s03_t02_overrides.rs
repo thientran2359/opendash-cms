@@ -289,9 +289,8 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .unwrap();
     assert_eq!(no_csrf_put.status(), 403);
 
-    // 6. Unsaved document remains client-owned; public markup and persisted
-    // template catalog must not contain its private draft. Legacy preview route
-    // was removed under S02 and must not execute arbitrary Builder documents.
+    // 6. D03 previews the submitted root without Save or a persisted override.
+    // Legacy preview remains removed.
     let retired_preview = client
         .post(format!(
             "{}/api/admin/builder/overrides/header/preview",
@@ -305,6 +304,73 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .await
         .unwrap();
     assert_eq!(retired_preview.status(), 404);
+    let preview_url = format!("{}/api/admin/template-overrides/preview", srv.base_url);
+    let preview_input = json!({
+        "target":{"kind":"part","part_key":"header"},
+        "document":&header_preview_doc
+    });
+    let anonymous = client
+        .post(&preview_url)
+        .json(&preview_input)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), 401);
+    let preview_request = || {
+        client
+            .post(&preview_url)
+            .header("Cookie", &cookie)
+            .header("Origin", &origin)
+    };
+    let no_csrf = preview_request().json(&preview_input).send().await.unwrap();
+    assert_eq!(no_csrf.status(), 403);
+    let preview_request = || {
+        client
+            .post(&preview_url)
+            .header("Cookie", &cookie)
+            .header("Origin", &origin)
+            .header("X-CSRF-Token", &csrf)
+    };
+    let wrong_type = preview_request()
+        .body(preview_input.to_string())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong_type.status(), 415);
+    let invalid = preview_request()
+        .json(&json!({
+            "target":{"kind":"part","part_key":"header"}, "document":&header_preview_doc,
+            "unexpected":true
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), 400);
+    let oversized = preview_request()
+        .header("Content-Type", "application/json")
+        .body(" ".repeat(256 * 1024 + 1))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(oversized.status(), 400);
+    let absent = preview_request()
+        .header("If-Match", "\"v1\"")
+        .json(&preview_input)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(absent.status(), 412);
+    let preview = preview_request().json(&preview_input).send().await.unwrap();
+    assert_eq!(preview.status(), 200);
+    assert_eq!(preview.headers()["cache-control"], "no-store");
+    assert_eq!(preview.headers()["x-content-type-options"], "nosniff");
+    let preview_json: Value = preview.json().await.unwrap();
+    assert!(
+        preview_json["html"]
+            .as_str()
+            .unwrap()
+            .contains("Unsaved Preview Header")
+    );
     let saved_before: Value = client
         .get(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
@@ -367,6 +433,40 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .await
         .unwrap();
     assert_eq!(stale_cas.status(), 412);
+    for (version, status) in [("\"v1\"", 200), ("\"v99\"", 412), ("invalid", 400)] {
+        let result = preview_request()
+            .header("If-Match", version)
+            .json(&preview_input)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(result.status(), status);
+        if status == 200 {
+            let body: Value = result.json().await.unwrap();
+            assert!(
+                body["html"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Unsaved Preview Header")
+            );
+            assert!(!body["html"].as_str().unwrap().contains("Site Header v1"));
+        }
+    }
+    let after: Value = client
+        .get(format!("{}/api/admin/template-overrides", srv.base_url))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mut saved_row = after["items"][0].clone();
+    saved_row
+        .as_object_mut()
+        .unwrap()
+        .remove("effective_source");
+    assert_eq!(saved_row, h1_json);
 
     // 8. Typed Single(post) still resolves RouteContext title per published
     // entry. It must contain exactly one core/content_slot under S02.
@@ -386,6 +486,46 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .push(json!({
             "id":"entry-slot","type":"core/content_slot","props":{}
         }));
+    let preview_single = preview_request()
+        .json(&json!({
+            "target":{"kind":"single","content_type":"post","selector_slug":"secret-draft"},
+            "document":&single_doc
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(preview_single.status(), 200);
+    let draft_value: Value = preview_single.json().await.unwrap();
+    assert!(
+        draft_value["html"]
+            .as_str()
+            .unwrap()
+            .contains("Secret Draft")
+    );
+    let no_entry = preview_request()
+        .json(&json!({
+            "target":{"kind":"single","content_type":"post"},"document":&single_doc
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(no_entry.status(), 200);
+    let no_entry_value: Value = no_entry.json().await.unwrap();
+    assert!(
+        no_entry_value["html"]
+            .as_str()
+            .unwrap()
+            .contains("data-template-preview-placeholder")
+    );
+    let missing = preview_request()
+        .json(&json!({
+            "target":{"kind":"single","content_type":"post","selector_slug":"missing"},
+            "document":&single_doc
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 404);
     let save_single = client
         .put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
@@ -738,4 +878,166 @@ async fn v3_page_canvas_and_custom_single_selections_survive_theme_switch() {
             .unwrap();
         assert_eq!(public.status(), 200);
     }
+}
+
+fn preview_part_document(keys: &[&str]) -> Value {
+    let mut doc = doc_with_heading("preview", "Unsaved root", None);
+    let children = doc["sections"][0]["children"][0]["children"][0]["children"]
+        .as_array_mut()
+        .unwrap();
+    for (index, key) in keys.iter().enumerate() {
+        children.push(
+            json!({"id":format!("part-{index}"),"type":"core/template_part",
+                             "props":{"part_key":key}}),
+        );
+    }
+    doc
+}
+
+fn build_mixed_preview_theme_zip() -> Vec<u8> {
+    let manifest = json!({
+        "manifest_version":3, "theme_id":"mixed-preview", "name":"Mixed Preview",
+        "version":"1.0.0",
+        "templates":[{"kind":"single","file":"single.html"}],
+        "parts":{
+            "bridge":"template-part/bridge.html",
+            "db-card":"template-part/db-card.html",
+            "leaf":"template-part/leaf.html",
+            "lexical":"template-part/lexical.html"
+        }
+    });
+    let mut buffer = Vec::new();
+    {
+        let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buffer));
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        for (name, source) in [
+            ("theme.json", manifest.to_string()),
+            ("single.html", "<main>{{ od_content() }}</main>".to_owned()),
+            ("template-part/bridge.html", "{% set title = 'Lexical parent' %}<div>{{ od_part('lexical') }}{{ od_part('db-card') }}</div>".to_owned()),
+            ("template-part/db-card.html", "<p>Theme card must lose</p>".to_owned()),
+            ("template-part/leaf.html", "<b>Theme leaf</b>".to_owned()),
+            ("template-part/lexical.html", "<i>{{ title }}</i>".to_owned()),
+        ] {
+            zip.start_file(name, opts).unwrap();
+            zip.write_all(source.as_bytes()).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+    buffer
+}
+
+#[tokio::test]
+async fn typed_preview_mixed_graph_uses_db_precedence_and_rejects_draft_cycles() {
+    let srv = spawn_server().await;
+    let client = Client::new();
+    let origin = &srv.base_url;
+    let setup = client
+        .post(format!("{origin}/auth/setup"))
+        .header("Origin", origin)
+        .json(&json!({"username":"admin","password":"AdminPassword123!"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(setup.status(), 201);
+    let (cookie, csrf) = login(&client, origin, "admin", "AdminPassword123!").await;
+    let auth = |request: reqwest::RequestBuilder| {
+        request
+            .header("Cookie", &cookie)
+            .header("Origin", origin)
+            .header("X-CSRF-Token", &csrf)
+    };
+    let install = auth(client.post(format!("{origin}/api/admin/themes")))
+        .header("Content-Type", "application/zip")
+        .body(build_mixed_preview_theme_zip())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(install.status(), 201);
+    let revision: Value = install.json().await.unwrap();
+    let activate = auth(client.put(format!("{origin}/api/admin/themes/active")))
+        .header("If-Match", "\"v1\"")
+        .json(&json!({"revision_id":revision["revision_id"]}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(activate.status(), 200);
+    let url = format!("{origin}/api/admin/template-overrides");
+    let db_doc = preview_part_document(&["leaf"]);
+    let saved = auth(client.put(&url))
+        .json(&json!({
+            "target":{"kind":"part","part_key":"db-card"},"document":&db_doc
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), 201);
+    let parent = auth(client.put(&url))
+        .json(&json!({
+            "target":{"kind":"part","part_key":"parent"},
+            "document":preview_part_document(&["bridge"])
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(parent.status(), 201);
+    let before: Value = auth(client.get(&url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let preview = |key: &str, document: Value| {
+        auth(client.post(format!("{url}/preview")))
+            .json(&json!({"target":{"kind":"part","part_key":key},"document":document}))
+    };
+    let response = preview("root", preview_part_document(&["bridge"]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let value: Value = response.json().await.unwrap();
+    let html = value["html"].as_str().unwrap();
+    assert!(html.contains("Lexical parent"));
+    assert!(html.contains("Theme leaf"));
+    assert!(!html.contains("Theme card must lose"));
+    assert_eq!(html.matches("Unsaved root").count(), 2);
+
+    // The saved DB card is acyclic; the draft version shadows its identity.
+    let cycle = preview("db-card", preview_part_document(&["bridge"]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cycle.status(), 400);
+    let too_many = preview("root", preview_part_document(&["leaf"; 33]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(too_many.status(), 400);
+    let too_deep = preview("root", preview_part_document(&["parent"]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(too_deep.status(), 400); // root -> parent -> bridge -> db-card -> leaf
+    let missing = preview("root", preview_part_document(&["missing-part"]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), 200);
+    let missing: Value = missing.json().await.unwrap();
+    assert!(
+        missing["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "template_part_unavailable")
+    );
+    let after: Value = auth(client.get(&url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(before, after);
 }

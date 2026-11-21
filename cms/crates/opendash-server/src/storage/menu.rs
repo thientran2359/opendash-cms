@@ -889,14 +889,22 @@ pub async fn resolve_active_slot_menus(
         tx.commit().await?;
         return Ok(BTreeMap::new());
     };
-    let assignments = list_slot_assignments_in_tx(&mut tx, &theme_id).await?;
+    let out = resolve_slot_menus_in_tx(&mut tx, &theme_id).await?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+pub(super) async fn resolve_slot_menus_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    theme_id: &str,
+) -> ApiResult<BTreeMap<String, MenuViewModel>> {
+    let assignments = list_slot_assignments_in_tx(tx, theme_id).await?;
     let mut out = BTreeMap::new();
     for (slot_key, menu_id) in assignments {
-        if let Some(view) = resolve_menu_view_in_tx(&mut tx, menu_id).await? {
+        if let Some(view) = resolve_menu_view_in_tx(tx, menu_id).await? {
             out.insert(slot_key, view);
         }
     }
-    tx.commit().await?;
     Ok(out)
 }
 

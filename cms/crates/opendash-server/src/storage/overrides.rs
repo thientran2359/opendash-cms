@@ -1,16 +1,21 @@
 //! Site-owned typed templates. Candidate specificity wins before source priority:
 //! for each candidate, site-owned Builder AST precedes active theme v3 HTML.
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use opendash_core::{
     builder::{BuilderDocument, ElementContent, KnownElement},
-    content::{ContentTypeDefinition, valid_content_type_key},
+    content::{ContentMode, ContentTypeDefinition, FieldRole, valid_content_type_key},
+    registry::{DeclarationState, ProviderStatus},
     theme::{TemplateCandidate, TemplateCandidateKind},
 };
 use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use crate::{
+    auth::SessionContext,
     content_render::{self, SiteContext},
     error::{ApiError, ApiResult},
     page::{self, RenderedLayout},
@@ -20,8 +25,10 @@ use crate::{
             resolve_lists_in_tx,
         },
         builder_binding::{self, BindingResults},
+        content, entries, menu, settings, theme,
         theme::ActiveThemeV3,
     },
+    template_sec::{self, PreviewCompositionBudget},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -867,6 +874,36 @@ async fn validate_typed_target_in_tx(
     Ok(None)
 }
 
+/// The same AST and route-binding validation is used by Save and read-only Preview.
+async fn validate_typed_document_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    prior: Option<&BuilderDocument>,
+) -> ApiResult<HomeState> {
+    let scoped_fields = validate_typed_target_in_tx(tx, target).await?;
+    let state = builder::read_home_tx(tx).await?;
+    document
+        .validate_for_save(&state.descriptors()?, prior)
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let route_role = match target.kind {
+        TemplateCandidateKind::Single
+        | TemplateCandidateKind::SingleCustom
+        | TemplateCandidateKind::Singular => Some("single"),
+        TemplateCandidateKind::Home
+        | TemplateCandidateKind::Page
+        | TemplateCandidateKind::PageLayout => Some("page"),
+        _ => None,
+    };
+    document
+        .validate_route_context_for_role(route_role, scoped_fields.as_deref())
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let (_, slots) = document_parts_and_slot_count(document)?;
+    validate_content_slots(target, slots)?;
+    builder::validate_media_refs_in_tx(&mut **tx, document).await?;
+    Ok(state)
+}
+
 async fn refresh_override_media_refs_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     override_id: i64,
@@ -907,7 +944,6 @@ pub async fn save_typed_override(
     let key = target.canonical_key().map_err(ApiError::bad_request)?;
     check_preview_images(db, document).await?;
     let mut tx = db.begin().await?;
-    let scoped_fields = validate_typed_target_in_tx(&mut tx, target).await?;
     let existing = get_typed_override_on_connection(&mut tx, &key).await?;
     match (existing.as_ref(), expected_version) {
         (Some(_), None) => {
@@ -925,29 +961,14 @@ pub async fn save_typed_override(
         }
         _ => {}
     }
-    let state = builder::read_home_tx(&mut tx).await?;
-    document
-        .validate_for_save(
-            &state.descriptors()?,
-            existing.as_ref().map(|row| &row.document),
-        )
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let route_role = match target.kind {
-        TemplateCandidateKind::Single
-        | TemplateCandidateKind::SingleCustom
-        | TemplateCandidateKind::Singular => Some("single"),
-        TemplateCandidateKind::Home
-        | TemplateCandidateKind::Page
-        | TemplateCandidateKind::PageLayout => Some("page"),
-        _ => None,
-    };
-    document
-        .validate_route_context_for_role(route_role, scoped_fields.as_deref())
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    let (_, slots) = document_parts_and_slot_count(document)?;
-    validate_content_slots(target, slots)?;
+    validate_typed_document_in_tx(
+        &mut tx,
+        target,
+        document,
+        existing.as_ref().map(|row| &row.document),
+    )
+    .await?;
     validate_part_graph_in_tx(&mut tx, target, document).await?;
-    builder::validate_media_refs_in_tx(&mut tx, document).await?;
 
     let ast_json = String::from_utf8(
         document
@@ -1073,51 +1094,370 @@ pub async fn reset_typed_override(
     })
 }
 
-pub async fn preview_override(
-    db: &SqlitePool,
-    scope: &OverrideScope,
-    document: &BuilderDocument,
-    preview_entry: Option<(&str, &str)>,
-) -> ApiResult<RenderedLayout> {
-    check_preview_images(db, document).await?;
-    let mut tx = db.begin().await?;
-    let scoped_fields = validate_scope_and_load_cpt_fields(&mut tx, scope).await?;
-    let state = builder::read_home_tx(&mut tx).await?;
-    let existing = get_override_in_tx(&mut tx, scope).await?;
-    let prior_doc = existing.as_ref().map(|r| &r.document);
-    document
-        .validate_for_save(&state.descriptors()?, prior_doc)
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
-    document
-        .validate_route_context_for_role(Some(scope.role.as_str()), scoped_fields.as_deref())
-        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplatePreviewEntry {
+    pub type_key: String,
+    pub entry_id: i64,
+}
 
-    let effective_entry: Option<(String, String)> = match preview_entry {
-        Some((tk, slug)) => Some((tk.to_string(), slug.to_string())),
-        None => {
-            if let (Some(tk), Some(eid)) = (&scope.scope_type_key, scope.scope_entry_id) {
-                let slug: Option<String> = sqlx::query_scalar(
-                    "SELECT slug FROM content_entries WHERE id = ? AND content_type_key = ?",
+enum PreviewPartSource {
+    Builder(BuilderDocument),
+    Theme(String),
+    Missing,
+}
+
+async fn preview_part_graph(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    active: Option<&theme::CapturedThemeV3>,
+    budget: &mut PreviewCompositionBudget,
+) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
+    let (edges, _) = document_parts_and_slot_count(document)?;
+    let mut pending = vec![(
+        edges,
+        0_usize,
+        vec![target.canonical_key().map_err(ApiError::bad_request)?],
+    )];
+    let mut graph = BTreeMap::new();
+    while let Some((edges, depth, path)) = pending.pop() {
+        budget.stack = path;
+        for part_key in edges {
+            let target = TemplateCandidate {
+                part_key: Some(part_key.clone()),
+                ..candidate(TemplateCandidateKind::Part)
+            };
+            let key = target.canonical_key().map_err(ApiError::bad_request)?;
+            if budget.stack.contains(&key) {
+                return Err(ApiError::bad_request("Template part cycle detected."));
+            }
+            budget.expansions += 1;
+            if depth >= 3 || budget.expansions > 32 {
+                return Err(ApiError::bad_request(
+                    "Template part expansion limit exceeded.",
+                ));
+            }
+            if !graph.contains_key(&part_key) {
+                let source = if let Some(row) = get_typed_override_on_connection(tx, &key).await? {
+                    validate_typed_document_in_tx(tx, &target, &row.document, Some(&row.document))
+                        .await?;
+                    PreviewPartSource::Builder(row.document)
+                } else if let Some(source) =
+                    active.map(|a| a.part(&part_key)).transpose()?.flatten()
+                {
+                    PreviewPartSource::Theme(source)
+                } else {
+                    PreviewPartSource::Missing
+                };
+                graph.insert(part_key.clone(), source);
+            }
+            let children = match &graph[&part_key] {
+                PreviewPartSource::Builder(doc) => document_parts_and_slot_count(doc)?.0,
+                PreviewPartSource::Theme(source) => {
+                    template_sec::preview_csec_part_keys(&part_key, source)
+                        .map_err(ApiError::bad_request)?
+                }
+                PreviewPartSource::Missing => Vec::new(),
+            };
+            let mut path = budget.stack.clone();
+            path.push(key);
+            pending.push((children, depth + 1, path));
+        }
+    }
+    budget.stack.clear();
+    Ok(graph)
+}
+
+struct PreviewRenderContext<'a> {
+    state: &'a HomeState,
+    graph: &'a BTreeMap<String, PreviewPartSource>,
+    theme_context: &'a serde_json::Value,
+    route: Option<(&'a str, &'a str)>,
+}
+
+async fn render_preview_builder(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    slot: Option<&str>,
+    ctx: &PreviewRenderContext<'_>,
+    budget: &mut PreviewCompositionBudget,
+) -> ApiResult<RenderedLayout> {
+    let mut parts = BTreeMap::new();
+    let mut diagnostics = Vec::new();
+    for key in document_parts_and_slot_count(document)?.0 {
+        if parts.contains_key(&key) {
+            continue;
+        }
+        if let Some(mut part) = Box::pin(render_preview_part(tx, &key, ctx, budget)).await? {
+            diagnostics.append(&mut part.diagnostics);
+            parts.insert(key, part.html);
+        }
+    }
+    let bindings = builder_binding::resolve_in_tx_with_route(tx, document, true, ctx.route).await?;
+    let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
+    let forms = resolve_contact_forms_in_tx(tx, document).await?;
+    let mut rendered = page::render_builder_with_template_context(
+        ctx.state,
+        document,
+        true,
+        &bindings,
+        &lists,
+        &forms,
+        Some(&page::BuilderTemplateContext {
+            content_html: slot,
+            parts: &parts,
+        }),
+    )?;
+    rendered.diagnostics.append(&mut diagnostics);
+    Ok(rendered)
+}
+
+async fn render_preview_part(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    ctx: &PreviewRenderContext<'_>,
+    budget: &mut PreviewCompositionBudget,
+) -> ApiResult<Option<RenderedLayout>> {
+    match ctx.graph.get(key) {
+        Some(PreviewPartSource::Builder(doc)) => Ok(Some(
+            Box::pin(render_preview_builder(tx, doc, None, ctx, budget)).await?,
+        )),
+        Some(PreviewPartSource::Theme(source)) => {
+            // Flatten only contiguous Theme-to-Theme edges. Builder boundaries
+            // use the server snapshot rather than the surrounding lexical scope.
+            let mut theme_sources = BTreeMap::new();
+            let mut boundaries = BTreeSet::new();
+            let mut todo =
+                template_sec::preview_csec_part_keys(key, source).map_err(ApiError::bad_request)?;
+            while let Some(child) = todo.pop() {
+                match ctx.graph.get(&child) {
+                    Some(PreviewPartSource::Theme(child_source)) => {
+                        if !theme_sources.contains_key(&child) {
+                            todo.extend(
+                                template_sec::preview_csec_part_keys(&child, child_source)
+                                    .map_err(ApiError::bad_request)?,
+                            );
+                            theme_sources.insert(child, child_source.clone());
+                        }
+                    }
+                    _ => {
+                        boundaries.insert(child);
+                    }
+                }
+            }
+            let mut trusted = BTreeMap::new();
+            let mut diagnostics = Vec::new();
+            for child in boundaries {
+                if let Some(mut rendered) =
+                    Box::pin(render_preview_part(tx, &child, ctx, budget)).await?
+                {
+                    trusted.insert(child, rendered.html);
+                    diagnostics.append(&mut rendered.diagnostics);
+                } else {
+                    diagnostics.push(page::BuilderDiagnostic {
+                        node_id: child.clone(),
+                        code: "template_part_unavailable",
+                    });
+                    trusted.insert(child, String::new());
+                }
+            }
+            let html = template_sec::render_preview_csec_fragment(
+                key,
+                source,
+                template_sec::json_to_safe_value(ctx.theme_context),
+                &theme_sources,
+                &trusted,
+                budget,
+            )
+            .map_err(ApiError::bad_request)?;
+            Ok(Some(RenderedLayout {
+                html,
+                diagnostics,
+                has_active_contact_form: false,
+            }))
+        }
+        _ => Ok(None),
+    }
+}
+
+async fn resolve_preview_entry(
+    tx: &mut Transaction<'_, Sqlite>,
+    target: &TemplateCandidate,
+    sample: Option<&TemplatePreviewEntry>,
+    active: Option<&theme::CapturedThemeV3>,
+) -> ApiResult<Option<(entries::ContentEntryRecord, ContentTypeDefinition)>> {
+    use TemplateCandidateKind as K;
+    let selected = if let Some(sample) = sample {
+        if sample.entry_id <= 0 || !valid_content_type_key(&sample.type_key) {
+            return Err(ApiError::bad_request("Invalid preview entry."));
+        }
+        Some((sample.type_key.clone(), sample.entry_id))
+    } else if target.kind == K::Single {
+        match (&target.content_type, target.entry_id, &target.selector_slug) {
+            (Some(t), Some(id), _) => Some((t.clone(), id)),
+            (Some(t), None, Some(slug)) => {
+                let id: i64 = sqlx::query_scalar(
+                    "SELECT id FROM content_entries WHERE content_type_key = ? AND slug = ?",
                 )
-                .bind(eid)
-                .bind(tk)
-                .fetch_optional(&mut *tx)
-                .await?;
-                slug.map(|s| (tk.clone(), s))
+                .bind(t)
+                .bind(slug)
+                .fetch_optional(&mut **tx)
+                .await?
+                .ok_or_else(|| ApiError::not_found("Preview entry not found."))?;
+                Some((t.clone(), id))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let Some((type_key, id)) = selected else {
+        return Ok(None);
+    };
+    if type_key == "section" {
+        return Err(ApiError::not_found("Preview entry not found."));
+    }
+    let valid = match target.kind {
+        K::Home | K::Page | K::PageLayout => type_key == "page",
+        K::Single => {
+            type_key != "page"
+                && target.content_type.as_ref().is_none_or(|t| t == &type_key)
+                && target.entry_id.is_none_or(|target_id| target_id == id)
+        }
+        K::SingleCustom => {
+            type_key != "page"
+                && active
+                    .and_then(|a| {
+                        a.manifest.templates.iter().find(|d| {
+                            d.kind == K::SingleCustom && d.custom_key == target.custom_key
+                        })
+                    })
+                    .is_none_or(|d| d.allowed_types.contains(&type_key))
+        }
+        K::Singular => type_key != "page",
+        K::Index => true,
+        _ => false,
+    };
+    if !valid {
+        return Err(ApiError::bad_request(
+            "Preview entry does not match template target.",
+        ));
+    }
+    let mut entry = entries::get_entry_in_tx(tx, &type_key, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Preview entry not found."))?;
+    if target.kind == K::Single
+        && target
+            .selector_slug
+            .as_ref()
+            .is_some_and(|s| s != &entry.slug)
+    {
+        return Err(ApiError::bad_request(
+            "Preview entry slug does not match template target.",
+        ));
+    }
+    let schema = content::load_effective_content_schema_in_tx(tx, &type_key)
+        .await?
+        .filter(|s| {
+            s.base.status == ProviderStatus::Active
+                && s.base.declaration_state == DeclarationState::Declared
+        })
+        .ok_or_else(|| ApiError::not_found("Preview entry type not available."))?;
+    entries::filter_entry_values_for_role(&mut entry, &schema, FieldRole::Admin);
+    Ok(Some((entry, schema.base.descriptor)))
+}
+
+pub async fn preview_typed_override(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    expected_version: Option<i64>,
+) -> ApiResult<RenderedLayout> {
+    let key = target.canonical_key().map_err(ApiError::bad_request)?;
+    let mut tx = db.begin().await?;
+    let existing = get_typed_override_on_connection(&mut tx, &key).await?;
+    if expected_version.is_some_and(|v| existing.as_ref().is_none_or(|r| r.version != v)) {
+        return Err(ApiError::precondition_failed("Template override changed."));
+    }
+    let state = validate_typed_document_in_tx(
+        &mut tx,
+        target,
+        document,
+        existing.as_ref().map(|r| &r.document),
+    )
+    .await?;
+    let active = theme::capture_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let mut budget = PreviewCompositionBudget::new();
+    let graph = preview_part_graph(&mut tx, target, document, active.as_ref(), &mut budget).await?;
+    let entry = resolve_preview_entry(&mut tx, target, preview_entry, active.as_ref()).await?;
+    let general = settings::get_general_in_conn(&mut tx).await?;
+    let site = SiteContext {
+        title: &general.site_title,
+        tagline: &general.tagline,
+    };
+    let (options, menus) = if let Some(active) = &active {
+        (
+            settings::get_public_theme_options_in_conn(
+                &mut tx,
+                &active.manifest.theme_id,
+                &serde_json::to_string(&active.manifest)?,
+            )
+            .await?,
+            menu::resolve_slot_menus_in_tx(&mut tx, &active.manifest.theme_id).await?,
+        )
+    } else {
+        (BTreeMap::new(), BTreeMap::new())
+    };
+    let mut theme_context = serde_json::json!({ "site": site, "options": options, "theme_options": options, "menus": menus });
+    let mut body_diagnostics = Vec::new();
+    let mut route = None;
+    let body = if let Some((record, definition)) = &entry {
+        route = Some((record.content_type_key.as_str(), record.slug.as_str()));
+        let view = content_render::authenticated_preview_view(record.clone(), definition);
+        theme_context["entry"] = serde_json::to_value(&view)?;
+        theme_context["content_type"] = serde_json::to_value(definition)?;
+        if record.content_mode == ContentMode::Builder && record.content_type_key == "page" {
+            if let Some(mut rendered) =
+                builder::preview_saved_page_body_in_tx(&mut tx, actor, record.id).await?
+            {
+                body_diagnostics.append(&mut rendered.diagnostics);
+                Some(rendered.html)
             } else {
                 None
             }
+        } else {
+            None
         }
+        .map(Ok)
+        .unwrap_or_else(|| {
+            let html = content_render::render_single_with_site_and_archive(
+                definition, &view, None, &site, None,
+            )?;
+            crate::document::normalize_public_document(&html)
+                .map(|doc| doc.body_fragment)
+                .map_err(|_| ApiError::bad_request("Invalid preview body."))
+        })?
+    } else {
+        "<div data-template-preview-placeholder>Preview content</div>".to_owned()
     };
-    let route_ref = effective_entry
-        .as_ref()
-        .map(|(t, s)| (t.as_str(), s.as_str()));
-    let bindings =
-        builder_binding::resolve_in_tx_with_route(&mut tx, document, true, route_ref).await?;
-    let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
-    let forms = resolve_contact_forms_in_tx(&mut tx, document).await?;
+    if body.len() > template_sec::MAX_RENDERED_HTML_BYTES {
+        return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
+    }
+    let ctx = PreviewRenderContext {
+        state: &state,
+        graph: &graph,
+        theme_context: &theme_context,
+        route,
+    };
+    let mut rendered =
+        render_preview_builder(&mut tx, document, Some(&body), &ctx, &mut budget).await?;
+    rendered.diagnostics.append(&mut body_diagnostics);
     tx.commit().await?;
-    page::render_builder_with_lists_and_forms(&state, document, true, &bindings, &lists, &forms)
+    Ok(rendered)
 }
 
 /// Kept temporarily for the old Builder endpoint callers until routes migrate.
