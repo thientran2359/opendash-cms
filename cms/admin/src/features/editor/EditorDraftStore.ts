@@ -1,4 +1,4 @@
-import type { ContentFieldValue, EffectiveEditorConfigProjection } from '../content/types.ts';
+import type { ContentFieldValue, ContentMode, EffectiveEditorConfigProjection } from '../content/types.ts';
 
 export type DraftStatus = 'active' | 'quarantined';
 
@@ -10,6 +10,7 @@ export interface EditorDraftPayload {
   /** Keep manual slug edits from being replaced by title auto-slug after return. */
   slug_touched?: boolean;
   publication_status: 'draft' | 'published';
+  content_mode?: ContentMode;
   values: Record<string, ContentFieldValue>;
   cleared_fields: string[];
   term_ids: number[];
@@ -45,7 +46,7 @@ export function diffEditorPayload(
   draft: EditorDraftPayload,
 ): string[] {
   const changed: string[] = [];
-  for (const key of ['title', 'slug', 'publication_status', 'term_ids', 'custom_path', 'seo'] as const) {
+  for (const key of ['title', 'slug', 'publication_status', 'content_mode', 'term_ids', 'custom_path', 'seo'] as const) {
     if (JSON.stringify(baseline[key]) !== JSON.stringify(draft[key])) changed.push(key);
   }
   const fieldKeys = new Set([
@@ -167,6 +168,8 @@ export class EditorDraftStore {
       slug_touched: saved.payload.slug_touched ?? fresh.slug_touched,
       publication_status: savedDirty.has('publication_status')
         ? saved.payload.publication_status : fresh.publication_status,
+      content_mode: freshConfig.type_key === 'page' && savedDirty.has('content_mode')
+        ? saved.payload.content_mode : fresh.content_mode,
       term_ids: savedDirty.has('term_ids') ? [...saved.payload.term_ids] : [...fresh.term_ids],
       values,
       cleared_fields: clearedFields,

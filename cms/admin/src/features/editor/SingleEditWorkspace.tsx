@@ -10,6 +10,7 @@ import {
   type EffectiveEditorConfigWithSettings,
   updateEntryComposite,
 } from '../../api/content.ts';
+import { getEntryBuilder } from '../../api/builder.ts';
 import { runPluginAction } from '../../api/plugins.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
@@ -17,6 +18,7 @@ import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes
 import type { AuthUser } from '../../types.ts';
 import type {
   ContentFieldValue,
+  ContentMode,
   EffectiveEditorConfigProjection,
   EffectivePanelProjection,
 } from '../content/types.ts';
@@ -129,6 +131,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [publicationStatus, setPublicationStatus] = useState<'draft' | 'published'>('draft');
+  const [contentMode, setContentMode] = useState<ContentMode>('editor');
+  const [hasBuilderDocument, setHasBuilderDocument] = useState(false);
   const [values, setValues] = useState<Record<string, ContentFieldValue>>({});
   const [clearedFields, setClearedFields] = useState<string[]>([]);
   const [termIds, setTermIds] = useState<number[]>([]);
@@ -219,6 +223,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     setTitle(payload.title);
     setSlug(payload.slug);
     setPublicationStatus(payload.publication_status);
+    setContentMode(payload.content_mode ?? 'editor');
     setValues(payload.values);
     setClearedFields(payload.cleared_fields);
     setTermIds(payload.term_ids);
@@ -237,7 +242,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     draftRef.current = updated;
     editRevisionRef.current += 1;
     const changed = diffEditorPayload(baseline, updated);
-    setDirty(changed.length > 0);
+    setDirty(changed.length > 0 || themeKeyDirtyRef.current);
     if (!changed.length) {
       editorDraftStore.delete(draftKey);
       return;
@@ -267,6 +272,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   useEffect(() => {
     setConfirmedPublicLink(null);
     setThemeLayouts(null);
+    setHasBuilderDocument(false);
     if (!user) {
       setConfig(null);
       baselineRef.current = null;
@@ -325,12 +331,15 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               throw cause;
             }
           };
-          const [rec, routeSnap, seoSnap] = await Promise.all([
+          const [rec, routeSnap, seoSnap, builderSnap] = await Promise.all([
             getContentEntry(typeKey, entryId),
             optional(getEntryRoute(typeKey, entryId)),
             optional(getEntrySeo(typeKey, entryId)),
+            typeKey === 'page' && freshCfg.settings?.supports.includes('builder')
+              ? getEntryBuilder(entryId) : Promise.resolve(null),
           ]);
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
+          setHasBuilderDocument(Boolean(builderSnap?.document && builderSnap.version === rec.version));
           const themeKey = typeKey === 'page'
             ? (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null
             : (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
@@ -350,6 +359,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           baseline = {
             id: rec.id, version: rec.version, title: rec.title, slug: rec.slug,
             slug_touched: true, publication_status: rec.publication_status,
+            content_mode: typeKey === 'page' ? rec.content_mode : undefined,
             values: allowedValues, cleared_fields: [], term_ids: rec.term_ids ?? [],
             custom_path: routeSnap?.custom_path ?? '',
             seo: seoSnap ? {
@@ -368,6 +378,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             id: null, version: null, title: '', slug: '', slug_touched: false,
             publication_status: effectiveContentTypeSettings(typeKey, freshCfg.settings).publication === 'draft_publish'
               ? 'draft' : 'published',
+            content_mode: typeKey === 'page' ? 'editor' : undefined,
             values: {}, cleared_fields: [], term_ids: [], custom_path: '', seo: emptySeo,
           };
         }
@@ -492,6 +503,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         title: snapshot.title.trim(),
         slug: snapshot.slug.trim(),
         publication_status: nextPublication,
+        ...(typeKey === 'page' && effectiveSettings.supports.includes('builder') &&
+            baselineRef.current?.content_mode !== snapshot.content_mode
+          ? { content_mode: snapshot.content_mode } : {}),
         values: submitValues,
         // Omitted term_ids retains existing links; [] only clears by user edit.
         term_ids: baselineRef.current && diffEditorPayload(baselineRef.current, snapshot).includes('term_ids')
@@ -517,6 +531,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         ...snapshot,
         id: res.entry.id, version: res.entry.version, title: res.entry.title, slug: res.entry.slug,
         slug_touched: true, publication_status: res.entry.publication_status,
+        content_mode: typeKey === 'page' ? res.entry.content_mode : undefined,
         values: res.entry.values, cleared_fields: [], term_ids: res.entry.term_ids ?? snapshot.term_ids,
         custom_path: res.custom_path ?? '',
         seo: res.seo ? {
@@ -573,7 +588,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       } else if (draftRef.current) {
         const remaining = { ...draftRef.current, id: res.entry.id, version: res.entry.version,
           publication_status: draftRef.current.publication_status === snapshot.publication_status
-            ? res.entry.publication_status : draftRef.current.publication_status };
+            ? res.entry.publication_status : draftRef.current.publication_status,
+          content_mode: draftRef.current.content_mode === snapshot.content_mode
+            ? saved.content_mode : draftRef.current.content_mode };
         draftRef.current = remaining;
         const changed = diffEditorPayload(saved, remaining);
         const newKey = editorDraftStore.makeDraftKey(typeKey, res.entry.id);
@@ -596,6 +613,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         onNavigateHash(`${listHashPrefix}/${res.entry.id}/edit`);
       }
     } catch (err) {
+      if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey
+          || activeMediaScopeRef.current !== mediaScopeKey) return;
       if (err instanceof ApiClientError && err.status === 401) {
         editorDraftStore.quarantineAll();
       }
@@ -657,6 +676,21 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
           Xem trước bản nháp đã lưu (yêu cầu đăng nhập)
         </a>
+      )}
+      {typeKey === 'page' && settings?.supports.includes('builder') && entryId !== null && (
+        <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+          <label htmlFor="page-content-mode" className="block text-sm font-semibold">Nguồn nội dung Page</label>
+          <select id="page-content-mode" value={contentMode} disabled={saving || !csrfToken}
+            onChange={event => {
+              const next = event.target.value as ContentMode;
+              setContentMode(next);
+              persistDraftPatch({ content_mode: next });
+            }}>
+            <option value="editor">Văn bản</option>
+            <option value="builder" disabled={!hasBuilderDocument && contentMode !== 'builder'}>Visual Builder</option>
+          </select>
+          <p className="text-xs text-slate-600">Chuyển nguồn khi lưu giữ nguyên văn bản và thiết kế đã lưu.</p>
+        </div>
       )}
       {isDraftPublishCpt && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3"
@@ -825,11 +859,15 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         }}
         onSave={intent => void handleSave(intent)}
         onOpenBuilder={() => {
+          if (typeKey !== 'page' || !settings?.supports.includes('builder')) {
+            setStatusNote('Loại nội dung này chưa hỗ trợ Visual Builder.');
+            return;
+          }
           if (entryId === null) {
             setStatusNote('Vui lòng Lưu nội dung trước khi mở Visual Builder.');
             return;
           }
-          onNavigateHash(`#/builder?template=${typeKey === 'page' ? 'page' : 'single'}&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
+          onNavigateHash(`#/builder?template=page&type=page&entry=${entryId}`);
         }}
       />
       </div>
