@@ -145,3 +145,8 @@ Rebaseline Page integration/browser tests to entry version tokens and new paths,
 Run the repository-required standards/plans checks and their self-tests, check-agent-artifacts, cargo fmt --all --check, cargo build --locked, cargo test --workspace --release --locked and git diff --check. Run Admin npm run build and npm exec tsc -- --noEmit. Run the Page scope, M6 domain/plugin, relevant M5/M7/M8 backup/media suites and the two affected browser scripts using the freshly built binary and isolated site roots. Record commands, exact source/head, pass/fail and limits; CI governance Ubuntu/Windows and cms-ci must all pass before implementation merge. Do not label the whole feature Verified until merged-source validation and the required drift report are completed.
 
 For the documentation amendment run the same mandated checks against the Aster checkout, record actual results, and reindex docs. Independent review uses design_critic, codebase_details and implementation_readiness in fresh contexts, explicit core context files and exact source snapshots. Two clean review rounds are required under egm-review-loop. No test or reviewer result is claimed until actually observed.
+
+
+## D03 shared-template draft preview supplement
+
+See [D03 typed shared-template draft preview](typed-template-draft-preview.md). This Approved supplement requires merge and exact-source handoff before implementation. It supplies the previously missing shared-template unsaved Preview API; entry Page Preview and existing publication semantics remain unchanged.
