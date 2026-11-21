@@ -5,6 +5,7 @@ import { effectiveResponsive, isElement, isLockedElement, locate, nodeTitle, RES
 import { BuilderBindingFields } from './BuilderBindingFields.tsx';
 import { BuilderListFields } from './BuilderListFields.tsx';
 import { BuilderContactFormFields } from './BuilderContactFormFields.tsx';
+import type { PatternRecord } from '../api/patterns.ts';
 
 interface Props {
   document: BuilderDocument;
@@ -13,6 +14,9 @@ interface Props {
   csrfToken: string | null;
   viewport: BuilderViewport;
   allowRouteContext?: boolean;
+  patterns: PatternRecord[];
+  patternsLoaded: boolean;
+  onRefreshPatterns: () => void;
   onChange: (id: string, key: string, value: string | number | boolean | undefined) => void;
   onBindingChange: (id: string, binding: ElementBinding | null) => void;
   onListChange: (id: string, config: ListProps) => void;
@@ -20,7 +24,7 @@ interface Props {
   onError: (error: unknown, fallback: string) => void;
 }
 
-export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, allowRouteContext, onChange, onBindingChange, onListChange, onResponsiveChange, onError }: Props) {
+export function BuilderInspector({ document, selectedId, registry, csrfToken, viewport, allowRouteContext, patterns, patternsLoaded, onRefreshPatterns, onChange, onBindingChange, onListChange, onResponsiveChange, onError }: Props) {
   const [showPicker, setShowPicker] = useState<'image' | 'video' | 'poster' | null>(null);
   const item = locate(document, selectedId);
   if (!item) return (
@@ -142,7 +146,7 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
       {!element && <p className="text-sm text-slate-500">
         Các thay đổi responsive chỉ ghi vào document khi bấm Lưu. Thêm hoặc đổi thứ tự node từ Tree.
       </p>}
-      {element && !locked && element.type !== 'core/list' && element.type !== 'core/contact_form' && element.type !== 'core/video' && (
+      {element && !locked && element.type !== 'core/list' && element.type !== 'core/contact_form' && element.type !== 'core/video' && element.type !== 'core/pattern_ref' && (
         <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label="Thuộc tính phần tử">
           {fields.map(field => (
             <label key={field.key} className="block text-sm font-medium text-slate-700">
@@ -167,6 +171,30 @@ export function BuilderInspector({ document, selectedId, registry, csrfToken, vi
           )}
           {fields.length === 0 && <p className="text-xs text-slate-500">Block không có field có thể chỉnh.</p>}
         </form>
+      )}
+      {element?.type === 'core/pattern_ref' && !locked && (
+        <div className="space-y-2" aria-label="Reusable Pattern">
+          <label htmlFor="pattern-ref-id" className="block text-sm font-medium text-slate-700">Reusable Pattern</label>
+          <select id="pattern-ref-id" className="w-full text-sm" value={Number(element.props.pattern_id) || 0}
+            onChange={event => onChange(element.id, 'pattern_id', Number(event.target.value))}>
+            <option value={0}>Chọn Pattern…</option>
+            {patterns.map(pattern => <option key={pattern.id} value={pattern.id}>{pattern.title} (#{pattern.id})</option>)}
+            {Number(element.props.pattern_id) > 0 && !patterns.some(pattern => pattern.id === element.props.pattern_id) &&
+              <option value={Number(element.props.pattern_id)}>Pattern #{String(element.props.pattern_id)} · không còn tồn tại</option>}
+          </select>
+          <button type="button" className="btn-secondary text-xs" onClick={onRefreshPatterns}>Tải lại danh sách Pattern</button>
+          {Number(element.props.pattern_id) === 0 && <p role="alert" className="text-sm text-amber-800">
+            Cần chọn Pattern hợp lệ trước khi lưu Builder.
+          </p>}
+          {patternsLoaded && Number(element.props.pattern_id) > 0
+            && !patterns.some(pattern => pattern.id === element.props.pattern_id) && (
+              <p role="alert" className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+                Pattern #{String(element.props.pattern_id)} đã bị xóa hoặc không còn tồn tại.
+                Block được giữ trong Builder để bạn chọn Pattern thay thế; nội dung public sẽ bỏ qua block bị thiếu.
+              </p>
+            )}
+          <p className="text-xs text-slate-500">Pattern đồng bộ: mọi trang tham chiếu sẽ nhận bố cục mới khi bản gốc được lưu.</p>
+        </div>
       )}
       {element && !locked && ['core/heading', 'core/text', 'core/image', 'core/button'].includes(element.type) && (
         <BuilderBindingFields key={element.id} element={element} allowRouteContext={allowRouteContext} onBindingChange={onBindingChange} onError={onError} />

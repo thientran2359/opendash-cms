@@ -4,7 +4,7 @@ export type AdminView =
   | 'dashboard'
   | 'posts'
   | 'pages'
-  | 'sections'
+  | 'patterns'
   | 'cpt'
   | 'media'
   | 'taxonomy'
@@ -85,6 +85,13 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
   }
   if (first === 'cpt' && segs[1]) {
     const typeKey = decodeURIComponent(segs[1]);
+    if (typeKey === 'pattern' || typeKey === 'section') {
+      if (segs[2] === 'new' && segs.length === 3) return { view: 'patterns', sub: 'new', rawHash: '#/patterns/new' };
+      if (segs.length === 4 && segs[3] === 'edit' && /^[1-9]\d*$/.test(segs[2]) && Number.isSafeInteger(Number(segs[2]))) {
+        return { view: 'patterns', sub: 'edit', entryId: Number(segs[2]), rawHash: `#/patterns/${segs[2]}/edit` };
+      }
+      return { view: 'patterns', sub: segs.length === 2 ? 'list' : 'invalid', rawHash: '#/patterns' };
+    }
     if (segs[2] === 'new') {
       return { view: 'cpt', sub: 'new', typeKey, rawHash: `#/cpt/${typeKey}/new` };
     }
@@ -99,12 +106,14 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     }
     return { view: 'cpt', sub: 'list', typeKey, rawHash: `#/cpt/${typeKey}${tableSuffix}` };
   }
-  if (first === 'sections') {
-    if (segs[1] === 'new' && segs.length === 2) return { view: 'sections', sub: 'new', rawHash: '#/sections/new' };
+  // Existing private Section IDs are migrated to Pattern IDs by S02/0044.
+  // Preserve bookmarks while using only the new Pattern routes and API.
+  if (first === 'patterns' || first === 'sections') {
+    if (segs[1] === 'new' && segs.length === 2) return { view: 'patterns', sub: 'new', rawHash: '#/patterns/new' };
     if (segs.length === 3 && segs[2] === 'edit' && /^[1-9]\d*$/.test(segs[1]) && Number.isSafeInteger(Number(segs[1]))) {
-      return { view: 'sections', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/sections/${segs[1]}/edit` };
+      return { view: 'patterns', sub: 'edit', entryId: Number(segs[1]), rawHash: `#/patterns/${segs[1]}/edit` };
     }
-    return { view: 'sections', sub: segs.length === 1 ? 'list' : 'invalid', rawHash: hash };
+    return { view: 'patterns', sub: segs.length === 1 ? 'list' : 'invalid', rawHash: segs.length === 1 ? '#/patterns' : hash };
   }
   if (first === 'media') {
     return { view: 'media', sub: segs[1] === 'upload' ? 'upload' : 'library', rawHash: `#/media${segs[1] === 'upload' ? '/upload' : ''}` };
@@ -119,7 +128,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
       return { view: 'taxonomy', sub, taxonomyKind: sub === 'tags' ? 'tag' : 'category', taxonomyMode: 'list', rawHash: hash };
     }
     const key = segs[1];
-    const validKey = Boolean(key && /^[a-z][a-z0-9_]{0,63}$/.test(key) && key !== 'section');
+    const validKey = Boolean(key && /^[a-z][a-z0-9_]{0,63}$/.test(key) && key !== 'pattern' && key !== 'section');
     if (validKey && segs[2] === 'terms') {
       const root = `#/taxonomy/${key}/terms`;
       if (segs.length === 3) return { view: 'taxonomy', sub: 'terms', taxonomyKind: key, taxonomyMode: 'list', rawHash: root };
@@ -153,10 +162,8 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const templateRole = params.get('template') ?? undefined;
     const typeKey = params.get('type') ?? undefined;
     const scopedPage = templateRole === 'page' && typeKey === 'page' && entryId !== undefined;
-    // Section keeps its existing private Admin-only protocol until Spec 2 S02.
     const scopedEntry = templateRole === 'entry' && !!typeKey && typeKey !== 'section'
       && /^[a-z][a-z0-9_]{0,63}$/.test(typeKey) && entryId !== undefined;
-    const scopedSection = templateRole === 'section' && typeKey === 'section' && entryId !== undefined;
     const noScope = !entryParam && !templateRole && !typeKey && !queryPart;
     const validGlobal = !entryParam && templateRole !== 'page' &&
       (templateRole === 'header' || templateRole === 'footer'
@@ -165,7 +172,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const validAdminScopedSingle = templateRole === 'single' && !!typeKey && entryId !== undefined;
     return {
       view: 'builder',
-      sub: scopedEntry || scopedPage || scopedSection || noScope || validGlobal || validAdminScopedSingle ? 'builder' : 'invalid',
+      sub: scopedEntry || scopedPage || noScope || validGlobal || validAdminScopedSingle ? 'builder' : 'invalid',
       templateRole,
       typeKey,
       entryId,
@@ -203,10 +210,11 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
 }
 
 export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
-  if (route.view === 'sections' && route.sub === 'invalid') return false;
+  if (route.view === 'patterns' && route.sub === 'invalid') return false;
   if (route.view === 'taxonomy' && route.taxonomyMode === 'invalid') return false;
   if (route.view === 'builder' && route.sub !== 'builder') return false;
   if (role === 'admin') return true;
+  if (route.view === 'patterns') return false;
   // Editors may update term extension values on an existing term. Creating
   // terms and editing definition/eligibility schemas remain Admin-only.
   if (route.view === 'taxonomy' && !['list', 'edit'].includes(route.taxonomyMode ?? '')) return false;
@@ -214,10 +222,9 @@ export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
     return false;
   }
   if (route.view === 'builder') {
-    return ((route.templateRole === 'entry' && !!route.typeKey && route.typeKey !== 'section'
+    return ((route.templateRole === 'entry' && !!route.typeKey && route.typeKey !== 'section' && route.typeKey !== 'pattern'
       && /^[a-z][a-z0-9_]{0,63}$/.test(route.typeKey))
-      || (route.templateRole === 'page' && route.typeKey === 'page')
-      || (route.templateRole === 'section' && route.typeKey === 'section'))
+      || (route.templateRole === 'page' && route.typeKey === 'page'))
       && Number.isSafeInteger(route.entryId) && (route.entryId ?? 0) > 0;
   }
   return true;
@@ -229,5 +236,5 @@ export function parseAdminView(hash: string, pathname: string = '/admin/'): Admi
 
 export function isViewAllowed(view: AdminView, role: Role): boolean {
   if (role === 'admin') return true;
-  return !['themes', 'plugins', 'users', 'tools', 'settings'].includes(view);
+  return !['themes', 'plugins', 'users', 'tools', 'settings', 'patterns'].includes(view);
 }
