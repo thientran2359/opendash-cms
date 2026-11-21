@@ -40,8 +40,7 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
     message: string;
     pins: MediaPinSummary | null;
   } | null>(null);
-  const imageUploadRef = useRef<HTMLInputElement>(null);
-  const videoUploadRef = useRef<HTMLInputElement>(null);
+  const fileUploadRef = useRef<HTMLInputElement>(null);
   const errorHandler = useRef(onApiError);
   errorHandler.current = onApiError;
 
@@ -74,7 +73,10 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
 
   const refresh = () => setRefreshVersion(previous => previous + 1);
 
-  const onUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const isVideoFile = (file: File): boolean =>
+    file.type === 'video/mp4' || file.name.toLowerCase().endsWith('.mp4');
+
+  const onUploadFiles = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = '';
     if (!files.length || !csrfToken || !user || uploading || loading) return;
@@ -85,25 +87,31 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
     let completed = 0;
     try {
       for (const [index, file] of files.entries()) {
-        setUploadProgress(`Đang kiểm tra và tải ảnh ${index + 1}/${files.length}: ${file.name}`);
+        const video = isVideoFile(file);
+        setUploadProgress(`Đang kiểm tra và tải ${video ? 'video' : 'ảnh'} ${index + 1}/${files.length}: ${file.name}`);
         try {
-          await validateImageUpload(file);
-          await uploadMedia(file, csrfToken);
+          if (video) {
+            validateVideoUpload(file);
+            await uploadVideo(file, csrfToken);
+          } else {
+            await validateImageUpload(file);
+            await uploadMedia(file, csrfToken);
+          }
           completed += 1;
         } catch (cause) {
-          const reason = cause instanceof Error ? cause.message : 'Không thể tải ảnh.';
+          const reason = cause instanceof Error ? cause.message : 'Không thể tải tệp.';
           setUploadError(`Không thể tải “${file.name}”: ${reason}`);
           if (completed > 0) {
-            setNotice(`Đã tải thành công ${completed}/${files.length} ảnh trước khi gặp lỗi. ${files.length - index - 1} ảnh còn lại chưa được tải.`);
+            setNotice(`Đã tải thành công ${completed}/${files.length} tệp trước khi gặp lỗi. ${files.length - index - 1} tệp còn lại chưa được tải.`);
           }
           // Only API failures reach the parent auth handler (especially expired sessions).
           if (!(cause instanceof MediaUploadValidationError)) {
-            errorHandler.current(cause, 'Không thể tải ảnh.');
+            errorHandler.current(cause, 'Không thể tải tệp media.');
           }
           return;
         }
       }
-      setNotice(`Đã tải thành công ${completed} ảnh. Thư viện đã được cập nhật.`);
+      setNotice(`Đã tải thành công ${completed} tệp. Thư viện đã được cập nhật.`);
     } finally {
       setUploadProgress('');
       setUploading(false);
@@ -111,33 +119,6 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
         setOffset(0);
         refresh();
       }
-    }
-  };
-
-  const onUploadVideo = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = '';
-    if (!file || !csrfToken || !user || uploading || loading) return;
-
-    setUploading(true);
-    setNotice('');
-    setUploadError('');
-    setUploadProgress(`Đang kiểm tra và tải video: ${file.name}`);
-    try {
-      validateVideoUpload(file);
-      await uploadVideo(file, csrfToken);
-      setNotice(`Đã tải thành công video “${file.name}”.`);
-      setOffset(0);
-      refresh();
-    } catch (cause) {
-      const reason = cause instanceof Error ? cause.message : 'Không thể tải video.';
-      setUploadError(`Không thể tải “${file.name}”: ${reason}`);
-      if (!(cause instanceof MediaUploadValidationError)) {
-        errorHandler.current(cause, 'Không thể tải video.');
-      }
-    } finally {
-      setUploadProgress('');
-      setUploading(false);
     }
   };
 
@@ -157,43 +138,57 @@ export const MediaLibraryPage: React.FC<MediaLibraryPageProps> = ({ user, csrfTo
       <div className="od-media-heading">
         <div>
           <h2 id="od-media-title">Thư viện media</h2>
-          <p>Quản lý ảnh và video MP4 của website. Tệp nháp chỉ hiển thị qua phiên Admin hoặc Editor đã đăng nhập.</p>
+          <p id="od-media-upload-help">Ảnh JPEG/PNG/WebP (≤ 8 MiB) và video MP4 H.264/AAC (≤ 100 MiB). Chọn nhiều tệp cùng lúc.</p>
         </div>
-        <button type="button" className="od-media-secondary" onClick={refresh} disabled={loading || uploading}>Tải lại</button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" className="od-media-secondary" onClick={refresh} disabled={loading || uploading}>Tải lại</button>
+          <button
+            className="od-media-upload"
+            type="button"
+            aria-describedby="od-media-upload-help"
+            onClick={() => fileUploadRef.current?.click()}
+            disabled={!csrfToken || loading || uploading}
+          >
+            + Tải tệp lên
+          </button>
+          <input
+            ref={fileUploadRef}
+            className="od-media-upload-file"
+            id="od-media-files"
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,image/webp,video/mp4,.jpg,.jpeg,.png,.webp,.mp4"
+            onChange={onUploadFiles}
+            disabled={!csrfToken || loading || uploading}
+            tabIndex={-1}
+          />
+        </div>
       </div>
 
-      <section className="od-media-toolbar" aria-label="Tải tệp và tìm kiếm">
-        <div className="od-media-upload-actions" role="group" aria-label="Tải media lên">
-          <button className="od-media-upload" type="button" aria-describedby="od-media-upload-help"
-            onClick={() => imageUploadRef.current?.click()} disabled={!csrfToken || loading || uploading}>
-            + Tải ảnh lên
-          </button>
-          <input ref={imageUploadRef} className="od-media-upload-file" id="od-media-files"
-            type="file" multiple accept="image/jpeg,image/png,image/webp"
-            onChange={onUpload} disabled={!csrfToken || loading || uploading} tabIndex={-1} />
-          <button className="od-media-upload" type="button" aria-describedby="od-media-upload-help"
-            onClick={() => videoUploadRef.current?.click()} disabled={!csrfToken || loading || uploading}>
-            + Tải video MP4
-          </button>
-          <input ref={videoUploadRef} className="od-media-upload-file" id="od-media-video-file"
-            type="file" accept="video/mp4,.mp4"
-            onChange={onUploadVideo} disabled={!csrfToken || loading || uploading} tabIndex={-1} />
-        </div>
-        <div className="od-media-filters" role="group" aria-label="Lọc loại media">
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-200 bg-white p-3" aria-label="Tìm kiếm và phân loại media">
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Lọc loại media">
           {(['all', 'image', 'video'] as const).map(k => (
-            <button key={k} type="button" className={kindFilter === k ? 'od-media-primary' : 'od-media-secondary'}
-              onClick={() => { setKindFilter(k); setOffset(0); }} disabled={loading || uploading}>
+            <button
+              key={k}
+              type="button"
+              className={kindFilter === k ? 'od-media-primary' : 'od-media-secondary'}
+              onClick={() => { setKindFilter(k); setOffset(0); }}
+              disabled={loading || uploading}
+            >
               {k === 'all' ? 'Tất cả' : k === 'image' ? 'Ảnh' : 'Video'}
             </button>
           ))}
         </div>
-        <p id="od-media-upload-help">Ảnh: JPEG/PNG/WebP ≤ 8 MiB · Video: MP4 (H.264/AAC) ≤ 100 MiB.</p>
-        <label className="od-media-search">
-          <span>Tìm trong trang hiện tại</span>
-          <input type="search" value={search} onChange={event => setSearch(event.target.value)}
-            placeholder="Tên file hoặc mã tệp" aria-describedby="od-media-search-help" />
-        </label>
-        <p id="od-media-search-help">Chỉ lọc {assets.length} tệp đã tải ở trang {offset / PAGE_SIZE + 1}; chưa tìm trên toàn thư viện.</p>
+        <div className="flex min-w-[220px] flex-1 items-center gap-2 sm:max-w-sm">
+          <input
+            type="search"
+            aria-label="Tìm tệp trong trang hiện tại"
+            value={search}
+            onChange={event => setSearch(event.target.value)}
+            placeholder={`Tìm trong ${assets.length} tệp ở trang ${offset / PAGE_SIZE + 1}...`}
+            className="h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:outline-od-accent"
+          />
+        </div>
       </section>
 
       {uploadProgress && <p className="od-media-notice" role="status">{uploadProgress}</p>}

@@ -87,10 +87,6 @@ function buildMenuTree(cptTypes: OwnedContentType[], isAdmin: boolean): ParentMe
       icon: 'media',
       hash: '#/media',
       group: 'content',
-      children: [
-        { label: 'Thư viện', hash: '#/media' },
-        { label: 'Tải lên', hash: '#/media/upload' },
-      ],
     },
     {
       id: 'contact',
@@ -348,7 +344,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     route.view === 'tools' ? `#/tools/${route.sub}` :
     route.view === 'settings'
       ? (route.sub === 'content-types' ? '#/appearance/content-types' : `#/settings/${route.sub}`) :
-    route.view === 'media' ? (route.sub === 'upload' ? '#/media/upload' : '#/media') :
+    route.view === 'media' ? '#/media' :
     route.view === 'plugins' ? (route.sub === 'install' ? '#/plugins/install' : '#/plugins') :
     route.view === 'users' ? (route.sub === 'new' ? '#/users/new' : '#/users') :
     route.rawHash.split('?')[0];
