@@ -310,14 +310,24 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         .json(&serde_json::json!({"username":"public_context_admin","password":"Strong-Public-Context-Password-123!"}))
         .send().await.unwrap();
     assert_eq!(login.status(), reqwest::StatusCode::OK);
-    let cookie = login.headers().get_all(reqwest::header::SET_COOKIE)
-        .iter().filter_map(|v| v.to_str().ok())
+    let cookie = login
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
         .map(|v| v.split(';').next().unwrap().to_string())
-        .collect::<Vec<_>>().join("; ");
+        .collect::<Vec<_>>()
+        .join("; ");
     let csrf = login.json::<serde_json::Value>().await.unwrap()["csrf_token"]
-        .as_str().unwrap().to_owned();
-    let settings = client.get(format!("{base}/api/admin/settings/permalinks"))
-        .header("Cookie", &cookie).send().await.unwrap();
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let settings = client
+        .get(format!("{base}/api/admin/settings/permalinks"))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(settings.status(), reqwest::StatusCode::OK);
     let settings: serde_json::Value = settings.json().await.unwrap();
     let version = settings["version"].as_i64().unwrap();
@@ -326,15 +336,23 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         "content_type_bases":settings["content_type_bases"],
         "taxonomy_bases":settings["taxonomy_bases"]
     });
-    let sync = client.put(format!("{base}/api/admin/settings/permalinks"))
+    let sync = client
+        .put(format!("{base}/api/admin/settings/permalinks"))
         .header("Cookie", &cookie)
         .header("x-csrf-token", &csrf)
         .header("If-Match", format!("\"v{version}\""))
         .header("Origin", &base)
-        .json(&input).send().await.unwrap();
+        .json(&input)
+        .send()
+        .await
+        .unwrap();
     let status = sync.status();
     let body = sync.text().await.unwrap();
-    assert_eq!(status, reqwest::StatusCode::OK, "fixture permalink sync: {body}");
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "fixture permalink sync: {body}"
+    );
 
     for (path, expected_status) in [
         ("/", 200),

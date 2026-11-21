@@ -69,8 +69,13 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
     for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
         let recognized = matches!(
             key.as_ref(),
-            "page" | "category_id" | "tag_id" | "taxonomy_key" | "term_id"
-                | "include_descendants" | "descendants"
+            "page"
+                | "category_id"
+                | "tag_id"
+                | "taxonomy_key"
+                | "term_id"
+                | "include_descendants"
+                | "descendants"
         );
         if !recognized {
             continue;
@@ -131,13 +136,15 @@ pub fn parse_query(raw: Option<&str>, scope: QueryScope) -> Result<PublicQuery, 
     }
     match scope {
         QueryScope::ContentArchive
-            if query.filters.descendants && query.filters.category_id.is_none()
+            if query.filters.descendants
+                && query.filters.category_id.is_none()
                 && query.filters.taxonomy_key.is_none() =>
         {
             Err("include_descendants yêu cầu category_id hoặc taxonomy_key + term_id.")
         }
         QueryScope::TaxonomyArchive(TaxonomyKind::Tag)
-            if query.filters.descendants && query.filters.category_id.is_none()
+            if query.filters.descendants
+                && query.filters.category_id.is_none()
                 && query.filters.taxonomy_key.is_none() =>
         {
             Err("descendants yêu cầu category_id hoặc hierarchical generic taxonomy.")
@@ -158,7 +165,11 @@ pub fn validate_public_request_path(path: &str) -> Result<(), &'static str> {
         || path.contains('%')
         || path.contains('#')
         || path.chars().any(char::is_control)
-        || (path != "/" && path.split('/').skip(1).any(|s| s.is_empty() || s == "." || s == ".."))
+        || (path != "/"
+            && path
+                .split('/')
+                .skip(1)
+                .any(|s| s.is_empty() || s == "." || s == ".."))
     {
         return Err("Đường dẫn công khai không hợp lệ.");
     }
@@ -355,9 +366,16 @@ mod request_path_tests {
     #[test]
     fn reject_encoded_and_non_canonical_request_paths() {
         for path in [
-            "/blog/%2fprivate", "/blog/%252fprivate", "/blog/%2e%2e/private",
-            "/blog/../private", "/blog/./post", "/blog//post", "/blog/post/",
-            "//blog/post", "/blog/post#fragment", "/blog/post\0",
+            "/blog/%2fprivate",
+            "/blog/%252fprivate",
+            "/blog/%2e%2e/private",
+            "/blog/../private",
+            "/blog/./post",
+            "/blog//post",
+            "/blog/post/",
+            "//blog/post",
+            "/blog/post#fragment",
+            "/blog/post\0",
         ] {
             assert!(validate_public_request_path(path).is_err(), "{path}");
         }
@@ -368,9 +386,13 @@ mod request_path_tests {
 
     #[test]
     fn canonical_pagination_uses_storage_base_not_legacy_prefix() {
-        let query = parse_query(Some("page=2&category_id=5&utm_campaign=x"), QueryScope::ContentArchive)
-            .expect("valid bounded query");
-        let href = CanonicalUrlBuilder::with_query("/blog".into(), query, QueryScope::ContentArchive);
+        let query = parse_query(
+            Some("page=2&category_id=5&utm_campaign=x"),
+            QueryScope::ContentArchive,
+        )
+        .expect("valid bounded query");
+        let href =
+            CanonicalUrlBuilder::with_query("/blog".into(), query, QueryScope::ContentArchive);
         assert_eq!(href, "/blog?page=2&category_id=5");
     }
 }
