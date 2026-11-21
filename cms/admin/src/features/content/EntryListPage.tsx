@@ -7,6 +7,7 @@ import {
   AdminColumnCell, type EffectiveListConfig, type ProviderColumn,
 } from '../extensions/AdminContributionRenderer.tsx';
 import { ApiClientError } from '../../api/client.ts';
+import { mediaThumbnailUrl } from '../../api/media.ts';
 import {
   listAllTaxonomyTerms, listTaxonomyDefinitions, resolveTaxonomyTermLabels,
   type TaxonomyDefinition, type TaxonomyTerm, type TaxonomyTermLabel,
@@ -691,7 +692,8 @@ export function EntryListPage({
                     return next;
                   })} />
               </th>
-              <th scope="col" aria-sort={ariaSortFor('title')} className="min-w-[180px] px-3 py-2.5">
+              <th scope="col" className="w-14 px-2 py-2.5 text-center">Ảnh</th>
+              <th scope="col" aria-sort={ariaSortFor('title')} className="min-w-[220px] px-3 py-2.5">
                 <button type="button" data-testid="sort-title" className={sortButton}
                   disabled={bulkBusy} onClick={() => sortBy('title')}>
                   <span>Tiêu đề</span>
@@ -711,7 +713,6 @@ export function EntryListPage({
                   {activeSort === 'updated_at' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
                 </button>
               </th>
-              <th scope="col" className="whitespace-nowrap px-3 py-2.5">Hành động</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
@@ -723,13 +724,87 @@ export function EntryListPage({
             </tr>}
             {currentRows.map(row => {
               const path = row.publication_status === 'published' ? safePublicPath(row.public_url) : null;
+              const thumbId = typeof row.fields?.featured_image === 'string' ? row.fields.featured_image.trim() : '';
               return <tr key={row.id} data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
                 <td className="px-3 py-2.5"><input type="checkbox" aria-label={`Chọn mục #${row.id}`}
                   checked={selected.has(row.id)} disabled={bulkBusy}
                   onChange={event => toggleRow(row.id, event.target.checked)} /></td>
+                <td className="w-14 px-2 py-2.5">
+                  {thumbId ? (
+                    <img
+                      src={mediaThumbnailUrl(thumbId)}
+                      alt={row.title}
+                      loading="lazy"
+                      className="mx-auto h-10 w-10 rounded-md border border-zinc-200 bg-zinc-50 object-cover"
+                    />
+                  ) : (
+                    <div
+                      className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-zinc-200 bg-zinc-50 text-zinc-300"
+                      aria-hidden="true"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <circle cx="8.5" cy="9.5" r="1.5" />
+                        <path d="m4 17 5-5 4 3 3-4 4 5" />
+                      </svg>
+                    </div>
+                  )}
+                </td>
                 <td className="break-words px-3 py-2.5">
-                  <strong className="block text-sm font-medium text-zinc-950">{row.title}</strong>
-                  <span className="break-all text-xs text-zinc-500">/{row.slug} · #{row.id} · v{row.version}</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={bulkBusy}
+                      onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
+                      className="text-left text-sm font-semibold text-zinc-950 hover:text-od-accent"
+                    >
+                      {row.title}
+                    </button>
+                    <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-zinc-500">
+                      #{row.id}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+                    <button
+                      type="button"
+                      className="font-medium text-od-accent hover:underline"
+                      disabled={bulkBusy}
+                      aria-label={`Chỉnh sửa ${row.title}, ID ${row.id}`}
+                      onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
+                    >
+                      Chỉnh sửa
+                    </button>
+                    {path && (
+                      <>
+                        <span className="text-zinc-300" aria-hidden="true">·</span>
+                        <a
+                          href={path}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
+                          aria-label={`Xem công khai ${row.title}`}
+                        >
+                          Xem
+                        </a>
+                      </>
+                    )}
+                    {row.publication_status === 'draft' && (
+                      <>
+                        <span className="text-zinc-300" aria-hidden="true">·</span>
+                        <a
+                          href={contentEntryPreviewPath(typeKey, row.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
+                          aria-label={`Xem trước bản nháp đã lưu ${row.title}`}
+                        >
+                          Xem trước
+                        </a>
+                      </>
+                    )}
+                    <span className="text-zinc-300" aria-hidden="true">·</span>
+                    <span className="break-all font-mono text-[11px] text-zinc-400">/{row.slug}</span>
+                  </div>
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5">
                   <AdminBadge tone={row.publication_status === 'published' ? 'success' : 'neutral'}>
@@ -744,20 +819,6 @@ export function EntryListPage({
                     onRun={(col, entry) => void performProviderAction(col, entry)} />
                 </td>)}
                 <td className="whitespace-nowrap px-3 py-2.5 text-xs tabular-nums text-zinc-600">{row.updated_at.slice(0, 16)} UTC</td>
-                <td className="whitespace-nowrap px-3 py-2.5">
-                  <div className="flex items-center gap-3 text-xs font-medium">
-                    <button type="button" className="text-od-accent hover:underline" disabled={bulkBusy}
-                      aria-label={`Chỉnh sửa ${row.title}, ID ${row.id}`}
-                      onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}>Chỉnh sửa</button>
-                    {path && <a href={path} target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-zinc-950 hover:underline"
-                      aria-label={`Xem công khai ${row.title}`}>Xem</a>}
-                    {row.publication_status === 'draft' && (
-                      <a href={contentEntryPreviewPath(typeKey, row.id)}
-                        target="_blank" rel="noopener noreferrer" className="text-zinc-600 hover:text-zinc-950 hover:underline"
-                        aria-label={`Xem trước bản nháp đã lưu ${row.title}`}>Xem trước</a>
-                    )}
-                  </div>
-                </td>
               </tr>;
             })}
           </tbody>
