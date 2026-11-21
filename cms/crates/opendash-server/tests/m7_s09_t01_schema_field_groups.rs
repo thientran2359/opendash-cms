@@ -696,11 +696,11 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // 7. Theme manifest field_groups & 3-level tombstone + collision check
     let theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "studio-theme",
         "name": "Studio Theme",
         "version": "1.0.0",
-        "templates": { "home": "templates/home.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "field_groups": [
             {
                 "local_key": "studio_seo_extra",
@@ -716,7 +716,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     .unwrap();
     let theme_zip = build_zip(&[
         ("theme.json", &theme_manifest),
-        ("templates/home.html", b"<main>Studio</main>"),
+        ("index.html", b"<main>Studio</main>"),
     ]);
     let inst_theme = client
         .post(format!("{}/api/admin/themes", srv2.base_url))
@@ -762,13 +762,13 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     assert_eq!(studio_fg["fields"][0]["public_exposure"], "private");
     assert_eq!(studio_fg["fields"][1]["public_exposure"], "public");
 
-    // Theme v2 colliding with existing `client_name` on portfolio -> 409 field_key_collision
+    // Theme v3 colliding with existing `client_name` on portfolio -> 409 field_key_collision
     let bad_theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "studio-theme",
         "name": "Studio Theme",
         "version": "1.1.0",
-        "templates": { "home": "templates/home.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "field_groups": [
             {
                 "local_key": "studio_seo_extra",
@@ -783,7 +783,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     .unwrap();
     let bad_theme_zip = build_zip(&[
         ("theme.json", &bad_theme_manifest),
-        ("templates/home.html", b"<main>Studio</main>"),
+        ("index.html", b"<main>Studio</main>"),
     ]);
     let inst_bad = client
         .post(format!("{}/api/admin/themes", srv2.base_url))

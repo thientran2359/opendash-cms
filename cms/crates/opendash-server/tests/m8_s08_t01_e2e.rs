@@ -176,27 +176,26 @@ fn build_theme_zip(theme_id: &str) -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": theme_id,
             "name": theme_id,
             "version": "1.0.0",
-            "templates": {
-                "header": "templates/header.html",
-                "single": "templates/single.html"
-            },
+            "templates": [{ "kind": "single", "file": "single.html" }],
+            "parts": { "header": "header.html" },
             "menus": {
                 "slots": ["primary"]
             }
         });
         zip.start_file("theme.json", opts).unwrap();
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("templates/header.html", opts).unwrap();
+        zip.start_file("header.html", opts).unwrap();
         zip.write_all(
             b"<header>{% if menus.primary is defined %}{% for item in menus.primary.items %}<a href=\"{{ item.url }}\">{{ item.label }}</a>{% endfor %}{% endif %}</header>",
         )
         .unwrap();
-        zip.start_file("templates/single.html", opts).unwrap();
-        zip.write_all(b"<article>{{ entry.title }}</article>").unwrap();
+        zip.start_file("single.html", opts).unwrap();
+        zip.write_all(b"<article>{{ entry.title }}{{ od_content() }}</article>")
+            .unwrap();
         zip.finish().unwrap();
     }
     buf
@@ -436,7 +435,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap();
     assert_eq!(draft_resp.status(), StatusCode::CREATED);
 
-    // 5. Media upload + pin in Home SEO + Builder Homepage
+    // 5. Media upload + pin in Home SEO + existing Builder Homepage
+    // S02 preserves homepage route authority until S03 (Aster ACK #7057434954).
+    // Retain this writer and both public / assertions; S03 will migrate the
+    // whole flow to typed home overrides when route authority changes.
     let png_bytes = minimal_1x1_png();
     let media_resp = client
         .post(format!("{}/api/admin/media", srv.base_url))

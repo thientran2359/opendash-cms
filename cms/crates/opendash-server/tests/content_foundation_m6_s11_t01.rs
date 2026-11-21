@@ -148,11 +148,11 @@ fn plugin_zip(manifest: &Value, wasm: &[u8]) -> Vec<u8> {
 
 fn theme_zip(theme_id: &str, version: &str, with_declarations: bool) -> Vec<u8> {
     let mut manifest = json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": theme_id,
         "name": theme_id,
         "version": version,
-        "templates": {"home": "templates/home.html"},
+        "templates": [{"kind":"index","file":"index.html"}],
     });
     if with_declarations {
         manifest["declarations"] = json!({
@@ -178,7 +178,7 @@ fn theme_zip(theme_id: &str, version: &str, with_declarations: bool) -> Vec<u8> 
         let options = SimpleFileOptions::default();
         zip.start_file("theme.json", options).unwrap();
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("templates/home.html", options).unwrap();
+        zip.start_file("index.html", options).unwrap();
         zip.write_all(b"<main>C4 theme</main>").unwrap();
         zip.finish().unwrap();
     }

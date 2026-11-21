@@ -535,11 +535,11 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
 
     // Reject theme declaring `editor_panels` (Theme cannot register Action panels)
     let bad_theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "bad-action-theme",
         "name": "Bad Action Theme",
         "version": "1.0.0",
-        "templates": { "home": "templates/home.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "editor_panels": [{
             "local_key": "evil",
             "title": "Evil",
@@ -551,7 +551,7 @@ async fn panel_registry_partition_auto_append_validation_and_rbac_projection() {
     .unwrap();
     let bad_theme_zip = build_zip(&[
         ("theme.json", &bad_theme_manifest),
-        ("templates/home.html", b"<main>Home</main>"),
+        ("index.html", b"<main>Home</main>"),
     ]);
     let bad_theme_resp = client
         .post(format!("{}/api/admin/themes", srv.base_url))

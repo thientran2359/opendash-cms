@@ -71,8 +71,8 @@ fn build_theme_zip(theme_json: &str) -> Vec<u8> {
         let opts = SimpleFileOptions::default();
         zip.start_file("theme.json", opts).unwrap();
         zip.write_all(theme_json.as_bytes()).unwrap();
-        zip.start_file("templates/home.html", opts).unwrap();
-        zip.write_all(b"<html><body><h1>Theme</h1></body></html>").unwrap();
+        zip.start_file("index.html", opts).unwrap();
+        zip.write_all(b"<main>Theme</main>").unwrap();
         zip.finish().unwrap();
     }
     buf.into_inner()
@@ -233,11 +233,11 @@ async fn m6_s02_t01_plugin_cnt_bridge_lifecycle_and_collisions() {
 
     // 2. Install & activate a Theme with its own CPT; verify plugin's CPT stays Active
     let theme_json = json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "agency-theme",
         "version": "1.0.0",
         "name": "Agency Theme",
-        "templates": { "home": "templates/home.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "declarations": {
             "content_types": [
                 {
