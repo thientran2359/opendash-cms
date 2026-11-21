@@ -405,3 +405,8 @@ Actual documentation validation: check-plans PASS; check-plans self-test 13 fixt
 ## D02 approved coordination amendment
 
 See [S02 target-only Page Builder and provider selections](s02-target-only-page-builder.md). This Approved amendment supersedes conflicting creation/order details in the slices above; implementation authority requires its merge and pinned handoff. It brings the Page-only entry document foundation into Theme S02/0042; later CPT S01/0043 extends those tables rather than recreating them. Owner clarified that no previous release or historical-data compatibility is required. Generic CPT, Patterns and Reading Settings remain in their existing later slices.
+
+
+## D03 shared-template draft preview supplement
+
+See [D03 typed shared-template draft preview](typed-template-draft-preview.md). While Draft this is a proposal, not implementation authority. It supplies the previously missing shared-template unsaved Preview API; entry Page Preview and existing publication semantics remain unchanged.
