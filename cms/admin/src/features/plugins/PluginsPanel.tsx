@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { PluginSummary } from '../../types.ts';
 import { getPlugins } from '../../api/plugins.ts';
 import { ZipUploadField } from '../../components/FormPrimitives.tsx';
+import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { DeclarativePluginUi } from './DeclarativePluginUi.tsx';
 
 interface PluginsPanelProps {
@@ -164,52 +165,52 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   const canRun = Boolean(selected?.enabled) && !busy;
 
   return (
-    <div id="plugin-management-section" className="min-w-0 space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div id="plugin-management-section" className="min-w-0 space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">{mode === 'install' ? 'Cài đặt plugin' : 'Quản lý Plugins'}</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-600">
+          <h2 className="text-base font-semibold text-zinc-950">{mode === 'install' ? 'Cài đặt plugin' : 'Quản lý Plugins'}</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">
             {mode === 'install'
               ? 'Cài gói plugin ZIP. Gói đã cài sẽ được tự bật sau khi được xác thực.'
               : 'Kiểm tra quyền và bật hoặc tắt plugin chạy trong Wasmi sandbox.'}
           </p>
         </div>
-        <button type="button" className="btn-secondary" onClick={() => void refresh()} disabled={busy || loading}>
+        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>
           {loading ? 'Đang tải...' : 'Tải lại danh sách'}
-        </button>
+        </AdminButton>
       </div>
 
-      {mode === 'install' && <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 sm:p-5" aria-labelledby="plugin-upload-heading">
-        <h3 id="plugin-upload-heading" className="mb-2 font-semibold text-slate-900">Cài đặt plugin</h3>
+      {mode === 'install' && <section className="max-w-2xl rounded-xl border border-zinc-200 bg-zinc-50 p-4 sm:p-5" aria-labelledby="plugin-upload-heading">
+        <h3 id="plugin-upload-heading" className="mb-2 text-sm font-semibold text-zinc-950">Cài đặt plugin</h3>
         <ZipUploadField id="plugin-zip" label="Chọn tệp plugin ZIP (tối đa 5 MiB)" onChange={upload}
           disabled={busy || loading || Boolean(loadError)} />
-        <p className="mt-2 text-sm leading-6 text-amber-800">
+        <p className="mt-2.5 text-xs leading-5 text-amber-800">
           Lưu ý: tải ZIP sẽ tự bật plugin. Nếu ID đã tồn tại, hệ thống thay thế gói cũ và bật lại plugin đó.
           Hãy kiểm tra quyền trong danh sách trước khi bật plugin đã tắt.
         </p>
       </section>}
 
-      {pendingAction && <p role="status" aria-live="polite" className="text-sm font-medium text-sky-800">{pendingAction}</p>}
-      {notice && <p role="alert" className="text-sm text-rose-700">{notice}</p>}
+      {pendingAction && <AdminAlert tone="info" aria-live="polite">{pendingAction}</AdminAlert>}
+      {notice && <AdminAlert tone="error">{notice}</AdminAlert>}
 
       {mode === 'list' && <>
       <section className="space-y-3" aria-labelledby="plugin-list-heading">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id="plugin-list-heading" className="text-lg font-semibold text-slate-900">
+          <h3 id="plugin-list-heading" className="text-sm font-semibold text-zinc-900">
             Plugins đã cài ({visiblePlugins.length})
           </h3>
-          {loading && <span role="status" className="text-sm text-slate-500">Đang đồng bộ với máy chủ...</span>}
+          {loading && <span role="status" className="text-xs text-zinc-500">Đang đồng bộ với máy chủ...</span>}
         </div>
         {loadError && (
-          <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+          <AdminAlert tone="error" className="space-y-2">
             <p>Không cập nhật được danh sách: {loadError}</p>
-            <button type="button" className="btn-secondary mt-3" disabled={busy || loading} onClick={() => void refresh()}>
+            <AdminButton variant="secondary" size="sm" disabled={busy || loading} onClick={() => void refresh()}>
               Thử tải lại
-            </button>
-          </div>
+            </AdminButton>
+          </AdminAlert>
         )}
         {!loading && visiblePlugins.length === 0 && !loadError && (
-          <p className="rounded-xl border border-dashed border-slate-300 p-5 text-sm text-slate-600">
+          <p className="rounded-xl border border-dashed border-zinc-300 p-5 text-sm text-zinc-500">
             Chưa có plugin nào. Chọn gói ZIP để cài đặt.
           </p>
         )}
@@ -217,42 +218,41 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           {visiblePlugins.map(plugin => {
             const grants = permissionDetails(plugin);
             return (
-              <article key={plugin.id} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm" data-plugin-id={plugin.id}>
+              <article key={plugin.id} className="min-w-0 rounded-xl border border-zinc-200 bg-white p-4" data-plugin-id={plugin.id}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <h4 className="break-words font-semibold text-slate-900">{plugin.name}</h4>
-                    <p className="mt-1 break-all text-xs text-slate-500">{plugin.id} · v{plugin.version}</p>
+                    <h4 className="break-words text-sm font-semibold text-zinc-950">{plugin.name}</h4>
+                    <p className="mt-0.5 break-all text-xs text-zinc-500">{plugin.id} · v{plugin.version}</p>
                   </div>
-                  <span className={'shrink-0 rounded-full px-3 py-1 text-xs font-semibold ' +
-                    (plugin.enabled ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700')}>
+                  <AdminBadge tone={plugin.enabled ? 'success' : 'neutral'}>
                     {plugin.enabled ? 'Đang bật' : 'Đã tắt'}
-                  </span>
+                  </AdminBadge>
                 </div>
-                {plugin.description && <p className="mt-3 break-words text-sm text-slate-600">{plugin.description}</p>}
-                <div className="mt-3 rounded-lg bg-slate-50 p-3">
-                  <h5 className="text-xs font-semibold uppercase tracking-wide text-slate-700">Quyền theo manifest</h5>
+                {plugin.description && <p className="mt-2.5 break-words text-sm text-zinc-600">{plugin.description}</p>}
+                <div className="mt-3 rounded-lg border border-zinc-100 bg-zinc-50 p-3">
+                  <h5 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Quyền theo manifest</h5>
                   {grants.length === 0
-                    ? <p className="mt-1 text-xs text-slate-600">Không yêu cầu quyền SQLite hoặc HTTP.</p>
-                    : <ul className="mt-2 space-y-1 text-xs text-slate-700">
+                    ? <p className="mt-1 text-xs text-zinc-500">Không yêu cầu quyền SQLite hoặc HTTP.</p>
+                    : <ul className="mt-1.5 space-y-1 text-xs text-zinc-700">
                         {grants.map((grant, index) => <li key={index} className="break-all">{grant}</li>)}
                       </ul>}
                 </div>
                 {plugin.last_error && (
-                  <p role="status" className="mt-3 break-words rounded-lg bg-rose-50 p-3 text-sm text-rose-800">
+                  <AdminAlert tone="error" role="status" className="mt-3 break-words text-xs">
                     Lỗi gần nhất: {plugin.last_error}
-                  </p>
+                  </AdminAlert>
                 )}
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-3.5 flex flex-wrap gap-2">
                   {plugin.enabled
-                    ? <button type="button" className="btn-secondary" disabled={busy} onClick={() => disable(plugin)}
-                        aria-label={'Tắt plugin ' + plugin.name}>Tắt</button>
-                    : <button type="button" className="btn-secondary" disabled={busy} onClick={() => enable(plugin)}
-                        aria-label={'Bật plugin ' + plugin.name}>Bật / Thử lại</button>}
-                  <button type="button" className="btn-secondary" disabled={busy || !plugin.enabled}
+                    ? <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => disable(plugin)}
+                        aria-label={'Tắt plugin ' + plugin.name}>Tắt</AdminButton>
+                    : <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => enable(plugin)}
+                        aria-label={'Bật plugin ' + plugin.name}>Bật / Thử lại</AdminButton>}
+                  <AdminButton variant={selectedPluginId === plugin.id ? 'primary' : 'secondary'} size="sm" disabled={busy || !plugin.enabled}
                     onClick={() => onSelectPlugin(plugin.id)}
                     aria-pressed={selectedPluginId === plugin.id}>
                     {selectedPluginId === plugin.id ? 'Đã chọn để chạy' : 'Chọn chạy'}
-                  </button>
+                  </AdminButton>
                 </div>
               </article>
             );
@@ -260,26 +260,26 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
         </div>
       </section>
 
-      <section className="min-w-0 space-y-3 border-t border-slate-200 pt-5" aria-labelledby="plugin-run-heading">
-        <h3 id="plugin-run-heading" className="text-lg font-semibold text-slate-900">Thử thực thi plugin</h3>
+      <section className="min-w-0 max-w-2xl space-y-3 border-t border-zinc-200 pt-5" aria-labelledby="plugin-run-heading">
+        <h3 id="plugin-run-heading" className="text-sm font-semibold text-zinc-950">Thử thực thi plugin</h3>
         {selected
-          ? <p className="break-all text-sm text-slate-600">Plugin đã chọn: {selected.name} ({selected.id})</p>
-          : <p className="text-sm text-slate-600">Chưa chọn plugin để chạy.</p>}
+          ? <p className="break-all text-xs text-zinc-600">Plugin đã chọn: <strong className="text-zinc-900">{selected.name}</strong> ({selected.id})</p>
+          : <p className="text-xs text-zinc-500">Chưa chọn plugin để chạy.</p>}
         {selected && !selected.enabled && (
-          <p role="status" className="text-sm text-amber-800">Plugin đang tắt. Có thể bật lại sau khi kiểm tra quyền.</p>
+          <p role="status" className="text-xs text-amber-800">Plugin đang tắt. Có thể bật lại sau khi kiểm tra quyền.</p>
         )}
-        <div className="form-group">
-          <label htmlFor="plugin-input-json">Payload JSON</label>
-          <textarea id="plugin-input-json" rows={4} className="w-full min-w-0 rounded-lg border border-slate-300 p-3 font-mono text-sm"
+        <label htmlFor="plugin-input-json" className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+          <span>Payload JSON</span>
+          <textarea id="plugin-input-json" rows={4} className="w-full min-w-0 rounded-md border border-zinc-300 bg-white p-2.5 font-mono text-xs text-zinc-900"
             value={pluginInputJson} onChange={event => onPluginInputChange(event.target.value)}
             disabled={busy} placeholder='{"text": "Dữ liệu mẫu"}' />
-        </div>
-        <button type="button" id="btn-run-plugin" className="od-primary-action" onClick={() => void invoke('Đang thực thi plugin...', onRunPlugin)}
-          disabled={!canRun}>Chạy Plugin</button>
+        </label>
+        <AdminButton id="btn-run-plugin" variant="primary" onClick={() => void invoke('Đang thực thi plugin...', onRunPlugin)}
+          disabled={!canRun}>Chạy Plugin</AdminButton>
         {pluginRunOutput && (
           <div>
-            <p className="mb-2 text-sm font-semibold text-slate-800">Kết quả</p>
-            <pre id="plugin-output" className="max-h-48 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">{pluginRunOutput}</pre>
+            <p className="mb-1.5 text-xs font-semibold text-zinc-700">Kết quả</p>
+            <pre id="plugin-output" className="max-h-48 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-800">{pluginRunOutput}</pre>
           </div>
         )}
       </section>

@@ -598,11 +598,11 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                   <div id="content-main">{contentContent}</div>
                 </section>
 
-                {user?.role === 'admin' && route.view === 'plugins' && <div className="od-admin-card od-legacy-scope">{pluginsContent}</div>}
+                {user?.role === 'admin' && route.view === 'plugins' && <div className="od-admin-card">{pluginsContent}</div>}
                 <section className={user?.role === 'admin' && route.view === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label="Người dùng" aria-hidden={user?.role !== 'admin' || route.view !== 'users'}>
                   {usersContent}
                 </section>
-                {user && route.view === 'profile' && <div className="od-admin-card od-legacy-scope min-w-0">{profileContent}</div>}
+                {user && route.view === 'profile' && <div className="od-admin-card min-w-0">{profileContent}</div>}
                 {user?.role === 'admin' && route.view === 'tools' && <div className="od-admin-card min-w-0">{toolsContent}</div>}
                 {user?.role === 'admin' && route.view === 'settings' && (
                   <div className={`od-admin-card min-w-0${settingsLegacy}`}>
