@@ -11,7 +11,6 @@ import {
   type EffectiveEditorConfigWithSettings,
   updateEntryComposite,
 } from '../../api/content.ts';
-import { getEntryBuilder } from '../../api/builder.ts';
 import { runPluginAction } from '../../api/plugins.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
@@ -19,7 +18,6 @@ import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes
 import type { AuthUser } from '../../types.ts';
 import type {
   ContentFieldValue,
-  ContentMode,
   EffectiveEditorConfigProjection,
   EffectivePanelProjection,
 } from '../content/types.ts';
@@ -68,7 +66,7 @@ function supportAllowsField(typeKey: string, key: string, settings: ContentTypeS
     return settings.supports.includes('featured_image');
   }
   if (typeKey !== 'post' && typeKey !== 'page') return true;
-  if (key === 'body') return settings.supports.includes('editor');
+  if (key === 'body') return settings.supports.includes('editor') || settings.supports.includes('builder');
   return true;
 }
 
@@ -81,7 +79,9 @@ function displayEditorConfig(
   const projectPanels = (panels: EffectivePanelProjection[]): EffectivePanelProjection[] =>
     panels.filter(({ panel }) => {
       if (panel.kind.kind !== 'core_built_in') return true;
-      if (panel.kind.core_key === 'body_editor') return settings.supports.includes('editor');
+      if (panel.kind.core_key === 'body_editor') {
+        return settings.supports.includes('editor') || settings.supports.includes('builder');
+      }
       if (panel.kind.core_key === 'featured_image') return settings.supports.includes('featured_image');
       return true;
     }).map(panel => ({
@@ -138,8 +138,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [publicationStatus, setPublicationStatus] = useState<'draft' | 'published'>('draft');
-  const [contentMode, setContentMode] = useState<ContentMode>('editor');
-  const [hasBuilderDocument, setHasBuilderDocument] = useState(false);
+  const [builderPromptOpen, setBuilderPromptOpen] = useState(false);
+  const builderDialogRef = useRef<HTMLDialogElement | null>(null);
   const [values, setValues] = useState<Record<string, ContentFieldValue>>({});
   const [clearedFields, setClearedFields] = useState<string[]>([]);
   const [termIds, setTermIds] = useState<number[]>([]);
@@ -234,7 +234,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     setTitle(payload.title);
     setSlug(payload.slug);
     setPublicationStatus(payload.publication_status);
-    setContentMode(payload.content_mode ?? 'editor');
     setValues(payload.values);
     setClearedFields(payload.cleared_fields);
     setTermIds(payload.term_ids);
@@ -283,7 +282,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   useEffect(() => {
     setConfirmedPublicLink(null);
     setThemeLayouts(null);
-    setHasBuilderDocument(false);
     if (!user) {
       setConfig(null);
       baselineRef.current = null;
@@ -348,15 +346,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
               throw cause;
             }
           };
-          const [rec, routeSnap, seoSnap, builderSnap] = await Promise.all([
+          const [rec, routeSnap, seoSnap] = await Promise.all([
             getContentEntry(typeKey, entryId),
             optional(getEntryRoute(typeKey, entryId)),
             optional(getEntrySeo(typeKey, entryId)),
-            freshCfg.settings?.supports.includes('builder')
-              ? optional(getEntryBuilder(typeKey, entryId)) : Promise.resolve(null),
           ]);
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
-          setHasBuilderDocument(Boolean(builderSnap?.document));
           setEntryTimestamps({ createdAt: rec.created_at, updatedAt: rec.updated_at });
           setCustomCreatedAt(null);
           setCustomUpdatedAt(null);
@@ -466,10 +461,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     }, 20);
   };
 
-  const handleSave = async (intent?: 'draft' | 'published') => {
-    if (isPattern || !config || !csrfToken || saving || saveInFlightRef.current || !draftRef.current || !user) return;
+  const handleSave = async (intent?: 'draft' | 'published', navigateOnCreate = true): Promise<number | null> => {
+    if (isPattern || !config || !csrfToken || saving || saveInFlightRef.current || !draftRef.current || !user) return null;
     const isBuiltInContent = typeKey === 'post' || typeKey === 'page';
-    if (isBuiltInContent && !intent) return;
+    if (isBuiltInContent && !intent) return null;
     const effectiveSettings = effectiveContentTypeSettings(typeKey, config.settings);
     const nextPublication = effectiveSettings.publication === 'draft_publish'
       ? (intent ?? draftRef.current.publication_status)
@@ -496,7 +491,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       setFieldErrors(nextErrors);
       const firstKey = Object.keys(nextErrors)[0];
       expandPanelContainingField(firstKey);
-      return;
+      return null;
     }
 
     setFieldErrors({});
@@ -550,7 +545,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         entryId === null
           ? await createEntryComposite(typeKey, payload, csrfToken)
           : await updateEntryComposite(typeKey, entryId, payload, csrfToken);
-      if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey) return;
+      if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey) return null;
       const saved: EditorDraftPayload = {
         ...snapshot,
         id: res.entry.id, version: res.entry.version, title: res.entry.title, slug: res.entry.slug,
@@ -636,12 +631,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       setStatusNote(hasNewerChanges
         ? `Đã lưu snapshot v${res.entry.version}; chỉnh sửa mới hơn vẫn chưa lưu.`
         : `Đã lưu thành công (v${res.entry.version}).`);
-      if (entryId === null) {
+      if (entryId === null && navigateOnCreate) {
         onNavigateHash(`${listHashPrefix}/${res.entry.id}/edit`);
       }
+      return res.entry.id;
     } catch (err) {
       if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey
-          || activeMediaScopeRef.current !== mediaScopeKey) return;
+          || activeMediaScopeRef.current !== mediaScopeKey) return null;
       if (err instanceof ApiClientError && err.status === 401) {
         editorDraftStore.quarantineAll();
       }
@@ -651,6 +647,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         setStatusNote('Thao tác bị từ chối vì xung đột chính sách xuất bản (409). Nháp vẫn được giữ.');
       }
       onApiError(err, 'Không thể lưu nội dung.');
+      return null;
     } finally {
       saveInFlightRef.current = false;
       setSaving(false);
@@ -748,6 +745,17 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     }
   };
 
+  useEffect(() => {
+    const dialog = builderDialogRef.current;
+    if (!dialog) return;
+    if (builderPromptOpen && !dialog.open) dialog.showModal();
+    else if (!builderPromptOpen && dialog.open) dialog.close();
+  }, [builderPromptOpen]);
+
+  const entryBuilderHash = entryId !== null
+    ? `#/studio/entry/${encodeURIComponent(typeKey)}/${entryId}`
+    : '';
+
   return (
     <div className="space-y-3">
       {statusNote && (
@@ -756,37 +764,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           : 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'}
           role={statusNote.includes('(412)') || statusNote.includes('(409)') ? 'alert' : 'status'}>
           {statusNote}
-        </div>
-      )}
-      {!isPattern && entryId !== null &&
-        (settings?.supports.includes('builder') || contentMode === 'builder' ||
-          baselineRef.current?.content_mode === 'builder') && (
-        <div className="rounded-xl border border-zinc-200 bg-white p-3.5 space-y-2">
-          <label htmlFor={typeKey === 'page' ? 'page-content-mode' : 'entry-content-mode'}
-            className="flex flex-col gap-1 text-xs font-semibold text-zinc-800">
-            <span>Nguồn nội dung {typeKey === 'page' ? 'Page' : typeKey}</span>
-            <select id={typeKey === 'page' ? 'page-content-mode' : 'entry-content-mode'}
-              className="h-9 max-w-xs rounded-md border border-zinc-300 bg-white px-2.5 text-sm font-normal text-zinc-900"
-              value={contentMode} disabled={saving || !csrfToken}
-              onChange={event => {
-                const next = event.target.value as ContentMode;
-                if (next === 'builder' &&
-                    (!settings?.supports.includes('builder') || (!hasBuilderDocument && contentMode !== 'builder'))) return;
-                setContentMode(next);
-                persistDraftPatch({ content_mode: next });
-              }}>
-              <option value="editor">Văn bản</option>
-              <option value="builder" disabled={!settings?.supports.includes('builder') ||
-                (!hasBuilderDocument && contentMode !== 'builder')}>
-                Visual Builder{!settings?.supports.includes('builder') ? ' (đã tắt)' : ''}
-              </option>
-            </select>
-          </label>
-          <p className="text-xs text-zinc-500">
-            {!settings?.supports.includes('builder')
-              ? 'Builder đã tắt; hệ thống hiển thị văn bản. Chọn Văn bản rồi lưu để cập nhật nguồn, thiết kế cũ vẫn được giữ.'
-              : 'Chuyển nguồn khi lưu giữ nguyên văn bản và thiết kế đã lưu.'}
-          </p>
         </div>
       )}
       <div>
@@ -909,20 +886,82 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         canOpenBuilder={!isPattern && Boolean(settings?.supports.includes('builder'))}
         onOpenBuilder={() => {
           if (isPattern || !settings?.supports.includes('builder')) {
-            setStatusNote('Loại nội dung này chưa hỗ trợ Visual Builder.');
+            setStatusNote('Loại nội dung này chưa hỗ trợ UX Builder.');
+            return;
+          }
+          if (dirty) {
+            setBuilderPromptOpen(true);
             return;
           }
           if (entryId === null) {
-            setStatusNote('Vui lòng Lưu nội dung trước khi mở Visual Builder.');
+            setStatusNote('Vui lòng Lưu nội dung trước khi mở UX Builder.');
             return;
           }
-          // Preserve the existing Page Builder deep link. Other opted-in CPTs
-          // use the new generic entry target without changing Page bookmarks.
-          const target = typeKey === 'page' ? 'page' : 'entry';
-          onNavigateHash(`#/builder?template=${target}&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
+          onNavigateHash(entryBuilderHash);
         }}
       />
       </div>
+      <dialog
+        ref={builderDialogRef}
+        aria-labelledby="builder-unsaved-title"
+        onClose={() => setBuilderPromptOpen(false)}
+        className="od-confirm-dialog m-auto max-w-md rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-xl"
+      >
+        <style>{'dialog.od-confirm-dialog:modal{overscroll-behavior:contain} dialog.od-confirm-dialog::backdrop{overflow:hidden;overscroll-behavior:contain;background:rgba(9,9,11,0.45)}'}</style>
+        <h2 id="builder-unsaved-title" className="text-base font-semibold text-zinc-950">
+          Có thay đổi chưa lưu trong trình soạn thảo
+        </h2>
+        <p className="mt-2 text-sm text-zinc-600">
+          Bạn muốn lưu các chỉnh sửa hiện tại trước khi mở OpenDash Studio (UX Builder) không?
+        </p>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          {entryId !== null && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                setBuilderPromptOpen(false);
+                editorDraftStore.delete(draftKey);
+                setDirty(false);
+                onDirtyChange(false);
+                onNavigateHash(entryBuilderHash);
+              }}
+              data-testid="builder-prompt-discard"
+              className="inline-flex h-9 items-center rounded-md border border-rose-200 bg-rose-50 px-3 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+            >
+              Bỏ thay đổi &amp; mở
+            </button>
+          )}
+          <button
+            type="button"
+            autoFocus
+            disabled={saving}
+            onClick={() => setBuilderPromptOpen(false)}
+            data-testid="builder-prompt-cancel"
+            className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Hủy
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              void (async () => {
+                const intent = publicationPolicy === 'draft_publish' ? publicationStatus : undefined;
+                const savedId = await handleSave(intent, false);
+                setBuilderPromptOpen(false);
+                if (savedId !== null) {
+                  onNavigateHash(`#/studio/entry/${encodeURIComponent(typeKey)}/${savedId}`);
+                }
+              })();
+            }}
+            data-testid="builder-prompt-save"
+            className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
+          >
+            {saving ? 'Đang lưu…' : 'Lưu & mở UX Builder'}
+          </button>
+        </div>
+      </dialog>
       {mediaPicker && mediaPicker.scopeKey === mediaScopeKey && csrfToken && user && config
         && config.schema_token === mediaPicker.schemaToken
         && editorDraftStore.getSessionEpoch() === mediaPicker.sessionEpoch

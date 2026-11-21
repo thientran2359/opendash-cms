@@ -103,6 +103,10 @@ export class EditorDraftStore {
     this.drafts.delete(draftKey);
   }
 
+  clearDraft(typeKey: string, entryId: number): void {
+    this.drafts.delete(this.makeDraftKey(typeKey, entryId));
+  }
+
   hasAnyDirty(): boolean {
     for (const d of this.drafts.values()) {
       if (d.dirty_fields.length > 0 || d.payload.custom_path_dirty || d.payload.seo_dirty) {
