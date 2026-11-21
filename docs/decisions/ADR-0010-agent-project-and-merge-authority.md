@@ -1,6 +1,6 @@
 # ADR-0010 — Quyền điều phối và merge của các agent
 
-> **Ánh xạ quy trình EGM (cập nhật 2026-11-21):** OpenDash đã chuyển chuẩn phát triển sang **EGM** ([`AGENTS.md`](../../AGENTS.md)). Các thuật ngữ lịch sử trong phần bên dưới được ánh xạ tương đương cho mọi task mới: `G2/G3 READY` → Design Spec trong `docs/designs/<feature>.md` đạt `Status: Approved` (đủ `Approved By`, `Approval Evidence`, `Goldfish Review` và Slice Contract); `G5 VERIFIED` → hoàn tất `Verification Plan` sau merge kèm bằng chứng tại `docs/verification/` và cập nhật `docs/designs/SITEMAP.md`. Quyền tự chủ, nhánh mặc định `agent/<name>` và phân quyền 3 tầng (Owner cho PRD/kiến trúc lõi/breaking · Atlas/Aster ủy quyền chốt Design Spec trong PRD · Implementer self-review/self-merge PR của mình khi đủ CI) giữ nguyên hiệu lực.
+> **Ánh xạ quy trình EGM (cập nhật 2026-11-22):** OpenDash đã chuyển chuẩn phát triển sang **EGM** ([`AGENTS.md`](../../AGENTS.md)). Các thuật ngữ lịch sử trong phần bên dưới được ánh xạ tương đương cho mọi task mới: `G2/G3 READY` → Design Spec trong `docs/designs/<feature>.md` đạt `Status: Approved` (đủ `Approved By`, `Approval Evidence`, `Goldfish Review` và Slice Contract); `G5 VERIFIED` → hoàn tất `Verification Plan` sau merge kèm bằng chứng tại `docs/verification/` và cập nhật `docs/designs/SITEMAP.md`. Quyền tự chủ, nhánh mặc định `agent/<name>` và phân quyền 3 tầng (Owner cho PRD/kiến trúc lõi/breaking · Coordinator `Atlas`/`Aster`/`Nova`/`Orion` ủy quyền chốt Design Spec trong PRD & review/merge mọi PR đủ gate · Implementer self-review/self-merge PR của mình khi đủ CI) giữ nguyên hiệu lực.
 >
 > **Owner Directive — Scheduled Auto-Pickup (2026-11-21):** Chủ dự án cho phép **Harbor** và **Forge** chạy tự động nhận task định kỳ (ví dụ 1 giờ/lần) theo [`github-task-pickup/SKILL.md`](../../.agents/skills/github-task-pickup/SKILL.md#scheduled-auto-pickup-owner-directive-2026-11-21): chỉ pick Issue đã gắn đúng nhãn `agent:<name>`, đủ 4 điều kiện rảnh (1 task active / branch), được tự chuyển `Backlog → Ready` khi slice phụ thuộc đã merge vào `main` với đủ required CI PASS, và áp dụng Circuit Breaker dừng `BLOCKED` sau 2 lượt lỗi/CI fail liên tiếp.
 
@@ -76,11 +76,10 @@ security/data, CI, human test hoặc release authorization.
 
 | Agent | Vai trò | Quyền |
 | --- | --- | --- |
-| Atlas | Điều phối toàn dự án | Quản lý ưu tiên, phân công, handoff, Issue/Project, chốt thiết kế và phân xử quyết định kỹ thuật. Có quyền review và merge mọi PR đủ điều kiện vào `main`, kể cả PR do Atlas viết, trong phạm vi sản phẩm chủ dự án đã giao. |
-| Nova, Harbor, Forge | Triển khai tự chủ | Tự chọn task chưa có người nhận phù hợp hoặc tiếp tục task mình sở hữu khi G3, tài liệu, dependencies và file ownership đủ. Tự quyết định chi tiết triển khai trong contract, chạy kiểm chứng, self-review và merge PR của mình vào `main`. |
-| Orion | Triển khai | Nhận task theo workflow và chuyển PR cho Atlas review/merge. |
+| Atlas, Aster, Nova, Orion | Điều phối & Triển khai tự chủ (`Coordinator / Elephant`) | Quản lý ưu tiên, phân công, handoff, Issue/Project, soạn & chốt Design Spec EGM (trong phạm vi PRD đã chốt), phân xử quyết định kỹ thuật, tự nhận và triển khai task. Có quyền review và merge mọi PR đủ điều kiện vào `main`, kể cả self-review & self-merge PR do chính mình viết. |
+| Harbor, Forge | Triển khai tự chủ (`Implementer`) | Tự chọn task chưa có người nhận phù hợp hoặc tiếp tục task mình sở hữu khi Design Spec EGM (`Status: Approved`), tài liệu, dependencies và file ownership đủ. Tự quyết định chi tiết triển khai trong contract, chạy kiểm chứng, self-review và merge PR của mình vào `main`. |
 
-Atlas, Nova, Harbor và Forge không cần chờ một agent khác duyệt PR của mình. Quyền tự chủ của Nova, Harbor và Forge áp dụng cho task đủ tài liệu để triển khai; nếu cần đổi phạm vi, schema, quyền hoặc contract đã chốt, ghi Design Delta và xử lý theo luồng thiết kế. Atlas chốt các quyết định liên task khi cần và ghi Final Decision cùng bằng chứng. Peer review có thể được yêu cầu để thu thập bằng chứng hoặc theo ruleset GitHub.
+Atlas, Aster, Nova, Orion, Harbor và Forge không cần chờ một agent khác duyệt PR của mình. Quyền tự chủ áp dụng cho task đủ tài liệu để triển khai; nếu cần đổi phạm vi, schema, quyền hoặc contract đã chốt, ghi Design Delta và xử lý theo luồng thiết kế EGM. Các Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) chốt các quyết định liên task khi cần và ghi Final Decision cùng bằng chứng. Peer review có thể được yêu cầu để thu thập bằng chứng hoặc theo ruleset GitHub.
 
 ## Thực hiện
 
@@ -103,3 +102,9 @@ Aster dùng nhánh `agent/aster`, danh tính Git theo worktree `Aster` và trail
 Atlas và Aster cùng tham gia, ghi rõ coordinator chịu trách nhiệm trên
 Issue/PR. Giữ nguyên gate G3/Ready, required CI, branch protection, bảo mật,
 bảo toàn dữ liệu và phân biệt MERGED với VERIFIED.
+
+## Bổ sung ủy quyền Nova & Orion (Coordinator / Elephant) — 2026-11-22
+
+Chủ dự án chính thức nâng **Orion (Antigravity macOS, `agent/orion`)** lên vai trò Coordinator tương đương **Nova (Antigravity Windows, `agent/nova`)**, **Atlas (Codex Windows)** và **Aster (Codex macOS)**:
+- Cả **Nova** và **Orion** đều giữ `role: coordinator` trong [`.agents/agents.yaml`](../../.agents/agents.yaml).
+- Có đầy đủ thẩm quyền **Elephant / Coordinator**: soạn thảo, chạy Goldfish review và duyệt Design Spec EGM (trong phạm vi PRD đã chốt: `Approved By: Nova (delegated)` hoặc `Orion (delegated)`), mở/điều phối GitHub Issue/Project, trực tiếp triển khai các Slice code trên nhánh `agent/nova` / `agent/orion`, cũng như review, self-review và merge mọi PR đủ điều kiện vào `main`.

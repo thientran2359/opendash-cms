@@ -1,6 +1,6 @@
 # GitHub workflow cho 5 agent — đề xuất chuẩn vận hành
 
-> **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao Atlas điều phối toàn dự án, chốt quyết định kỹ thuật và merge mọi PR đủ gate, kể cả PR của mình. Nova, Harbor và Forge tự nhận task đủ Design Spec EGM (`Status: Approved`) / ownership và tự review/merge PR của mình. Orion đi qua Atlas review/merge. Required CI, acceptance, security/data và GitHub protection vẫn áp dụng.
+> **Ủy quyền của chủ dự án:** [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md) giao các Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) điều phối dự án, chốt quyết định kỹ thuật và merge mọi PR đủ gate, kể cả PR của chính mình. Tất cả agent (`Atlas`, `Aster`, `Nova`, `Orion`, `Harbor`, `Forge`) đều tự nhận task đủ Design Spec EGM (`Status: Approved`) / ownership và tự review/merge PR của mình. Required CI, acceptance, security/data và GitHub protection vẫn áp dụng.
 
 **Repository nguồn duy nhất:** `thientran2359/opendash-cms`.
 Code nằm trong 5 worktree/checkout **cục bộ** tách biệt trên Windows và macOS;
@@ -77,7 +77,7 @@ trailer là **metadata tự khai báo để truy vết**, không chứng minh da
 lập. Một comment ghi `Verdict: APPROVED` hoặc `CHANGES_REQUESTED` không
 tương đương một GitHub review APPROVE/REQUEST_CHANGES và không thay thế required
 review trong ruleset. Không tự gán kết quả AI thành approval GitHub, không bỏ
-qua CI, ownership hoặc gate. **Atlas, Nova, Harbor và Forge áp dụng ADR-0010**:
+qua CI, ownership hoặc gate. **Atlas, Aster, Nova, Orion, Harbor và Forge áp dụng ADR-0010**:
 được tự kiểm tra và merge PR đủ gates; ghi `Self-review: <Agent> — reviewed head <SHA>`
 và validation thật trong PR. Không tạo review giả từ một tài khoản chung.
 
@@ -85,9 +85,9 @@ và validation thật trong PR. Không tạo review giả từ một tài khoả
 
 | Dữ liệu | Nơi ghi | Ai cập nhật |
 | --- | --- | --- |
-| Đặc tả thiết kế EGM (`Status: Approved`), contract nền tảng, ADR | `docs/designs/`, `docs/contracts/`, `docs/decisions/` | Elephant (`Atlas`, `Nova`, `Aster`) qua quy trình EGM + Goldfish review và phê duyệt của chủ dự án |
+| Đặc tả thiết kế EGM (`Status: Approved`), contract nền tảng, ADR | `docs/designs/`, `docs/contracts/`, `docs/decisions/` | Elephant (`Atlas`, `Nova`, `Aster`, `Orion`) qua quy trình EGM + Goldfish review và phê duyệt của chủ dự án |
 | Điều tra, thảo luận phụ, đề xuất/task draft | `.agents/research/`, `.agents/discussions/`, `.agents/tasks/` | Agent trên branch của mình |
-| Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator (`Atlas`, `Aster`, `Nova`), sau khi Design Spec đạt `Status: Approved` và merge vào `main` |
+| Giao task, mô tả dễ hiểu, mã ID, owner, dependency vận hành, state | **GitHub Issue** | Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`), sau khi Design Spec đạt `Status: Approved` và merge vào `main` |
 | Danh mục Design Spec EGM và baseline `M1–M8` | [`docs/designs/SITEMAP.md`](../docs/designs/SITEMAP.md) | Elephant đăng ký khi `/egm-draft`; cập nhật `Implemented`/`Verified` sau khi merge & kiểm chứng |
 | Source diff, test, phản biện, chấp thuận tích hợp | **GitHub PR** | Assignee rồi reviewer/CI |
 | Evidence thực chạy/acceptance đã duyệt | `docs/verification/` | Theo quy trình review, không suy từ báo cáo AI |
@@ -115,7 +115,7 @@ và [Research/Design](../.github/ISSUE_TEMPLATE/research-design.yml).
 
 1. Design Spec tại `docs/designs/<feature>.md` đã qua Goldfish review, được chủ dự án duyệt (`**Status:** Approved`), không còn `Open Questions` mở hay `TODO`/`TBD`, có đầy đủ `## Detailed Implementation Plan` (`### Target Files to Create/Modify` + `### Verification Plan`) và đã **merge vào `main`**.
 2. Với đặc tả lớn, có thể chia nhiều slice bằng heading `### Slice S01: <Tên slice>` trong `## Detailed Implementation Plan` để tạo các Issue nhỏ độc lập.
-3. Coordinator (`Atlas`, `Aster`, `Nova`) chạy `git fetch origin` rồi dùng công cụ **read-only** để đọc blob tại `origin/main`:
+3. Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) chạy `git fetch origin` rồi dùng công cụ **read-only** để đọc blob tại `origin/main`:
 
    ```shell
    python .agents/scripts/prepare-github-issue.py --source docs/designs/<feature>.md --ref origin/main --agent forge --format json
@@ -184,7 +184,7 @@ và `agent:*` nếu đã phân công. Task quy trình liên module dùng
 | Done | Chỉ khi đã VERIFIED đúng phạm vi có evidence và chấp thuận đóng |
 
 **Đồng bộ task đã Approved nhưng còn Backlog:** theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md),
-Atlas, Nova, Harbor và Forge có thể trực tiếp chuyển Issue đã giao đúng agent từ `Backlog`
+Atlas, Aster, Nova, Orion, Harbor và Forge có thể trực tiếp chuyển Issue đã giao đúng agent từ `Backlog`
 sang `Ready` **sau khi** đối chiếu Design Spec EGM đã merge (`Status: Approved`), dependency,
 `Verification Plan`, file ownership và không có blocker thực. Kiểm lại `Ready` trên Project trước
 khi claim. Không sử dụng thao tác này để bypass điều kiện `Ready` hoặc nhận
@@ -269,7 +269,7 @@ review. Sau khi giao sửa, kiểm lại head và áp dụng quyền review/merg
 
 ## Review và merge implementation PR được ủy quyền
 
-Theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas có quyền review và merge mọi PR đủ gate, kể cả PR của Atlas. Nova, Harbor và Forge tự review và merge PR thuộc task mình sở hữu mà không cần agent khác phê duyệt. Khi tác giả là Orion, Atlas review/merge. Luồng [github-pr-review-merge](skills/github-pr-review-merge/SKILL.md) áp dụng khi Atlas được gọi review/merge PR; yêu cầu chỉ review giữ nguyên phạm vi.
+Theo [ADR-0010](../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), các Coordinator (`Atlas`, `Aster`, `Nova`, `Orion`) có quyền review và merge mọi PR đủ gate, kể cả PR của chính mình. Tất cả agent (`Atlas`, `Aster`, `Nova`, `Orion`, `Harbor`, `Forge`) đều tự review và merge PR thuộc task mình sở hữu mà không cần agent khác phê duyệt. Luồng [github-pr-review-merge](skills/github-pr-review-merge/SKILL.md) áp dụng khi Coordinator hoặc Implementer được gọi review/merge PR; yêu cầu chỉ review giữ nguyên phạm vi.
 
 - Xác minh tác giả bằng Issue, branch và signed evidence. Tác giả tự review ghi
   self-review cùng head SHA và validation. Atlas review PR của agent khác ghi

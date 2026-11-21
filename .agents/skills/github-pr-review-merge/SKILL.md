@@ -1,11 +1,11 @@
 ---
 name: github-pr-review-merge
-description: "Dùng khi Atlas, Aster hoặc Nova được yêu cầu review hoặc merge PR OpenDash (Design Spec EGM hoặc PR triển khai của Forge/Harbor) đủ điều kiện theo ADR-0010. Hỗ trợ review độc lập và self-review có bằng chứng."
+description: "Dùng khi Atlas, Aster, Nova hoặc Orion được yêu cầu review hoặc merge PR OpenDash (Design Spec EGM hoặc PR triển khai của Forge/Harbor/Nova/Orion) đủ điều kiện theo ADR-0010. Hỗ trợ review độc lập và self-review có bằng chứng."
 ---
 
 # Review và Merge PR (Chuẩn EGM + Multi-Agent)
 
-> Theo [ADR-0010](../../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas và Aster có quyền điều phối & merge mọi PR đủ gate; Nova, Harbor và Forge có thể self-review và merge PR của chính mình khi đạt đầy đủ gate và CI checks.
+> Theo [ADR-0010](../../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md), Atlas, Aster, Nova và Orion có quyền điều phối & merge mọi PR đủ gate; tất cả agent (bao gồm Harbor và Forge) có thể self-review và merge PR của chính mình khi đạt đầy đủ gate và CI checks.
 
 Đọc [`AGENTS.md`](../../../AGENTS.md), [`.agents/skills/opendash-elephant/SKILL.md`](../opendash-elephant/SKILL.md), [Agent Operating Standard](../../AGENT_OPERATING_STANDARD.md), [GitHub workflow](../../GITHUB_WORKFLOW.md) và [agents.yaml](../../agents.yaml). Chỉ thao tác trên repo `thientran2359/opendash-cms`, đích `main`. Không đổi ruleset, không bypass required checks hoặc dùng quyền admin để vượt gate.
 
