@@ -747,9 +747,9 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                       onChange={event => changeEditSettings({ has_archive: event.target.checked })} />
                     Cho phép trang danh sách (has_archive)
                   </label>
-                  <label className="block text-sm font-medium">
-                    Cơ chế xuất bản
-                    <select className="mt-1 block w-full max-w-md rounded border border-slate-300 px-3 py-2"
+                  <label className="flex flex-col gap-1 text-sm font-medium">
+                    <span>Cơ chế xuất bản</span>
+                    <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm"
                       value={editSettings.publication} disabled={!csrfToken || savingSettings || isBuiltin}
                       onChange={event => changeEditSettings({
                         publication: event.target.value as ContentPublicationPolicy,

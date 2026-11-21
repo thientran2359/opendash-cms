@@ -1,7 +1,7 @@
 # D03 — Typed shared-template draft preview
 
 **Author:** Aster
-**Status:** Approved
+**Status:** Verified
 **Date:** 2026-11-21
 **Approved By:** Aster (delegated).
 **Approval Evidence:** [PR #439 coordinator approval](https://github.com/thientran2359/opendash-cms/pull/439#issuecomment-7059918363).

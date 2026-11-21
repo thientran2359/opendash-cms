@@ -658,11 +658,41 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     && settings?.publication === 'draft_publish';
 
   return (
-    <div className="space-y-4">
-      <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        onClick={() => onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)))}>
-        ← Về danh sách
-      </button>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <button type="button" className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+          onClick={() => onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)))}>
+          ← Về danh sách
+        </button>
+        <div className="flex flex-wrap items-center gap-2" data-testid="theme-template-selection">
+          <label className="text-xs font-medium text-zinc-600" htmlFor="entry-theme-selector">
+            {typeKey === 'page' ? 'Page Layout' : 'Template'}
+          </label>
+          <select id="entry-theme-selector" className="h-8 rounded-md border border-zinc-300 bg-white px-2.5 text-xs text-zinc-900"
+            value={selectedThemeKey ?? ''} disabled={saving || !csrfToken || !themeLayouts}
+            onChange={event => {
+              const choice = event.target.value || null;
+              selectedThemeKeyRef.current = choice;
+              setSelectedThemeKey(choice);
+              const differs = choice !== savedThemeKeyRef.current;
+              themeKeyDirtyRef.current = differs;
+              setThemeKeyDirty(differs);
+              if (differs) editRevisionRef.current++;
+              setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
+            }}>
+            <option value="">Theo theme mặc định</option>
+            {(typeKey === 'page' ? themeLayouts?.page_layouts.map(layout => ({ key: layout.key, label: layout.label }))
+              : themeLayouts?.custom_templates.filter(tpl => tpl.allowed_types.includes(typeKey))
+                  .map(tpl => ({ key: tpl.custom_key, label: tpl.label })))?.map(choice =>
+                <option key={choice.key} value={choice.key}>{choice.label}</option>)}
+            {selectedThemeKey && !(typeKey === 'page'
+              ? themeLayouts?.page_layouts.some(layout => layout.key === selectedThemeKey)
+              : themeLayouts?.custom_templates.some(tpl => tpl.custom_key === selectedThemeKey && tpl.allowed_types.includes(typeKey))) &&
+              <option value={selectedThemeKey}>{selectedThemeKey} (theme hiện tại không còn cung cấp — được bảo toàn)</option>}
+          </select>
+          {themeKeyDirty && <span className="text-xs text-amber-700">Chưa lưu</span>}
+        </div>
+      </div>
       {statusNote && (
         <div className={statusNote.includes('(412)') || statusNote.includes('(409)')
           ? 'rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800'
@@ -716,38 +746,10 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       )}
       {!isBuiltIn && !isDraftPublishCpt && publicPath && (
         <a href={publicPath} target="_blank" rel="noopener noreferrer"
-          className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
+          className="inline-flex rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50">
           Xem nội dung
         </a>
       )}
-      <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2" data-testid="theme-template-selection">
-        <label className="block text-sm font-semibold text-slate-800" htmlFor="entry-theme-selector">
-          {typeKey === 'page' ? 'Page Layout' : 'Custom Single Template'}
-        </label>
-        <select id="entry-theme-selector" className="w-full max-w-lg rounded-lg border border-slate-300 p-2 text-sm"
-          value={selectedThemeKey ?? ''} disabled={saving || !csrfToken || !themeLayouts}
-          onChange={event => {
-            const choice = event.target.value || null;
-            selectedThemeKeyRef.current = choice;
-            setSelectedThemeKey(choice);
-            const differs = choice !== savedThemeKeyRef.current;
-            themeKeyDirtyRef.current = differs;
-            setThemeKeyDirty(differs);
-            if (differs) editRevisionRef.current++;
-            setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
-          }}>
-          <option value="">Theo theme mặc định</option>
-          {(typeKey === 'page' ? themeLayouts?.page_layouts.map(layout => ({ key: layout.key, label: layout.label }))
-            : themeLayouts?.custom_templates.filter(tpl => tpl.allowed_types.includes(typeKey))
-                .map(tpl => ({ key: tpl.custom_key, label: tpl.label })))?.map(choice =>
-              <option key={choice.key} value={choice.key}>{choice.label}</option>)}
-          {selectedThemeKey && !(typeKey === 'page'
-            ? themeLayouts?.page_layouts.some(layout => layout.key === selectedThemeKey)
-            : themeLayouts?.custom_templates.some(tpl => tpl.custom_key === selectedThemeKey && tpl.allowed_types.includes(typeKey))) &&
-            <option value={selectedThemeKey}>{selectedThemeKey} (theme hiện tại không còn cung cấp — được bảo toàn)</option>}
-        </select>
-        {themeKeyDirty && <p className="text-xs text-slate-600">Lựa chọn này chưa lưu. Bản nháp khác vẫn được giữ.</p>}
-      </div>
       {/* Legacy renderer has a fixed CPT status select and generic Save button.
           Keep its Builder action and layout while showing policy-aware actions above. */}
       <style>{`

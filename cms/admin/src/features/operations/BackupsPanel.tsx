@@ -147,38 +147,41 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
         </button>
       </div>
 
-      <form onSubmit={handleCreateBackup} className="stack-sm">
-        <label>
-          Mật khẩu mã hóa (16–128 ký tự, không lưu trên máy chủ)
+      <form onSubmit={handleCreateBackup} className="mt-4 flex max-w-xl flex-col gap-3">
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Mật khẩu mã hóa (16–128 ký tự, không lưu trên máy chủ)</span>
           <input
             type="password"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
             value={passphrase}
             onChange={(e) => setPassphrase(e.target.value)}
             autoComplete="new-password"
             required
           />
         </label>
-        <label>
-          Xác nhận mật khẩu mã hóa
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Xác nhận mật khẩu mã hóa</span>
           <input
             type="password"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
             value={confirmPassphrase}
             onChange={(e) => setConfirmPassphrase(e.target.value)}
             autoComplete="new-password"
             required
           />
         </label>
-        <label>
-          Ghi chú (tùy chọn)
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Ghi chú (tùy chọn)</span>
           <input
             type="text"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Ví dụ: Trước khi nâng cấp theme"
           />
         </label>
-        <div className="row-gap">
-          <button type="submit" className="btn-primary" disabled={busy || Boolean(activeJob)}>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button type="submit" className="od-primary-action" disabled={busy || Boolean(activeJob)}>
             Tạo bản sao lưu mã hóa
           </button>
           {activeJob && (activeJob.state === 'queued' || activeJob.state === 'running') && (

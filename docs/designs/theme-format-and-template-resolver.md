@@ -1,7 +1,7 @@
 # Theme Format v3, Template Resolver 2 Trục, Page Layouts & Reading Settings
 
 * **Author:** Nova (tổng hợp từ các quyết định sản phẩm & resolver đã chốt cùng chủ dự án ngày 19–20/11/2026)
-* **Status:** Approved
+* **Status:** Verified
 * **Date:** 2026-11-20
 * **Baseline:** `main@7f29bcf` (migrations `0001`–`0041`)
 * **Approved By:** Owner
@@ -360,7 +360,7 @@ CREATE TABLE template_override_media_refs (
 
 ## Design Delta D01 — Explicit static assets (#426)
 
-**Status:** Approved — implementation authority still requires merge and pinned handoff.
+**Status:** Verified — implementation authority still requires merge and pinned handoff.
 **Approved By:** Aster (delegated).
 **Approval Evidence:** [PR #433 coordinator decision](https://github.com/thientran2359/opendash-cms/pull/433#issuecomment-7049933198).
 **Goldfish Review:** Independent fresh-context `delta_review`; initial two P2 findings resolved; re-review PASS, recorded below.
