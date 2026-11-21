@@ -302,7 +302,18 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         let baseline: EditorDraftPayload;
         let serverPublicPath: string | null = null;
         let routeReadable = true;
-        const layoutCatalog = await getActiveThemeLayouts();
+        // Optional theme metadata must not make the entire content editor
+        // unusable during a theme reload/corrupt provider. Only authorization
+        // failures remain fatal; all existing assignments stay in the entry
+        // response and are never implicitly cleared on Save.
+        let layoutCatalog: ThemeLayoutCatalog | null = null;
+        let layoutUnavailable = false;
+        try {
+          layoutCatalog = await getActiveThemeLayouts();
+        } catch (cause) {
+          if (cause instanceof ApiClientError && (cause.status === 401 || cause.status === 403)) throw cause;
+          layoutUnavailable = true;
+        }
         let seoReadable = true;
         if (mode === 'edit' && entryId !== null) {
           // Route/SEO can be forbidden after same-user role downgrade. Never
@@ -378,7 +389,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         applyPayload(draftRef.current);
         setDirty(Boolean(restored?.dirty_fields.length));
         setConfig(freshCfg);
-        if (restored && restored.schema_token_at_edit !== freshCfg.schema_token) {
+        if (layoutUnavailable) {
+          setStatusNote('Không tải được danh sách template từ theme. Bản nội dung và lựa chọn cũ vẫn được giữ; không thể chọn template mới cho đến khi tải lại.');
+        } else if (restored && restored.schema_token_at_edit !== freshCfg.schema_token) {
           setStatusNote('Schema đã thay đổi. Nháp được giữ; Lưu sẽ kiểm tra schema token cũ để tránh ghi đè.');
         }
       } catch (err) {
@@ -678,7 +691,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           {typeKey === 'page' ? 'Page Layout' : 'Custom Single Template'}
         </label>
         <select id="entry-theme-selector" className="w-full max-w-lg rounded-lg border border-slate-300 p-2 text-sm"
-          value={selectedThemeKey ?? ''} disabled={saving || !csrfToken}
+          value={selectedThemeKey ?? ''} disabled={saving || !csrfToken || !themeLayouts}
           onChange={event => {
             const choice = event.target.value || null;
             selectedThemeKeyRef.current = choice;
