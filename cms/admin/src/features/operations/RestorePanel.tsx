@@ -8,6 +8,7 @@ import {
   type OperationJob,
   type RecoveryStatus,
 } from '../../api/operations.ts';
+import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface RestorePanelProps {
   csrfToken: string | null;
@@ -125,122 +126,105 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
   };
 
   return (
-    <section className="mt-8 border-t border-slate-200 pt-6">
-      <div className="mb-4 flex items-center justify-between">
+    <section className="mt-8 space-y-4 border-t border-zinc-200 pt-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-slate-900">Khôi phục & Safe Mode</h3>
-          <p className="text-xs text-slate-600">
-            Tải lên gói <code>.odbackup.age</code> để dựng vào thư mục riêng, hoặc mở khóa safe mode sau khi khởi chạy root mới.
+          <h3 className="text-base font-semibold text-zinc-950">Khôi phục &amp; Safe Mode</h3>
+          <p className="mt-0.5 text-sm text-zinc-600">
+            Tải lên gói <code className="text-xs">.odbackup.age</code> để dựng vào thư mục riêng, hoặc mở khóa safe mode sau khi khởi chạy root mới.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadRecoveryStatus()}
-          className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-        >
+        <AdminButton variant="secondary" size="sm" onClick={() => void loadRecoveryStatus()}>
           Làm mới
-        </button>
+        </AdminButton>
       </div>
 
       {recovery && (
-        <div className={`mb-4 rounded border p-3 text-xs ${recovery.safe_mode ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
-          <div className="font-semibold">
-            Trạng thái hiện tại: {recovery.safe_mode ? 'SAFE MODE (công khai noindex, contact/plugin/SMTP tạm khóa)' : 'Hoạt động bình thường'}
+        <div className={`space-y-1.5 rounded-xl border p-3.5 text-xs ${recovery.safe_mode ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-zinc-200 bg-zinc-50 text-zinc-700'}`}>
+          <div className="flex flex-wrap items-center gap-2 font-semibold">
+            <AdminBadge tone={recovery.safe_mode ? 'warning' : 'success'}>
+              {recovery.safe_mode ? 'SAFE MODE' : 'Hoạt động bình thường'}
+            </AdminBadge>
+            {recovery.safe_mode && <span>Công khai noindex, contact/plugin/SMTP tạm khóa</span>}
           </div>
-          <div className="mt-1">Site root: <code>{recovery.site_root}</code></div>
+          <div>Site root: <code className="font-mono">{recovery.site_root}</code></div>
           {recovery.ready_marker && (
-            <div className="mt-1">
-              READY.json generation: <code>{recovery.ready_marker.job_id}</code> (files: {recovery.ready_marker.file_count})
+            <div>
+              READY.json generation: <code className="font-mono">{recovery.ready_marker.job_id}</code> (files: {recovery.ready_marker.file_count})
             </div>
           )}
         </div>
       )}
 
-      {errorMsg && (
-        <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-          {errorMsg}
-        </div>
-      )}
-      {notice && (
-        <div className="mb-3 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-          {notice}
-        </div>
-      )}
+      {errorMsg && <AdminAlert tone="error">{errorMsg}</AdminAlert>}
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
 
       {recovery?.safe_mode && recovery.expected_generation && (
-        <form onSubmit={handleActivate} className="mb-5 rounded border border-amber-300 bg-white p-3">
-          <div className="mb-2 text-xs font-semibold text-slate-800">Kích hoạt vận hành sau khôi phục</div>
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex-1 text-xs text-slate-700">
-              Mật khẩu Admin
+        <form onSubmit={handleActivate} className="max-w-xl space-y-3 rounded-xl border border-amber-200 bg-white p-4">
+          <div className="text-sm font-semibold text-zinc-900">Kích hoạt vận hành sau khôi phục</div>
+          <div className="flex flex-wrap items-end gap-2.5">
+            <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-700">
+              <span>Mật khẩu Admin</span>
               <input
                 type="password"
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
-                className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 text-xs"
+                className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
                 placeholder="Nhập mật khẩu Admin hiện tại"
               />
             </label>
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 disabled:opacity-50"
-            >
+            <AdminButton type="submit" variant="primary" disabled={busy}>
               Mở khóa Safe Mode
-            </button>
+            </AdminButton>
           </div>
         </form>
       )}
 
-      <form onSubmit={handleRestoreUploadAndRun} className="rounded border border-slate-200 bg-white p-3">
-        <div className="mb-2 text-xs font-semibold text-slate-800">Khôi phục từ gói .odbackup.age</div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="text-xs text-slate-700">
-            Tệp backup (.odbackup.age)
+      <form onSubmit={handleRestoreUploadAndRun} className="max-w-2xl space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
+        <div className="text-sm font-semibold text-zinc-900">Khôi phục từ gói .odbackup.age</div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Tệp backup (.odbackup.age)</span>
             <input
               type="file"
               accept=".age,.odbackup.age"
               onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-              className="mt-1 block w-full text-xs"
+              className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-xs text-zinc-800"
             />
           </label>
-          <label className="text-xs text-slate-700">
-            Passphrase giải mã
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Passphrase giải mã</span>
             <input
               type="password"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 text-xs"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
               placeholder="Passphrase của gói backup"
             />
           </label>
         </div>
-        <div className="mt-2 flex flex-wrap items-end gap-2">
-          <label className="flex-1 text-xs text-slate-700">
-            Ghi chú (tùy chọn)
+        <div className="flex flex-wrap items-end gap-2.5">
+          <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Ghi chú (tùy chọn)</span>
             <input
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              className="mt-1 block w-full rounded border border-slate-300 px-2 py-1 text-xs"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
               placeholder="Ví dụ: Khôi phục kiểm thử sang thư mục mới"
             />
           </label>
-          <button
-            type="submit"
-            disabled={busy || !csrfToken}
-            className="rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
+          <AdminButton type="submit" variant="primary" disabled={busy || !csrfToken}>
             {busy ? 'Đang xử lý...' : 'Tải lên & Khôi phục'}
-          </button>
+          </AdminButton>
         </div>
       </form>
 
       {activeJob && (
-        <div className="mt-3 rounded border border-slate-200 bg-slate-50 p-2.5 text-xs text-slate-700">
-          <div>Tác vụ: <code>{activeJob.id}</code> — Trạng thái: <strong>{activeJob.state}</strong></div>
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
+          <div>Tác vụ: <code className="font-mono">{activeJob.id}</code> — Trạng thái: <strong>{activeJob.state}</strong></div>
           {activeJob.summary_json && (
-            <pre className="mt-1 overflow-x-auto text-[11px] text-slate-600">{activeJob.summary_json}</pre>
+            <pre className="mt-1.5 overflow-x-auto text-[11px] text-zinc-600">{activeJob.summary_json}</pre>
           )}
         </div>
       )}

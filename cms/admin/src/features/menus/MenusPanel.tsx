@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { ApiClientError } from '../../api/client.ts';
 import { listContentEntries, listContentTypes } from '../../api/content.ts';
 import {
@@ -390,46 +391,44 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
   }
 
   return (
-    <section className="mt-8 border-t border-slate-200 pt-6 space-y-6" data-testid="menus-panel">
+    <section className="space-y-5" data-testid="menus-panel">
       <div>
-        <h2 className="text-xl font-semibold text-slate-900">Quản lý Menu &amp; Slot</h2>
-        <p className="mt-1 text-sm text-slate-600">
+        <h2 className="text-base font-semibold text-zinc-950">Quản lý Menu &amp; Slot</h2>
+        <p className="mt-0.5 text-sm text-zinc-600">
           Tạo, sắp xếp, preview và gắn menu vào slot của theme đang kích hoạt (tối đa 200 mục, 8 cấp).
         </p>
       </div>
-      {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
-      {notice && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
+      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
 
       <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => void handleCreateMenu(e)}>
-        <div>
-          <label htmlFor="od-menu-new-key" className="mb-1 block text-xs font-medium text-slate-700">Menu key</label>
+        <label htmlFor="od-menu-new-key" className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+          <span>Menu key</span>
           <input
             id="od-menu-new-key" value={newKey} onChange={(e) => setNewKey(e.target.value)} required
-            placeholder="primary" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="primary" className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
           />
-        </div>
-        <div>
-          <label htmlFor="od-menu-new-title" className="mb-1 block text-xs font-medium text-slate-700">Tiêu đề menu</label>
+        </label>
+        <label htmlFor="od-menu-new-title" className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+          <span>Tiêu đề menu</span>
           <input
             id="od-menu-new-title" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} required
-            placeholder="Menu chính" className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
+            placeholder="Menu chính" className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
           />
-        </div>
-        <button type="submit" className="od-primary-action" disabled={!csrfToken || busy}>Tạo menu</button>
+        </label>
+        <AdminButton type="submit" variant="primary" disabled={!csrfToken || busy}>Tạo menu</AdminButton>
       </form>
 
       <div className="flex flex-wrap gap-2">
         {menus.map((m) => (
-          <button
+          <AdminButton
             key={m.id}
-            type="button"
+            variant={selectedId === m.id ? 'primary' : 'secondary'}
+            size="sm"
             onClick={() => void openMenu(m.id)}
-            className={`rounded-lg border px-3 py-1.5 text-sm ${
-              selectedId === m.id ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-300 bg-white text-slate-800'
-            }`}
           >
             {m.title} ({m.menu_key})
-          </button>
+          </AdminButton>
         ))}
       </div>
 
