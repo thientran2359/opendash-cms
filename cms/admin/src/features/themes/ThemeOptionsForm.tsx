@@ -6,6 +6,7 @@ import {
   type ThemeOptionDef,
   type ThemeOptionsSnapshot,
 } from '../../api/themes.ts';
+import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface Props {
   themeId: string;
@@ -47,7 +48,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
     return () => { active = false; };
   }, [themeId, onApiError]);
 
-  if (loading) return <p role="status" className="text-sm text-slate-600">Đang tải tùy chọn theme…</p>;
+  if (loading) return <p role="status" className="text-sm text-zinc-600">Đang tải tùy chọn theme…</p>;
   if (!snapshot || snapshot.schema.length === 0) return null;
 
   const setField = (key: string, value: unknown) => {
@@ -86,7 +87,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             checked={Boolean(val)}
             onChange={e => setField(def.key, e.target.checked)}
             disabled={saving}
-            className="h-4 w-4 rounded border-slate-300"
+            className="h-4 w-4 rounded border-zinc-300"
           />
         );
       case 'number':
@@ -99,7 +100,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             step="any"
             onChange={e => setField(def.key, e.target.value === '' ? '' : Number(e.target.value))}
             disabled={saving}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           />
         );
       case 'select':
@@ -108,7 +109,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             value={typeof val === 'string' ? val : ''}
             onChange={e => setField(def.key, e.target.value)}
             disabled={saving}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           >
             {(def.choices ?? []).map(c => (
               <option key={c.value} value={c.value}>{c.label}</option>
@@ -123,7 +124,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             placeholder="Nhập media_id (để trống để bỏ)"
             onChange={e => setField(def.key, e.target.value.trim() === '' ? null : e.target.value.trim())}
             disabled={saving}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           />
         );
       default:
@@ -134,7 +135,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             value={typeof val === 'string' ? val : ''}
             onChange={e => setField(def.key, e.target.value)}
             disabled={saving}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           />
         );
     }
@@ -144,29 +145,36 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
     <form
       onSubmit={e => void handleSubmit(e)}
       data-testid="theme-options-form"
-      className="space-y-4 rounded-xl border border-slate-200 bg-white p-4"
+      className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5"
     >
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-base font-semibold text-slate-900">Tùy chọn theme ({themeId})</h3>
-        <span className="text-xs text-slate-500">v{snapshot.version}</span>
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-100 pb-3">
+        <h3 className="text-base font-semibold text-zinc-950">Tùy chọn theme ({themeId})</h3>
+        <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>
       </div>
-      {notice && <p role="status" className="rounded-lg bg-emerald-50 p-2 text-sm text-emerald-900">{notice}</p>}
-      {error && <p role="alert" className="rounded-lg bg-red-50 p-2 text-sm text-red-900">{error}</p>}
-      <div className="space-y-3">
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
+      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      <div className="space-y-3.5">
         {snapshot.schema.map(def => (
-          <label key={def.key} className="block space-y-1">
-            <span className="block text-sm font-medium text-slate-800">{def.label}</span>
-            {renderInput(def)}
+          <label key={def.key} className={def.type === 'boolean' ? 'flex items-center gap-2.5 text-sm font-medium text-zinc-800' : 'flex flex-col gap-1'}>
+            {def.type === 'boolean' ? (
+              <>
+                {renderInput(def)}
+                <span>{def.label}</span>
+              </>
+            ) : (
+              <>
+                <span className="text-sm font-medium text-zinc-800">{def.label}</span>
+                {renderInput(def)}
+              </>
+            )}
           </label>
         ))}
       </div>
-      <button
-        type="submit"
-        disabled={!csrfToken || saving}
-        className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-      >
-        {saving ? 'Đang lưu…' : 'Lưu tùy chọn'}
-      </button>
+      <div className="pt-1">
+        <AdminButton type="submit" variant="primary" size="md" disabled={!csrfToken || saving}>
+          {saving ? 'Đang lưu…' : 'Lưu tùy chọn'}
+        </AdminButton>
+      </div>
     </form>
   );
 };

@@ -19,6 +19,7 @@ import {
 } from './ContentTypeForm.tsx';
 import { EditorLayoutConfigurator } from './EditorLayoutConfigurator.tsx';
 import { FieldGroupsManager } from './FieldGroupsManager.tsx';
+import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface ContentTypeSchemaSettingsProps {
   /** Passed by App from its authenticated server session; RAM recovery is off without these. */
@@ -643,28 +644,23 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
 
   return (
     <section className="space-y-6" data-testid="content-type-schema-settings">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Loại nội dung &amp; Trường</h2>
-          <p className="text-sm text-slate-600">
+          <p className="text-xs font-semibold uppercase tracking-widest text-od-accent">Cấu trúc / Loại nội dung</p>
+          <h2 className="mt-1 text-xl font-bold tracking-tight text-zinc-950">Loại nội dung &amp; Trường</h2>
+          <p className="mt-1 text-sm text-zinc-600">
             Cấu hình schema, nhóm trường mở rộng và bố cục Single Edit cho từng loại nội dung.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={toggleCreateForm}
-          className="rounded-lg bg-slate-900 px-3.5 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-        >
+        <AdminButton variant={showCreateForm ? 'secondary' : 'primary'} size="md" onClick={toggleCreateForm}>
           {showCreateForm ? 'Đóng form tạo CPT' : '+ Tạo loại nội dung mới'}
-        </button>
+        </AdminButton>
       </div>
 
-      {createNotice && <p role="status" className="rounded border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
-        {createNotice}
-      </p>}
+      {createNotice && <AdminAlert tone="info">{createNotice}</AdminAlert>}
 
       {showCreateForm && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4">
           <ContentTypeForm
             key={createScope ?? 'unverified-identity'}
             disabled={!csrfToken}
@@ -673,83 +669,90 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
             onDraftChange={onCreateDraftChange}
             onDirtyChange={onCreateFormDirty}
           />
-          {createDirty && <p role="status" className="mt-3 text-xs text-slate-600">
+          {createDirty && <p role="status" className="mt-3 text-xs text-zinc-600">
             {createScope
               ? 'Bản nhập CPT chưa lưu được giữ trong RAM theo website và tài khoản khi hết phiên đăng nhập. Tải lại trình duyệt sẽ xóa nháp.'
               : 'Không xác minh được website/tài khoản để khôi phục nháp; hãy lưu trước khi rời màn hình.'}
           </p>}
-          <button type="button" className="mt-3 rounded border border-slate-300 px-3 py-2 text-sm"
-            onClick={toggleCreateForm}>Đóng form / bỏ bản nhập chưa lưu</button>
+          <div className="mt-3">
+            <AdminButton variant="secondary" size="sm" onClick={toggleCreateForm}>
+              Đóng form / bỏ bản nhập chưa lưu
+            </AdminButton>
+          </div>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-        {contentTypes.map(ct => (
-          <button
-            key={ct.descriptor.key}
-            type="button"
-            aria-pressed={selectedTypeKey === ct.descriptor.key}
-            disabled={taxonomyBusy || savingSettings}
-            onClick={() => {
-              if (ct.descriptor.key === selectedTypeKey) return;
-              onSelectTypeKey(ct.descriptor.key);
-            }}
-            className={
-              'rounded-lg px-3 py-1.5 text-sm font-medium ' +
-              (selectedTypeKey === ct.descriptor.key
-                ? 'bg-slate-900 text-white'
-                : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50')
-            }
-          >
-            {ct.descriptor.label} ({ct.descriptor.key})
-          </button>
-        ))}
+      <div className="flex flex-wrap gap-2 border-b border-zinc-200 pb-3">
+        {contentTypes.map(ct => {
+          const active = selectedTypeKey === ct.descriptor.key;
+          return (
+            <button
+              key={ct.descriptor.key}
+              type="button"
+              aria-pressed={active}
+              disabled={taxonomyBusy || savingSettings}
+              onClick={() => {
+                if (ct.descriptor.key === selectedTypeKey) return;
+                onSelectTypeKey(ct.descriptor.key);
+              }}
+              className={
+                'inline-flex h-8 items-center rounded-md px-3 text-xs font-medium transition-colors ' +
+                (active
+                  ? 'bg-od-accent text-white shadow-2xs'
+                  : 'border border-zinc-300 bg-white text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50')
+              }
+            >
+              {ct.descriptor.label} ({ct.descriptor.key})
+            </button>
+          );
+        })}
       </div>
 
       {activeType && (
-        <div className="space-y-8">
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="space-y-6">
+          <div className="rounded-xl border border-zinc-200 bg-white p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-100 pb-3">
               <div>
-                <h3 className="text-base font-semibold text-slate-900">
+                <h3 className="text-base font-semibold text-zinc-950">
                   Thông tin Schema: {activeType.descriptor.label}
                 </h3>
-                <p className="text-xs text-slate-500">
-                  Key: <code>{activeType.descriptor.key}</code> · Chủ sở hữu: {activeType.owner.kind} · v{activeType.version}
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  Key: <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">{activeType.descriptor.key}</code> · Chủ sở hữu: {activeType.owner.kind}
                 </p>
               </div>
+              <AdminBadge tone="neutral">v{activeType.version}</AdminBadge>
             </div>
-            <div className="mt-3 text-xs text-slate-600">
+            <div className="mt-3 text-xs text-zinc-600">
               Base fields ({activeType.descriptor.fields.length}):{' '}
               {activeType.descriptor.fields.map(f => f.key).join(', ') || 'Chưa có'}
             </div>
             {canEditSettings ? (
               <form onSubmit={handleUpdateSettings} className="mt-5 space-y-4" aria-label="Cấu hình loại nội dung">
                 {activeType.owner.kind === 'user' && (
-                  <label className="block text-sm font-medium text-slate-800">
-                    Tên hiển thị
+                  <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+                    <span>Tên hiển thị</span>
                     <input type="text" value={editLabel} required maxLength={100}
                       disabled={!csrfToken || savingSettings} onChange={event => changeEditLabel(event.target.value)}
-                      className="mt-1 block w-full max-w-md rounded border border-slate-300 px-3 py-2" />
+                      className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent" />
                   </label>
                 )}
-                <fieldset className="space-y-3 rounded-lg border border-slate-200 p-3">
-                  <legend className="px-1 text-sm font-semibold">Hiển thị công khai</legend>
-                  <label className="flex items-center gap-2 text-sm">
+                <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
+                  <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">Hiển thị công khai</legend>
+                  <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.public}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => changeEditSettings({ public: event.target.checked })} />
                     Công khai nội dung (public)
                   </label>
-                  <label className="flex items-center gap-2 text-sm">
+                  <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.has_archive}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => changeEditSettings({ has_archive: event.target.checked })} />
                     Cho phép trang danh sách (has_archive)
                   </label>
-                  <label className="flex flex-col gap-1 text-sm font-medium">
+                  <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
                     <span>Cơ chế xuất bản</span>
-                    <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm"
+                    <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
                       value={editSettings.publication} disabled={!csrfToken || savingSettings || isBuiltin}
                       onChange={event => changeEditSettings({
                         publication: event.target.value as ContentPublicationPolicy,
@@ -758,45 +761,44 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                       <option value="draft_publish">Lưu nháp / Xuất bản (draft_publish)</option>
                     </select>
                   </label>
-                  {isBuiltin && <p className="text-xs text-slate-600">Post và Page luôn dùng Lưu nháp / Xuất bản.</p>}
+                  {isBuiltin && <p className="text-xs text-zinc-500">Post và Page luôn dùng Lưu nháp / Xuất bản.</p>}
                 </fieldset>
-                <fieldset className="space-y-2 rounded-lg border border-slate-200 p-3">
-                  <legend className="px-1 text-sm font-semibold">Thành phần màn hình chỉnh sửa</legend>
-                  <label className="flex items-center gap-2 text-sm">
+                <fieldset className="space-y-2 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3.5">
+                  <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">Thành phần màn hình chỉnh sửa</legend>
+                  <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.supports.includes('editor')}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => toggleSupport('editor', event.target.checked)} />
                     Trình soạn thảo (editor)
                   </label>
-                  <label className="flex items-center gap-2 text-sm">
+                  <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.supports.includes('featured_image')}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => toggleSupport('featured_image', event.target.checked)} />
                     Ảnh đại diện (featured_image)
                   </label>
-                  <label className="flex items-center gap-2 text-sm">
+                  <label className="flex items-center gap-2 text-sm text-zinc-800">
                     <input type="checkbox" checked={editSettings.supports.includes('builder')}
                       disabled={!csrfToken || savingSettings}
                       onChange={event => toggleSupport('builder', event.target.checked)} />
                     Visual Builder (builder)
                   </label>
-                  <p className="text-xs text-slate-600">Bật Builder cho phép thiết kế riêng từng bản ghi. Tắt thành phần không xóa văn bản, ảnh hay thiết kế Builder đã lưu.</p>
+                  <p className="text-xs text-zinc-500">Bật Builder cho phép thiết kế riêng từng bản ghi. Tắt thành phần không xóa văn bản, ảnh hay thiết kế Builder đã lưu.</p>
                 </fieldset>
-                {settingsError && <p className="text-sm text-rose-700" role="alert">{settingsError}</p>}
-                {settingsStale && <div role="alert" className="space-y-2 text-sm text-amber-800">
+                {settingsError && <AdminAlert tone="error">{settingsError}</AdminAlert>}
+                {settingsStale && <AdminAlert tone="warning" role="alert" className="space-y-2">
                   <p>Phiên bản CPT đã thay đổi. Bản nhập được giữ nhưng không thể lưu bằng CAS cũ.</p>
-                  <button type="button" className="rounded border border-amber-400 px-3 py-2"
+                  <AdminButton variant="secondary" size="sm"
                     disabled={savingSettings || taxonomyBusy} onClick={() => void rebaseSettingsDraft()}>
                     Đối chiếu CPT mới, giữ thay đổi đang nhập
-                  </button>
-                </div>}
+                  </AdminButton>
+                </AdminAlert>}
                 <div className="flex flex-wrap items-center gap-2">
-                  <button type="submit" disabled={!settingsChanged || settingsStale || !csrfToken || savingSettings || taxonomyBusy}
-                    className="rounded bg-slate-800 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                  <AdminButton type="submit" variant="primary" size="md"
+                    disabled={!settingsChanged || settingsStale || !csrfToken || savingSettings || taxonomyBusy}>
                     {savingSettings ? 'Đang lưu...' : 'Lưu cấu hình'}
-                  </button>
-                  <button type="button" disabled={savingSettings || taxonomyBusy}
-                    className="rounded border border-slate-300 px-3 py-2 text-sm text-slate-700"
+                  </AdminButton>
+                  <AdminButton variant="secondary" size="md" disabled={savingSettings || taxonomyBusy}
                     onClick={() => {
                       if (selectedScope) settingsDraftMemory.delete(selectedScope);
                       setSettingsStale(false);
@@ -809,30 +811,30 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                       setSettingsError('');
                     }}>
                     Tải lại từ máy chủ (bỏ chỉnh sửa)
-                  </button>
+                  </AdminButton>
                 </div>
               </form>
             ) : (
-              <p className="mt-4 text-sm text-slate-600">
+              <p className="mt-4 text-sm text-zinc-600">
                 {isSection ? 'Section là loại nội dung riêng tư và không cho phép thay đổi cấu hình công khai.'
                   : 'Cấu hình thuộc quyền sở hữu của nhà cung cấp; chỉ có thể xem tại đây.'}
               </p>
             )}
           </div>
 
-          <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="Taxonomy áp dụng cho loại nội dung">
-            <h3 className="text-base font-semibold text-slate-900">Taxonomy áp dụng</h3>
-            <p className="mt-1 text-sm text-slate-600">
+          <section className="rounded-xl border border-zinc-200 bg-white p-5" aria-label="Taxonomy áp dụng cho loại nội dung">
+            <h3 className="text-base font-semibold text-zinc-950">Taxonomy áp dụng</h3>
+            <p className="mt-1 text-sm text-zinc-600">
               Chọn taxonomy được phép gắn vào {activeType.descriptor.label}. Bỏ chọn không xóa liên kết đã lưu.
             </p>
-            {isSection ? <p className="mt-3 text-sm text-slate-600">Section không hỗ trợ taxonomy.</p>
-              : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-slate-600">Đang tải taxonomy áp dụng…</p>
-                : <form className="mt-3 space-y-3" onSubmit={handleUpdateTaxonomies}>
-                    <div className="grid gap-2 sm:grid-cols-2">
+            {isSection ? <p className="mt-3 text-sm text-zinc-600">Section không hỗ trợ taxonomy.</p>
+              : !taxonomyLoaded ? <p role="status" className="mt-3 text-sm text-zinc-600">Đang tải taxonomy áp dụng…</p>
+                : <form className="mt-3.5 space-y-3.5" onSubmit={handleUpdateTaxonomies}>
+                    <div className="grid gap-2.5 sm:grid-cols-2">
                       {taxonomyLoaded.available.filter(def =>
                         (def.provider_status === 'active' && def.declaration_state === 'declared')
                         || taxonomyDraft.includes(def.key)).map(def => (
-                        <label key={def.key} className="flex items-start gap-2 rounded border border-slate-200 p-3 text-sm text-slate-700">
+                        <label key={def.key} className="flex items-start gap-2.5 rounded-lg border border-zinc-200 bg-zinc-50/40 p-3 text-sm text-zinc-700 hover:border-zinc-300">
                           <input type="checkbox" className="mt-1" checked={taxonomyDraft.includes(def.key)}
                             disabled={!canEditTaxonomies || !csrfToken || taxonomyBusy || savingSettings
                               || (!taxonomyDraft.includes(def.key) &&
@@ -845,15 +847,15 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                               rememberTaxonomyDraft(taxonomyLoaded, next);
                               setTaxonomyNotice('');
                             }} />
-                          <span><strong className="block">{def.label}</strong>
-                            <code className="text-xs">{def.key}</code> · {def.hierarchical ? 'Phân cấp' : 'Không phân cấp'}
+                          <span><strong className="block font-medium text-zinc-900">{def.label}</strong>
+                            <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">{def.key}</code> · <span className="text-xs text-zinc-500">{def.hierarchical ? 'Phân cấp' : 'Không phân cấp'}</span>
                             {(def.provider_status !== 'active' || def.declaration_state !== 'declared')
-                              && <span className="block text-xs text-amber-700">Provider không hoạt động hoặc khai báo đã rút; lựa chọn đã lưu được giữ lại.</span>}
+                              && <span className="mt-0.5 block text-xs text-amber-700">Provider không hoạt động hoặc khai báo đã rút; lựa chọn đã lưu được giữ lại.</span>}
                           </span>
                         </label>
                       ))}
                       {taxonomyDraft.filter(key => !taxonomyLoaded.available.some(def => def.key === key)).map(key => (
-                        <label key={key} className="flex items-start gap-2 rounded border border-amber-300 p-3 text-sm">
+                        <label key={key} className="flex items-start gap-2.5 rounded-lg border border-amber-300 bg-amber-50/50 p-3 text-sm text-amber-950">
                           <input type="checkbox" checked disabled={!canEditTaxonomies || taxonomyBusy || savingSettings}
                             onChange={() => {
                               const next = taxonomyDraft.filter(value => value !== key);
@@ -864,34 +866,34 @@ export const ContentTypeSchemaSettings: React.FC<ContentTypeSchemaSettingsProps>
                         </label>
                       ))}
                     </div>
-                    {!canEditTaxonomies && <p className="text-xs text-slate-600">Chỉ quản trị viên có thể thay đổi taxonomy; Section không hỗ trợ.</p>}
-                    {taxonomyChanged && <p className="text-xs text-slate-600" role="status">
+                    {!canEditTaxonomies && <p className="text-xs text-zinc-500">Chỉ quản trị viên có thể thay đổi taxonomy; Section không hỗ trợ.</p>}
+                    {taxonomyChanged && <p className="text-xs text-zinc-500" role="status">
                       {selectedScope
                         ? 'Bản chọn taxonomy chưa lưu được giữ trong bộ nhớ phiên này theo tài khoản, website và loại nội dung khi bạn chuyển màn hình hoặc đăng nhập lại. Tải lại trang sẽ xóa bản nháp.'
                         : 'Bản chọn chưa lưu sẽ bị mất khi rời màn hình hoặc hết phiên đăng nhập; chỉ lưu được bản nháp khi xác định đủ website và tài khoản.'}
                     </p>}
-                    {taxonomyNotice && <p role="status" className="text-sm text-amber-800">{taxonomyNotice}</p>}
-                    {taxonomyLoaded.stale && <div className="space-y-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                    {taxonomyNotice && <AdminAlert tone="info">{taxonomyNotice}</AdminAlert>}
+                    {taxonomyLoaded.stale && <AdminAlert tone="warning" className="space-y-2">
                       <p role="alert">Version/schema CPT hoặc cấu hình taxonomy đã đổi. Bản chọn vẫn được giữ; không lưu với CAS cũ.</p>
-                      <button type="button" className="rounded border border-amber-500 px-3 py-2 font-medium"
+                      <AdminButton variant="secondary" size="sm"
                         disabled={taxonomyBusy || savingSettings || !csrfToken}
                         onClick={() => void rebaseTaxonomyDraft()}>
                         Đối chiếu với máy chủ, giữ lựa chọn đang sửa
-                      </button>
-                    </div>}
-                    {taxonomyError && <p role="alert" className="text-sm text-rose-700">{taxonomyError}</p>}
+                      </AdminButton>
+                    </AdminAlert>}
+                    {taxonomyError && <AdminAlert tone="error">{taxonomyError}</AdminAlert>}
                     <div className="flex flex-wrap gap-2">
-                      <button type="submit" className="rounded bg-slate-800 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                      <AdminButton type="submit" variant="primary" size="md"
                         disabled={!canEditTaxonomies || !taxonomyChanged || taxonomyBusy || savingSettings || !csrfToken || taxonomyLoaded.stale}>
                         {taxonomyBusy ? 'Đang lưu…' : 'Lưu taxonomy áp dụng'}
-                      </button>
-                      <button type="button" className="rounded border border-slate-300 px-3 py-2 text-sm"
+                      </AdminButton>
+                      <AdminButton variant="secondary" size="md"
                         disabled={taxonomyBusy || savingSettings} onClick={discardTaxonomyDraft}>
                         Hủy lựa chọn chưa lưu
-                      </button>
+                      </AdminButton>
                     </div>
                   </form>}
-            {!taxonomyLoaded && taxonomyError && <p role="alert" className="mt-3 text-sm text-rose-700">{taxonomyError}</p>}
+            {!taxonomyLoaded && taxonomyError && <AdminAlert tone="error" className="mt-3">{taxonomyError}</AdminAlert>}
           </section>
 
           <FieldGroupsManager
