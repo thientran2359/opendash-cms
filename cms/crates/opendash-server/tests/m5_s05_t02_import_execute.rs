@@ -65,7 +65,12 @@ async fn spawn_server_at(site_root: PathBuf, run_setup: bool) -> TestServer {
 
     let client = Client::new();
     for _ in 0..80 {
-        if client.get(format!("{base_url}/api/health")).send().await.is_ok() {
+        if client
+            .get(format!("{base_url}/api/health"))
+            .send()
+            .await
+            .is_ok()
+        {
             break;
         }
         if let Some(status) = child.try_wait().unwrap() {
@@ -129,11 +134,12 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     // Install & activate A1
     let manifest_a1 = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "exec-theme",
         "name": "Exec Theme",
         "version": "1.0.0",
-        "templates": { "home": "templates/home.html" },
+        "assets": ["assets/hero.png"],
+        "templates": [{ "kind": "home", "file": "home.html" }],
         "options": [
             { "key": "brand_title", "label": "Brand", "type": "string", "default": "Default", "public": true }
         ],
@@ -172,7 +178,7 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     let zip_a1 = build_zip(&[
         ("theme.json", &manifest_a1),
-        ("templates/home.html", b"<main>Home</main>"),
+        ("home.html", b"<main>Home{{ od_content() }}</main>"),
         ("assets/hero.png", &png),
     ]);
     let inst1 = client
@@ -223,7 +229,10 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     // 2. Dry-run all 4 groups, verify stale 412 + missing ack 422, then execute with run_id
     let plan: Value = client
-        .post(format!("{}/api/themes/exec-theme/import/dry-run", srv.base_url))
+        .post(format!(
+            "{}/api/themes/exec-theme/import/dry-run",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -238,7 +247,10 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
     // Missing ack -> 422
     assert_eq!(
         client
-            .post(format!("{}/api/themes/exec-theme/import/execute", srv.base_url))
+            .post(format!(
+                "{}/api/themes/exec-theme/import/execute",
+                srv.base_url
+            ))
             .header("Cookie", &cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &csrf)
@@ -259,7 +271,10 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
     // Stale plan_digest -> 412
     assert_eq!(
         client
-            .post(format!("{}/api/themes/exec-theme/import/execute", srv.base_url))
+            .post(format!(
+                "{}/api/themes/exec-theme/import/execute",
+                srv.base_url
+            ))
             .header("Cookie", &cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &csrf)
@@ -279,7 +294,10 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     // Valid execute with fixed run_id
     let exec_res = client
-        .post(format!("{}/api/themes/exec-theme/import/execute", srv.base_url))
+        .post(format!(
+            "{}/api/themes/exec-theme/import/execute",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -300,7 +318,10 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     // Idempotent retry with same run_id returns same outcome
     let retry_res = client
-        .post(format!("{}/api/themes/exec-theme/import/execute", srv.base_url))
+        .post(format!(
+            "{}/api/themes/exec-theme/import/execute",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -320,11 +341,12 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
 
     // 3. Upgrade A1 -> A2: logical provenance skips duplicates (0 created, 4 skipped)
     let manifest_a2 = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "exec-theme",
         "name": "Exec Theme",
         "version": "2.0.0",
-        "templates": { "home": "templates/home.html" },
+        "assets": ["assets/hero.png"],
+        "templates": [{ "kind": "home", "file": "home.html" }],
         "options": [
             { "key": "brand_title", "label": "Brand", "type": "string", "default": "Default", "public": true }
         ],
@@ -362,7 +384,7 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
     .unwrap();
     let zip_a2 = build_zip(&[
         ("theme.json", &manifest_a2),
-        ("templates/home.html", b"<main>Home v2</main>"),
+        ("home.html", b"<main>Home v2{{ od_content() }}</main>"),
         ("assets/hero.png", &png),
     ]);
     let inst2 = client
@@ -396,7 +418,10 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
     );
 
     let plan_a2: Value = client
-        .post(format!("{}/api/themes/exec-theme/import/dry-run", srv.base_url))
+        .post(format!(
+            "{}/api/themes/exec-theme/import/dry-run",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -408,7 +433,10 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
         .await
         .unwrap();
     let exec_a2: Value = client
-        .post(format!("{}/api/themes/exec-theme/import/execute", srv.base_url))
+        .post(format!(
+            "{}/api/themes/exec-theme/import/execute",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -467,11 +495,17 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
     // Simulate orphaned Phase 2 `files_verified` run sharing `media_id` (`already_existed: true`) + a non-shared file (`already_existed: false`),
     // then verify server startup recovery quarantines it, deletes only the non-shared file, and preserves `media_id`.
     let orphan_id = "deadbeefcafebabe00112233445566778899aabbccddeeff0011223344556677";
-    let orphan_dir = site_root.join("uploads").join("media").join(&orphan_id[..2]);
+    let orphan_dir = site_root
+        .join("uploads")
+        .join("media")
+        .join(&orphan_id[..2]);
     fs::create_dir_all(&orphan_dir).unwrap();
     let orphan_file = orphan_dir.join(format!("{orphan_id}.png"));
     fs::write(&orphan_file, b"orphan-bytes").unwrap();
-    let staging_dir = site_root.join("uploads").join(".staging").join("crash-run-p2");
+    let staging_dir = site_root
+        .join("uploads")
+        .join(".staging")
+        .join("crash-run-p2");
     fs::create_dir_all(&staging_dir).unwrap();
 
     let manifest_json = serde_json::to_string(&json!([
@@ -529,7 +563,10 @@ async fn sample_import_execute_g_recovery_idempotency_upgrade_and_crash_recovery
             .await
             .unwrap();
     assert_eq!(state, "quarantined");
-    assert!(!orphan_file.exists(), "non-shared orphan file should be deleted");
+    assert!(
+        !orphan_file.exists(),
+        "non-shared orphan file should be deleted"
+    );
     assert!(!staging_dir.exists(), "staging dir should be deleted");
 
     // Pre-existing shared hero.png MUST still exist on disk

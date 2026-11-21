@@ -133,7 +133,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
 
     // 3. Malicious ZIP corpus rejected before touching revisions/
     let bad_manifest =
-        br#"{"manifest_version":2,"theme_id":"bad-theme","name":"Bad","version":"1.0.0"}"#;
+        br#"{"manifest_version":3,"theme_id":"bad-theme","name":"Bad","version":"1.0.0","templates":[]}"#;
     for bad_zip in [
         build_zip(&[
             ("theme.json", bad_manifest, CompressionMethod::Stored),
@@ -158,7 +158,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
             .header("Content-Type", "application/zip")
             .header("Cookie", &cookie)
             .header("Cookie", &cookie)
-        .header("x-csrf-token", &csrf)
+            .header("x-csrf-token", &csrf)
             .body(bad_zip)
             .send()
             .await
@@ -170,7 +170,8 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
         assert_eq!(fs::read_dir(&rev_dir).unwrap().count(), 0);
     }
 
-    // 4. v1 ZIP still installs cleanly (no regression)
+    // 4. S02 rejects legacy v1 and v2 uploads instead of creating new
+    // revisions. Both paths remain covered as explicit compatibility guards.
     let v1_zip = build_zip(&[
         (
             "block.json",
@@ -192,21 +193,37 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
         .send()
         .await
         .unwrap();
-    assert_eq!(v1_resp.status(), 201);
+    assert_eq!(v1_resp.status(), 400);
 
-    // 5. v2 ZIP install (1.0.0) succeeds without auto-activating
+    let v2_zip = build_zip(&[
+        ("theme.json", br#"{"manifest_version":2,"theme_id":"old-v2","name":"Old V2","version":"1.0.0","templates":{"single":"templates/single.html"}}"#, CompressionMethod::Deflated),
+        ("templates/single.html", b"<article>{{ entry.title }}</article>", CompressionMethod::Deflated),
+    ]);
+    let v2_resp = client
+        .post(format!("{}/api/admin/themes", srv.base_url))
+        .header("Content-Type", "application/zip")
+        .header("Cookie", &cookie)
+        .header("x-csrf-token", &csrf)
+        .body(v2_zip)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(v2_resp.status(), 400);
+
+    // 5. v3 ZIP install (1.0.0) succeeds without auto-activating
     let m1 = br#"{
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "editorial-clean",
         "name": "Editorial Clean",
         "version": "1.0.0",
-        "templates": { "single": "templates/single.html" }
+        "assets": ["assets/style.css"],
+        "templates": [{ "kind": "single", "file": "single.html" }]
     }"#;
     let zip_v2_a = build_zip(&[
         ("theme.json", m1, CompressionMethod::Deflated),
         (
-            "templates/single.html",
-            b"<article>{{ entry.title }}</article>",
+            "single.html",
+            b"<article>{{ entry.title }}{{ od_content() }}</article>",
             CompressionMethod::Deflated,
         ),
         (
@@ -242,19 +259,19 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
         .unwrap();
     assert_eq!(reinstall_a.status(), 200);
 
-    // 6. Install v2 2.0.0, then test If-Match guards + activation + rollback
+    // 6. Install v3 2.0.0, then test If-Match guards + activation + rollback
     let m2 = br#"{
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "editorial-clean",
         "name": "Editorial Clean",
         "version": "2.0.0",
-        "templates": { "single": "templates/single.html" }
+        "templates": [{ "kind": "single", "file": "single.html" }]
     }"#;
     let zip_v2_b = build_zip(&[
         ("theme.json", m2, CompressionMethod::Deflated),
         (
-            "templates/single.html",
-            b"<main>{{ entry.title }}</main>",
+            "single.html",
+            b"<main>{{ entry.title }}{{ od_content() }}</main>",
             CompressionMethod::Deflated,
         ),
     ]);
@@ -320,13 +337,14 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
     assert_eq!(act_b.status(), 200);
     assert_eq!(act_b.headers().get("etag").unwrap(), "\"v3\"");
 
-    // 7. Revision containing declarations is rejected from activation (422) without mutating active
+    // 7. An installed revision attempting to redeclare a protected core CPT
+    // must fail activation atomically (409) without advancing active CAS.
     let m_decl = br#"{
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "editorial-clean",
         "name": "Editorial Clean",
         "version": "3.0.0",
-        "declarations": { "content_types": [{"key": "portfolio"}] }
+        "declarations": { "content_types": [{"key": "post", "label": "Builtin override"}] }
     }"#;
     let zip_decl = build_zip(&[("theme.json", m_decl, CompressionMethod::Deflated)]);
     let install_decl = client
@@ -353,7 +371,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
         .send()
         .await
         .unwrap();
-    assert_eq!(act_decl.status(), 422);
+    assert_eq!(act_decl.status(), 409);
     let decl_err = act_decl.text().await.unwrap();
     assert!(!decl_err.is_empty());
 
@@ -393,7 +411,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
     // Non-asset / manifest / template / traversal blocked with 404
     for blocked in [
         format!("{}/theme/{digest_a}/theme.json", srv.base_url),
-        format!("{}/theme/{digest_a}/templates/single.html", srv.base_url),
+        format!("{}/theme/{digest_a}/single.html", srv.base_url),
         format!("{}/theme/{digest_a}/../style.css", srv.base_url),
     ] {
         let r = anon.get(blocked).send().await.unwrap();

@@ -73,7 +73,12 @@ async fn spawn_server() -> TestServer {
     spawn_server_at(site_root, true).await
 }
 
-async fn login(client: &Client, base_url: &str, username: &str, password: &str) -> (String, String) {
+async fn login(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> (String, String) {
     let resp = client
         .post(format!("{base_url}/auth/login"))
         .json(&json!({ "username": username, "password": password }))
@@ -94,26 +99,23 @@ async fn login(client: &Client, base_url: &str, username: &str, password: &str) 
     (cookie, csrf)
 }
 
-fn build_theme_v2_zip(id: &str, header_html: &str, single_html: &str) -> Vec<u8> {
+fn build_theme_v3_zip(id: &str, header_html: &str, single_html: &str) -> Vec<u8> {
     let mut buf = Vec::new();
     {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = serde_json::json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": id,
             "name": id,
             "version": "1.0.0",
-            "templates": {
-                "header": "templates/header.html",
-                "single": "templates/single.html"
-            }
+            "templates": [{ "kind": "single", "file": "single.html" }], "parts": { "header": "header.html" }
         });
         zip.start_file("theme.json", opts).unwrap();
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("templates/header.html", opts).unwrap();
+        zip.start_file("header.html", opts).unwrap();
         zip.write_all(header_html.as_bytes()).unwrap();
-        zip.start_file("templates/single.html", opts).unwrap();
+        zip.start_file("single.html", opts).unwrap();
         zip.write_all(single_html.as_bytes()).unwrap();
         zip.finish().unwrap();
     }
@@ -161,12 +163,24 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .send()
         .await
         .unwrap();
-    assert!(setup.status().is_success(), "setup failed: {}", setup.status());
+    assert!(
+        setup.status().is_success(),
+        "setup failed: {}",
+        setup.status()
+    );
     let (cookie, csrf) = login(&client, &srv.base_url, "admin", "AdminPassword123!").await;
 
     // 2. Install & activate theme A and theme B
-    let zip_a = build_theme_v2_zip("theme-a", "<header>ThemeA Header</header>", "<article>{{ entry.title }}</article>");
-    let zip_b = build_theme_v2_zip("theme-b", "<header>ThemeB Header</header>", "<article>B:{{ entry.title }}</article>");
+    let zip_a = build_theme_v3_zip(
+        "theme-a",
+        "<header>ThemeA Header</header>",
+        "<article>{{ entry.title }}{{ od_content() }}</article>",
+    );
+    let zip_b = build_theme_v3_zip(
+        "theme-b",
+        "<header>ThemeB Header</header>",
+        "<article>B:{{ entry.title }}{{ od_content() }}</article>",
+    );
     let mut rev_ids = Vec::new();
     for zip_bytes in [zip_a, zip_b] {
         let res = client
@@ -202,7 +216,10 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         ("Secret Draft", "secret-draft", false),
     ] {
         let created = client
-            .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+            .post(format!(
+                "{}/api/admin/content-types/post/entries",
+                srv.base_url
+            ))
             .header("Cookie", &cookie)
             .header("Origin", &origin)
             .header("X-CSRF-Token", &csrf)
@@ -215,7 +232,10 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         let id = body["id"].as_i64().unwrap();
         if publish {
             let pub_res = client
-                .post(format!("{}/api/admin/content-types/post/entries/{id}/publication", srv.base_url))
+                .post(format!(
+                    "{}/api/admin/content-types/post/entries/{id}/publication",
+                    srv.base_url
+                ))
                 .header("Cookie", &cookie)
                 .header("Origin", &origin)
                 .header("X-CSRF-Token", &csrf)
@@ -228,39 +248,49 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         }
     }
 
-    // 4. Reject `home` override (homepage remains authoritative)
-    let home_rej = client
-        .get(format!("{}/api/admin/builder/overrides/home", srv.base_url))
-        .header("Cookie", &cookie)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(home_rej.status(), 400);
-
-    // 5. Unauthenticated preview must be 401; missing CSRF must be 403
+    // 4. The new typed API rejects malformed canonical targets; Home itself
+    // is now a valid template identity, unlike the removed legacy endpoint.
     let header_preview_doc = doc_with_heading("hdr-1", "Unsaved Preview Header", None);
-    let unauth_prev = client
-        .post(format!("{}/api/admin/builder/overrides/header/preview", srv.base_url))
-        .header("Origin", &origin)
-        .json(&header_preview_doc)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(unauth_prev.status(), 401);
-
-    let no_csrf_prev = client
-        .post(format!("{}/api/admin/builder/overrides/header/preview", srv.base_url))
+    let invalid_target = client
+        .put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
-        .json(&header_preview_doc)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "target": {"kind": "part", "part_key": "header", "entry_id": 1},
+            "document": &header_preview_doc
+        }))
         .send()
         .await
         .unwrap();
-    assert_eq!(no_csrf_prev.status(), 403);
+    assert_eq!(invalid_target.status(), 400);
 
-    // 6. Preview without Save renders unsaved header but does NOT leak to public
-    let prev_res = client
-        .post(format!("{}/api/admin/builder/overrides/header/preview", srv.base_url))
+    // 5. Authentication and CSRF continue to protect the typed override API.
+    let unauth_list = client
+        .get(format!("{}/api/admin/template-overrides", srv.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unauth_list.status(), 401);
+    let no_csrf_put = client
+        .put(format!("{}/api/admin/template-overrides", srv.base_url))
+        .header("Cookie", &cookie)
+        .header("Origin", &origin)
+        .json(&json!({"target":{"kind":"part","part_key":"header"},
+                      "document":&header_preview_doc}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(no_csrf_put.status(), 403);
+
+    // 6. Unsaved document remains client-owned; public markup and persisted
+    // template catalog must not contain its private draft. Legacy preview route
+    // was removed under S02 and must not execute arbitrary Builder documents.
+    let retired_preview = client
+        .post(format!(
+            "{}/api/admin/builder/overrides/header/preview",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)
@@ -268,11 +298,17 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .send()
         .await
         .unwrap();
-    assert_eq!(prev_res.status(), 200);
-    assert_eq!(prev_res.headers().get("cache-control").unwrap(), "no-store");
-    let prev_json: Value = prev_res.json().await.unwrap();
-    assert!(prev_json["html"].as_str().unwrap().contains("Unsaved Preview Header"));
-
+    assert_eq!(retired_preview.status(), 404);
+    let saved_before: Value = client
+        .get(format!("{}/api/admin/template-overrides", srv.base_url))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(saved_before["items"].as_array().unwrap().len(), 0);
     let public_post_1 = client
         .get(format!("{}/content/post/first-post", srv.base_url))
         .send()
@@ -284,48 +320,51 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
     assert!(!public_post_1.contains("Unsaved Preview Header"));
     assert!(public_post_1.contains("ThemeA Header"));
 
-    // 7. Save header override -> CAS checks (428 / 412)
+    // 7. Saving site-owned Header is a typed part target. CAS stays 428/412.
     let header_v1_doc = doc_with_heading("hdr-1", "Site Header v1", None);
+    let header_target = json!({"kind":"part","part_key":"header"});
     let save_h1 = client
-        .put(format!("{}/api/admin/builder/overrides/header", srv.base_url))
+        .put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)
-        .json(&header_v1_doc)
+        .json(&json!({"target":&header_target,"document":&header_v1_doc}))
         .send()
         .await
         .unwrap();
-    assert_eq!(save_h1.status(), 200);
+    assert_eq!(save_h1.status(), 201);
     let h1_json: Value = save_h1.json().await.unwrap();
     assert_eq!(h1_json["version"], 1);
+    assert_eq!(h1_json["canonical_target_key"], "part:header");
+    let header_override_id = h1_json["id"].as_i64().unwrap();
 
-    // Missing If-Match on existing override -> 428
     let missing_cas = client
-        .put(format!("{}/api/admin/builder/overrides/header", srv.base_url))
+        .put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)
-        .json(&doc_with_heading("hdr-1", "Site Header v2", None))
+        .json(&json!({"target":&header_target,
+                      "document":doc_with_heading("hdr-1", "Site Header v2", None)}))
         .send()
         .await
         .unwrap();
     assert_eq!(missing_cas.status(), 428);
-
-    // Stale If-Match -> 412
     let stale_cas = client
-        .put(format!("{}/api/admin/builder/overrides/header", srv.base_url))
+        .put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)
         .header("If-Match", "\"v99\"")
-        .json(&doc_with_heading("hdr-1", "Site Header v2", None))
+        .json(&json!({"target":&header_target,
+                      "document":doc_with_heading("hdr-1", "Site Header v2", None)}))
         .send()
         .await
         .unwrap();
     assert_eq!(stale_cas.status(), 412);
 
-    // 8. Save single override with RouteContext binding (dynamic title across entries)
-    let single_doc = doc_with_heading(
+    // 8. Typed Single(post) still resolves RouteContext title per published
+    // entry. It must contain exactly one core/content_slot under S02.
+    let mut single_doc = doc_with_heading(
         "sng-title",
         "Fallback Title",
         Some(json!({
@@ -335,16 +374,30 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
             "target": "text"
         })),
     );
+    single_doc["sections"][0]["children"][0]["children"][0]["children"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({
+            "id":"entry-slot","type":"core/content_slot","props":{}
+        }));
     let save_single = client
-        .put(format!("{}/api/admin/builder/overrides/single?type_key=post", srv.base_url))
+        .put(format!("{}/api/admin/template-overrides", srv.base_url))
         .header("Cookie", &cookie)
         .header("Origin", &origin)
         .header("X-CSRF-Token", &csrf)
-        .json(&single_doc)
+        .json(&json!({
+            "target":{"kind":"single","content_type":"post"},
+            "document":&single_doc
+        }))
         .send()
         .await
         .unwrap();
-    assert_eq!(save_single.status(), 200);
+    assert_eq!(
+        save_single.status(),
+        201,
+        "{:?}",
+        save_single.text().await.ok()
+    );
 
     // Both published posts render their own dynamic title + Site Header v1; draft post stays 404
     let body1 = client
@@ -404,34 +457,46 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
     assert!(body1_after_restart.contains("Site Header v1"));
     assert!(body1_after_restart.contains("First Post"));
 
-    // 10. Re-login on restarted server and test Reset confirmation + CAS
+    // 10. Reset requires a fresh version, deletes only the typed Header
+    // override, and reveals the currently active Theme B part.
     let (cookie2, csrf2) = login(&client, &srv2.base_url, "admin", "AdminPassword123!").await;
-
-    // Reset without confirm=true -> 400
-    let reset_no_confirm = client
-        .post(format!("{}/api/admin/builder/overrides/header/reset", srv2.base_url))
+    let reset_url = format!(
+        "{}/api/admin/template-overrides/{header_override_id}/reset",
+        srv2.base_url
+    );
+    let reset_without_match = client
+        .post(&reset_url)
         .header("Cookie", &cookie2)
         .header("Origin", &srv2.base_url)
         .header("X-CSRF-Token", &csrf2)
-        .header("If-Match", "\"v1\"")
-        .json(&json!({ "confirm": false }))
         .send()
         .await
         .unwrap();
-    assert_eq!(reset_no_confirm.status(), 400);
-
-    // Reset with confirm=true and valid CAS -> 200, falls back to ThemeB Header
+    assert_eq!(reset_without_match.status(), 428);
+    let reset_stale = client
+        .post(&reset_url)
+        .header("Cookie", &cookie2)
+        .header("Origin", &srv2.base_url)
+        .header("X-CSRF-Token", &csrf2)
+        .header("If-Match", "\"v99\"")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reset_stale.status(), 412);
     let reset_ok = client
-        .post(format!("{}/api/admin/builder/overrides/header/reset", srv2.base_url))
+        .post(&reset_url)
         .header("Cookie", &cookie2)
         .header("Origin", &srv2.base_url)
         .header("X-CSRF-Token", &csrf2)
         .header("If-Match", "\"v1\"")
-        .json(&json!({ "confirm": true }))
         .send()
         .await
         .unwrap();
     assert_eq!(reset_ok.status(), 200);
+    let reset: Value = reset_ok.json().await.unwrap();
+    assert_eq!(reset["canonical_target_key"], "part:header");
+    assert_eq!(reset["next_effective_source"]["kind"], "active_theme");
+    assert_eq!(reset["next_effective_source"]["target_key"], "part:header");
 
     let body1_after_reset = client
         .get(format!("{}/content/post/first-post", srv2.base_url))

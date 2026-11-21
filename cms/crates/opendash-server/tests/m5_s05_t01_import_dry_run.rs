@@ -57,7 +57,12 @@ async fn spawn_server_at(site_root: PathBuf, run_setup: bool) -> TestServer {
 
     let client = Client::new();
     for _ in 0..80 {
-        if client.get(format!("{base_url}/api/health")).send().await.is_ok() {
+        if client
+            .get(format!("{base_url}/api/health"))
+            .send()
+            .await
+            .is_ok()
+        {
             break;
         }
         if let Some(status) = child.try_wait().unwrap() {
@@ -82,7 +87,12 @@ async fn spawn_server_at(site_root: PathBuf, run_setup: bool) -> TestServer {
     TestServer { base_url, child }
 }
 
-async fn login(client: &Client, base_url: &str, username: &str, password: &str) -> (String, String) {
+async fn login(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> (String, String) {
     let res = client
         .post(format!("{base_url}/auth/login"))
         .json(&json!({ "username": username, "password": password }))
@@ -116,7 +126,8 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
 
     let srv = spawn_server_at(site_root.clone(), true).await;
     let client = Client::new();
-    let (admin_cookie, admin_csrf) = login(&client, &srv.base_url, "admin", "AdminPassword123!").await;
+    let (admin_cookie, admin_csrf) =
+        login(&client, &srv.base_url, "admin", "AdminPassword123!").await;
 
     // Create an Editor user to verify RBAC (403)
     let ed_res = client
@@ -137,11 +148,12 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
 
     // Install & activate theme with sample manifest
     let manifest = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "sample-theme",
         "name": "Sample Theme",
         "version": "1.0.0",
-        "templates": { "home": "templates/home.html" },
+        "assets": ["assets/hero.png", "assets/logo.png"],
+        "templates": [{ "kind": "home", "file": "home.html" }],
         "options": [
             { "key": "brand_title", "label": "Brand", "type": "string", "default": "OpenDash", "public": true }
         ],
@@ -191,7 +203,7 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
     .unwrap();
     let zip = build_zip(&[
         ("theme.json", &manifest),
-        ("templates/home.html", b"<main>Home</main>"),
+        ("home.html", b"<main>Home{{ od_content() }}</main>"),
         ("assets/hero.png", b"\x89PNG\r\n\x1a\nHERO"),
         ("assets/logo.png", b"\x89PNG\r\n\x1a\nLOGO"),
     ]);
@@ -225,7 +237,10 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
 
     // 1. RBAC: Guest -> 401, Editor -> 403
     let guest_res = client
-        .post(format!("{}/api/themes/sample-theme/import/dry-run", srv.base_url))
+        .post(format!(
+            "{}/api/themes/sample-theme/import/dry-run",
+            srv.base_url
+        ))
         .json(&json!({ "groups": ["pages"] }))
         .send()
         .await
@@ -233,7 +248,10 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
     assert_eq!(guest_res.status(), 401);
 
     let ed_try = client
-        .post(format!("{}/api/themes/sample-theme/import/dry-run", srv.base_url))
+        .post(format!(
+            "{}/api/themes/sample-theme/import/dry-run",
+            srv.base_url
+        ))
         .header("Cookie", &ed_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &ed_csrf)
@@ -245,7 +263,10 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
 
     // 2. Selecting `pages` without `media` reports unselected dependency instead of pulling media
     let partial_plan: Value = client
-        .post(format!("{}/api/themes/sample-theme/import/dry-run", srv.base_url))
+        .post(format!(
+            "{}/api/themes/sample-theme/import/dry-run",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -256,9 +277,21 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
         .json()
         .await
         .unwrap();
-    assert_eq!(partial_plan["unselected_dependencies"].as_array().unwrap().len(), 1);
-    assert_eq!(partial_plan["unselected_dependencies"][0]["required_group"], "media");
-    assert_eq!(partial_plan["unselected_dependencies"][0]["object_key"], "hero");
+    assert_eq!(
+        partial_plan["unselected_dependencies"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        partial_plan["unselected_dependencies"][0]["required_group"],
+        "media"
+    );
+    assert_eq!(
+        partial_plan["unselected_dependencies"][0]["object_key"],
+        "hero"
+    );
     let home_item = partial_plan["items"]
         .as_array()
         .unwrap()
@@ -269,7 +302,10 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
 
     // 3. Running dry-run twice with all groups produces identical `plan_digest`
     let plan1: Value = client
-        .post(format!("{}/api/themes/sample-theme/import/dry-run", srv.base_url))
+        .post(format!(
+            "{}/api/themes/sample-theme/import/dry-run",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -281,7 +317,10 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
         .await
         .unwrap();
     let plan2: Value = client
-        .post(format!("{}/api/themes/sample-theme/import/dry-run", srv.base_url))
+        .post(format!(
+            "{}/api/themes/sample-theme/import/dry-run",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -297,7 +336,10 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
 
     // 4. Create site conflict on `about-us` + tombstone on `logo` + provenance on `brand_setting`
     let site_page = client
-        .post(format!("{}/api/admin/content-types/page/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/page/entries",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -345,7 +387,10 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
     let (admin_cookie2, admin_csrf2) =
         login(&client, &srv2.base_url, "admin", "AdminPassword123!").await;
     let plan3: Value = client
-        .post(format!("{}/api/themes/sample-theme/import/dry-run", srv2.base_url))
+        .post(format!(
+            "{}/api/themes/sample-theme/import/dry-run",
+            srv2.base_url
+        ))
         .header("Cookie", &admin_cookie2)
         .header("Origin", &srv2.base_url)
         .header("X-CSRF-Token", &admin_csrf2)
@@ -369,7 +414,10 @@ async fn sample_import_dry_run_selects_groups_reports_deps_conflicts_and_stays_r
     assert_eq!(find_item("media", "logo")["action"], "skip");
     assert_eq!(find_item("media", "logo")["reason"], "tombstone_exists");
     assert_eq!(find_item("settings", "brand_setting")["action"], "skip");
-    assert_eq!(find_item("settings", "brand_setting")["reason"], "already_imported");
+    assert_eq!(
+        find_item("settings", "brand_setting")["reason"],
+        "already_imported"
+    );
     assert_eq!(find_item("pages", "home_page")["action"], "create");
 
     drop(srv2);
