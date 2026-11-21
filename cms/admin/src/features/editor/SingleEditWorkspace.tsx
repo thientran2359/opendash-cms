@@ -719,12 +719,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <button type="button" className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
-          onClick={() => onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)))}>
-          ← Về danh sách
-        </button>
-      </div>
       {statusNote && (
         <div className={statusNote.includes('(412)') || statusNote.includes('(409)')
           ? 'rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800'

@@ -386,8 +386,8 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         case 'publish_box':
           return (
             <div className="space-y-3.5">
-              {/* Top secondary bar: Save Draft + Preview / View */}
-              {((isDraftPublish && publicationStatus === 'draft') || draftPreviewPath || publicPath) && (
+              {/* Top secondary bar: Save Draft + Draft Preview (only for drafts) */}
+              {((isDraftPublish && publicationStatus === 'draft') || draftPreviewPath) && (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   {isDraftPublish && publicationStatus === 'draft' ? (
                     <button
@@ -399,16 +399,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                       {saving ? 'Đang lưu...' : 'Lưu nháp'}
                     </button>
                   ) : <span />}
-                  {publicPath ? (
-                    <a
-                      href={publicPath}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 no-underline transition-colors hover:border-zinc-400 hover:bg-zinc-50"
-                    >
-                      {config.type_key === 'page' ? 'Xem trang' : config.type_key === 'post' ? 'Xem bài viết' : 'Xem nội dung'}
-                    </a>
-                  ) : draftPreviewPath ? (
+                  {draftPreviewPath && (
                     <a
                       href={draftPreviewPath}
                       target="_blank"
@@ -417,7 +408,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                     >
                       Xem trước nháp
                     </a>
-                  ) : null}
+                  )}
                 </div>
               )}
 
@@ -529,6 +520,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
             <div data-testid="single-edit-terms">
               <TermPicker userId={userId} selectedIds={termIds} disabled={saving}
                 typeKey={config.type_key} allowedKinds={config.taxonomies}
+                variant="cards"
                 onApiError={onApiError} onChange={onTermIdsChange} />
             </div>
           ) : null;
@@ -589,15 +581,16 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         .filter(p => p.placement.enabled)
         .map(proj => {
           const isCollapsed = collapsedPanels[proj.panel.panel_id] ?? proj.placement.collapsed_by_default;
-          const isTitlePanel =
-            proj.panel.kind.kind === 'core_built_in' && proj.panel.kind.core_key === 'title_slug';
+          const isChromelessPanel =
+            proj.panel.kind.kind === 'core_built_in' &&
+            (proj.panel.kind.core_key === 'title_slug' || proj.panel.kind.core_key === 'taxonomies');
           return (
             <section
               key={proj.panel.panel_id}
-              className={isTitlePanel ? '' : 'rounded-xl border border-zinc-200 bg-white p-4 shadow-2xs'}
+              className={isChromelessPanel ? '' : 'rounded-xl border border-zinc-200 bg-white p-4 shadow-2xs'}
               data-panel-id={proj.panel.panel_id}
             >
-              {!isTitlePanel && (
+              {!isChromelessPanel && (
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-zinc-900">{proj.panel.title}</h3>
                   {proj.panel.collapsible && (
@@ -612,7 +605,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   )}
                 </div>
               )}
-              {!isCollapsed && <div className={isTitlePanel ? '' : 'mt-3'}>{renderPanelBody(proj)}</div>}
+              {!isCollapsed && <div className={isChromelessPanel ? '' : 'mt-3'}>{renderPanelBody(proj)}</div>}
             </section>
           );
         })}
