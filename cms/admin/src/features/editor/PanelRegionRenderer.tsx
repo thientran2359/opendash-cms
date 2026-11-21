@@ -293,8 +293,42 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
             </div>
           );
         }
-        case 'body_editor':
-          return renderField('body');
+        case 'body_editor': {
+          const rawBody = clearedFields.includes('body') ? '' : values.body;
+          const hasOdBlocks = typeof rawBody === 'string' && rawBody.includes('<!-- od:');
+          return (
+            <div className="space-y-2.5">
+              {(canOpenBuilder || hasOdBlocks) && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+                    {hasOdBlocks ? (
+                      <span
+                        data-testid="od-blocks-badge"
+                        className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-900 ring-1 ring-inset ring-sky-200"
+                      >
+                        Chứa khối UX Builder (&lt;!-- od:... --&gt;)
+                      </span>
+                    ) : (
+                      <span>Có thể chỉnh trực tiếp hoặc mở UX Builder trực quan.</span>
+                    )}
+                  </div>
+                  {canOpenBuilder && (
+                    <button
+                      type="button"
+                      data-testid="open-ux-builder-toolbar"
+                      onClick={onOpenBuilder}
+                      disabled={saving}
+                      className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 shadow-2xs transition-colors hover:border-zinc-400 hover:bg-zinc-100 disabled:opacity-50"
+                    >
+                      Sửa với UX Builder
+                    </button>
+                  )}
+                </div>
+              )}
+              {renderField('body')}
+            </div>
+          );
+        }
         case 'featured_image': {
           const eff = config.effective_fields.featured_image;
           if (!eff) return null;
@@ -569,7 +603,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   onClick={onOpenBuilder}
                   className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50"
                 >
-                  Mở Visual Builder
+                  Sửa với UX Builder
                 </button>
               )}
 

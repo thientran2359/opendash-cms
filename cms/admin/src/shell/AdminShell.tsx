@@ -110,10 +110,10 @@ function buildMenuTree(
       adminOnly: true,
     },
     {
-      id: 'builder',
-      label: 'Visual Builder',
+      id: 'studio',
+      label: 'OpenDash Studio',
       icon: 'builder',
-      hash: '#/builder',
+      hash: '#/studio',
       group: 'appearance',
       adminOnly: true,
     },
@@ -277,6 +277,7 @@ interface AdminShellProps {
   menusContent: React.ReactNode;
   themeOptionsContent: React.ReactNode;
   libraryContent: React.ReactNode;
+  studioContent?: React.ReactNode;
 }
 
 export const AdminShell: React.FC<AdminShellProps> = ({
@@ -286,7 +287,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   sidebarContent, previewContent, contentContent, schemaSettingsContent,
   postsContent, pagesContent, patternsContent, mediaContent, taxonomyContent, dashboardContent,
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
-  menusContent, themeOptionsContent, libraryContent,
+  menusContent, themeOptionsContent, libraryContent, studioContent,
 }) => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -300,8 +301,8 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           ? 'schema' : 'posts')
         : route.view === 'profile'
           ? 'users'
-          : route.view === 'builder'
-            ? 'builder'
+          : route.view === 'builder' || route.view === 'studio'
+            ? 'studio'
             : route.view === 'themes'
               ? (route.sub === 'options' || route.sub === 'menus' ? 'theme-options' : 'themes')
               : route.view === 'settings' && route.sub === 'content-types'
@@ -355,7 +356,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
       ? (route.taxonomyMode === 'definitions' || (route.taxonomyKind !== 'category' && route.taxonomyKind !== 'tag')
         ? '#/taxonomy/definitions' : `#/posts/${route.taxonomyKind === 'tag' ? 'tags' : 'categories'}`) :
     route.view === 'profile' ? '#/users/profile' :
-    route.view === 'builder' ? '#/builder' :
+    route.view === 'builder' || route.view === 'studio' ? '#/studio' :
     route.view === 'tools' ? `#/tools/${route.sub}` :
     route.view === 'settings'
       ? (route.sub === 'content-types' ? '#/appearance/content-types' : `#/settings/${route.sub}`) :
@@ -388,17 +389,21 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const customCptTypes = cptTypes.filter(
     ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
   );
-  // PatternsPage and TemplateLibraryPage own their own <main> landmark.
+  const isStudioView = Boolean(
+    user && !routeForbidden && (route.view === 'studio' || route.view === 'studio-entry'),
+  );
+  // PatternsPage, TemplateLibraryPage, and Studio own their own <main> landmark.
   const routeOwnsMain = Boolean(
     user && !routeForbidden && (
       route.view === 'patterns' ||
+      route.view === 'studio' ||
+      route.view === 'studio-entry' ||
       (route.view === 'themes' && route.sub === 'library')
     ),
   );
-  // Keep the Builder subtree mounted through a transient 401/login cycle so
-  // its quarantined, unsaved AST survives same-account reauthentication.
-  // The admin layout is hidden while logged out, so its <main> is not an
-  // additional visible landmark beside the public login screen.
+  // Keep the Builder/Editor subtree mounted through a transient 401/login cycle so
+  // its quarantined, unsaved drafts survive same-account reauthentication.
+  // The admin layout is hidden while logged out or inside fullscreen Studio.
   const PageContainerTag: 'main' | 'div' = routeOwnsMain ? 'div' : 'main';
   const postsLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
   const pagesLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
@@ -423,7 +428,17 @@ export const AdminShell: React.FC<AdminShellProps> = ({
         </main>
       )}
 
-      <div className={user ? 'od-layout' : 'hidden'} data-testid="admin-layout">
+      {studioContent && (
+        <div
+          className={isStudioView ? 'h-screen w-screen overflow-hidden bg-zinc-100' : 'hidden'}
+          data-testid="studio-shell"
+          aria-hidden={!isStudioView}
+        >
+          {studioContent}
+        </div>
+      )}
+
+      <div className={user && !isStudioView ? 'od-layout' : 'hidden'} data-testid="admin-layout" aria-hidden={!user || isStudioView}>
         {mobileOpen && <button type="button" className="od-drawer-overlay" aria-label="Đóng menu" onClick={() => setMobileOpen(false)} />}
         <aside id="admin-navigation" className={'od-sidebar ' + (mobileOpen ? 'od-sidebar-open' : '')} aria-label="Điều hướng quản trị">
           <div className="od-brand flex items-center gap-2.5 px-4 py-3.5">
