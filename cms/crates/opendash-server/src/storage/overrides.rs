@@ -888,6 +888,15 @@ async fn validate_typed_document_in_tx(
     document
         .validate_for_save(&state.descriptors()?, prior)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
+    // S02 stores synchronized Pattern references per content entry through
+    // entry_pattern_refs. Shared template overrides have no such ownership or
+    // public-media projection, so accepting a PatternRef here would silently
+    // hide its markup on public pages. Keep these blocks entry-scoped.
+    if !builder::pattern_ids(document).is_empty() {
+        return Err(ApiError::bad_request(
+            "Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.",
+        ));
+    }
     let route_role = match target.kind {
         TemplateCandidateKind::Single
         | TemplateCandidateKind::SingleCustom

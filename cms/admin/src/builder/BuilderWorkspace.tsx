@@ -353,6 +353,9 @@ export function BuilderWorkspace({
   };
 
   const add = (parentId: string | null, kind: NodeKind) => {
+    if (!scopedEntry && kind === 'element' && elementType === 'core/pattern_ref') {
+      return message('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+    }
     if (scopedPattern && kind === 'element' && (elementType === 'core/pattern_ref' || elementType === 'core/list')) {
       return message('Pattern không được chứa Reusable Pattern hoặc Danh sách nội dung.', true);
     }
@@ -460,6 +463,10 @@ export function BuilderWorkspace({
     const refs = allNodes(draftRef.current).filter(node =>
       node.kind === 'element' && (node.node as import('./document.ts').BuilderElement).type === 'core/pattern_ref')
       .map(node => Number((node.node as import('./document.ts').BuilderElement).props.pattern_id));
+    if (!scopedEntry && refs.length > 0) {
+      message('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+      return;
+    }
     if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
       message('Mỗi Reusable Pattern cần một Pattern hợp lệ; tối đa 16 Pattern duy nhất trên một trang.', true);
       return;
@@ -722,11 +729,13 @@ export function BuilderWorkspace({
             <label htmlFor="builder-element-type" className="text-xs text-slate-500">Element mới</label>
             <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
               value={elementType} onChange={event => setElementType(event.target.value as InsertableElementType)}>
-              {ELEMENT_TYPES.filter(type => !scopedPattern || (type !== 'core/pattern_ref' && type !== 'core/list'))
+              {ELEMENT_TYPES.filter(type =>
+                (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
+                && (!scopedPattern || type !== 'core/list'))
                 .map(type => <option key={type} value={type}>{type === 'core/pattern_ref' ? 'Reusable Pattern' : type}</option>)}
             </select>
           </div>
-          {!scopedPattern && <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-pattern-help">
+          {scopedEntry && !scopedPattern && <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-pattern-help">
             <strong className="text-xs">Reusable Pattern</strong>
             <p className="mt-1 text-xs text-slate-600">Chọn “Reusable Pattern” ở Element mới, thêm vào Column, rồi chọn Pattern trong Inspector để tham chiếu đồng bộ.</p>
             <p className="mt-1 text-xs text-slate-600">{patternsLoaded ? `${patterns.length} Pattern sẵn dùng` : 'Đang tải danh sách Pattern…'}</p>

@@ -337,6 +337,21 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
     let ref_doc = document(json!({
         "id":"shared","type":"core/pattern_ref","props":{"pattern_id":pattern_id}
     }));
+    // The 1-hop reference projection belongs to entry Builder only. Shared
+    // overrides must reject the block rather than save a silently missing CTA.
+    let shared_override = http
+        .put(format!("{}/api/admin/template-overrides", site.base))
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, &site.base)
+        .header("X-CSRF-Token", &csrf)
+        .json(&json!({
+            "target": {"kind": "part", "part_key": "header"},
+            "document": ref_doc
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(shared_override.status(), StatusCode::BAD_REQUEST);
     let first_id = create_page(&http, &site, &cookie, &csrf, "pattern-home").await;
     let second_id = create_page(&http, &site, &cookie, &csrf, "pattern-contact").await;
     let third_id = create_page(&http, &site, &cookie, &csrf, "pattern-about").await;
