@@ -1,3 +1,4 @@
+//! S02 typed resolver/migration regression tests.
 use std::{
     collections::BTreeMap,
     fs,
@@ -5,13 +6,24 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use opendash_core::{
+    builder::BuilderDocument,
+    theme::{TemplateCandidate, TemplateCandidateKind as Kind},
+};
+use serde_json::json;
 use sqlx::{
     SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
 
-use super::*;
-use crate::storage::{builder, init_db, page};
+use crate::storage::{
+    init_db, media_refs,
+    overrides::{
+        PublicTemplateContext, TemplateResolution, build_candidates, get_typed_override,
+        reset_typed_override, resolve_template_2axis, save_typed_override,
+    },
+    public_content,
+};
 
 struct TempDirGuard(PathBuf);
 
@@ -22,7 +34,7 @@ impl TempDirGuard {
             .unwrap()
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "opendash-m5-s01-t01-{label}-{}-{nanos}",
+            "opendash-s02-theme-{label}-{}-{nanos}",
             std::process::id()
         ));
         fs::create_dir_all(&path).unwrap();
@@ -33,7 +45,6 @@ impl TempDirGuard {
         &self.0
     }
 }
-
 impl Drop for TempDirGuard {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
@@ -52,299 +63,408 @@ async fn connect_file_pool(db_path: &Path) -> SqlitePool {
         .unwrap()
 }
 
-/// Apply only migrations 0001..=0014 to simulate an existing M3/M4 database before M5.
-async fn run_pre_0015_migrations(db: &SqlitePool) {
-    let migrations_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
-    let mut migrator = sqlx::migrate::Migrator::new(migrations_dir).await.unwrap();
-    migrator.migrations.to_mut().retain(|m| m.version <= 14);
-    migrator.run(db).await.unwrap();
+fn target(kind: Kind) -> TemplateCandidate {
+    TemplateCandidate::new(kind)
+}
+
+fn one_part(part_key: &str) -> BuilderDocument {
+    serde_json::from_value(json!({
+        "schema_version":1,
+        "sections":[{
+            "id":"section-main",
+            "children":[{
+                "id":"row-main",
+                "children":[{
+                    "id":"column-main",
+                    "children":[{
+                        "id":"part-node",
+                        "type":"core/template_part",
+                        "props":{"part_key":part_key}
+                    }]
+                }]
+            }]
+        }]
+    }))
+    .unwrap()
+}
+
+async fn insert_override(db: &SqlitePool, target: &TemplateCandidate) -> i64 {
+    let kind = serde_json::to_value(target.kind)
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_string();
+    let res = sqlx::query(
+        "INSERT INTO template_overrides
+         (target_kind,canonical_target_key,target_json,ast_json,version)
+         VALUES (?,?,?,?,1)",
+    )
+    .bind(kind)
+    .bind(target.canonical_key().unwrap())
+    .bind(serde_json::to_string(target).unwrap())
+    .bind(serde_json::to_string(&BuilderDocument::empty()).unwrap())
+    .execute(db)
+    .await
+    .unwrap();
+    res.last_insert_rowid()
 }
 
 #[tokio::test]
-async fn upgrades_m3_db_preserving_null_and_explicit_active_and_prefix_blocks() {
-    let tmp = TempDirGuard::new("upgrade");
-    let db_null = tmp.path().join("site-null.sqlite");
-
-    // 1. Pre-0015 DB with NULL active theme and two legacy blocks sharing prefix `qa-a`.
+async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_reference() {
+    let tmp = TempDirGuard::new("migration");
+    let path = tmp.path().join("site.sqlite");
     {
-        let db = connect_file_pool(&db_null).await;
-        run_pre_0015_migrations(&db).await;
-        sqlx::query(
-            "INSERT INTO theme_blocks (id, compatible_block_id, fields_json, template, content_list_template, content_single_template)
-             VALUES
-               ('qa-a/banner', NULL, '{}', '<div>A-banner</div>', '<ul>list-a</ul>', '<article>single-a</article>'),
-               ('qa-a/hero', NULL, '{}', '<div>A-hero</div>', '<ul>list-hero</ul>', '<article>single-hero</article>')",
-        )
-        .execute(&db)
+        let db = connect_file_pool(&path).await;
+        let migrations = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        let mut migrator = sqlx::migrate::Migrator::new(migrations).await.unwrap();
+        migrator.migrations.to_mut().retain(|m| m.version <= 41);
+        migrator.run(&db).await.unwrap();
+        sqlx::query("INSERT INTO template_overrides (role, ast_json) VALUES ('header', ?)")
+            .bind(serde_json::to_string(&BuilderDocument::empty()).unwrap())
+            .execute(&db)
+            .await
+            .unwrap();
+        db.close().await;
+    }
+    let db = init_db(&path).await.unwrap();
+    let settings: (Option<i64>, Option<i64>, i64) = sqlx::query_as(
+        "SELECT homepage_page_id,posts_page_id,version FROM site_reading_settings WHERE id = 1",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(settings, (None, None, 1));
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM template_overrides")
+        .fetch_one(&db)
         .await
         .unwrap();
-        sqlx::query("INSERT INTO home_page (id, block_id, values_json) VALUES (1, 'qa-a/banner', '{}')")
-            .execute(&db)
+    assert_eq!(count, 0);
+    // No foreign-key cascade: deleting a Page preserves the historical ID and
+    // increments the reading CAS independently at the entries writer layer.
+    sqlx::query(
+        "UPDATE site_reading_settings SET homepage_page_id=12345,version=version+1 WHERE id=1",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let stale: (Option<i64>, i64) =
+        sqlx::query_as("SELECT homepage_page_id,version FROM site_reading_settings WHERE id=1")
+            .fetch_one(&db)
             .await
             .unwrap();
-        db.close().await;
+    assert_eq!(stale, (Some(12345), 2));
+    for column in ["page_layout_key", "custom_template_key"] {
+        let cols: Vec<(i64, String, String, i64, Option<String>, i64)> =
+            sqlx::query_as("PRAGMA table_info(content_entries)")
+                .fetch_all(&db)
+                .await
+                .unwrap();
+        assert!(cols.iter().any(|col| col.1 == column));
     }
-
-    // Upgrade via init_db (runs 0015) and verify NULL selection + distinct mappings + readers.
-    {
-        let db = init_db(&db_null).await.unwrap();
-        let active = get_active_selection(&db).await.unwrap();
-        assert_eq!(active.revision_id, None);
-        assert_eq!(active.legacy_block_id, None);
-        assert_eq!(active.version, 1);
-
-        let pkgs = list_packages(&db).await.unwrap();
-        let legacy_pkgs: Vec<_> = pkgs.iter().filter(|p| p.is_legacy).collect();
-        assert_eq!(legacy_pkgs.len(), 2);
-        assert_ne!(legacy_pkgs[0].theme_id, legacy_pkgs[1].theme_id);
-
-        let list_view = list(&db).await.unwrap();
-        assert_eq!(list_view.active_id, None);
-        assert_eq!(list_view.version, 1);
-
-        let home_snap = public_home(&db).await.unwrap().unwrap();
-        assert_eq!(home_snap.selected.template.as_deref(), Some("<div>A-banner</div>"));
-
-        let (list_tpl, single_tpl) = page::active_content_templates(&db).await.unwrap();
-        assert_eq!(list_tpl.as_deref(), Some("<ul>list-a</ul>"));
-        assert_eq!(single_tpl.as_deref(), Some("<article>single-a</article>"));
-
-        let home_state = builder::read(&db).await.unwrap();
-        assert_eq!(home_state.active_id, None);
-        db.close().await;
-    }
-
-    // 2. Pre-0015 DB with explicit active `qa-a/hero` at version 5; upgrade + restart.
-    let db_explicit = tmp.path().join("site-explicit.sqlite");
-    {
-        let db = connect_file_pool(&db_explicit).await;
-        run_pre_0015_migrations(&db).await;
-        sqlx::query(
-            "INSERT INTO theme_blocks (id, compatible_block_id, fields_json, template, content_list_template, content_single_template)
-             VALUES
-               ('qa-a/banner', NULL, '{}', '<div>A-banner</div>', '<ul>list-a</ul>', '<article>single-a</article>'),
-               ('qa-a/hero', 'qa-a/banner', '{}', '<div>A-hero</div>', '<ul>list-hero</ul>', '<article>single-hero</article>')",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
-        sqlx::query("INSERT INTO home_page (id, block_id, values_json) VALUES (1, 'qa-a/banner', '{}')")
-            .execute(&db)
-            .await
-            .unwrap();
-        sqlx::query("UPDATE site_active_theme SET block_id = 'qa-a/hero', version = 5 WHERE id = 1")
-            .execute(&db)
-            .await
-            .unwrap();
-        db.close().await;
-    }
-
-    let db = init_db(&db_explicit).await.unwrap();
-    let active = get_active_selection(&db).await.unwrap();
-    assert_eq!(active.legacy_block_id.as_deref(), Some("qa-a/hero"));
-    assert_eq!(active.version, 5);
-    let (list_tpl, single_tpl) = page::active_content_templates(&db).await.unwrap();
-    assert_eq!(list_tpl.as_deref(), Some("<ul>list-hero</ul>"));
-    assert_eq!(single_tpl.as_deref(), Some("<article>single-hero</article>"));
-    let home_state = builder::read(&db).await.unwrap();
-    assert_eq!(home_state.active_id.as_deref(), Some("qa-a/hero"));
-    assert_eq!(home_state.active_template.as_deref(), Some("<div>A-hero</div>"));
     db.close().await;
-
-    // Reopen after restart: state identical.
-    let reopened = connect_file_pool(&db_explicit).await;
-    let active_after = get_active_selection(&reopened).await.unwrap();
-    assert_eq!(active_after.revision_id, active.revision_id);
-    assert_eq!(active_after.version, 5);
-    reopened.close().await;
+    let reopened = connect_file_pool(&path).await;
+    let version: i64 = sqlx::query_scalar("SELECT version FROM site_reading_settings WHERE id=1")
+        .fetch_one(&reopened)
+        .await
+        .unwrap();
+    assert_eq!(version, 2);
 }
 
 #[tokio::test]
-async fn installs_two_revisions_idempotently_and_enforces_cas_and_durability() {
-    let tmp = TempDirGuard::new("revisions");
-    let db_path = tmp.path().join("site.sqlite");
-    let themes_root = tmp.path().join("themes");
-    let db = init_db(&db_path).await.unwrap();
-
-    // Stale staging directory from a crashed run is cleaned without touching revisions/.
-    let stale_dir = themes_root.join(".staging").join("crashed-run-1");
-    fs::create_dir_all(&stale_dir).unwrap();
-    fs::write(stale_dir.join("leftover.txt"), b"junk").unwrap();
-    let cleaned = ensure_themes_layout_and_quarantine_stale(&themes_root).unwrap();
-    assert_eq!(cleaned, 1);
-    assert!(!stale_dir.exists());
-
-    // Reserved legacy prefix must be rejected for v2 theme_id.
-    let mut files_v1 = BTreeMap::new();
-    files_v1.insert("theme.json".to_string(), br#"{"id":"acme-theme","version":"1.0.0"}"#.to_vec());
-    files_v1.insert("templates/home.html".to_string(), b"<h1>v1</h1>".to_vec());
-
-    let bad_id = stage_and_commit_v2_revision(
-        &db,
-        &themes_root,
-        "run-bad-id",
-        "legacy-v1-hijack",
-        "Hijack",
-        "1.0.0",
-        "{}",
-        "{}",
-        &files_v1,
-    )
-    .await
-    .unwrap_err();
-    assert_eq!(bad_id.0, axum::http::StatusCode::BAD_REQUEST);
-
-    // Install v1.0.0 (does NOT activate).
-    let rev1 = match stage_and_commit_v2_revision(
-        &db,
-        &themes_root,
-        "run-1",
-        "acme-theme",
-        "Acme Theme",
-        "1.0.0",
-        "{}",
-        "{}",
-        &files_v1,
-    )
-    .await
-    .unwrap()
-    {
-        RevisionInstallOutcome::Installed(r) => r,
-        other => panic!("expected Installed, got {other:?}"),
+async fn two_axis_specific_theme_beats_generic_db_and_same_candidate_db_wins() {
+    let tmp = TempDirGuard::new("resolver");
+    let db = init_db(&tmp.path().join("site.sqlite")).await.unwrap();
+    let ctx = PublicTemplateContext::Single {
+        content_type: "project".into(),
+        entry_id: 9,
+        slug: "hello-world".into(),
+        custom_template_key: None,
     };
-    assert_eq!(get_active_selection(&db).await.unwrap().revision_id, None);
+    let candidates = build_candidates(&ctx).unwrap();
+    let keys: Vec<_> = candidates
+        .iter()
+        .map(|candidate| candidate.canonical_key().unwrap())
+        .collect();
     assert_eq!(
-        verify_revision_durability(&themes_root, &rev1),
-        RevisionDurabilityStatus::Valid
+        keys,
+        vec![
+            "single:type:project:id:9",
+            "single:type:project:slug:hello-world",
+            "single:type:project",
+            "single",
+            "singular",
+            "index",
+        ]
     );
-
-    // Identical canonical digest is idempotent.
-    match stage_and_commit_v2_revision(
-        &db,
-        &themes_root,
-        "run-1-retry",
-        "acme-theme",
-        "Acme Theme",
-        "1.0.0",
-        "{}",
-        "{}",
-        &files_v1,
-    )
-    .await
-    .unwrap()
+    let generic = target(Kind::Single);
+    insert_override(&db, &generic).await;
+    let mut specific = target(Kind::Single);
+    specific.content_type = Some("project".into());
+    let mut templates = BTreeMap::new();
+    templates.insert("single:type:project".into(), "<main>Project</main>".into());
+    match resolve_template_2axis(&db, &candidates, Some(&templates), None, None)
+        .await
+        .unwrap()
     {
-        RevisionInstallOutcome::AlreadyExists(r) => assert_eq!(r.revision_id, rev1.revision_id),
-        other => panic!("expected AlreadyExists, got {other:?}"),
+        TemplateResolution::ActiveTheme { target_key, html } => {
+            assert_eq!(target_key, "single:type:project");
+            assert_eq!(html, "<main>Project</main>");
+        }
+        other => panic!("Expected specific theme source, got {other:?}"),
     }
+    let id = insert_override(&db, &specific).await;
+    match resolve_template_2axis(&db, &candidates, Some(&templates), None, None)
+        .await
+        .unwrap()
+    {
+        TemplateResolution::DbOverride(row) => {
+            assert_eq!(row.id, id);
+            assert_eq!(row.canonical_target_key, "single:type:project");
+        }
+        other => panic!("Expected exact DB source, got {other:?}"),
+    }
+    assert!(sqlx::query(
+        "INSERT INTO template_overrides (target_kind, canonical_target_key, target_json, ast_json)
+         VALUES ('single','single:type:project','{}','{}')"
+    ).execute(&db).await.is_err());
+    db.close().await;
+}
 
-    // Same (theme_id, version) with different digest returns 409 Conflict.
-    let mut files_v1_mutated = files_v1.clone();
-    files_v1_mutated.insert("templates/home.html".to_string(), b"<h1>tampered</h1>".to_vec());
-    let conflict = stage_and_commit_v2_revision(
+#[tokio::test]
+async fn candidate_order_covers_layout_home_taxonomy_not_found_and_parts() {
+    let home = build_candidates(&PublicTemplateContext::Home {
+        page_layout_key: Some("canvas".into()),
+    })
+    .unwrap();
+    assert_eq!(
+        home.iter()
+            .map(|c| c.canonical_key().unwrap())
+            .collect::<Vec<_>>(),
+        ["home", "page_layout:canvas", "page", "index"]
+    );
+    let taxonomy = build_candidates(&PublicTemplateContext::Taxonomy {
+        taxonomy: "category".into(),
+        term_id: 17,
+        slug: "tips".into(),
+    })
+    .unwrap();
+    assert_eq!(
+        taxonomy
+            .iter()
+            .map(|c| c.canonical_key().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "taxonomy:key:category:id:17",
+            "taxonomy:key:category:slug:tips",
+            "taxonomy:key:category",
+            "taxonomy",
+            "archive",
+            "index"
+        ]
+    );
+    let absent = build_candidates(&PublicTemplateContext::NotFound).unwrap();
+    assert_eq!(
+        absent
+            .iter()
+            .map(|c| c.canonical_key().unwrap())
+            .collect::<Vec<_>>(),
+        ["not_found", "index"]
+    );
+    let tmp = TempDirGuard::new("parts");
+    let db = init_db(&tmp.path().join("site.sqlite")).await.unwrap();
+    let mut parts = BTreeMap::new();
+    parts.insert("header".into(), "<header>Theme</header>".into());
+    let result = resolve_template_2axis(
         &db,
-        &themes_root,
-        "run-conflict",
-        "acme-theme",
-        "Acme Theme",
-        "1.0.0",
-        "{}",
-        "{}",
-        &files_v1_mutated,
+        &build_candidates(&PublicTemplateContext::Part {
+            part_key: "header".into(),
+        })
+        .unwrap(),
+        None,
+        Some(&parts),
+        None,
     )
     .await
-    .unwrap_err();
-    assert_eq!(conflict.0, axum::http::StatusCode::CONFLICT);
+    .unwrap();
+    assert!(matches!(result, TemplateResolution::ActiveTheme { .. }));
+    let mut layouts = BTreeMap::new();
+    layouts.insert("canvas".into(), "<main>Canvas</main>".into());
+    let result = resolve_template_2axis(&db, &home, None, None, Some(&layouts))
+        .await
+        .unwrap();
+    assert!(
+        matches!(result, TemplateResolution::ActiveTheme { ref target_key, .. }
+        if target_key == "page_layout:canvas")
+    );
+    assert!(matches!(
+        resolve_template_2axis(&db, &absent, None, None, None)
+            .await
+            .unwrap(),
+        TemplateResolution::CoreFallback
+    ));
+    db.close().await;
+}
 
-    // Install v1.1.0 for the same theme_id.
-    let mut files_v2 = BTreeMap::new();
-    files_v2.insert("theme.json".to_string(), br#"{"id":"acme-theme","version":"1.1.0"}"#.to_vec());
-    files_v2.insert("templates/home.html".to_string(), b"<h1>v1.1</h1>".to_vec());
-    let rev2 = match stage_and_commit_v2_revision(
-        &db,
-        &themes_root,
-        "run-2",
-        "acme-theme",
-        "Acme Theme",
-        "1.1.0",
-        "{}",
-        "{}",
-        &files_v2,
+#[tokio::test]
+async fn override_atomic_cas_reset_source_and_part_cycle_and_slot_contract() {
+    let tmp = TempDirGuard::new("cas");
+    let db = init_db(&tmp.path().join("site.sqlite")).await.unwrap();
+    let mut header = target(Kind::Part);
+    header.part_key = Some("header".into());
+    let empty = BuilderDocument::empty();
+    let first = save_typed_override(&db, &header, &empty, None)
+        .await
+        .unwrap();
+    assert_eq!(first.version, 1);
+    assert_eq!(first.canonical_target_key, "part:header");
+    assert_eq!(
+        get_typed_override(&db, &header)
+            .await
+            .unwrap()
+            .unwrap()
+            .version,
+        1
+    );
+    assert_eq!(
+        save_typed_override(&db, &header, &empty, None)
+            .await
+            .unwrap_err()
+            .0,
+        axum::http::StatusCode::PRECONDITION_REQUIRED
+    );
+    let second = save_typed_override(&db, &header, &empty, Some(1))
+        .await
+        .unwrap();
+    assert_eq!(second.version, 2);
+    assert_eq!(
+        save_typed_override(&db, &header, &empty, Some(1))
+            .await
+            .unwrap_err()
+            .0,
+        axum::http::StatusCode::PRECONDITION_FAILED
+    );
+    let mut parts = BTreeMap::new();
+    parts.insert("header".into(), "<header>Base</header>".into());
+    let chain = build_candidates(&PublicTemplateContext::Part {
+        part_key: "header".into(),
+    })
+    .unwrap();
+    assert_eq!(
+        reset_typed_override(&db, first.id, None, &chain, None, Some(&parts), None)
+            .await
+            .unwrap_err()
+            .0,
+        axum::http::StatusCode::PRECONDITION_REQUIRED
+    );
+    assert_eq!(
+        reset_typed_override(&db, first.id, Some(1), &chain, None, Some(&parts), None)
+            .await
+            .unwrap_err()
+            .0,
+        axum::http::StatusCode::PRECONDITION_FAILED
+    );
+    let reset = reset_typed_override(&db, first.id, Some(2), &chain, None, Some(&parts), None)
+        .await
+        .unwrap();
+    assert_eq!(reset.next_effective_source.kind, "active_theme");
+    assert_eq!(
+        reset.next_effective_source.target_key.as_deref(),
+        Some("part:header")
+    );
+    assert!(get_typed_override(&db, &header).await.unwrap().is_none());
+
+    let mut single = target(Kind::Single);
+    single.content_type = Some("post".into());
+    assert_eq!(
+        save_typed_override(&db, &single, &empty, None)
+            .await
+            .unwrap_err()
+            .0,
+        axum::http::StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        save_typed_override(&db, &header, &one_part("header"), None)
+            .await
+            .unwrap_err()
+            .0,
+        axum::http::StatusCode::BAD_REQUEST
+    );
+    let mut footer = target(Kind::Part);
+    footer.part_key = Some("footer".into());
+    save_typed_override(&db, &header, &one_part("footer"), None)
+        .await
+        .unwrap();
+    assert_eq!(
+        save_typed_override(&db, &footer, &one_part("header"), None)
+            .await
+            .unwrap_err()
+            .0,
+        axum::http::StatusCode::BAD_REQUEST
+    );
+    assert!(get_typed_override(&db, &footer).await.unwrap().is_none());
+    db.close().await;
+}
+
+#[tokio::test]
+async fn unpublished_id_specific_override_is_pinned_but_not_publicly_readable() {
+    let tmp = TempDirGuard::new("acl");
+    let db = init_db(&tmp.path().join("site.sqlite")).await.unwrap();
+    let media_id = "a".repeat(64);
+    sqlx::query(
+        "INSERT INTO media_assets (id,filename,mime_type,extension,byte_size,width,height,thumb_width,thumb_height)
+         VALUES (?, 'asset.png','image/png','png',12,1,1,1,1)",
+    ).bind(&media_id).execute(&db).await.unwrap();
+    let inserted = sqlx::query(
+        "INSERT INTO content_entries (content_type_key,slug,title,values_json,publication_status)
+         VALUES ('post','unpublished-selector','Draft','{}','draft')",
     )
+    .execute(&db)
     .await
     .unwrap()
-    {
-        RevisionInstallOutcome::Installed(r) => r,
-        other => panic!("expected Installed, got {other:?}"),
-    };
-    assert_ne!(rev1.revision_id, rev2.revision_id);
-    assert_eq!(list_revisions(&db, "acme-theme").await.unwrap().len(), 2);
-
-    // Missing expected version -> 428; stale version -> 412; valid CAS -> Activated.
-    assert!(matches!(
-        activate_revision(&db, &themes_root, &rev2.revision_id, None)
+    .last_insert_rowid();
+    let mut specific = target(Kind::Single);
+    specific.content_type = Some("post".into());
+    specific.entry_id = Some(inserted);
+    let override_id = insert_override(&db, &specific).await;
+    sqlx::query(
+        "INSERT INTO template_override_media_refs (override_id,media_id,ref_role)
+         VALUES (?,?,'image')",
+    )
+    .bind(override_id)
+    .bind(&media_id)
+    .execute(&db)
+    .await
+    .unwrap();
+    assert!(
+        !public_content::media_is_referenced(&db, &media_id)
             .await
-            .unwrap(),
-        RevisionActivationOutcome::MissingExpectedVersion
-    ));
-    assert!(matches!(
-        activate_revision(&db, &themes_root, &rev2.revision_id, Some(99))
-            .await
-            .unwrap(),
-        RevisionActivationOutcome::Stale
-    ));
-    let activated = match activate_revision(&db, &themes_root, &rev2.revision_id, Some(1))
-        .await
-        .unwrap()
-    {
-        RevisionActivationOutcome::Activated(s) => s,
-        other => panic!("expected Activated, got {other:?}"),
-    };
-    assert_eq!(activated.revision_id.as_deref(), Some(rev2.revision_id.as_str()));
-    assert_eq!(activated.version, 2);
-
-    // Corrupting rev1 on disk (.complete removed) blocks rollback activation without mutating active pointer.
-    let rev1_marker = themes_root
-        .join("revisions")
-        .join(&rev1.revision_digest)
-        .join(".complete");
-    fs::remove_file(&rev1_marker).unwrap();
-    let corrupt = activate_revision(&db, &themes_root, &rev1.revision_id, Some(2))
-        .await
-        .unwrap();
-    assert!(matches!(
-        corrupt,
-        RevisionActivationOutcome::CorruptRevision(RevisionDurabilityStatus::MissingCompleteMarker)
-    ));
-    assert_eq!(
-        get_active_selection(&db).await.unwrap().revision_id.as_deref(),
-        Some(rev2.revision_id.as_str())
+            .unwrap()
     );
-
-    // Restore .complete, corrupt file bytes -> DigestMismatch blocks activation.
-    fs::write(&rev1_marker, format!("{}\n", rev1.revision_digest)).unwrap();
-    let rev1_tpl = themes_root
-        .join("revisions")
-        .join(&rev1.revision_digest)
-        .join("templates/home.html");
-    fs::write(&rev1_tpl, b"corrupted").unwrap();
-    let mismatch = activate_revision(&db, &themes_root, &rev1.revision_id, Some(2))
+    let mut conn = db.acquire().await.unwrap();
+    let pins = media_refs::collect_pins_in_tx(&mut conn, &media_id)
         .await
         .unwrap();
-    assert!(matches!(
-        mismatch,
-        RevisionActivationOutcome::CorruptRevision(RevisionDurabilityStatus::DigestMismatch(_))
-    ));
-
-    // Restore file bytes -> rollback to rev1 succeeds with CAS version 2 -> 3.
-    fs::write(&rev1_tpl, b"<h1>v1</h1>").unwrap();
-    let rolled_back = match activate_revision(&db, &themes_root, &rev1.revision_id, Some(2))
+    assert_eq!(pins.total_pins, 1);
+    drop(conn);
+    sqlx::query("UPDATE content_entries SET publication_status='published' WHERE id=?")
+        .bind(inserted)
+        .execute(&db)
         .await
-        .unwrap()
-    {
-        RevisionActivationOutcome::Activated(s) => s,
-        other => panic!("expected Activated, got {other:?}"),
-    };
-    assert_eq!(rolled_back.revision_id.as_deref(), Some(rev1.revision_id.as_str()));
-    assert_eq!(rolled_back.version, 3);
+        .unwrap();
+    assert!(
+        public_content::media_is_referenced(&db, &media_id)
+            .await
+            .unwrap()
+    );
+    sqlx::query("UPDATE content_entries SET publication_status='draft' WHERE id=?")
+        .bind(inserted)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(
+        !public_content::media_is_referenced(&db, &media_id)
+            .await
+            .unwrap()
+    );
     db.close().await;
 }

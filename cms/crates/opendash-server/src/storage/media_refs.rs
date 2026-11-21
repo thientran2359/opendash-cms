@@ -58,7 +58,9 @@ pub fn text_contains_media_pin(text: &str, media_id: &str) -> bool {
 pub fn json_contains_media_pin(value: &Value, media_id: &str) -> bool {
     match value {
         Value::String(s) => text_contains_media_pin(s, media_id),
-        Value::Array(items) => items.iter().any(|item| json_contains_media_pin(item, media_id)),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| json_contains_media_pin(item, media_id)),
         Value::Object(map) => map.values().any(|v| json_contains_media_pin(v, media_id)),
         Value::Null | Value::Bool(_) | Value::Number(_) => false,
     }
@@ -162,14 +164,34 @@ pub async fn collect_pins_in_tx(
         }
     }
 
-    // 4. Template overrides (all roles/scopes)
+    // 4. Site-owned typed template ASTs (all candidates, including inactive
+    // themes and unpublished entry selectors). Preserve pins for every saved
+    // override independently of public media delivery eligibility.
     let override_rows = sqlx::query("SELECT id, ast_json FROM template_overrides ORDER BY id ASC")
         .fetch_all(&mut *conn)
         .await?;
+    let mut pinned_overrides = HashSet::new();
     for row in override_rows {
         let id: i64 = row.try_get("id")?;
         let ast_json: String = row.try_get("ast_json")?;
         if parse_json_and_check_pin(&ast_json, media_id, "template_overrides")? {
+            push_pin(&mut summary, "template_override", id.to_string());
+            pinned_overrides.insert(id);
+        }
+    }
+    // Projection refs are derived from the AST transactionally, but still
+    // count conservatively when an older projection is not represented by a
+    // plain media token in the AST. Deduplicate against the AST scan.
+    let projection_rows = sqlx::query(
+        "SELECT DISTINCT override_id FROM template_override_media_refs
+          WHERE media_id = ? ORDER BY override_id ASC",
+    )
+    .bind(media_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    for row in projection_rows {
+        let id: i64 = row.try_get("override_id")?;
+        if pinned_overrides.insert(id) {
             push_pin(&mut summary, "template_override", id.to_string());
         }
     }
@@ -190,12 +212,11 @@ pub async fn collect_pins_in_tx(
             push_pin(&mut summary, "theme_option", entity);
         }
     }
-    let opt_ref_rows = sqlx::query(
-        "SELECT theme_id, option_key FROM theme_option_media_refs WHERE media_id = ?",
-    )
-    .bind(media_id)
-    .fetch_all(&mut *conn)
-    .await?;
+    let opt_ref_rows =
+        sqlx::query("SELECT theme_id, option_key FROM theme_option_media_refs WHERE media_id = ?")
+            .bind(media_id)
+            .fetch_all(&mut *conn)
+            .await?;
     for row in opt_ref_rows {
         let theme_id: String = row.try_get("theme_id")?;
         let option_key: String = row.try_get("option_key")?;
@@ -266,12 +287,10 @@ pub async fn ensure_media_active_in_tx(
     conn: &mut SqliteConnection,
     media_id: &str,
 ) -> ApiResult<i64> {
-    let row = sqlx::query(
-        "SELECT lifecycle_state, generation FROM media_assets WHERE id = ?",
-    )
-    .bind(media_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+    let row = sqlx::query("SELECT lifecycle_state, generation FROM media_assets WHERE id = ?")
+        .bind(media_id)
+        .fetch_optional(&mut *conn)
+        .await?;
 
     let Some(row) = row else {
         return Err(ApiError::bad_request(format!(
