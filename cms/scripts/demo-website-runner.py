@@ -491,6 +491,18 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
             f"dich_vu {slug}",
         )
 
+    must(
+        json_http(
+            base,
+            "PUT",
+            "/api/admin/taxonomy/eligibility/du_an",
+            {"taxonomies": ["category", "tag"], "expected_version": 1},
+            {**admin, "If-Match": '"v1"'},
+        ),
+        200,
+        "enable category/tag taxonomy for du_an",
+    )
+
     projects_data = [
         ("nha-hien-nam-thao-dien", "Nhà Hiên Nắng — Thảo Điền", "TP. Thủ Đức, TP.HCM", 185, True, "2026-08-15", "hoan_thanh"),
         ("can-ho-go-am-binh-thanh", "Căn hộ Gỗ Ấm — Bình Thạnh", "Quận Bình Thạnh, TP.HCM", 92, True, "2026-07-20", "hoan_thanh"),
@@ -699,8 +711,19 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
         "assign menu slots",
     )
 
-    # 12. Builder Homepage
-    _, _, b_hdrs = must(json_http(base, "GET", "/api/admin/builder/homepage", headers=admin), 200, "get builder homepage")
+    # 12. Builder Homepage (Page Builder + Reading Settings S03)
+    home_page = create_and_publish(
+        "page",
+        "trang-chu",
+        "Trang chủ — Mộc Studio",
+        {"body": ""},
+    )
+    home_page_id = home_page["id"]
+    _, _, b_hdrs = must(
+        json_http(base, "GET", f"/api/admin/entries/page/{home_page_id}/builder", headers=admin),
+        200,
+        "get page builder homepage",
+    )
     homepage_doc = {
         "schema_version": 1,
         "sections": [
@@ -818,15 +841,38 @@ def seed_site(base: str, public_origin: str | None = None) -> dict:
         ],
     }
     must(
-        json_http(base, "PUT", "/api/admin/builder/homepage", homepage_doc, {**admin, "If-Match": b_hdrs["etag"]}),
+        json_http(
+            base,
+            "PUT",
+            f"/api/admin/entries/page/{home_page_id}/builder",
+            homepage_doc,
+            {**admin, "If-Match": b_hdrs["etag"]},
+        ),
         200,
-        "save builder homepage",
+        "save page builder homepage",
+    )
+    _, _, reading_hdrs = must(
+        json_http(base, "GET", "/api/admin/settings/reading", headers=admin),
+        200,
+        "get reading settings",
+    )
+    must(
+        json_http(
+            base,
+            "PUT",
+            "/api/admin/settings/reading",
+            {"homepage_page_id": home_page_id, "posts_page_id": None},
+            {**admin, "If-Match": reading_hdrs["etag"]},
+        ),
+        200,
+        "assign homepage in reading settings",
     )
 
     return {
         "media_ids": media_ids,
         "video_id": video_id,
         "form_id": form_rec["id"],
+        "home_page_id": home_page_id,
         "first_post_slug": first_post["slug"],
         "draft_post_slug": draft_post["slug"],
         "cat_slug": "kien-truc",
@@ -905,10 +951,19 @@ def run_smoke_and_capture(base: str, meta: dict, out_dir: Path | None) -> dict:
     )
 
     # 3. Unsaved preview vs Save (HTTP preview leaves public unchanged)
-    _, cur_b, b_hdrs = must(json_http(base, "GET", "/api/admin/builder/homepage", headers=admin), 200, "get builder")
+    home_page_id = meta["home_page_id"]
+    _, cur_b, b_hdrs = must(
+        json_http(base, "GET", f"/api/admin/entries/page/{home_page_id}/builder", headers=admin),
+        200,
+        "get page builder",
+    )
     preview_doc = json.loads(json.dumps(cur_b["document"]))
     preview_doc["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"] = "BẢN XEM TRƯỚC CHƯA LƯU"
-    _, prev_res, _ = must(json_http(base, "POST", "/api/admin/builder/homepage/preview", preview_doc, admin), 200, "preview builder")
+    _, prev_res, _ = must(
+        json_http(base, "POST", f"/api/admin/entries/page/{home_page_id}/builder/preview", preview_doc, admin),
+        200,
+        "preview page builder",
+    )
     assert "BẢN XEM TRƯỚC CHƯA LƯU" in prev_res["html"]
     _, pub_home, _ = raw_http(base, "GET", "/")
     assert "BẢN XEM TRƯỚC CHƯA LƯU" not in pub_home.decode("utf-8"), "Unsaved preview leaked to public!"

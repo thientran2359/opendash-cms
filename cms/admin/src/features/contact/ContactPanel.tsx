@@ -158,15 +158,15 @@ export function ContactPanel({ csrfToken, onApiError }: Props) {
   };
 
   return (
-    <section id="contact-forms-panel" className="mt-8 border-t border-slate-200 pt-6">
-      <div className="flex items-center justify-between gap-4">
+    <section id="contact-forms-panel" className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Form liên hệ &amp; Hộp thư</h2>
-          <p className="text-sm text-slate-600">Thiết kế form liên hệ an toàn (không JS công khai) và xem thư gửi đến.</p>
+          <h2 className="text-base font-semibold text-zinc-950">Form liên hệ &amp; Hộp thư</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">Thiết kế form liên hệ an toàn (không JS công khai) và xem thư gửi đến.</p>
         </div>
         <button
           type="button"
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
           onClick={() => selectForm(null)}
         >
           + Form mới

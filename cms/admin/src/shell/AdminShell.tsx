@@ -380,7 +380,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const postsLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
   const pagesLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
   const cptLegacy = route.sub !== 'list' ? ' od-legacy-scope' : '';
-  const settingsLegacy = route.sub !== 'general' ? ' od-legacy-scope' : '';
+  const settingsLegacy =
+    route.sub === 'general' || route.sub === 'reading' || route.sub === 'seo' || route.sub === 'smtp'
+      ? ''
+      : ' od-legacy-scope';
 
   return (
     <div className="od-root min-h-screen">
@@ -587,7 +590,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 </section>
 
                 {user?.role === 'admin' && route.view === 'plugins' && <div className="od-admin-card od-legacy-scope">{pluginsContent}</div>}
-                <section className={user?.role === 'admin' && route.view === 'users' ? 'od-admin-card od-legacy-scope min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label="Người dùng" aria-hidden={user?.role !== 'admin' || route.view !== 'users'}>
+                <section className={user?.role === 'admin' && route.view === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label="Người dùng" aria-hidden={user?.role !== 'admin' || route.view !== 'users'}>
                   {usersContent}
                 </section>
                 {user && route.view === 'profile' && <div className="od-admin-card od-legacy-scope min-w-0">{profileContent}</div>}

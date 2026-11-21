@@ -7,6 +7,7 @@ import {
   type SmtpSettingsPublic,
   type TlsMode,
 } from '../../api/smtp.ts';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface Props {
   csrfToken: string | null;
@@ -93,18 +94,18 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
   };
 
   return (
-    <section id="smtp-settings-panel" className="mt-8 border-t border-slate-200 pt-6">
+    <section id="smtp-settings-panel" className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-slate-900">Thông báo Email (SMTP)</h2>
-        <p className="text-sm text-slate-600">
+        <h2 className="text-base font-semibold text-zinc-950">Thông báo Email (SMTP)</h2>
+        <p className="mt-0.5 text-sm text-zinc-600">
           Cấu hình máy chủ SMTP bảo mật TLS để gửi thông báo khi có liên hệ mới. Mật khẩu được lưu tách biệt và không hiển thị lại.
         </p>
       </div>
 
-      {notice && <p className="mt-3 rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p>}
+      {notice && <AdminAlert tone="success" className="mt-3 max-w-2xl">{notice}</AdminAlert>}
 
-      <form onSubmit={handleSave} className="mt-4 max-w-2xl space-y-4 rounded-lg border border-slate-200 bg-white p-4">
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-800">
+      <form onSubmit={handleSave} className="mt-4 max-w-2xl space-y-4 rounded-xl border border-zinc-200 bg-white p-5">
+        <label className="flex items-center gap-2 text-sm font-medium text-zinc-800">
           <input
             type="checkbox"
             checked={enabled}
@@ -114,59 +115,59 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
         </label>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <label className="block text-xs font-medium text-slate-700 sm:col-span-2">
-            Host SMTP
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700 sm:col-span-2">
+            <span>Host SMTP</span>
             <input
               type="text"
               value={host}
               onChange={(e) => setHost(e.target.value)}
               placeholder="smtp.example.com"
-              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             />
           </label>
-          <label className="block text-xs font-medium text-slate-700">
-            Cổng
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Cổng</span>
             <input
               type="number"
               min={1}
               max={65535}
               value={port}
               onChange={(e) => setPort(Number(e.target.value) || 587)}
-              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             />
           </label>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-medium text-slate-700">
-            Chế độ TLS
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Chế độ TLS</span>
             <select
               value={tlsMode}
               onChange={(e) => setTlsMode(e.target.value as TlsMode)}
-              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             >
               <option value="starttls">STARTTLS bắt buộc (cổng 587)</option>
               <option value="implicit_tls">Implicit TLS (cổng 465)</option>
             </select>
           </label>
-          <label className="block text-xs font-medium text-slate-700">
-            Tên đăng nhập
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Tên đăng nhập</span>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             />
           </label>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-medium text-slate-700">
-            Mật khẩu SMTP ({settings?.has_password ? 'đã cấu hình' : 'chưa đặt'})
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Mật khẩu SMTP ({settings?.has_password ? 'đã cấu hình' : 'chưa đặt'})</span>
             <select
               value={passwordMode}
               onChange={(e) => setPasswordMode(e.target.value as PasswordUpdateMode)}
-              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             >
               <option value="keep">Giữ mật khẩu hiện tại</option>
               <option value="replace">Thay mật khẩu mới</option>
@@ -174,58 +175,49 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
             </select>
           </label>
           {passwordMode === 'replace' && (
-            <label className="block text-xs font-medium text-slate-700">
-              Mật khẩu mới
+            <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+              <span>Mật khẩu mới</span>
               <input
                 type="password"
                 value={passwordValue}
                 onChange={(e) => setPasswordValue(e.target.value)}
                 autoComplete="new-password"
-                className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+                className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
               />
             </label>
           )}
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="block text-xs font-medium text-slate-700">
-            Địa chỉ gửi (From)
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Địa chỉ gửi (From)</span>
             <input
               type="email"
               value={fromAddress}
               onChange={(e) => setFromAddress(e.target.value)}
               placeholder="noreply@example.com"
-              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             />
           </label>
-          <label className="block text-xs font-medium text-slate-700">
-            Địa chỉ nhận (Recipient)
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+            <span>Địa chỉ nhận (Recipient)</span>
             <input
               type="email"
               value={recipientAddress}
               onChange={(e) => setRecipientAddress(e.target.value)}
               placeholder="admin@example.com"
-              className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             />
           </label>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pt-2">
-          <button
-            type="submit"
-            disabled={busy || !settings}
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
+          <AdminButton type="submit" variant="primary" disabled={busy || !settings}>
             Lưu cấu hình SMTP
-          </button>
-          <button
-            type="button"
-            disabled={busy || !settings?.enabled}
-            onClick={handleTest}
-            className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
+          </AdminButton>
+          <AdminButton variant="secondary" disabled={busy || !settings?.enabled} onClick={handleTest}>
             Gửi email kiểm tra
-          </button>
+          </AdminButton>
         </div>
       </form>
     </section>
