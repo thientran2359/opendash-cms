@@ -287,6 +287,6 @@ CREATE INDEX idx_entry_pattern_refs_target ON entry_pattern_refs(target_pattern_
    - **Pattern Library:** Lọc theo danh mục/từ khóa trả đúng mẫu từ `patterns/*.json` của active theme v3; bấm chèn tạo bản COPY AST với `node_id` mới hoàn toàn, sửa trên trang không ghi ngược file theme bất biến; restart và `age` backup/restore bảo toàn đầy đủ.
 
 
-## Proposed D02 coordination amendment
+## D02 approved coordination amendment
 
-See [S02 target-only Page Builder and provider selections](s02-target-only-page-builder.md). While Draft, this is a review proposal, not implementation authority. It brings the Page-only entry document foundation into Theme S02/0042; later CPT S01/0043 extends those tables rather than recreating them. Owner clarified that no previous release or historical-data compatibility is required. Generic CPT, Patterns and Reading Settings remain in their existing later slices.
+See [S02 target-only Page Builder and provider selections](s02-target-only-page-builder.md). This Approved amendment supersedes conflicting creation/order details in the slices above; implementation authority requires its merge and pinned handoff. It brings the Page-only entry document foundation into Theme S02/0042; later CPT S01/0043 extends those tables rather than recreating them. Owner clarified that no previous release or historical-data compatibility is required. Generic CPT, Patterns and Reading Settings remain in their existing later slices.

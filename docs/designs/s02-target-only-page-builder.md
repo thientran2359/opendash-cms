@@ -1,8 +1,11 @@
 # S02 target-only Page Builder and provider selections
 
 **Author:** Aster
-**Status:** Draft
+**Status:** Approved
 **Date:** 2026-11-21
+**Approved By:** Owner (target-only scope and sequence); Aster (delegated technical closure).
+**Approval Evidence:** [Owner direction recorded on #427](https://github.com/thientran2359/opendash-cms/issues/427#issuecomment-7059083925) and current-chat instruction to finish design/review/handoff in one run.
+**Goldfish Review:** [PR #437 review closure](https://github.com/thientran2359/opendash-cms/pull/437#issuecomment-7059352039): design_critic, codebase_details and implementation_readiness; rounds 5 and 6 PASS in fresh contexts; all earlier findings resolved. Implementation requires merge and exact-source handoff.
 **Baseline:** main `29681bd336a0f20e876d6b9273b45aaaf9d6c304`; implementation PR #436 `a5b4f1d23c475076cba62b11403bc2cbe8af9811`.
 **Owner Direction:** [Owner clarification recorded on Issue #427](https://github.com/thientran2359/opendash-cms/issues/427#issuecomment-7059083925). Owner subsequently instructed Aster to finish drafting, review, coordination and handoff in one run without repeated section approval stops.
 
@@ -68,7 +71,7 @@ Composite entry saves accept `content_mode: PatchField<ContentMode>`: omission p
 
 Keep both existing publication entry points: composite save and `/api/admin/content-types/{type_key}/entries/{id}/publication` (`routes/content.rs::content_entry_publication` -> `storage/entries.rs::set_publication_status`). Neither performs snapshot promotion because there is no snapshot table. Both use existing entry CAS/status/permalink rules. Explicit Publish makes saved Builder content eligible for public rendering/media if content_mode=builder; draft/unpublish removes that eligibility through current status predicates. Ordinary Builder Save never changes publication_status. Test the actual registered dedicated publication API as well as composite Publish, not an unused handler in routes/entries.rs.
 
-A public Page first passes existing public-entry/provider/status ACL. In a single read transaction capture entry, saved Builder document and selected template needed for coherent rendering. If mode is builder and a valid document exists, render it as entry body inserted into od_content/core/content_slot; otherwise render normal body. Apply the approved page layout/template wrapper and site header/footer once, forward contact-form CSP flags, and never recurse from entry AST into the template resolver. In entry AST reject ContentSlot and TemplatePart as template-only elements; retained inactive plugin nodes follow existing safe fallback. Preview uses the path Page's authorized fields and unsaved AST, published-only list results, private preview media authorization and existing total node/output limits. Render limits are the existing Builder 1024-node and 512 KiB output caps, with the same descriptor/binding/list/form limits as normal Page Builder.
+A public Page first passes existing public-entry/provider/status ACL. In a single read transaction capture entry, saved Builder document and selected template needed for coherent rendering. If mode is builder and a valid document exists, render it as entry body inserted into od_content/core/content_slot; otherwise render normal body. Apply the approved page layout/template wrapper and site header/footer once, forward contact-form CSP flags, and never recurse from entry AST into the template resolver. In entry AST reject ContentSlot and TemplatePart as template-only elements; retained inactive plugin nodes follow existing safe fallback. Preview uses the path Page's authorized fields and unsaved AST, published-only list results, private preview media authorization and existing total node/output limits. Render limits are the existing Builder 512-node and 512 KiB output caps (the later Pattern expansion to 1024 nodes is outside D02), with the same descriptor/binding/list/form limits as normal Page Builder.
 
 Media public ACL requires a public/published/active-provider Page, content_mode=builder and a saved entry ref. Draft entries and previews never grant public access. Deletion pins scan the saved JSON even if mode is editor or the provider is withdrawn; malformed persisted JSON fails closed under existing media lifecycle policy. Deleting an entry cascades its document/refs in the admitted entry writer. No saved AST is erased by mode switching or theme/plugin withdrawal. Backup/restore of this TARGET schema includes the document, mode and refs through the full DB snapshot.
 
@@ -101,37 +104,37 @@ Rebaseline Page integration/browser tests to entry version tokens and new paths,
 
 **File Ownership:** Harbor is the only implementation writer. This amendment adds the paths below to #427 and retains prior ACKed paths; no other writer may modify them concurrently. Aster owns documentation and the merged-source handoff.
 
-| File | Change and reason |
-| --- | --- |
-| `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql` | Add final entry document/media/selection tables and mode column; no historical copies or compatibility APIs. |
-| `cms/crates/opendash-core/src/content.rs` | Pure ContentSupport::Builder/ContentMode and a Page-specific constructor/default path; retain builtin_publication() for Post unchanged. |
-| `cms/crates/opendash-server/src/storage/content.rs` | Update builtin_definition and default settings for Page specifically; it currently uses the same builtin_publication() constructor as Post. Fresh DB effective Page includes builder, Post does not; no global constructor flip. |
-| `cms/crates/opendash-server/src/storage/builder.rs` | Entry read/save/preview/reset use cases, registry/field/media validation and entry CAS; all SQL stays in storage. Proposed public storage signatures: read_entry_builder(db, actor, type_key, id); save_entry_builder(db, actor, hooks, type_key, id, expected_version, document); preview_entry_builder(db, actor, type_key, id, document); reset_entry_builder(db, actor, hooks, type_key, id, expected_version, confirmed). DTOs follow the API table. |
-| `cms/crates/opendash-server/src/storage/entries.rs` | Composite content_mode patch; existing status writer retains entry CAS/public predicates; entry deletion cleanup through FK cascade. |
-| `cms/crates/opendash-server/src/routes/builder.rs` | Thin entry handlers; existing guards, admitted mutations, strict requests and If-Match. |
-| `cms/crates/opendash-server/src/routes/content.rs` | Exercise and retain the registered dedicated publication endpoint; ensure Builder changes do not bypass its status/CAS/auth rules. |
-| `cms/crates/opendash-server/src/routes/entries.rs` | Parse/return content_mode in existing composite entry contract; preserve validation and hooks. |
-| `cms/crates/opendash-server/src/app.rs` | Register only the target entry family, remove retired Page override aliases, retain pre-S03 homepage route set. |
-| `cms/crates/opendash-server/src/storage/{public_content,media_refs}.rs` | Publication-aware entry media ACL, conservative pins for saved entry/selection JSON and coherent public reads. |
-| `cms/crates/opendash-server/src/storage/theme.rs` | Retarget owner selection helpers and validate owner identity; no template resolver precedence change. |
-| `cms/crates/opendash-server/src/routes/public_content.rs` and `cms/crates/opendash-server/src/page.rs` | Render eligible entry Builder as body within approved template wrapper, with CSP and coherent storage snapshot; routes contain no SQL. |
-| `cms/crates/opendash-server/src/backup_worker.rs` | Verify existing full-DB backup includes these target tables; add focused tests only if current table filtering excludes them. Do not add legacy restore conversion. |
-| `cms/crates/opendash-server/src/content_render.rs` | Keep prior test-only entry literal ACK; hydrate/consume content_mode if required by the current entry DTO. |
-| `cms/admin/src/features/content/types.ts` | Add ContentMode to the actual ContentEntryRecord/CompositeEntrySaveInput types imported by api/content.ts; keep absent patch distinct from null. |
-| `cms/admin/src/features/editor/EditorDraftStore.ts` | Include content_mode in draft capture/restore, dirty comparison and payload generation; retain chosen mode and unsaved fields/AST across 401/412/account quarantine without changing another account or entry. |
-| `cms/admin/src/api/{builder,content}.ts` | Typed target clients/DTOs via client.ts only, publication/reset CAS response handling. |
-| `cms/admin/src/builder/BuilderWorkspace.tsx` | Separate entry/shared/Section targets; Page open/save/unsaved preview/reset and retained drafts. |
-| `cms/admin/src/features/editor/SingleEditWorkspace.tsx` | Use entry CAS/version and existing Publish with current Page mode; no generic CPT configuration UI. |
-| `cms/crates/opendash-server/tests/m4_s11_t01_page_scope.rs` | New entry API isolation/ACL/CAS/reset/preview and publication regression. |
-| `cms/crates/opendash-server/tests/m6_s05_t01_domain_bridge.rs` | Target selection helper/table owner separation and inactive AST regression. |
-| `cms/crates/opendash-server/tests/m6_s08_t01_plugin_e2e.rs` | Target-version selection/settings/content persistence, disable/restart/reinstall and matching-binary restore. |
-| `cms/crates/opendash-server/tests/m7_s12_t01_navigation_and_schema_ui.rs` | Retired shared override reads become typed template reads with unchanged auth/navigation assertions. |
-| `cms/scripts/m4_s11_t01_page_builder_e2e.py` and `cms/scripts/m5_s12_t01_library_e2e.py` | Browser callers use target Page and typed shared-template APIs; target v3 fixtures and shared entry CAS. |
-| `docs/contracts/M8_WRITER_INVENTORY.md` | List Page save/reset writers and Page document/ref mutation boundaries. |
-| `docs/contracts/M6_PLUGIN_EXTENSIONS.md` | Describe current owner selection store, separate from shared templates; no old schema guarantee. |
-| `docs/designs/theme-format-and-template-resolver.md` and `docs/designs/cpt-content-builder-and-pattern-library.md` | Link overriding D02; update S02 and later S01 creation/extension ownership. |
-| `docs/designs/SITEMAP.md` | Register this amendment and keep implementation status truthful. |
-| `docs/designs/s02-target-only-page-builder.md` | This exact contract, review/provenance and handoff reference. |
+| File | Operation | Change and reason |
+| --- | --- | --- |
+| `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql` | Modify (create on Harbor if absent) | Add final entry document/media/selection tables and mode column; no historical copies or compatibility APIs. |
+| `cms/crates/opendash-core/src/content.rs` | Modify | Pure ContentSupport::Builder/ContentMode and a Page-specific constructor/default path; retain builtin_publication() for Post unchanged. |
+| `cms/crates/opendash-server/src/storage/content.rs` | Modify | Update builtin_definition and default settings for Page specifically; it currently uses the same builtin_publication() constructor as Post. Fresh DB effective Page includes builder, Post does not; no global constructor flip. |
+| `cms/crates/opendash-server/src/storage/builder.rs` | Modify | Entry read/save/preview/reset use cases, registry/field/media validation and entry CAS; all SQL stays in storage. Proposed public storage signatures: read_entry_builder(db, actor, type_key, id); save_entry_builder(db, actor, hooks, type_key, id, expected_version, document); preview_entry_builder(db, actor, type_key, id, document); reset_entry_builder(db, actor, hooks, type_key, id, expected_version, confirmed). DTOs follow the API table. |
+| `cms/crates/opendash-server/src/storage/entries.rs` | Modify | Composite content_mode patch; existing status writer retains entry CAS/public predicates; entry deletion cleanup through FK cascade. |
+| `cms/crates/opendash-server/src/routes/builder.rs` | Modify | Thin entry handlers; existing guards, admitted mutations, strict requests and If-Match. |
+| `cms/crates/opendash-server/src/routes/content.rs` | Modify | Exercise and retain the registered dedicated publication endpoint; ensure Builder changes do not bypass its status/CAS/auth rules. |
+| `cms/crates/opendash-server/src/routes/entries.rs` | Modify | Parse/return content_mode in existing composite entry contract; preserve validation and hooks. |
+| `cms/crates/opendash-server/src/app.rs` | Modify | Register only the target entry family, remove retired Page override aliases, retain pre-S03 homepage route set. |
+| `cms/crates/opendash-server/src/storage/{public_content,media_refs}.rs` | Modify | Publication-aware entry media ACL, conservative pins for saved entry/selection JSON and coherent public reads. |
+| `cms/crates/opendash-server/src/storage/theme.rs` | Modify | Retarget owner selection helpers and validate owner identity; no template resolver precedence change. |
+| `cms/crates/opendash-server/src/routes/public_content.rs` and `cms/crates/opendash-server/src/page.rs` | Modify | Render eligible entry Builder as body within approved template wrapper, with CSP and coherent storage snapshot; routes contain no SQL. |
+| `cms/crates/opendash-server/src/backup_worker.rs` | Modify | Verify existing full-DB backup includes these target tables; add focused tests only if current table filtering excludes them. Do not add legacy restore conversion. |
+| `cms/crates/opendash-server/src/content_render.rs` | Modify | Keep prior test-only entry literal ACK; hydrate/consume content_mode if required by the current entry DTO. |
+| `cms/admin/src/features/content/types.ts` | Modify | Add ContentMode to the actual ContentEntryRecord/CompositeEntrySaveInput types imported by api/content.ts; keep absent patch distinct from null. |
+| `cms/admin/src/features/editor/EditorDraftStore.ts` | Modify | Include content_mode in draft capture/restore, dirty comparison and payload generation; retain chosen mode and unsaved fields/AST across 401/412/account quarantine without changing another account or entry. |
+| `cms/admin/src/api/{builder,content}.ts` | Modify | Typed target clients/DTOs via client.ts only, publication/reset CAS response handling. |
+| `cms/admin/src/builder/BuilderWorkspace.tsx` | Modify | Separate entry/shared/Section targets; Page open/save/unsaved preview/reset and retained drafts. |
+| `cms/admin/src/features/editor/SingleEditWorkspace.tsx` | Modify | Use entry CAS/version and existing Publish with current Page mode; no generic CPT configuration UI. |
+| `cms/crates/opendash-server/tests/m4_s11_t01_page_scope.rs` | Modify | New entry API isolation/ACL/CAS/reset/preview and publication regression. |
+| `cms/crates/opendash-server/tests/m6_s05_t01_domain_bridge.rs` | Modify | Target selection helper/table owner separation and inactive AST regression. |
+| `cms/crates/opendash-server/tests/m6_s08_t01_plugin_e2e.rs` | Modify | Target-version selection/settings/content persistence, disable/restart/reinstall and matching-binary restore. |
+| `cms/crates/opendash-server/tests/m7_s12_t01_navigation_and_schema_ui.rs` | Modify | Retired shared override reads become typed template reads with unchanged auth/navigation assertions. |
+| `cms/scripts/m4_s11_t01_page_builder_e2e.py` and `cms/scripts/m5_s12_t01_library_e2e.py` | Modify | Browser callers use target Page and typed shared-template APIs; target v3 fixtures and shared entry CAS. |
+| `docs/contracts/M8_WRITER_INVENTORY.md` | Modify | List Page save/reset writers and Page document/ref mutation boundaries. |
+| `docs/contracts/M6_PLUGIN_EXTENSIONS.md` | Modify | Describe current owner selection store, separate from shared templates; no old schema guarantee. |
+| `docs/designs/theme-format-and-template-resolver.md` and `docs/designs/cpt-content-builder-and-pattern-library.md` | Modify | Link overriding D02; update S02 and later S01 creation/extension ownership. |
+| `docs/designs/SITEMAP.md` | Modify | Register this amendment and keep implementation status truthful. |
+| `docs/designs/s02-target-only-page-builder.md` | Create | This exact contract, review/provenance and handoff reference. |
 
 **Acceptance Criteria:** Every behavior in sections 1–5 is covered by focused API/storage/browser tests. Target schema initializes on a fresh site, no old alias remains, different owners do not overwrite each other, Page edits never write shared templates or Page B. Published Page output/ACL update on Builder Save/reset; draft Page remains private until explicit publication. Required checks and full locked workspace release tests pass on the exact PR head; native browser acceptance is recorded. No live site operation is permitted.
 
