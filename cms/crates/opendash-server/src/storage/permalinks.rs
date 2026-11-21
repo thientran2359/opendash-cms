@@ -140,7 +140,9 @@ pub async fn sync_provider_rewrite_defaults_in_tx(
     declarations: &[ProviderRewriteDeclaration],
 ) -> ApiResult<()> {
     if !matches!(owner_kind, "plugin" | "theme") || owner_id.is_empty() {
-        return Err(ApiError::bad_request("Provider rewrite owner không hợp lệ."));
+        return Err(ApiError::bad_request(
+            "Provider rewrite owner không hợp lệ.",
+        ));
     }
     let before = read_effective_settings(conn).await?;
     let mut incoming = std::collections::BTreeSet::new();
@@ -149,26 +151,31 @@ pub async fn sync_provider_rewrite_defaults_in_tx(
             || !valid_content_type_key(&item.resource_key)
             || (item.resource_kind == "content_type"
                 && matches!(item.resource_key.as_str(), "post" | "page" | "section"))
-            || item.rewrite_base.as_deref().is_some_and(|base| !valid_base(base))
+            || item
+                .rewrite_base
+                .as_deref()
+                .is_some_and(|base| !valid_base(base))
         {
             return Err(ApiError::bad_request("Provider rewrite_base không hợp lệ."));
         }
         if !incoming.insert((item.resource_kind, item.resource_key.as_str())) {
-            return Err(ApiError::bad_request("Provider rewrite khai báo key trùng."));
+            return Err(ApiError::bad_request(
+                "Provider rewrite khai báo key trùng.",
+            ));
         }
         let (existing_owner, existing_id): (String, Option<String>) = match item.resource_kind {
-            "content_type" => sqlx::query_as(
-                "SELECT owner_kind, owner_id FROM content_types WHERE key=?",
-            )
-            .bind(&item.resource_key)
-            .fetch_optional(&mut *conn)
-            .await?,
-            _ => sqlx::query_as(
-                "SELECT owner_kind, owner_id FROM taxonomy_definitions WHERE key=?",
-            )
-            .bind(&item.resource_key)
-            .fetch_optional(&mut *conn)
-            .await?,
+            "content_type" => {
+                sqlx::query_as("SELECT owner_kind, owner_id FROM content_types WHERE key=?")
+                    .bind(&item.resource_key)
+                    .fetch_optional(&mut *conn)
+                    .await?
+            }
+            _ => {
+                sqlx::query_as("SELECT owner_kind, owner_id FROM taxonomy_definitions WHERE key=?")
+                    .bind(&item.resource_key)
+                    .fetch_optional(&mut *conn)
+                    .await?
+            }
         }
         .ok_or_else(|| ApiError::conflict("Provider rewrite target chưa được khai báo."))?;
         if existing_owner != owner_kind || existing_id.as_deref() != Some(owner_id) {
@@ -186,7 +193,9 @@ pub async fn sync_provider_rewrite_defaults_in_tx(
             .as_ref()
             .is_some_and(|(kind, id)| kind != owner_kind || id != owner_id)
         {
-            return Err(ApiError::conflict("Provider rewrite key đã thuộc owner khác."));
+            return Err(ApiError::conflict(
+                "Provider rewrite key đã thuộc owner khác.",
+            ));
         }
         sqlx::query(
             "INSERT INTO provider_rewrite_defaults
@@ -234,7 +243,11 @@ pub async fn set_provider_rewrite_status_in_tx(
     active: bool,
 ) -> ApiResult<()> {
     let before = read_effective_settings(conn).await?;
-    let status = if active { "active" } else { "provider_inactive" };
+    let status = if active {
+        "active"
+    } else {
+        "provider_inactive"
+    };
     sqlx::query(
         "UPDATE provider_rewrite_defaults SET provider_status=?
          WHERE owner_kind=? AND owner_id=?
@@ -605,17 +618,53 @@ fn add_claim(
     Ok(())
 }
 
+/// This is the one intentional owner transfer in the permalink namespace:
+/// the selected Page's entry URL becomes the post archive, and a former
+/// Posts Page can reclaim its Page URL when changed/unset. All other cross-
+/// target history remains collision protected.
+fn reading_page_owner_transfer(
+    old: &Claim,
+    new: &Claim,
+    posts_page_id: Option<i64>,
+    target_families: &BTreeMap<Claim, String>,
+) -> bool {
+    let archive = ("archive".to_owned(), "post".to_owned());
+    (old == &archive
+        && new.0 == "entry"
+        && target_families.get(new).is_some_and(|kind| kind == "page"))
+        || (new == &archive
+            && old.0 == "entry"
+            && posts_page_id.is_some_and(|id| old.1 == id.to_string()))
+}
+
 /// Always called while the caller already holds SQLite's single-writer
 /// reservation. Any failure (including a namespace conflict) rolls back the
 /// caller's data mutation as well as the proposed claims.
 pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     let settings = read_effective_settings(conn).await?;
+    let (homepage_id, posts_page_id): (Option<i64>, Option<i64>) = sqlx::query_as(
+        "SELECT homepage_page_id, posts_page_id FROM site_reading_settings WHERE id = 1",
+    )
+    .fetch_one(&mut *conn)
+    .await?;
     let mut proposed = BTreeMap::<String, ProposedClaim>::new();
     // Historical routes carry only stable target IDs. Resolve their family
     // from the current rows when checking dynamic routes, not from the path.
     let mut target_families = BTreeMap::<Claim, String>::new();
     let mut legacy_aliases = Vec::<(String, Claim)>::new();
-    add_claim(&mut proposed, "/".into(), "home", "site".into(), None, true)?;
+    // A deleted/draft assigned Homepage must keep / reserved as a tombstone:
+    // public resolution then returns 404, never an implicit safe-view Home.
+    match homepage_id {
+        Some(id) => add_claim(
+            &mut proposed,
+            "/".into(),
+            "entry",
+            id.to_string(),
+            Some("page".into()),
+            true,
+        )?,
+        None => add_claim(&mut proposed, "/".into(), "home", "site".into(), None, true)?,
+    }
 
     let cpts: Vec<(String, i64)> = sqlx::query_as(
         "SELECT key, COALESCE(json_extract(definition_json,'$.settings.has_archive'),1)
@@ -666,6 +715,7 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     )
     .fetch_all(&mut *conn)
     .await?;
+    let mut posts_page_path = None::<String>;
     for (id, key, slug, custom) in entries {
         target_families.insert(("entry".to_owned(), id.to_string()), key.clone());
         if let Some(custom) = &custom {
@@ -676,6 +726,23 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
         let generated = custom.as_ref().is_none_or(|p| p == &generated_path);
         let current_path = entry_path(&settings, id, &key, &slug, custom.as_deref());
         let old_path = format!("/content/{key}/{slug}");
+        if key == "page" && Some(id) == posts_page_id {
+            posts_page_path = Some(current_path.clone());
+            // Legacy Page aliases follow the archive when this Page becomes
+            // the Blog index; its original entry claim must be withdrawn.
+            if current_path != old_path {
+                legacy_aliases.push((old_path, ("archive".into(), "post".into())));
+            }
+            continue;
+        }
+        if key == "page" && Some(id) == homepage_id {
+            // The former canonical Page URL now redirects straight to /.
+            legacy_aliases.push((current_path, ("entry".into(), id.to_string())));
+            if legacy_aliases.last().is_some_and(|(p, _)| p != &old_path) {
+                legacy_aliases.push((old_path, ("entry".into(), id.to_string())));
+            }
+            continue;
+        }
         if current_path != old_path {
             legacy_aliases.push((old_path, ("entry".to_owned(), id.to_string())));
         }
@@ -688,9 +755,27 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
             generated,
         )?;
     }
+    let prior_post_archive_path: Option<String> = sqlx::query_scalar(
+        "SELECT path FROM permalink_route_claims WHERE target_kind='archive' AND target_id='post'",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    // When the assigned Blog Page has been deleted, keep its last route
+    // reserved and dead. Unsetting the assignment restores the regular archive.
+    let posts_archive_path = if posts_page_id.is_some() {
+        posts_page_path.or(prior_post_archive_path)
+    } else {
+        None
+    };
     for (key, archive_enabled) in cpts {
         if archive_enabled != 0 {
-            let current_path = archive_path(&settings, &key);
+            let current_path = if key == "post" {
+                posts_archive_path
+                    .clone()
+                    .unwrap_or_else(|| archive_path(&settings, &key))
+            } else {
+                archive_path(&settings, &key)
+            };
             let old_path = format!("/content/{key}");
             if current_path != old_path {
                 legacy_aliases.push((old_path, ("archive".to_owned(), key.clone())));
@@ -720,7 +805,13 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     }
 
     for (path, proposed_claim) in &proposed {
-        if proposed_claim.kind == "home" {
+        // / is a first-class reserved route; Reading Settings alone decides
+        // whether Home or its selected Page owns it.
+        if path == "/"
+            && (proposed_claim.kind == "home"
+                || (proposed_claim.kind == "entry"
+                    && homepage_id.is_some_and(|id| proposed_claim.id == id.to_string())))
+        {
             continue;
         }
         let root = path.trim_start_matches('/').split('/').next().unwrap_or("");
@@ -743,6 +834,11 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
                 && !(proposed_claim.generated
                     && proposed_claim.kind == pattern.kind
                     && proposed_claim.family.as_deref() == Some(&pattern.family))
+                && !(proposed_claim.kind == "archive"
+                    && proposed_claim.id == "post"
+                    && pattern.kind == "entry"
+                    && pattern.family == "page"
+                    && posts_page_id.is_some())
             {
                 return Err(ApiError::conflict(format!(
                     "permalink_pattern_collision:path={path} target={}:{} pattern={}:{}",
@@ -760,11 +856,22 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
         sqlx::query_as("SELECT source_path,target_kind,target_id FROM permalink_route_redirects")
             .fetch_all(&mut *conn)
             .await?;
+    let previous_history: BTreeMap<String, Claim> = old_redirects
+        .iter()
+        .map(|(path, kind, id)| (path.clone(), (kind.clone(), id.clone())))
+        .collect();
     let mut historical = BTreeMap::<String, Claim>::new();
     for (path, kind, id) in old_redirects {
-        historical.insert(path, (kind, id));
+        if path == "/" {
+            continue;
+        }
+        let owner = if kind == "entry" && posts_page_id.is_some_and(|page| id == page.to_string()) {
+            ("archive".into(), "post".into())
+        } else {
+            (kind, id)
+        };
+        historical.insert(path, owner);
     }
-    let previous_history = historical.clone();
     // Compatibility: until all legacy entry mutation paths are replaced,
     // migration0027 redirects remain an input to the new global authority.
     let old_entry_redirects: Vec<(String, i64)> =
@@ -772,9 +879,18 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
             .fetch_all(&mut *conn)
             .await?;
     for (path, id) in old_entry_redirects {
-        let owner = ("entry".to_owned(), id.to_string());
+        if path == "/" {
+            continue;
+        }
+        let owner = if Some(id) == posts_page_id {
+            ("archive".into(), "post".into())
+        } else {
+            ("entry".to_owned(), id.to_string())
+        };
         if let Some(other) = historical.insert(path.clone(), owner.clone()) {
-            if other != owner {
+            if other != owner
+                && !reading_page_owner_transfer(&other, &owner, posts_page_id, &target_families)
+            {
                 return Err(ApiError::conflict(format!(
                     "permalink_redirect_collision:path={path} legacy=entry:{id} owner={}:{}",
                     other.0, other.1,
@@ -784,7 +900,9 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
     }
     for (path, owner) in legacy_aliases {
         if let Some(other) = historical.insert(path.clone(), owner.clone()) {
-            if other != owner {
+            if other != owner
+                && !reading_page_owner_transfer(&other, &owner, posts_page_id, &target_families)
+            {
                 return Err(ApiError::conflict(format!(
                     "permalink_redirect_collision:path={path} new={}:{} owner={}:{}",
                     owner.0, owner.1, other.0, other.1,
@@ -793,18 +911,33 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
         }
     }
     for (path, kind, id) in &previous {
-        let owner = (kind.clone(), id.clone());
+        if path == "/" {
+            continue;
+        }
+        let owner = if kind == "entry" && posts_page_id.is_some_and(|page| id == &page.to_string())
+        {
+            ("archive".into(), "post".into())
+        } else {
+            (kind.clone(), id.clone())
+        };
         if kind != "home"
             && !proposed
                 .get(path)
                 .is_some_and(|p| p.kind == *kind && p.id == *id)
         {
             if let Some(other) = historical.insert(path.clone(), owner.clone()) {
-                if other != owner {
+                if other != owner
+                    && !reading_page_owner_transfer(&other, &owner, posts_page_id, &target_families)
+                    && !reading_page_owner_transfer(&owner, &other, posts_page_id, &target_families)
+                {
                     return Err(ApiError::conflict(format!(
                         "permalink_redirect_collision:path={path} old={kind}:{id} owner={}:{}",
                         other.0, other.1,
                     )));
+                }
+                if reading_page_owner_transfer(&owner, &other, posts_page_id, &target_families) {
+                    // Current Page alias takes precedence over the old archive.
+                    historical.insert(path.clone(), other);
                 }
             }
         }
@@ -813,6 +946,13 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
         if let Some(owner) = historical.get(path) {
             if owner.0 == candidate.kind && owner.1 == candidate.id {
                 historical.remove(path); // Reclaim own old canonical URL.
+            } else if reading_page_owner_transfer(
+                owner,
+                &(candidate.kind.clone(), candidate.id.clone()),
+                posts_page_id,
+                &target_families,
+            ) {
+                historical.remove(path);
             } else {
                 return Err(ApiError::conflict(format!(
                     "permalink_collision:path={path} new={}:{} redirect_owner={}:{}",
@@ -855,9 +995,15 @@ pub async fn sync_claims_in_tx(conn: &mut SqliteConnection) -> ApiResult<()> {
                 && !(owner.0 == pattern.kind
                     && match target_families.get(owner) {
                         Some(family) => family == &pattern.family,
-                        None => orphan_families.get(owner).and_then(Option::as_deref)
-                            == Some(pattern.family.as_str()),
+                        None => {
+                            orphan_families.get(owner).and_then(Option::as_deref)
+                                == Some(pattern.family.as_str())
+                        }
                     })
+                && !(owner == &("archive".into(), "post".into())
+                    && pattern.kind == "entry"
+                    && pattern.family == "page"
+                    && path.starts_with("/content/page/"))
             {
                 return Err(ApiError::conflict(format!(
                     "permalink_pattern_collision:redirect={path} owner={}:{} pattern={}:{}",
@@ -980,6 +1126,33 @@ pub async fn resolve_public_path(
             (PublicRouteTarget::Term(term_id), canonical)
         }
         "archive" => {
+            if id == "post" {
+                // An assigned Blog Page which later becomes draft/deleted is a
+                // dead route, not an implicit fallback to the default archive.
+                let posts_page_id: Option<i64> = sqlx::query_scalar(
+                    "SELECT posts_page_id FROM site_reading_settings WHERE id = 1",
+                )
+                .fetch_one(&mut *tx)
+                .await?;
+                if let Some(page_id) = posts_page_id {
+                    let published: i64 = sqlx::query_scalar(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM content_entries e
+                           JOIN content_types t ON t.key = e.content_type_key
+                          WHERE e.id = ? AND e.content_type_key = 'page'
+                            AND e.publication_status = 'published'
+                            AND t.provider_status = 'active'
+                            AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1
+                         )",
+                    )
+                    .bind(page_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    if published == 0 {
+                        return Ok(None);
+                    }
+                }
+            }
             let Some(canonical) = canonical_archive_path_in_tx(&mut tx, &id).await? else {
                 return Ok(None);
             };
@@ -1011,6 +1184,376 @@ mod tests {
             .unwrap();
         sqlx::migrate!("../../migrations").run(&db).await.unwrap();
         db
+    }
+
+    async fn reading_page(db: &SqlitePool, slug: &str, published: bool) -> i64 {
+        let id = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES('page',?,'Page','{}','draft')",
+        )
+        .bind(slug)
+        .execute(db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        if published {
+            sqlx::query("UPDATE content_entries SET publication_status='published' WHERE id=?")
+                .bind(id)
+                .execute(db)
+                .await
+                .unwrap();
+        }
+        id
+    }
+
+    #[tokio::test]
+    async fn reading_settings_reclaims_home_and_posts_page_paths_without_collision() {
+        use crate::storage::settings::{ReadingSettingsInput, save_reading};
+        let db = site().await;
+        let front = reading_page(&db, "front", true).await;
+        let blog = reading_page(&db, "blog", true).await;
+        let updates = reading_page(&db, "updates", true).await;
+
+        let first = save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: Some(front),
+                posts_page_id: Some(blog),
+            },
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.version, 2);
+        assert_eq!(
+            resolve_public_path(&db, "/").await.unwrap().unwrap().target,
+            PublicRouteTarget::Entry(front)
+        );
+        let home_alias = resolve_public_path(&db, "/content/page/front")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(home_alias.redirect);
+        assert_eq!(home_alias.canonical_path, "/");
+        let blog_route = resolve_public_path(&db, "/content/page/blog")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(blog_route.target, PublicRouteTarget::Archive("post".into()));
+        assert!(!blog_route.redirect);
+        let old_archive = resolve_public_path(&db, "/content/post")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(old_archive.canonical_path, "/content/page/blog");
+        assert!(old_archive.redirect);
+        assert_eq!(
+            canonical_entry_path_in_tx(&mut db.acquire().await.unwrap(), blog)
+                .await
+                .unwrap(),
+            None,
+            "Posts Page must have no competing entry claim"
+        );
+
+        let moved = save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: Some(front),
+                posts_page_id: Some(updates),
+            },
+            first.version,
+        )
+        .await
+        .unwrap();
+        assert_eq!(moved.version, 3);
+        assert_eq!(
+            resolve_public_path(&db, "/content/page/blog")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Entry(blog),
+            "Former Posts Page regains its Page claim"
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/content/page/updates")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Archive("post".into())
+        );
+        let unset = save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: None,
+                posts_page_id: None,
+            },
+            moved.version,
+        )
+        .await
+        .unwrap();
+        assert_eq!(unset.version, 4);
+        assert_eq!(
+            resolve_public_path(&db, "/").await.unwrap().unwrap().target,
+            PublicRouteTarget::Home
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/content/page/front")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Entry(front)
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/content/page/updates")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Entry(updates)
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/content/post")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Archive("post".into())
+        );
+        save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: Some(front),
+                posts_page_id: Some(blog),
+            },
+            unset.version,
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn reading_settings_reject_invalid_ids_and_stale_cas_without_writes() {
+        use crate::storage::settings::{ReadingSettingsInput, get_reading, save_reading};
+        let db = site().await;
+        let draft = reading_page(&db, "draft-page", false).await;
+        let published = reading_page(&db, "published-page", true).await;
+        let post = sqlx::query(
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+             VALUES('post','article','Article','{}','draft')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query("UPDATE content_entries SET publication_status='published' WHERE id=?")
+            .bind(post)
+            .execute(&db)
+            .await
+            .unwrap();
+        for (home, posts) in [
+            (Some(published), Some(published)),
+            (Some(draft), None),
+            (Some(post), None),
+            (Some(999999), None),
+            (Some(-1), None),
+        ] {
+            let error = save_reading(
+                &db,
+                ReadingSettingsInput {
+                    homepage_page_id: home,
+                    posts_page_id: posts,
+                },
+                1,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(get_reading(&db).await.unwrap().version, 1);
+        }
+        let saved = save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: Some(published),
+                posts_page_id: None,
+            },
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(saved.version, 2);
+        let error = save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: None,
+                posts_page_id: None,
+            },
+            1,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(error.0, axum::http::StatusCode::PRECONDITION_FAILED);
+        assert_eq!(
+            get_reading(&db).await.unwrap().homepage_page_id,
+            Some(published)
+        );
+    }
+
+    #[tokio::test]
+    async fn reading_settings_custom_blog_path_reclaims_page_alias_on_unset() {
+        use crate::storage::settings::{ReadingSettingsInput, save_reading};
+        let db = site().await;
+        let blog = reading_page(&db, "blog", true).await;
+        sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?, '/news')")
+            .bind(blog)
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let selected = save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: None,
+                posts_page_id: Some(blog),
+            },
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resolve_public_path(&db, "/news")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Archive("post".into())
+        );
+        let alias = resolve_public_path(&db, "/content/page/blog")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(alias.canonical_path, "/news");
+        assert!(alias.redirect);
+
+        let unselected = save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: None,
+                posts_page_id: None,
+            },
+            selected.version,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resolve_public_path(&db, "/news")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Entry(blog)
+        );
+        let page_alias = resolve_public_path(&db, "/content/page/blog")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(page_alias.target, PublicRouteTarget::Entry(blog));
+        assert_eq!(page_alias.canonical_path, "/news");
+
+        save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: None,
+                posts_page_id: Some(blog),
+            },
+            unselected.version,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resolve_public_path(&db, "/news")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            PublicRouteTarget::Archive("post".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn assigned_draft_and_deleted_pages_stay_dead_and_advance_delete_etag() {
+        use crate::storage::settings::{
+            ReadingPageStatus, ReadingSettingsInput, bump_reading_version_on_deleted_entry_in_tx,
+            get_reading, save_reading,
+        };
+        let db = site().await;
+        let front = reading_page(&db, "front", true).await;
+        let blog = reading_page(&db, "blog", true).await;
+        let saved = save_reading(
+            &db,
+            ReadingSettingsInput {
+                homepage_page_id: Some(front),
+                posts_page_id: Some(blog),
+            },
+            1,
+        )
+        .await
+        .unwrap();
+        sqlx::query("UPDATE content_entries SET publication_status='draft' WHERE id IN (?,?)")
+            .bind(front)
+            .bind(blog)
+            .execute(&db)
+            .await
+            .unwrap();
+        let mut tx = db.begin().await.unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let draft = get_reading(&db).await.unwrap();
+        assert_eq!(draft.homepage_status, ReadingPageStatus::Draft);
+        assert_eq!(draft.posts_page_status, ReadingPageStatus::Draft);
+        assert_eq!(draft.version, saved.version);
+        assert!(resolve_public_path(&db, "/").await.unwrap().is_none());
+        assert!(
+            resolve_public_path(&db, "/content/page/blog")
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let mut tx = db.begin().await.unwrap();
+        sqlx::query("DELETE FROM content_entries WHERE id IN (?,?)")
+            .bind(front)
+            .bind(blog)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        bump_reading_version_on_deleted_entry_in_tx(&mut tx, front)
+            .await
+            .unwrap();
+        bump_reading_version_on_deleted_entry_in_tx(&mut tx, blog)
+            .await
+            .unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let deleted = get_reading(&db).await.unwrap();
+        assert_eq!(deleted.homepage_page_id, Some(front));
+        assert_eq!(deleted.posts_page_id, Some(blog));
+        assert_eq!(deleted.homepage_status, ReadingPageStatus::Deleted);
+        assert_eq!(deleted.posts_page_status, ReadingPageStatus::Deleted);
+        assert_eq!(deleted.version, saved.version + 2);
+        assert!(resolve_public_path(&db, "/").await.unwrap().is_none());
+        assert!(
+            resolve_public_path(&db, "/content/page/blog")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let claimed: (String,String) = sqlx::query_as(
+            "SELECT target_kind,target_id FROM permalink_route_claims WHERE path='/content/page/blog'",
+        ).fetch_one(&db).await.unwrap();
+        assert_eq!(claimed, ("archive".into(), "post".into()));
     }
 
     async fn add_post(db: &SqlitePool, slug: &str, published: bool) -> i64 {
@@ -1093,9 +1636,14 @@ mod tests {
             rewrite_base: Some("library".to_owned()),
         };
         let mut tx = db.begin().await.unwrap();
-        sync_provider_rewrite_defaults_in_tx(&mut tx, "plugin", "books_plugin", &[declaration.clone()])
-            .await
-            .unwrap();
+        sync_provider_rewrite_defaults_in_tx(
+            &mut tx,
+            "plugin",
+            "books_plugin",
+            &[declaration.clone()],
+        )
+        .await
+        .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         let enabled = get_settings(&db).await.unwrap();
@@ -1103,27 +1651,41 @@ mod tests {
         assert!(!enabled.content_type_bases.contains_key("books"));
         let mut conn = db.acquire().await.unwrap();
         let effective = read_effective_settings(&mut conn).await.unwrap();
-        assert_eq!(effective.content_type_bases["books"], Some("library".into()));
+        assert_eq!(
+            effective.content_type_bases["books"],
+            Some("library".into())
+        );
         drop(conn);
 
         let mut changed = declaration.clone();
         changed.rewrite_base = Some("catalog".into());
         let mut tx = db.begin().await.unwrap();
         sync_provider_rewrite_defaults_in_tx(&mut tx, "plugin", "books_plugin", &[changed.clone()])
-            .await.unwrap();
+            .await
+            .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         let modified = get_settings(&db).await.unwrap();
-        assert_eq!(modified.version, enabled.version + 1,
-            "updating an effective provider default invalidates an older site editor CAS");
+        assert_eq!(
+            modified.version,
+            enabled.version + 1,
+            "updating an effective provider default invalidates an older site editor CAS"
+        );
         assert!(!modified.content_type_bases.contains_key("books"));
         let mut conn = db.acquire().await.unwrap();
-        assert_eq!(read_effective_settings(&mut conn).await.unwrap().content_type_bases["books"],
-            Some("catalog".to_owned()));
+        assert_eq!(
+            read_effective_settings(&mut conn)
+                .await
+                .unwrap()
+                .content_type_bases["books"],
+            Some("catalog".to_owned())
+        );
         drop(conn);
 
         let mut explicit_legacy = get_settings(&db).await.unwrap().input();
-        explicit_legacy.content_type_bases.insert("books".into(), None);
+        explicit_legacy
+            .content_type_bases
+            .insert("books".into(), None);
         let saved = put_settings(&db, modified.version, &explicit_legacy)
             .await
             .unwrap();
@@ -1135,22 +1697,38 @@ mod tests {
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         let final_site = get_settings(&db).await.unwrap();
-        assert_eq!(final_site.version, saved.version, "provider defaults hidden by site choice");
+        assert_eq!(
+            final_site.version, saved.version,
+            "provider defaults hidden by site choice"
+        );
         assert_eq!(final_site.content_type_bases.get("books"), Some(&None));
         let mut conn = db.acquire().await.unwrap();
-        assert_eq!(read_effective_settings(&mut conn).await.unwrap().content_type_bases["books"], None);
+        assert_eq!(
+            read_effective_settings(&mut conn)
+                .await
+                .unwrap()
+                .content_type_bases["books"],
+            None
+        );
         drop(conn);
         let mut tx = db.begin().await.unwrap();
-        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", false).await.unwrap();
+        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", false)
+            .await
+            .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
         assert_eq!(get_settings(&db).await.unwrap().version, saved.version);
         let mut tx = db.begin().await.unwrap();
-        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", true).await.unwrap();
+        set_provider_rewrite_status_in_tx(&mut tx, "plugin", "books_plugin", true)
+            .await
+            .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
-        assert_eq!(get_settings(&db).await.unwrap().version, saved.version,
-            "explicit null must survive disable and re-enable");
+        assert_eq!(
+            get_settings(&db).await.unwrap().version,
+            saved.version,
+            "explicit null must survive disable and re-enable"
+        );
     }
 
     #[tokio::test]
@@ -1754,7 +2332,9 @@ mod tests {
         tx.commit().await.unwrap();
         assert_eq!(resolve_public_path(&db, "/blog/gone").await.unwrap(), None);
         assert_eq!(
-            resolve_public_path(&db, "/content/post/gone").await.unwrap(),
+            resolve_public_path(&db, "/content/post/gone")
+                .await
+                .unwrap(),
             None,
         );
     }
@@ -1767,9 +2347,7 @@ mod tests {
         genres
             .taxonomy_bases
             .insert("category".to_owned(), Some("genres".to_owned()));
-        put_settings(&db, original.version, &genres)
-            .await
-            .unwrap();
+        put_settings(&db, original.version, &genres).await.unwrap();
         let term_id = sqlx::query(
             "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Gone','gone')",
         )
@@ -1797,7 +2375,10 @@ mod tests {
             .unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
-        assert_eq!(resolve_public_path(&db, "/genres/gone").await.unwrap(), None);
+        assert_eq!(
+            resolve_public_path(&db, "/genres/gone").await.unwrap(),
+            None
+        );
         assert_eq!(
             resolve_public_path(&db, "/taxonomy/category/gone")
                 .await

@@ -9,6 +9,7 @@ import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { clearPermalinkDrafts, discardPermalinkDraft, PermalinkSettingsPage } from './features/settings/PermalinkSettingsPage.tsx';
+import { clearReadingDrafts, discardReadingDraft, ReadingSettingsPanel } from './features/settings/ReadingSettingsPanel.tsx';
 import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
@@ -60,7 +61,7 @@ function editorIdentity(route: ParsedRoute, hash: string): string | null {
 
 function builderIdentity(route: ParsedRoute): string | null {
   if (route.view !== 'builder') return null;
-  return `${route.sub}:${route.templateRole ?? 'homepage'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
+  return `${route.sub}:${route.templateRole ?? 'header'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
 }
 
 export const App: React.FC = () => {
@@ -88,6 +89,12 @@ export const App: React.FC = () => {
   const markPermalinkDirty = useCallback((value: boolean) => {
     permalinkDirtyRef.current = value;
     setPermalinkDirty(value);
+  }, []);
+  const [readingDirty, setReadingDirty] = useState(false);
+  const readingDirtyRef = useRef(false);
+  const markReadingDirty = useCallback((value: boolean) => {
+    readingDirtyRef.current = value;
+    setReadingDirty(value);
   }, []);
   const [builderDirty, setBuilderDirty] = useState(false);
   const [postsDirty, setPostsDirty] = useState(false);
@@ -175,20 +182,26 @@ export const App: React.FC = () => {
       && schemaDirtyRef.current && acceptedHashRef.current !== destination;
     const leavingPermalinks = current.view === 'settings' && current.sub === 'permalinks'
       && acceptedHashRef.current !== destination && permalinkDirtyRef.current;
+    const leavingReading = current.view === 'settings' && current.sub === 'reading'
+      && acceptedHashRef.current !== destination && readingDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema || leavingPermalinks;
+    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema || leavingPermalinks || leavingReading;
     if (!hasDirty) return true;
     const approved = window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
         : leavingTerm
           ? 'Taxonomy có thay đổi chưa lưu. Rời màn hình sẽ bỏ bản nhập. Tiếp tục?'
-          : leavingSchema || leavingSection || leavingPermalinks
+          : leavingSchema || leavingSection || leavingPermalinks || leavingReading
             ? 'Có thay đổi chưa lưu. Rời màn hình có thể làm mất bản nhập. Tiếp tục?'
             : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
     if (approved && leavingPermalinks && userRef.current) {
       discardPermalinkDraft(siteInstanceIdRef.current, userRef.current.id);
       markPermalinkDirty(false);
+    }
+    if (approved && leavingReading && userRef.current) {
+      discardReadingDraft(siteInstanceIdRef.current, userRef.current.id);
+      markReadingDirty(false);
     }
     return approved;
   };
@@ -252,13 +265,13 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, schemaDirty, permalinkDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
+  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
@@ -387,7 +400,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -396,6 +409,7 @@ export const App: React.FC = () => {
       authSessionEpochRef.current += 1;
       editorDraftStore.clear();
       clearPermalinkDrafts();
+      clearReadingDrafts();
       setUser(null);
       setCsrfToken(null);
       setAuthUsername('');
@@ -409,6 +423,7 @@ export const App: React.FC = () => {
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
       markPermalinkDirty(false);
+      markReadingDirty(false);
       setBuilderDirty(false);
       setPostsDirty(false);
       setPagesDirty(false);
@@ -542,9 +557,9 @@ export const App: React.FC = () => {
       cptTypes={cptTypes}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
       sidebarContent={<BuilderWorkspace
-        key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
+        key={builderIdentity(lastBuilderRouteRef.current) ?? 'header'}
         route={lastBuilderRouteRef.current}
         active={route.view === 'builder' && isRouteAllowed(route, user?.role ?? 'editor')}
         onNavigateHash={navigateHash}
@@ -606,6 +621,11 @@ export const App: React.FC = () => {
               user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
               onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cài đặt permalink.')}
               onDirtyChange={markPermalinkDirty} />
+        : route.sub === 'reading'
+          ? <ReadingSettingsPanel key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
+              user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+              onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cấu hình Reading Settings.')}
+              onDirtyChange={markReadingDirty} />
         : route.sub === 'seo'
           ? <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
           : route.sub === 'contact'

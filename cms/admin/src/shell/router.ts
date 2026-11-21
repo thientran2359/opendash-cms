@@ -156,7 +156,7 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const scopedSection = templateRole === 'section' && typeKey === 'section' && entryId !== undefined;
     const noScope = !entryParam && !templateRole && !typeKey && !queryPart;
     const validGlobal = !entryParam && templateRole !== 'page' &&
-      (templateRole === 'homepage' || templateRole === 'header' || templateRole === 'footer'
+      (templateRole === 'header' || templateRole === 'footer'
         || templateRole === 'taxonomy_archive' || templateRole === 'archive'
         || templateRole === 'single') && (!typeKey || /^[a-z][a-z0-9_]{0,63}$/.test(typeKey));
     const validAdminScopedSingle = templateRole === 'single' && !!typeKey && entryId !== undefined;

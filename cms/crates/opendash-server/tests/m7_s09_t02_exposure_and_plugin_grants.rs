@@ -111,7 +111,14 @@ fn make_png(r: u8, g: u8, b: u8) -> Vec<u8> {
     out
 }
 
-async fn upload_png(client: &Client, base: &str, cookie: &str, csrf: &str, name: &str, bytes: Vec<u8>) -> String {
+async fn upload_png(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    name: &str,
+    bytes: Vec<u8>,
+) -> String {
     let resp = client
         .post(format!("{base}/api/admin/media"))
         .header("Cookie", cookie)
@@ -255,6 +262,84 @@ fn build_content_save_action_wasm(cmd_json: &str) -> Vec<u8> {
     wat_bytes(&wat)
 }
 
+// S03 public Home is selected from a published Page through Reading Settings.
+// Keep this setup through HTTP so the tests exercise publication and CAS.
+async fn create_s03_home(client: &Client, base: &str, cookie: &str, csrf: &str) -> i64 {
+    let created = client
+        .post(format!("{base}/api/admin/content-types/page/entries"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({"title":"S03 Home","slug":"s03-home","values":{"body":"Home"}}))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let text = created.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "create S03 Page: {text}");
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    let id = entry["id"].as_i64().unwrap();
+    let publish = client
+        .post(format!(
+            "{base}/api/admin/content-types/page/entries/{id}/publication"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(
+            "If-Match",
+            format!("\"v{}\"", entry["version"].as_i64().unwrap()),
+        )
+        .json(&json!({"status":"published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status().as_u16(), 200, "publish Home Page");
+    let reading = client
+        .get(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status().as_u16(), 200);
+    let token = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let selected = client
+        .put(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", token)
+        .json(&json!({"homepage_page_id":id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = selected.status();
+    let text = selected.text().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "save S03 Reading: {text}");
+    id
+}
+
+async fn save_s03_home_doc(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    page_id: i64,
+    version: i64,
+    document: &Value,
+) -> reqwest::Response {
+    client
+        .put(format!("{base}/api/admin/entries/page/{page_id}/builder"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .json(document)
+        .send()
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
     let dir = TempDirGuard::new("exposure-grants");
@@ -279,10 +364,42 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
     let (ed_cookie, ed_csrf) = login(&client, &srv.base_url, "editor1", "EditorPassword123!").await;
 
     // 1. Upload media for AC-05a,b,c
-    let img_private_only = upload_png(&client, &srv.base_url, &admin_cookie, &admin_csrf, "priv.png", make_png(200, 10, 10)).await;
-    let img_public_base = upload_png(&client, &srv.base_url, &admin_cookie, &admin_csrf, "pub.png", make_png(10, 200, 10)).await;
-    let img_dual_use = upload_png(&client, &srv.base_url, &admin_cookie, &admin_csrf, "dual.png", make_png(10, 10, 200)).await;
-    let img_home_builder = upload_png(&client, &srv.base_url, &admin_cookie, &admin_csrf, "home.png", make_png(200, 200, 10)).await;
+    let img_private_only = upload_png(
+        &client,
+        &srv.base_url,
+        &admin_cookie,
+        &admin_csrf,
+        "priv.png",
+        make_png(200, 10, 10),
+    )
+    .await;
+    let img_public_base = upload_png(
+        &client,
+        &srv.base_url,
+        &admin_cookie,
+        &admin_csrf,
+        "pub.png",
+        make_png(10, 200, 10),
+    )
+    .await;
+    let img_dual_use = upload_png(
+        &client,
+        &srv.base_url,
+        &admin_cookie,
+        &admin_csrf,
+        "dual.png",
+        make_png(10, 10, 200),
+    )
+    .await;
+    let img_home_builder = upload_png(
+        &client,
+        &srv.base_url,
+        &admin_cookie,
+        &admin_csrf,
+        "home.png",
+        make_png(200, 200, 10),
+    )
+    .await;
 
     // Create CPT `portfolio` with Public + Private fields
     assert_eq!(
@@ -311,7 +428,10 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
 
     // Create published `portfolio` entry
     let entry_resp = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -347,48 +467,33 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
         StatusCode::OK
     );
 
-    // Set `img_home_builder` in `builder_homepage_media` (Branch 2)
-    let home_get = client
-        .get(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header("Cookie", &admin_cookie)
-        .send()
-        .await
-        .unwrap();
-    let home_etag = home_get
-        .headers()
-        .get(reqwest::header::ETAG)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("\"v0\"")
-        .to_string();
-    let home_put = client
-        .put(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header("If-Match", home_etag)
-        .header("Cookie", &admin_cookie)
-        .header("Origin", &srv.base_url)
-        .header("X-CSRF-Token", &admin_csrf)
-        .json(&json!({
-            "schema_version": 1,
-            "sections": [{
-                "id": "sec-1",
-                "children": [{
-                    "id": "row-1",
-                    "children": [{
-                        "id": "col-1",
-                        "children": [{
-                            "id": "img-1",
-                            "type": "core/image",
-                            "props": { "media_id": img_home_builder, "alt": "Home Banner" }
-                        }]
-                    }]
-                }]
-            }]
-        }))
-        .send()
-        .await
-        .unwrap();
+    // Pin img_home_builder through the published Reading Page's Builder document.
+    let home_id = create_s03_home(&client, &srv.base_url, &admin_cookie, &admin_csrf).await;
+    let home_doc = json!({
+        "schema_version": 1,
+        "sections": [{"id":"sec-1","children":[{"id":"row-1","children":[
+            {"id":"col-1","children":[
+                {"id":"img-1","type":"core/image","props":{"media_id":img_home_builder,"alt":"Home Banner"}}
+            ]}
+        ]}]}]
+    });
+    let home_put = save_s03_home_doc(
+        &client,
+        &srv.base_url,
+        &admin_cookie,
+        &admin_csrf,
+        home_id,
+        2,
+        &home_doc,
+    )
+    .await;
     let home_status = home_put.status();
     let home_err = home_put.text().await.unwrap();
-    assert_eq!(home_status, StatusCode::OK, "homepage_put failed: {home_err}");
+    assert_eq!(
+        home_status,
+        StatusCode::OK,
+        "Reading Page Builder failed: {home_err}"
+    );
 
     // AC-05a,b,c assertions:
     // - Private-only image -> 404 publicly, 409 on DELETE (pinned!)
@@ -403,7 +508,10 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
     );
     assert_eq!(
         client
-            .delete(format!("{}/api/admin/media/{img_private_only}", srv.base_url))
+            .delete(format!(
+                "{}/api/admin/media/{img_private_only}",
+                srv.base_url
+            ))
             .header("Cookie", &admin_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &admin_csrf)
@@ -503,11 +611,18 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
         .unwrap();
     let basic_status = basic_inst.status();
     let basic_body = basic_inst.text().await.unwrap();
-    assert_eq!(basic_status, StatusCode::CREATED, "basic_hook install failed: {basic_body}");
+    assert_eq!(
+        basic_status,
+        StatusCode::CREATED,
+        "basic_hook install failed: {basic_body}"
+    );
 
     // Saving an entry with `secret_note`: `basic-hook` does NOT see `secret_note`, so it ALLOWs (201)!
     let create_b = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -560,7 +675,10 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
         StatusCode::CREATED
     );
     let create_c = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -665,7 +783,10 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
 
     // Editor calling `sync_deal` writing `admin_margin` -> 403 `field_edit_forbidden`
     let ed_action = client
-        .post(format!("{}/api/admin/plugins/deal-sync/actions/sync_deal", srv.base_url))
+        .post(format!(
+            "{}/api/admin/plugins/deal-sync/actions/sync_deal",
+            srv.base_url
+        ))
         .header("Cookie", &ed_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &ed_csrf)
@@ -675,12 +796,19 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
         .unwrap();
     let ed_status = ed_action.status();
     let ed_body = ed_action.text().await.unwrap();
-    assert_eq!(ed_status, StatusCode::FORBIDDEN, "ed_action unexpected: {ed_body}");
+    assert_eq!(
+        ed_status,
+        StatusCode::FORBIDDEN,
+        "ed_action unexpected: {ed_body}"
+    );
     assert!(ed_body.contains("field_edit_forbidden"));
 
     // Admin calling `sync_deal` (`required_role = "editor"`) -> 200 OK (not downgraded!)
     let adm_action = client
-        .post(format!("{}/api/admin/plugins/deal-sync/actions/sync_deal", srv.base_url))
+        .post(format!(
+            "{}/api/admin/plugins/deal-sync/actions/sync_deal",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)

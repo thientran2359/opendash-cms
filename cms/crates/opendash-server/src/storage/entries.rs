@@ -1634,6 +1634,11 @@ pub async fn delete_entry(
     if result.rows_affected() == 0 {
         return Err(missing_or_stale(db, type_key, id).await?);
     }
+    if type_key == "page" {
+        // Preserve deleted Reading IDs and advance their CAS token atomically
+        // with removal and permalink-claim rebuilding.
+        crate::storage::settings::bump_reading_version_on_deleted_entry_in_tx(&mut tx, id).await?;
+    }
     sqlx::query(
         "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
     )

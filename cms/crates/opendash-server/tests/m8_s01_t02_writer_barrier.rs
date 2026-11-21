@@ -89,18 +89,13 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
     let routes_dir = manifest_dir.join("src").join("routes");
 
     // All mutating handler functions wired into build_router_with_themes_root
-    // (excludes read-only POST previews: homepage_preview, entry_builder_preview,
+    // (excludes read-only POST previews: entry_builder_preview,
     // template_overrides_preview, menus_preview)
     let required_handlers: &[(&str, &[&str])] = &[
         ("auth.rs", &["auth_setup", "auth_login", "auth_logout"]),
         (
             "builder.rs",
-            &[
-                "save",
-                "homepage_put",
-                "entry_builder_put",
-                "entry_builder_reset",
-            ],
+            &["save", "entry_builder_put", "entry_builder_reset"],
         ),
         (
             "contact.rs",
@@ -161,7 +156,12 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
         ),
         (
             "settings.rs",
-            &["general_put", "public_put", "theme_options_put"],
+            &[
+                "general_put",
+                "public_put",
+                "reading_put",
+                "theme_options_put",
+            ],
         ),
         (
             "smtp.rs",

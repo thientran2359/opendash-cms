@@ -117,30 +117,68 @@ async fn login(
     (cookie, csrf)
 }
 
-// S02 retains the independent homepage writer until S03. Seed the actual
-// public homepage through its authenticated CAS API, not the future Reading API.
-async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) {
-    let current = client
-        .get(format!("{base_url}/api/admin/builder/homepage"))
+// S03: Home is a published Page selected atomically in Reading Settings.
+async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) -> i64 {
+    let types: Vec<Value> = client
+        .get(format!("{base_url}/api/admin/content-types"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let schema_token = types
+        .iter()
+        .find(|v| v["descriptor"]["key"] == "page")
+        .unwrap()["schema_token"]
+        .as_str()
+        .unwrap();
+    let created = client
+        .post(format!(
+            "{base_url}/api/admin/content-types/page/entries/composite"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base_url)
+        .header("X-CSRF-Token", csrf)
+        .json(&serde_json::json!({
+            "expected_schema_token": schema_token,
+            "slug":"theme-home-fixture",
+            "title":"Theme Home Fixture",
+            "values":{"body":"Theme Home Fixture"},
+            "publication_status":"published"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let raw = created.text().await.unwrap();
+    assert_eq!(status, 201, "S03 Home Page create: {raw}");
+    let page_id = serde_json::from_str::<Value>(&raw).unwrap()["entry"]["id"]
+        .as_i64()
+        .unwrap();
+    let reading = client
+        .get(format!("{base_url}/api/admin/settings/reading"))
         .header("Cookie", cookie)
         .send()
         .await
         .unwrap();
-    assert_eq!(current.status(), 200, "read S02 homepage");
-    let etag = current.headers()["etag"].to_str().unwrap().to_owned();
-    let saved = client
-        .put(format!("{base_url}/api/admin/builder/homepage"))
-        .header("Cookie", cookie).header("Origin", base_url)
-        .header("X-CSRF-Token", csrf).header("If-Match", etag)
-        .json(&serde_json::json!({
-            "schema_version":1, "sections":[{"id":"home-sec","children":[
-                {"id":"home-row","children":[{"id":"home-col","children":[
-                    {"id":"home-title","type":"core/heading","props":{"level":1,"text":"Theme Home Fixture"}}
-                ]}]}
-            ]}]
-        }))
-        .send().await.unwrap();
-    assert_eq!(saved.status(), 200, "seed S02 homepage");
+    assert_eq!(reading.status(), 200);
+    let etag = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let assigned = client
+        .put(format!("{base_url}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base_url)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", etag)
+        .json(&serde_json::json!({"homepage_page_id":page_id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = assigned.status();
+    let body = assigned.text().await.unwrap();
+    assert_eq!(status, 200, "S03 Reading assignment: {body}");
+    page_id
 }
 
 #[tokio::test]
