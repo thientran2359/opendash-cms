@@ -9,6 +9,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use opendash_core::registry::ProviderStatus;
 use opendash_core::{id::validate_package_id, theme::ThemeV3Manifest};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -772,8 +773,44 @@ pub async fn activate_revision(
         return Ok(RevisionActivationOutcome::CorruptRevision(durability));
     }
 
+    // Only read files explicitly included in this verified immutable revision.
+    // Never discover arbitrary filesystem content under the revisions directory.
+    let mut block_files = BTreeMap::new();
+    let revision_dir = themes_root
+        .join("revisions")
+        .join(&revision.revision_digest);
+    for path in revision
+        .file_digests
+        .keys()
+        .filter(|path| path.starts_with("blocks/"))
+    {
+        let clean = safe_relative_path(path)?;
+        let bytes = fs::read(revision_dir.join(clean))
+            .map_err(|_| ApiError::internal("Không đọc được block trong theme revision."))?;
+        block_files.insert(path.clone(), bytes);
+    }
+    let blocks = crate::theme::collect_package_blocks(&block_files, &revision.theme_id)
+        .map_err(ApiError::bad_request)?;
+
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    let block_update = async {
+        crate::storage::page::sync_owner_blocks_in_tx(
+            &mut conn,
+            "theme",
+            &revision.theme_id,
+            ProviderStatus::Active,
+            &revision.revision_digest,
+            &blocks,
+        )
+        .await?;
+        crate::storage::page::resync_plugin_block_acls_in_tx(&mut conn).await
+    }
+    .await;
+    if let Err(err) = block_update {
+        let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+        return Err(err);
+    }
     if let Err(err) = crate::storage::content::sync_theme_declarations_in_tx(
         &mut conn,
         &revision.theme_id,

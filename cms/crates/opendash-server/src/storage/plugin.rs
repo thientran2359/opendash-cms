@@ -8,12 +8,61 @@ fn map_cnt_err(err: crate::error::ApiError) -> PluginStorageError {
     }
 }
 
-use std::{fs, io::Write, path::Path};
+use std::{collections::BTreeMap, fs, io::Write, path::Path};
 
+use opendash_core::{block_schema::BlockSchemaV1, registry::ProviderStatus};
 use sha2::{Digest, Sha256};
 use sqlx::{Row, SqliteConnection, SqlitePool};
 
 const COMPLETE_MARKER: &str = ".complete";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StoredBlock {
+    schema: BlockSchemaV1,
+    template: String,
+}
+
+fn canonical_blocks_json(
+    owner_id: &str,
+    blocks: &[(BlockSchemaV1, String)],
+) -> Result<Option<String>, PluginStorageError> {
+    if blocks.is_empty() {
+        return Ok(None);
+    }
+    if blocks.len() > 32 {
+        return Err(PluginStorageError::BadRequest(
+            "Plugin vượt quá 32 blocks.".into(),
+        ));
+    }
+    let mut map = BTreeMap::new();
+    for (schema, template) in blocks {
+        schema
+            .validate(owner_id)
+            .map_err(|e| PluginStorageError::BadRequest(e.into()))?;
+        crate::template_sec::validate_block_template_csec(&schema.id, template, schema)
+            .map_err(|e| PluginStorageError::BadRequest(e.into()))?;
+        let (_, slug) = schema
+            .id
+            .split_once('/')
+            .ok_or_else(|| PluginStorageError::BadRequest("Block ID không hợp lệ.".into()))?;
+        if map
+            .insert(
+                slug.to_owned(),
+                StoredBlock {
+                    schema: schema.clone(),
+                    template: template.clone(),
+                },
+            )
+            .is_some()
+        {
+            return Err(PluginStorageError::BadRequest("Block trùng slug.".into()));
+        }
+    }
+    serde_json::to_string(&map)
+        .map(Some)
+        .map_err(|e| PluginStorageError::Internal(format!("Không serialize được blocks.json: {e}")))
+}
 
 #[derive(Debug, Clone)]
 pub enum PluginStorageError {
@@ -51,6 +100,15 @@ pub fn compute_plugin_revision_digest_with_extensions(
     wasm_bytes: &[u8],
     extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
 ) -> String {
+    compute_plugin_revision_digest_with_blocks_json(manifest_json, wasm_bytes, extensions, None)
+}
+
+fn compute_plugin_revision_digest_with_blocks_json(
+    manifest_json: &str,
+    wasm_bytes: &[u8],
+    extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
+    blocks_json: Option<&str>,
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(manifest_json.as_bytes());
     hasher.update([0u8]);
@@ -58,6 +116,10 @@ pub fn compute_plugin_revision_digest_with_extensions(
     if let Some(ext) = extensions {
         hasher.update(b"\0admin_extensions\0");
         hasher.update(serde_json::to_vec(ext).expect("validated admin declarations serialize"));
+    }
+    if let Some(blocks_json) = blocks_json {
+        hasher.update(b"\0blocks_json\0");
+        hasher.update(blocks_json.as_bytes());
     }
     hasher
         .finalize()
@@ -125,10 +187,40 @@ pub fn verify_plugin_revision_durability(
     } else {
         None
     };
-    if compute_plugin_revision_digest_with_extensions(
+    let block_path = rev_dir.join("blocks.json");
+    let blocks_json = if block_path.exists() {
+        let raw = fs::read_to_string(&block_path)
+            .map_err(|_| "Revision plugin không đọc được blocks.json.".to_string())?;
+        let saved: BTreeMap<String, StoredBlock> = serde_json::from_str(&raw)
+            .map_err(|_| "Revision plugin blocks.json không đúng cấu trúc.".to_string())?;
+        if saved.is_empty() || saved.len() > 32 {
+            return Err("Revision plugin blocks.json không hợp lệ.".into());
+        }
+        let manifest: opendash_core::plugin::PluginManifest =
+            opendash_core::plugin::PluginManifest::from_json_str(&manifest_json)
+                .map_err(str::to_owned)?;
+        let mut blocks = Vec::new();
+        for (slug, block) in saved {
+            if block.schema.id != format!("{}/{slug}", manifest.id) {
+                return Err("Revision plugin blocks.json có slug không khớp.".into());
+            }
+            blocks.push((block.schema, block.template));
+        }
+        let canonical = canonical_blocks_json(&manifest.id, &blocks)
+            .map_err(|e| e.to_string())?
+            .ok_or("Revision plugin blocks.json trống.")?;
+        if raw != canonical {
+            return Err("Revision plugin blocks.json không canonical.".into());
+        }
+        Some(canonical)
+    } else {
+        None
+    };
+    if compute_plugin_revision_digest_with_blocks_json(
         &manifest_json,
         &wasm_bytes,
         extension.as_ref(),
+        blocks_json.as_deref(),
     ) != revision_digest
     {
         return Err("Nội dung revision plugin trên đĩa bị hỏng hoặc lệch digest.".to_string());
@@ -171,6 +263,26 @@ pub fn stage_and_publish_plugin_revision_with_extensions(
     wasm_bytes: &[u8],
     extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
 ) -> Result<(), String> {
+    stage_and_publish_plugin_revision_with_blocks(
+        plugins_root,
+        run_uuid,
+        revision_digest,
+        manifest_json,
+        wasm_bytes,
+        extensions,
+        None,
+    )
+}
+
+fn stage_and_publish_plugin_revision_with_blocks(
+    plugins_root: &Path,
+    run_uuid: &str,
+    revision_digest: &str,
+    manifest_json: &str,
+    wasm_bytes: &[u8],
+    extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
+    blocks_json: Option<&str>,
+) -> Result<(), String> {
     if run_uuid.is_empty()
         || run_uuid.contains('/')
         || run_uuid.contains('\\')
@@ -195,6 +307,10 @@ pub fn stage_and_publish_plugin_revision_with_extensions(
                     let raw = serde_json::to_vec(ext).map_err(|e| e.to_string())?;
                     write_durable_file(&staging_dir.join("admin-extensions.json"), &raw)
                 }
+                None => Ok(()),
+            })
+            .and_then(|_| match blocks_json {
+                Some(raw) => write_durable_file(&staging_dir.join("blocks.json"), raw.as_bytes()),
                 None => Ok(()),
             })
     {
@@ -233,7 +349,9 @@ pub async fn install_plugin_revision(
     manifest_json: &str,
     wasm_bytes: &[u8],
     extensions: Option<&opendash_core::admin_extensions::AdminExtensions>,
+    blocks: &[(BlockSchemaV1, String)],
 ) -> Result<i64, PluginStorageError> {
+    let blocks_json = canonical_blocks_json(&manifest.id, blocks)?;
     // Fail combined-cap checks before publishing a durable ZIP revision.
     crate::storage::admin_extensions::require_capacity(db_pool, "plugin", &manifest.id, extensions)
         .await
@@ -244,8 +362,12 @@ pub async fn install_plugin_revision(
                 PluginStorageError::Internal(e.1.into_owned())
             }
         })?;
-    let revision_digest =
-        compute_plugin_revision_digest_with_extensions(manifest_json, wasm_bytes, extensions);
+    let revision_digest = compute_plugin_revision_digest_with_blocks_json(
+        manifest_json,
+        wasm_bytes,
+        extensions,
+        blocks_json.as_deref(),
+    );
     let run_uuid = crate::auth::generate_random_token();
 
     // Check version collision before staging on disk
@@ -267,13 +389,44 @@ pub async fn install_plugin_revision(
         }
     }
 
-    stage_and_publish_plugin_revision_with_extensions(
+    // Catch ownership conflicts before staging an immutable directory. The
+    // transaction below repeats the check atomically with the registry write.
+    for (schema, _) in blocks {
+        let existing: Option<(String, String)> = sqlx::query_as(
+            "SELECT owner_kind, owner_id FROM builder_block_definitions WHERE block_id = ?",
+        )
+        .bind(&schema.id)
+        .fetch_optional(db_pool)
+        .await
+        .map_err(|e| PluginStorageError::Internal(e.to_string()))?;
+        if let Some((kind, owner_id)) = existing
+            && (kind != "plugin" || owner_id != manifest.id)
+        {
+            return Err(PluginStorageError::Conflict(
+                "ID block đã thuộc quyền sở hữu của gói khác.".into(),
+            ));
+        }
+        let legacy_exists: Option<String> =
+            sqlx::query_scalar("SELECT id FROM theme_blocks WHERE id = ?")
+                .bind(&schema.id)
+                .fetch_optional(db_pool)
+                .await
+                .map_err(|e| PluginStorageError::Internal(e.to_string()))?;
+        if legacy_exists.is_some() {
+            return Err(PluginStorageError::Conflict(
+                "ID block xung đột với theme_blocks.".into(),
+            ));
+        }
+    }
+
+    stage_and_publish_plugin_revision_with_blocks(
         plugins_root,
         &run_uuid,
         &revision_digest,
         manifest_json,
         wasm_bytes,
         extensions,
+        blocks_json.as_deref(),
     )
     .map_err(PluginStorageError::Internal)?;
 
@@ -327,14 +480,15 @@ pub async fn install_plugin_revision(
         rev_id
     } else {
         let res = sqlx::query(
-            "INSERT INTO plugin_revisions (plugin_id, version, revision_digest, manifest_schema, manifest_json)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO plugin_revisions (plugin_id, version, revision_digest, manifest_schema, manifest_json, blocks_json)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&manifest.id)
         .bind(&manifest.version)
         .bind(&revision_digest)
         .bind(manifest.manifest_schema as i64)
         .bind(manifest_json)
+        .bind(blocks_json.as_deref().unwrap_or("{}"))
         .execute(&mut *tx)
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi tạo plugin_revisions: {e}")))?;
@@ -379,6 +533,20 @@ pub async fn install_plugin_revision(
     )
     .await
     .map_err(map_cnt_err)?;
+
+    crate::storage::page::sync_owner_blocks_in_tx(
+        &mut tx,
+        "plugin",
+        &manifest.id,
+        ProviderStatus::Active,
+        &revision_digest,
+        blocks,
+    )
+    .await
+    .map_err(map_cnt_err)?;
+    crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx)
+        .await
+        .map_err(map_cnt_err)?;
 
     tx.commit()
         .await
@@ -538,6 +706,21 @@ pub async fn set_plugin_enabled(
     crate::storage::admin_extensions::set_owner_status_in_conn(&mut tx, "plugin", id, enabled)
         .await
         .map_err(|e| e.1.into_owned())?;
+    crate::storage::page::set_owner_block_status_in_tx(
+        &mut tx,
+        "plugin",
+        id,
+        if enabled {
+            ProviderStatus::Active
+        } else {
+            ProviderStatus::ProviderInactive
+        },
+    )
+    .await
+    .map_err(|e| e.1.into_owned())?;
+    crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx)
+        .await
+        .map_err(|e| e.1.into_owned())?;
     if enabled {
         crate::storage::admin_extensions::require_capacity_in_conn(&mut tx, "plugin", id, None)
             .await
@@ -593,6 +776,21 @@ pub async fn set_plugin_enabled_cas(
         .await
         .map_err(map_cnt_err)?;
     crate::storage::admin_extensions::set_owner_status_in_conn(&mut tx, "plugin", id, enabled)
+        .await
+        .map_err(map_cnt_err)?;
+    crate::storage::page::set_owner_block_status_in_tx(
+        &mut tx,
+        "plugin",
+        id,
+        if enabled {
+            ProviderStatus::Active
+        } else {
+            ProviderStatus::ProviderInactive
+        },
+    )
+    .await
+    .map_err(map_cnt_err)?;
+    crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx)
         .await
         .map_err(map_cnt_err)?;
     if enabled {
@@ -766,4 +964,115 @@ pub async fn is_actor_role_active(
         (Some("editor"), "editor") => true,
         _ => false,
     })
+}
+
+#[cfg(test)]
+mod s03_revision_tests {
+    use super::*;
+
+    fn sample_schema() -> BlockSchemaV1 {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1, "id": "sample-plugin/notice",
+            "title": "Notice", "category": "content", "render": "render.html",
+            "fields": []
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn blockless_plugin_digest_is_backward_compatible() {
+        let manifest = "{\"id\":\"sample-plugin\"}";
+        let wasm = b"arbitrary wasm fixture";
+        let legacy = compute_plugin_revision_digest_with_extensions(manifest, wasm, None);
+        assert_eq!(legacy, compute_plugin_revision_digest(manifest, wasm));
+        assert_eq!(
+            legacy,
+            compute_plugin_revision_digest_with_blocks_json(manifest, wasm, None, None)
+        );
+        let root = std::env::temp_dir().join(format!(
+            "od-s03-legacy-plugin-{}",
+            crate::auth::generate_random_token()
+        ));
+        stage_and_publish_plugin_revision(&root, "test", &legacy, manifest, wasm).unwrap();
+        assert!(
+            !root
+                .join("revisions")
+                .join(&legacy)
+                .join("blocks.json")
+                .exists()
+        );
+        assert!(verify_plugin_revision_durability(&root, &legacy).is_ok());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn canonical_block_revision_digest_detects_disk_tampering() {
+        let manifest = r#"{"id":"sample-plugin","version":"1.0.0","api_version":1,"name":"Sample","entrypoint":"plugin.wasm","permissions":{}}"#;
+        let wasm = b"test wasm";
+        let blocks = vec![(sample_schema(), "<p>Safe</p>".to_string())];
+        let json = canonical_blocks_json("sample-plugin", &blocks)
+            .unwrap()
+            .unwrap();
+        let digest =
+            compute_plugin_revision_digest_with_blocks_json(manifest, wasm, None, Some(&json));
+        let old_digest = compute_plugin_revision_digest(manifest, wasm);
+        assert_ne!(digest, old_digest);
+
+        let root = std::env::temp_dir().join(format!(
+            "od-s03-plugin-blocks-{}",
+            crate::auth::generate_random_token()
+        ));
+        stage_and_publish_plugin_revision_with_blocks(
+            &root,
+            "test",
+            &digest,
+            manifest,
+            wasm,
+            None,
+            Some(&json),
+        )
+        .unwrap();
+        assert!(verify_plugin_revision_durability(&root, &digest).is_ok());
+        fs::write(
+            root.join("revisions").join(&digest).join("blocks.json"),
+            "{}",
+        )
+        .unwrap();
+        assert!(verify_plugin_revision_durability(&root, &digest).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn install_rejects_cross_provider_claim_before_disk_staging() {
+        let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let schema = sample_schema();
+        let schema_json = serde_json::to_string(&schema).unwrap();
+        sqlx::query(
+            "INSERT INTO builder_block_definitions (block_id,owner_kind,owner_id,provider_status,declaration_state,schema_json,template,revision_digest)
+             VALUES (?, 'theme','other-theme','active','declared',?, '<p>Safe</p>','digest')",
+        )
+        .bind(&schema.id)
+        .bind(&schema_json)
+        .execute(&db).await.unwrap();
+
+        let manifest_json = r#"{"id":"sample-plugin","version":"1.0.0","api_version":1,"name":"Sample","entrypoint":"plugin.wasm","permissions":{}}"#;
+        let manifest = opendash_core::plugin::PluginManifest::from_json_str(manifest_json).unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "od-s03-plugin-conflict-{}",
+            crate::auth::generate_random_token()
+        ));
+        let result = install_plugin_revision(
+            &db,
+            &root,
+            &manifest,
+            manifest_json,
+            b"fixture",
+            None,
+            &[(schema, "<p>Safe</p>".to_string())],
+        )
+        .await;
+        assert!(matches!(result, Err(PluginStorageError::Conflict(_))));
+        assert!(!root.join("revisions").exists());
+    }
 }
