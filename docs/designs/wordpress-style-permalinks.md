@@ -1,7 +1,7 @@
 # WordPress-Style Permalinks (Phase 1): Root Post/Page/CPT/Taxonomy URLs, `%category%` + Primary Category, Auto-Unique Slug & Trailing Slash `301`
 
 - **Author:** Orion (Elephant)
-- **Status:** Approved
+- **Status:** Verified
 - **Approved By:** Owner
 - **Approval Evidence:** Owner chat 2026-11-22 ("duyệt spec" — WordPress-Style Permalinks Phase 1)
 - **Date:** 2026-11-22
