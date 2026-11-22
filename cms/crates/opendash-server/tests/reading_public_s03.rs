@@ -264,7 +264,7 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
     assert!(front_html.contains("SEO Home Display"), "{front_html}");
     assert!(!front_html.contains("Blog Secret Body"));
     let old_home = client
-        .get(format!("{}/content/page/s03-home", site.base))
+        .get(format!("{}/s03-home", site.base))
         .send()
         .await
         .unwrap();
@@ -272,7 +272,7 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
     assert_eq!(old_home.headers().get(header::LOCATION).unwrap(), "/");
 
     let blog_archive = client
-        .get(format!("{}/content/page/s03-blog", site.base))
+        .get(format!("{}/s03-blog", site.base))
         .send()
         .await
         .unwrap();
@@ -294,11 +294,11 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
         1,
         "{xml}"
     );
-    assert!(!xml.contains("/content/page/s03-home"));
+    assert!(!xml.contains("/s03-home"));
     // The Posts Page is absent as a Page entry but present exactly once as
     // the canonical post archive at the same URL.
     assert_eq!(
-        xml.matches("<loc>https://example.com/content/page/s03-blog</loc>")
+        xml.matches("<loc>https://example.com/s03-blog</loc>")
             .count(),
         1,
         "{xml}"
@@ -349,7 +349,7 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
     assert_eq!((saved_home, saved_blog), (Some(home), Some(blog)));
     assert_eq!(version_after, version_before + 1);
     let missing_blog = client
-        .get(format!("{}/content/page/s03-blog", site.base))
+        .get(format!("{}/s03-blog", site.base))
         .send()
         .await
         .unwrap();
@@ -366,7 +366,7 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
     assert_eq!(sitemap_after_delete.status(), StatusCode::OK);
     let xml_after_delete = sitemap_after_delete.text().await.unwrap();
     assert!(
-        !xml_after_delete.contains("/content/page/s03-blog"),
+        !xml_after_delete.contains("/s03-blog"),
         "{xml_after_delete}"
     );
     db.close().await;

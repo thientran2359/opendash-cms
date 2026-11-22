@@ -350,7 +350,7 @@ mod c1_public_url_tests {
             .unwrap();
         assert_eq!(
             visible.items[0].public_url.as_deref(),
-            Some("/content/news/hidden-article")
+            Some("/news/hidden-article")
         );
     }
 }

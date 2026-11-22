@@ -1,6 +1,6 @@
-# SQLite migrations (`0001`–`0045`)
+# SQLite migrations (`0001`–`0046`)
 
-Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (44 file, đánh số từ `0001` đến `0045`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
+Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (45 file, đánh số từ `0001` đến `0046`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
 
 | Nhóm / Mốc | Migrations | Nội dung chính |
 | --- | --- | --- |
@@ -13,4 +13,6 @@ Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (44 file,
 | **M8 Operations & Lifecycle** | `0032_operations_jobs.sql`, `0033_media_lifecycle.sql` | `operation_jobs`, `maintenance_generation`, `media_generations`, `media_delete_jobs` và trạng thái `lifecycle_state`. |
 | **Admin Nav & Review** | `0034_field_groups_and_editor_layout.sql` – `0037_section_documents.sql` | `content_field_groups`/`content_field_group_targets`/`content_editor_layouts`, bỏ default taxonomy khỏi `page`, `admin_extensions`/`term_extension_values`, `section_documents`/`section_document_media_refs`. |
 | **Content Foundation** | `0038_content_type_settings.sql` – `0041_provider_rewrite_defaults.sql` | `content_types` settings (`public`, `has_archive`, `publication`, `supports`), `taxonomy_definitions`/`content_type_taxonomy_overrides`, `site_permalink_settings`/`permalink_route_claims`/`permalink_route_redirects`, `provider_rewrite_defaults`. |
-| **Theme v3, Content Builder & Block Engine** | `0042_theme_v3_resolver_and_reading_settings.sql` – `0045_declarative_block_engine.sql` | `site_reading_settings` + 2-axis Theme v3 resolver, `entry_builder_documents`/`entry_builder_media_refs`, `pattern` CPT + `entry_pattern_refs`, `builder_block_definitions` (`block.json` v1 registry) và `plugin_revisions.blocks_json`. |
+| **Theme v3, CPT Builder & Patterns** | `0042_theme_v3_resolver_and_reading_settings.sql` – `0044_pattern_cpt_and_refs.sql` | `site_reading_settings`, `page_layout_key`/`custom_template_key`, `content_mode` Builder cho CPT và `pattern` CPT + `pattern_entry_refs`. |
+| **WordPress Permalinks (Phase 1)** | `0045_wordpress_permalinks.sql` | Chuẩn hóa URL mặc định WordPress (`/{slug}`, `/{cpt}/{slug}`, `/{tax}/{slug}`, `/posts`), `primary_category_term_id`, `has_been_published` + 2 triggers đơn điệu và tái dựng `permalink_route_claims`. |
+| **Declarative Block Engine (`block.json` v1)** | `0046_declarative_block_engine.sql` | Bảng `builder_block_definitions` (`block.json` v1 registry cho core/theme/plugin) và `plugin_revisions.blocks_json`. |

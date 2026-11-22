@@ -1172,7 +1172,6 @@ pub async fn execute_sample_import_with_cutpoint(
                 } else {
                     "{}".to_string()
                 };
-                crate::storage::seo::check_default_slug_claim_in_tx(&mut *conn, &p.content_type, &p.slug, None).await?;
                 let entry_id: i64 = sqlx::query_scalar(
                     "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, version)
                      VALUES (?, ?, ?, ?, 'draft', 1) RETURNING id",
@@ -1231,6 +1230,7 @@ pub async fn execute_sample_import_with_cutpoint(
                 });
             }
         }
+        crate::storage::permalinks::sync_claims_in_tx(&mut *conn).await?;
 
         // Insert menus + items + slot assignment + provenance
         for item in &plan.items {

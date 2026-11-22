@@ -115,7 +115,7 @@ Legacy theme_blocks ──────────┘ (upcast legacy_mode: true)
 ```
 
 - **Tái sử dụng AST & Comment Tag Hiện Hữu:** Giữ nguyên [`KnownElement::PluginBlock(PluginBlockProps)`](../../cms/crates/opendash-core/src/builder.rs#L216-L226) (`"type": "plugin/block"`) và tag Comment Block **`<!-- od:plugin_block {"id":"...","block_id":"...","values":{...}} /-->`** tại [`builder_blocks.rs#L274-L281, #L822-L828`](../../cms/crates/opendash-core/src/builder_blocks.rs#L274-L281). Không thêm variant AST mới.
-- **Migration `0045_declarative_block_engine.sql` (cùng `cms/migrations/README.md`):**
+- **Migration `0046_declarative_block_engine.sql` (cùng `cms/migrations/README.md`):**
   ```sql
   CREATE TABLE builder_block_definitions (
       block_id TEXT PRIMARY KEY NOT NULL,
@@ -330,7 +330,7 @@ pub struct RegisteredBlockSchema {
 | :--- | :--- | :--- |
 | **Docs & Contracts** | `docs/product/PRODUCT_REQUIREMENTS.md` (đã cập nhật §7 tại PR #470), `cms/migrations/README.md`, `docs/contracts/M8_WRITER_INVENTORY.md`, `docs/contracts/PLUGIN_ABI.md` | Ngoại lệ `repeater` 1 cấp Trình dựng trang, bảng writer `builder_block_definitions`, mở rộng Plugin ZIP `blocks/` (`MAX_PLUGIN_FILES = 72`). |
 | **Slice S01 (`opendash-core`)** | `cms/crates/opendash-core/src/{lib.rs,id.rs,richtext.rs*,block_schema.rs*,theme.rs,builder.rs,builder_blocks.rs}` | `BlockSchemaV1` (12 kiểu field), `richtext` sanitizer thuần Rust, reserved `"core"`/`"legacy"`, `validate_for_save_with_schemas`, trích xuất media & văn bản `plugin_block`. |
-| **Slice S02 (C-SEC & 5 Core Blocks)** | `cms/migrations/0045_declarative_block_engine.sql*`, `cms/crates/opendash-server/src/{app.rs,main.rs,template_sec.rs,document.rs,page.rs}`, `builtin_blocks/**`, `storage/{page,builder,overrides,public_content,restore}.rs`, `routes/{public_content,builder,themes}.rs` | Migration `0045`, đóng lỗ hổng HTML5 comment/duplicate attr/entity, nonce RichText, Scoped CSS `[data-od-node-scope]`, `BlockTemplateCache`, `RenderBudget` toàn request, 5 core blocks nhúng sẵn. |
+| **Slice S02 (C-SEC & 5 Core Blocks)** | `cms/migrations/0046_declarative_block_engine.sql*`, `cms/crates/opendash-server/src/{app.rs,main.rs,template_sec.rs,document.rs,page.rs}`, `builtin_blocks/**`, `storage/{page,builder,overrides,public_content,restore}.rs`, `routes/{public_content,builder,themes}.rs` | Migration `0046`, đóng lỗ hổng HTML5 comment/duplicate attr/entity, nonce RichText, Scoped CSS `[data-od-node-scope]`, `BlockTemplateCache`, `RenderBudget` toàn request, 5 core blocks nhúng sẵn. |
 | **Slice S03 (Packages & Media ACL)** | `cms/crates/opendash-server/src/{theme.rs,app.rs}`, `plugin/{package.rs,manager.rs}`, `storage/{theme,plugin,builder,entries,overrides,page}.rs`, `routes/builder.rs` | Auto-discovery `blocks/<slug>/` trong Theme v3 & Plugin ZIP, `plugin_revisions.blocks_json`, resync Public ACL khi bật/tắt/đổi theme, `GET /api/admin/builder/blocks`. |
 | **Slice S04 (Studio UI)** | `cms/admin/src/{types.ts,api/builder.ts}`, `features/media/MediaPicker.tsx`, `builder/{document.ts,BlockSchemaForm.tsx*,BuilderPreviewFrame.tsx,BuilderTree.tsx,BuilderCanvas.tsx,BuilderInspector.tsx,BuilderWorkspace.tsx}`, `studio/{StudioWorkspace.tsx,StudioCustomizerNav.tsx}`, `features/editor/{PanelRegionRenderer.tsx,SingleEditWorkspace.tsx}`, `storage/builder.rs#L1106,#L1111` | `<BlockSchemaForm>` 12 kiểu field, CSS data-URI Preview inliner, `MediaPicker` `'any'`, khóa `ProviderInactive`, đổi nhãn `"UX Builder"` sang **OpenDash Studio / Trình dựng trang**. |
 
@@ -355,11 +355,11 @@ pub struct RegisteredBlockSchema {
 
 ---
 
-### Slice S02: Migration `0045`, C-SEC Joint Checker & HTML5 Fixes, Scoped CSS, `RenderBudget` & 5 Core Blocks
+### Slice S02: Migration `0046`, C-SEC Joint Checker & HTML5 Fixes, Scoped CSS, `RenderBudget` & 5 Core Blocks
 
 - **Dependencies:** `Slice S01` merged vào `main`.
 - **File Ownership:**
-  - `cms/migrations/0045_declarative_block_engine.sql` *(tạo mới)* & `cms/migrations/README.md` — bảng `builder_block_definitions` (`CHECK (json_valid(schema_json))`) + `ALTER TABLE plugin_revisions ADD COLUMN blocks_json`
+  - `cms/migrations/0046_declarative_block_engine.sql` *(tạo mới)* & `cms/migrations/README.md` — bảng `builder_block_definitions` (`CHECK (json_valid(schema_json))`) + `ALTER TABLE plugin_revisions ADD COLUMN blocks_json`
   - `cms/crates/opendash-server/src/app.rs` — thêm `block_template_cache: Arc<BlockTemplateCache>` (`std::sync::RwLock`, cap 256, `FromRef<AppState>`)
   - `cms/crates/opendash-server/src/template_sec.rs` — đóng comment HTML5 uniform (`-->`, `--!>`, `<!-->`, `<!--->`), thêm `title`/`xmp`/`noembed`/`noframes`/`plaintext` vào `FORBIDDEN_TAGS`, chống duplicate attribute trong `parse_attributes`, dùng `decode_html_entities_for_url` (cấm ASCII control chars sau decode) cả trong `!post_render` & kiểm `srcset`/`ping`, tách `validate_safe_href_url`, `validate_safe_scoped_block_css(css, is_preview)`, `validate_block_template_csec` (joint AST + `HtmlScanState`, cấm `OD_RICHTEXT_` và `Set`/`With`/`GetItem`/`Filter` trên `richtext`/`url`/`media`), và `render_block_csec_with_budget` (post-render single-pass `HtmlScanState::Body`)
   - `cms/crates/opendash-server/src/document.rs` — cập nhật `document::tokenize` (`#L221-L232`) đóng comment HTML5 (`-->`, `--!>`, `<!-->`, `<!--->`) đồng bộ với `template_sec.rs`

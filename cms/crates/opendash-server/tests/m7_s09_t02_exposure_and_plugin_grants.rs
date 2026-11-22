@@ -537,7 +537,7 @@ async fn public_exposure_media_branches_and_plugin_scoped_field_grants() {
 
     // - Public single page must show PUBLIC_TEXT_VISIBLE and must NOT leak PRIVATE_SECRET_DO_NOT_LEAK or img_private_only
     let pub_html = client
-        .get(format!("{}/content/portfolio/du-an-a", srv.base_url))
+        .get(format!("{}/portfolio/du-an-a", srv.base_url))
         .send()
         .await
         .unwrap()

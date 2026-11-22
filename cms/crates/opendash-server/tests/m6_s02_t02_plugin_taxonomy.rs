@@ -324,13 +324,14 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     let entry: Value = entry_resp.json().await.unwrap();
     let entry_id = entry["id"].as_i64().unwrap();
 
-    // Draft `post` must NOT leak through /taxonomy/category/engineering, while published `listing` does appear
+    // Draft `post` must NOT leak through /category/engineering, while published `listing` does appear
     let archive_draft = client
-        .get(format!("{base_url}/taxonomy/category/engineering"))
+        .get(format!("{base_url}/category/engineering"))
         .send()
         .await
         .unwrap();
     let archive_status = archive_draft.status();
+    assert_eq!(archive_status, 200);
     let archive_draft_body = archive_draft.text().await.unwrap();
     assert!(
         !archive_draft_body.contains("Secret Draft Post"),

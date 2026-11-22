@@ -389,6 +389,28 @@ pub async fn load_effective_content_schema(
     load_effective_content_schema_in_tx(&mut conn, type_key).await
 }
 
+async fn ensure_non_reserved_cpt_key_in_tx(
+    conn: &mut SqliteConnection,
+    key: &str,
+) -> ApiResult<()> {
+    if crate::seo::is_reserved_namespace_key(key) {
+        return Err(ApiError::conflict(
+            "Khóa loại nội dung trùng với tiền tố hệ thống được bảo vệ.",
+        ));
+    }
+    let tax_conflict: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM taxonomy_definitions WHERE key = ? LIMIT 1")
+            .bind(key)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if tax_conflict.is_some() {
+        return Err(ApiError::conflict(
+            "Khóa loại nội dung trùng với khóa taxonomy đang tồn tại.",
+        ));
+    }
+    Ok(())
+}
+
 /// Stores a user-created CPT definition (`POST /api/admin/content-types`).
 pub async fn insert_user_content_type(
     db: &SqlitePool,
@@ -397,6 +419,11 @@ pub async fn insert_user_content_type(
     if builtin_definition(&input.key).is_some() || input.key == "section" {
         return Err(ApiError::conflict("post/page là khóa Core được bảo vệ."));
     }
+    if crate::seo::is_reserved_namespace_key(&input.key) {
+        return Err(ApiError::conflict(
+            "Khóa loại nội dung trùng với tiền tố hệ thống được bảo vệ.",
+        ));
+    }
     let definition = input
         .clone()
         .into_canonical()
@@ -404,6 +431,7 @@ pub async fn insert_user_content_type(
     let definition_json = serde_json::to_string(&definition)?;
 
     let mut tx = begin_content_write_tx(db).await?;
+    ensure_non_reserved_cpt_key_in_tx(&mut tx, &definition.key).await?;
     crate::storage::seo::check_cpt_root_claim_in_tx(&mut tx, &definition.key).await?;
     let result = sqlx::query(
         "INSERT INTO content_types (key, definition_json, owner_kind, owner_id, provider_status, declaration_state, version)
@@ -1392,6 +1420,7 @@ async fn sync_owner_cnt_declarations_in_tx(
         if builtin_definition(&ct.key).is_some() {
             return Err(ApiError::conflict("post/page là khóa Core được bảo vệ."));
         }
+        ensure_non_reserved_cpt_key_in_tx(&mut *conn, &ct.key).await?;
         let existing: Option<(String, String, Option<String>, String, String)> = sqlx::query_as(
             "SELECT definition_json, owner_kind, owner_id, provider_status, declaration_state
              FROM content_types WHERE key = ?",

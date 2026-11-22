@@ -126,7 +126,7 @@ fn csec_accepts_safe_subset_and_rejects_dangerous_constructs() {
     assert!(template_sec::validate_safe_css("body { background: url(/x.png); }").is_err());
 
     let ctx = template_sec::json_to_safe_value(&serde_json::json!({
-        "entry": { "title": "<script>xss</script>", "url": "/content/post/hi", "cover_url": null, "fields": [] }
+        "entry": { "title": "<script>xss</script>", "url": "/hi", "cover_url": null, "fields": [] }
     }));
     let rendered = template_sec::render_csec("single", safe_tpl, ctx).unwrap();
     assert!(
@@ -379,8 +379,8 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
     // 5. Verify public routes compose header + role + footer and include CSP style-src 'self' 'unsafe-inline'
     for (path, marker) in [
         ("/", "Theme Home Fixture"),
-        ("/content/post", "data-role=\"archive\""),
-        ("/content/post/hello-roles", "data-role=\"single\""),
+        ("/posts", "data-role=\"archive\""),
+        ("/hello-roles", "data-role=\"single\""),
     ] {
         let resp = client
             .get(format!("{}{}", srv.base_url, path))
@@ -494,7 +494,7 @@ async fn m5_s03_t01_roles_csec_install_compose_and_fallback() {
     fs::write(&rev_single, b"<main>tampered</main>").unwrap();
 
     let fallback_single = client
-        .get(format!("{}/content/post/hello-roles", srv.base_url))
+        .get(format!("{}/hello-roles", srv.base_url))
         .send()
         .await
         .unwrap();

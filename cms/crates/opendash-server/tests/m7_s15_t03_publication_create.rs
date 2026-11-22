@@ -26,6 +26,8 @@ impl Drop for Site {
     }
 }
 
+static NEXT_SITE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 impl Site {
     async fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -35,11 +37,12 @@ impl Site {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
+        let seq = NEXT_SITE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // macOS /var -> /private/var: canonicalize to satisfy runtime path guards.
         let root = fs::canonicalize(std::env::temp_dir())
             .unwrap()
             .join(format!(
-                "opendash-m7-s15-t03-{}-{nanos}",
+                "opendash-m7-s15-t03-{}-{nanos}-{seq}",
                 std::process::id()
             ));
         fs::create_dir_all(&root).unwrap();
@@ -265,7 +268,7 @@ async fn composite_published_create_is_atomic_v1_and_draft_stays_private() {
         assert_eq!(draft_body["entry"]["version"], 1);
         assert_eq!(
             client
-                .get(format!("{}/content/{kind}/{draft_slug}", site.base))
+                .get(format!("{}/{draft_slug}", site.base))
                 .send()
                 .await
                 .unwrap()
@@ -365,7 +368,7 @@ async fn composite_publication_rejections_leave_no_partial_entry_or_sidecars() {
     assert_eq!(editor_entry["entry"]["publication_status"], "published");
     assert_eq!(
         client
-            .get(format!("{}/content/post/editor-published", site.base))
+            .get(format!("{}/editor-published", site.base))
             .send()
             .await
             .unwrap()
