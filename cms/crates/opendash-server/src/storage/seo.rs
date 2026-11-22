@@ -314,29 +314,6 @@ pub async fn check_cpt_root_claim_in_tx(
     Ok(())
 }
 
-/// No-op compatibility stub during S01: sync_claims_in_tx validates claims at commit time; removed in S02.
-pub async fn check_default_slug_claim_in_tx(
-    conn: &mut SqliteConnection,
-    type_key: &str,
-    slug: &str,
-    owner_entry_id: Option<i64>,
-) -> ApiResult<()> {
-    let _ = (conn, type_key, slug, owner_entry_id);
-    Ok(())
-}
-
-/// No-op compatibility stub during S01: sync_claims_in_tx records redirects when has_been_published = 1; removed in S02.
-pub async fn record_slug_change_redirect_in_tx(
-    conn: &mut SqliteConnection,
-    entry_id: i64,
-    type_key: &str,
-    old_slug: &str,
-    new_slug: &str,
-) -> ApiResult<()> {
-    let _ = (conn, entry_id, type_key, old_slug, new_slug);
-    Ok(())
-}
-
 /// Sets or clears `entry_public_paths` inside an active transaction, enforcing ENTRY CAS
 /// and cross-table uniqueness, and capturing old custom path in `entry_redirects` only if ever published.
 async fn set_entry_route_in_tx(
@@ -1035,6 +1012,7 @@ pub(crate) async fn apply_entry_route_patch_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
     patch: &PatchField<String>,
+    record_old_redirect: bool,
 ) -> ApiResult<Option<String>> {
     let old_custom: Option<String> =
         sqlx::query_scalar("SELECT path FROM entry_public_paths WHERE entry_id = ?")
@@ -1059,16 +1037,7 @@ pub(crate) async fn apply_entry_route_patch_in_tx(
         return Ok(old_custom);
     }
 
-    let has_been_published: i64 =
-        sqlx::query_scalar("SELECT has_been_published FROM content_entries WHERE id = ?")
-            .bind(entry_id)
-            .fetch_optional(&mut *conn)
-            .await?
-            .unwrap_or(0);
-
-    if has_been_published != 0
-        && let Some(old_path) = old_custom
-    {
+    if record_old_redirect && let Some(old_path) = old_custom {
         sqlx::query("INSERT OR IGNORE INTO entry_redirects (source_path, entry_id) VALUES (?, ?)")
             .bind(&old_path)
             .bind(entry_id)

@@ -452,6 +452,7 @@ mod tests {
             )]
             .into(),
             term_ids: vec![],
+            primary_category_term_id: None,
             publication_status: "draft".into(),
             page_layout_key: None,
             custom_template_key: None,
@@ -511,6 +512,7 @@ mod tests {
             title: "Safe title".into(),
             values: BTreeMap::new(),
             term_ids: vec![],
+            primary_category_term_id: None,
             publication_status: "published".into(),
             page_layout_key: None,
             custom_template_key: None,

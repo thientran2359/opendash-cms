@@ -217,6 +217,7 @@ pub struct ContentEntryRecord {
     pub values: BTreeMap<String, Value>,
     /// Site-owned term IDs. Stable across content slug edits, publication and provider disable.
     pub term_ids: Vec<i64>,
+    pub primary_category_term_id: Option<i64>,
     /// Site-owned theme selection; retained even if its provider is withdrawn.
     pub page_layout_key: Option<String>,
     pub custom_template_key: Option<String>,
@@ -261,6 +262,7 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
         title,
         values,
         term_ids: Vec::new(),
+        primary_category_term_id: None,
         page_layout_key: None,
         custom_template_key: None,
         content_mode: ContentMode::Editor,
@@ -328,14 +330,21 @@ pub(super) async fn decoded_with_terms(
 ) -> ApiResult<ContentEntryRecord> {
     let mut record = decode_row(row)?;
     record.term_ids = read_term_ids(tx, record.id).await?;
-    let (layout, custom, mode): (Option<String>, Option<String>, String) = sqlx::query_as(
-        "SELECT page_layout_key, custom_template_key, content_mode FROM content_entries WHERE id = ?",
+    let (layout, custom, mode, primary_category_term_id): (
+        Option<String>,
+        Option<String>,
+        String,
+        Option<i64>,
+    ) = sqlx::query_as(
+        "SELECT page_layout_key, custom_template_key, content_mode, primary_category_term_id
+           FROM content_entries WHERE id = ?",
     )
     .bind(record.id)
     .fetch_one(&mut **tx)
     .await?;
     record.page_layout_key = layout;
     record.custom_template_key = custom;
+    record.primary_category_term_id = primary_category_term_id;
     record.content_mode = match mode.as_str() {
         "editor" => ContentMode::Editor,
         "builder" => ContentMode::Builder,
@@ -457,6 +466,20 @@ async fn replace_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64, ids: &[i64]
         sqlx::query("INSERT INTO entry_terms (entry_id, term_id) VALUES (?, ?)")
             .bind(id)
             .bind(term_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    let current_primary: Option<i64> =
+        sqlx::query_scalar("SELECT primary_category_term_id FROM content_entries WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .flatten();
+    if let Some(pid) = current_primary
+        && !ids.contains(&pid)
+    {
+        sqlx::query("UPDATE content_entries SET primary_category_term_id = NULL WHERE id = ?")
+            .bind(id)
             .execute(&mut **tx)
             .await?;
     }
@@ -892,8 +915,6 @@ pub async fn create_entry_with_fence(
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None)
-        .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
@@ -984,16 +1005,14 @@ pub async fn update_entry_with_fence(
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let (old_slug, old_values_json): (String, String) = sqlx::query_as(
-        "SELECT slug, values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let old_values_json: String = sqlx::query_scalar(
+        "SELECT values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
     let previous_body = extract_body_from_values_json(&old_values_json);
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id))
-        .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
@@ -1032,14 +1051,6 @@ pub async fn update_entry_with_fence(
                 &effective,
                 &input.values,
                 previous_body.as_deref(),
-            )
-            .await?;
-            crate::storage::seo::record_slug_change_redirect_in_tx(
-                &mut tx,
-                id,
-                type_key,
-                &old_slug,
-                &input.slug,
             )
             .await?;
             let row: EntryRow = sqlx::query_as(
@@ -1106,8 +1117,6 @@ pub async fn create_entry_with_schema_fence(
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     let settings = &effective.base.descriptor.settings;
     verify_supported_values(type_key, &input.values, settings)?;
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None)
-        .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
@@ -1168,16 +1177,14 @@ pub async fn update_entry_with_schema_fence(
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let (old_slug, old_values_json): (String, String) = sqlx::query_as(
-        "SELECT slug, values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let old_values_json: String = sqlx::query_scalar(
+        "SELECT values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
     let previous_body = extract_body_from_values_json(&old_values_json);
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id))
-        .await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
@@ -1218,14 +1225,6 @@ pub async fn update_entry_with_schema_fence(
                 previous_body.as_deref(),
             )
             .await?;
-            crate::storage::seo::record_slug_change_redirect_in_tx(
-                &mut tx,
-                id,
-                type_key,
-                &old_slug,
-                &input.slug,
-            )
-            .await?;
             let row: EntryRow = sqlx::query_as(
                 "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -1257,6 +1256,10 @@ pub struct CompositeEntrySaveInput {
     pub values: BTreeMap<String, Value>,
     #[serde(default)]
     pub term_ids: Option<Vec<i64>>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub primary_category_term_id: PatchField<i64>,
+    #[serde(default)]
+    pub auto_unique_slug: bool,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub custom_path: PatchField<String>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
@@ -1550,6 +1553,18 @@ pub async fn prepare_composite_entry_save(
     // A missing provider must never erase a previously saved choice. New
     // assignments are validated against the *currently active* v3 manifest
     // again after the writer lock is acquired at commit time.
+    if let PatchField::Set(tid) = input.primary_category_term_id {
+        if type_key != "post" {
+            return Err(ApiError::bad_request(
+                "primary_category_term_id chỉ áp dụng cho bài viết (post).",
+            ));
+        }
+        if tid <= 0 {
+            return Err(ApiError::bad_request(
+                "primary_category_term_id phải là ID nguyên dương.",
+            ));
+        }
+    }
     if type_key != "page" && !matches!(input.page_layout_key, PatchField::Omitted) {
         return Err(ApiError::bad_request(
             "page_layout_key chỉ áp dụng cho Page.",
@@ -1650,6 +1665,300 @@ pub async fn prepare_composite_entry_save(
     })
 }
 
+async fn resolve_primary_category_patch_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    entry_id: Option<i64>,
+    patch: &PatchField<i64>,
+    term_ids_provided: bool,
+    effective_term_ids: &[i64],
+) -> ApiResult<Option<i64>> {
+    match *patch {
+        PatchField::Clear => Ok(None),
+        PatchField::Set(tid) => {
+            if type_key != "post" {
+                return Err(ApiError::bad_request(
+                    "primary_category_term_id chỉ áp dụng cho bài viết (post).",
+                ));
+            }
+            if tid <= 0 || !effective_term_ids.contains(&tid) {
+                return Err(ApiError::bad_request(
+                    "primary_category_term_id phải là một term đã được gán cho bài viết.",
+                ));
+            }
+            let is_category: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM taxonomy_terms WHERE id = ? AND kind = 'category')",
+            )
+            .bind(tid)
+            .fetch_one(&mut **tx)
+            .await?;
+            if is_category == 0 {
+                return Err(ApiError::bad_request(
+                    "primary_category_term_id phải thuộc taxonomy 'category'.",
+                ));
+            }
+            Ok(Some(tid))
+        }
+        PatchField::Omitted => match entry_id {
+            None => Ok(None),
+            Some(id) => {
+                if type_key != "post" {
+                    return Ok(None);
+                }
+                let current_primary: Option<i64> = sqlx::query_scalar(
+                    "SELECT primary_category_term_id FROM content_entries WHERE id = ?",
+                )
+                .bind(id)
+                .fetch_one(&mut **tx)
+                .await?;
+                Ok(current_primary
+                    .filter(|pid| !term_ids_provided || effective_term_ids.contains(pid)))
+            }
+        },
+    }
+}
+
+async fn resolve_effective_rewrite_base_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    resource_kind: &str,
+    resource_key: &str,
+    site_bases: &BTreeMap<String, Option<String>>,
+) -> ApiResult<String> {
+    match site_bases.get(resource_key) {
+        Some(Some(base)) if !base.trim().is_empty() => return Ok(base.trim().to_owned()),
+        Some(None) => return Ok(resource_key.to_owned()),
+        _ => {}
+    }
+    let provider_default: Option<String> = sqlx::query_scalar(
+        "SELECT rewrite_base FROM provider_rewrite_defaults
+          WHERE resource_kind = ? AND resource_key = ?
+            AND provider_status = 'active' AND declaration_state = 'declared'",
+    )
+    .bind(resource_kind)
+    .bind(resource_key)
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
+    Ok(provider_default
+        .filter(|b| !b.trim().is_empty())
+        .unwrap_or_else(|| resource_key.to_owned()))
+}
+
+pub(super) async fn resolve_auto_unique_slug_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    type_key: &str,
+    base_slug: &str,
+    term_ids: Option<&[i64]>,
+    primary_category_term_id: Option<i64>,
+    has_custom_path: bool,
+) -> ApiResult<String> {
+    if !opendash_core::id::valid_kebab_segment_with_limit(base_slug, 64) {
+        return Err(ApiError::unprocessable("Slug không hợp lệ."));
+    }
+    let (post_structure, cpt_bases_json, tax_bases_json): (String, String, String) =
+        sqlx::query_as(
+            "SELECT post_structure, content_type_bases_json, taxonomy_bases_json
+               FROM site_permalink_settings WHERE id = 1",
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+    let posts_page_id: Option<i64> =
+        sqlx::query_scalar("SELECT posts_page_id FROM site_reading_settings WHERE id = 1")
+            .fetch_one(&mut *conn)
+            .await?;
+    let cpt_bases: BTreeMap<String, Option<String>> =
+        serde_json::from_str(&cpt_bases_json).unwrap_or_default();
+    let tax_bases: BTreeMap<String, Option<String>> =
+        serde_json::from_str(&tax_bases_json).unwrap_or_default();
+
+    let is_public_type = if matches!(type_key, "pattern" | "section") {
+        false
+    } else {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(json_extract(definition_json, '$.settings.public'), 1)
+               FROM content_types WHERE key = ? AND provider_status = 'active'",
+        )
+        .bind(type_key)
+        .fetch_optional(&mut *conn)
+        .await?
+            == Some(1)
+    };
+
+    let cat_slug = if type_key == "post" && post_structure.contains("%category%") {
+        let cat_public: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(
+               SELECT 1 FROM taxonomy_definitions
+                WHERE key = 'category' AND public = 1
+                  AND provider_status = 'active' AND declaration_state = 'declared'
+             )",
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let cat_eligible = if cat_public == 1 {
+            crate::storage::content::load_effective_taxonomies_in_tx(&mut *conn, "post")
+                .await?
+                .iter()
+                .any(|k| k == "category")
+        } else {
+            false
+        };
+        let resolved_cat = if !cat_eligible {
+            "uncategorized".to_owned()
+        } else {
+            let primary_slug: Option<String> = match primary_category_term_id {
+                Some(pid) => {
+                    sqlx::query_scalar(
+                        "SELECT slug FROM taxonomy_terms WHERE id = ? AND kind = 'category'",
+                    )
+                    .bind(pid)
+                    .fetch_optional(&mut *conn)
+                    .await?
+                }
+                None => None,
+            };
+            match primary_slug {
+                Some(slug) => slug,
+                None => match term_ids {
+                    Some(ids) if !ids.is_empty() => {
+                        let ids_json = serde_json::to_string(ids)?;
+                        let min_slug: Option<String> = sqlx::query_scalar(
+                            "SELECT slug FROM taxonomy_terms
+                              WHERE kind = 'category'
+                                AND id IN (SELECT value FROM json_each(?))
+                              ORDER BY id ASC LIMIT 1",
+                        )
+                        .bind(ids_json)
+                        .fetch_optional(&mut *conn)
+                        .await?;
+                        min_slug.unwrap_or_else(|| "uncategorized".to_owned())
+                    }
+                    _ => "uncategorized".to_owned(),
+                },
+            }
+        };
+        if post_structure.starts_with("/%category%/") {
+            if crate::seo::is_reserved_system_root(&resolved_cat) {
+                return Err(ApiError::conflict(format!(
+                    "permalink_category_root_collision: slug '{resolved_cat}' trùng gốc hệ thống."
+                )));
+            }
+            if posts_page_id.is_none() && resolved_cat == "posts" {
+                return Err(ApiError::conflict(
+                    "permalink_category_root_collision: slug 'posts' trùng trang lưu trữ mặc định.",
+                ));
+            }
+            let public_cpts: Vec<String> = sqlx::query_scalar(
+                "SELECT key FROM content_types
+                  WHERE key NOT IN ('pattern', 'section', 'page', 'post')
+                    AND provider_status = 'active'
+                    AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+            for key in public_cpts {
+                let base = resolve_effective_rewrite_base_in_tx(
+                    &mut *conn,
+                    "content_type",
+                    &key,
+                    &cpt_bases,
+                )
+                .await?;
+                if base.trim_start_matches('/').split('/').next().unwrap_or("") == resolved_cat {
+                    return Err(ApiError::conflict(format!(
+                        "permalink_category_root_collision: slug '{resolved_cat}' trùng CPT '{key}'."
+                    )));
+                }
+            }
+            let public_taxes: Vec<String> = sqlx::query_scalar(
+                "SELECT key FROM taxonomy_definitions
+                  WHERE public = 1 AND provider_status = 'active' AND declaration_state = 'declared'",
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+            for key in public_taxes {
+                let base =
+                    resolve_effective_rewrite_base_in_tx(&mut *conn, "taxonomy", &key, &tax_bases)
+                        .await?;
+                if base.trim_start_matches('/').split('/').next().unwrap_or("") == resolved_cat {
+                    return Err(ApiError::conflict(format!(
+                        "permalink_category_root_collision: slug '{resolved_cat}' trùng taxonomy '{key}'."
+                    )));
+                }
+            }
+        }
+        resolved_cat
+    } else {
+        "uncategorized".to_owned()
+    };
+
+    let cpt_base = if !matches!(type_key, "post" | "page") {
+        Some(
+            resolve_effective_rewrite_base_in_tx(&mut *conn, "content_type", type_key, &cpt_bases)
+                .await?,
+        )
+    } else {
+        None
+    };
+    let uses_post_id = type_key == "post" && post_structure.contains("%post_id%");
+    let check_public_path = !has_custom_path && is_public_type && !uses_post_id;
+    let check_root_reserved =
+        type_key == "page" || (type_key == "post" && post_structure == "/%postname%");
+
+    for n in 1..=100usize {
+        let candidate = if n == 1 {
+            base_slug.to_owned()
+        } else {
+            let suffix = format!("-{n}");
+            let max_prefix = 64usize.saturating_sub(suffix.len());
+            let prefix = base_slug[..base_slug.len().min(max_prefix)].trim_end_matches('-');
+            if prefix.is_empty() {
+                continue;
+            }
+            format!("{prefix}{suffix}")
+        };
+        let slug_taken: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND slug = ?)",
+        )
+        .bind(type_key)
+        .bind(&candidate)
+        .fetch_one(&mut *conn)
+        .await?;
+        if slug_taken != 0 {
+            continue;
+        }
+        if check_public_path {
+            if check_root_reserved && crate::seo::is_reserved_system_root(&candidate) {
+                continue;
+            }
+            let candidate_path = match type_key {
+                "page" => format!("/{candidate}"),
+                "post" => post_structure
+                    .replace("%category%", &cat_slug)
+                    .replace("%postname%", &candidate),
+                _ => format!("/{}/{candidate}", cpt_base.as_deref().unwrap_or(type_key)),
+            };
+            let path_taken: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM permalink_route_claims WHERE path = ?)
+                     OR EXISTS(SELECT 1 FROM permalink_route_redirects WHERE source_path = ?)
+                     OR EXISTS(SELECT 1 FROM entry_redirects WHERE source_path = ?)",
+            )
+            .bind(&candidate_path)
+            .bind(&candidate_path)
+            .bind(&candidate_path)
+            .fetch_one(&mut *conn)
+            .await?;
+            if path_taken != 0 {
+                continue;
+            }
+        }
+        return Ok(candidate);
+    }
+
+    Err(ApiError::conflict(
+        "Không thể tự động tạo slug duy nhất trong giới hạn 100 lần thử.",
+    ))
+}
+
 pub async fn commit_composite_entry_save(
     db: &SqlitePool,
     actor: &SessionContext,
@@ -1694,13 +2003,6 @@ pub async fn commit_composite_entry_save(
         ));
     }
 
-    crate::storage::seo::check_default_slug_claim_in_tx(
-        &mut tx,
-        type_key,
-        &plan.merged_input.slug,
-        entry_id,
-    )
-    .await?;
     crate::storage::media::require_existing_references_in_tx(
         &mut tx,
         &plan.effective_ct_def,
@@ -1710,6 +2012,38 @@ pub async fn commit_composite_entry_save(
     if let Some(ids) = &plan.merged_input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
     }
+    let effective_term_ids: Vec<i64> = match &plan.merged_input.term_ids {
+        Some(ids) => ids.clone(),
+        None => match entry_id {
+            Some(id) => read_term_ids(&mut tx, id).await?,
+            None => Vec::new(),
+        },
+    };
+    let next_primary_category = resolve_primary_category_patch_in_tx(
+        &mut tx,
+        type_key,
+        entry_id,
+        &input.primary_category_term_id,
+        plan.merged_input.term_ids.is_some(),
+        &effective_term_ids,
+    )
+    .await?;
+
+    let resolved_slug = if entry_id.is_none() && input.auto_unique_slug {
+        let has_custom_path =
+            matches!(&input.custom_path, PatchField::Set(raw) if !raw.trim().is_empty());
+        resolve_auto_unique_slug_in_tx(
+            &mut tx,
+            type_key,
+            &plan.merged_input.slug,
+            plan.merged_input.term_ids.as_deref(),
+            next_primary_category,
+            has_custom_path,
+        )
+        .await?
+    } else {
+        plan.merged_input.slug.clone()
+    };
 
     let values_json = serde_json::to_string(&plan.merged_input.values)?;
     let (page_layout_key, custom_template_key) =
@@ -1723,7 +2057,7 @@ pub async fn commit_composite_entry_save(
         _ => None,
     };
 
-    let (saved_id, previous_body) = match entry_id {
+    let (saved_id, previous_body, was_ever_published) = match entry_id {
         None => {
             // Migration 0008 deliberately rejects a directly published INSERT
             // for the built-in types. Keep that security trigger intact and
@@ -1735,17 +2069,18 @@ pub async fn commit_composite_entry_save(
                 "published"
             };
             let res = sqlx::query(
-                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
+                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
             )
             .bind(type_key)
-            .bind(&plan.merged_input.slug)
+            .bind(&resolved_slug)
             .bind(&plan.merged_input.title)
             .bind(&values_json)
             .bind(status_clause)
             .bind(requested_mode)
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
+            .bind(next_primary_category)
             .bind(custom_created_at.as_deref())
             .bind(custom_updated_at.as_deref())
             .bind(custom_created_at.as_deref())
@@ -1769,13 +2104,13 @@ pub async fn commit_composite_entry_save(
                 .execute(&mut *tx)
                 .await?;
             }
-            (new_id, None)
+            (new_id, None, false)
         }
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
             current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
-            let (old_slug, old_values_json): (String, String) = sqlx::query_as(
-                "SELECT slug, values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
+            let (old_values_json, was_ever_published_int): (String, i64) = sqlx::query_as(
+                "SELECT values_json, has_been_published FROM content_entries WHERE content_type_key = ? AND id = ?",
             )
             .bind(type_key)
             .bind(id)
@@ -1787,18 +2122,20 @@ pub async fn commit_composite_entry_save(
                  SET slug = ?, title = ?, values_json = ?,
                      publication_status = COALESCE(?, publication_status),
                      page_layout_key = ?, custom_template_key = ?,
+                     primary_category_term_id = ?,
                      content_mode = COALESCE(?, content_mode),
                      created_at = COALESCE(?, created_at),
                      version = version + 1,
                      updated_at = COALESCE(?, datetime('now'))
                  WHERE content_type_key = ? AND id = ? AND version = ?",
             )
-            .bind(&plan.merged_input.slug)
+            .bind(&resolved_slug)
             .bind(&plan.merged_input.title)
             .bind(&values_json)
             .bind(plan.publication_status.as_deref())
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
+            .bind(next_primary_category)
             .bind(requested_mode)
             .bind(custom_created_at.as_deref())
             .bind(custom_updated_at.as_deref())
@@ -1819,15 +2156,7 @@ pub async fn commit_composite_entry_save(
                     }
                 }
             }
-            crate::storage::seo::record_slug_change_redirect_in_tx(
-                &mut tx,
-                id,
-                type_key,
-                &old_slug,
-                &plan.merged_input.slug,
-            )
-            .await?;
-            (id, prev_body)
+            (id, prev_body, was_ever_published_int != 0)
         }
     };
 
@@ -1853,9 +2182,13 @@ pub async fn commit_composite_entry_save(
     .await?;
     let mut record = decoded_with_terms(&mut tx, row).await?;
 
-    let custom_path =
-        crate::storage::seo::apply_entry_route_patch_in_tx(&mut tx, saved_id, &input.custom_path)
-            .await?;
+    let custom_path = crate::storage::seo::apply_entry_route_patch_in_tx(
+        &mut tx,
+        saved_id,
+        &input.custom_path,
+        was_ever_published,
+    )
+    .await?;
     let seo = crate::storage::seo::apply_entry_seo_patch_in_tx(
         &mut tx,
         saved_id,
@@ -1864,6 +2197,14 @@ pub async fn commit_composite_entry_save(
     )
     .await?;
 
+    if !was_ever_published {
+        sqlx::query(
+            "DELETE FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
+        )
+        .bind(saved_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+    }
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
@@ -2672,5 +3013,458 @@ mod tests {
             .len(),
             2
         );
+    }
+
+    async fn s02_admin_context(db: &SqlitePool) -> SessionContext {
+        let user_id = sqlx::query(
+            "INSERT INTO users(username, password_hash, role) VALUES('s02_admin', 'unused', 'admin')",
+        )
+        .execute(db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let expires_at = auth::current_time_secs() + 3600;
+        sqlx::query(
+            "INSERT INTO sessions(token_hash, user_id, csrf_token, expires_at)
+             VALUES('s02-hash', ?, 's02-csrf', ?)",
+        )
+        .bind(user_id)
+        .bind(expires_at)
+        .execute(db)
+        .await
+        .unwrap();
+        SessionContext {
+            user: auth::AuthUser {
+                id: user_id,
+                username: "s02_admin".to_owned(),
+                role: auth::Role::Admin,
+            },
+            token_hash: "s02-hash".to_owned(),
+            csrf_token: "s02-csrf".to_owned(),
+        }
+    }
+
+    async fn composite_save(
+        db: &SqlitePool,
+        actor: &SessionContext,
+        type_key: &str,
+        entry_id: Option<i64>,
+        input: CompositeEntrySaveInput,
+    ) -> ApiResult<CompositeEntrySaveResult> {
+        let plan = prepare_composite_entry_save(db, actor, type_key, entry_id, &input).await?;
+        commit_composite_entry_save(db, actor, type_key, entry_id, &input, &plan).await
+    }
+
+    fn base_composite_input(
+        schema_token: &str,
+        slug: &str,
+        expected_version: Option<i64>,
+    ) -> CompositeEntrySaveInput {
+        CompositeEntrySaveInput {
+            expected_version,
+            expected_schema_token: Some(schema_token.to_owned()),
+            title: format!("Title {slug}"),
+            slug: slug.to_owned(),
+            publication_status: Some("published".to_owned()),
+            values: BTreeMap::new(),
+            term_ids: None,
+            primary_category_term_id: PatchField::Omitted,
+            auto_unique_slug: false,
+            custom_path: PatchField::Omitted,
+            page_layout_key: PatchField::Omitted,
+            custom_template_key: PatchField::Omitted,
+            content_mode: PatchField::Omitted,
+            seo: PatchField::Omitted,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn s02_auto_unique_slug_resolves_collisions_reserved_roots_and_64b_limit() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let actor = s02_admin_context(&db).await;
+
+        let post_schema = crate::storage::content::load_effective_content_schema(&db, "post")
+            .await
+            .unwrap()
+            .unwrap();
+        let page_schema = crate::storage::content::load_effective_content_schema(&db, "page")
+            .await
+            .unwrap()
+            .unwrap();
+        let post_tok = post_schema.schema_token.clone();
+        let page_tok = page_schema.schema_token.clone();
+
+        // 1. Repeated posts with auto_unique_slug: true produce foo, foo-2, foo-3.
+        for expected in ["foo", "foo-2", "foo-3"] {
+            let mut input = base_composite_input(&post_tok, "foo", None);
+            input.auto_unique_slug = true;
+            let saved = composite_save(&db, &actor, "post", None, input)
+                .await
+                .unwrap();
+            assert_eq!(saved.entry.slug, expected);
+        }
+
+        // 2. Page colliding with Post claims /foo, /foo-2, /foo-3 becomes foo-4;
+        //    with an explicit custom_path, Page can reuse slug "foo".
+        let mut page_foo = base_composite_input(&page_tok, "foo", None);
+        page_foo.auto_unique_slug = true;
+        let saved_page_foo = composite_save(&db, &actor, "page", None, page_foo)
+            .await
+            .unwrap();
+        assert_eq!(saved_page_foo.entry.slug, "foo-4");
+
+        let mut page_with_custom = base_composite_input(&page_tok, "foo", None);
+        page_with_custom.auto_unique_slug = true;
+        page_with_custom.custom_path = PatchField::Set("/custom-holder".to_owned());
+        let saved_holder = composite_save(&db, &actor, "page", None, page_with_custom)
+            .await
+            .unwrap();
+        assert_eq!(saved_holder.entry.slug, "foo");
+
+        // 3. Reserved roots (media), default archive (/posts), and CPT archive (/project) disambiguate cleanly.
+        sqlx::query(
+            "INSERT INTO content_types(key, definition_json, owner_kind)
+             VALUES('project', json_object('key','project','label','Project','fields',json('[]'),'settings',json_object('public',json('true'),'has_archive',json('true'))), 'user')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let mut tx = db.begin().await.unwrap();
+        crate::storage::permalinks::sync_claims_in_tx(&mut tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        for (raw_slug, expected) in [
+            ("media", "media-2"),
+            ("posts", "posts-2"),
+            ("project", "project-2"),
+        ] {
+            let mut input = base_composite_input(&page_tok, raw_slug, None);
+            input.auto_unique_slug = true;
+            let saved = composite_save(&db, &actor, "page", None, input)
+                .await
+                .unwrap();
+            assert_eq!(saved.entry.slug, expected);
+        }
+
+        // 4. 64-byte boundary trims trailing '-' before appending '-2'.
+        let long_base = format!("{}-xy", "a".repeat(61));
+        assert_eq!(long_base.len(), 64);
+        let mut long1 = base_composite_input(&post_tok, &long_base, None);
+        long1.auto_unique_slug = true;
+        let s1 = composite_save(&db, &actor, "post", None, long1)
+            .await
+            .unwrap();
+        assert_eq!(s1.entry.slug, long_base);
+        let mut long2 = base_composite_input(&post_tok, &long_base, None);
+        long2.auto_unique_slug = true;
+        let s2 = composite_save(&db, &actor, "post", None, long2)
+            .await
+            .unwrap();
+        assert_eq!(s2.entry.slug, format!("{}-2", "a".repeat(61)));
+        assert!(s2.entry.slug.len() <= 64);
+
+        // 5. Opt-in false & non-composite POST /entries still return 409 Conflict.
+        let strict_err = composite_save(
+            &db,
+            &actor,
+            "post",
+            None,
+            base_composite_input(&post_tok, "foo", None),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(strict_err.0, axum::http::StatusCode::CONFLICT);
+
+        let non_comp_err = create_entry(
+            &db,
+            &actor,
+            "post",
+            &post_schema.base.descriptor,
+            &ContentEntryInput {
+                title: "Dup".into(),
+                slug: "foo".into(),
+                values: BTreeMap::new(),
+                term_ids: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(non_comp_err.0, axum::http::StatusCode::CONFLICT);
+
+        // 6. With post_structure = /%category%/%postname%: post can share slug with a root Page,
+        //    while same-CPT slug still increments and forbidden %category% prefix rejects 409 immediately.
+        let perm = crate::storage::permalinks::get_settings(&db).await.unwrap();
+        crate::storage::permalinks::put_settings(
+            &db,
+            perm.version,
+            &crate::storage::permalinks::PermalinkSettingsInput {
+                post_structure: "/%category%/%postname%".to_owned(),
+                content_type_bases: perm.content_type_bases,
+                taxonomy_bases: perm.taxonomy_bases,
+            },
+        )
+        .await
+        .unwrap();
+        let cat_news = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','News','news')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+
+        let page_root = composite_save(
+            &db,
+            &actor,
+            "page",
+            None,
+            base_composite_input(&page_tok, "root-story", None),
+        )
+        .await
+        .unwrap();
+        assert_eq!(page_root.entry.slug, "root-story");
+
+        let mut post_in_news = base_composite_input(&post_tok, "root-story", None);
+        post_in_news.auto_unique_slug = true;
+        post_in_news.term_ids = Some(vec![cat_news]);
+        let post_saved = composite_save(&db, &actor, "post", None, post_in_news)
+            .await
+            .unwrap();
+        assert_eq!(post_saved.entry.slug, "root-story");
+
+        // Synthetically inject a colliding category term to exercise the immediate 409 pre-check
+        // in resolve_auto_unique_slug_in_tx when post_structure starts with /%category%/.
+        let cat_project = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Project','project')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let mut forbidden_cat = base_composite_input(&post_tok, "bad-cat-post", None);
+        forbidden_cat.auto_unique_slug = true;
+        forbidden_cat.term_ids = Some(vec![cat_project]);
+        let cat_err = composite_save(&db, &actor, "post", None, forbidden_cat)
+            .await
+            .unwrap_err();
+        assert_eq!(cat_err.0, axum::http::StatusCode::CONFLICT);
+        assert!(cat_err.1.contains("permalink_category_root_collision"));
+    }
+
+    #[tokio::test]
+    async fn s02_primary_category_validation_autoclear_and_redirect_history() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let actor = s02_admin_context(&db).await;
+
+        let perm = crate::storage::permalinks::get_settings(&db).await.unwrap();
+        crate::storage::permalinks::put_settings(
+            &db,
+            perm.version,
+            &crate::storage::permalinks::PermalinkSettingsInput {
+                post_structure: "/%category%/%postname%".to_owned(),
+                content_type_bases: perm.content_type_bases,
+                taxonomy_bases: perm.taxonomy_bases,
+            },
+        )
+        .await
+        .unwrap();
+
+        let cat_a = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Alpha','alpha')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let cat_b = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Beta','beta')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let tag_id =
+            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','T1','t1')")
+                .execute(&db)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+
+        let post_schema = crate::storage::content::load_effective_content_schema(&db, "post")
+            .await
+            .unwrap()
+            .unwrap();
+        let page_schema = crate::storage::content::load_effective_content_schema(&db, "page")
+            .await
+            .unwrap()
+            .unwrap();
+        let post_tok = post_schema.schema_token.clone();
+        let page_tok = page_schema.schema_token.clone();
+
+        // Validation rejections -> 400 Bad Request
+        let mut page_primary = base_composite_input(&page_tok, "page-pc", None);
+        page_primary.primary_category_term_id = PatchField::Set(cat_a);
+        assert_eq!(
+            composite_save(&db, &actor, "page", None, page_primary)
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+
+        let mut zero_primary = base_composite_input(&post_tok, "zero-pc", None);
+        zero_primary.primary_category_term_id = PatchField::Set(0);
+        assert_eq!(
+            composite_save(&db, &actor, "post", None, zero_primary)
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+
+        let mut tag_primary = base_composite_input(&post_tok, "tag-pc", None);
+        tag_primary.term_ids = Some(vec![tag_id]);
+        tag_primary.primary_category_term_id = PatchField::Set(tag_id);
+        assert_eq!(
+            composite_save(&db, &actor, "post", None, tag_primary)
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+
+        let mut unassigned_primary = base_composite_input(&post_tok, "unassigned-pc", None);
+        unassigned_primary.term_ids = Some(vec![cat_a]);
+        unassigned_primary.primary_category_term_id = PatchField::Set(cat_b);
+        assert_eq!(
+            composite_save(&db, &actor, "post", None, unassigned_primary)
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+
+        // Draft post changing primary category must NOT leave historical 301 redirect.
+        let mut draft_in = base_composite_input(&post_tok, "pc-post", None);
+        draft_in.publication_status = Some("draft".to_owned());
+        draft_in.term_ids = Some(vec![cat_a, cat_b]);
+        draft_in.primary_category_term_id = PatchField::Set(cat_b);
+        let draft1 = composite_save(&db, &actor, "post", None, draft_in)
+            .await
+            .unwrap();
+        assert_eq!(draft1.entry.primary_category_term_id, Some(cat_b));
+
+        let mut draft_up = base_composite_input(&post_tok, "pc-post", Some(draft1.entry.version));
+        draft_up.publication_status = Some("published".to_owned());
+        draft_up.primary_category_term_id = PatchField::Set(cat_a);
+        let published1 = composite_save(&db, &actor, "post", Some(draft1.entry.id), draft_up)
+            .await
+            .unwrap();
+        assert_eq!(published1.entry.primary_category_term_id, Some(cat_a));
+        assert_eq!(
+            crate::storage::permalinks::resolve_public_path(&db, "/beta/pc-post")
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            crate::storage::permalinks::resolve_public_path(&db, "/alpha/pc-post")
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical_path,
+            "/alpha/pc-post"
+        );
+
+        // Published post updates primary_category_term_id WITHOUT resending term_ids -> 301 created.
+        let mut switch_primary =
+            base_composite_input(&post_tok, "pc-post", Some(published1.entry.version));
+        switch_primary.publication_status = None;
+        switch_primary.term_ids = None;
+        switch_primary.primary_category_term_id = PatchField::Set(cat_b);
+        let published2 = composite_save(
+            &db,
+            &actor,
+            "post",
+            Some(published1.entry.id),
+            switch_primary,
+        )
+        .await
+        .unwrap();
+        assert_eq!(published2.entry.primary_category_term_id, Some(cat_b));
+        let alpha_redir = crate::storage::permalinks::resolve_public_path(&db, "/alpha/pc-post")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(alpha_redir.redirect);
+        assert_eq!(alpha_redir.canonical_path, "/beta/pc-post");
+
+        // Removing cat_b while primary_category_term_id is Omitted auto-clears primary_category_term_id.
+        let mut strip_cat_b =
+            base_composite_input(&post_tok, "pc-post", Some(published2.entry.version));
+        strip_cat_b.publication_status = None;
+        strip_cat_b.term_ids = Some(vec![cat_a]);
+        strip_cat_b.primary_category_term_id = PatchField::Omitted;
+        let cleared = composite_save(&db, &actor, "post", Some(published2.entry.id), strip_cat_b)
+            .await
+            .unwrap();
+        assert_eq!(cleared.entry.primary_category_term_id, None);
+        assert_eq!(
+            crate::storage::permalinks::resolve_public_path(&db, "/alpha/pc-post")
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical_path,
+            "/alpha/pc-post"
+        );
+
+        // Re-set primary = cat_b, then verify non-composite update_entry removing cat_b also clears it.
+        let mut restore_cat_b =
+            base_composite_input(&post_tok, "pc-post", Some(cleared.entry.version));
+        restore_cat_b.publication_status = None;
+        restore_cat_b.term_ids = Some(vec![cat_a, cat_b]);
+        restore_cat_b.primary_category_term_id = PatchField::Set(cat_b);
+        let restored = composite_save(
+            &db,
+            &actor,
+            "post",
+            Some(published2.entry.id),
+            restore_cat_b,
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.entry.primary_category_term_id, Some(cat_b));
+
+        let non_comp_updated = update_entry(
+            &db,
+            &actor,
+            "post",
+            &post_schema.base.descriptor,
+            restored.entry.id,
+            restored.entry.version,
+            &ContentEntryInput {
+                title: restored.entry.title.clone(),
+                slug: restored.entry.slug.clone(),
+                values: restored.entry.values.clone(),
+                term_ids: Some(vec![cat_a]),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(non_comp_updated.primary_category_term_id, None);
     }
 }
