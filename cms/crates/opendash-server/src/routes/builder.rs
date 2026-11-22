@@ -1,14 +1,17 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
-    Json,
+    Extension, Json,
     body::Bytes,
-    extract::{Path, Query, State},
+    extract::{Path, RawQuery, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use opendash_core::builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES};
-use serde::{Deserialize, Serialize};
+use opendash_core::{
+    builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES},
+    content::valid_content_type_key,
+};
+use serde::Deserialize;
 use sqlx::SqlitePool;
 
 use crate::{
@@ -16,14 +19,10 @@ use crate::{
     auth::{require_admin_with_csrf, require_session, require_session_with_csrf},
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
-    package::is_valid_zip_content_type,
-    page::{self as page_usecase, render_block, save_page},
+    page::{render_block, save_page},
     routes::public::rendered,
-    storage::{
-        builder as builder_storage, overrides as overrides_storage,
-        page::{insert_theme_block, list_theme_blocks},
-    },
-    theme::{Block, Fields, Theme},
+    storage::{builder as builder_storage, page::list_theme_blocks},
+    theme::{Block, Fields},
 };
 
 pub async fn builder() -> Response {
@@ -77,25 +76,6 @@ pub async fn registry(
     Ok(Json(list_theme_blocks(&db).await?))
 }
 
-pub async fn install(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-    bytes: Bytes,
-) -> ApiResult<StatusCode> {
-    require_admin_with_csrf(&headers, &db).await?;
-
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok());
-    if !is_valid_zip_content_type(content_type, true) {
-        return Err(ApiError::unsupported_media_type("Cần gói application/zip."));
-    }
-    let theme = Theme::from_zip(&bytes).map_err(ApiError::bad_request)?;
-    insert_theme_block(&db, &theme).await?;
-    Ok(StatusCode::CREATED)
-}
-
 pub async fn page(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
@@ -137,22 +117,6 @@ fn builder_rendered(result: crate::page::RenderedBlock) -> Response {
     response
 }
 
-#[derive(Serialize)]
-pub struct HomepageOpen {
-    pub document: BuilderDocument,
-    pub source: &'static str,
-    pub version: i64,
-}
-
-#[derive(Serialize)]
-pub struct HomepageSaved {
-    pub document: BuilderDocument,
-    pub source: &'static str,
-    pub version: i64,
-    pub html: String,
-    pub diagnostics: Vec<page_usecase::BuilderDiagnostic>,
-}
-
 fn builder_headers(version: Option<i64>) -> HeaderMap {
     let mut h = HeaderMap::new();
     h.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -191,7 +155,7 @@ fn parse_builder_if_match(headers: &HeaderMap) -> ApiResult<i64> {
         .ok_or_else(|| ApiError::bad_request("If-Match không hợp lệ."))
 }
 
-fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocument> {
+fn require_builder_json(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<()> {
     let is_json = headers
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -205,302 +169,166 @@ fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocum
     if bytes.len() > MAX_BUILDER_JSON_BYTES {
         return Err(ApiError::bad_request("Builder JSON vượt giới hạn 256 KiB."));
     }
+    Ok(())
+}
+
+fn decode_document(headers: &HeaderMap, bytes: &Bytes) -> ApiResult<BuilderDocument> {
+    require_builder_json(headers, bytes)?;
     BuilderDocument::from_json(bytes).map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
-pub async fn homepage_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
-    let actor = require_session(&headers, &db).await?;
-    if actor.user.role != crate::auth::Role::Admin {
-        return Err(ApiError::forbidden("Chỉ Admin mới được chỉnh homepage."));
+fn validate_entry_builder_type(type_key: &str) -> ApiResult<()> {
+    if !valid_content_type_key(type_key) {
+        return Err(ApiError::bad_request("Content type key không hợp lệ."));
     }
-    let current = builder_storage::read(&db).await?;
-    Ok((
-        builder_headers(Some(current.version)),
-        Json(HomepageOpen {
-            document: current.document(),
-            source: current.source(),
-            version: current.version,
-        }),
-    )
-        .into_response())
+    Ok(())
 }
 
-pub async fn homepage_preview(
+fn entry_builder_response(result: builder_storage::EntryBuilderOpen) -> Response {
+    (builder_headers(Some(result.version)), Json(result)).into_response()
+}
+
+fn entry_builder_mutation_response(
+    result: Result<builder_storage::EntryBuilderOpen, builder_storage::EntryBuilderMutationError>,
+) -> ApiResult<Response> {
+    match result {
+        Ok(open) => Ok(entry_builder_response(open)),
+        Err(builder_storage::EntryBuilderMutationError::Api(error)) => Err(error),
+        Err(builder_storage::EntryBuilderMutationError::Veto(veto)) => Ok((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            builder_headers(None),
+            Json(veto),
+        )
+            .into_response()),
+    }
+}
+
+pub async fn entry_builder_get(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
-    bytes: Bytes,
+    Path((type_key, id)): Path<(String, i64)>,
 ) -> ApiResult<Response> {
-    require_admin_with_csrf(&headers, &db).await?;
-    let document = decode_document(&headers, &bytes)?;
-    let current = builder_storage::read(&db).await?;
-    current.validate(&document)?;
-    builder_storage::check_preview_images(&db, &document).await?;
-    let (bindings, lists) = builder_storage::resolve_preview(&db, &document).await?;
-    let forms = crate::storage::builder::resolve_contact_forms(&db, &document).await?;
-    let rendered = page_usecase::render_builder_with_lists_and_forms(
-        &current, &document, true, &bindings, &lists, &forms,
-    )?;
-    Ok((builder_headers(None), Json(rendered)).into_response())
+    let actor = require_session(&headers, &db).await?;
+    validate_entry_builder_type(&type_key)?;
+    let result = builder_storage::read_entry_builder(&db, &actor, &type_key, id).await?;
+    Ok(entry_builder_response(result))
 }
 
-pub async fn homepage_put(
+pub async fn entry_builder_put(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    require_admin_with_csrf(&headers, &db).await?;
-    let version = parse_builder_if_match(&headers)?;
+    let actor = if type_key == "pattern" {
+        require_admin_with_csrf(&headers, &db).await?
+    } else {
+        require_session_with_csrf(&headers, &db).await?
+    };
+    validate_entry_builder_type(&type_key)?;
+    let expected_version = parse_builder_if_match(&headers)?;
     let document = decode_document(&headers, &bytes)?;
-    let (version, rendered) = builder_storage::save_and_render(
+    entry_builder_mutation_response(
+        builder_storage::save_entry_builder(
+            &db,
+            &actor,
+            &hooks,
+            &type_key,
+            id,
+            expected_version,
+            &document,
+        )
+        .await,
+    )
+}
+
+pub async fn entry_builder_preview(
+    State(db): State<SqlitePool>,
+    State(block_template_cache): State<Arc<crate::page::BlockTemplateCache>>,
+    Extension(themes_root): Extension<crate::routes::themes::ThemeStoreRoot>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    RawQuery(raw): RawQuery,
+    bytes: Bytes,
+) -> ApiResult<Response> {
+    let actor = if type_key == "pattern" {
+        require_admin_with_csrf(&headers, &db).await?
+    } else {
+        require_session_with_csrf(&headers, &db).await?
+    };
+    validate_entry_builder_type(&type_key)?;
+    if raw.as_deref().is_some_and(|query| !query.is_empty()) {
+        return Err(ApiError::bad_request(
+            "Entry Builder preview target is fixed by the path.",
+        ));
+    }
+    let document = decode_document(&headers, &bytes)?;
+    let rendered = builder_storage::preview_entry_builder_with_cache(
         &db,
+        &themes_root.0,
+        &actor,
+        &type_key,
+        id,
         &document,
-        version,
-        |current, draft, bindings, lists| {
-            page_usecase::render_builder_with_lists(current, draft, false, bindings, lists)
-        },
+        &block_template_cache,
     )
     .await?;
-    page_usecase::dispatch_saved_hook(
-        &hooks,
-        page_usecase::layout_hook_payload(&document, version),
-    )
-    .await;
-    Ok((
-        builder_headers(Some(version)),
-        Json(HomepageSaved {
-            document,
-            source: "layout",
-            version,
-            html: rendered.html,
-            diagnostics: rendered.diagnostics,
-        }),
-    )
-        .into_response())
+    let mut response_headers = builder_headers(None);
+    // Reuse the site's strict layout CSP, including the contact form flag.
+    let layout_response = super::public::rendered_layout_with_form_csp(
+        rendered.html.clone(),
+        rendered.has_active_contact_form,
+    );
+    for name in [header::CONTENT_SECURITY_POLICY, header::REFERRER_POLICY] {
+        if let Some(value) = layout_response.headers().get(&name) {
+            response_headers.insert(name, value.clone());
+        }
+    }
+    Ok((response_headers, Json(rendered)).into_response())
 }
 
 #[derive(Deserialize)]
-pub struct OverrideScopeQuery {
-    pub type_key: Option<String>,
-    pub entry_id: Option<i64>,
-    pub preview_type_key: Option<String>,
-    pub preview_entry_slug: Option<String>,
+#[serde(deny_unknown_fields)]
+struct EntryBuilderReset {
+    confirm: bool,
 }
 
-#[derive(Serialize)]
-pub struct OverrideOpen {
-    pub exists: bool,
-    pub role: String,
-    pub scope_type_key: Option<String>,
-    pub scope_entry_id: Option<i64>,
-    pub document: BuilderDocument,
-    pub version: i64,
-    pub base_theme_id: Option<String>,
-    pub base_revision_id: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct OverrideSaved {
-    pub role: String,
-    pub scope_type_key: Option<String>,
-    pub scope_entry_id: Option<i64>,
-    pub document: BuilderDocument,
-    pub version: i64,
-    pub base_theme_id: Option<String>,
-    pub base_revision_id: Option<String>,
-    pub html: String,
-    pub diagnostics: Vec<page_usecase::BuilderDiagnostic>,
-}
-
-#[derive(Deserialize)]
-pub struct OverrideResetRequest {
-    pub confirm: bool,
-}
-
-fn parse_optional_builder_if_match(headers: &HeaderMap) -> ApiResult<Option<i64>> {
-    let Some(raw) = headers.get(header::IF_MATCH) else {
-        return Ok(None);
-    };
-    let value = raw
-        .to_str()
-        .map_err(|_| ApiError::bad_request("If-Match không hợp lệ."))?;
-    let Some(digits) = value
-        .strip_prefix("\"v")
-        .and_then(|tail| tail.strip_suffix('"'))
-    else {
-        return Err(ApiError::bad_request("If-Match phải có dạng \"vN\"."));
-    };
-    if digits == "0" {
-        return Ok(Some(0));
-    }
-    if digits.is_empty() || digits.starts_with('0') || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(ApiError::bad_request("If-Match không hợp lệ."));
-    }
-    digits
-        .parse::<i64>()
-        .ok()
-        .filter(|v| *v >= 1)
-        .map(Some)
-        .ok_or_else(|| ApiError::bad_request("If-Match không hợp lệ."))
-}
-
-pub async fn overrides_list(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-) -> ApiResult<Response> {
-    let actor = require_session(&headers, &db).await?;
-    if actor.user.role != crate::auth::Role::Admin {
-        return Err(ApiError::forbidden(
-            "Chỉ Admin mới xem được danh sách template dùng chung.",
-        ));
-    }
-    let items = overrides_storage::list_overrides(&db).await?;
-    Ok((builder_headers(None), Json(items)).into_response())
-}
-
-pub async fn override_get(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-    Path(role): Path<String>,
-    Query(query): Query<OverrideScopeQuery>,
-) -> ApiResult<Response> {
-    let actor = require_session(&headers, &db).await?;
-    let role = overrides_storage::OverrideRole::parse(&role)?;
-    let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
-    check_override_permission(&scope, actor.user.role)?;
-    let existing = overrides_storage::get_override(&db, &scope).await?;
-    let (exists, document, version, base_theme_id, base_revision_id) = match existing {
-        Some(record) => (
-            true,
-            record.document,
-            record.version,
-            record.base_theme_id,
-            record.base_revision_id,
-        ),
-        None => (false, BuilderDocument::empty(), 0, None, None),
-    };
-    Ok((
-        builder_headers((version > 0).then_some(version)),
-        Json(OverrideOpen {
-            exists,
-            role: scope.role.as_str().to_string(),
-            scope_type_key: scope.scope_type_key,
-            scope_entry_id: scope.scope_entry_id,
-            document,
-            version,
-            base_theme_id,
-            base_revision_id,
-        }),
-    )
-        .into_response())
-}
-
-pub async fn override_preview(
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-    Path(role): Path<String>,
-    Query(query): Query<OverrideScopeQuery>,
-    bytes: Bytes,
-) -> ApiResult<Response> {
-    let actor = require_session_with_csrf(&headers, &db).await?;
-    let role = overrides_storage::OverrideRole::parse(&role)?;
-    let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
-    check_override_permission(&scope, actor.user.role)?;
-    if scope.role == overrides_storage::OverrideRole::Page
-        && scope.scope_entry_id.is_some()
-        && (query.preview_type_key.is_some() || query.preview_entry_slug.is_some())
-    {
-        return Err(ApiError::bad_request(
-            "Page Builder preview dùng đúng entry_id, không nhận preview target khác.",
-        ));
-    }
-    let document = decode_document(&headers, &bytes)?;
-    let preview_entry = match (
-        query.preview_type_key.as_deref(),
-        query.preview_entry_slug.as_deref(),
-    ) {
-        (Some(tk), Some(slug)) => Some((tk, slug)),
-        _ => None,
-    };
-    let rendered =
-        overrides_storage::preview_override(&db, &scope, &document, preview_entry).await?;
-    Ok((builder_headers(None), Json(rendered)).into_response())
-}
-
-pub async fn override_put(
+pub async fn entry_builder_reset(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
-    Path(role): Path<String>,
-    Query(query): Query<OverrideScopeQuery>,
+    Path((type_key, id)): Path<(String, i64)>,
     bytes: Bytes,
 ) -> ApiResult<Response> {
-    let actor = require_session_with_csrf(&headers, &db).await?;
-    let role = overrides_storage::OverrideRole::parse(&role)?;
-    let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
-    check_override_permission(&scope, actor.user.role)?;
-    let expected_version = parse_optional_builder_if_match(&headers)?;
-    let document = decode_document(&headers, &bytes)?;
-    let (saved, rendered) =
-        overrides_storage::save_override_and_render(&db, &scope, &document, expected_version)
-            .await?;
-    Ok((
-        builder_headers(Some(saved.version)),
-        Json(OverrideSaved {
-            role: saved.role,
-            scope_type_key: saved.scope_type_key,
-            scope_entry_id: saved.scope_entry_id,
-            document: saved.document,
-            version: saved.version,
-            base_theme_id: saved.base_theme_id,
-            base_revision_id: saved.base_revision_id,
-            html: rendered.html,
-            diagnostics: rendered.diagnostics,
-        }),
-    )
-        .into_response())
-}
-
-pub async fn override_reset(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
-    State(db): State<SqlitePool>,
-    headers: HeaderMap,
-    Path(role): Path<String>,
-    Query(query): Query<OverrideScopeQuery>,
-    Json(body): Json<OverrideResetRequest>,
-) -> ApiResult<Response> {
-    let actor = require_session_with_csrf(&headers, &db).await?;
-    let role = overrides_storage::OverrideRole::parse(&role)?;
-    let scope = overrides_storage::OverrideScope::new(role, query.type_key, query.entry_id)?;
-    check_override_permission(&scope, actor.user.role)?;
+    let actor = if type_key == "pattern" {
+        require_admin_with_csrf(&headers, &db).await?
+    } else {
+        require_session_with_csrf(&headers, &db).await?
+    };
+    validate_entry_builder_type(&type_key)?;
     let expected_version = parse_builder_if_match(&headers)?;
-    overrides_storage::reset_override(&db, &scope, expected_version, body.confirm).await?;
-    Ok((
-        builder_headers(None),
-        Json(serde_json::json!({ "reset": true, "role": scope.role.as_str() })),
+    require_builder_json(&headers, &bytes)?;
+    let input: EntryBuilderReset =
+        serde_json::from_slice(&bytes).map_err(|error| ApiError::bad_request(error.to_string()))?;
+    entry_builder_mutation_response(
+        builder_storage::reset_entry_builder(
+            &db,
+            &actor,
+            &hooks,
+            &type_key,
+            id,
+            expected_version,
+            input.confirm,
+        )
+        .await,
     )
-        .into_response())
-}
-
-fn check_override_permission(
-    scope: &overrides_storage::OverrideScope,
-    role: crate::auth::Role,
-) -> ApiResult<()> {
-    if role == crate::auth::Role::Admin
-        || (scope.role == overrides_storage::OverrideRole::Page
-            && scope.scope_type_key.as_deref() == Some("page")
-            && scope.scope_entry_id.is_some())
-    {
-        return Ok(());
-    }
-    Err(ApiError::forbidden(
-        "Editor chỉ được chỉnh layout của Page cụ thể; template dùng chung cần Admin.",
-    ))
 }
 
 #[cfg(test)]
-mod homepage_tests {
+mod builder_etag_tests {
     use super::*;
 
     #[test]

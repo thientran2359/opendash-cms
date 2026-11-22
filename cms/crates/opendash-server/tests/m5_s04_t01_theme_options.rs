@@ -91,7 +91,12 @@ fn tiny_png() -> Vec<u8> {
     ]
 }
 
-async fn login(client: &Client, base_url: &str, username: &str, password: &str) -> (String, String) {
+async fn login(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> (String, String) {
     let resp = client
         .post(format!("{base_url}/auth/login"))
         .json(&serde_json::json!({ "username": username, "password": password }))
@@ -110,6 +115,70 @@ async fn login(client: &Client, base_url: &str, username: &str, password: &str) 
     let json: Value = resp.json().await.unwrap();
     let csrf = json["csrf_token"].as_str().unwrap().to_string();
     (cookie, csrf)
+}
+
+// S03: Home is a published Page selected atomically in Reading Settings.
+async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) -> i64 {
+    let types: Vec<Value> = client
+        .get(format!("{base_url}/api/admin/content-types"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let schema_token = types
+        .iter()
+        .find(|v| v["descriptor"]["key"] == "page")
+        .unwrap()["schema_token"]
+        .as_str()
+        .unwrap();
+    let created = client
+        .post(format!(
+            "{base_url}/api/admin/content-types/page/entries/composite"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base_url)
+        .header("X-CSRF-Token", csrf)
+        .json(&serde_json::json!({
+            "expected_schema_token": schema_token,
+            "slug":"theme-home-fixture",
+            "title":"Theme Home Fixture",
+            "values":{"body":"Theme Home Fixture"},
+            "publication_status":"published"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let raw = created.text().await.unwrap();
+    assert_eq!(status, 201, "S03 Home Page create: {raw}");
+    let page_id = serde_json::from_str::<Value>(&raw).unwrap()["entry"]["id"]
+        .as_i64()
+        .unwrap();
+    let reading = client
+        .get(format!("{base_url}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status(), 200);
+    let etag = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let assigned = client
+        .put(format!("{base_url}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base_url)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", etag)
+        .json(&serde_json::json!({"homepage_page_id":page_id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = assigned.status();
+    let body = assigned.text().await.unwrap();
+    assert_eq!(status, 200, "S03 Reading assignment: {body}");
+    page_id
 }
 
 #[tokio::test]
@@ -170,15 +239,11 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
 
     // 3. Install & activate Theme A with 5 option types
     let manifest_a = br#"{
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "theme-alpha",
         "name": "Theme Alpha",
         "version": "1.0.0",
-        "templates": {
-            "header": "templates/header.html",
-            "footer": "templates/footer.html",
-            "home": "templates/home.html"
-        },
+        "templates": [{ "kind": "home", "file": "home.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
         "options": [
             { "key": "banner_text", "label": "Banner", "type": "string", "default": "Welcome", "public": true },
             { "key": "cols", "label": "Columns", "type": "number", "default": 3, "min": 1, "max": 6, "public": true },
@@ -190,9 +255,9 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
     }"#;
     let zip_a = build_zip(&[
         ("theme.json", manifest_a, CompressionMethod::Deflated),
-        ("templates/header.html", b"<header>{% if options.show_banner %}<span>{{ options.banner_text }}</span>{% endif %}</header>", CompressionMethod::Deflated),
-        ("templates/footer.html", b"<footer data-tone=\"{{ options.tone }}\">Cols:{{ options.cols }}</footer>", CompressionMethod::Deflated),
-        ("templates/home.html", b"<main>Home</main>", CompressionMethod::Deflated),
+        ("header.html", b"<header>{% if options.show_banner %}<span>{{ options.banner_text }}</span>{% endif %}</header>", CompressionMethod::Deflated),
+        ("footer.html", b"<footer data-tone=\"{{ options.tone }}\">Cols:{{ options.cols }}</footer>", CompressionMethod::Deflated),
+        ("home.html", b"<main>Home{{ od_content() }}</main>", CompressionMethod::Deflated),
     ]);
     let inst_a = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -204,7 +269,10 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
         .await
         .unwrap();
     assert_eq!(inst_a.status(), 201);
-    let rev_a = inst_a.json::<Value>().await.unwrap()["revision_id"].as_str().unwrap().to_string();
+    let rev_a = inst_a.json::<Value>().await.unwrap()["revision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let act_a = client
         .put(format!("{}/api/admin/themes/active", srv.base_url))
@@ -216,6 +284,8 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
         .await
         .unwrap();
     assert_eq!(act_a.status(), 200);
+
+    seed_builder_homepage(&client, &srv.base_url, &admin_cookie, &admin_csrf).await;
 
     // 4. RBAC: Guest -> 401, Editor -> 403
     assert_eq!(
@@ -319,7 +389,14 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
         .unwrap();
     assert_eq!(save_ok.status(), 200);
 
-    let home_html = client.get(format!("{}/", srv.base_url)).send().await.unwrap().text().await.unwrap();
+    let home_html = client
+        .get(format!("{}/", srv.base_url))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(home_html.contains("Autumn Sale"), "{home_html}");
     assert!(home_html.contains("Cols:4"), "{home_html}");
     assert!(home_html.contains("data-tone=\"dark\""), "{home_html}");
@@ -337,8 +414,8 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
 
     // 7. Switch Theme A -> B: media ACL immediately revoked (404), then B -> A restores saved values & ACL (200)
     let zip_b = build_zip(&[
-        ("theme.json", br#"{"manifest_version":2,"theme_id":"theme-beta","name":"Theme Beta","version":"1.0.0","templates":{"home":"templates/home.html"}}"#, CompressionMethod::Deflated),
-        ("templates/home.html", b"<main>Beta</main>", CompressionMethod::Deflated),
+        ("theme.json", br#"{"manifest_version":3,"theme_id":"theme-beta","name":"Theme Beta","version":"1.0.0","templates": [{ "kind": "home", "file": "home.html" }]}"#, CompressionMethod::Deflated),
+        ("home.html", b"<main>Beta{{ od_content() }}</main>", CompressionMethod::Deflated),
     ]);
     let inst_b = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -349,7 +426,10 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
         .send()
         .await
         .unwrap();
-    let rev_b = inst_b.json::<Value>().await.unwrap()["revision_id"].as_str().unwrap().to_string();
+    let rev_b = inst_b.json::<Value>().await.unwrap()["revision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     assert_eq!(
         client
@@ -399,18 +479,22 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
 
     // 8. Incompatible option type on Theme A v2.0.0 -> 409 Conflict when activating
     let manifest_a_bad = br#"{
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "theme-alpha",
         "name": "Theme Alpha",
         "version": "2.0.0",
-        "templates": { "home": "templates/home.html" },
+        "templates": [{ "kind": "home", "file": "home.html" }],
         "options": [
             { "key": "banner_text", "label": "Banner", "type": "number", "default": 1, "public": true }
         ]
     }"#;
     let zip_a_bad = build_zip(&[
         ("theme.json", manifest_a_bad, CompressionMethod::Deflated),
-        ("templates/home.html", b"<main>Home 2</main>", CompressionMethod::Deflated),
+        (
+            "home.html",
+            b"<main>Home 2{{ od_content() }}</main>",
+            CompressionMethod::Deflated,
+        ),
     ]);
     let inst_a_bad = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -422,7 +506,10 @@ async fn m5_s04_t01_theme_options_rbac_cas_acl_compat_and_ssr() {
         .await
         .unwrap();
     assert_eq!(inst_a_bad.status(), 201);
-    let rev_a_bad = inst_a_bad.json::<Value>().await.unwrap()["revision_id"].as_str().unwrap().to_string();
+    let rev_a_bad = inst_a_bad.json::<Value>().await.unwrap()["revision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     assert_eq!(
         client

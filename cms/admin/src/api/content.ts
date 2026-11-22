@@ -32,7 +32,7 @@ export const contentEntryPreviewPath = (key: string, id: number): string =>
   `${entryPath(key, id)}/preview`;
 
 /** C1 settings extend the existing schema DTO without changing legacy callers. */
-export type ContentSupport = 'editor' | 'featured_image';
+export type ContentSupport = 'editor' | 'featured_image' | 'builder';
 export type ContentPublicationPolicy = 'immediate' | 'draft_publish';
 
 export interface ContentTypeSettings {
@@ -62,12 +62,16 @@ export function effectiveContentTypeSettings(
   settings?: ContentTypeSettings,
 ): ContentTypeSettings {
   const effective: ContentTypeSettings = settings ?? {
-    public: typeKey !== 'section',
-    has_archive: typeKey !== 'section',
+    public: typeKey !== 'pattern' && typeKey !== 'section',
+    has_archive: typeKey !== 'pattern' && typeKey !== 'section',
     publication: typeKey === 'post' || typeKey === 'page' || typeKey === 'section'
       ? 'draft_publish' : 'immediate',
-    supports: ['editor', 'featured_image'],
+    supports: typeKey === 'pattern' ? ['builder']
+      : typeKey === 'page' ? ['editor', 'featured_image', 'builder'] : ['editor', 'featured_image'],
   };
+  if (typeKey === 'pattern') {
+    return { ...effective, public: false, has_archive: false, publication: 'immediate', supports: ['builder'] };
+  }
   if (typeKey === 'section') {
     return { ...effective, public: false, has_archive: false, publication: 'draft_publish' };
   }

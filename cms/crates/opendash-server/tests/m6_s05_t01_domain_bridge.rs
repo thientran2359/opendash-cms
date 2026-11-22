@@ -23,10 +23,13 @@ fn unique_db_path(name: &str) -> std::path::PathBuf {
 async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtrip() {
     // 1. Verify migration 0024 applies cleanly and supports owner_kind='plugin' alongside 'theme'
     let db_path = unique_db_path("bridge");
-    let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect(&db_url)
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
         .await
         .expect("connect sqlite");
     sqlx::migrate!("../../migrations")
@@ -49,25 +52,6 @@ async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtri
     .await
     .expect("insert plugin option value");
 
-    // Insert plugin-owned template selection in canonical template_overrides
-    sqlx::query(
-        "INSERT INTO template_overrides (role, scope_type_key, scope_entry_id, ast_json, version, base_theme_id, owner_kind, owner_id, template_selection_key)
-         VALUES ('single', 'acme_product', NULL, '{\"schema_version\":1,\"sections\":[]}', 1, 'acme-plugin', 'plugin', 'acme-plugin', 'product-hero-v1')",
-    )
-    .execute(&pool)
-    .await
-    .expect("insert plugin template selection");
-
-    let (owner_kind, owner_id, sel_key): (String, String, Option<String>) = sqlx::query_as(
-        "SELECT owner_kind, owner_id, template_selection_key FROM template_overrides WHERE owner_kind = 'plugin' AND owner_id = 'acme-plugin'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("query plugin template selection");
-    assert_eq!(owner_kind, "plugin");
-    assert_eq!(owner_id, "acme-plugin");
-    assert_eq!(sel_key.as_deref(), Some("product-hero-v1"));
-
     // 2. Verify BuilderDocument AST validates active PluginBlock and preserves it when disabled
     let mut vals = BTreeMap::new();
     vals.insert("heading".into(), serde_json::json!("Plugin Block Title"));
@@ -84,15 +68,45 @@ async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtri
                     responsive: None,
                     children: vec![ElementNode {
                         id: "el-1".into(),
-                        content: ElementContent::Known(KnownElement::PluginBlock(PluginBlockProps {
-                            block_id: "acme-plugin/hero".into(),
-                            values: vals,
-                        })),
+                        content: ElementContent::Known(KnownElement::PluginBlock(
+                            PluginBlockProps {
+                                block_id: "acme-plugin/hero".into(),
+                                values: vals,
+                            },
+                        )),
                     }],
                 }],
             }],
         }],
     };
+
+    // D02: Two providers may independently own the same role and scope.
+    let raw = serde_json::to_string(&doc).unwrap();
+    for (kind, key) in [("plugin", "product-hero-v1"), ("theme", "theme-hero-v1")] {
+        sqlx::query(
+            "INSERT INTO owner_template_selections (owner_kind, owner_id, role, scope_type_key, template_selection_key, ast_json, updated_at)
+             VALUES (?, 'acme-plugin', 'single', 'acme_product', ?, ?, datetime('now'))",
+        ).bind(kind).bind(key).bind(&raw).execute(&pool).await.unwrap();
+    }
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT owner_kind, template_selection_key, ast_json FROM owner_template_selections WHERE owner_id = 'acme-plugin' ORDER BY owner_kind",
+    ).fetch_all(&pool).await.unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                "plugin".to_owned(),
+                "product-hero-v1".to_owned(),
+                raw.clone()
+            ),
+            ("theme".to_owned(), "theme-hero-v1".to_owned(), raw)
+        ]
+    );
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM template_overrides")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
 
     let mut active_reg = RegistryCatalog::default();
     active_reg

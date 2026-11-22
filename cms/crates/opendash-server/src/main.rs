@@ -36,7 +36,6 @@ use hooks::HookDispatcher;
 use media::MediaStore;
 use plugin::PluginManager;
 
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().any(|a| a == "--check-config") {
         let paths = paths::SitePaths::from_env()?;
@@ -71,6 +70,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         config::RuntimeConfigV1::load(&paths).map_err(|e| format!("{}: {}", e.0, e.1))?;
     let recovery = config::RecoveryState::new(runtime_cfg.portable.recovery_safe_mode);
     let db = storage::init_db(paths.db_path()).await?;
+    storage::builder::migrate_demo_entry_builder_docs_on_startup(&db)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
     storage::import::recover_orphaned_import_runs(&db, &paths.uploads_dir())
         .await
         .map_err(|e| format!("{}: {}", e.0, e.1))?;
@@ -106,6 +108,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         content_registry,
         coordinator,
         backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
+        block_template_cache: crate::page::BlockTemplateCache::global().clone(),
         recovery,
         runtime_config: runtime_cfg.clone(),
     };
@@ -136,12 +139,13 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let mut shutdown_rx_for_serve = shutdown_rx.clone();
     let serve_fut = std::future::IntoFuture::into_future(
         axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .with_graceful_shutdown(async move {
-        let _ = shutdown_rx_for_serve.wait_for(|v| *v).await;
-    }));
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            let _ = shutdown_rx_for_serve.wait_for(|v| *v).await;
+        }),
+    );
     tokio::pin!(serve_fut);
     let serve_res = tokio::select! {
         res = &mut serve_fut => Some(res),
@@ -150,7 +154,9 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     match serve_res {
         Some(res) => res?,
         None => {
-            if let Ok(res) = tokio::time::timeout(std::time::Duration::from_secs(10), &mut serve_fut).await {
+            if let Ok(res) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), &mut serve_fut).await
+            {
                 res?;
             } else {
                 eprintln!(
@@ -190,10 +196,7 @@ extern "C" fn handle_termination_signal(_sig: std::ffi::c_int) {
 
 async fn shutdown_signal() {
     unsafe extern "C" {
-        fn signal(
-            sig: std::ffi::c_int,
-            handler: extern "C" fn(std::ffi::c_int),
-        ) -> usize;
+        fn signal(sig: std::ffi::c_int, handler: extern "C" fn(std::ffi::c_int)) -> usize;
     }
     const SIGINT: std::ffi::c_int = 2;
     const SIGTERM: std::ffi::c_int = 15;

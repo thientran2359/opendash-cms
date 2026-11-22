@@ -2,14 +2,17 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AuthUser, PluginSummary, type Role } from './types.ts';
 import * as api from './api/index.ts';
 import { AdminShell, isRouteAllowed, parseAdminRoute, type ParsedRoute } from './shell/AdminShell.tsx';
-import { listContentTypes } from './api/content.ts';
+import { getEffectiveContentTypeTaxonomies, listContentTypes } from './api/content.ts';
+import { listTaxonomyDefinitions } from './api/taxonomy.ts';
 import type { OwnedContentType } from './features/content/types.ts';
 import { ContentTypeSchemaSettings } from './features/content/ContentTypeSchemaSettings.tsx';
 import { UserProfilePanel } from './features/users/UserProfilePanel.tsx';
 import { SystemStatus } from './features/system/SystemStatus.tsx';
 import { GeneralSettingsPanel } from './features/system/GeneralSettingsPanel.tsx';
 import { clearPermalinkDrafts, discardPermalinkDraft, PermalinkSettingsPage } from './features/settings/PermalinkSettingsPage.tsx';
+import { clearReadingDrafts, discardReadingDraft, ReadingSettingsPanel } from './features/settings/ReadingSettingsPanel.tsx';
 import { BuilderWorkspace } from './builder/BuilderWorkspace.tsx';
+import { StudioWorkspace } from './studio/StudioWorkspace.tsx';
 import { UsersPanel } from './features/users/UsersPanel.tsx';
 import { PluginsPanel } from './features/plugins/PluginsPanel.tsx';
 import { SingleEditWorkspace } from './features/editor/SingleEditWorkspace.tsx';
@@ -28,7 +31,7 @@ import { RestorePanel } from './features/operations/RestorePanel.tsx';
 import { TaxonomyPage } from './features/taxonomy/TaxonomyPage.tsx';
 import { TermEditPage } from './features/taxonomy/TermEditPage.tsx';
 import { TaxonomyDefinitionsPage } from './features/taxonomy/TaxonomyDefinitionsPage.tsx';
-import { SectionsPage } from './features/sections/SectionsPage.tsx';
+import { PatternsPage } from './features/patterns/PatternsPage.tsx';
 import { TemplateLibraryPage } from './features/library/TemplateLibraryPage.tsx';
 
 const HISTORY_INDEX = '__openDashAdminHistoryIndex';
@@ -60,7 +63,13 @@ function editorIdentity(route: ParsedRoute, hash: string): string | null {
 
 function builderIdentity(route: ParsedRoute): string | null {
   if (route.view !== 'builder') return null;
-  return `${route.sub}:${route.templateRole ?? 'homepage'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
+  return `${route.sub}:${route.templateRole ?? 'header'}:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
+}
+
+function studioIdentity(route: ParsedRoute): string | null {
+  if (route.view === 'studio') return 'studio-mode1';
+  if (route.view === 'studio-entry') return `studio-entry:${route.typeKey ?? ''}:${route.entryId ?? ''}`;
+  return null;
 }
 
 export const App: React.FC = () => {
@@ -71,6 +80,7 @@ export const App: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
   const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
+  const [cptTaxonomies, setCptTaxonomies] = useState<Record<string, Array<{ key: string; label: string }>>>({});
   const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
   const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
   const siteInstanceIdRef = useRef(siteInstanceId);
@@ -89,12 +99,24 @@ export const App: React.FC = () => {
     permalinkDirtyRef.current = value;
     setPermalinkDirty(value);
   }, []);
+  const [readingDirty, setReadingDirty] = useState(false);
+  const readingDirtyRef = useRef(false);
+  const markReadingDirty = useCallback((value: boolean) => {
+    readingDirtyRef.current = value;
+    setReadingDirty(value);
+  }, []);
   const [builderDirty, setBuilderDirty] = useState(false);
+  const [studioDirty, setStudioDirty] = useState(false);
+  const studioDirtyRef = useRef(false);
+  const markStudioDirty = useCallback((value: boolean) => {
+    studioDirtyRef.current = value;
+    setStudioDirty(value);
+  }, []);
   const [postsDirty, setPostsDirty] = useState(false);
   const [pagesDirty, setPagesDirty] = useState(false);
-  const [sectionsDirty, setSectionsDirty] = useState(false);
-  const sectionsDirtyRef = useRef(false);
-  const markSectionsDirty = (value: boolean) => { sectionsDirtyRef.current = value; setSectionsDirty(value); };
+  const [patternsDirty, setPatternsDirty] = useState(false);
+  const patternsDirtyRef = useRef(false);
+  const markPatternsDirty = (value: boolean) => { patternsDirtyRef.current = value; setPatternsDirty(value); };
   const [termDirty, setTermDirty] = useState(false);
   const termDirtyRef = useRef(false);
   const markTermDirty = (next: boolean) => {
@@ -115,8 +137,14 @@ export const App: React.FC = () => {
   const authSessionEpochRef = useRef(0);
   const builderDirtyRef = useRef(builderDirty);
   builderDirtyRef.current = builderDirty;
-  const lastBuilderRouteRef = useRef<ParsedRoute>(parseAdminRoute('#/builder'));
-  if (route.view === 'builder') lastBuilderRouteRef.current = route;
+  const lastBuilderRouteRef = useRef<ParsedRoute | null>(
+    route.view === 'builder' && route.sub === 'builder' ? route : null,
+  );
+  if (route.view === 'builder' && route.sub === 'builder') lastBuilderRouteRef.current = route;
+  const lastStudioRouteRef = useRef<ParsedRoute | null>(
+    route.view === 'studio' || route.view === 'studio-entry' ? route : null,
+  );
+  if (route.view === 'studio' || route.view === 'studio-entry') lastStudioRouteRef.current = route;
 
   // Auth inputs
   const [authUsername, setAuthUsername] = useState<string>('');
@@ -141,8 +169,26 @@ export const App: React.FC = () => {
   // The existing editors stay mounted in AdminShell across route changes.
   const loadCptTypes = useCallback(async () => {
     try {
-      const list = await listContentTypes();
+      const [list, definitions] = await Promise.all([
+        listContentTypes(),
+        listTaxonomyDefinitions().catch(() => []),
+      ]);
       setCptTypes(list);
+      const defMap = new Map(definitions.map(def => [def.key, def]));
+      const customTypes = list.filter(
+        ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
+      );
+      const entries = await Promise.all(
+        customTypes.map(async ct => {
+          const keys = await getEffectiveContentTypeTaxonomies(ct.descriptor.key).catch(() => []);
+          const items = keys.map(key => ({
+            key,
+            label: key === 'category' ? 'Chuyên mục' : key === 'tag' ? 'Thẻ' : (defMap.get(key)?.label ?? key),
+          }));
+          return [ct.descriptor.key, items] as const;
+        }),
+      );
+      setCptTaxonomies(Object.fromEntries(entries));
     } catch {
       // Non-fatal on boot; panels handle explicit errors.
     }
@@ -170,25 +216,36 @@ export const App: React.FC = () => {
     const switchingBuilderTarget = current.view === 'builder'
       && builderIdentity(current) !== builderIdentity(next);
     const leavingBuilder = switchingBuilderTarget && builderDirtyRef.current;
-    const leavingSection = current.view === 'sections' && current.rawHash !== destination && sectionsDirtyRef.current;
+    const switchingStudioTarget = (current.view === 'studio' || current.view === 'studio-entry')
+      && studioIdentity(current) !== studioIdentity(next);
+    const leavingStudio = switchingStudioTarget && studioDirtyRef.current;
+    const leavingPattern = current.view === 'patterns' && current.rawHash !== destination && patternsDirtyRef.current;
     const leavingSchema = current.view === 'settings' && current.sub === 'content-types'
       && schemaDirtyRef.current && acceptedHashRef.current !== destination;
     const leavingPermalinks = current.view === 'settings' && current.sub === 'permalinks'
       && acceptedHashRef.current !== destination && permalinkDirtyRef.current;
+    const leavingReading = current.view === 'settings' && current.sub === 'reading'
+      && acceptedHashRef.current !== destination && readingDirtyRef.current;
     const leavingTerm = current.view === 'taxonomy' && current.taxonomyMode !== 'list'
       && termDirtyRef.current && acceptedHashRef.current !== destination;
-    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingTerm || leavingSection || leavingSchema || leavingPermalinks;
+    const hasDirty = leavingDirtyEditor || leavingBuilder || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading;
     if (!hasDirty) return true;
     const approved = window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
+        : leavingStudio
+          ? 'OpenDash Studio có thay đổi chưa lưu. Bỏ thay đổi và rời Studio?'
         : leavingTerm
           ? 'Taxonomy có thay đổi chưa lưu. Rời màn hình sẽ bỏ bản nhập. Tiếp tục?'
-          : leavingSchema || leavingSection || leavingPermalinks
+          : leavingSchema || leavingPattern || leavingPermalinks || leavingReading
             ? 'Có thay đổi chưa lưu. Rời màn hình có thể làm mất bản nhập. Tiếp tục?'
             : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
     if (approved && leavingPermalinks && userRef.current) {
       discardPermalinkDraft(siteInstanceIdRef.current, userRef.current.id);
       markPermalinkDirty(false);
+    }
+    if (approved && leavingReading && userRef.current) {
+      discardReadingDraft(siteInstanceIdRef.current, userRef.current.id);
+      markReadingDirty(false);
     }
     return approved;
   };
@@ -207,6 +264,8 @@ export const App: React.FC = () => {
       const requested = parseAdminRoute(target, window.location.pathname);
       if (userRef.current && requested.isLegacyContentRedirect) {
         target = userRef.current.role === 'admin' ? '#/appearance/content-types' : '#/posts';
+      } else if (requested.redirectHash) {
+        target = requested.redirectHash;
       }
       if (target === acceptedHashRef.current && event) return;
       if (!mayLeave(target)) {
@@ -252,17 +311,19 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     const guard = (event: BeforeUnloadEvent) => {
-      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current)) return;
+      if (!editorDraftStore.hasAnyDirty() && !(builderDirtyRef.current || studioDirtyRef.current || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', guard);
     return () => window.removeEventListener('beforeunload', guard);
-  }, [contentDirty, schemaDirty, permalinkDirty, postsDirty, pagesDirty, termDirty, sectionsDirty]);
+  }, [contentDirty, schemaDirty, permalinkDirty, readingDirty, postsDirty, pagesDirty, termDirty, patternsDirty]);
 
   const navigateHash = (hash: string) => {
     if (!userRef.current) return;
-    const target = normalizeEditorHash(hash);
+    let target = normalizeEditorHash(hash);
+    const parsed = parseAdminRoute(target, window.location.pathname);
+    if (parsed.redirectHash) target = parsed.redirectHash;
     if (!mayLeave(target)) return;
     if (window.location.hash !== target) {
       historyIndexRef.current += 1;
@@ -358,13 +419,19 @@ export const App: React.FC = () => {
         setSiteInstanceId(nextSiteId);
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
-        markSectionsDirty(false);
+        markStudioDirty(false);
+        lastStudioRouteRef.current = null;
+        lastBuilderRouteRef.current = null;
+        markPatternsDirty(false);
       } else if (lastAuthenticatedUserId.current !== null &&
           lastAuthenticatedUserId.current !== res.user.id) {
         editorDraftStore.clear();
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
-        markSectionsDirty(false);
+        markStudioDirty(false);
+        lastStudioRouteRef.current = null;
+        lastBuilderRouteRef.current = null;
+        markPatternsDirty(false);
       } else {
         setAuthGeneration(g => g + 1);
       }
@@ -387,7 +454,7 @@ export const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || builderDirty || postsDirty || pagesDirty || termDirtyRef.current || sectionsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || builderDirty || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
       return;
     }
     setIsProcessing(true);
@@ -396,6 +463,7 @@ export const App: React.FC = () => {
       authSessionEpochRef.current += 1;
       editorDraftStore.clear();
       clearPermalinkDrafts();
+      clearReadingDrafts();
       setUser(null);
       setCsrfToken(null);
       setAuthUsername('');
@@ -409,10 +477,14 @@ export const App: React.FC = () => {
       setContentRevision(previous => previous + 1);
       setContentDirty(false);
       markPermalinkDirty(false);
+      markReadingDirty(false);
       setBuilderDirty(false);
+      markStudioDirty(false);
+      lastStudioRouteRef.current = null;
+      lastBuilderRouteRef.current = null;
       setPostsDirty(false);
       setPagesDirty(false);
-      markSectionsDirty(false);
+      markPatternsDirty(false);
       markTermDirty(false);
       lastAuthenticatedUserId.current = null;
       setRoute(parseAdminRoute('#/dashboard', window.location.pathname));
@@ -540,17 +612,31 @@ export const App: React.FC = () => {
       route={route}
       routeForbidden={Boolean(user && !isRouteAllowed(route, user.role))}
       cptTypes={cptTypes}
+      cptTaxonomies={cptTaxonomies}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
-      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || builderDirty || postsDirty || pagesDirty || termDirty || sectionsDirty}
-      sidebarContent={<BuilderWorkspace
-        key={builderIdentity(lastBuilderRouteRef.current) ?? 'homepage'}
+      hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || builderDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
+      sidebarContent={lastBuilderRouteRef.current ? <BuilderWorkspace
+        key={builderIdentity(lastBuilderRouteRef.current) ?? 'header'}
         route={lastBuilderRouteRef.current}
         active={route.view === 'builder' && isRouteAllowed(route, user?.role ?? 'editor')}
         onNavigateHash={navigateHash}
         user={user} csrfToken={csrfToken} resetToken={builderReset} themeRevision={themeRevision}
         onDirtyChange={setBuilderDirty} onApiError={handleApiError}
-      />}
+      /> : null}
+      studioContent={lastStudioRouteRef.current ? <StudioWorkspace
+        key={studioIdentity(lastStudioRouteRef.current) ?? 'studio-mode1'}
+        route={route.view === 'studio' || route.view === 'studio-entry' ? route : lastStudioRouteRef.current}
+        active={(route.view === 'studio' || route.view === 'studio-entry') && isRouteAllowed(route, user?.role ?? 'editor')}
+        user={user}
+        csrfToken={csrfToken}
+        resetToken={builderReset}
+        themeRevision={themeRevision}
+        onNavigateHash={navigateHash}
+        onDirtyChange={markStudioDirty}
+        onApiError={handleApiError}
+        onSavedSettingsOrTheme={() => setThemeRevision(v => v + 1)}
+      /> : null}
       previewContent={null}
       themesContent={<ThemesPanel mode="themes" csrfToken={csrfToken} onApiError={handleApiError}
         onInstalled={() => setThemeRevision(value => value + 1)}
@@ -606,6 +692,11 @@ export const App: React.FC = () => {
               user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
               onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cài đặt permalink.')}
               onDirtyChange={markPermalinkDirty} />
+        : route.sub === 'reading'
+          ? <ReadingSettingsPanel key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
+              user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+              onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cấu hình Reading Settings.')}
+              onDirtyChange={markReadingDirty} />
         : route.sub === 'seo'
           ? <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
           : route.sub === 'contact'
@@ -698,10 +789,10 @@ export const App: React.FC = () => {
           onNavigateHash={navigateHash}
         />
       }
-      sectionsContent={
-        <SectionsPage key={`${siteInstanceId}:${user?.id ?? 'none'}:${user?.role ?? 'none'}`}
+      patternsContent={
+        <PatternsPage key={siteInstanceId}
           route={route} user={user} csrfToken={csrfToken} onApiError={handleApiError}
-          onDirtyChange={markSectionsDirty} onNavigateHash={navigateHash} />
+          onDirtyChange={markPatternsDirty} onNavigateHash={navigateHash} />
       }
       mediaContent={<MediaRoute user={user} csrfToken={csrfToken} onApiError={handleApiError} />}
       taxonomyContent={route.taxonomyMode === 'definitions'

@@ -138,9 +138,7 @@ pub fn validate_form_schema(schema: &FormSchema) -> Result<(), String> {
         return Err("Phiên bản schema form phải là 1.".to_string());
     }
     if schema.fields.is_empty() || schema.fields.len() > MAX_FORM_FIELDS {
-        return Err(format!(
-            "Form phải có từ 1 đến {MAX_FORM_FIELDS} trường."
-        ));
+        return Err(format!("Form phải có từ 1 đến {MAX_FORM_FIELDS} trường."));
     }
     let mut seen_keys = HashSet::new();
     let mut email_keys = HashSet::new();
@@ -208,8 +206,7 @@ pub fn validate_form_schema(schema: &FormSchema) -> Result<(), String> {
     if let Some(reply_key) = schema.reply_to_field.as_deref() {
         if !email_keys.contains(reply_key) {
             return Err(
-                "reply_to_field phải trỏ tới một trường kiểu email hợp lệ trong form."
-                    .to_string(),
+                "reply_to_field phải trỏ tới một trường kiểu email hợp lệ trong form.".to_string(),
             );
         }
     }
@@ -321,17 +318,13 @@ pub fn validate_and_normalize_submission(
                     });
                     continue;
                 }
-                if schema.reply_to_field.as_deref() == Some(field.key.as_str()) && !val.is_empty()
-                {
+                if schema.reply_to_field.as_deref() == Some(field.key.as_str()) && !val.is_empty() {
                     reply_to_email = Some(val.clone());
                 }
                 normalized.insert(field.key.clone(), serde_json::Value::String(val));
             }
             FormKind::Textarea => {
-                let norm = raw
-                    .unwrap_or("")
-                    .replace("\r\n", "\n")
-                    .replace('\r', "\n");
+                let norm = raw.unwrap_or("").replace("\r\n", "\n").replace('\r', "\n");
                 let trimmed = norm.trim().to_string();
                 if has_disallowed_control_chars(&trimmed, true) {
                     errors.push(FieldValidationError {

@@ -11,17 +11,14 @@ use public_context::{
 #[test]
 fn public_canonical_uses_current_typed_identity_and_reserved_roots() {
     assert_eq!(Urls::home(), "/");
-    assert_eq!(Urls::archive("post").as_deref(), Some("/content/post"));
-    assert_eq!(Urls::archive("page").as_deref(), Some("/content/page"));
+    assert_eq!(Urls::archive("post").as_deref(), Some("/posts"));
+    assert_eq!(Urls::archive("page"), None);
     assert_eq!(
         Urls::entry_from_id(42, "page", "hello").as_deref(),
-        Some("/content/page/hello")
+        Some("/hello")
     );
     assert_eq!(Urls::entry_from_id(0, "page", "hello"), None);
-    assert_eq!(
-        Urls::entry("news", "first").as_deref(),
-        Some("/content/news/first")
-    );
+    assert_eq!(Urls::entry("news", "first").as_deref(), Some("/news/first"));
     assert_eq!(Urls::entry("admin", "first"), None);
     assert_eq!(Urls::entry("post", "first%2Fother"), None);
     assert_eq!(Urls::entry("post", "first/other"), None);
@@ -30,11 +27,11 @@ fn public_canonical_uses_current_typed_identity_and_reserved_roots() {
     assert_eq!(Urls::entry("post", "old-slug?next=1"), None);
     assert_eq!(
         Urls::taxonomy(TaxonomyKind::Category, "new").as_deref(),
-        Some("/taxonomy/category/new")
+        Some("/category/new")
     );
     assert_eq!(
         Urls::term_from_id(5, TaxonomyKind::Tag, "rust").as_deref(),
-        Some("/taxonomy/tag/rust")
+        Some("/tag/rust")
     );
 }
 
@@ -51,7 +48,7 @@ fn archive_query_is_typed_bounded_and_single_valued() {
     assert!(parsed.filters.descendants);
     assert_eq!(
         Urls::content_page("post", parsed).as_deref(),
-        Some("/content/post?page=10000&category_id=12&tag_id=7&include_descendants=true")
+        Some("/posts?page=10000&category_id=12&tag_id=7&include_descendants=true")
     );
     for raw in [
         "page=0",
@@ -99,7 +96,7 @@ fn taxonomy_page_filters_are_and_composed_without_tracking() {
     assert_eq!(exact.filters, PublicFilters::default());
     assert_eq!(
         Urls::taxonomy_page(TaxonomyKind::Category, "wildlife", exact).as_deref(),
-        Some("/taxonomy/category/wildlife?page=2")
+        Some("/category/wildlife?page=2")
     );
     let descendants = parse_query(
         Some("descendants=true&tag_id=8&category_id=3&garbage=%2f"),
@@ -108,7 +105,7 @@ fn taxonomy_page_filters_are_and_composed_without_tracking() {
     .unwrap();
     assert_eq!(
         Urls::taxonomy_page(TaxonomyKind::Tag, "reef", descendants).as_deref(),
-        Some("/taxonomy/tag/reef?category_id=3&tag_id=8&descendants=true")
+        Some("/tag/reef?category_id=3&tag_id=8&descendants=true")
     );
     assert!(
         parse_query(
@@ -138,18 +135,20 @@ fn single_urls_ignore_tracking_but_reject_known_archive_parameters() {
     assert!(validate_single_query(Some("utm_source=abc&ref=home")).is_ok());
     assert!(validate_single_query(Some("page=1")).is_err());
     assert_eq!(
-        Urls::normalize_internal_link("/content/post/new?utm_source=x"),
-        Some("/content/post/new".into())
+        Urls::normalize_internal_link("/new?utm_source=x").as_deref(),
+        Some("/new?utm_source=x")
     );
     assert_eq!(
-        Urls::normalize_internal_link("/content/post/new?page=1"),
-        None
+        Urls::normalize_internal_link("/posts?page=2").as_deref(),
+        Some("/posts?page=2")
     );
-    assert_eq!(Urls::normalize_internal_link("/content/post%2Fnew"), None);
-    assert_eq!(Urls::normalize_internal_link("/content/post/%252F"), None);
+    assert_eq!(Urls::normalize_internal_link("//evil.com/x"), None);
+    assert_eq!(Urls::normalize_internal_link("/a\\b"), None);
+    assert_eq!(Urls::normalize_internal_link("/post%2Fnew"), None);
+    assert_eq!(Urls::normalize_internal_link("/post/%252F"), None);
     assert_eq!(
-        Urls::normalize_internal_link("/taxonomy/tag/rust?foo=x").as_deref(),
-        Some("/taxonomy/tag/rust")
+        Urls::normalize_internal_link("/tag/rust?foo=x").as_deref(),
+        Some("/tag/rust?foo=x")
     );
     assert_eq!(
         Urls::normalize_internal_link("https://example.com/x").as_deref(),
@@ -176,7 +175,7 @@ fn builder_home_pages_obey_separate_m4_limits() {
     };
     assert_eq!(
         Urls::content_page("post", query),
-        Some("/content/post?page=101".into())
+        Some("/posts?page=101".into())
     );
 }
 
@@ -310,14 +309,24 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         .json(&serde_json::json!({"username":"public_context_admin","password":"Strong-Public-Context-Password-123!"}))
         .send().await.unwrap();
     assert_eq!(login.status(), reqwest::StatusCode::OK);
-    let cookie = login.headers().get_all(reqwest::header::SET_COOKIE)
-        .iter().filter_map(|v| v.to_str().ok())
+    let cookie = login
+        .headers()
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
         .map(|v| v.split(';').next().unwrap().to_string())
-        .collect::<Vec<_>>().join("; ");
+        .collect::<Vec<_>>()
+        .join("; ");
     let csrf = login.json::<serde_json::Value>().await.unwrap()["csrf_token"]
-        .as_str().unwrap().to_owned();
-    let settings = client.get(format!("{base}/api/admin/settings/permalinks"))
-        .header("Cookie", &cookie).send().await.unwrap();
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let settings = client
+        .get(format!("{base}/api/admin/settings/permalinks"))
+        .header("Cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
     assert_eq!(settings.status(), reqwest::StatusCode::OK);
     let settings: serde_json::Value = settings.json().await.unwrap();
     let version = settings["version"].as_i64().unwrap();
@@ -326,47 +335,59 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         "content_type_bases":settings["content_type_bases"],
         "taxonomy_bases":settings["taxonomy_bases"]
     });
-    let sync = client.put(format!("{base}/api/admin/settings/permalinks"))
+    let sync = client
+        .put(format!("{base}/api/admin/settings/permalinks"))
         .header("Cookie", &cookie)
         .header("x-csrf-token", &csrf)
         .header("If-Match", format!("\"v{version}\""))
         .header("Origin", &base)
-        .json(&input).send().await.unwrap();
+        .json(&input)
+        .send()
+        .await
+        .unwrap();
     let status = sync.status();
     let body = sync.text().await.unwrap();
-    assert_eq!(status, reqwest::StatusCode::OK, "fixture permalink sync: {body}");
+    assert_eq!(
+        status,
+        reqwest::StatusCode::OK,
+        "fixture permalink sync: {body}"
+    );
 
     for (path, expected_status) in [
         ("/", 200),
-        ("/content/post", 200),
-        ("/content/page", 200),
-        ("/content/post/public-article?utm_source=test", 200),
-        ("/content/post/public-article?page=1", 400),
-        ("/content/page/secret-page", 404),
-        ("/content/post/old-slug", 404),
-        ("/content/post?page=2&page=3", 400),
-        ("/content/post?pa%67e=2&page=3", 400),
-        ("/content/post?page=10001", 400),
-        ("/content/post?category_id=0", 400),
-        ("/content/post?include_descendants=true", 400),
-        ("/content/post?utm_campaign=ignored", 200),
+        ("/posts", 200),
+        ("/content/post", 404),
+        // EGM S01: untouched Core Page defaults to a singular-only CPT.
+        ("/content/page", 404),
+        ("/page/", 404),
+        ("/public-article?utm_source=test", 200),
+        ("/public-article?page=1", 400),
+        ("/secret-page", 404),
+        ("/old-slug", 404),
+        ("/posts?page=2&page=3", 400),
+        ("/posts?pa%67e=2&page=3", 400),
+        ("/posts?page=10001", 400),
+        ("/posts?category_id=0", 400),
+        ("/posts?include_descendants=true", 400),
+        ("/posts?utm_campaign=ignored", 200),
         // C3 CONTENT_FOUNDATION_2026_11: malformed token/encoding/traversal
         // must return 400, unlike a valid missing/private target (404).
-        ("/content/post/public%2Farticle", 400),
-        ("/content/post/public%252Farticle", 400),
-        ("/content/post/public%5Carticle", 400),
-        ("/taxonomy/category/missing", 404),
-        ("/taxonomy/tag/sea", 404),
-        ("/taxonomy/category/sea", 200),
-        ("/taxonomy/category/sea?descendants=true", 200),
-        ("/taxonomy/category/sea?descendants=true&tag_id=999999", 400),
-        ("/taxonomy/tag/fish", 200),
+        ("/public%2Farticle", 400),
+        ("/public%252Farticle", 400),
+        ("/public%5Carticle", 400),
+        ("/category/missing", 404),
+        ("/tag/sea", 404),
+        ("/taxonomy/category/sea", 404),
+        ("/category/sea", 200),
+        ("/category/sea?descendants=true", 200),
+        ("/category/sea?descendants=true&tag_id=999999", 400),
+        ("/tag/fish", 200),
     ] {
         let response = client.get(format!("{base}{path}")).send().await.unwrap();
         assert_eq!(response.status().as_u16(), expected_status, "path: {path}");
     }
     let exact = client
-        .get(format!("{base}/taxonomy/category/sea"))
+        .get(format!("{base}/category/sea"))
         .send()
         .await
         .unwrap()
@@ -378,7 +399,7 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         "category is exact by default"
     );
     let descendants = client
-        .get(format!("{base}/taxonomy/category/sea?descendants=true"))
+        .get(format!("{base}/category/sea?descendants=true"))
         .send()
         .await
         .unwrap()
@@ -388,7 +409,7 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
     assert!(descendants.contains("Visible Article"));
     assert!(!descendants.contains("Private Draft"));
     let tagged = client
-        .get(format!("{base}/taxonomy/tag/fish"))
+        .get(format!("{base}/tag/fish"))
         .send()
         .await
         .unwrap()

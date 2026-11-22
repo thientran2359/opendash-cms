@@ -66,6 +66,8 @@ export interface OwnedContentType {
   schema_token: string;
 }
 
+export type ContentMode = 'editor' | 'builder';
+
 export type ContentFieldValue = string | number | boolean | string[] | null;
 
 export interface ContentEntryInput {
@@ -81,6 +83,7 @@ export interface ContentEntryRecord extends ContentEntryInput {
   id: number;
   content_type_key: string;
   publication_status: 'draft' | 'published';
+  content_mode: ContentMode;
   version: number;
   created_at: string;
   updated_at: string;
@@ -266,6 +269,7 @@ export interface CompositeEntrySaveInput {
   title: string;
   slug: string;
   publication_status?: 'draft' | 'published';
+  content_mode?: ContentMode;
   values: Record<string, ContentFieldValue>;
   term_ids?: number[];
   custom_path?: string | null;
@@ -276,6 +280,8 @@ export interface CompositeEntrySaveInput {
     canonical_url?: string | null;
     noindex?: boolean;
   } | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface CompositeEntrySaveResult {

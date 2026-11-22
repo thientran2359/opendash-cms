@@ -29,8 +29,19 @@ MARKDOWN_LINK = re.compile(r"\]\(([^)]+)\)")
 FENCE = re.compile(r"^\s*(?:`{3,}|~{3,})")
 STATUS_BOLD = re.compile(r"^\*\*([^*]+)\*\*")
 EGM_STATUS_LINE = re.compile(r"^\s*(?:[-*]\s+)?\*\*Status:\*\*\s*(.+?)\s*$", re.I)
+EGM_META_LINE = re.compile(r"^\s*(?:[-*]\s+)?\*\*([^*:]+):\*\*\s*(.*?)\s*$")
 EGM_PLACEHOLDER = re.compile(r"\b(?:TODO|TBD)\b", re.I)
 EGM_UNRESOLVED_OQ = re.compile(r"(?:\bOQ-\d+\b|^\s*[-*]\s+\[ \])", re.M)
+EGM_SLICE_HEADING = re.compile(
+    r"^(#{3,4})\s+Slice\s+([A-Za-z0-9][A-Za-z0-9_-]*)\s*[-–—:]\s*(.+?)\s*$", re.I
+)
+EGM_REQUIRED_PROVENANCE = ("approved by", "approval evidence", "goldfish review")
+EGM_REQUIRED_SLICE_FIELDS = (
+    "**Dependencies:**",
+    "**File Ownership:**",
+    "**Acceptance Criteria:**",
+    "**Rollback:**",
+)
 
 
 def content_lines(file: Path) -> list[tuple[int, str]]:
@@ -102,6 +113,16 @@ def check(root: Path) -> list[str]:
         else []
     )
     files = sorted(docs.rglob("*.md")) + sorted(agent_files)
+    github_dir = root / ".github"
+    if github_dir.is_dir():
+        files += sorted(github_dir.rglob("*.md"))
+    cms_dir = root / "cms"
+    if cms_dir.is_dir():
+        files += sorted(
+            f
+            for f in cms_dir.rglob("README.md")
+            if "node_modules" not in f.parts and "target" not in f.parts
+        )
     files += [
         file for file in (root / "README.md", root / "AGENTS.md") if file.is_file()
     ]
@@ -166,20 +187,26 @@ def check(root: Path) -> list[str]:
 
 
 def check_egm_design_structure(design_file: Path, root: Path) -> list[str]:
-    """Enforce EGM Approved gate: Approved specs must have Detailed Implementation Plan, Verification Plan, and no open TODO/TBD/OQ."""
+    """Enforce EGM Approved gate: provenance, Detailed Implementation Plan, Slice Contract, Verification Plan, and no open TODO/TBD/OQ."""
     errors: list[str] = []
     rel = design_file.relative_to(root)
     active_lines = [line for _, line in content_lines(design_file)]
-    status = ""
+    meta: dict[str, str] = {}
     for line in active_lines:
         if line.startswith("## "):
             break
-        match = EGM_STATUS_LINE.match(line)
+        match = EGM_META_LINE.match(line)
         if match:
-            status = match.group(1).strip()
-            break
-    if status.casefold() != "approved":
+            meta[match.group(1).strip().casefold()] = match.group(2).strip()
+    if meta.get("status", "").casefold() != "approved":
         return errors
+
+    for key in EGM_REQUIRED_PROVENANCE:
+        val = meta.get(key, "")
+        if not val or EGM_PLACEHOLDER.search(val):
+            errors.append(
+                f"{rel}: Approved EGM design missing valid '**{key.title()}:**' provenance metadata"
+            )
 
     text = "\n".join(active_lines)
     if "## Detailed Implementation Plan" not in text:
@@ -200,6 +227,33 @@ def check_egm_design_structure(design_file: Path, root: Path) -> list[str]:
             oq_lines.append(line)
     if oq_lines and EGM_UNRESOLVED_OQ.search("\n".join(oq_lines)):
         errors.append(f"{rel}: Approved EGM design still has unresolved Open Questions (OQ-xx / unchecked items)")
+
+    # Check per-slice contract if slices are defined inside Detailed Implementation Plan
+    in_impl = False
+    impl_lines: list[str] = []
+    for line in active_lines:
+        if line.startswith("## "):
+            in_impl = line.strip() == "## Detailed Implementation Plan"
+            continue
+        if in_impl:
+            impl_lines.append(line)
+    slice_starts: list[tuple[int, int, str]] = []
+    for idx, line in enumerate(impl_lines):
+        m = EGM_SLICE_HEADING.match(line)
+        if m:
+            slice_starts.append((idx, len(m.group(1)), m.group(2)))
+    for i, (start, level, slice_id) in enumerate(slice_starts):
+        stop = len(impl_lines)
+        for j in range(start + 1, len(impl_lines)):
+            if impl_lines[j].startswith("#") and len(impl_lines[j].split(" ", 1)[0]) <= level:
+                stop = j
+                break
+        slice_body = "\n".join(impl_lines[start:stop])
+        for req_field in EGM_REQUIRED_SLICE_FIELDS:
+            if req_field not in slice_body:
+                errors.append(
+                    f"{rel}: Slice {slice_id} missing required contract field '{req_field}'"
+                )
     return errors
 
 
@@ -211,7 +265,18 @@ def fixture(root: Path) -> None:
     (verification / "test.md").write_text("# Real test evidence\n", encoding="utf-8")
     (designs / "README.md").write_text("# EGM Designs Guide\n", encoding="utf-8")
     (designs / "feature-a.md").write_text(
-        "# Feature A\n\n* **Status:** Approved\n\n## Detailed Implementation Plan\n\n### Verification Plan\n\n- Run tests\n",
+        "# Feature A\n\n"
+        "* **Status:** Approved\n"
+        "* **Approved By:** Owner\n"
+        "* **Approval Evidence:** Owner chat 2026-11-20 + PR #1\n"
+        "* **Goldfish Review:** 5-agent swarm · 2026-11-20 · reviewed baseline\n\n"
+        "## Detailed Implementation Plan\n\n"
+        "### Slice S01: Core\n\n"
+        "- **Dependencies:** None\n"
+        "- **File Ownership:** `cms/crates/opendash-core/src/lib.rs`\n"
+        "- **Acceptance Criteria:**\n  - [ ] Core compiles\n"
+        "- **Rollback:** Revert commit\n\n"
+        "### Verification Plan\n\n- Run tests\n",
         encoding="utf-8",
     )
     (designs / "SITEMAP.md").write_text(
@@ -240,6 +305,8 @@ def self_test() -> None:
         ("approved_missing_impl", "missing '## Detailed Implementation Plan'"),
         ("approved_missing_verify", "missing '### Verification Plan'"),
         ("approved_open_oq", "unresolved Open Questions"),
+        ("approved_missing_provenance", "provenance metadata"),
+        ("approved_incomplete_slice", "missing required contract field"),
     ]
     for name, expected in cases:
         with tempfile.TemporaryDirectory(prefix="opendash-check-plans-") as tmp:
@@ -268,12 +335,37 @@ def self_test() -> None:
                     encoding="utf-8",
                 )
             elif name == "approved_missing_impl":
-                feature.write_text("# Feature A\n\n* **Status:** Approved\n\n## Overview\n\nText.\n", encoding="utf-8")
+                feature.write_text(
+                    "# Feature A\n\n* **Status:** Approved\n* **Approved By:** Owner\n"
+                    "* **Approval Evidence:** PR #1\n* **Goldfish Review:** 3-agent\n\n## Overview\n\nText.\n",
+                    encoding="utf-8",
+                )
             elif name == "approved_missing_verify":
-                feature.write_text("# Feature A\n\n* **Status:** Approved\n\n## Detailed Implementation Plan\n\nFiles.\n", encoding="utf-8")
+                feature.write_text(
+                    "# Feature A\n\n* **Status:** Approved\n* **Approved By:** Owner\n"
+                    "* **Approval Evidence:** PR #1\n* **Goldfish Review:** 3-agent\n\n"
+                    "## Detailed Implementation Plan\n\nFiles.\n",
+                    encoding="utf-8",
+                )
             elif name == "approved_open_oq":
                 feature.write_text(
-                    "# Feature A\n\n* **Status:** Approved\n\n## Open Questions\n\n| OQ-01 | Unresolved |\n\n## Detailed Implementation Plan\n\n### Verification Plan\n\nTests.\n",
+                    "# Feature A\n\n* **Status:** Approved\n* **Approved By:** Owner\n"
+                    "* **Approval Evidence:** PR #1\n* **Goldfish Review:** 3-agent\n\n"
+                    "## Open Questions\n\n| OQ-01 | Unresolved |\n\n"
+                    "## Detailed Implementation Plan\n\n### Verification Plan\n\nTests.\n",
+                    encoding="utf-8",
+                )
+            elif name == "approved_missing_provenance":
+                feature.write_text(
+                    "# Feature A\n\n* **Status:** Approved\n\n## Detailed Implementation Plan\n\n### Verification Plan\n\nTests.\n",
+                    encoding="utf-8",
+                )
+            elif name == "approved_incomplete_slice":
+                feature.write_text(
+                    "# Feature A\n\n* **Status:** Approved\n* **Approved By:** Owner\n"
+                    "* **Approval Evidence:** PR #1\n* **Goldfish Review:** 3-agent\n\n"
+                    "## Detailed Implementation Plan\n\n### Slice S01: Core\n\n- Only files\n\n"
+                    "### Verification Plan\n\nTests.\n",
                     encoding="utf-8",
                 )
             errors = check(root)

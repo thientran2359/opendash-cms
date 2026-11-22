@@ -70,7 +70,10 @@ fn extract_cookies(headers: &header::HeaderMap) -> String {
         .join("; ")
 }
 
-async fn setup_admin_and_editor(client: &Client, base_url: &str) -> ((String, String), (String, String)) {
+async fn setup_admin_and_editor(
+    client: &Client,
+    base_url: &str,
+) -> ((String, String), (String, String)) {
     let setup = client
         .post(format!("{base_url}/auth/setup"))
         .json(&json!({ "username": "admin", "password": "AdminPassword123!" }))
@@ -129,10 +132,7 @@ fn hex_nonce(seed: u8) -> String {
 #[tokio::test]
 async fn contact_form_schema_submission_dedup_origin_and_rate_limits() {
     let srv = spawn_server().await;
-    let client = Client::builder()
-        .redirect(Policy::none())
-        .build()
-        .unwrap();
+    let client = Client::builder().redirect(Policy::none()).build().unwrap();
     let ((admin_cookie, admin_csrf), (ed_cookie, ed_csrf)) =
         setup_admin_and_editor(&client, &srv.base_url).await;
 
@@ -359,7 +359,10 @@ async fn contact_form_schema_submission_dedup_origin_and_rate_limits() {
 
     // Verify only 1 submission persisted
     let subs: Value = client
-        .get(format!("{}/api/admin/contact/submissions?form_id={form_id}", srv.base_url))
+        .get(format!(
+            "{}/api/admin/contact/submissions?form_id={form_id}",
+            srv.base_url
+        ))
         .header(header::COOKIE, &admin_cookie)
         .send()
         .await
@@ -371,7 +374,10 @@ async fn contact_form_schema_submission_dedup_origin_and_rate_limits() {
     let sub_id = subs[0]["id"].as_i64().unwrap();
 
     let detail: Value = client
-        .get(format!("{}/api/admin/contact/submissions/{sub_id}", srv.base_url))
+        .get(format!(
+            "{}/api/admin/contact/submissions/{sub_id}",
+            srv.base_url
+        ))
         .header(header::COOKIE, &admin_cookie)
         .send()
         .await
@@ -385,7 +391,10 @@ async fn contact_form_schema_submission_dedup_origin_and_rate_limits() {
 
     // 7. Edit form schema -> old submission retains original schema snapshot; form delete -> 409
     let upd_form = client
-        .put(format!("{}/api/admin/contact/forms/{form_id}", srv.base_url))
+        .put(format!(
+            "{}/api/admin/contact/forms/{form_id}",
+            srv.base_url
+        ))
         .header(header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .header(header::IF_MATCH, format!("\"v{form_ver}\""))
@@ -409,7 +418,10 @@ async fn contact_form_schema_submission_dedup_origin_and_rate_limits() {
         .unwrap();
 
     let detail_after: Value = client
-        .get(format!("{}/api/admin/contact/submissions/{sub_id}", srv.base_url))
+        .get(format!(
+            "{}/api/admin/contact/submissions/{sub_id}",
+            srv.base_url
+        ))
         .header(header::COOKIE, &admin_cookie)
         .send()
         .await
@@ -417,10 +429,16 @@ async fn contact_form_schema_submission_dedup_origin_and_rate_limits() {
         .json()
         .await
         .unwrap();
-    assert_eq!(detail_after["schema_snapshot"]["fields"][0]["label"], "Ho ten");
+    assert_eq!(
+        detail_after["schema_snapshot"]["fields"][0]["label"],
+        "Ho ten"
+    );
 
     let del_blocked = client
-        .delete(format!("{}/api/admin/contact/forms/{form_id}", srv.base_url))
+        .delete(format!(
+            "{}/api/admin/contact/forms/{form_id}",
+            srv.base_url
+        ))
         .header(header::COOKIE, &admin_cookie)
         .header("X-CSRF-Token", &admin_csrf)
         .header(header::IF_MATCH, format!("\"v{new_ver}\""))
@@ -484,7 +502,10 @@ async fn contact_form_schema_submission_dedup_origin_and_rate_limits() {
     // 9. Explicit submission delete -> 204, then form1 delete -> 204
     assert_eq!(
         client
-            .delete(format!("{}/api/admin/contact/submissions/{sub_id}", srv.base_url))
+            .delete(format!(
+                "{}/api/admin/contact/submissions/{sub_id}",
+                srv.base_url
+            ))
             .header(header::COOKIE, &admin_cookie)
             .header("X-CSRF-Token", &admin_csrf)
             .send()
@@ -495,7 +516,10 @@ async fn contact_form_schema_submission_dedup_origin_and_rate_limits() {
     );
     assert_eq!(
         client
-            .delete(format!("{}/api/admin/contact/forms/{form_id}", srv.base_url))
+            .delete(format!(
+                "{}/api/admin/contact/forms/{form_id}",
+                srv.base_url
+            ))
             .header(header::COOKIE, &admin_cookie)
             .header("X-CSRF-Token", &admin_csrf)
             .header(header::IF_MATCH, format!("\"v{new_ver}\""))

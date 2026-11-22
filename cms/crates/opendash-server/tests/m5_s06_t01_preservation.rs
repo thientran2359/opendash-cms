@@ -83,7 +83,12 @@ async fn spawn_server_at(site_root: PathBuf, setup_admin: bool) -> TestServer {
     TestServer { base_url, child }
 }
 
-async fn login(client: &Client, base_url: &str, username: &str, password: &str) -> (String, String) {
+async fn login(
+    client: &Client,
+    base_url: &str,
+    username: &str,
+    password: &str,
+) -> (String, String) {
     let resp = client
         .post(format!("{base_url}/auth/login"))
         .json(&json!({ "username": username, "password": password }))
@@ -139,15 +144,11 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
 
     // 2. Install & activate Theme A1 (CPT `portfolio` + fields + options_schema + menu_slots)
     let manifest_a1 = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "theme-a",
         "name": "Theme Alpha",
         "version": "1.0.0",
-        "templates": {
-            "home": "templates/home.html",
-            "single": "templates/single.html",
-            "archive": "templates/archive.html"
-        },
+        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }],
         "declarations": {
             "content_types": [
                 {
@@ -168,9 +169,12 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     .unwrap();
     let zip_a1 = build_zip(&[
         ("theme.json", &manifest_a1),
-        ("templates/home.html", b"<main>Alpha Home</main>"),
-        ("templates/single.html", b"<main>Alpha Single: {{ entry.title }}</main>"),
-        ("templates/archive.html", b"<main>Alpha Archive</main>"),
+        ("home.html", b"<main>Alpha Home{{ od_content() }}</main>"),
+        (
+            "single.html",
+            b"<main>Alpha Single: {{ entry.title }}{{ od_content() }}</main>",
+        ),
+        ("archive.html", b"<main>Alpha Archive</main>"),
     ]);
     let inst_a1 = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -214,7 +218,9 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
         .await
         .unwrap();
     assert_eq!(cat_resp.status(), 201);
-    let cat_id = cat_resp.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let cat_id = cat_resp.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     let tag_resp = client
         .post(format!("{}/api/admin/taxonomy/terms", srv.base_url))
@@ -226,10 +232,15 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
         .await
         .unwrap();
     assert_eq!(tag_resp.status(), 201);
-    let tag_id = tag_resp.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let tag_id = tag_resp.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     let entry1_resp = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -263,13 +274,15 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
 
     assert_eq!(
         client
-            .put(format!("{}/api/admin/builder/overrides/header", srv.base_url))
+            .put(format!("{}/api/admin/template-overrides", srv.base_url))
             .header("Cookie", &admin_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &admin_csrf)
             .json(&json!({
-                "schema_version": 1,
-                "sections": [{
+                "target": { "kind": "part", "part_key": "header" },
+                "document": {
+                  "schema_version": 1,
+                  "sections": [{
                     "id": "sec-hdr-1",
                     "children": [{
                         "id": "row-hdr-1",
@@ -282,27 +295,28 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
                             }]
                         }]
                     }]
-                }]
+                  }]
+                }
             }))
             .send()
             .await
             .unwrap()
             .status(),
-        200
+        201
     );
 
     // 4. Install & activate Theme B (empty v2 theme, NO `portfolio`, NO `options_schema`)
     let manifest_b = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "theme-b",
         "name": "Theme Beta",
         "version": "1.0.0",
-        "templates": { "home": "templates/home.html" }
+        "templates": [{ "kind": "home", "file": "home.html" }]
     }))
     .unwrap();
     let zip_b = build_zip(&[
         ("theme.json", &manifest_b),
-        ("templates/home.html", b"<main>Beta Home</main>"),
+        ("home.html", b"<main>Beta Home{{ od_content() }}</main>"),
     ]);
     let inst_b = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -349,10 +363,11 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
             .execute(&pool)
             .await
             .unwrap();
-        let menu_id: i64 = sqlx::query_scalar("SELECT id FROM site_menus WHERE menu_key = 'main-nav'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let menu_id: i64 =
+            sqlx::query_scalar("SELECT id FROM site_menus WHERE menu_key = 'main-nav'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         sqlx::query("INSERT INTO site_menu_slot_assignments (theme_id, slot_key, menu_id) VALUES ('theme-a', 'header', ?)")
             .bind(menu_id)
             .execute(&pool)
@@ -371,14 +386,14 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     // 5a. C3/C4 deny public routing while the owning provider is inactive,
     // even though the site-owned rows must remain editable in Admin.
     let pub_arch = client
-        .get(format!("{}/content/portfolio", srv2.base_url))
+        .get(format!("{}/portfolio", srv2.base_url))
         .send()
         .await
         .unwrap();
     assert_eq!(pub_arch.status(), 404);
 
     let pub_single = client
-        .get(format!("{}/content/portfolio/case-study-1", srv2.base_url))
+        .get(format!("{}/portfolio/case-study-1", srv2.base_url))
         .send()
         .await
         .unwrap();
@@ -403,7 +418,10 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     assert_eq!(portfolio_ct["status"], "provider_inactive");
 
     let editor_create = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv2.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv2.base_url
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &srv2.base_url)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -416,11 +434,16 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
         .await
         .unwrap();
     assert_eq!(editor_create.status(), 201);
-    let entry2_id = editor_create.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let entry2_id = editor_create.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     // Editor updates entry #1 while provider is inactive/missing
     let cur_entry1: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/entries/{entry1_id}", srv2.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/entries/{entry1_id}",
+            srv2.base_url
+        ))
         .header("Cookie", &editor_cookie2)
         .send()
         .await
@@ -430,7 +453,10 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
         .unwrap();
     let cur_ver = cur_entry1["version"].as_i64().unwrap();
     let editor_upd = client
-        .put(format!("{}/api/admin/content-types/portfolio/entries/{entry1_id}", srv2.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio/entries/{entry1_id}",
+            srv2.base_url
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &srv2.base_url)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -450,7 +476,10 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     // While the provider is inactive, an explicit membership change must be
     // rejected atomically; an ordinary title/value-only edit above remains valid.
     let rejected_terms = client
-        .put(format!("{}/api/admin/content-types/portfolio/entries/{entry1_id}", srv2.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio/entries/{entry1_id}",
+            srv2.base_url
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &srv2.base_url)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -461,12 +490,22 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
             "values": { "client": "Should Not Persist", "budget": 1 },
             "term_ids": [cat_id]
         }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(rejected_terms.status(), 400);
     let after_rejection: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/entries/{entry1_id}", srv2.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/entries/{entry1_id}",
+            srv2.base_url
+        ))
         .header("Cookie", &editor_cookie2)
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(after_rejection["version"], saved_ver);
     assert_eq!(after_rejection["title"], "Case Study One Updated");
     assert_eq!(after_rejection["values"]["client"], "Acme Global");
@@ -499,7 +538,10 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     );
     assert_eq!(
         client
-            .post(format!("{}/api/themes/theme-a/import/dry-run", srv2.base_url))
+            .post(format!(
+                "{}/api/themes/theme-a/import/dry-run",
+                srv2.base_url
+            ))
             .header("Cookie", &editor_cookie2)
             .header("Origin", &srv2.base_url)
             .header("X-CSRF-Token", &editor_csrf2)
@@ -513,15 +555,11 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
 
     // 6. Install & activate Theme A2 (v2.0.0 with `portfolio` + extra optional field `year`)
     let manifest_a2 = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "theme-a",
         "name": "Theme Alpha",
         "version": "2.0.0",
-        "templates": {
-            "home": "templates/home.html",
-            "single": "templates/single.html",
-            "archive": "templates/archive.html"
-        },
+        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }],
         "declarations": {
             "content_types": [
                 {
@@ -543,9 +581,12 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     .unwrap();
     let zip_a2 = build_zip(&[
         ("theme.json", &manifest_a2),
-        ("templates/home.html", b"<main>Alpha v2 Home</main>"),
-        ("templates/single.html", b"<main>Alpha v2 Single: {{ entry.title }}</main>"),
-        ("templates/archive.html", b"<main>Alpha v2 Archive</main>"),
+        ("home.html", b"<main>Alpha v2 Home{{ od_content() }}</main>"),
+        (
+            "single.html",
+            b"<main>Alpha v2 Single: {{ entry.title }}{{ od_content() }}</main>",
+        ),
+        ("archive.html", b"<main>Alpha v2 Archive</main>"),
     ]);
     let inst_a2 = client
         .post(format!("{}/api/admin/themes", srv2.base_url))
@@ -600,7 +641,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     // The same provider returning must restore the exact public routes without
     // duplicating the entry or changing its stable identity.
     let restored_archive = client
-        .get(format!("{}/content/portfolio", srv2.base_url))
+        .get(format!("{}/portfolio", srv2.base_url))
         .send()
         .await
         .unwrap();
@@ -608,15 +649,24 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     // Theme templates may choose a fixed archive body; the public 200 and
     // authenticated row assertions below are the stable preservation contract.
     let restored_single = client
-        .get(format!("{}/content/portfolio/case-study-1", srv2.base_url))
+        .get(format!("{}/portfolio/case-study-1", srv2.base_url))
         .send()
         .await
         .unwrap();
     assert_eq!(restored_single.status(), 200);
-    assert!(restored_single.text().await.unwrap().contains("Case Study One Updated"));
+    assert!(
+        restored_single
+            .text()
+            .await
+            .unwrap()
+            .contains("Case Study One Updated")
+    );
 
     let entries_list: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/entries", srv2.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv2.base_url
+        ))
         .header("Cookie", &admin_cookie2)
         .send()
         .await
@@ -630,19 +680,34 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     assert_eq!(e1["title"], "Case Study One Updated");
     assert_eq!(e1["values"]["client"], "Acme Global");
     assert_eq!(e1["values"]["budget"], 7500);
-    assert_eq!(e1["term_ids"], json!([cat_id, tag_id]), "inactive title/value edit must preserve memberships");
+    assert_eq!(
+        e1["term_ids"],
+        json!([cat_id, tag_id]),
+        "inactive title/value edit must preserve memberships"
+    );
     assert!(items.iter().any(|e| e["id"] == entry2_id));
 
     // The same explicit category assignment rejected while inactive becomes
     // eligible when Theme A's declaration is active again. Persist and reread
     // it under the original stable entry ID.
     let entry2_before: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/entries/{entry2_id}", srv2.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/entries/{entry2_id}",
+            srv2.base_url
+        ))
         .header("Cookie", &editor_cookie2)
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let entry2_version = entry2_before["version"].as_i64().unwrap();
     let membership_update = client
-        .put(format!("{}/api/admin/content-types/portfolio/entries/{entry2_id}", srv2.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio/entries/{entry2_id}",
+            srv2.base_url
+        ))
         .header("Cookie", &editor_cookie2)
         .header("Origin", &srv2.base_url)
         .header("X-CSRF-Token", &editor_csrf2)
@@ -653,12 +718,22 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
             "values": { "client": "Beta LLC", "budget": 9000 },
             "term_ids": [cat_id]
         }))
-        .send().await.unwrap();
+        .send()
+        .await
+        .unwrap();
     assert_eq!(membership_update.status(), 200);
     let entry2_after: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/entries/{entry2_id}", srv2.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/entries/{entry2_id}",
+            srv2.base_url
+        ))
         .header("Cookie", &editor_cookie2)
-        .send().await.unwrap().json().await.unwrap();
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     assert_eq!(entry2_after["id"], entry2_id);
     assert_eq!(entry2_after["term_ids"], json!([cat_id]));
     assert_eq!(entry2_after["values"]["client"], "Beta LLC");
@@ -675,7 +750,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     assert_eq!(opts["values"]["accent_color"], "#ff0000");
 
     let ovr: Value = client
-        .get(format!("{}/api/admin/builder/overrides/header", srv2.base_url))
+        .get(format!("{}/api/admin/template-overrides", srv2.base_url))
         .header("Cookie", &admin_cookie2)
         .send()
         .await
@@ -683,7 +758,17 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
         .json()
         .await
         .unwrap();
-    assert_eq!(ovr["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"], "Preserved Site Header");
+    let saved_header = ovr["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["canonical_target_key"] == "part:header")
+        .expect("site-owned header survives theme switch and restart");
+    assert_eq!(
+        saved_header["ast_json"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]
+            ["text"],
+        "Preserved Site Header"
+    );
 
     drop(srv2);
     let pool = SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db_path))

@@ -114,7 +114,20 @@ pub fn entry_view_with_url(
             continue;
         }
         let value = record.values.get(&definition.key).unwrap_or(&Value::Null);
-        if !value.is_null() {
+        let extracted_rich = if definition.field_type == ContentFieldType::RichText {
+            value.as_str().map(|s| {
+                if opendash_core::builder_blocks::contains_blocks(s) {
+                    opendash_core::builder_blocks::extract_visible_text(s)
+                } else {
+                    s.to_owned()
+                }
+            })
+        } else {
+            None
+        };
+        if let Some(ref clean) = extracted_rich {
+            public_values.insert(definition.key.clone(), Value::String(clean.clone()));
+        } else if !value.is_null() {
             public_values.insert(definition.key.clone(), value.clone());
         }
         let kind = match definition.field_type {
@@ -154,10 +167,11 @@ pub fn entry_view_with_url(
                 "Không"
             }
             .to_string(),
-            _ => match value {
-                Value::Null => String::new(),
-                Value::String(text) => text.clone(),
-                other => other.to_string(),
+            _ => match (extracted_rich, value) {
+                (Some(clean), _) => clean,
+                (None, Value::Null) => String::new(),
+                (None, Value::String(text)) => text.clone(),
+                (None, other) => other.to_string(),
             },
         };
         fields.push(FieldView {
@@ -438,7 +452,11 @@ mod tests {
             )]
             .into(),
             term_ids: vec![],
+            primary_category_term_id: None,
             publication_status: "draft".into(),
+            page_layout_key: None,
+            custom_template_key: None,
+            content_mode: opendash_core::content::ContentMode::Editor,
             version: 1,
             created_at: "".into(),
             updated_at: "".into(),
@@ -494,22 +512,29 @@ mod tests {
             title: "Safe title".into(),
             values: BTreeMap::new(),
             term_ids: vec![],
+            primary_category_term_id: None,
             publication_status: "published".into(),
+            page_layout_key: None,
+            custom_template_key: None,
+            content_mode: opendash_core::content::ContentMode::Editor,
             version: 1,
             created_at: String::new(),
             updated_at: String::new(),
         };
         let unresolved = entry_view_with_url(entry.clone(), &schema, None);
         assert_eq!(unresolved.url, None);
-        let html = render_single_with_site_and_archive(
-            &schema, &unresolved, None, &DEFAULT_SITE, None,
-        )
-        .unwrap();
+        let html =
+            render_single_with_site_and_archive(&schema, &unresolved, None, &DEFAULT_SITE, None)
+                .unwrap();
         assert!(!html.contains("content/post"));
         let resolved = entry_view_with_url(entry, &schema, Some("/blog/new-slug".into()));
         assert_eq!(resolved.url.as_deref(), Some("/blog/new-slug"));
         let html = render_single_with_site_and_archive(
-            &schema, &resolved, None, &DEFAULT_SITE, Some("/blog"),
+            &schema,
+            &resolved,
+            None,
+            &DEFAULT_SITE,
+            Some("/blog"),
         )
         .unwrap();
         assert!(html.contains("href=\"/blog\"") || html.contains("href=\"&#x2f;blog\""));

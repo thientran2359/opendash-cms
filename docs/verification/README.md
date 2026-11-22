@@ -45,3 +45,10 @@ Không suy ra trạng thái `verified` từ tài liệu chuyển đến hoặc b
 - [M7 planning G1/G2/G3 — 14/11/2026](2026-11-14-m7-planning.md): docs/source validation only, full14-task coverage; M7 runtime/native/browser NOT_RUN.
 
 - [M8 G1/G2/G3 planning — 14/11/2026](2026-11-14-m8-planning.md): all18 tasks/8 candidates specified, source/docs checks only; M8 native/runtime NOT_RUN.
+
+- [Spec 2 S01–S03 closure and drift gate (2026-11-21)](2026-11-21-spec2-closure.md) — merged-source/native artifact verification; remains Implemented pending conformance fixes.
+- [Spec 2 D1–D3 conformance macOS Intel (#451, 2026-11-21)](2026-11-21-egm-spec2-conformance-d1-d3-macos.md) — Media sidebar, selected Pattern placement and Builder timestamp native receipts; final `Verified` promotion remains a coordinator drift-review gate.
+
+- [Spec 2 post-conformance closure (2026-11-22)](2026-11-22-spec2-closure.md) — no remaining feature drift; exact-main verification and outstanding formatter gate.
+- [Spec 2 Formatter Gate (#454) & Admin Style A Closure (2026-11-22)](2026-11-22-admin-style-a-and-fmt-closure.md) — whole-workspace `cargo fmt --all --check` PASS, Style A drift report clean, promotes Spec 2 and Admin Style A to `Verified`.
+- [OpenDash Studio Customizer, UX Builder & Unified Entry Content Closure (#458–#461, 2026-11-22)](2026-11-22-opendash-studio-closure.md) — exact-main (`4309bc9`) Rust release tests (76 suites / 355 passed), live browser E2E, zero Blocker/Major drift, promotes OpenDash Studio Spec to `Verified`.

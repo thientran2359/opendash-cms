@@ -1,6 +1,6 @@
 # HTTP Routes (`opendash-server/src/routes/`)
 
-Tầng tiếp nhận HTTP request của Axum (22 modules). Mọi handler trong thư mục này phải tuân thủ [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) và [M8 Writer Inventory](../../../../../docs/contracts/M8_WRITER_INVENTORY.md):
+Tầng tiếp nhận HTTP request của Axum. Mọi handler trong thư mục này phải tuân thủ [Core Foundation](../../../../../docs/contracts/CORE_FOUNDATION.md) và [M8 Writer Inventory](../../../../../docs/contracts/M8_WRITER_INVENTORY.md):
 - Không viết `sqlx::query*` trực tiếp trong `routes/`.
 - Mọi route ghi có phiên đều gọi `require_session_with_csrf` hoặc `require_admin_with_csrf` (được kiểm tra tự động bởi `cms/scripts/check-standards.py`) và lấy `AdmittedMutation`.
 
@@ -11,10 +11,10 @@ Tầng tiếp nhận HTTP request của Axum (22 modules). Mọi handler trong t
 | `dashboard.rs` | `/api/admin/dashboard` |
 | `content.rs` | `/api/admin/content-types/*`, field groups, editor layout, `effective-editor-config`, `publication` |
 | `entries.rs` | `/api/admin/content-types/{type_key}/entries/*`, `composite`, `entry-table`, `admin-actions` |
-| `sections.rs` | `/api/admin/sections/*`, `media_delete_section_aware` (`DELETE /api/admin/media/{id}`) |
+| `patterns.rs` | `/api/admin/patterns/*` (private Pattern CPT), `/api/admin/patterns/library/*` (theme pattern catalog) |
 | `taxonomy.rs` | `/api/admin/taxonomy/definitions/*`, `/terms/*`, `/eligibility/*` |
 | `media.rs` | `/api/admin/media/*` (upload ảnh & video MP4), `/media/{id}/file` & `/thumbnail` (Range/ACL) |
-| `builder.rs` | `/builder`, `/api/{registry,page,preview,save,theme}`, homepage & template overrides |
+| `builder.rs` | `/builder`, `/api/admin/entries/{type_key}/{id}/builder*` (Pattern Admin mutation), template overrides |
 | `themes.rs` | `/api/admin/themes/*`, `/theme/*` assets, `/api/admin/library/*` |
 | `import.rs` | `/api/admin/themes/{id}/import/dry-run`, `/execute` |
 | `menu.rs` | `/api/admin/menus/*`, `/api/admin/menu-slots/{theme_id}` |

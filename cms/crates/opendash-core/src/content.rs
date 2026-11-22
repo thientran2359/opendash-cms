@@ -237,7 +237,10 @@ pub struct FieldDefinitionInput {
 }
 
 impl FieldDefinitionInput {
-    pub fn into_canonical(self, scope: FieldScopeKind) -> Result<ContentFieldDefinition, &'static str> {
+    pub fn into_canonical(
+        self,
+        scope: FieldScopeKind,
+    ) -> Result<ContentFieldDefinition, &'static str> {
         let min_view_role = self.min_view_role.unwrap_or(FieldRole::Editor);
         let min_edit_role = self.min_edit_role.unwrap_or(FieldRole::Editor);
         if min_edit_role < min_view_role {
@@ -260,8 +263,7 @@ impl FieldDefinitionInput {
                 "field_key_collision: Khóa custom field trùng với trường hệ thống được bảo vệ.",
             );
         }
-        if scope == FieldScopeKind::BaseCptField
-            && RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
+        if scope == FieldScopeKind::BaseCptField && RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
         {
             return Err(
                 "field_key_collision: Khóa custom field trùng với trường hệ thống được bảo vệ.",
@@ -439,6 +441,24 @@ pub enum ContentPublication {
 pub enum ContentSupport {
     Editor,
     FeaturedImage,
+    Builder,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentMode {
+    #[default]
+    Editor,
+    Builder,
+}
+
+impl ContentMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Editor => "editor",
+            Self::Builder => "builder",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,22 +484,35 @@ impl Default for ContentTypeSettings {
 impl ContentTypeSettings {
     pub fn default_for_type_key(type_key: &str) -> Self {
         match type_key {
-            "post" | "page" => Self::builtin_publication(),
-            "section" => Self::private_section(),
+            "post" => Self::builtin_publication(),
+            "page" => Self::builtin_page(),
+            "pattern" => Self::private_pattern(),
             _ => Self::default(),
         }
     }
 
     pub fn builtin_publication() -> Self {
-        Self { publication: ContentPublication::DraftPublish, ..Self::default() }
+        Self {
+            publication: ContentPublication::DraftPublish,
+            ..Self::default()
+        }
     }
 
-    pub fn private_section() -> Self {
+    pub fn builtin_page() -> Self {
+        let mut settings = Self::builtin_publication();
+        // Page has no archive of its own; its Builder capability is an
+        // entry-owned content surface, not a shared template or archive.
+        settings.has_archive = false;
+        settings.supports.push(ContentSupport::Builder);
+        settings
+    }
+
+    pub fn private_pattern() -> Self {
         Self {
             public: false,
             has_archive: false,
-            publication: ContentPublication::DraftPublish,
-            supports: Vec::new(),
+            publication: ContentPublication::Immediate,
+            supports: vec![ContentSupport::Builder],
         }
     }
 
@@ -564,6 +597,9 @@ impl ContentTypeDefinition {
         if !valid_content_type_key(&self.key) {
             return Err("Khóa loại nội dung không hợp lệ.");
         }
+        if self.key == "section" {
+            return Err("Section là khóa Core đã được thay thế bằng Pattern.");
+        }
         if !valid_label(&self.label) {
             return Err("Tên loại nội dung không hợp lệ.");
         }
@@ -577,8 +613,8 @@ impl ContentTypeDefinition {
         {
             return Err("post/page phải sử dụng cơ chế Lưu nháp và Xuất bản.");
         }
-        if self.key == "section" && self.settings != ContentTypeSettings::private_section() {
-            return Err("Section phải luôn riêng tư và không được xuất bản.");
+        if self.key == "pattern" && self.settings != ContentTypeSettings::private_pattern() {
+            return Err("Pattern phải luôn riêng tư và chỉ hỗ trợ Builder.");
         }
         if self.fields.len() > 64 {
             return Err("Mỗi loại nội dung hỗ trợ tối đa 64 custom fields.");
@@ -658,7 +694,9 @@ impl ManifestFieldGroupInput {
         let mut canonical_fields = Vec::with_capacity(self.fields.len());
         let mut seen_keys = HashSet::new();
         for f in &self.fields {
-            let cf = f.clone().into_canonical(FieldScopeKind::ExtensionGroupField)?;
+            let cf = f
+                .clone()
+                .into_canonical(FieldScopeKind::ExtensionGroupField)?;
             if !seen_keys.insert(cf.key.clone()) {
                 return Err("field_key_collision: Trùng khóa custom field trong cùng field_group.");
             }
@@ -1008,6 +1046,67 @@ impl EffectiveContentSchema {
             }
         }
 
+        if !is_builtin
+            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
+            && !effective_fields.contains_key("featured_image")
+        {
+            effective_fields.insert(
+                "featured_image".into(),
+                EffectiveFieldEntry {
+                    definition: ContentFieldDefinition {
+                        key: "featured_image".into(),
+                        label: "Ảnh đại diện".into(),
+                        field_type: ContentFieldType::Image,
+                        required: false,
+                        options: Vec::new(),
+                        min_view_role: FieldRole::Editor,
+                        min_edit_role: FieldRole::Editor,
+                        public_exposure: PublicExposure::Public,
+                        default_value: None,
+                        declaration_state: DeclarationState::Declared,
+                    },
+                    owner: ResourceOwner::Core,
+                    source_id: base_source_id.clone(),
+                    effective_status: EffectiveFieldStatus::Active,
+                },
+            );
+        }
+
+        if !is_builtin
+            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
+            && base.descriptor.settings.supports(ContentSupport::Builder)
+        {
+            if let Some(existing_body) = effective_fields.get("body") {
+                if existing_body.definition.field_type != ContentFieldType::RichText {
+                    return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
+                        "Trường 'body' trên loại nội dung '{}' phải có kiểu rich_text khi bật ContentSupport::Builder.",
+                        base.descriptor.key
+                    )));
+                }
+            } else {
+                effective_fields.insert(
+                    "body".into(),
+                    EffectiveFieldEntry {
+                        definition: ContentFieldDefinition {
+                            key: "body".into(),
+                            label: "Nội dung".into(),
+                            field_type: ContentFieldType::RichText,
+                            required: false,
+                            options: Vec::new(),
+                            min_view_role: FieldRole::Editor,
+                            min_edit_role: FieldRole::Editor,
+                            public_exposure: PublicExposure::Public,
+                            default_value: None,
+                            declaration_state: DeclarationState::Declared,
+                        },
+                        owner: ResourceOwner::Core,
+                        source_id: base_source_id.clone(),
+                        effective_status: EffectiveFieldStatus::Active,
+                    },
+                );
+            }
+        }
+
         Ok(Self {
             base,
             base_version,
@@ -1072,6 +1171,18 @@ pub fn verify_effective_schema_transition(
     if let Some(old) = old_effective {
         for (old_key, old_entry) in &old.effective_fields {
             let Some(new_entry) = new_effective.effective_fields.get(old_key) else {
+                // Allow removing the synthetic core-injected `body` field when a custom CPT disables Builder.
+                if old_key == "body"
+                    && old_entry.owner == ResourceOwner::Core
+                    && !matches!(old.base.descriptor.key.as_str(), "post" | "page")
+                    && !new_effective
+                        .base
+                        .descriptor
+                        .settings
+                        .supports(ContentSupport::Builder)
+                {
+                    continue;
+                }
                 if has_existing_entries {
                     return Err(SchemaTransitionError::CannotRemoveFieldWithData(format!(
                         "Không thể xóa hẳn trường '{old_key}' khi đã có dữ liệu; hãy đặt declaration_state = withdrawn."
@@ -1149,9 +1260,11 @@ pub fn verify_effective_schema_transition(
             && entry.definition.min_edit_role == FieldRole::Admin
             && entry.definition.default_value.is_none()
         {
-            return Err(SchemaTransitionError::AdminRequiredFieldMissingDefault(format!(
-                "Trường bắt buộc '{key}' có min_edit_role = admin phải khai báo default_value hợp lệ để Editor có thể tạo mới bản ghi."
-            )));
+            return Err(SchemaTransitionError::AdminRequiredFieldMissingDefault(
+                format!(
+                    "Trường bắt buộc '{key}' có min_edit_role = admin phải khai báo default_value hợp lệ để Editor có thể tạo mới bản ghi."
+                ),
+            ));
         }
     }
 
@@ -1214,10 +1327,10 @@ impl CntDeclarations {
             if !seen_keys.insert(ct.key.as_str()) {
                 return Err("Khóa content_type bị trùng lặp trong declarations.");
             }
-            if matches!(ct.key.as_str(), "post" | "page" | "section")
+            if matches!(ct.key.as_str(), "post" | "page" | "pattern" | "section")
                 && ct.rewrite_base.is_some()
             {
-                return Err("Post/Page/Section không hỗ trợ rewrite_base riêng của provider.");
+                return Err("Core Post/Page/Pattern không hỗ trợ rewrite_base riêng của provider.");
             }
             validate_provider_rewrite_base(ct.rewrite_base.as_deref())?;
             let mut settings = ct.settings.clone().unwrap_or_default();
@@ -1359,7 +1472,9 @@ pub struct TaxonomyDefinition {
     pub declaration_state: DeclarationState,
 }
 
-fn taxonomy_public_default() -> bool { true }
+fn taxonomy_public_default() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -1377,8 +1492,10 @@ impl TaxonomyDefinitionInput {
         if !valid_content_type_key(&self.key) {
             return Err("Khóa taxonomy không hợp lệ.");
         }
-        if matches!(self.key.as_str(), "category" | "tag" | "post" | "page" | "section")
-            || RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
+        if matches!(
+            self.key.as_str(),
+            "category" | "tag" | "post" | "page" | "pattern" | "section"
+        ) || RESERVED_ENTRY_KEYS.contains(&self.key.as_str())
         {
             return Err("Khóa taxonomy thuộc namespace Core được bảo vệ.");
         }
@@ -1544,7 +1661,13 @@ pub fn valid_field_value(field: &ContentFieldDefinition, value: &Value) -> bool 
             s.chars().count() <= 100_000 && (!field.required || !s.trim().is_empty())
         }),
         ContentFieldType::RichText => text.is_some_and(|s| {
-            s.chars().count() <= 200_000 && (!field.required || !s.trim().is_empty())
+            let len_ok = if crate::builder_blocks::contains_blocks(s) {
+                s.len() <= crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES
+                    && s.chars().count() <= crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES
+            } else {
+                s.chars().count() <= 200_000
+            };
+            len_ok && (!field.required || !s.trim().is_empty())
         }),
         ContentFieldType::Number => value.is_number(),
         ContentFieldType::Boolean => value.is_boolean(),
@@ -1845,9 +1968,7 @@ impl ManifestActionPanelInput {
             }
         }
         if !self.allowed_regions.contains(&self.default_region) {
-            return Err(
-                "invalid_panel_region: default_region phải nằm trong allowed_regions.",
-            );
+            return Err("invalid_panel_region: default_region phải nằm trong allowed_regions.");
         }
         if !(-1000..=1000).contains(&self.default_order) {
             return Err("default_order của editor_panel phải nằm trong [-1000..=1000].");
@@ -1920,14 +2041,33 @@ fn panel_sort_key(def: &PanelDefinition, placement: &PanelPlacementConfig) -> (i
     (placement.order, rank, def.panel_id.clone())
 }
 
+fn has_core_body_panel(effective: &EffectiveContentSchema) -> bool {
+    let type_key = effective.base.descriptor.key.as_str();
+    let is_builtin = matches!(type_key, "post" | "page");
+    let settings = &effective.base.descriptor.settings;
+    !matches!(type_key, "section" | "pattern")
+        && (is_builtin
+            || settings.supports(ContentSupport::Editor)
+            || settings.supports(ContentSupport::Builder))
+        && effective
+            .effective_fields
+            .get("body")
+            .is_some_and(|fe| fe.definition.field_type == ContentFieldType::RichText)
+}
+
 pub fn eligible_base_field_keys(effective: &EffectiveContentSchema) -> Vec<String> {
-    let is_builtin = matches!(effective.base.descriptor.key.as_str(), "post" | "page");
+    let type_key = effective.base.descriptor.key.as_str();
+    let use_body_panel = has_core_body_panel(effective);
+    let is_private_reusable = matches!(type_key, "section" | "pattern");
     effective
         .base
         .descriptor
         .fields
         .iter()
-        .filter(|f| !(is_builtin && matches!(f.key.as_str(), "body" | "featured_image")))
+        .filter(|f| {
+            !(use_body_panel && f.key == "body")
+                && !(!is_private_reusable && f.key == "featured_image")
+        })
         .map(|f| f.key.clone())
         .collect()
 }
@@ -1938,7 +2078,7 @@ pub fn build_core_and_group_panels(
     plugin_action_panels: &[PanelDefinition],
 ) -> Vec<PanelDefinition> {
     let type_key = &effective.base.descriptor.key;
-    let is_builtin = matches!(type_key.as_str(), "post" | "page");
+    let use_body_panel = has_core_body_panel(effective);
     let mut panels = Vec::new();
     let all_regions = default_all_content_regions();
 
@@ -1978,7 +2118,7 @@ pub fn build_core_and_group_panels(
         effective_status: EffectiveFieldStatus::Active,
     });
 
-    if is_builtin && effective.effective_fields.contains_key("body") {
+    if use_body_panel {
         panels.push(PanelDefinition {
             panel_id: "core:body_editor".into(),
             owner: ResourceOwner::Core,
@@ -2072,7 +2212,9 @@ pub fn build_core_and_group_panels(
         });
     }
 
-    if is_builtin && effective.effective_fields.contains_key("featured_image") {
+    if !matches!(type_key.as_str(), "section" | "pattern")
+        && effective.effective_fields.contains_key("featured_image")
+    {
         panels.push(PanelDefinition {
             panel_id: "core:featured_image".into(),
             owner: ResourceOwner::Core,
@@ -2198,7 +2340,10 @@ fn validate_subgroups_for_panel(
         if !valid_snake_key(&sg.subgroup_id) || !seen_sg_ids.insert(sg.subgroup_id.as_str()) {
             return Err(LayoutValidationError::new(
                 "invalid_subgroup",
-                format!("subgroup_id '{}' không hợp lệ hoặc bị trùng.", sg.subgroup_id),
+                format!(
+                    "subgroup_id '{}' không hợp lệ hoặc bị trùng.",
+                    sg.subgroup_id
+                ),
             ));
         }
         if !valid_label(&sg.title) {
@@ -2211,13 +2356,18 @@ fn validate_subgroups_for_panel(
             if !allowed_set.contains(fk.as_str()) {
                 return Err(LayoutValidationError::new(
                     "unknown_field_in_subgroup",
-                    format!("Trường '{fk}' trong subgroup '{}' không thuộc panel '{panel_id}'.", sg.subgroup_id),
+                    format!(
+                        "Trường '{fk}' trong subgroup '{}' không thuộc panel '{panel_id}'.",
+                        sg.subgroup_id
+                    ),
                 ));
             }
             if !seen_fields.insert(fk.as_str()) {
                 return Err(LayoutValidationError::new(
                     "duplicate_field_in_subgroups",
-                    format!("Trường '{fk}' bị lặp lại trong nhiều subgroup của panel '{panel_id}'."),
+                    format!(
+                        "Trường '{fk}' bị lặp lại trong nhiều subgroup của panel '{panel_id}'."
+                    ),
                 ));
             }
         }
@@ -2286,7 +2436,10 @@ pub fn resolve_and_validate_editor_layout(
         let Some(slice_key) = crate::id::valid_layout_slice_panel_id(&slice.panel_id) else {
             return Err(LayoutValidationError::new(
                 "invalid_or_duplicate_slice_panel_id",
-                format!("panel_id '{}' phải có dạng 'layout:<snake_key>'.", slice.panel_id),
+                format!(
+                    "panel_id '{}' phải có dạng 'layout:<snake_key>'.",
+                    slice.panel_id
+                ),
             ));
         };
         if !seen_slice_ids.insert(slice.panel_id.as_str()) {
@@ -2304,7 +2457,10 @@ pub fn resolve_and_validate_editor_layout(
         if slice.field_keys.is_empty() || slice.field_keys.len() > 64 {
             return Err(LayoutValidationError::new(
                 "layout_quota_exceeded",
-                format!("Panel '{}' phải chứa từ 1 đến 64 field_keys.", slice.panel_id),
+                format!(
+                    "Panel '{}' phải chứa từ 1 đến 64 field_keys.",
+                    slice.panel_id
+                ),
             ));
         }
         let mut min_view = FieldRole::Admin;
@@ -2313,13 +2469,17 @@ pub fn resolve_and_validate_editor_layout(
             if !eligible_set.contains(fk.as_str()) {
                 return Err(LayoutValidationError::new(
                     "unknown_base_field_key",
-                    format!("Trường '{fk}' không thuộc danh sách base fields hợp lệ của '{type_key}'."),
+                    format!(
+                        "Trường '{fk}' không thuộc danh sách base fields hợp lệ của '{type_key}'."
+                    ),
                 ));
             }
             if !assigned_base_fields.insert(fk.as_str()) {
                 return Err(LayoutValidationError::new(
                     "duplicate_base_field_placement",
-                    format!("Base field '{fk}' chỉ được xuất hiện tối đa 1 lần trong base_field_panels."),
+                    format!(
+                        "Base field '{fk}' chỉ được xuất hiện tối đa 1 lần trong base_field_panels."
+                    ),
                 ));
             }
             if let Some(eff) = effective.effective_fields.get(fk) {
@@ -2387,19 +2547,29 @@ pub fn resolve_and_validate_editor_layout(
             let Some(def) = panels_by_id.get(&p.panel_id) else {
                 return Err(LayoutValidationError::new(
                     "unknown_or_inapplicable_panel_id",
-                    format!("panel_id '{}' không tồn tại hoặc không áp dụng cho '{type_key}'.", p.panel_id),
+                    format!(
+                        "panel_id '{}' không tồn tại hoặc không áp dụng cho '{type_key}'.",
+                        p.panel_id
+                    ),
                 ));
             };
             if !placed_ids.insert(p.panel_id.clone()) {
                 return Err(LayoutValidationError::new(
                     "duplicate_panel_placement",
-                    format!("panel_id '{}' chỉ được xuất hiện tối đa 1 lần trong regions.", p.panel_id),
+                    format!(
+                        "panel_id '{}' chỉ được xuất hiện tối đa 1 lần trong regions.",
+                        p.panel_id
+                    ),
                 ));
             }
             if !def.allowed_regions.contains(&region) {
                 return Err(LayoutValidationError::new(
                     "invalid_panel_region",
-                    format!("Panel '{}' không được phép đặt vào vùng '{}'.", p.panel_id, region.as_str()),
+                    format!(
+                        "Panel '{}' không được phép đặt vào vùng '{}'.",
+                        p.panel_id,
+                        region.as_str()
+                    ),
                 ));
             }
             if def.required_core && !p.enabled {
@@ -2419,7 +2589,10 @@ pub fn resolve_and_validate_editor_layout(
                         format!("Panel '{}' không hỗ trợ subgroups.", p.panel_id),
                     ));
                 }
-                let fkeys = panel_fields.get(&p.panel_id).map(Vec::as_slice).unwrap_or(&[]);
+                let fkeys = panel_fields
+                    .get(&p.panel_id)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
                 validate_subgroups_for_panel(&p.subgroups, fkeys, &p.panel_id)?;
             }
             // Rule COMPAT-4: panel containing effective_required == true && min_edit_role == Editor cannot be hidden/admin-only
@@ -2434,7 +2607,10 @@ pub fn resolve_and_validate_editor_layout(
                         {
                             return Err(LayoutValidationError::new(
                                 "required_field_hidden_or_inaccessible",
-                                format!("Không thể ẩn hoặc giới hạn quyền Admin cho panel '{}' vì chứa trường bắt buộc '{fk}'.", p.panel_id),
+                                format!(
+                                    "Không thể ẩn hoặc giới hạn quyền Admin cho panel '{}' vì chứa trường bắt buộc '{fk}'.",
+                                    p.panel_id
+                                ),
                             ));
                         }
                     }
@@ -2448,7 +2624,10 @@ pub fn resolve_and_validate_editor_layout(
         if !placed_ids.contains(&slice.panel_id) {
             return Err(LayoutValidationError::new(
                 "unplaced_base_field_slice",
-                format!("Panel '{}' trong base_field_panels chưa được đặt vào vùng nào.", slice.panel_id),
+                format!(
+                    "Panel '{}' trong base_field_panels chưa được đặt vào vùng nào.",
+                    slice.panel_id
+                ),
             ));
         }
     }
@@ -2545,7 +2724,12 @@ pub fn project_effective_editor_config(
     let group_fields_map: HashMap<&str, Vec<String>> = effective
         .attached_groups
         .iter()
-        .map(|g| (g.group_id.as_str(), g.fields.iter().map(|f| f.key.clone()).collect()))
+        .map(|g| {
+            (
+                g.group_id.as_str(),
+                g.fields.iter().map(|f| f.key.clone()).collect(),
+            )
+        })
         .collect();
 
     let project_region = |placements: &[PanelPlacementConfig]| -> Vec<EffectivePanelProjection> {
@@ -2591,7 +2775,11 @@ pub fn project_effective_editor_config(
             let visible_set: HashSet<&str> = visible_keys.iter().map(String::as_str).collect();
             let raw_subgroups = if !p.subgroups.is_empty() {
                 &p.subgroups
-            } else if let Some(slice) = layout.base_field_panels.iter().find(|s| s.panel_id == p.panel_id) {
+            } else if let Some(slice) = layout
+                .base_field_panels
+                .iter()
+                .find(|s| s.panel_id == p.panel_id)
+            {
                 &slice.subgroups
             } else {
                 &[][..]
@@ -2687,23 +2875,46 @@ mod tests {
         assert_eq!(actual["taxonomy_definitions"][0]["public"], false);
         assert_eq!(actual["taxonomy_definitions"][1]["hierarchical"], false);
         assert_eq!(actual["taxonomy_definitions"][1]["public"], true);
-        assert!(actual["taxonomy_definitions"][1].get("rewrite_base").is_none());
-        assert_eq!(actual["content_types"][0]["rewrite_base"], "library/reviews");
-        assert_eq!(serde_json::from_value::<CntDeclarations>(actual).unwrap(), input);
+        assert!(
+            actual["taxonomy_definitions"][1]
+                .get("rewrite_base")
+                .is_none()
+        );
+        assert_eq!(
+            actual["content_types"][0]["rewrite_base"],
+            "library/reviews"
+        );
+        assert_eq!(
+            serde_json::from_value::<CntDeclarations>(actual).unwrap(),
+            input
+        );
 
         let tax_only: CntDeclarations = serde_json::from_value(json!({
             "taxonomy_definitions":[{"key":"genre","label":"Genre"}]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(!tax_only.is_empty());
     }
 
     #[test]
     fn c4_provider_rejects_duplicate_or_core_owned_taxonomy_declarations() {
-        for key in ["category", "tag", "post", "page", "section", "seo", "Invalid-Key"] {
+        for key in [
+            "category",
+            "tag",
+            "post",
+            "page",
+            "section",
+            "seo",
+            "Invalid-Key",
+        ] {
             let declarations: CntDeclarations = serde_json::from_value(json!({
                 "taxonomy_definitions":[{"key":key,"label":"A"}]
-            })).unwrap();
-            assert!(declarations.validate().is_err(), "reserved or invalid taxonomy: {key}");
+            }))
+            .unwrap();
+            assert!(
+                declarations.validate().is_err(),
+                "reserved or invalid taxonomy: {key}"
+            );
         }
         let duplicate: CntDeclarations = serde_json::from_value(json!({
             "taxonomy_definitions":[{"key":"genre","label":"Genre"}, {"key":"genre","label":"Other"}]
@@ -2714,7 +2925,7 @@ mod tests {
             json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","surprise":3}]}),
             json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","owner":{"kind":"plugin","id":"other"}}]}),
             json!({"content_types":[{"key":"review","label":"Reviews","rewrite_base":"a","surprise":3}]}),
-            json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","rewrite_base":7}]})
+            json!({"taxonomy_definitions":[{"key":"genre","label":"Genre","rewrite_base":7}]}),
         ] {
             assert!(serde_json::from_value::<CntDeclarations>(path).is_err());
         }
@@ -2727,36 +2938,61 @@ mod tests {
                 {"content_type":"review","taxonomies":["genre"]},
                 {"content_type":"review","taxonomies":["genre"]}
             ]
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(duplicate.validate().is_err());
     }
 
     #[test]
     fn c4_provider_rejects_malformed_rewrite_bases_and_associations() {
-        for base in ["", "/reviews", "reviews/", "a//b", "a/b/c/d", "../x", "X", "review_name", "news?x=1", "a/%term%"] {
+        for base in [
+            "",
+            "/reviews",
+            "reviews/",
+            "a//b",
+            "a/b/c/d",
+            "../x",
+            "X",
+            "review_name",
+            "news?x=1",
+            "a/%term%",
+        ] {
             let cpt: CntDeclarations = serde_json::from_value(json!({
                 "content_types":[{"key":"review","label":"Reviews","rewrite_base":base}]
-            })).unwrap();
+            }))
+            .unwrap();
             assert!(cpt.validate().is_err(), "invalid CPT rewrite base: {base}");
             let tax: CntDeclarations = serde_json::from_value(json!({
                 "taxonomy_definitions":[{"key":"genre","label":"Genre","rewrite_base":base}]
-            })).unwrap();
-            assert!(tax.validate().is_err(), "invalid taxonomy rewrite base: {base}");
+            }))
+            .unwrap();
+            assert!(
+                tax.validate().is_err(),
+                "invalid taxonomy rewrite base: {base}"
+            );
         }
         for taxonomies in [
             json!(["genre", "genre"]),
             json!(["bad-key"]),
             json!([""]),
-            json!(["category", "category"])
+            json!(["category", "category"]),
         ] {
             let cpt: CntDeclarations = serde_json::from_value(json!({
                 "content_types":[{"key":"review","label":"Reviews","taxonomies":taxonomies}]
-            })).unwrap();
-            assert!(cpt.validate().is_err(), "invalid CPT association: {taxonomies}");
+            }))
+            .unwrap();
+            assert!(
+                cpt.validate().is_err(),
+                "invalid CPT association: {taxonomies}"
+            );
             let eligibility: CntDeclarations = serde_json::from_value(json!({
                 "taxonomy_eligibility":[{"content_type":"review","taxonomies":taxonomies}]
-            })).unwrap();
-            assert!(eligibility.validate().is_err(), "invalid eligibility association: {taxonomies}");
+            }))
+            .unwrap();
+            assert!(
+                eligibility.validate().is_err(),
+                "invalid eligibility association: {taxonomies}"
+            );
         }
         let builtin: CntDeclarations = serde_json::from_value(json!({
             "content_types":[{
@@ -2764,7 +3000,10 @@ mod tests {
                 "settings":{"public":true,"has_archive":true,"publication":"draft_publish","supports":["editor"]}
             }]
         })).unwrap();
-        assert!(builtin.validate().is_err(), "post URLs belong to global C3 policy");
+        assert!(
+            builtin.validate().is_err(),
+            "post URLs belong to global C3 policy"
+        );
     }
 
     #[test]
@@ -3045,5 +3284,93 @@ mod tests {
 
         let set: Probe = serde_json::from_str(r#"{"path": "/hello"}"#).unwrap();
         assert_eq!(set.path, PatchField::Set("/hello".to_string()));
+    }
+
+    #[test]
+    fn richtext_allows_384kib_when_containing_blocks_and_keeps_200k_for_plain() {
+        let field = ContentFieldDefinition {
+            key: "body".into(),
+            label: "Nội dung".into(),
+            field_type: ContentFieldType::RichText,
+            required: false,
+            options: vec![],
+            ..Default::default()
+        };
+        let plain_over_200k = "a".repeat(200_001);
+        assert!(!valid_field_value(&field, &json!(plain_over_200k)));
+
+        let block_250k = format!(
+            "<!-- od:text {{\"id\":\"t1\"}} -->\n{}\n<!-- /od:text -->",
+            "a".repeat(250_000)
+        );
+        assert!(valid_field_value(&field, &json!(block_250k)));
+
+        let block_over_384k = format!(
+            "<!-- od:text {{\"id\":\"t1\"}} -->\n{}\n<!-- /od:text -->",
+            "a".repeat(crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES)
+        );
+        assert!(!valid_field_value(&field, &json!(block_over_384k)));
+    }
+
+    #[test]
+    fn cpt_builder_auto_injects_body_rejects_non_richtext_and_emits_body_panel() {
+        let builder_settings = ContentTypeSettings {
+            public: true,
+            has_archive: true,
+            publication: ContentPublication::DraftPublish,
+            supports: vec![ContentSupport::Builder, ContentSupport::FeaturedImage],
+        };
+        let base_no_body = OwnedDescriptor {
+            owner: ResourceOwner::User,
+            status: ProviderStatus::Active,
+            declaration_state: DeclarationState::Declared,
+            descriptor: ContentTypeDefinition {
+                key: "service".into(),
+                label: "Dịch vụ".into(),
+                fields: vec![],
+                settings: builder_settings.clone(),
+            },
+        };
+        let eff = EffectiveContentSchema::assemble(base_no_body.clone(), 1, vec![]).unwrap();
+        let injected = eff.effective_fields.get("body").expect("body injected");
+        assert_eq!(injected.definition.field_type, ContentFieldType::RichText);
+        assert_eq!(injected.owner, ResourceOwner::Core);
+        assert!(
+            build_core_and_group_panels(&eff, false, &[])
+                .iter()
+                .any(|p| p.panel_id == "core:body_editor")
+        );
+
+        // Disabling Builder on the custom CPT allows removing the synthetic Core `body`
+        // even when entries already exist.
+        let mut disabled_base = base_no_body;
+        disabled_base.descriptor.settings.supports = vec![ContentSupport::FeaturedImage];
+        let eff_disabled = EffectiveContentSchema::assemble(disabled_base, 2, vec![]).unwrap();
+        assert!(!eff_disabled.effective_fields.contains_key("body"));
+        verify_effective_schema_transition(Some(&eff), &eff_disabled, true).unwrap();
+
+        // Non-RichText `body` is rejected when ContentSupport::Builder is enabled.
+        let bad_base = OwnedDescriptor {
+            owner: ResourceOwner::User,
+            status: ProviderStatus::Active,
+            declaration_state: DeclarationState::Declared,
+            descriptor: ContentTypeDefinition {
+                key: "bad_cpt".into(),
+                label: "Bad".into(),
+                fields: vec![ContentFieldDefinition {
+                    key: "body".into(),
+                    label: "Short body".into(),
+                    field_type: ContentFieldType::ShortText,
+                    required: false,
+                    options: vec![],
+                    ..Default::default()
+                }],
+                settings: builder_settings,
+            },
+        };
+        assert!(matches!(
+            EffectiveContentSchema::assemble(bad_base, 1, vec![]),
+            Err(SchemaTransitionError::IncompatibleSchemaChange(_))
+        ));
     }
 }

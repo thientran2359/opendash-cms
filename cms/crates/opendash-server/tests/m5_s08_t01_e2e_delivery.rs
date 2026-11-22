@@ -114,6 +114,70 @@ async fn login(client: &Client, base_url: &str) -> (String, String) {
     (cookie, csrf)
 }
 
+// S03: Home is a published Page selected atomically in Reading Settings.
+async fn seed_builder_homepage(client: &Client, base_url: &str, cookie: &str, csrf: &str) -> i64 {
+    let types: Vec<Value> = client
+        .get(format!("{base_url}/api/admin/content-types"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let schema_token = types
+        .iter()
+        .find(|v| v["descriptor"]["key"] == "page")
+        .unwrap()["schema_token"]
+        .as_str()
+        .unwrap();
+    let created = client
+        .post(format!(
+            "{base_url}/api/admin/content-types/page/entries/composite"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base_url)
+        .header("X-CSRF-Token", csrf)
+        .json(&serde_json::json!({
+            "expected_schema_token": schema_token,
+            "slug":"theme-home-fixture",
+            "title":"Theme Home Fixture",
+            "values":{"body":"Theme Home Fixture"},
+            "publication_status":"published"
+        }))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let raw = created.text().await.unwrap();
+    assert_eq!(status, 201, "S03 Home Page create: {raw}");
+    let page_id = serde_json::from_str::<Value>(&raw).unwrap()["entry"]["id"]
+        .as_i64()
+        .unwrap();
+    let reading = client
+        .get(format!("{base_url}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status(), 200);
+    let etag = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let assigned = client
+        .put(format!("{base_url}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base_url)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", etag)
+        .json(&serde_json::json!({"homepage_page_id":page_id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = assigned.status();
+    let body = assigned.text().await.unwrap();
+    assert_eq!(status, 200, "S03 Reading assignment: {body}");
+    page_id
+}
+
 #[tokio::test]
 async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security() {
     let site_root = std::env::temp_dir().join(format!(
@@ -130,17 +194,12 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     // 1. Install & activate Theme A with CPT, options, templates, and sample pack
     let png = tiny_png();
     let manifest_a = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "release-theme-a",
         "name": "Release Theme A",
         "version": "1.0.0",
-        "templates": {
-            "header": "templates/header.html",
-            "home": "templates/home.html",
-            "single": "templates/single.html",
-            "archive": "templates/archive.html",
-            "footer": "templates/footer.html"
-        },
+        "assets": ["assets/hero.png"],
+        "templates": [{ "kind": "home", "file": "home.html" }, { "kind": "single", "file": "single.html" }, { "kind": "archive", "file": "archive.html" }], "parts": { "header": "header.html", "footer": "footer.html" },
         "declarations": {
             "content_types": [
                 {
@@ -176,11 +235,20 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     .unwrap();
     let zip_a = build_zip(&[
         ("theme.json", &manifest_a),
-        ("templates/header.html", b"<header><nav><a href=\"/\">{{ options.brand }}</a></nav></header>"),
-        ("templates/home.html", b"<main><h1>{{ options.brand }} Home</h1></main>"),
-        ("templates/single.html", b"<main><h1>{{ entry.title }}</h1></main>"),
-        ("templates/archive.html", b"<main><h1>Archive</h1></main>"),
-        ("templates/footer.html", b"<footer>Release Footer</footer>"),
+        (
+            "header.html",
+            b"<header><nav><a href=\"/\">{{ options.brand }}</a></nav></header>",
+        ),
+        (
+            "home.html",
+            b"<main><h1>{{ options.brand }} Home</h1>{{ od_content() }}</main>",
+        ),
+        (
+            "single.html",
+            b"<main><h1>{{ entry.title }}</h1>{{ od_content() }}</main>",
+        ),
+        ("archive.html", b"<main><h1>Archive</h1></main>"),
+        ("footer.html", b"<footer>Release Footer</footer>"),
         ("assets/hero.png", &png),
     ]);
     let inst_a = client
@@ -213,9 +281,14 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
         200
     );
 
+    seed_builder_homepage(&client, &srv.base_url, &cookie, &csrf).await;
+
     // 2. Selective sample import dry-run + execute + idempotent retry
     let plan: Value = client
-        .post(format!("{}/api/themes/release-theme-a/import/dry-run", srv.base_url))
+        .post(format!(
+            "{}/api/themes/release-theme-a/import/dry-run",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -234,7 +307,10 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
         "run_id": "e2e-run-1"
     });
     let out1: Value = client
-        .post(format!("{}/api/themes/release-theme-a/import/execute", srv.base_url))
+        .post(format!(
+            "{}/api/themes/release-theme-a/import/execute",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -248,7 +324,10 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     assert_eq!(out1["run_id"], "e2e-run-1");
     assert_eq!(out1["created"].as_array().unwrap().len(), 2);
     let out2: Value = client
-        .post(format!("{}/api/themes/release-theme-a/import/execute", srv.base_url))
+        .post(format!(
+            "{}/api/themes/release-theme-a/import/execute",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -264,7 +343,10 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     // 3. Theme Options SSR + Override Save + Public delivery
     assert_eq!(
         client
-            .put(format!("{}/api/themes/release-theme-a/options", srv.base_url))
+            .put(format!(
+                "{}/api/themes/release-theme-a/options",
+                srv.base_url
+            ))
             .header("Cookie", &cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &csrf)
@@ -276,12 +358,22 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
             .status(),
         200
     );
-    let home_html = client.get(format!("{}/", srv.base_url)).send().await.unwrap().text().await.unwrap();
+    let home_html = client
+        .get(format!("{}/", srv.base_url))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert!(home_html.contains("OpenDashV2"));
 
     // 4. Create published portfolio entry, switch to Theme B, verify preservation & restart
     let entry_res: Value = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &csrf)
@@ -299,8 +391,8 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     let entry_id = entry_res["id"].as_i64().unwrap();
 
     let zip_b = build_zip(&[
-        ("theme.json", br#"{"manifest_version":2,"theme_id":"release-theme-b","name":"B","version":"1.0.0","templates":{"home":"templates/home.html"}}"#),
-        ("templates/home.html", b"<main>Beta</main>"),
+        ("theme.json", br#"{"manifest_version":3,"theme_id":"release-theme-b","name":"B","version":"1.0.0","templates": [{ "kind": "home", "file": "home.html" }]}"#),
+        ("home.html", b"<main>Beta{{ od_content() }}</main>"),
     ]);
     let rev_b = client
         .post(format!("{}/api/admin/themes", srv.base_url))
@@ -338,12 +430,16 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     // C3/C4: persisted provider CPT data remains in Admin, but anonymous
     // archive and single routes are unavailable until that provider returns.
     assert_eq!(
-        client.get(format!("{}/content/portfolio", srv2.base_url))
-            .send().await.unwrap().status(),
+        client
+            .get(format!("{}/portfolio", srv2.base_url))
+            .send()
+            .await
+            .unwrap()
+            .status(),
         404
     );
     let pub_single = client
-        .get(format!("{}/content/portfolio/e2e-work", srv2.base_url))
+        .get(format!("{}/portfolio/e2e-work", srv2.base_url))
         .send()
         .await
         .unwrap();
@@ -351,7 +447,10 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
 
     let (cookie2, csrf2) = login(&client, &srv2.base_url).await;
     let entries: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/entries", srv2.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv2.base_url
+        ))
         .header("Cookie", &cookie2)
         .send()
         .await
@@ -359,7 +458,13 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
         .json()
         .await
         .unwrap();
-    assert!(entries.as_array().unwrap().iter().any(|e| e["id"] == entry_id));
+    assert!(
+        entries
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["id"] == entry_id)
+    );
 
     // Restore the identical provider revision; the existing row (same ID)
     // becomes public again without a re-import or content rewrite.
@@ -371,21 +476,44 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
             .header("X-CSRF-Token", &csrf2)
             .header("If-Match", "\"v3\"")
             .json(&json!({ "revision_id": rev_a }))
-            .send().await.unwrap().status(),
+            .send()
+            .await
+            .unwrap()
+            .status(),
         200
     );
-    let restored_archive = client.get(format!("{}/content/portfolio", srv2.base_url))
-        .send().await.unwrap();
+    let restored_archive = client
+        .get(format!("{}/portfolio", srv2.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(restored_archive.status(), 200);
-    let restored_single = client.get(format!("{}/content/portfolio/e2e-work", srv2.base_url))
-        .send().await.unwrap();
+    let restored_single = client
+        .get(format!("{}/portfolio/e2e-work", srv2.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(restored_single.status(), 200);
     assert!(restored_single.text().await.unwrap().contains("E2E Work"));
     let entries_after: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/entries", srv2.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv2.base_url
+        ))
         .header("Cookie", &cookie2)
-        .send().await.unwrap().json().await.unwrap();
-    assert!(entries_after.as_array().unwrap().iter().any(|e| e["id"] == entry_id));
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        entries_after
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["id"] == entry_id)
+    );
 
     drop(srv2);
     let _ = fs::remove_dir_all(&site_root);

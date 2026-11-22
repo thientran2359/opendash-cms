@@ -188,7 +188,7 @@ export function BuilderBindingFields({ element, allowRouteContext = false, onBin
     const source: BindingSource = sourceKey === 'title'
       ? { kind: 'title' } : { kind: 'field', key: sourceKey.slice(6) };
     onBindingChange(element.id, { type_key: typeKey, entry_slug: entrySlug, source, target });
-    setSavedStatus('Đã áp dụng vào bản nháp. Bấm Preview hoặc Lưu homepage để kiểm tra.');
+    setSavedStatus('Đã áp dụng vào bản nháp. Bấm Xem trước hoặc Lưu Builder để kiểm tra.');
   };
 
   return (

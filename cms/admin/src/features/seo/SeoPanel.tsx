@@ -9,6 +9,7 @@ import {
   putHomeSeo,
 } from '../../api/seo.ts';
 import { safePublicPath } from '../content/EntryListPage.tsx';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface SeoPanelProps {
   csrfToken: string | null;
@@ -82,39 +83,39 @@ export function SeoPanel({ csrfToken, onApiError }: SeoPanelProps) {
   };
 
   return (
-    <section className="mt-8 border-t border-slate-200 pt-6" aria-label="SEO trang chủ">
-      <div className="flex items-center justify-between gap-4">
+    <section className="space-y-4" aria-label="SEO trang chủ">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">SEO trang chủ</h3>
-          <p className="text-sm text-slate-600">
-            Metadata công khai cho trang chủ (<code>v{version}</code>).
+          <h2 className="text-base font-semibold text-zinc-950">SEO trang chủ</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">
+            Metadata công khai cho trang chủ (<code className="text-xs">v{version}</code>).
           </p>
         </div>
-        <button type="button" className="btn-secondary" disabled={loading || saving} onClick={load}>
+        <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={load}>
           Tải lại
-        </button>
+        </AdminButton>
       </div>
       {status && (
-        <div className={`mt-3 rounded border p-3 text-sm ${staleConflict ? 'border-red-300 bg-red-50 text-red-800' : 'border-emerald-300 bg-emerald-50 text-emerald-900'}`}>
+        <AdminAlert tone={staleConflict ? 'error' : 'success'}>
           {status}
-        </div>
+        </AdminAlert>
       )}
-      <form className="mt-4 grid gap-3" onSubmit={handleSave}>
-        <label className="grid gap-1 text-sm">
-          <span className="font-medium">Tiêu đề SEO (tối đa 120 ký tự)</span>
+      <form className="max-w-2xl space-y-4" onSubmit={handleSave}>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-800">Tiêu đề SEO (tối đa 120 ký tự)</span>
           <input
             type="text"
-            className="rounded border border-slate-300 px-3 py-1.5"
+            className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
             value={title}
             maxLength={120}
             disabled={loading || saving}
             onChange={(e) => setTitle(e.target.value)}
           />
         </label>
-        <label className="grid gap-1 text-sm">
-          <span className="font-medium">Mô tả SEO (tối đa 320 ký tự)</span>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-800">Mô tả SEO (tối đa 320 ký tự)</span>
           <textarea
-            className="rounded border border-slate-300 px-3 py-1.5"
+            className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
             rows={2}
             value={description}
             maxLength={320}
@@ -123,28 +124,28 @@ export function SeoPanel({ csrfToken, onApiError }: SeoPanelProps) {
           />
         </label>
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="grid gap-1 text-sm">
-            <span className="font-medium">OG Image Media ID (SHA-256)</span>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-800">OG Image Media ID (SHA-256)</span>
             <input
               type="text"
-              className="rounded border border-slate-300 px-3 py-1.5 font-mono text-xs"
+              className="h-9 rounded-md border border-zinc-300 bg-white px-3 font-mono text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
               value={ogImageId}
               disabled={loading || saving}
               onChange={(e) => setOgImageId(e.target.value)}
             />
           </label>
-          <label className="grid gap-1 text-sm">
-            <span className="font-medium">Canonical URL tùy chỉnh</span>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-800">Canonical URL tùy chỉnh</span>
             <input
               type="url"
-              className="rounded border border-slate-300 px-3 py-1.5"
+              className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
               value={canonicalUrl}
               disabled={loading || saving}
               onChange={(e) => setCanonicalUrl(e.target.value)}
             />
           </label>
         </div>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 text-sm text-zinc-800">
           <input
             type="checkbox"
             checked={noindex}
@@ -153,10 +154,10 @@ export function SeoPanel({ csrfToken, onApiError }: SeoPanelProps) {
           />
           <span>Không cho máy tìm kiếm lập chỉ mục (noindex)</span>
         </label>
-        <div>
-          <button type="submit" disabled={loading || saving || !csrfToken}>
+        <div className="pt-1">
+          <AdminButton type="submit" variant="primary" disabled={loading || saving || !csrfToken}>
             {saving ? 'Đang lưu…' : 'Lưu SEO trang chủ'}
-          </button>
+          </AdminButton>
         </div>
       </form>
     </section>

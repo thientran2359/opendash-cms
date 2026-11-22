@@ -10,7 +10,7 @@ export interface ThemeRevisionSummary {
   theme_id: string;
   version: string;
   revision_digest: string;
-  source_format: 'v1_legacy' | 'v2';
+  source_format: 'v3';
 }
 
 export interface ThemeSelection {
@@ -18,7 +18,7 @@ export interface ThemeSelection {
   theme_id: string | null;
   version: number;
   legacy_block_id: string | null;
-  source_format: 'v1_legacy' | 'v2' | null;
+  source_format: 'v3' | null;
 }
 
 export interface ThemesSummary {
@@ -30,18 +30,18 @@ export interface ThemesSummary {
   selection: ThemeSelection;
 }
 
-export interface ThemeV2InstallResponse {
+export interface ThemeV3InstallResponse {
   revision_id: string;
   theme_id: string;
   version: string;
   revision_digest: string;
-  source_format: 'v2';
+  source_format: 'v3';
   activated: false;
 }
 
-export type ThemeInstallResponse = ThemeItem | ThemeV2InstallResponse;
+export type ThemeInstallResponse = ThemeV3InstallResponse;
 
-export function isV2ThemeInstall(response: ThemeInstallResponse): response is ThemeV2InstallResponse {
+export function isV3ThemeInstall(response: ThemeInstallResponse): response is ThemeV3InstallResponse {
   return 'revision_id' in response;
 }
 
@@ -86,14 +86,19 @@ export function installTheme(file: File, csrfToken: string): Promise<ThemeInstal
   });
 }
 
-export function activateTheme(id: string, version: number, csrfToken: string): Promise<ThemesSummary> {
-  return requestJson('/api/admin/themes/active', {
-    method: 'PUT',
-    csrfToken,
-    ifMatchVersion: version,
-    contentType: 'application/json',
-    body: JSON.stringify({ id }),
-    defaultErrorMessage: 'Không thể kích hoạt theme.',
+export function activateTheme(revisionId: string, version: number, csrfToken: string): Promise<ThemeSelection> {
+  return activateThemeRevision(revisionId, version, csrfToken);
+}
+
+export interface ThemeLayoutCatalog {
+  active_theme_id: string | null;
+  page_layouts: Array<{ key: string; label: string }>;
+  custom_templates: Array<{ custom_key: string; label: string; allowed_types: string[] }>;
+}
+
+export function getActiveThemeLayouts(): Promise<ThemeLayoutCatalog> {
+  return requestJson('/api/admin/themes/active/layouts', {
+    defaultErrorMessage: 'Không thể tải Page Layout và Custom Single Template.',
   });
 }
 

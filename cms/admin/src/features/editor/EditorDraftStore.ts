@@ -1,4 +1,5 @@
-import type { ContentFieldValue, EffectiveEditorConfigProjection } from '../content/types.ts';
+import type { ContentFieldValue, ContentMode } from '../content/types.ts';
+import type { EffectiveEditorConfigWithSettings } from '../../api/content.ts';
 
 export type DraftStatus = 'active' | 'quarantined';
 
@@ -10,6 +11,7 @@ export interface EditorDraftPayload {
   /** Keep manual slug edits from being replaced by title auto-slug after return. */
   slug_touched?: boolean;
   publication_status: 'draft' | 'published';
+  content_mode?: ContentMode;
   values: Record<string, ContentFieldValue>;
   cleared_fields: string[];
   term_ids: number[];
@@ -45,7 +47,7 @@ export function diffEditorPayload(
   draft: EditorDraftPayload,
 ): string[] {
   const changed: string[] = [];
-  for (const key of ['title', 'slug', 'publication_status', 'term_ids', 'custom_path', 'seo'] as const) {
+  for (const key of ['title', 'slug', 'publication_status', 'content_mode', 'term_ids', 'custom_path', 'seo'] as const) {
     if (JSON.stringify(baseline[key]) !== JSON.stringify(draft[key])) changed.push(key);
   }
   const fieldKeys = new Set([
@@ -101,6 +103,10 @@ export class EditorDraftStore {
     this.drafts.delete(draftKey);
   }
 
+  clearDraft(typeKey: string, entryId: number): void {
+    this.drafts.delete(this.makeDraftKey(typeKey, entryId));
+  }
+
   hasAnyDirty(): boolean {
     for (const d of this.drafts.values()) {
       if (d.dirty_fields.length > 0 || d.payload.custom_path_dirty || d.payload.seo_dirty) {
@@ -128,7 +134,7 @@ export class EditorDraftStore {
     draftKey: string,
     siteInstanceId: string,
     userId: number,
-    freshConfig: EffectiveEditorConfigProjection,
+    freshConfig: EffectiveEditorConfigWithSettings,
     authGeneration: number,
     fresh: EditorDraftPayload,
     routeReadable: boolean,
@@ -167,6 +173,11 @@ export class EditorDraftStore {
       slug_touched: saved.payload.slug_touched ?? fresh.slug_touched,
       publication_status: savedDirty.has('publication_status')
         ? saved.payload.publication_status : fresh.publication_status,
+      // Switching back to Editor remains authorized after Builder is disabled;
+      // do not restore a pending switch *to* Builder without the capability.
+      content_mode: savedDirty.has('content_mode') &&
+        (freshConfig.settings?.supports.includes('builder') || saved.payload.content_mode === 'editor')
+        ? saved.payload.content_mode : fresh.content_mode,
       term_ids: savedDirty.has('term_ids') ? [...saved.payload.term_ids] : [...fresh.term_ids],
       values,
       cleared_fields: clearedFields,

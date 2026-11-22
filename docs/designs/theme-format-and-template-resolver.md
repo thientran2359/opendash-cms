@@ -1,10 +1,12 @@
 # Theme Format v3, Template Resolver 2 Trục, Page Layouts & Reading Settings
 
 * **Author:** Nova (tổng hợp từ các quyết định sản phẩm & resolver đã chốt cùng chủ dự án ngày 19–20/11/2026)
-* **Status:** Approved
+* **Status:** Verified
 * **Date:** 2026-11-20
 * **Baseline:** `main@7f29bcf` (migrations `0001`–`0041`)
-* **Goldfish Review:** 5-agent independent swarm (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-comprehension`, `egm-zoom-out`) — all Blocker/Major findings resolved and approved by owner.
+* **Approved By:** Owner
+* **Approval Evidence:** Owner chat 2026-11-20 (Cách A Full Site Editor + OQ-02/03/04 chốt) · PR #424 (`e47d5d3`)
+* **Goldfish Review:** 5-agent independent swarm (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`, `egm-comprehension`, `egm-zoom-out`) · 2026-11-20 · reviewed `main@7f29bcf` (all Blocker/Major resolved)
 * **Related Spec:** [Design Spec 2: Generic CPT Content Builder, Pattern CPT (`core/pattern_ref`) & Pattern Library](cpt-content-builder-and-pattern-library.md)
 
 ---
@@ -269,7 +271,7 @@ CREATE TABLE template_override_media_refs (
 
 | File | Action | Reason |
 |---|---|---|
-| `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql` | Create | DDL cho `site_reading_settings`, `page_layout_key`, `custom_template_key`, `template_overrides` & `template_override_media_refs`. |
+| `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql` | Create | DDL cho `site_reading_settings`, `page_layout_key`, `custom_template_key`, `template_overrides` & `template_override_media_refs`; D02 thêm Page `content_mode`, `entry_builder_documents`, `entry_builder_media_refs` và `owner_template_selections`. |
 | `cms/crates/opendash-core/src/theme.rs` | Modify | Thêm `ThemeV3Manifest`, `TemplateCandidateKind`, `TemplateCandidate`, `canonical_key()`, `ThemeTemplateDecl`, `PageLayoutDecl`, `ThemePatternDecl`. |
 | `cms/crates/opendash-core/src/builder.rs` | Modify | Thêm `KnownElement::ContentSlot(ContentSlotProps)` và `KnownElement::TemplatePart(TemplatePartProps)` (`#[serde(tag = "type", content = "props")]`). |
 | `cms/crates/opendash-server/src/template_sec.rs` | Modify | AST validator & compiler cho `od_part("<literal>")` (DAG, depth ≤ 3, fan-out ≤ 32, shared fuel) và `od_content()` (standalone `Stmt::EmitExpr`, per-render nonce, C-SEC check trước khi inject). |
@@ -292,29 +294,47 @@ CREATE TABLE template_override_media_refs (
 
 ### Slice S01: Theme Package v3 Manifest, Core Types & C-SEC Typed Composition (Additive — Zero Compile Break)
 
-* **Phạm vi file:** `cms/crates/opendash-core/src/theme.rs`, `cms/crates/opendash-core/src/builder.rs`, `cms/crates/opendash-server/src/template_sec.rs`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/backup_worker.rs`.
+* **Dependencies:** None (additive trên `main@e47d5d3`, không phá vỡ callers v2 hiện có).
+* **File Ownership:** `cms/crates/opendash-core/src/theme.rs`, `cms/crates/opendash-core/src/builder.rs`, `cms/crates/opendash-server/src/template_sec.rs`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/backup_worker.rs`.
 * **Công việc chính:**
   1. Định nghĩa `ThemeV3Manifest`, `TemplateCandidateKind`, `TemplateCandidate::canonical_key()`, `ThemeTemplateDecl`, `PageLayoutDecl`, `ThemePatternDecl` trong `opendash_core::theme`.
   2. Thêm `KnownElement::ContentSlot(ContentSlotProps)` và `KnownElement::TemplatePart(TemplatePartProps)` vào `opendash_core::builder`.
   3. Cài đặt `validate_and_compile_csec_composition()` trong `template_sec.rs` (`od_part("<literal>")` DAG depth ≤ 3, fan-out ≤ 32, shared fuel; `od_content()` standalone `Stmt::EmitExpr`, per-render nonce, C-SEC check trước khi inject).
   4. Cài đặt `parse_theme_zip_v3` trong `theme.rs` (tạm giữ struct v2 đến S02 để workspace compile & test PASS 100%) và cập nhật `backup_worker.rs` hỗ trợ `source_format == "v3"`.
+* **Acceptance Criteria:**
+  - [ ] Unit tests `opendash_core::theme` xác thực `ThemeV3Manifest` (`manifest_version == 3`, từ chối duplicate `canonical_target_key`, đường dẫn ngoài root/4 thư mục).
+  - [ ] Unit tests `template_sec.rs` chặn `od_part` vòng lặp, depth > 3, fan-out > 32, `od_content()` trong loop/attribute hoặc sai số lượng (entry = 1, non-entry = 0, index = 0..=1), và cho phép `<form>` trong nội dung chèn sau nonce.
+  - [ ] `backup_worker.rs` bao gồm revision `source_format == "v3"` trong snapshot; `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S01 (chưa có migration SQLite nên không ảnh hưởng DB hiện hành).
 
 ### Slice S02: Migration 0042, 2-Axis Template Resolver, Visual Builder Overrides & Page Layouts
 
-* **Phạm vi file:** `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/storage/{theme,import,overrides,entries,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/routes/{themes,entries,public_content,builder,seo}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/{themes,builder}.ts`, `cms/admin/src/features/editor/SingleEditWorkspace.tsx`, `cms/admin/src/features/library/TemplateLibraryPage.tsx`, `cms/admin/src/features/themes/ThemesPanel.tsx`, `cms/crates/opendash-server/src/storage/theme_tests.rs`.
+* **Dependencies:** Spec 1 Slice `S01`.
+* **File Ownership:** `cms/migrations/0042_theme_v3_resolver_and_reading_settings.sql`, `cms/crates/opendash-server/src/theme.rs`, `cms/crates/opendash-server/src/storage/{theme,import,overrides,entries,media_refs,public_content}.rs`, `cms/crates/opendash-server/src/page.rs`, `cms/crates/opendash-server/src/routes/{themes,entries,public_content,builder,seo}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/{themes,builder}.ts`, `cms/admin/src/features/editor/SingleEditWorkspace.tsx`, `cms/admin/src/features/library/TemplateLibraryPage.tsx`, `cms/admin/src/features/themes/ThemesPanel.tsx`, `cms/crates/opendash-server/src/storage/theme_tests.rs`.
 * **Công việc chính:**
   1. Thêm Migration `0042` và chuyển toàn bộ `theme.rs`, `storage/theme.rs`, `storage/import.rs`, fixtures sang v3 duy nhất (gỡ v1/v2).
   2. Triển khai `build_candidates` + `resolve_template_2axis` trong `storage/overrides.rs` (DB `ast_json` → active theme v3 HTML theo từng candidate), cập nhật `page.rs` render `core/content_slot` & `core/template_part` + truyền cờ CSP, cập nhật `media_refs.rs` & `public_content.rs`.
   3. Hỗ trợ `page_layout_key` & `custom_template_key` (`PatchField::Keep`) trong `storage/entries.rs`, `routes/entries.rs` và `GET /api/admin/themes/active/layouts`.
   4. Triển khai `GET/PUT /api/admin/template-overrides` và `POST /api/admin/template-overrides/{id}/reset` trong `routes/themes.rs` & `app.rs` (gỡ route override cũ ở `routes/builder.rs`), nối UI Admin.
+* **Acceptance Criteria:**
+  - [ ] Integration tests chứng minh theme-specific (`single-project.html`) thắng DB-generic (`single`), DB `ast_json` cùng candidate thắng theme, `core/content_slot` & `core/template_part` render đúng kèm CSP.
+  - [ ] Page Layout (`canvas` không header/footer) & Custom Single Template bảo toàn reference qua `PatchField::Keep` khi đổi theme và fallback an toàn.
+  - [ ] `POST /api/admin/template-overrides/{id}/reset` kiểm `If-Match` (`428`/`412`) và trả `next_effective_source` chính xác; `npm run build` và `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S02 và khôi phục DB fixture trước Migration `0042` (không có dữ liệu production cũ cần migrate ngược).
 
 ### Slice S03: Atomic Reading Settings (Homepage & Posts Page), Route Authority, Sitemap/SEO & Admin UI
 
-* **Phạm vi file:** `cms/crates/opendash-server/src/storage/{settings,permalinks,sitemap,seo,entries}.rs`, `cms/crates/opendash-server/src/routes/{settings,public,public_content,seo,builder}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/settings.ts`, `cms/admin/src/App.tsx`, `cms/admin/src/shell/router.ts`, `cms/admin/src/features/settings/ReadingSettingsPanel.tsx`, `cms/admin/src/features/system/GeneralSettingsPanel.tsx`.
+* **Dependencies:** Spec 1 Slice `S02`.
+* **File Ownership:** `cms/crates/opendash-server/src/storage/{settings,permalinks,sitemap,seo,entries}.rs`, `cms/crates/opendash-server/src/routes/{settings,public,public_content,seo,builder}.rs`, `cms/crates/opendash-server/src/app.rs`, `docs/contracts/M8_WRITER_INVENTORY.md`, `cms/admin/src/api/settings.ts`, `cms/admin/src/App.tsx`, `cms/admin/src/shell/router.ts`, `cms/admin/src/features/settings/ReadingSettingsPanel.tsx`, `cms/admin/src/features/system/GeneralSettingsPanel.tsx`.
 * **Công việc chính:**
   1. Cài đặt `get_reading` / `save_reading` trong `storage/settings.rs` và `GET/PUT /api/admin/settings/reading` trong `routes/settings.rs` & `app.rs` (`require_admin_with_csrf`, `AdmittedMutation`, `If-Match`).
   2. Cập nhật `permalinks::sync_claims_in_tx` chuyển quyền sở hữu `/` & `("archive", "post")` không collision, xóa Page đang gắn trong `storage/entries.rs::delete` tăng `site_reading_settings.version` (giữ trạng thái `deleted` → `404 + noindex`), đồng bộ `storage/sitemap.rs` & `storage/seo.rs`.
   3. Chuyển `routes/public.rs` sang route authority + Resolver 2 trục (gỡ `/api/admin/builder/homepage*` thử nghiệm cũ), cập nhật `routes/seo.rs::missing_public_page` và hoàn thiện UI `ReadingSettingsPanel.tsx`.
+* **Acceptance Criteria:**
+  - [ ] `PUT /api/admin/settings/reading` từ chối trùng 2 Page ID, draft, non-page (`400`), kiểm `If-Match` (`428`/`412`); gán/đổi/bỏ chọn `posts_page_id` không phát sinh `409 permalink_collision`.
+  - [ ] `/` render Homepage Page qua `home → PageLayout → page`; Posts Page render `archive-post → archive` giữ nguyên `values_json`; xóa/chuyển draft trả `404` + `X-Robots-Tag: noindex`; sitemap không lặp `/`.
+  - [ ] `npm run build`, `check-standards.py`, `cargo test --workspace --release --locked` PASS.
+* **Rollback:** `git revert` commit của Slice S03 (bảng `site_reading_settings` vẫn giữ sạch ở Migration `0042`).
 
 ---
 
@@ -336,3 +356,57 @@ CREATE TABLE template_override_media_refs (
    - **Resolver 2 trục & Visual Builder Overrides:** Theme-specific (`single-project.html`) thắng DB-generic (`single`); DB `ast_json` cùng candidate thắng theme; `core/content_slot` & `core/template_part` hoạt động đúng; mất `page_layout_key`/`custom_template_key` giữ reference khi save (`PatchField::Keep`), báo Admin và fallback nhánh thường.
    - **Reading Settings & Route Authority:** Chọn 2 Page khác nhau (từ chối trùng ID, draft, non-page; `428`/`412` CAS); gán/đổi/bỏ chọn `posts_page_id` không gây `409 permalink_collision`; `/` render Homepage qua `home → PageLayout → page`; Posts Page render `archive-post → archive` và giữ nguyên `values_json` Page; xóa hoặc chuyển sang draft trả `404` + `X-Robots-Tag: noindex`; sitemap không lặp `/`.
    - **Reset & Backup/Restore v3:** `POST .../reset` kiểm `If-Match` CAS và trả đúng `next_effective_source`; theme `A → B → A` giữ overrides; `backup_worker.rs` sao chép đầy đủ revision `v3` và restore giữ nguyên `site_reading_settings`, `page_layout_key`, `custom_template_key`, `template_overrides`.
+
+
+## Design Delta D01 — Explicit static assets (#426)
+
+**Status:** Verified — implementation authority still requires merge and pinned handoff.
+**Approved By:** Aster (delegated).
+**Approval Evidence:** [PR #433 coordinator decision](https://github.com/thientran2359/opendash-cms/pull/433#issuecomment-7049933198).
+**Goldfish Review:** Independent fresh-context `delta_review`; initial two P2 findings resolved; re-review PASS, recorded below.
+**Coordinator:** Aster. **Baseline:** `284f000333b32d38629297c0368584761d54d67f`.
+
+### Problem and selected direction
+
+Goal 1 requires explicit declarations of all resources, but the manifest omits general CSS, font and image declarations. Preserve that boundary; do not implicitly allow every file under `assets/`. This delta concerns the unreleased v3 format, not SQLite, public routing, publication or content migration. Existing S01 approval does not approve this delta.
+
+### Exact proposed schema and semantics
+
+Add `#[serde(default)] pub assets: Vec<String>` to `ThemeV3Manifest`. Each string is a unique canonical package-relative file path below `assets/`; an omitted field means an empty set. No glob, directory, URL or executable declaration is accepted. `deny_unknown_fields` remains effective. Example: `"assets": ["assets/styles.css", "assets/images/hero.png"]`.
+
+Canonical asset paths have at most 240 ASCII bytes after `assets/`. Each directory component matches `[a-z0-9_-]+`; the final filename uses only `[a-z0-9_.-]`, starts with a non-dot character, has an allowed lowercase extension, and contains no `..`. Core and server must use the same acceptance grammar, including rejection of `assets/icons.v2/logo.png` and `assets/a..b.png`, and tests must verify boundary agreement. Core validation rejects duplicates, empty components, dot/dot-dot and hidden components, backslashes, absolute paths, control characters and URI syntax; paths use case-sensitive forward slashes without normalization. Retain the package path validator and package extraction protections; server performs byte/existence checks, never I/O in core. Allowed extensions match the current safe package policy: css/txt, png/jpg/jpeg/webp/gif and woff2. No HTML, SVG, JavaScript, Wasm or additional executable type is introduced.
+
+Every declared asset must exist as a regular validated ZIP member. Every ZIP regular file under assets/ must be declared. A pattern preview must name a declared raster image that exists, not merely a path with an allowed prefix. Existing template/part/layout/pattern declarations remain the authority for their own files. Reject duplicate regular ZIP members, traversal and hidden regular-file paths with the package safeguards before constructing a valid package. Empty ZIP directory entries remain subject to the shared reader path-safety validation and are ignored; they are not manifest resources and are not materialized or served. A hidden empty directory entry may be ignored, but any regular file beneath it is rejected by v3 validation. No shared package-reader change is authorized. Existing compressed/uncompressed aggregate, file-count and per-file size limits remain mandatory; manifest declarations never increase limits.
+
+CSS continues through `validate_safe_css` before package acceptance; this delta does not relax CSS URLs, C-SEC, CSP or enable templating of asset bytes. Assets remain inert bytes served by the existing asset route. The manifest is an archive allowlist, not a new HTML/CSS dependency crawler or auto-enqueue feature.
+
+### Detailed Implementation Plan
+
+S01 ownership remains Harbor's existing five implementation files plus the prior bounded `page.rs` ACK. Within `cms/crates/opendash-core/src/theme.rs`, add the field and pure validation with in-file tests. Within `cms/crates/opendash-server/src/theme.rs`, enforce declared/existing asset set equality, preview membership and type, existing safe CSS checks and invoke `parse_theme_declarations` so malformed declarations/field_groups fail before ZIP acceptance; add focused in-file tests. Update S01 fixture literals in these owned files to carry assets as needed. No extra runtime file ownership is granted by this proposal. Any other fixture or caller needs an explicit exact-path handoff before editing.
+
+Aster owns this spec amendment, review/provenance record and design index update. Only after review/approval and merge will Aster pin the new source SHA on #426 and issue the exact schema/file handoff. Harbor preserves existing task commits and dirty worktrees while blocked; no reset or force push.
+
+### Verification Plan
+
+Core tests: missing/empty assets accepted, valid declarations accepted, duplicate/invalid paths and unsupported extensions rejected. ZIP tests: declared CSS/image/font accepted, missing declaration rejected, missing declared file rejected, undeclared/hidden/traversal/duplicate regular ZIP members rejected, safe empty directory entries ignored with hidden child regular files rejected, preview missing or non-raster rejected, unsafe CSS and over-limit members rejected, malformed declarations/field_groups rejected. Preserve v2 behavior during additive S01. Run standards/plans checks and self-tests, artifact validation, fmt, locked build and full workspace release tests, plus all required CI at implementation head. This proposal records no tests as PASS before execution.
+
+### Rollback and completion
+
+Before implementation, revert only the documentation delta. After implementation, revert the bounded code changes through a protected PR; do not delete site data. No migration is introduced. D01 is complete only after independent EGM review findings are resolved, delegated approval is recorded, required CI passes, the delta merges and the exact source/schema/ownership handoff is posted on #426. Implementation verification remains separate.
+
+
+### D01 independent review and disposition — 2026-11-21
+
+Independent fresh-context reviewer `delta_review` read this amendment against the actual core/server theme validators and package-reader boundary. Initial verdict CHANGES_REQUESTED: two P2 findings, core/server path grammar mismatch and directory entries bypassing the v3 callback. Both were resolved by specifying the identical ASCII/length grammar and explicitly preserving safe empty directory entries while rejecting hidden regular files. Re-review verdict PASS: no remaining actionable P0/P1/P2. This review does not assert implementation verification.
+
+Actual documentation validation: check-plans PASS; check-plans self-test 13 fixtures PASS; check-agent-artifacts PASS; standards and self-test PASS using Python 3.9 with a temporary pip-vendored tomli compatibility module, including child processes; diff whitespace PASS. CodeGraph indexing attempted but unavailable because the engine is not installed in this worktree. No CMS runtime files changed, and Rust/runtime/native tests were not run for this documentation-only delta. Required remote CI and delegated approval remain merge preconditions.
+
+
+## D02 approved coordination amendment
+
+See [S02 target-only Page Builder and provider selections](s02-target-only-page-builder.md). This Approved amendment supersedes conflicting creation/order details in the slices above; implementation authority requires its merge and pinned handoff. It brings the Page-only entry document foundation into Theme S02/0042; later CPT S01/0043 extends those tables rather than recreating them. Owner clarified that no previous release or historical-data compatibility is required. Generic CPT, Patterns and Reading Settings remain in their existing later slices.
+
+
+## D03 shared-template draft preview supplement
+
+See [D03 typed shared-template draft preview](typed-template-draft-preview.md). This Approved supplement requires merge and exact-source handoff before implementation. It supplies the previously missing shared-template unsaved Preview API; entry Page Preview and existing publication semantics remain unchanged.

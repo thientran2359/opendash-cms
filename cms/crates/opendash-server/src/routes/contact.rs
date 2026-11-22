@@ -135,7 +135,9 @@ pub async fn admin_list_submissions(
     let limit = query.limit.unwrap_or(20);
     let offset = query.offset.unwrap_or(0);
     if !(1..=100).contains(&limit) || offset < 0 {
-        return Err(ApiError::bad_request("limit phải trong 1..=100 và offset >= 0."));
+        return Err(ApiError::bad_request(
+            "limit phải trong 1..=100 và offset >= 0.",
+        ));
     }
     let list = store::list_submissions(&db, query.form_id, limit, offset).await?;
     Ok((no_store_headers(None), Json(list)).into_response())
@@ -222,7 +224,10 @@ pub async fn public_submit(
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult<Response> {
-    if recovery.as_ref().is_some_and(|Extension(r)| r.is_safe_mode()) {
+    if recovery
+        .as_ref()
+        .is_some_and(|Extension(r)| r.is_safe_mode())
+    {
         return Ok((
             StatusCode::SERVICE_UNAVAILABLE,
             [(header::CACHE_CONTROL, "no-store")],
@@ -239,7 +244,9 @@ pub async fn public_submit(
                 .and_then(|v| v.to_str().ok())
                 .is_some_and(|o| o == trusted)
         });
-    if !trusted_origin_match && !check_strict_contact_origin(&headers, &db, &listener_origin).await? {
+    if !trusted_origin_match
+        && !check_strict_contact_origin(&headers, &db, &listener_origin).await?
+    {
         return Ok((
             StatusCode::FORBIDDEN,
             [(header::CACHE_CONTROL, "no-store")],

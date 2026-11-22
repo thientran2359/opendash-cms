@@ -4,7 +4,7 @@
 use opendash_core::builder::{BuilderDocument, ElementContent, KnownElement};
 use opendash_core::registry::RegistryCatalog;
 use opendash_core::theme::BlockDescriptor;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn document(props: Value) -> BuilderDocument {
     let input = json!({
@@ -30,7 +30,9 @@ fn generic_term_pair_survives_public_list_ast_serialization() {
     assert_eq!(source, restored);
     let ElementContent::Known(KnownElement::List(props)) =
         &restored.sections[0].children[0].children[0].children[0].content
-    else { panic!("custom taxonomy must decode into a typed list") };
+    else {
+        panic!("custom taxonomy must decode into a typed list")
+    };
     assert_eq!(props.taxonomy_key.as_deref(), Some("genre_t02"));
     assert_eq!(props.term_id, Some(41));
     assert_eq!(props.category_id, None);
@@ -48,7 +50,10 @@ fn incompatible_or_incomplete_generic_pair_is_rejected_without_legacy_regression
                "category_id":7}),
     ] {
         let result = document(invalid).validate_for_save(&catalog, None);
-        assert!(result.is_err(), "invalid mixed or partial filter must not be saved");
+        assert!(
+            result.is_err(),
+            "invalid mixed or partial filter must not be saved"
+        );
     }
     for legacy in [
         json!({"type_key":"post", "category_id":7, "include_descendants":true}),

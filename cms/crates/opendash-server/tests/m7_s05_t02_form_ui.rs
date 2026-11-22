@@ -100,13 +100,88 @@ fn extract_hidden_value(html: &str, name: &str) -> Option<String> {
     Some(html[start..end].to_string())
 }
 
+// S03 public Home is selected from a published Page through Reading Settings.
+// Keep this setup through HTTP so the tests exercise publication and CAS.
+async fn create_s03_home(client: &Client, base: &str, cookie: &str, csrf: &str) -> i64 {
+    let created = client
+        .post(format!("{base}/api/admin/content-types/page/entries"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({"title":"S03 Home","slug":"s03-home","values":{"body":"Home"}}))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let text = created.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "create S03 Page: {text}");
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    let id = entry["id"].as_i64().unwrap();
+    let publish = client
+        .post(format!(
+            "{base}/api/admin/content-types/page/entries/{id}/publication"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(
+            "If-Match",
+            format!("\"v{}\"", entry["version"].as_i64().unwrap()),
+        )
+        .json(&json!({"status":"published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status().as_u16(), 200, "publish Home Page");
+    let reading = client
+        .get(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status().as_u16(), 200);
+    let token = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let selected = client
+        .put(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", token)
+        .json(&json!({"homepage_page_id":id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = selected.status();
+    let text = selected.text().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "save S03 Reading: {text}");
+    id
+}
+
+async fn save_s03_home_doc(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    page_id: i64,
+    version: i64,
+    document: &Value,
+) -> reqwest::Response {
+    client
+        .put(format!("{base}/api/admin/entries/page/{page_id}/builder"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .json(document)
+        .send()
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn builder_contact_form_preview_live_csp_and_nojs_submit() {
     let srv = spawn_server().await;
-    let client = Client::builder()
-        .redirect(Policy::none())
-        .build()
-        .unwrap();
+    let client = Client::builder().redirect(Policy::none()).build().unwrap();
     let (cookie, csrf) = setup_admin(&client, &srv.base_url).await;
 
     // 1. Create a contact form
@@ -158,9 +233,14 @@ async fn builder_contact_form_preview_live_csp_and_nojs_submit() {
         }]
     });
 
+    let home_id = create_s03_home(&client, &srv.base_url, &cookie, &csrf).await;
+
     // Preview with unsaved draft: must be inert (<fieldset disabled>, no action, no nonce)
     let preview_resp = client
-        .post(format!("{}/api/admin/builder/homepage/preview", srv.base_url))
+        .post(format!(
+            "{}/api/admin/entries/page/{home_id}/builder/preview",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&doc)
@@ -177,7 +257,11 @@ async fn builder_contact_form_preview_live_csp_and_nojs_submit() {
     assert!(!preview_html.contains("name=\"nonce\""));
 
     // Before Save, public / still has no active contact form & CSP has form-action 'none'
-    let home_before = client.get(format!("{}/", srv.base_url)).send().await.unwrap();
+    let home_before = client
+        .get(format!("{}/", srv.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(home_before.status(), 200);
     let csp_before = home_before
         .headers()
@@ -187,34 +271,16 @@ async fn builder_contact_form_preview_live_csp_and_nojs_submit() {
         .unwrap();
     assert!(csp_before.contains("form-action 'none'"));
 
-    // 3. Save homepage draft + publish
-    let hp_get = client
-        .get(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header(header::COOKIE, &cookie)
-        .send()
-        .await
-        .unwrap();
-    let hp_etag = hp_get
-        .headers()
-        .get(header::ETAG)
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
-
-    let hp_put = client
-        .put(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header(header::COOKIE, &cookie)
-        .header("X-CSRF-Token", &csrf)
-        .header(header::IF_MATCH, hp_etag)
-        .json(&doc)
-        .send()
-        .await
-        .unwrap();
+    // 3. Save the published Reading Page's own Builder document.
+    let hp_put = save_s03_home_doc(&client, &srv.base_url, &cookie, &csrf, home_id, 2, &doc).await;
     assert_eq!(hp_put.status(), 200);
 
     // 4. Live homepage now renders active <form> with nonce and CSP form-action 'self'
-    let home_live = client.get(format!("{}/", srv.base_url)).send().await.unwrap();
+    let home_live = client
+        .get(format!("{}/", srv.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(home_live.status(), 200);
     let csp_live = home_live
         .headers()
@@ -255,7 +321,10 @@ async fn builder_contact_form_preview_live_csp_and_nojs_submit() {
 
     // 6. Disable form -> homepage shows unavailable fallback and CSP reverts to form-action 'none'
     let upd_disabled = client
-        .put(format!("{}/api/admin/contact/forms/{form_id}", srv.base_url))
+        .put(format!(
+            "{}/api/admin/contact/forms/{form_id}",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::IF_MATCH, format!("\"v{form_ver}\""))
@@ -270,7 +339,11 @@ async fn builder_contact_form_preview_live_csp_and_nojs_submit() {
         .unwrap();
     assert_eq!(upd_disabled.status(), 200);
 
-    let home_disabled = client.get(format!("{}/", srv.base_url)).send().await.unwrap();
+    let home_disabled = client
+        .get(format!("{}/", srv.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(home_disabled.status(), 200);
     let csp_disabled = home_disabled
         .headers()

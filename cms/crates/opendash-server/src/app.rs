@@ -21,55 +21,50 @@ use crate::{
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
         builder::{
-            builder, homepage_get, homepage_preview, homepage_put, install, override_get,
-            override_preview, override_put, override_reset, overrides_list, page, preview,
-            registry, save, serve_asset,
+            builder, entry_builder_get, entry_builder_preview, entry_builder_put,
+            entry_builder_reset, page, preview, registry, save, serve_asset,
         },
         content::{
-            MAX_CONTENT_TYPE_JSON_BYTES, content_type_create, content_type_list,
-            content_type_update, content_entry_publication, content_entry_preview,
-            editor_layout_get, editor_layout_put,
-            effective_editor_config_get, field_group_create, field_group_delete,
+            MAX_CONTENT_TYPE_JSON_BYTES, content_entry_preview, content_entry_publication,
+            content_type_create, content_type_list, content_type_update, editor_layout_get,
+            editor_layout_put, effective_editor_config_get, field_group_create, field_group_delete,
             field_group_list, field_group_update,
         },
         dashboard::dashboard_get,
         entries::{
-            MAX_CONTENT_ENTRY_JSON_BYTES, entry_create, entry_delete, entry_get, entry_list,
-            entry_table_get,
-            entry_composite_create, entry_composite_update,
-            entry_update,
+            MAX_CONTENT_ENTRY_JSON_BYTES, entry_composite_create, entry_composite_update,
+            entry_create, entry_delete, entry_get, entry_list, entry_table_get, entry_update,
         },
+        import::{import_dry_run, import_execute},
         media::{
-            media_get, media_list, media_original, media_thumbnail, media_upload,
+            media_delete, media_get, media_list, media_original, media_thumbnail, media_upload,
             media_video_upload,
         },
         menu::{
             MAX_MENU_JSON_BYTES, menu_slots_get, menu_slots_put, menus_create, menus_delete,
             menus_get, menus_list, menus_preview, menus_put,
         },
-        import::{import_dry_run, import_execute},
         plugin::{
-            MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES, plugin_disable, plugin_enable,
-            plugin_action, plugin_install, plugin_list, plugin_run, plugin_ui_schema,
+            MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES, plugin_action, plugin_disable,
+            plugin_enable, plugin_install, plugin_list, plugin_run, plugin_ui_schema,
         },
         public::public_page,
-        public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
+        public_content::{media_file, media_thumb},
         settings::{
-            general_get, general_put, public_get, public_put, theme_options_get,
-            theme_options_put, timezones_get, permalinks_get, permalinks_put,
+            general_get, general_put, permalinks_get, permalinks_put, public_get, public_put,
+            reading_get, reading_put, theme_options_get, theme_options_put, timezones_get,
         },
         taxonomy::{
-            MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_delete, taxonomy_get, taxonomy_list,
-            taxonomy_patch, taxonomy_terms_resolve, taxonomy_eligibility_list,
-            taxonomy_eligibility_put, taxonomy_eligibility_effective,
-            taxonomy_definitions_list, taxonomy_definitions_create, taxonomy_definitions_get,
-            taxonomy_definitions_patch, taxonomy_definitions_delete,
+            MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_definitions_create,
+            taxonomy_definitions_delete, taxonomy_definitions_get, taxonomy_definitions_list,
+            taxonomy_definitions_patch, taxonomy_delete, taxonomy_eligibility_effective,
+            taxonomy_eligibility_list, taxonomy_eligibility_put, taxonomy_get, taxonomy_list,
+            taxonomy_patch, taxonomy_terms_resolve,
         },
         themes::{ThemeStoreRoot, theme_activate, theme_asset, theme_install, theme_list},
         users::{
             max_users_json_bytes, profile_get, profile_put, user_create, user_delete, user_list,
-            user_patch,
-            user_reset_password,
+            user_patch, user_reset_password,
         },
     },
     theme::MAX_ZIP_BYTES,
@@ -81,9 +76,14 @@ pub struct AppState {
     pub plugin_manager: Arc<PluginManager>,
     pub hooks: Arc<HookDispatcher>,
     pub media_store: Arc<MediaStore>,
-    pub content_registry: Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>,
+    pub content_registry: Arc<
+        tokio::sync::RwLock<
+            opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>,
+        >,
+    >,
     pub coordinator: Arc<crate::operations::SiteCoordinator>,
     pub backup_registry: Arc<crate::backup::BackupRuntimeRegistry>,
+    pub block_template_cache: Arc<crate::page::BlockTemplateCache>,
     pub recovery: crate::config::RecoveryState,
     pub runtime_config: crate::config::RuntimeConfigV1,
 }
@@ -118,7 +118,19 @@ impl axum::extract::FromRef<AppState> for Arc<crate::operations::SiteCoordinator
     }
 }
 
-impl axum::extract::FromRef<AppState> for Arc<tokio::sync::RwLock<opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>> {
+impl axum::extract::FromRef<AppState> for Arc<crate::page::BlockTemplateCache> {
+    fn from_ref(state: &AppState) -> Self {
+        state.block_template_cache.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState>
+    for Arc<
+        tokio::sync::RwLock<
+            opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>,
+        >,
+    >
+{
     fn from_ref(state: &AppState) -> Self {
         state.content_registry.clone()
     }
@@ -144,7 +156,11 @@ pub fn build_router_with_themes_root(
         .map(|p| p.smtp_secrets_dir())
         .unwrap_or_else(|_| PathBuf::from("database/secrets/smtp"));
     let secret_store = crate::secrets::SecretStore::new(smtp_secrets_dir);
-    let smtp_service = crate::smtp::SmtpService::with_recovery_state(state.db.clone(), secret_store.clone(), state.recovery.clone());
+    let smtp_service = crate::smtp::SmtpService::with_recovery_state(
+        state.db.clone(),
+        secret_store.clone(),
+        state.recovery.clone(),
+    );
     let recovery_for_mw = state.recovery.clone();
     let trusted_host = state.runtime_config.trusted_host();
     let trusted_origin = state.runtime_config.trusted_origin_normalized();
@@ -152,10 +168,6 @@ pub fn build_router_with_themes_root(
 
     Router::new()
         .route("/", get(public_page))
-        .route("/content/{type_key}", get(archive))
-        .route("/content/{type_key}/{slug}", get(single))
-        .route("/taxonomy/category/{slug}", get(category_archive))
-        .route("/taxonomy/tag/{slug}", get(tag_archive))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))
@@ -204,57 +216,65 @@ pub fn build_router_with_themes_root(
         .route("/api/admin/dashboard", get(dashboard_get))
         .route("/api/admin/library", get(crate::routes::themes::local_library_list))
         .route(
-            "/api/admin/library/apply/{role}",
-            post(crate::routes::themes::local_library_apply).layer(DefaultBodyLimit::max(4096)),
-        )
-        .route(
-            "/api/admin/sections",
-            get(crate::routes::sections::section_list)
-                .post(crate::routes::sections::section_create)
+            "/api/admin/patterns",
+            get(crate::routes::patterns::pattern_list)
+                .post(crate::routes::patterns::pattern_create)
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route(
-            "/api/admin/sections/{id}",
-            get(crate::routes::sections::section_get)
-                .put(crate::routes::sections::section_update)
-                .delete(crate::routes::sections::section_delete)
+            "/api/admin/patterns/{id}",
+            get(crate::routes::patterns::pattern_get)
+                .put(crate::routes::patterns::pattern_update)
+                .delete(crate::routes::patterns::pattern_delete)
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route(
-            "/api/admin/sections/{id}/document",
-            get(crate::routes::sections::section_document_get)
-                .put(crate::routes::sections::section_document_put)
+            "/api/admin/patterns/library",
+            get(crate::routes::patterns::pattern_library_list),
+        )
+        .route(
+            "/api/admin/patterns/library/theme/{key}",
+            get(crate::routes::patterns::pattern_library_theme_get),
+        )
+        .route(
+            "/api/admin/entries/{type_key}/{id}/builder",
+            get(entry_builder_get)
+                .put(entry_builder_put)
                 .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
         )
         .route(
-            "/api/admin/sections/{id}/document/preview",
-            post(crate::routes::sections::section_document_preview)
+            "/api/admin/entries/{type_key}/{id}/builder/preview",
+            post(entry_builder_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/entries/{type_key}/{id}/builder/reset",
+            post(entry_builder_reset).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/template-overrides",
+            get(crate::routes::themes::template_overrides_list)
+                .put(crate::routes::themes::template_overrides_put)
                 .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
         )
         .route(
-            "/api/admin/builder/homepage",
-            get(homepage_get)
-                .put(homepage_put)
-                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+            "/api/admin/template-overrides/preview",
+            post(crate::routes::themes::template_overrides_preview)
+                .layer(DefaultBodyLimit::max(2 * MAX_BUILDER_JSON_BYTES)),
         )
         .route(
-            "/api/admin/builder/homepage/preview",
-            post(homepage_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
-        )
-        .route("/api/admin/builder/overrides", get(overrides_list))
-        .route(
-            "/api/admin/builder/overrides/{role}",
-            get(override_get)
-                .put(override_put)
-                .layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+            "/api/admin/template-overrides/{id}/reset",
+            post(crate::routes::themes::template_overrides_reset)
+                .layer(DefaultBodyLimit::max(4096)),
         )
         .route(
-            "/api/admin/builder/overrides/{role}/preview",
-            post(override_preview).layer(DefaultBodyLimit::max(MAX_BUILDER_JSON_BYTES)),
+            "/api/admin/studio/targets",
+            get(crate::routes::themes::studio_targets),
         )
         .route(
-            "/api/admin/builder/overrides/{role}/reset",
-            post(override_reset).layer(DefaultBodyLimit::max(4096)),
+            "/api/admin/studio/preview",
+            post(crate::routes::themes::studio_preview).layer(DefaultBodyLimit::max(
+                crate::routes::themes::MAX_STUDIO_PREVIEW_JSON_BYTES,
+            )),
         )
         .route(
             "/api/admin/settings/general",
@@ -266,6 +286,12 @@ pub fn build_router_with_themes_root(
             "/api/admin/settings/public",
             get(public_get)
                 .put(public_put)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/settings/reading",
+            get(reading_get)
+                .put(reading_put)
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/settings/timezones", get(timezones_get))
@@ -418,6 +444,7 @@ pub fn build_router_with_themes_root(
             "/api/admin/themes/active",
             axum::routing::put(theme_activate).layer(DefaultBodyLimit::max(4096)),
         )
+        .route("/api/admin/themes/active/layouts", get(crate::routes::themes::active_layouts))
         .route(
             "/api/themes/{theme_id}/options",
             get(theme_options_get)
@@ -560,7 +587,7 @@ pub fn build_router_with_themes_root(
         )
         .route(
             "/api/admin/media/{id}",
-            get(media_get).delete(crate::routes::sections::media_delete_section_aware),
+            get(media_get).delete(media_delete),
         )
         .route("/api/admin/media/{id}/file", get(media_original))
         .route("/api/admin/media/{id}/thumbnail", get(media_thumbnail))
@@ -598,7 +625,6 @@ pub fn build_router_with_themes_root(
         )
         .route("/registry", get(registry))
         .route("/page", get(page))
-        .route("/theme", post(install))
         .route("/preview", post(preview))
         .route("/save", post(save))
         .layer(DefaultBodyLimit::max(MAX_ZIP_BYTES))

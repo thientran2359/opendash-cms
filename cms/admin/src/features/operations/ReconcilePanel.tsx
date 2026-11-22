@@ -7,6 +7,7 @@ import {
   type OperationsDiagnostics,
   type ReconcilePlan,
 } from '../../api/operations.ts';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface ReconcilePanelProps {
   csrfToken: string | null;
@@ -88,67 +89,53 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
   };
 
   return (
-    <section className="mt-8 border-t border-slate-200 pt-6">
+    <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-slate-900">Đối soát lưu trữ &amp; Vùng cách ly</h3>
-          <p className="text-sm text-slate-500">
+          <h2 className="text-base font-semibold text-zinc-950">Đối soát lưu trữ &amp; Vùng cách ly</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">
             Quét thủ công tệp mồ côi (&ge; 24 giờ), tệp thiếu, secret mồ côi và dọn vùng cách ly (&ge; 7 ngày).
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={busy || !csrfToken}
-            onClick={handlePlan}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
+          <AdminButton variant="secondary" size="sm" disabled={busy || !csrfToken} onClick={handlePlan}>
             Quét &amp; Lập kế hoạch
-          </button>
-          <button
-            type="button"
+          </AdminButton>
+          <AdminButton
+            variant="primary"
+            size="sm"
             disabled={busy || !csrfToken || !plan || plan.orphan_candidates.length === 0}
             onClick={handleApply}
-            className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50"
           >
             Áp dụng cách ly
-          </button>
-          <button
-            type="button"
-            disabled={busy || !csrfToken}
-            onClick={handlePurge}
-            className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-50"
-          >
+          </AdminButton>
+          <AdminButton variant="danger" size="sm" disabled={busy || !csrfToken} onClick={handlePurge}>
             Dọn cách ly (&ge; 7 ngày)
-          </button>
+          </AdminButton>
         </div>
       </div>
 
-      {notice && (
-        <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-          {notice}
-        </div>
-      )}
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
 
       {diagnostics && (
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4 text-sm">
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="text-slate-500">Generation</div>
-            <div className="font-semibold text-slate-900">{diagnostics.maintenance_generation}</div>
+        <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
+            <div className="text-xs font-medium text-zinc-500">Generation</div>
+            <div className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">{diagnostics.maintenance_generation}</div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="text-slate-500">Xóa đang chờ</div>
-            <div className="font-semibold text-slate-900">{diagnostics.pending_delete_jobs.length}</div>
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
+            <div className="text-xs font-medium text-zinc-500">Xóa đang chờ</div>
+            <div className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">{diagnostics.pending_delete_jobs.length}</div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="text-slate-500">Cách ly (đủ 7d / giữ lại)</div>
-            <div className="font-semibold text-slate-900">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
+            <div className="text-xs font-medium text-zinc-500">Cách ly (đủ 7d / giữ lại)</div>
+            <div className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">
               {diagnostics.purgeable_quarantine_dirs} / {diagnostics.retained_quarantine_dirs}
             </div>
           </div>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="text-slate-500">Secret mồ côi (đủ 7d)</div>
-            <div className="font-semibold text-slate-900">
+          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
+            <div className="text-xs font-medium text-zinc-500">Secret mồ côi (đủ 7d)</div>
+            <div className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">
               {diagnostics.orphan_secret_blobs} ({diagnostics.purgeable_secret_blobs})
             </div>
           </div>
@@ -156,13 +143,11 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
       )}
 
       {plan && (
-        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <div>
-            Kế hoạch <code>{plan.plan_id.slice(0, 12)}...</code> — Quét {plan.scanned_records} bản ghi,{' '}
-            {plan.scanned_files} tệp; thiếu file: {plan.missing_canonical_files.length}; mồ côi &ge; 24h:{' '}
-            {plan.orphan_candidates.length}; mồ côi mới (&lt; 24h): {plan.recent_orphans_under_grace}.
-          </div>
-        </div>
+        <AdminAlert tone="warning">
+          Kế hoạch <code className="font-mono text-xs">{plan.plan_id.slice(0, 12)}...</code> — Quét {plan.scanned_records} bản ghi,{' '}
+          {plan.scanned_files} tệp; thiếu file: {plan.missing_canonical_files.length}; mồ côi &ge; 24h:{' '}
+          {plan.orphan_candidates.length}; mồ côi mới (&lt; 24h): {plan.recent_orphans_under_grace}.
+        </AdminAlert>
       )}
     </section>
   );

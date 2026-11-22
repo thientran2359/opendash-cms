@@ -232,7 +232,6 @@ impl HookDispatcher {
         DispatchReport { envelope, outcomes }
     }
 
-
     pub async fn dispatch_content_before_save(
         &self,
         type_key: &str,
@@ -438,15 +437,15 @@ impl HookDispatcher {
                     } else {
                         let remaining = CONTENT_HOOK_PHASE_BUDGET.saturating_sub(started.elapsed());
                         let mut plugin_env = envelope.clone();
-                    self.plugin_manager
-                        .filter_content_payload_for_plugin(
-                            &plugin_id,
-                            type_key,
-                            actor_role,
-                            &mut plugin_env.payload,
-                        )
-                        .await;
-                    let env_val = serde_json::to_value(&plugin_env).expect("JSON envelope");
+                        self.plugin_manager
+                            .filter_content_payload_for_plugin(
+                                &plugin_id,
+                                type_key,
+                                actor_role,
+                                &mut plugin_env.payload,
+                            )
+                            .await;
+                        let env_val = serde_json::to_value(&plugin_env).expect("JSON envelope");
                         self.plugin_manager
                             .run_plugin_with_mode(
                                 &plugin_id,

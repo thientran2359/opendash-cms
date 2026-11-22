@@ -1,5 +1,3 @@
-use std::collections::{BTreeMap, HashSet};
-
 use axum::{
     Extension,
     extract::{RawQuery, State},
@@ -8,138 +6,50 @@ use axum::{
 };
 use sqlx::SqlitePool;
 
-use opendash_core::id::valid_package_id;
-
 use crate::{
-    content_render::{self, SiteContext},
-    error::ApiResult,
-    page::{render_builder_with_lists_and_forms, render_legacy_state},
-    public_context::{CanonicalUrlBuilder, PublicRequestContext},
+    content_render,
+    error::{ApiError, ApiResult},
+    public_context::validate_single_query,
     routes::themes::ThemeStoreRoot,
-    storage::{builder, overrides, settings, theme as theme_storage},
-    theme,
+    storage::{
+        public_content,
+        seo::{self, ReadingPageState},
+    },
 };
-
-/// Malformed, repeated or unknown list-page parameters cannot become SQL or
-/// survive in canonical pagination links. Only a single valid integer 1..100
-/// for an eligible node ID counts; otherwise that list starts at page 1.
-fn parsed_list_pages(raw: Option<&str>) -> BTreeMap<String, i64> {
-    let mut pages = BTreeMap::new();
-    let mut seen = HashSet::new();
-    let mut repeated = HashSet::new();
-    for (key, value) in url::form_urlencoded::parse(raw.unwrap_or("").as_bytes()) {
-        let Some(id) = key.strip_prefix("list_page_") else {
-            continue;
-        };
-        if !valid_package_id(id) {
-            continue;
-        }
-        if !seen.insert(id.to_string()) {
-            repeated.insert(id.to_string());
-            pages.remove(id);
-            continue;
-        }
-        let parsed = value.parse::<i64>().ok().filter(|p| (1..=100).contains(p));
-        if let Some(page) = parsed.filter(|p| value.as_ref() == p.to_string()) {
-            pages.insert(id.to_string(), page);
-        }
-    }
-    pages.retain(|id, _| !repeated.contains(id));
-    pages
-}
 
 pub async fn public_page(
     State(db): State<SqlitePool>,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     RawQuery(raw): RawQuery,
 ) -> ApiResult<Response> {
-    let _context = PublicRequestContext::Home {
-        canonical_path: CanonicalUrlBuilder::home().to_owned(),
-    };
-    let active_v2 = match themes_root {
-        Some(Extension(root)) => theme_storage::load_active_v2_role_templates(&db, &root.0).await?,
-        None => None,
-    };
-    // One SQLite read snapshot for source, document, active theme and block
-    // templates. Do not split them across old / and new Builder reads.
-    let (state, bindings, lists) =
-        builder::read_public_resolved(&db, &parsed_list_pages(raw.as_deref())).await?;
-    if let Some(document) = &state.saved {
-        let forms = builder::resolve_contact_forms(&db, document).await?;
-        let rendered_layout_res =
-            render_builder_with_lists_and_forms(&state, document, false, &bindings, &lists, &forms)?;
-        let allow_form_self = rendered_layout_res.has_active_contact_form;
-        let mut html = rendered_layout_res.html;
-        let site = settings::get_general(&db).await?;
-        let theme_opts = settings::get_active_public_theme_options(&db).await?;
-        let site_ctx = SiteContext {
-            title: &site.site_title,
-            tagline: &site.tagline,
-        };
-        let (header, footer) = overrides::resolve_and_render_header_footer(
-            &db,
-            active_v2.as_ref(),
-            &site_ctx,
-            &theme_opts,
-            None,
-        )
-        .await?;
-        let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
-        html = content_render::compose_document_with_seo(
-            header.as_deref(),
-            &html,
-            footer.as_deref(),
-            &seo_view,
-        )?;
-        return Ok(rendered_layout_with_form_csp(html, allow_form_self));
-    }
-    if let Some(v2) = &active_v2 {
-        if let Some(home_tpl) = v2.roles.get("home") {
-            let site = settings::get_general(&db).await?;
-            let theme_opts = settings::get_active_public_theme_options(&db).await?;
-            let site_ctx = SiteContext {
-                title: &site.site_title,
-                tagline: &site.tagline,
+    validate_single_query(raw.as_deref()).map_err(ApiError::bad_request)?;
+    match seo::reading_page_state(&db, true).await? {
+        ReadingPageState::Published(page_id) => {
+            // Re-check publication in the content snapshot. A stale Reading
+            // assignment must never expose a draft/private Page.
+            let Some(page) = public_content::get_published_by_id(&db, page_id).await? else {
+                return super::public_content::render_not_found_response(&db, themes_root).await;
             };
-            if let Ok(home_html) = theme::render_content(home_tpl, &serde_json::json!({ "site": site_ctx, "options": theme_opts })) {
-                let (header, footer) = overrides::resolve_and_render_header_footer(
-                    &db,
-                    Some(v2),
-                    &site_ctx,
-                    &theme_opts,
-                    None,
-                )
-                .await?;
-                let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
-                let html = content_render::compose_document_with_seo(header.as_deref(), &home_html, footer.as_deref(), &seo_view)?;
-                return Ok(rendered_layout_with_form_csp(html, false));
+            if page.content_type_key != "page" {
+                return super::public_content::render_not_found_response(&db, themes_root).await;
             }
+            super::public_content::render_homepage_entry_response(&db, themes_root, page).await
         }
-    }
-    let raw_html = match render_legacy_state(&state)? {
-        Some(snapshot) => snapshot.html,
-        None => "<p>Chưa lưu block.</p>".into(),
-    };
-    let seo_view = crate::storage::seo::build_home_seo_view(&db).await?;
-    let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
-    Ok(rendered_layout(html))
-}
-
-#[cfg(test)]
-mod list_query_tests {
-    use super::*;
-
-    #[test]
-    fn duplicate_invalid_and_noncanonical_pages_default_to_one() {
-        let parsed = parsed_list_pages(Some(
-            "list_page_list-a=2&list_page_list-b=4&list_page_list-a=3&list_page_list-c=02&list_page_list-d=101&list_page_list-e=-1&list_page_invalid%2Fnode=8&x=anything",
-        ));
-        assert_eq!(parsed.get("list-a"), None);
-        assert_eq!(parsed.get("list-b"), Some(&4));
-        assert!(!parsed.contains_key("list-c"));
-        assert!(!parsed.contains_key("list-d"));
-        assert!(!parsed.contains_key("list-e"));
-        assert_eq!(parsed.len(), 1);
+        ReadingPageState::Missing => {
+            super::public_content::render_not_found_response(&db, themes_root).await
+        }
+        ReadingPageState::Unconfigured => {
+            // No implicit Page selection or migration of the old Builder layout.
+            let mut view = seo::build_home_seo_view(&db).await?;
+            view.robots = "noindex,nofollow".to_owned();
+            let html = content_render::compose_document_with_seo(
+                None,
+                "<main><p>Chưa cấu hình trang chủ.</p></main>",
+                None,
+                &view,
+            )?;
+            Ok(rendered_layout(html))
+        }
     }
 }
 

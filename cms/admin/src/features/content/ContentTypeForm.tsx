@@ -1,16 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  CheckboxField,
-  SelectField,
-  TextAreaField,
-  TextField,
-} from '../../components/FormPrimitives.tsx';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import {
   CONTENT_FIELD_TYPES,
   ContentFieldDefinition,
   ContentFieldType,
 } from './types.ts';
 import type { ContentPublicationPolicy, ContentSupport, ContentTypeDefinitionWithSettings } from '../../api/content.ts';
+
+const INPUT_CLASS =
+  'h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50';
+const SELECT_CLASS =
+  'h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50';
 
 export interface DraftField {
   id: number;
@@ -41,7 +41,8 @@ export const blankContentTypeCreationDraft = (): ContentTypeCreationDraft => ({
 
 export const isContentTypeCreationDraftDirty = (draft: ContentTypeCreationDraft): boolean =>
   Boolean(draft.key || draft.label || draft.fields.length || !draft.isPublic || !draft.hasArchive
-    || draft.publication !== 'immediate' || draft.supports.length !== 2);
+    || draft.publication !== 'immediate' || draft.supports.length !== 2
+    || !draft.supports.includes('editor') || !draft.supports.includes('featured_image'));
 
 const copyDraft = (draft: ContentTypeCreationDraft): ContentTypeCreationDraft => ({
   ...draft, fields: draft.fields.map(field => ({ ...field })), supports: [...draft.supports],
@@ -167,102 +168,202 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
   };
 
   return (
-    <form onSubmit={submit} className="content-schema-form">
-      <h3>Đăng ký loại nội dung mới</h3>
-      <p className="content-help">Chỉ quản trị viên được khai báo CPT. Có thể chỉnh sửa nhãn và hành vi trong phần cài đặt loại nội dung.</p>
-      <div className="content-form-grid">
-        <TextField id="content-type-key" name="key" label="Khóa CPT *" value={key} disabled={disabled} maxLength={64} onChange={value => update({ key: value })} placeholder="vi_du: portfolio_item" />
-        <TextField id="content-type-label" name="label" label="Tên hiển thị *" value={label} disabled={disabled} maxLength={100} onChange={value => update({ label: value })} placeholder="Dự án" />
+    <form onSubmit={submit} className="space-y-4">
+      <div>
+        <h3 className="text-base font-semibold text-zinc-950">Đăng ký loại nội dung mới</h3>
+        <p className="mt-0.5 text-xs text-zinc-600">Chỉ quản trị viên được khai báo CPT. Có thể chỉnh sửa nhãn và hành vi trong phần cài đặt loại nội dung.</p>
       </div>
-      <fieldset className="space-y-3 rounded-lg border border-slate-200 p-3">
-        <legend className="px-1 font-semibold">Hành vi loại nội dung</legend>
-        <CheckboxField id="new-cpt-public" label="Công khai bài viết (public)" checked={isPublic}
-          disabled={disabled} onChange={value => update({ isPublic: value })} />
-        <CheckboxField id="new-cpt-archive" label="Cho phép trang danh sách (has_archive)"
-          checked={hasArchive} disabled={disabled} onChange={value => update({ hasArchive: value })} />
-        <SelectField id="new-cpt-publication" label="Cơ chế xuất bản"
-          value={publication} disabled={disabled}
-          options={[
-            { value: 'immediate', label: 'Lưu là xuất bản (immediate)' },
-            { value: 'draft_publish', label: 'Lưu nháp / Xuất bản (draft_publish)' },
-          ]}
-          onChange={event => update({ publication: event.target.value as ContentPublicationPolicy })} />
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">Thành phần màn hình chỉnh sửa</legend>
-          <CheckboxField id="new-cpt-editor" label="Trình soạn thảo (editor)"
-            checked={supports.includes('editor')} disabled={disabled}
-            onChange={checked => toggleSupport('editor', checked)} />
-          <CheckboxField id="new-cpt-featured-image" label="Ảnh đại diện (featured_image)"
-            checked={supports.includes('featured_image')} disabled={disabled}
-            onChange={checked => toggleSupport('featured_image', checked)} />
-          <p className="text-xs text-slate-600">Tắt thành phần chỉ ẩn quyền chỉnh sửa, không xóa nội dung hoặc ảnh đã lưu.</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label htmlFor="content-type-key" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Khóa CPT *</span>
+          <input
+            id="content-type-key"
+            name="key"
+            type="text"
+            className={INPUT_CLASS}
+            value={key}
+            disabled={disabled}
+            maxLength={64}
+            onChange={e => update({ key: e.target.value })}
+            placeholder="vi_du: portfolio_item"
+          />
+        </label>
+        <label htmlFor="content-type-label" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Tên hiển thị *</span>
+          <input
+            id="content-type-label"
+            name="label"
+            type="text"
+            className={INPUT_CLASS}
+            value={label}
+            disabled={disabled}
+            maxLength={100}
+            onChange={e => update({ label: e.target.value })}
+            placeholder="Dự án"
+          />
+        </label>
+      </div>
+      <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3.5">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">Hành vi loại nội dung</legend>
+        <label htmlFor="new-cpt-public" className="flex items-center gap-2 text-sm text-zinc-800">
+          <input
+            id="new-cpt-public"
+            type="checkbox"
+            checked={isPublic}
+            disabled={disabled}
+            onChange={e => update({ isPublic: e.target.checked })}
+          />
+          <span>Công khai bài viết (public)</span>
+        </label>
+        <label htmlFor="new-cpt-archive" className="flex items-center gap-2 text-sm text-zinc-800">
+          <input
+            id="new-cpt-archive"
+            type="checkbox"
+            checked={hasArchive}
+            disabled={disabled}
+            onChange={e => update({ hasArchive: e.target.checked })}
+          />
+          <span>Cho phép trang danh sách (has_archive)</span>
+        </label>
+        <label htmlFor="new-cpt-publication" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Cơ chế xuất bản</span>
+          <select
+            id="new-cpt-publication"
+            className={SELECT_CLASS}
+            value={publication}
+            disabled={disabled}
+            onChange={event => update({ publication: event.target.value as ContentPublicationPolicy })}
+          >
+            <option value="immediate">Lưu là xuất bản (immediate)</option>
+            <option value="draft_publish">Lưu nháp / Xuất bản (draft_publish)</option>
+          </select>
+        </label>
+        <fieldset className="space-y-2 border-t border-zinc-100 pt-2.5">
+          <legend className="text-xs font-semibold uppercase tracking-wide text-zinc-700">Thành phần màn hình chỉnh sửa</legend>
+          <label htmlFor="new-cpt-editor" className="flex items-center gap-2 text-sm text-zinc-800">
+            <input
+              id="new-cpt-editor"
+              type="checkbox"
+              checked={supports.includes('editor')}
+              disabled={disabled}
+              onChange={e => toggleSupport('editor', e.target.checked)}
+            />
+            <span>Trình soạn thảo (editor)</span>
+          </label>
+          <label htmlFor="new-cpt-featured-image" className="flex items-center gap-2 text-sm text-zinc-800">
+            <input
+              id="new-cpt-featured-image"
+              type="checkbox"
+              checked={supports.includes('featured_image')}
+              disabled={disabled}
+              onChange={e => toggleSupport('featured_image', e.target.checked)}
+            />
+            <span>Ảnh đại diện (featured_image)</span>
+          </label>
+          <label htmlFor="new-cpt-builder" className="flex items-center gap-2 text-sm text-zinc-800">
+            <input
+              id="new-cpt-builder"
+              type="checkbox"
+              checked={supports.includes('builder')}
+              disabled={disabled}
+              onChange={e => toggleSupport('builder', e.target.checked)}
+            />
+            <span>Visual Builder (builder)</span>
+          </label>
+          <p className="text-xs text-zinc-500">Bật Builder để thiết kế nội dung riêng từng bản ghi. Tắt thành phần giữ nguyên văn bản, ảnh và thiết kế đã lưu.</p>
         </fieldset>
       </fieldset>
-      <div className="content-section-heading">
-        <h4>Custom fields ({fields.length})</h4>
-        <button type="button" className="btn-secondary" onClick={addField} disabled={disabled || fields.length >= 64}>+ Thêm field</button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold text-zinc-900">Custom fields ({fields.length})</h4>
+        <AdminButton variant="secondary" size="sm" onClick={addField} disabled={disabled || fields.length >= 64}>
+          + Thêm field
+        </AdminButton>
       </div>
       {fields.map((field, index) => (
-        <fieldset key={field.id} className="content-schema-field">
-          <legend>Field {index + 1}</legend>
-          <div className="content-form-grid">
-            <TextField
-              id={`schema-field-key-${field.id}`}
-              name="key"
-              label="Khóa field *"
-              value={field.key}
-              disabled={disabled}
-              maxLength={64}
-              onChange={value => updateField(field.id, { key: value })}
-            />
-            <TextField
-              id={`schema-field-label-${field.id}`}
-              name="label"
-              label="Tên field *"
-              value={field.label}
-              disabled={disabled}
-              maxLength={100}
-              onChange={value => updateField(field.id, { label: value })}
-            />
-            <SelectField
-              id={`schema-field-type-${field.id}`}
-              label="Kiểu dữ liệu"
-              value={field.type}
-              options={CONTENT_FIELD_TYPES}
-              disabled={disabled}
-              onChange={event => updateField(field.id, { type: event.target.value as ContentFieldType })}
-            />
-            <CheckboxField
-              id={`schema-field-required-${field.id}`}
-              label="Bắt buộc"
-              checked={field.required}
-              disabled={disabled}
-              onChange={required => updateField(field.id, { required })}
-            />
+        <fieldset key={field.id} className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3.5">
+          <legend className="px-1 text-xs font-semibold text-zinc-700">Field {index + 1}</legend>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label htmlFor={`schema-field-key-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+              <span>Khóa field *</span>
+              <input
+                id={`schema-field-key-${field.id}`}
+                name="key"
+                type="text"
+                className={INPUT_CLASS}
+                value={field.key}
+                disabled={disabled}
+                maxLength={64}
+                onChange={e => updateField(field.id, { key: e.target.value })}
+              />
+            </label>
+            <label htmlFor={`schema-field-label-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+              <span>Tên field *</span>
+              <input
+                id={`schema-field-label-${field.id}`}
+                name="label"
+                type="text"
+                className={INPUT_CLASS}
+                value={field.label}
+                disabled={disabled}
+                maxLength={100}
+                onChange={e => updateField(field.id, { label: e.target.value })}
+              />
+            </label>
+            <label htmlFor={`schema-field-type-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+              <span>Kiểu dữ liệu</span>
+              <select
+                id={`schema-field-type-${field.id}`}
+                className={SELECT_CLASS}
+                value={field.type}
+                disabled={disabled}
+                onChange={event => updateField(field.id, { type: event.target.value as ContentFieldType })}
+              >
+                {CONTENT_FIELD_TYPES.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
+            <label htmlFor={`schema-field-required-${field.id}`} className="flex items-center gap-2 self-end pb-2 text-sm text-zinc-800">
+              <input
+                id={`schema-field-required-${field.id}`}
+                type="checkbox"
+                checked={field.required}
+                disabled={disabled}
+                onChange={e => updateField(field.id, { required: e.target.checked })}
+              />
+              <span>Bắt buộc</span>
+            </label>
           </div>
           {field.type === 'select' && (
-            <TextAreaField
-              id={`schema-field-options-${field.id}`}
-              label="Các lựa chọn * (mỗi dòng: giá_trị|Nhãn)"
-              value={field.optionsText}
-              disabled={disabled}
-              rows={4}
-              placeholder={'draft|Bản nháp\npublished|Đã đăng'}
-              onChange={optionsText => updateField(field.id, { optionsText })}
-            />
+            <label htmlFor={`schema-field-options-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+              <span>Các lựa chọn * (mỗi dòng: giá_trị|Nhãn)</span>
+              <textarea
+                id={`schema-field-options-${field.id}`}
+                className="w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50"
+                value={field.optionsText}
+                disabled={disabled}
+                rows={4}
+                placeholder={'draft|Bản nháp\npublished|Đã đăng'}
+                onChange={e => updateField(field.id, { optionsText: e.target.value })}
+              />
+            </label>
           )}
-          <button
-            type="button"
-            className="btn-secondary"
+          <AdminButton
+            variant="danger"
+            size="sm"
             onClick={() => update({ fields: draftRef.current.fields.filter(item => item.id !== field.id) })}
             disabled={disabled}
           >
             Bỏ field
-          </button>
+          </AdminButton>
         </fieldset>
       ))}
-      {error && <p className="content-alert error" role="alert">{error}</p>}
-      <button type="submit" disabled={disabled}>Tạo loại nội dung</button>
+      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      <div>
+        <AdminButton type="submit" variant="primary" size="md" disabled={disabled}>
+          Tạo loại nội dung
+        </AdminButton>
+      </div>
     </form>
   );
 };

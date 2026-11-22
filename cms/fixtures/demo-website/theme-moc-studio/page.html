@@ -1,6 +1,7 @@
 <main class="ms-main">
   <article class="builder-section">
     <h1>{{ entry.title }}</h1>
+    <div class="ms-content">{{ od_content() }}</div>
     <dl class="ms-meta-dl">
       {% for field in entry.fields %}
         {% if field.text or field.image_url or field.gallery_urls %}

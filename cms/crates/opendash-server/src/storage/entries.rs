@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use opendash_core::content::{
-    ContentEntryInput, ContentTypeDefinition, ContentTypeSettings, ContentPublication,
-    ContentSupport, EffectiveContentSchema, EffectiveFieldStatus,
-    FieldRole, PatchField, deserialize_patch_field,
+    ContentEntryInput, ContentMode, ContentPublication, ContentSupport, ContentTypeDefinition,
+    ContentTypeSettings, EffectiveContentSchema, EffectiveFieldStatus, FieldRole, PatchField,
+    deserialize_patch_field,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -16,12 +16,12 @@ use crate::{
     error::{ApiError, ApiResult},
 };
 
-/// Section is a separate, strictly private canonical entry protocol. Generic
+/// Pattern is a separate, strictly private canonical entry protocol. Generic
 /// content writes (including composite field/layout hooks) may not mutate it.
-fn forbid_generic_section_write(type_key: &str) -> ApiResult<()> {
-    if type_key == "section" {
+fn forbid_generic_pattern_write(type_key: &str) -> ApiResult<()> {
+    if type_key == "pattern" {
         Err(ApiError::forbidden(
-            "Section chỉ được sửa qua API riêng tư /api/admin/sections.",
+            "Pattern chỉ được sửa qua API riêng tư /api/admin/patterns.",
         ))
     } else {
         Ok(())
@@ -38,17 +38,164 @@ fn verify_supported_values(
     if !matches!(type_key, "post" | "page") {
         return Ok(());
     }
-    for (key, feature) in [
-        ("body", ContentSupport::Editor),
-        ("featured_image", ContentSupport::FeaturedImage),
+    if values.contains_key("body")
+        && !(settings.supports(ContentSupport::Editor)
+            || settings.supports(ContentSupport::Builder))
+    {
+        return Err(ApiError::unprocessable(
+            "Không thể chỉnh sửa 'body' khi tính năng này bị tắt.",
+        ));
+    }
+    if values.contains_key("featured_image") && !settings.supports(ContentSupport::FeaturedImage) {
+        return Err(ApiError::unprocessable(
+            "Không thể chỉnh sửa 'featured_image' khi tính năng này bị tắt.",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) async fn sync_entry_body_refs_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    entry_id: i64,
+    schema: &EffectiveContentSchema,
+    values: &BTreeMap<String, Value>,
+    previous_body: Option<&str>,
+) -> ApiResult<()> {
+    if matches!(schema.base.descriptor.key.as_str(), "pattern" | "section") {
+        return Ok(());
+    }
+    sqlx::query("DELETE FROM entry_pattern_refs WHERE source_entry_id = ?")
+        .bind(entry_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("DELETE FROM entry_builder_media_refs WHERE entry_id = ?")
+        .bind(entry_id)
+        .execute(&mut *conn)
+        .await?;
+
+    let Some(body_field) = schema.effective_fields.get("body") else {
+        return Ok(());
+    };
+    if body_field.definition.field_type != opendash_core::content::ContentFieldType::RichText {
+        return Ok(());
+    }
+    let Some(raw_body) = values.get("body").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    if !opendash_core::builder_blocks::contains_blocks(raw_body) {
+        return Ok(());
+    }
+
+    let refs = opendash_core::builder_blocks::extract_block_refs_lenient(raw_body);
+    for id in refs.image_ids.iter().chain(refs.poster_image_ids.iter()) {
+        if !crate::storage::media::valid_media_id(id) {
+            return Err(ApiError::unprocessable(
+                "ID ảnh trong comment block không hợp lệ.",
+            ));
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')",
+        )
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists == 0 {
+            return Err(ApiError::unprocessable(
+                "Ảnh tham chiếu trong comment block không tồn tại trong Media Library.",
+            ));
+        }
+    }
+    for id in &refs.video_ids {
+        if !crate::storage::media::valid_media_id(id) {
+            return Err(ApiError::unprocessable(
+                "ID video trong comment block không hợp lệ.",
+            ));
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'video' AND lifecycle_state = 'active')",
+        )
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists == 0 {
+            return Err(ApiError::unprocessable(
+                "Video tham chiếu trong comment block không tồn tại trong Media Library.",
+            ));
+        }
+    }
+    if refs.pattern_ids.len() > 16 {
+        return Err(ApiError::unprocessable(
+            "Builder exceeds 16 Pattern references.",
+        ));
+    }
+    let prev_patterns = previous_body
+        .map(|b| opendash_core::builder_blocks::extract_block_refs_lenient(b).pattern_ids)
+        .unwrap_or_default();
+    let mut existing_patterns = Vec::new();
+    for &pid in &refs.pattern_ids {
+        if pid <= 0 || pid == entry_id {
+            return Err(ApiError::unprocessable(
+                "Pattern tham chiếu không hợp lệ hoặc tự tham chiếu.",
+            ));
+        }
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE id = ? AND content_type_key = 'pattern')",
+        )
+        .bind(pid)
+        .fetch_one(&mut *conn)
+        .await?;
+        if exists != 0 {
+            existing_patterns.push(pid);
+        } else if !prev_patterns.contains(&pid) {
+            return Err(ApiError::unprocessable(
+                "Pattern tham chiếu trong comment block không tồn tại.",
+            ));
+        }
+    }
+
+    let body_is_public = body_field.definition.public_exposure
+        == opendash_core::content::PublicExposure::Public
+        && body_field.definition.min_view_role == FieldRole::Editor;
+    if !body_is_public {
+        return Ok(());
+    }
+
+    for pid in existing_patterns {
+        sqlx::query(
+            "INSERT INTO entry_pattern_refs(source_entry_id, target_pattern_id) VALUES (?, ?)",
+        )
+        .bind(entry_id)
+        .bind(pid)
+        .execute(&mut *conn)
+        .await?;
+    }
+    for (role, ids) in [
+        ("image", &refs.image_ids),
+        ("video", &refs.video_ids),
+        ("poster", &refs.poster_image_ids),
     ] {
-        if values.contains_key(key) && !settings.supports(feature) {
-            return Err(ApiError::unprocessable(format!(
-                "Không thể chỉnh sửa '{key}' khi tính năng này bị tắt."
-            )));
+        for media_id in ids {
+            sqlx::query(
+                "INSERT INTO entry_builder_media_refs(entry_id, media_id, ref_role) VALUES (?, ?, ?)",
+            )
+            .bind(entry_id)
+            .bind(media_id)
+            .bind(role)
+            .execute(&mut *conn)
+            .await?;
         }
     }
     Ok(())
+}
+
+fn extract_body_from_values_json(values_json: &str) -> Option<String> {
+    serde_json::from_str::<BTreeMap<String, Value>>(values_json)
+        .ok()
+        .and_then(|map| {
+            map.get("body")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+        })
 }
 
 async fn current_settings_in_tx(
@@ -70,6 +217,11 @@ pub struct ContentEntryRecord {
     pub values: BTreeMap<String, Value>,
     /// Site-owned term IDs. Stable across content slug edits, publication and provider disable.
     pub term_ids: Vec<i64>,
+    pub primary_category_term_id: Option<i64>,
+    /// Site-owned theme selection; retained even if its provider is withdrawn.
+    pub page_layout_key: Option<String>,
+    pub custom_template_key: Option<String>,
+    pub content_mode: ContentMode,
     /// Server-owned status; legacy CPT entries remain published on Save.
     pub publication_status: String,
     pub version: i64,
@@ -77,7 +229,7 @@ pub struct ContentEntryRecord {
     pub updated_at: String,
 }
 
-type EntryRow = (
+pub(super) type EntryRow = (
     i64,
     String,
     String,
@@ -110,6 +262,10 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
         title,
         values,
         term_ids: Vec::new(),
+        primary_category_term_id: None,
+        page_layout_key: None,
+        custom_template_key: None,
+        content_mode: ContentMode::Editor,
         publication_status,
         version,
         created_at,
@@ -156,7 +312,10 @@ pub enum PublishedListResult {
     MissingConfig(PublishedListMissing),
 }
 
-async fn read_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64) -> ApiResult<Vec<i64>> {
+pub(super) async fn read_term_ids(
+    tx: &mut Transaction<'_, Sqlite>,
+    id: i64,
+) -> ApiResult<Vec<i64>> {
     Ok(
         sqlx::query_scalar("SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id")
             .bind(id)
@@ -165,12 +324,32 @@ async fn read_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64) -> ApiResult<V
     )
 }
 
-async fn decoded_with_terms(
+pub(super) async fn decoded_with_terms(
     tx: &mut Transaction<'_, Sqlite>,
     row: EntryRow,
 ) -> ApiResult<ContentEntryRecord> {
     let mut record = decode_row(row)?;
     record.term_ids = read_term_ids(tx, record.id).await?;
+    let (layout, custom, mode, primary_category_term_id): (
+        Option<String>,
+        Option<String>,
+        String,
+        Option<i64>,
+    ) = sqlx::query_as(
+        "SELECT page_layout_key, custom_template_key, content_mode, primary_category_term_id
+           FROM content_entries WHERE id = ?",
+    )
+    .bind(record.id)
+    .fetch_one(&mut **tx)
+    .await?;
+    record.page_layout_key = layout;
+    record.custom_template_key = custom;
+    record.primary_category_term_id = primary_category_term_id;
+    record.content_mode = match mode.as_str() {
+        "editor" => ContentMode::Editor,
+        "builder" => ContentMode::Builder,
+        _ => return Err(ApiError::internal("Chế độ nội dung không hợp lệ.")),
+    };
     Ok(record)
 }
 
@@ -212,7 +391,7 @@ async fn verify_plugin_action_fence(
     Ok(())
 }
 
-async fn begin_entry_write<'a>(
+pub(super) async fn begin_entry_write<'a>(
     db: &'a SqlitePool,
     actor: &SessionContext,
 ) -> ApiResult<Transaction<'a, Sqlite>> {
@@ -238,31 +417,36 @@ async fn begin_entry_write<'a>(
 }
 
 async fn validate_term_ids(
-    tx: &mut Transaction<'_, Sqlite>, type_key: &str, ids: &[i64],
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    ids: &[i64],
 ) -> ApiResult<()> {
     if ids.len() > 96 || ids.iter().any(|id| *id <= 0) {
         return Err(ApiError::bad_request("term_ids không hợp lệ."));
     }
     let mut unique = std::collections::HashSet::new();
     let mut counts = std::collections::HashMap::<String, usize>::new();
-    let eligible = crate::storage::content::load_effective_taxonomies_in_tx(
-        &mut **tx, type_key,
-    ).await?;
+    let eligible =
+        crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
     for &id in ids {
         if !unique.insert(id) {
             return Err(ApiError::bad_request("term_ids không được trùng lặp."));
         }
-        let kind: Option<String> =
-            sqlx::query_scalar("SELECT t.kind FROM taxonomy_terms t
+        let kind: Option<String> = sqlx::query_scalar(
+            "SELECT t.kind FROM taxonomy_terms t
                JOIN taxonomy_definitions d ON d.key=t.kind
               WHERE t.id=? AND d.provider_status='active'
-                AND d.declaration_state='declared'")
-                .bind(id)
-                .fetch_optional(&mut **tx)
-                .await?;
-        let kind = kind.ok_or_else(|| ApiError::bad_request("Term ID không tồn tại hoặc inactive."))?;
+                AND d.declaration_state='declared'",
+        )
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        let kind =
+            kind.ok_or_else(|| ApiError::bad_request("Term ID không tồn tại hoặc inactive."))?;
         if !eligible.contains(&kind) {
-            return Err(ApiError::bad_request("Taxonomy của term không được phép dùng cho CPT."));
+            return Err(ApiError::bad_request(
+                "Taxonomy của term không được phép dùng cho CPT.",
+            ));
         }
         let count = counts.entry(kind.clone()).or_insert(0);
         *count += 1;
@@ -285,10 +469,24 @@ async fn replace_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64, ids: &[i64]
             .execute(&mut **tx)
             .await?;
     }
+    let current_primary: Option<i64> =
+        sqlx::query_scalar("SELECT primary_category_term_id FROM content_entries WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .flatten();
+    if let Some(pid) = current_primary
+        && !ids.contains(&pid)
+    {
+        sqlx::query("UPDATE content_entries SET primary_category_term_id = NULL WHERE id = ?")
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
+    }
     Ok(())
 }
 
-async fn current_entry_in_write(
+pub(super) async fn current_entry_in_write(
     tx: &mut Transaction<'_, Sqlite>,
     type_key: &str,
     id: i64,
@@ -316,19 +514,28 @@ pub async fn get_entry(
     id: i64,
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let mut tx = db.begin().await?;
+    let entry = get_entry_in_tx(&mut tx, type_key, id).await?;
+    tx.commit().await?;
+    Ok(entry)
+}
+
+pub(super) async fn get_entry_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    id: i64,
+) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<EntryRow> = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     let entry = match row {
-        Some(row) => Some(decoded_with_terms(&mut tx, row).await?),
+        Some(row) => Some(decoded_with_terms(tx, row).await?),
         None => None,
     };
-    tx.commit().await?;
     Ok(entry)
 }
 
@@ -351,7 +558,9 @@ pub async fn list_published_filtered(
     offset: i64,
     filters: EntryFilters,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
-    if type_key == "section" { return Err(ApiError::not_found("Section là nội dung riêng tư.")); }
+    if type_key == "pattern" {
+        return Err(ApiError::not_found("Pattern là nội dung riêng tư."));
+    }
     list_entries_filtered(db, type_key, limit, offset, filters, true).await
 }
 
@@ -383,16 +592,20 @@ pub async fn list_published_page_in_tx(
     sort: PublishedListSort,
     filters: EntryFilters,
 ) -> ApiResult<PublishedListResult> {
-    if type_key == "section" {
-        return Ok(PublishedListResult::MissingConfig(PublishedListMissing::ContentType));
+    if type_key == "pattern" {
+        return Ok(PublishedListResult::MissingConfig(
+            PublishedListMissing::ContentType,
+        ));
     }
     if !(1..=100).contains(&page) || !(1..=20).contains(&page_size) {
         return Err(ApiError::bad_request(
             "Trang danh sách phải từ 1–100 và page_size từ 1–20.",
         ));
     }
-    if filters.include_descendants && filters.category_id.is_none()
-        && filters.taxonomy_key.is_none() {
+    if filters.include_descendants
+        && filters.category_id.is_none()
+        && filters.taxonomy_key.is_none()
+    {
         return Err(ApiError::bad_request(
             "include_descendants yêu cầu category_id hoặc generic taxonomy.",
         ));
@@ -410,7 +623,7 @@ pub async fn list_published_page_in_tx(
 
     let type_exists: Option<i64> = sqlx::query_scalar(
         "SELECT 1 FROM content_types WHERE key = ? AND provider_status = 'active'
-         AND key != 'section' AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
+         AND key != 'pattern' AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(type_key)
     .fetch_optional(&mut **tx)
@@ -447,9 +660,9 @@ pub async fn list_published_page_in_tx(
                   WHERE term.id=? AND d.public=1 AND d.provider_status='active'
                     AND d.declaration_state='declared'",
             )
-                    .bind(id)
-                    .fetch_optional(&mut **tx)
-                    .await?;
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
             if actual.as_deref() != Some(kind)
                 || !effective_taxonomies.iter().any(|enabled| enabled == kind)
             {
@@ -530,22 +743,37 @@ async fn list_entries_filtered(
 /// the query. Inactive, private or unassociated terms cannot be used to probe
 /// published entry existence; Admin may still manage private taxonomies.
 pub(crate) async fn validate_filter_in_tx(
-    tx: &mut Transaction<'_, Sqlite>, type_key: &str,
-    filters: &EntryFilters, published_only: bool,
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    filters: &EntryFilters,
+    published_only: bool,
 ) -> ApiResult<()> {
     if filters.taxonomy_key.is_some() != filters.term_id.is_some()
         || (filters.taxonomy_key.is_some()
             && (filters.category_id.is_some() || filters.tag_id.is_some()))
     {
-        return Err(ApiError::bad_request("Trộn hoặc thiếu cặp taxonomy_key + term_id."));
+        return Err(ApiError::bad_request(
+            "Trộn hoặc thiếu cặp taxonomy_key + term_id.",
+        ));
     }
-    if filters.include_descendants && filters.category_id.is_none()
-        && filters.taxonomy_key.is_none() {
-        return Err(ApiError::bad_request("include_descendants cần taxonomy filter."));
+    if filters.include_descendants
+        && filters.category_id.is_none()
+        && filters.taxonomy_key.is_none()
+    {
+        return Err(ApiError::bad_request(
+            "include_descendants cần taxonomy filter.",
+        ));
     }
-    let allowed = crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
-    for (id, kind) in [(filters.category_id, "category"), (filters.tag_id, "tag"),
-        (filters.term_id, filters.taxonomy_key.as_deref().unwrap_or(""))] {
+    let allowed =
+        crate::storage::content::load_effective_taxonomies_in_tx(&mut **tx, type_key).await?;
+    for (id, kind) in [
+        (filters.category_id, "category"),
+        (filters.tag_id, "tag"),
+        (
+            filters.term_id,
+            filters.taxonomy_key.as_deref().unwrap_or(""),
+        ),
+    ] {
         if let Some(id) = id {
             if id <= 0 {
                 return Err(ApiError::bad_request("Bộ lọc taxonomy không hợp lệ."));
@@ -556,24 +784,27 @@ pub(crate) async fn validate_filter_in_tx(
                  WHERE t.id=? AND d.provider_status='active'
                    AND d.declaration_state='declared'",
             )
-                    .bind(id)
-                .fetch_optional(&mut **tx)
-                    .await?;
+            .bind(id)
+            .fetch_optional(&mut **tx)
+            .await?;
             if !actual.as_ref().is_some_and(|(actual, _, _)| actual == kind) {
                 return Err(ApiError::bad_request(
                     "Term trong bộ lọc không tồn tại hoặc sai taxonomy.",
                 ));
             }
             let (_, is_public, hierarchical) = actual.expect("checked term");
-            if !allowed.iter().any(|a| a == kind)
-                || (published_only && is_public == 0)
-            {
-                return Err(ApiError::bad_request("Taxonomy không được dùng cho CPT này."));
+            if !allowed.iter().any(|a| a == kind) || (published_only && is_public == 0) {
+                return Err(ApiError::bad_request(
+                    "Taxonomy không được dùng cho CPT này.",
+                ));
             }
-            if filters.include_descendants && filters.taxonomy_key.as_deref() == Some(kind)
+            if filters.include_descendants
+                && filters.taxonomy_key.as_deref() == Some(kind)
                 && hierarchical == 0
             {
-                return Err(ApiError::bad_request("Taxonomy không phân cấp không nhận descendants."));
+                return Err(ApiError::bad_request(
+                    "Taxonomy không phân cấp không nhận descendants.",
+                ));
             }
         }
     }
@@ -617,7 +848,7 @@ async fn query_entries_filtered(
            JOIN content_types t ON t.key = e.content_type_key
           WHERE e.content_type_key = ?
             AND (? = 0 OR (e.publication_status = 'published'
-                 AND e.content_type_key != 'section' AND t.provider_status = 'active'
+                 AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
                  AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1))
             AND (? IS NULL OR EXISTS (
                 SELECT 1 FROM entry_terms et
@@ -673,20 +904,27 @@ pub async fn create_entry_with_fence(
     input: &ContentEntryInput,
     fence: Option<&PluginActionFence>,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
-    let settings = current_settings_in_tx(&mut tx, type_key).await?;
-    verify_supported_values(type_key, &input.values, &settings)?;
+    let effective =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let settings = &effective.base.descriptor.settings;
+    verify_supported_values(type_key, &input.values, settings)?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
-    let status = if settings.publication == ContentPublication::DraftPublish { "draft" } else { "published" };
+    let status = if settings.publication == ContentPublication::DraftPublish {
+        "draft"
+    } else {
+        "published"
+    };
     let result = sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
          VALUES (?, ?, ?, ?, ?)",
@@ -707,6 +945,7 @@ pub async fn create_entry_with_fence(
     if let Some(ids) = &input.term_ids {
         replace_term_ids(&mut tx, id, ids).await?;
     }
+    sync_entry_body_refs_in_conn(&mut *tx, id, &effective, &input.values, None).await?;
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -730,7 +969,17 @@ pub async fn update_entry(
     expected_version: i64,
     input: &ContentEntryInput,
 ) -> ApiResult<ContentEntryRecord> {
-    update_entry_with_fence(db, actor, type_key, schema, id, expected_version, input, None).await
+    update_entry_with_fence(
+        db,
+        actor,
+        type_key,
+        schema,
+        id,
+        expected_version,
+        input,
+        None,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -744,22 +993,26 @@ pub async fn update_entry_with_fence(
     input: &ContentEntryInput,
     fence: Option<&PluginActionFence>,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
-    let settings = current_settings_in_tx(&mut tx, type_key).await?;
-    verify_supported_values(type_key, &input.values, &settings)?;
+    let effective =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let settings = &effective.base.descriptor.settings;
+    verify_supported_values(type_key, &input.values, settings)?;
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let old_slug: String = sqlx::query_scalar(
-        "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let old_values_json: String = sqlx::query_scalar(
+        "SELECT values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
+    let previous_body = extract_body_from_values_json(&old_values_json);
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
@@ -792,7 +1045,14 @@ pub async fn update_entry_with_fence(
             if let Some(ids) = &input.term_ids {
                 replace_term_ids(&mut tx, id, ids).await?;
             }
-            crate::storage::seo::record_slug_change_redirect_in_tx(&mut tx, id, type_key, &old_slug, &input.slug).await?;
+            sync_entry_body_refs_in_conn(
+                &mut *tx,
+                id,
+                &effective,
+                &input.values,
+                previous_body.as_deref(),
+            )
+            .await?;
             let row: EntryRow = sqlx::query_as(
                 "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -809,7 +1069,6 @@ pub async fn update_entry_with_fence(
     }
 }
 
-
 pub fn filter_entry_values_for_role(
     record: &mut ContentEntryRecord,
     effective: &EffectiveContentSchema,
@@ -824,12 +1083,14 @@ pub fn filter_entry_values_for_role(
     });
 }
 
-async fn verify_schema_token_in_tx(
+pub(super) async fn verify_schema_token_in_tx(
     tx: &mut sqlx::SqliteConnection,
     type_key: &str,
     expected_schema_token: &str,
 ) -> ApiResult<EffectiveContentSchema> {
-    let Some(eff) = crate::storage::content::load_effective_content_schema_in_tx(tx, type_key).await? else {
+    let Some(eff) =
+        crate::storage::content::load_effective_content_schema_in_tx(tx, type_key).await?
+    else {
         return Err(ApiError::not_found(format!(
             "Kh?ng t?m th?y lo?i n?i dung '{type_key}'."
         )));
@@ -851,18 +1112,21 @@ pub async fn create_entry_with_schema_fence(
     input: &ContentEntryInput,
     preflight_schema_token: &str,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     let settings = &effective.base.descriptor.settings;
     verify_supported_values(type_key, &input.values, settings)?;
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
     }
     let json = serde_json::to_string(&input.values)?;
-    let status = if settings.publication == ContentPublication::DraftPublish { "draft" } else { "published" };
+    let status = if settings.publication == ContentPublication::DraftPublish {
+        "draft"
+    } else {
+        "published"
+    };
     let result = sqlx::query(
         "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
          VALUES (?, ?, ?, ?, ?)",
@@ -883,6 +1147,7 @@ pub async fn create_entry_with_schema_fence(
     if let Some(ids) = &input.term_ids {
         replace_term_ids(&mut tx, id, ids).await?;
     }
+    sync_entry_body_refs_in_conn(&mut *tx, id, &effective, &input.values, None).await?;
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -907,19 +1172,19 @@ pub async fn update_entry_with_schema_fence(
     input: &ContentEntryInput,
     preflight_schema_token: &str,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = begin_entry_write(db, actor).await?;
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let old_slug: String = sqlx::query_scalar(
-        "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let old_values_json: String = sqlx::query_scalar(
+        "SELECT values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
-    crate::storage::seo::check_default_slug_claim_in_tx(&mut tx, type_key, &input.slug, Some(id)).await?;
+    let previous_body = extract_body_from_values_json(&old_values_json);
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
@@ -952,7 +1217,14 @@ pub async fn update_entry_with_schema_fence(
             if let Some(ids) = &input.term_ids {
                 replace_term_ids(&mut tx, id, ids).await?;
             }
-            crate::storage::seo::record_slug_change_redirect_in_tx(&mut tx, id, type_key, &old_slug, &input.slug).await?;
+            sync_entry_body_refs_in_conn(
+                &mut *tx,
+                id,
+                &effective,
+                &input.values,
+                previous_body.as_deref(),
+            )
+            .await?;
             let row: EntryRow = sqlx::query_as(
                 "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",
@@ -985,9 +1257,93 @@ pub struct CompositeEntrySaveInput {
     #[serde(default)]
     pub term_ids: Option<Vec<i64>>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub primary_category_term_id: PatchField<i64>,
+    #[serde(default)]
+    pub auto_unique_slug: bool,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub custom_path: PatchField<String>,
     #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub page_layout_key: PatchField<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub custom_template_key: PatchField<String>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
+    pub content_mode: PatchField<ContentMode>,
+    #[serde(default, deserialize_with = "deserialize_patch_field")]
     pub seo: PatchField<crate::seo::SeoMetadataInput>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+fn normalize_entry_timestamp(raw: &str, field_name: &str) -> ApiResult<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 32 || !trimmed.is_ascii() {
+        return Err(ApiError::unprocessable(format!(
+            "Định dạng thời gian {field_name} không hợp lệ (dùng YYYY-MM-DD HH:MM:SS hoặc ISO-8601)."
+        )));
+    }
+    let normalized = trimmed.trim_end_matches('Z').trim_end_matches('z');
+    let normalized = normalized.split('.').next().unwrap_or(normalized);
+    let (date_part, time_part) = normalized
+        .split_once('T')
+        .or_else(|| normalized.split_once('t'))
+        .or_else(|| normalized.split_once(' '))
+        .ok_or_else(|| {
+            ApiError::unprocessable(format!(
+                "Định dạng thời gian {field_name} không hợp lệ (thiếu ngày hoặc giờ)."
+            ))
+        })?;
+    let mut date_it = date_part.split('-');
+    let year: u32 = date_it
+        .next()
+        .and_then(|s| (s.len() == 4).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Năm trong {field_name} không hợp lệ.")))?;
+    let month: u32 = date_it
+        .next()
+        .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| {
+            ApiError::unprocessable(format!("Tháng trong {field_name} không hợp lệ."))
+        })?;
+    let day: u32 = date_it
+        .next()
+        .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Ngày trong {field_name} không hợp lệ.")))?;
+    if date_it.next().is_some()
+        || !(1970..=2100).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+    {
+        return Err(ApiError::unprocessable(format!(
+            "Ngày trong {field_name} nằm ngoài phạm vi hợp lệ."
+        )));
+    }
+    let mut time_it = time_part.split(':');
+    let hour: u32 = time_it
+        .next()
+        .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Giờ trong {field_name} không hợp lệ.")))?;
+    let minute: u32 = time_it
+        .next()
+        .and_then(|s| (s.len() == 2).then(|| s.parse().ok()).flatten())
+        .ok_or_else(|| ApiError::unprocessable(format!("Phút trong {field_name} không hợp lệ.")))?;
+    let second: u32 = match time_it.next() {
+        Some(s) => (s.len() == 2)
+            .then(|| s.parse().ok())
+            .flatten()
+            .ok_or_else(|| {
+                ApiError::unprocessable(format!("Giây trong {field_name} không hợp lệ."))
+            })?,
+        None => 0,
+    };
+    if time_it.next().is_some() || hour > 23 || minute > 59 || second > 59 {
+        return Err(ApiError::unprocessable(format!(
+            "Giờ phút giây trong {field_name} không hợp lệ."
+        )));
+    }
+    Ok(format!(
+        "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}"
+    ))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1004,6 +1360,88 @@ pub struct CompositePreflightPlan {
     pub effective_ct_def: ContentTypeDefinition,
     pub merged_input: ContentEntryInput,
     pub publication_status: Option<String>,
+}
+
+/// Check a selection under the same SQLite writer as the entry mutation. A
+/// theme switch and entry Save cannot silently race and validate against two
+/// different active revisions. Existing values are retained on omission even
+/// if their original provider is no longer active.
+async fn resolve_entry_template_patches_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    entry_id: Option<i64>,
+    input: &CompositeEntrySaveInput,
+) -> ApiResult<(Option<String>, Option<String>)> {
+    let existing: (Option<String>, Option<String>) = match entry_id {
+        Some(id) => sqlx::query_as(
+            "SELECT page_layout_key, custom_template_key FROM content_entries WHERE id = ? AND content_type_key = ?",
+        )
+        .bind(id)
+        .bind(type_key)
+        .fetch_one(&mut **tx)
+        .await?,
+        None => (None, None),
+    };
+
+    let mut next = existing.clone();
+    let mut needs_layout_validation = false;
+    let mut needs_custom_validation = false;
+    match &input.page_layout_key {
+        PatchField::Omitted => {}
+        PatchField::Clear => next.0 = None,
+        PatchField::Set(key) => {
+            needs_layout_validation = existing.0.as_deref() != Some(key.as_str());
+            next.0 = Some(key.clone());
+        }
+    }
+    match &input.custom_template_key {
+        PatchField::Omitted => {}
+        PatchField::Clear => next.1 = None,
+        PatchField::Set(key) => {
+            needs_custom_validation = existing.1.as_deref() != Some(key.as_str());
+            next.1 = Some(key.clone());
+        }
+    }
+    if !needs_layout_validation && !needs_custom_validation {
+        return Ok(next);
+    }
+    let manifest_json: Option<String> = sqlx::query_scalar(
+        "SELECT r.manifest_json FROM theme_active_selection s
+           JOIN theme_revisions r ON r.revision_id = s.revision_id
+          WHERE s.id = 1 AND r.source_format = 'v3'",
+    )
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(manifest_json) = manifest_json else {
+        return Err(ApiError::unprocessable(
+            "Chưa có theme v3 hoạt động để chọn layout/template.",
+        ));
+    };
+    let manifest: opendash_core::theme::ThemeV3Manifest = serde_json::from_str(&manifest_json)
+        .map_err(|_| ApiError::internal("Manifest theme hoạt động không hợp lệ."))?;
+    manifest.validate().map_err(ApiError::internal)?;
+    if needs_layout_validation
+        && !manifest
+            .page_layouts
+            .iter()
+            .any(|layout| Some(layout.key.as_str()) == next.0.as_deref())
+    {
+        return Err(ApiError::unprocessable(
+            "Page Layout không có trong theme đang hoạt động.",
+        ));
+    }
+    if needs_custom_validation
+        && !manifest.templates.iter().any(|tpl| {
+            tpl.kind == opendash_core::theme::TemplateCandidateKind::SingleCustom
+                && tpl.custom_key.as_deref() == next.1.as_deref()
+                && tpl.allowed_types.iter().any(|allowed| allowed == type_key)
+        })
+    {
+        return Err(ApiError::unprocessable(
+            "Custom Single Template không dành cho loại nội dung này.",
+        ));
+    }
+    Ok(next)
 }
 
 fn actor_field_role(role: auth::Role) -> FieldRole {
@@ -1033,7 +1471,7 @@ pub async fn prepare_composite_entry_save(
     entry_id: Option<i64>,
     input: &CompositeEntrySaveInput,
 ) -> ApiResult<CompositePreflightPlan> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let client_token = input
         .expected_schema_token
         .as_deref()
@@ -1048,7 +1486,9 @@ pub async fn prepare_composite_entry_save(
 
     let effective = crate::storage::content::load_effective_content_schema(db, type_key)
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("Kh?ng t?m th?y lo?i n?i dung '{type_key}'.")))?;
+        .ok_or_else(|| {
+            ApiError::not_found(format!("Kh?ng t?m th?y lo?i n?i dung '{type_key}'."))
+        })?;
 
     if client_token != effective.schema_token {
         return Err(ApiError::conflict(format!(
@@ -1110,6 +1550,57 @@ pub async fn prepare_composite_entry_save(
     if let PatchField::Set(seo_in) = &input.seo {
         crate::seo::validate_seo_input(seo_in)?;
     }
+    // A missing provider must never erase a previously saved choice. New
+    // assignments are validated against the *currently active* v3 manifest
+    // again after the writer lock is acquired at commit time.
+    if let PatchField::Set(tid) = input.primary_category_term_id {
+        if type_key != "post" {
+            return Err(ApiError::bad_request(
+                "primary_category_term_id chỉ áp dụng cho bài viết (post).",
+            ));
+        }
+        if tid <= 0 {
+            return Err(ApiError::bad_request(
+                "primary_category_term_id phải là ID nguyên dương.",
+            ));
+        }
+    }
+    if type_key != "page" && !matches!(input.page_layout_key, PatchField::Omitted) {
+        return Err(ApiError::bad_request(
+            "page_layout_key chỉ áp dụng cho Page.",
+        ));
+    }
+    if type_key == "page" && !matches!(input.custom_template_key, PatchField::Omitted) {
+        return Err(ApiError::bad_request(
+            "custom_template_key không áp dụng cho Page.",
+        ));
+    }
+    if !matches!(input.content_mode, PatchField::Omitted) {
+        // The editor mode is always available as a safe fallback (including
+        // after an Admin disables Builder). Entering Builder mode requires an
+        // explicit capability, regardless of CPT key.
+        if matches!(input.content_mode, PatchField::Set(ContentMode::Builder))
+            && !effective
+                .base
+                .descriptor
+                .settings
+                .supports(ContentSupport::Builder)
+        {
+            return Err(ApiError::unprocessable(
+                "Builder chưa được bật cho loại nội dung này.",
+            ));
+        }
+        if matches!(input.content_mode, PatchField::Clear) {
+            return Err(ApiError::bad_request("content_mode không được null."));
+        }
+    }
+    for patch in [&input.page_layout_key, &input.custom_template_key] {
+        if let PatchField::Set(key) = patch {
+            if !opendash_core::id::valid_snake_key(key) {
+                return Err(ApiError::unprocessable("Tên layout/template không hợp lệ."));
+            }
+        }
+    }
 
     let merged_values = match entry_id {
         None => {
@@ -1162,7 +1653,8 @@ pub async fn prepare_composite_entry_save(
         .map_err(ApiError::unprocessable)?;
 
     let effective_ct_def = effective_as_ct_def(&effective);
-    crate::storage::media::require_existing_references(db, &effective_ct_def, &merged_input).await?;
+    crate::storage::media::require_existing_references(db, &effective_ct_def, &merged_input)
+        .await?;
 
     Ok(CompositePreflightPlan {
         preflight_schema_token: effective.schema_token.clone(),
@@ -1171,6 +1663,300 @@ pub async fn prepare_composite_entry_save(
         merged_input,
         publication_status: input.publication_status.clone(),
     })
+}
+
+async fn resolve_primary_category_patch_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    entry_id: Option<i64>,
+    patch: &PatchField<i64>,
+    term_ids_provided: bool,
+    effective_term_ids: &[i64],
+) -> ApiResult<Option<i64>> {
+    match *patch {
+        PatchField::Clear => Ok(None),
+        PatchField::Set(tid) => {
+            if type_key != "post" {
+                return Err(ApiError::bad_request(
+                    "primary_category_term_id chỉ áp dụng cho bài viết (post).",
+                ));
+            }
+            if tid <= 0 || !effective_term_ids.contains(&tid) {
+                return Err(ApiError::bad_request(
+                    "primary_category_term_id phải là một term đã được gán cho bài viết.",
+                ));
+            }
+            let is_category: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM taxonomy_terms WHERE id = ? AND kind = 'category')",
+            )
+            .bind(tid)
+            .fetch_one(&mut **tx)
+            .await?;
+            if is_category == 0 {
+                return Err(ApiError::bad_request(
+                    "primary_category_term_id phải thuộc taxonomy 'category'.",
+                ));
+            }
+            Ok(Some(tid))
+        }
+        PatchField::Omitted => match entry_id {
+            None => Ok(None),
+            Some(id) => {
+                if type_key != "post" {
+                    return Ok(None);
+                }
+                let current_primary: Option<i64> = sqlx::query_scalar(
+                    "SELECT primary_category_term_id FROM content_entries WHERE id = ?",
+                )
+                .bind(id)
+                .fetch_one(&mut **tx)
+                .await?;
+                Ok(current_primary
+                    .filter(|pid| !term_ids_provided || effective_term_ids.contains(pid)))
+            }
+        },
+    }
+}
+
+async fn resolve_effective_rewrite_base_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    resource_kind: &str,
+    resource_key: &str,
+    site_bases: &BTreeMap<String, Option<String>>,
+) -> ApiResult<String> {
+    match site_bases.get(resource_key) {
+        Some(Some(base)) if !base.trim().is_empty() => return Ok(base.trim().to_owned()),
+        Some(None) => return Ok(resource_key.to_owned()),
+        _ => {}
+    }
+    let provider_default: Option<String> = sqlx::query_scalar(
+        "SELECT rewrite_base FROM provider_rewrite_defaults
+          WHERE resource_kind = ? AND resource_key = ?
+            AND provider_status = 'active' AND declaration_state = 'declared'",
+    )
+    .bind(resource_kind)
+    .bind(resource_key)
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
+    Ok(provider_default
+        .filter(|b| !b.trim().is_empty())
+        .unwrap_or_else(|| resource_key.to_owned()))
+}
+
+pub(super) async fn resolve_auto_unique_slug_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    type_key: &str,
+    base_slug: &str,
+    term_ids: Option<&[i64]>,
+    primary_category_term_id: Option<i64>,
+    has_custom_path: bool,
+) -> ApiResult<String> {
+    if !opendash_core::id::valid_kebab_segment_with_limit(base_slug, 64) {
+        return Err(ApiError::unprocessable("Slug không hợp lệ."));
+    }
+    let (post_structure, cpt_bases_json, tax_bases_json): (String, String, String) =
+        sqlx::query_as(
+            "SELECT post_structure, content_type_bases_json, taxonomy_bases_json
+               FROM site_permalink_settings WHERE id = 1",
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+    let posts_page_id: Option<i64> =
+        sqlx::query_scalar("SELECT posts_page_id FROM site_reading_settings WHERE id = 1")
+            .fetch_one(&mut *conn)
+            .await?;
+    let cpt_bases: BTreeMap<String, Option<String>> =
+        serde_json::from_str(&cpt_bases_json).unwrap_or_default();
+    let tax_bases: BTreeMap<String, Option<String>> =
+        serde_json::from_str(&tax_bases_json).unwrap_or_default();
+
+    let is_public_type = if matches!(type_key, "pattern" | "section") {
+        false
+    } else {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(json_extract(definition_json, '$.settings.public'), 1)
+               FROM content_types WHERE key = ? AND provider_status = 'active'",
+        )
+        .bind(type_key)
+        .fetch_optional(&mut *conn)
+        .await?
+            == Some(1)
+    };
+
+    let cat_slug = if type_key == "post" && post_structure.contains("%category%") {
+        let cat_public: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(
+               SELECT 1 FROM taxonomy_definitions
+                WHERE key = 'category' AND public = 1
+                  AND provider_status = 'active' AND declaration_state = 'declared'
+             )",
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        let cat_eligible = if cat_public == 1 {
+            crate::storage::content::load_effective_taxonomies_in_tx(&mut *conn, "post")
+                .await?
+                .iter()
+                .any(|k| k == "category")
+        } else {
+            false
+        };
+        let resolved_cat = if !cat_eligible {
+            "uncategorized".to_owned()
+        } else {
+            let primary_slug: Option<String> = match primary_category_term_id {
+                Some(pid) => {
+                    sqlx::query_scalar(
+                        "SELECT slug FROM taxonomy_terms WHERE id = ? AND kind = 'category'",
+                    )
+                    .bind(pid)
+                    .fetch_optional(&mut *conn)
+                    .await?
+                }
+                None => None,
+            };
+            match primary_slug {
+                Some(slug) => slug,
+                None => match term_ids {
+                    Some(ids) if !ids.is_empty() => {
+                        let ids_json = serde_json::to_string(ids)?;
+                        let min_slug: Option<String> = sqlx::query_scalar(
+                            "SELECT slug FROM taxonomy_terms
+                              WHERE kind = 'category'
+                                AND id IN (SELECT value FROM json_each(?))
+                              ORDER BY id ASC LIMIT 1",
+                        )
+                        .bind(ids_json)
+                        .fetch_optional(&mut *conn)
+                        .await?;
+                        min_slug.unwrap_or_else(|| "uncategorized".to_owned())
+                    }
+                    _ => "uncategorized".to_owned(),
+                },
+            }
+        };
+        if post_structure.starts_with("/%category%/") {
+            if crate::seo::is_reserved_system_root(&resolved_cat) {
+                return Err(ApiError::conflict(format!(
+                    "permalink_category_root_collision: slug '{resolved_cat}' trùng gốc hệ thống."
+                )));
+            }
+            if posts_page_id.is_none() && resolved_cat == "posts" {
+                return Err(ApiError::conflict(
+                    "permalink_category_root_collision: slug 'posts' trùng trang lưu trữ mặc định.",
+                ));
+            }
+            let public_cpts: Vec<String> = sqlx::query_scalar(
+                "SELECT key FROM content_types
+                  WHERE key NOT IN ('pattern', 'section', 'page', 'post')
+                    AND provider_status = 'active'
+                    AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1",
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+            for key in public_cpts {
+                let base = resolve_effective_rewrite_base_in_tx(
+                    &mut *conn,
+                    "content_type",
+                    &key,
+                    &cpt_bases,
+                )
+                .await?;
+                if base.trim_start_matches('/').split('/').next().unwrap_or("") == resolved_cat {
+                    return Err(ApiError::conflict(format!(
+                        "permalink_category_root_collision: slug '{resolved_cat}' trùng CPT '{key}'."
+                    )));
+                }
+            }
+            let public_taxes: Vec<String> = sqlx::query_scalar(
+                "SELECT key FROM taxonomy_definitions
+                  WHERE public = 1 AND provider_status = 'active' AND declaration_state = 'declared'",
+            )
+            .fetch_all(&mut *conn)
+            .await?;
+            for key in public_taxes {
+                let base =
+                    resolve_effective_rewrite_base_in_tx(&mut *conn, "taxonomy", &key, &tax_bases)
+                        .await?;
+                if base.trim_start_matches('/').split('/').next().unwrap_or("") == resolved_cat {
+                    return Err(ApiError::conflict(format!(
+                        "permalink_category_root_collision: slug '{resolved_cat}' trùng taxonomy '{key}'."
+                    )));
+                }
+            }
+        }
+        resolved_cat
+    } else {
+        "uncategorized".to_owned()
+    };
+
+    let cpt_base = if !matches!(type_key, "post" | "page") {
+        Some(
+            resolve_effective_rewrite_base_in_tx(&mut *conn, "content_type", type_key, &cpt_bases)
+                .await?,
+        )
+    } else {
+        None
+    };
+    let uses_post_id = type_key == "post" && post_structure.contains("%post_id%");
+    let check_public_path = !has_custom_path && is_public_type && !uses_post_id;
+    let check_root_reserved =
+        type_key == "page" || (type_key == "post" && post_structure == "/%postname%");
+
+    for n in 1..=100usize {
+        let candidate = if n == 1 {
+            base_slug.to_owned()
+        } else {
+            let suffix = format!("-{n}");
+            let max_prefix = 64usize.saturating_sub(suffix.len());
+            let prefix = base_slug[..base_slug.len().min(max_prefix)].trim_end_matches('-');
+            if prefix.is_empty() {
+                continue;
+            }
+            format!("{prefix}{suffix}")
+        };
+        let slug_taken: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND slug = ?)",
+        )
+        .bind(type_key)
+        .bind(&candidate)
+        .fetch_one(&mut *conn)
+        .await?;
+        if slug_taken != 0 {
+            continue;
+        }
+        if check_public_path {
+            if check_root_reserved && crate::seo::is_reserved_system_root(&candidate) {
+                continue;
+            }
+            let candidate_path = match type_key {
+                "page" => format!("/{candidate}"),
+                "post" => post_structure
+                    .replace("%category%", &cat_slug)
+                    .replace("%postname%", &candidate),
+                _ => format!("/{}/{candidate}", cpt_base.as_deref().unwrap_or(type_key)),
+            };
+            let path_taken: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM permalink_route_claims WHERE path = ?)
+                     OR EXISTS(SELECT 1 FROM permalink_route_redirects WHERE source_path = ?)
+                     OR EXISTS(SELECT 1 FROM entry_redirects WHERE source_path = ?)",
+            )
+            .bind(&candidate_path)
+            .bind(&candidate_path)
+            .bind(&candidate_path)
+            .fetch_one(&mut *conn)
+            .await?;
+            if path_taken != 0 {
+                continue;
+            }
+        }
+        return Ok(candidate);
+    }
+
+    Err(ApiError::conflict(
+        "Không thể tự động tạo slug duy nhất trong giới hạn 100 lần thử.",
+    ))
 }
 
 pub async fn commit_composite_entry_save(
@@ -1182,23 +1968,41 @@ pub async fn commit_composite_entry_save(
     plan: &CompositePreflightPlan,
 ) -> ApiResult<CompositeEntrySaveResult> {
     let mut tx = begin_entry_write(db, actor).await?;
-    let effective = verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
+    let effective =
+        verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
-    let is_draft_capable = effective.base.descriptor.settings.publication
-        == ContentPublication::DraftPublish;
+    if let Some(id) = entry_id {
+        let expected_ver = input
+            .expected_version
+            .ok_or_else(|| ApiError::bad_request("Thiếu phiên bản nội dung."))?;
+        current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
+    }
+    let requested_mode = match &input.content_mode {
+        PatchField::Omitted => None,
+        PatchField::Clear => return Err(ApiError::bad_request("content_mode không được null.")),
+        PatchField::Set(mode) => {
+            if *mode == ContentMode::Builder
+                && !effective
+                    .base
+                    .descriptor
+                    .settings
+                    .supports(ContentSupport::Builder)
+            {
+                return Err(ApiError::unprocessable(
+                    "Builder chưa được bật cho loại nội dung này.",
+                ));
+            }
+            Some(mode.as_str())
+        }
+    };
+    let is_draft_capable =
+        effective.base.descriptor.settings.publication == ContentPublication::DraftPublish;
     if !is_draft_capable && plan.publication_status.as_deref() == Some("draft") {
         return Err(ApiError::unprocessable(
             "Loại nội dung lưu ngay không hỗ trợ trạng thái bản nháp.",
         ));
     }
 
-    crate::storage::seo::check_default_slug_claim_in_tx(
-        &mut tx,
-        type_key,
-        &plan.merged_input.slug,
-        entry_id,
-    )
-    .await?;
     crate::storage::media::require_existing_references_in_tx(
         &mut tx,
         &plan.effective_ct_def,
@@ -1208,24 +2012,78 @@ pub async fn commit_composite_entry_save(
     if let Some(ids) = &plan.merged_input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
     }
+    let effective_term_ids: Vec<i64> = match &plan.merged_input.term_ids {
+        Some(ids) => ids.clone(),
+        None => match entry_id {
+            Some(id) => read_term_ids(&mut tx, id).await?,
+            None => Vec::new(),
+        },
+    };
+    let next_primary_category = resolve_primary_category_patch_in_tx(
+        &mut tx,
+        type_key,
+        entry_id,
+        &input.primary_category_term_id,
+        plan.merged_input.term_ids.is_some(),
+        &effective_term_ids,
+    )
+    .await?;
+
+    let resolved_slug = if entry_id.is_none() && input.auto_unique_slug {
+        let has_custom_path =
+            matches!(&input.custom_path, PatchField::Set(raw) if !raw.trim().is_empty());
+        resolve_auto_unique_slug_in_tx(
+            &mut tx,
+            type_key,
+            &plan.merged_input.slug,
+            plan.merged_input.term_ids.as_deref(),
+            next_primary_category,
+            has_custom_path,
+        )
+        .await?
+    } else {
+        plan.merged_input.slug.clone()
+    };
 
     let values_json = serde_json::to_string(&plan.merged_input.values)?;
-    let saved_id = match entry_id {
+    let (page_layout_key, custom_template_key) =
+        resolve_entry_template_patches_in_tx(&mut tx, type_key, entry_id, input).await?;
+    let custom_created_at = match input.created_at.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => Some(normalize_entry_timestamp(raw, "created_at")?),
+        _ => None,
+    };
+    let custom_updated_at = match input.updated_at.as_deref() {
+        Some(raw) if !raw.trim().is_empty() => Some(normalize_entry_timestamp(raw, "updated_at")?),
+        _ => None,
+    };
+
+    let (saved_id, previous_body, was_ever_published) = match entry_id {
         None => {
             // Migration 0008 deliberately rejects a directly published INSERT
             // for the built-in types. Keep that security trigger intact and
             // transition to published *within this same writer transaction*.
             // No intermediate draft can be observed or committed.
-            let status_clause = if is_draft_capable { "draft" } else { "published" };
+            let status_clause = if is_draft_capable {
+                "draft"
+            } else {
+                "published"
+            };
             let res = sqlx::query(
-                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
             )
             .bind(type_key)
-            .bind(&plan.merged_input.slug)
+            .bind(&resolved_slug)
             .bind(&plan.merged_input.title)
             .bind(&values_json)
             .bind(status_clause)
+            .bind(requested_mode)
+            .bind(page_layout_key.as_deref())
+            .bind(custom_template_key.as_deref())
+            .bind(next_primary_category)
+            .bind(custom_created_at.as_deref())
+            .bind(custom_updated_at.as_deref())
+            .bind(custom_created_at.as_deref())
             .execute(&mut *tx)
             .await;
             let new_id = match res {
@@ -1246,30 +2104,41 @@ pub async fn commit_composite_entry_save(
                 .execute(&mut *tx)
                 .await?;
             }
-            new_id
+            (new_id, None, false)
         }
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
             current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
-            let old_slug: String = sqlx::query_scalar(
-                "SELECT slug FROM content_entries WHERE content_type_key = ? AND id = ?",
+            let (old_values_json, was_ever_published_int): (String, i64) = sqlx::query_as(
+                "SELECT values_json, has_been_published FROM content_entries WHERE content_type_key = ? AND id = ?",
             )
             .bind(type_key)
             .bind(id)
             .fetch_one(&mut *tx)
             .await?;
+            let prev_body = extract_body_from_values_json(&old_values_json);
             let res = sqlx::query(
                 "UPDATE content_entries
                  SET slug = ?, title = ?, values_json = ?,
                      publication_status = COALESCE(?, publication_status),
+                     page_layout_key = ?, custom_template_key = ?,
+                     primary_category_term_id = ?,
+                     content_mode = COALESCE(?, content_mode),
+                     created_at = COALESCE(?, created_at),
                      version = version + 1,
-                     updated_at = datetime('now')
+                     updated_at = COALESCE(?, datetime('now'))
                  WHERE content_type_key = ? AND id = ? AND version = ?",
             )
-            .bind(&plan.merged_input.slug)
+            .bind(&resolved_slug)
             .bind(&plan.merged_input.title)
             .bind(&values_json)
             .bind(plan.publication_status.as_deref())
+            .bind(page_layout_key.as_deref())
+            .bind(custom_template_key.as_deref())
+            .bind(next_primary_category)
+            .bind(requested_mode)
+            .bind(custom_created_at.as_deref())
+            .bind(custom_updated_at.as_deref())
             .bind(type_key)
             .bind(id)
             .bind(expected_ver)
@@ -1287,21 +2156,21 @@ pub async fn commit_composite_entry_save(
                     }
                 }
             }
-            crate::storage::seo::record_slug_change_redirect_in_tx(
-                &mut tx,
-                id,
-                type_key,
-                &old_slug,
-                &plan.merged_input.slug,
-            )
-            .await?;
-            id
+            (id, prev_body, was_ever_published_int != 0)
         }
     };
 
     if let Some(ids) = &plan.merged_input.term_ids {
         replace_term_ids(&mut tx, saved_id, ids).await?;
     }
+    sync_entry_body_refs_in_conn(
+        &mut *tx,
+        saved_id,
+        &effective,
+        &plan.merged_input.values,
+        previous_body.as_deref(),
+    )
+    .await?;
 
     let row: EntryRow = sqlx::query_as(
         "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
@@ -1313,9 +2182,13 @@ pub async fn commit_composite_entry_save(
     .await?;
     let mut record = decoded_with_terms(&mut tx, row).await?;
 
-    let custom_path =
-        crate::storage::seo::apply_entry_route_patch_in_tx(&mut tx, saved_id, &input.custom_path)
-            .await?;
+    let custom_path = crate::storage::seo::apply_entry_route_patch_in_tx(
+        &mut tx,
+        saved_id,
+        &input.custom_path,
+        was_ever_published,
+    )
+    .await?;
     let seo = crate::storage::seo::apply_entry_seo_patch_in_tx(
         &mut tx,
         saved_id,
@@ -1324,6 +2197,14 @@ pub async fn commit_composite_entry_save(
     )
     .await?;
 
+    if !was_ever_published {
+        sqlx::query(
+            "DELETE FROM permalink_route_claims WHERE target_kind = 'entry' AND target_id = ?",
+        )
+        .bind(saved_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+    }
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
@@ -1342,7 +2223,7 @@ pub async fn delete_entry(
     id: i64,
     expected_version: i64,
 ) -> ApiResult<()> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     let mut tx = db.begin().await?;
     let result = sqlx::query(
         "DELETE FROM content_entries
@@ -1356,10 +2237,17 @@ pub async fn delete_entry(
     if result.rows_affected() == 0 {
         return Err(missing_or_stale(db, type_key, id).await?);
     }
-    sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await?;
+    if type_key == "page" {
+        // Preserve deleted Reading IDs and advance their CAS token atomically
+        // with removal and permalink-claim rebuilding.
+        crate::storage::settings::bump_reading_version_on_deleted_entry_in_tx(&mut tx, id).await?;
+    }
+    sqlx::query(
+        "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(())
@@ -1373,7 +2261,7 @@ pub async fn set_publication_status(
     expected_version: i64,
     status: &str,
 ) -> ApiResult<ContentEntryRecord> {
-    forbid_generic_section_write(type_key)?;
+    forbid_generic_pattern_write(type_key)?;
     if status != "draft" && status != "published" {
         return Err(ApiError::bad_request("Trạng thái xuất bản không hợp lệ."));
     }
@@ -1383,7 +2271,9 @@ pub async fn set_publication_status(
         .await?;
     let settings = current_settings_in_tx(&mut tx, type_key).await?;
     if settings.publication != ContentPublication::DraftPublish {
-        return Err(ApiError::bad_request("Loại nội dung này sử dụng chế độ lưu ngay."));
+        return Err(ApiError::bad_request(
+            "Loại nội dung này sử dụng chế độ lưu ngay.",
+        ));
     }
     let result = sqlx::query(
         "UPDATE content_entries
@@ -1484,9 +2374,13 @@ mod tests {
         .unwrap();
         // Page stays unassociated by default; this fixture explicitly opts in
         // Page and the custom CPT, as a real C2 Admin configuration would.
-        sqlx::query("INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
-                     VALUES ('page','[\"category\",\"tag\"]'),('news','[\"category\",\"tag\"]')")
-            .execute(&db).await.unwrap();
+        sqlx::query(
+            "INSERT INTO content_type_taxonomy_overrides(content_type_key,taxonomies_json)
+                     VALUES ('page','[\"category\",\"tag\"]'),('news','[\"category\",\"tag\"]')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
         let root = sqlx::query(
             "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Root','list-root')",
         )
@@ -1571,9 +2465,16 @@ mod tests {
         assert!(!exact.has_next);
         for (type_key, id) in [("page", page_id), ("news", cpt_id)] {
             let result = expect_list_page(
-                list_published_page(&db, type_key, 1, 20, PublishedListSort::IdDesc, filters.clone())
-                    .await
-                    .unwrap(),
+                list_published_page(
+                    &db,
+                    type_key,
+                    1,
+                    20,
+                    PublishedListSort::IdDesc,
+                    filters.clone(),
+                )
+                .await
+                .unwrap(),
             );
             assert_eq!(
                 result.entries.iter().map(|e| e.id).collect::<Vec<_>>(),
@@ -1583,9 +2484,16 @@ mod tests {
         }
 
         let past_end = expect_list_page(
-            list_published_page(&db, "post", 100, 1, PublishedListSort::IdAsc, filters.clone())
-                .await
-                .unwrap(),
+            list_published_page(
+                &db,
+                "post",
+                100,
+                1,
+                PublishedListSort::IdAsc,
+                filters.clone(),
+            )
+            .await
+            .unwrap(),
         );
         assert!(past_end.entries.is_empty());
         assert!(!past_end.has_next);
@@ -1820,11 +2728,24 @@ mod tests {
             ..EntryFilters::default()
         };
         let page = expect_list_page(
-            list_published_page(&db, "post", 1, 1, PublishedListSort::IdDesc, filters.clone())
-                .await
-                .unwrap(),
+            list_published_page(
+                &db,
+                "post",
+                1,
+                1,
+                PublishedListSort::IdDesc,
+                filters.clone(),
+            )
+            .await
+            .unwrap(),
         );
-        assert_eq!(page.entries.iter().map(|entry| entry.id).collect::<Vec<_>>(), [published]);
+        assert_eq!(
+            page.entries
+                .iter()
+                .map(|entry| entry.id)
+                .collect::<Vec<_>>(),
+            [published]
+        );
         assert!(!page.has_next, "drafts must not create a next page");
 
         // A malformed query remains a 400, even though a withdrawn persisted
@@ -1833,11 +2754,9 @@ mod tests {
             tag_id: Some(child),
             ..filters.clone()
         };
-        let error = list_published_page(
-            &db, "post", 1, 6, PublishedListSort::IdDesc, malformed,
-        )
-        .await
-        .unwrap_err();
+        let error = list_published_page(&db, "post", 1, 6, PublishedListSort::IdDesc, malformed)
+            .await
+            .unwrap_err();
         assert_eq!(error.0, axum::http::StatusCode::BAD_REQUEST);
 
         for change in [
@@ -1848,7 +2767,12 @@ mod tests {
         ] {
             sqlx::query(change).execute(&db).await.unwrap();
             let result = list_published_page(
-                &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+                &db,
+                "post",
+                1,
+                6,
+                PublishedListSort::IdDesc,
+                filters.clone(),
             )
             .await
             .unwrap();
@@ -1873,7 +2797,12 @@ mod tests {
         .await
         .unwrap();
         let withdrawn = list_published_page(
-            &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
+            &db,
+            "post",
+            1,
+            6,
+            PublishedListSort::IdDesc,
+            filters.clone(),
         )
         .await
         .unwrap();
@@ -1899,8 +2828,15 @@ mod tests {
             .await
             .unwrap();
         let deleted = list_published_page(
-            &db, "post", 1, 6, PublishedListSort::IdDesc,
-            EntryFilters { term_id: Some(child), ..filters.clone() },
+            &db,
+            "post",
+            1,
+            6,
+            PublishedListSort::IdDesc,
+            EntryFilters {
+                term_id: Some(child),
+                ..filters.clone()
+            },
         )
         .await
         .unwrap();
@@ -1912,17 +2848,32 @@ mod tests {
         // is a root. An older saved Builder node with descendants=true must
         // not turn the entire public homepage into HTTP 400.
         sqlx::query("UPDATE taxonomy_definitions SET hierarchical=0 WHERE key='genre'")
-            .execute(&db).await.unwrap();
+            .execute(&db)
+            .await
+            .unwrap();
         let incompatible = list_published_page(
-            &db, "post", 1, 6, PublishedListSort::IdDesc, filters.clone(),
-        ).await.unwrap();
-        assert!(matches!(incompatible,
-            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)));
+            &db,
+            "post",
+            1,
+            6,
+            PublishedListSort::IdDesc,
+            filters.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(matches!(
+            incompatible,
+            PublishedListResult::MissingConfig(PublishedListMissing::Taxonomy)
+        ));
         let mut tx = db.begin().await.unwrap();
         let query_error = validate_filter_in_tx(&mut tx, "post", &filters, true)
-            .await.unwrap_err();
-        assert_eq!(query_error.0, axum::http::StatusCode::BAD_REQUEST,
-            "user-provided filters remain strict after the definition change");
+            .await
+            .unwrap_err();
+        assert_eq!(
+            query_error.0,
+            axum::http::StatusCode::BAD_REQUEST,
+            "user-provided filters remain strict after the definition change"
+        );
     }
 
     #[tokio::test]
@@ -2008,7 +2959,9 @@ mod tests {
         assert_eq!(second.iter().map(|e| e.id).collect::<Vec<_>>(), [ids[0]]);
         assert!(last.is_empty());
         assert_eq!(first[0].term_ids, [root, child, tag]);
-        let admin = list_entries(&db, "post", 10, 0, filters.clone()).await.unwrap();
+        let admin = list_entries(&db, "post", 10, 0, filters.clone())
+            .await
+            .unwrap();
         assert_eq!(
             admin.len(),
             3,
@@ -2060,5 +3013,458 @@ mod tests {
             .len(),
             2
         );
+    }
+
+    async fn s02_admin_context(db: &SqlitePool) -> SessionContext {
+        let user_id = sqlx::query(
+            "INSERT INTO users(username, password_hash, role) VALUES('s02_admin', 'unused', 'admin')",
+        )
+        .execute(db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let expires_at = auth::current_time_secs() + 3600;
+        sqlx::query(
+            "INSERT INTO sessions(token_hash, user_id, csrf_token, expires_at)
+             VALUES('s02-hash', ?, 's02-csrf', ?)",
+        )
+        .bind(user_id)
+        .bind(expires_at)
+        .execute(db)
+        .await
+        .unwrap();
+        SessionContext {
+            user: auth::AuthUser {
+                id: user_id,
+                username: "s02_admin".to_owned(),
+                role: auth::Role::Admin,
+            },
+            token_hash: "s02-hash".to_owned(),
+            csrf_token: "s02-csrf".to_owned(),
+        }
+    }
+
+    async fn composite_save(
+        db: &SqlitePool,
+        actor: &SessionContext,
+        type_key: &str,
+        entry_id: Option<i64>,
+        input: CompositeEntrySaveInput,
+    ) -> ApiResult<CompositeEntrySaveResult> {
+        let plan = prepare_composite_entry_save(db, actor, type_key, entry_id, &input).await?;
+        commit_composite_entry_save(db, actor, type_key, entry_id, &input, &plan).await
+    }
+
+    fn base_composite_input(
+        schema_token: &str,
+        slug: &str,
+        expected_version: Option<i64>,
+    ) -> CompositeEntrySaveInput {
+        CompositeEntrySaveInput {
+            expected_version,
+            expected_schema_token: Some(schema_token.to_owned()),
+            title: format!("Title {slug}"),
+            slug: slug.to_owned(),
+            publication_status: Some("published".to_owned()),
+            values: BTreeMap::new(),
+            term_ids: None,
+            primary_category_term_id: PatchField::Omitted,
+            auto_unique_slug: false,
+            custom_path: PatchField::Omitted,
+            page_layout_key: PatchField::Omitted,
+            custom_template_key: PatchField::Omitted,
+            content_mode: PatchField::Omitted,
+            seo: PatchField::Omitted,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn s02_auto_unique_slug_resolves_collisions_reserved_roots_and_64b_limit() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let actor = s02_admin_context(&db).await;
+
+        let post_schema = crate::storage::content::load_effective_content_schema(&db, "post")
+            .await
+            .unwrap()
+            .unwrap();
+        let page_schema = crate::storage::content::load_effective_content_schema(&db, "page")
+            .await
+            .unwrap()
+            .unwrap();
+        let post_tok = post_schema.schema_token.clone();
+        let page_tok = page_schema.schema_token.clone();
+
+        // 1. Repeated posts with auto_unique_slug: true produce foo, foo-2, foo-3.
+        for expected in ["foo", "foo-2", "foo-3"] {
+            let mut input = base_composite_input(&post_tok, "foo", None);
+            input.auto_unique_slug = true;
+            let saved = composite_save(&db, &actor, "post", None, input)
+                .await
+                .unwrap();
+            assert_eq!(saved.entry.slug, expected);
+        }
+
+        // 2. Page colliding with Post claims /foo, /foo-2, /foo-3 becomes foo-4;
+        //    with an explicit custom_path, Page can reuse slug "foo".
+        let mut page_foo = base_composite_input(&page_tok, "foo", None);
+        page_foo.auto_unique_slug = true;
+        let saved_page_foo = composite_save(&db, &actor, "page", None, page_foo)
+            .await
+            .unwrap();
+        assert_eq!(saved_page_foo.entry.slug, "foo-4");
+
+        let mut page_with_custom = base_composite_input(&page_tok, "foo", None);
+        page_with_custom.auto_unique_slug = true;
+        page_with_custom.custom_path = PatchField::Set("/custom-holder".to_owned());
+        let saved_holder = composite_save(&db, &actor, "page", None, page_with_custom)
+            .await
+            .unwrap();
+        assert_eq!(saved_holder.entry.slug, "foo");
+
+        // 3. Reserved roots (media), default archive (/posts), and CPT archive (/project) disambiguate cleanly.
+        sqlx::query(
+            "INSERT INTO content_types(key, definition_json, owner_kind)
+             VALUES('project', json_object('key','project','label','Project','fields',json('[]'),'settings',json_object('public',json('true'),'has_archive',json('true'))), 'user')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let mut tx = db.begin().await.unwrap();
+        crate::storage::permalinks::sync_claims_in_tx(&mut tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        for (raw_slug, expected) in [
+            ("media", "media-2"),
+            ("posts", "posts-2"),
+            ("project", "project-2"),
+        ] {
+            let mut input = base_composite_input(&page_tok, raw_slug, None);
+            input.auto_unique_slug = true;
+            let saved = composite_save(&db, &actor, "page", None, input)
+                .await
+                .unwrap();
+            assert_eq!(saved.entry.slug, expected);
+        }
+
+        // 4. 64-byte boundary trims trailing '-' before appending '-2'.
+        let long_base = format!("{}-xy", "a".repeat(61));
+        assert_eq!(long_base.len(), 64);
+        let mut long1 = base_composite_input(&post_tok, &long_base, None);
+        long1.auto_unique_slug = true;
+        let s1 = composite_save(&db, &actor, "post", None, long1)
+            .await
+            .unwrap();
+        assert_eq!(s1.entry.slug, long_base);
+        let mut long2 = base_composite_input(&post_tok, &long_base, None);
+        long2.auto_unique_slug = true;
+        let s2 = composite_save(&db, &actor, "post", None, long2)
+            .await
+            .unwrap();
+        assert_eq!(s2.entry.slug, format!("{}-2", "a".repeat(61)));
+        assert!(s2.entry.slug.len() <= 64);
+
+        // 5. Opt-in false & non-composite POST /entries still return 409 Conflict.
+        let strict_err = composite_save(
+            &db,
+            &actor,
+            "post",
+            None,
+            base_composite_input(&post_tok, "foo", None),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(strict_err.0, axum::http::StatusCode::CONFLICT);
+
+        let non_comp_err = create_entry(
+            &db,
+            &actor,
+            "post",
+            &post_schema.base.descriptor,
+            &ContentEntryInput {
+                title: "Dup".into(),
+                slug: "foo".into(),
+                values: BTreeMap::new(),
+                term_ids: None,
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(non_comp_err.0, axum::http::StatusCode::CONFLICT);
+
+        // 6. With post_structure = /%category%/%postname%: post can share slug with a root Page,
+        //    while same-CPT slug still increments and forbidden %category% prefix rejects 409 immediately.
+        let perm = crate::storage::permalinks::get_settings(&db).await.unwrap();
+        crate::storage::permalinks::put_settings(
+            &db,
+            perm.version,
+            &crate::storage::permalinks::PermalinkSettingsInput {
+                post_structure: "/%category%/%postname%".to_owned(),
+                content_type_bases: perm.content_type_bases,
+                taxonomy_bases: perm.taxonomy_bases,
+            },
+        )
+        .await
+        .unwrap();
+        let cat_news = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','News','news')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+
+        let page_root = composite_save(
+            &db,
+            &actor,
+            "page",
+            None,
+            base_composite_input(&page_tok, "root-story", None),
+        )
+        .await
+        .unwrap();
+        assert_eq!(page_root.entry.slug, "root-story");
+
+        let mut post_in_news = base_composite_input(&post_tok, "root-story", None);
+        post_in_news.auto_unique_slug = true;
+        post_in_news.term_ids = Some(vec![cat_news]);
+        let post_saved = composite_save(&db, &actor, "post", None, post_in_news)
+            .await
+            .unwrap();
+        assert_eq!(post_saved.entry.slug, "root-story");
+
+        // Synthetically inject a colliding category term to exercise the immediate 409 pre-check
+        // in resolve_auto_unique_slug_in_tx when post_structure starts with /%category%/.
+        let cat_project = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Project','project')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let mut forbidden_cat = base_composite_input(&post_tok, "bad-cat-post", None);
+        forbidden_cat.auto_unique_slug = true;
+        forbidden_cat.term_ids = Some(vec![cat_project]);
+        let cat_err = composite_save(&db, &actor, "post", None, forbidden_cat)
+            .await
+            .unwrap_err();
+        assert_eq!(cat_err.0, axum::http::StatusCode::CONFLICT);
+        assert!(cat_err.1.contains("permalink_category_root_collision"));
+    }
+
+    #[tokio::test]
+    async fn s02_primary_category_validation_autoclear_and_redirect_history() {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let actor = s02_admin_context(&db).await;
+
+        let perm = crate::storage::permalinks::get_settings(&db).await.unwrap();
+        crate::storage::permalinks::put_settings(
+            &db,
+            perm.version,
+            &crate::storage::permalinks::PermalinkSettingsInput {
+                post_structure: "/%category%/%postname%".to_owned(),
+                content_type_bases: perm.content_type_bases,
+                taxonomy_bases: perm.taxonomy_bases,
+            },
+        )
+        .await
+        .unwrap();
+
+        let cat_a = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Alpha','alpha')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let cat_b = sqlx::query(
+            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Beta','beta')",
+        )
+        .execute(&db)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let tag_id =
+            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','T1','t1')")
+                .execute(&db)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+
+        let post_schema = crate::storage::content::load_effective_content_schema(&db, "post")
+            .await
+            .unwrap()
+            .unwrap();
+        let page_schema = crate::storage::content::load_effective_content_schema(&db, "page")
+            .await
+            .unwrap()
+            .unwrap();
+        let post_tok = post_schema.schema_token.clone();
+        let page_tok = page_schema.schema_token.clone();
+
+        // Validation rejections -> 400 Bad Request
+        let mut page_primary = base_composite_input(&page_tok, "page-pc", None);
+        page_primary.primary_category_term_id = PatchField::Set(cat_a);
+        assert_eq!(
+            composite_save(&db, &actor, "page", None, page_primary)
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+
+        let mut zero_primary = base_composite_input(&post_tok, "zero-pc", None);
+        zero_primary.primary_category_term_id = PatchField::Set(0);
+        assert_eq!(
+            composite_save(&db, &actor, "post", None, zero_primary)
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+
+        let mut tag_primary = base_composite_input(&post_tok, "tag-pc", None);
+        tag_primary.term_ids = Some(vec![tag_id]);
+        tag_primary.primary_category_term_id = PatchField::Set(tag_id);
+        assert_eq!(
+            composite_save(&db, &actor, "post", None, tag_primary)
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+
+        let mut unassigned_primary = base_composite_input(&post_tok, "unassigned-pc", None);
+        unassigned_primary.term_ids = Some(vec![cat_a]);
+        unassigned_primary.primary_category_term_id = PatchField::Set(cat_b);
+        assert_eq!(
+            composite_save(&db, &actor, "post", None, unassigned_primary)
+                .await
+                .unwrap_err()
+                .0,
+            axum::http::StatusCode::BAD_REQUEST
+        );
+
+        // Draft post changing primary category must NOT leave historical 301 redirect.
+        let mut draft_in = base_composite_input(&post_tok, "pc-post", None);
+        draft_in.publication_status = Some("draft".to_owned());
+        draft_in.term_ids = Some(vec![cat_a, cat_b]);
+        draft_in.primary_category_term_id = PatchField::Set(cat_b);
+        let draft1 = composite_save(&db, &actor, "post", None, draft_in)
+            .await
+            .unwrap();
+        assert_eq!(draft1.entry.primary_category_term_id, Some(cat_b));
+
+        let mut draft_up = base_composite_input(&post_tok, "pc-post", Some(draft1.entry.version));
+        draft_up.publication_status = Some("published".to_owned());
+        draft_up.primary_category_term_id = PatchField::Set(cat_a);
+        let published1 = composite_save(&db, &actor, "post", Some(draft1.entry.id), draft_up)
+            .await
+            .unwrap();
+        assert_eq!(published1.entry.primary_category_term_id, Some(cat_a));
+        assert_eq!(
+            crate::storage::permalinks::resolve_public_path(&db, "/beta/pc-post")
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            crate::storage::permalinks::resolve_public_path(&db, "/alpha/pc-post")
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical_path,
+            "/alpha/pc-post"
+        );
+
+        // Published post updates primary_category_term_id WITHOUT resending term_ids -> 301 created.
+        let mut switch_primary =
+            base_composite_input(&post_tok, "pc-post", Some(published1.entry.version));
+        switch_primary.publication_status = None;
+        switch_primary.term_ids = None;
+        switch_primary.primary_category_term_id = PatchField::Set(cat_b);
+        let published2 = composite_save(
+            &db,
+            &actor,
+            "post",
+            Some(published1.entry.id),
+            switch_primary,
+        )
+        .await
+        .unwrap();
+        assert_eq!(published2.entry.primary_category_term_id, Some(cat_b));
+        let alpha_redir = crate::storage::permalinks::resolve_public_path(&db, "/alpha/pc-post")
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(alpha_redir.redirect);
+        assert_eq!(alpha_redir.canonical_path, "/beta/pc-post");
+
+        // Removing cat_b while primary_category_term_id is Omitted auto-clears primary_category_term_id.
+        let mut strip_cat_b =
+            base_composite_input(&post_tok, "pc-post", Some(published2.entry.version));
+        strip_cat_b.publication_status = None;
+        strip_cat_b.term_ids = Some(vec![cat_a]);
+        strip_cat_b.primary_category_term_id = PatchField::Omitted;
+        let cleared = composite_save(&db, &actor, "post", Some(published2.entry.id), strip_cat_b)
+            .await
+            .unwrap();
+        assert_eq!(cleared.entry.primary_category_term_id, None);
+        assert_eq!(
+            crate::storage::permalinks::resolve_public_path(&db, "/alpha/pc-post")
+                .await
+                .unwrap()
+                .unwrap()
+                .canonical_path,
+            "/alpha/pc-post"
+        );
+
+        // Re-set primary = cat_b, then verify non-composite update_entry removing cat_b also clears it.
+        let mut restore_cat_b =
+            base_composite_input(&post_tok, "pc-post", Some(cleared.entry.version));
+        restore_cat_b.publication_status = None;
+        restore_cat_b.term_ids = Some(vec![cat_a, cat_b]);
+        restore_cat_b.primary_category_term_id = PatchField::Set(cat_b);
+        let restored = composite_save(
+            &db,
+            &actor,
+            "post",
+            Some(published2.entry.id),
+            restore_cat_b,
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.entry.primary_category_term_id, Some(cat_b));
+
+        let non_comp_updated = update_entry(
+            &db,
+            &actor,
+            "post",
+            &post_schema.base.descriptor,
+            restored.entry.id,
+            restored.entry.version,
+            &ContentEntryInput {
+                title: restored.entry.title.clone(),
+                slug: restored.entry.slug.clone(),
+                values: restored.entry.values.clone(),
+                term_ids: Some(vec![cat_a]),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(non_comp_updated.primary_category_term_id, None);
     }
 }

@@ -56,7 +56,7 @@ export function BuilderTree({ document, selectedId, elementType, onSelect, onAdd
     if (target) focusAndSelect(target);
   };
   const renderLevel = (parentId: string | null, depth: number): React.ReactNode => (
-    <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : 'Cấu trúc homepage'} className="space-y-1">
+    <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : 'Cấu trúc Builder'} className="space-y-1">
       {nodes.filter(entry => entry.parentId === parentId).map(item => {
         const nextKind = ({ section: 'row', row: 'column', column: 'element' } as const)[item.kind as 'section' | 'row' | 'column'];
         const label = nodeTitle(item);

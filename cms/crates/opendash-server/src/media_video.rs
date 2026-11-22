@@ -89,7 +89,9 @@ impl InspectCtx {
     fn count_box(&mut self) -> ApiResult<()> {
         self.box_count += 1;
         if self.box_count > MAX_BOXES {
-            return Err(ApiError::bad_request("Video MP4 vượt quá số lượng box cho phép."));
+            return Err(ApiError::bad_request(
+                "Video MP4 vượt quá số lượng box cho phép.",
+            ));
         }
         if self.box_count.is_multiple_of(128) {
             self.check_timeout()?;
@@ -139,7 +141,9 @@ fn read_top_box_header(file: &mut File, pos: u64, file_size: u64) -> ApiResult<B
         }
     };
     if box_end < pos + header_size || box_end > file_size {
-        return Err(ApiError::bad_request("Kích thước box MP4 vượt ngoài phạm vi file."));
+        return Err(ApiError::bad_request(
+            "Kích thước box MP4 vượt ngoài phạm vi file.",
+        ));
     }
     Ok(BoxHeader {
         kind,
@@ -228,7 +232,9 @@ pub fn inspect_mp4(path: &Path, file_size: u64, sha256: String) -> ApiResult<Val
                     return Err(ApiError::bad_request("Box ftyp MP4 không hợp lệ."));
                 }
                 if !(8..=4096).contains(&payload_len) {
-                    return Err(ApiError::bad_request("Box ftyp MP4 có kích thước không hợp lệ."));
+                    return Err(ApiError::bad_request(
+                        "Box ftyp MP4 có kích thước không hợp lệ.",
+                    ));
                 }
                 let mut buf = vec![0u8; payload_len as usize];
                 file.seek(SeekFrom::Start(hdr.payload_start))
@@ -242,7 +248,9 @@ pub fn inspect_mp4(path: &Path, file_size: u64, sha256: String) -> ApiResult<Val
                     return Err(ApiError::bad_request("MP4 thiếu ftyp ở đầu file."));
                 }
                 if moov_bytes.is_some() {
-                    return Err(ApiError::bad_request("MP4 chỉ được phép có đúng một box moov."));
+                    return Err(ApiError::bad_request(
+                        "MP4 chỉ được phép có đúng một box moov.",
+                    ));
                 }
                 if payload_len == 0 || payload_len > MAX_MOOV_BYTES {
                     return Err(ApiError::bad_request(
@@ -340,8 +348,7 @@ fn parse_moov(
         }
     }
 
-    let duration_ms =
-        duration_ms.ok_or_else(|| ApiError::bad_request("MP4 thiếu box mvhd."))?;
+    let duration_ms = duration_ms.ok_or_else(|| ApiError::bad_request("MP4 thiếu box mvhd."))?;
 
     let mut video_info: Option<(u32, u32, String)> = None;
     let mut audio_codec: Option<String> = None;
@@ -379,9 +386,7 @@ fn parse_moov(
     for pair in ctx.sample_ranges.windows(2) {
         ctx.check_timeout()?;
         if pair[0].1 > pair[1].0 {
-            return Err(ApiError::bad_request(
-                "MP4 có sample byte range chồng lấn.",
-            ));
+            return Err(ApiError::bad_request("MP4 có sample byte range chồng lấn."));
         }
     }
 
@@ -406,7 +411,8 @@ fn parse_mvhd(payload: &[u8]) -> ApiResult<u64> {
             if payload.len() < 24 {
                 return Err(ApiError::bad_request("Box mvhd v0 bị cắt cụt."));
             }
-            let ts = u32::from_be_bytes([payload[12], payload[13], payload[14], payload[15]]) as u64;
+            let ts =
+                u32::from_be_bytes([payload[12], payload[13], payload[14], payload[15]]) as u64;
             let dur =
                 u32::from_be_bytes([payload[16], payload[17], payload[18], payload[19]]) as u64;
             (ts, dur)
@@ -415,10 +421,17 @@ fn parse_mvhd(payload: &[u8]) -> ApiResult<u64> {
             if payload.len() < 36 {
                 return Err(ApiError::bad_request("Box mvhd v1 bị cắt cụt."));
             }
-            let ts = u32::from_be_bytes([payload[20], payload[21], payload[22], payload[23]]) as u64;
+            let ts =
+                u32::from_be_bytes([payload[20], payload[21], payload[22], payload[23]]) as u64;
             let dur = u64::from_be_bytes([
-                payload[24], payload[25], payload[26], payload[27], payload[28], payload[29],
-                payload[30], payload[31],
+                payload[24],
+                payload[25],
+                payload[26],
+                payload[27],
+                payload[28],
+                payload[29],
+                payload[30],
+                payload[31],
             ]);
             (ts, dur)
         }
@@ -431,8 +444,8 @@ fn parse_mvhd(payload: &[u8]) -> ApiResult<u64> {
         .checked_mul(1000)
         .map(|v| v / u128::from(timescale))
         .ok_or_else(|| ApiError::bad_request("Duration MP4 bị tràn số."))?;
-    let ms_u64 = u64::try_from(ms)
-        .map_err(|_| ApiError::bad_request("Duration MP4 vượt giới hạn."))?;
+    let ms_u64 =
+        u64::try_from(ms).map_err(|_| ApiError::bad_request("Duration MP4 vượt giới hạn."))?;
     if ms_u64 == 0 || ms_u64 > MAX_DURATION_MS {
         return Err(ApiError::bad_request(
             "Thời lượng video vượt quá giới hạn 1..600000 ms.",
@@ -627,15 +640,23 @@ fn validate_mdhd(payload: &[u8]) -> ApiResult<()> {
             (
                 u32::from_be_bytes([payload[20], payload[21], payload[22], payload[23]]) as u64,
                 u64::from_be_bytes([
-                    payload[24], payload[25], payload[26], payload[27], payload[28], payload[29],
-                    payload[30], payload[31],
+                    payload[24],
+                    payload[25],
+                    payload[26],
+                    payload[27],
+                    payload[28],
+                    payload[29],
+                    payload[30],
+                    payload[31],
                 ]),
             )
         }
         _ => return Err(ApiError::bad_request("Phiên bản mdhd không hợp lệ.")),
     };
     if ts == 0 || dur == 0 {
-        return Err(ApiError::bad_request("mdhd timescale hoặc duration bằng 0."));
+        return Err(ApiError::bad_request(
+            "mdhd timescale hoặc duration bằng 0.",
+        ));
     }
     Ok(())
 }
@@ -743,7 +764,9 @@ fn parse_avcc(avcc: &[u8]) -> ApiResult<(u32, u32, String)> {
         }
         let sps = &avcc[idx..idx + sps_len];
         if (sps[0] & 0x1f) != 7 {
-            return Err(ApiError::bad_request("NALU đầu tiên trong avcC không phải SPS."));
+            return Err(ApiError::bad_request(
+                "NALU đầu tiên trong avcC không phải SPS.",
+            ));
         }
         if sps_i == 0 {
             dims = Some(parse_h264_sps_dimensions(sps)?);
@@ -787,7 +810,10 @@ impl<'a> BitReader<'a> {
     }
 
     fn remaining_bits(&self) -> usize {
-        self.data.len().saturating_mul(8).saturating_sub(self.bit_pos)
+        self.data
+            .len()
+            .saturating_mul(8)
+            .saturating_sub(self.bit_pos)
     }
 
     fn read_bit(&mut self) -> ApiResult<u32> {
@@ -823,7 +849,11 @@ impl<'a> BitReader<'a> {
         if zeros >= 32 {
             return Err(ApiError::bad_request("Exp-Golomb SPS vượt giới hạn."));
         }
-        let suffix = if zeros == 0 { 0 } else { self.read_bits(zeros)? };
+        let suffix = if zeros == 0 {
+            0
+        } else {
+            self.read_bits(zeros)?
+        };
         Ok(((1u32 << zeros) - 1) + suffix)
     }
 
@@ -887,7 +917,11 @@ fn parse_h264_sps_dimensions(sps_nal: &[u8]) -> ApiResult<(u32, u32)> {
                             let delta = br.read_se()?;
                             next_scale = (last_scale + delta + 256) % 256;
                         }
-                        last_scale = if next_scale == 0 { last_scale } else { next_scale };
+                        last_scale = if next_scale == 0 {
+                            last_scale
+                        } else {
+                            next_scale
+                        };
                     }
                 }
             }
@@ -910,7 +944,9 @@ fn parse_h264_sps_dimensions(sps_nal: &[u8]) -> ApiResult<(u32, u32)> {
             let _ = br.read_se()?;
         }
     } else if pic_order_cnt_type > 2 {
-        return Err(ApiError::bad_request("pic_order_cnt_type SPS không hợp lệ."));
+        return Err(ApiError::bad_request(
+            "pic_order_cnt_type SPS không hợp lệ.",
+        ));
     }
 
     let _max_num_ref_frames = br.read_ue()?;
@@ -954,12 +990,8 @@ fn parse_h264_sps_dimensions(sps_nal: &[u8]) -> ApiResult<(u32, u32)> {
         sub_h * (2 - frame_mbs_only_flag)
     };
 
-    let crop_x = crop_l
-        .saturating_add(crop_r)
-        .saturating_mul(crop_unit_x);
-    let crop_y = crop_t
-        .saturating_add(crop_b)
-        .saturating_mul(crop_unit_y);
+    let crop_x = crop_l.saturating_add(crop_r).saturating_mul(crop_unit_x);
+    let crop_y = crop_t.saturating_add(crop_b).saturating_mul(crop_unit_y);
     let width = raw_w
         .checked_sub(crop_x)
         .ok_or_else(|| ApiError::bad_request("Crop ngang SPS vượt chiều rộng."))?;
@@ -1023,7 +1055,9 @@ fn read_mp4_descr_len(data: &[u8], pos: &mut usize) -> ApiResult<usize> {
             return Ok(len);
         }
     }
-    Err(ApiError::bad_request("Độ dài descriptor esds không hợp lệ."))
+    Err(ApiError::bad_request(
+        "Độ dài descriptor esds không hợp lệ.",
+    ))
 }
 
 fn validate_esds_aac_lc(esds: &[u8]) -> ApiResult<()> {
@@ -1118,7 +1152,9 @@ fn validate_sample_tables(
         ));
     }
     if uniform_size == 0 && sample_count.saturating_mul(4) > (stsz.len() - 12) as u64 {
-        return Err(ApiError::bad_request("Bảng kích thước sample stsz vượt payload."));
+        return Err(ApiError::bad_request(
+            "Bảng kích thước sample stsz vượt payload.",
+        ));
     }
 
     // 3. Validate stsc count fits remaining payload BEFORE iteration

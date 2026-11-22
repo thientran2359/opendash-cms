@@ -5,18 +5,19 @@ use axum::{
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqlitePool;
+use std::collections::BTreeMap;
 
 use crate::{
     auth::{require_admin, require_admin_with_csrf},
     error::{ApiError, ApiResult},
-    storage::permalinks::{self, PermalinkSettings, PermalinkSettingsInput},
+    storage::permalinks::{self, PermalinkPutError, PermalinkSettings, PermalinkSettingsInput},
     storage::settings::{
         self, GeneralSettings, GeneralSettingsInput, PublicSaveOutcome, PublicSiteSettings,
-        PublicSiteSettingsInput, SaveOutcome, ThemeOptionsOutcome, ThemeOptionsSnapshot,
+        PublicSiteSettingsInput, ReadingSettings, ReadingSettingsInput, SaveOutcome,
+        ThemeOptionsOutcome, ThemeOptionsSnapshot,
     },
 };
 
@@ -123,7 +124,10 @@ pub async fn public_put(
     let version = parse_if_match(&headers)?;
     let Json(input) = input.map_err(|err| {
         if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
-            ApiError(StatusCode::PAYLOAD_TOO_LARGE, "Dữ liệu cài đặt công khai vượt quá 4 KiB.".into())
+            ApiError(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Dữ liệu cài đặt công khai vượt quá 4 KiB.".into(),
+            )
         } else {
             ApiError::bad_request("Dữ liệu cài đặt công khai không hợp lệ.")
         }
@@ -168,13 +172,46 @@ pub async fn permalinks_put(
     let expected = parse_if_match(&headers)?;
     let Json(input) = input.map_err(|error| {
         if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
-            ApiError(StatusCode::PAYLOAD_TOO_LARGE, "Cấu hình permalink vượt quá 16 KiB.".into())
+            ApiError(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Cấu hình permalink vượt quá 16 KiB.".into(),
+            )
         } else {
             ApiError::bad_request("Cấu hình permalink không hợp lệ.")
         }
     })?;
-    let saved = permalinks::put_settings(&db, expected, &input).await?;
-    Ok(permalink_settings_response(saved))
+    match permalinks::put_settings(&db, expected, &input).await {
+        Ok(saved) => Ok(permalink_settings_response(saved)),
+        Err(PermalinkPutError::Conflicts(payload)) => Ok((
+            StatusCode::CONFLICT,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(payload),
+        )
+            .into_response()),
+        Err(PermalinkPutError::Api(err)) => Err(err),
+    }
+}
+
+fn reading_settings_response(settings: ReadingSettings) -> Response {
+    (no_store_headers(Some(settings.version)), Json(settings)).into_response()
+}
+
+pub async fn reading_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    Ok(reading_settings_response(settings::get_reading(&db).await?))
+}
+
+pub async fn reading_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    input: Result<Json<ReadingSettingsInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let expected = parse_if_match(&headers)?;
+    let Json(input) = input.map_err(|_| ApiError::bad_request("Reading Settings không hợp lệ."))?;
+    let saved = settings::save_reading(&db, input, expected).await?;
+    Ok(reading_settings_response(saved))
 }
 
 #[derive(Debug, Deserialize)]
@@ -210,9 +247,7 @@ pub async fn theme_options_put(
     let version = parse_if_match(&headers)?;
     let Json(input) =
         input.map_err(|_| ApiError::bad_request("Dữ liệu theme options không hợp lệ."))?;
-    match settings::put_theme_options(&db, &theme_id, version, input.values)
-        .await?
-    {
+    match settings::put_theme_options(&db, &theme_id, version, input.values).await? {
         ThemeOptionsOutcome::Saved(saved) => Ok(theme_options_response(saved)),
         ThemeOptionsOutcome::NotFound => Err(ApiError::not_found("Không tìm thấy theme.")),
         ThemeOptionsOutcome::Stale => Err(ApiError::precondition_failed(

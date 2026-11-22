@@ -64,6 +64,17 @@ EGM_REQUIRED_SECTIONS = (
     "Goals",
     "Detailed Implementation Plan",
 )
+EGM_REQUIRED_PROVENANCE = (
+    "approved by",
+    "approval evidence",
+    "goldfish review",
+)
+EGM_REQUIRED_SLICE_FIELDS = (
+    "**Dependencies:**",
+    "**File Ownership:**",
+    "**Acceptance Criteria:**",
+    "**Rollback:**",
+)
 
 
 class TaskError(ValueError):
@@ -194,6 +205,13 @@ def parse_egm_design(document: str) -> dict[str, object]:
             f"EGM Design Spec phải có '**Status:** Approved' trước khi tạo Issue (hiện tại: {status or 'trống'})"
         )
 
+    for prov_key in EGM_REQUIRED_PROVENANCE:
+        prov_val = metadata.get(prov_key, "")
+        if not prov_val or EGM_PLACEHOLDER.search(prov_val):
+            raise TaskError(
+                f"EGM Design Spec đã Approved phải có metadata provenance '**{prov_key.title()}:**' hợp lệ"
+            )
+
     for required in EGM_REQUIRED_SECTIONS:
         value = sections.get(required, "")
         if not value or EGM_PLACEHOLDER.search(value):
@@ -233,8 +251,15 @@ def extract_egm_slice(impl_plan: str, slice_id: str) -> tuple[str, str, str]:
             break
     slice_body = "\n".join(lines[start:stop]).strip()
 
-    # Append document-level Verification Plan if not already inside the slice
-    if "### Verification Plan" not in slice_body:
+    for req_field in EGM_REQUIRED_SLICE_FIELDS:
+        if req_field not in slice_body:
+            raise TaskError(
+                f"Slice {matched_id} thiếu trường contract bắt buộc: '{req_field}'"
+            )
+
+    # Append ONLY the standard verification command block (fenced code block) from
+    # document-level ### Verification Plan so S01 does not inherit S02/S03 behavioral items.
+    if "### Verification Plan" not in slice_body and "### Verification Commands" not in slice_body:
         vp_start = None
         for idx, line in enumerate(lines):
             if line.strip() == "### Verification Plan":
@@ -247,8 +272,22 @@ def extract_egm_slice(impl_plan: str, slice_id: str) -> tuple[str, str, str]:
                 if heading and len(heading.group(1)) <= 3:
                     vp_stop = idx
                     break
-            vp_block = "\n".join(lines[vp_start:vp_stop]).strip()
-            slice_body = f"{slice_body}\n\n{vp_block}"
+            vp_lines = lines[vp_start + 1 : vp_stop]
+            cmd_block: list[str] = []
+            in_fence = False
+            for vp_line in vp_lines:
+                if vp_line.strip().startswith("```"):
+                    cmd_block.append(vp_line)
+                    if in_fence:
+                        break
+                    in_fence = True
+                elif in_fence:
+                    cmd_block.append(vp_line)
+            if cmd_block:
+                slice_body = (
+                    f"{slice_body}\n\n### Verification Commands (Standard Gate)\n\n"
+                    + "\n".join(cmd_block)
+                )
 
     return matched_id, slice_title, slice_body
 

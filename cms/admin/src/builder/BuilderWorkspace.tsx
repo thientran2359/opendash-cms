@@ -1,19 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
+import * as builderApi from '../api/builder.ts';
 import { getContentEntry } from '../api/content.ts';
-import * as sectionApi from '../api/sections.ts';
+import { listPatterns, type PatternRecord } from '../api/patterns.ts';
 import type { AuthUser, BlockRegistry } from '../types.ts';
-import type { BuilderDiagnostic, HomepageOpen, OverrideRole } from '../api/builder.ts';
+import type { BuilderDiagnostic, HomepageOpen, OverrideRole, TemplateTargetInput } from '../api/builder.ts';
 import type { ParsedRoute } from '../shell/router.ts';
 import {
-  type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type ListProps, type NodeKind, type ResponsiveAlign,
-  type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
-  allNodes, appendNode, copySectionIntoDocument, isElement, isLockedElement, locate, moveNode, preservesAnchors,
+  type BuilderDocument, type BuilderElement, type BuilderRow, type BuilderViewport, type ElementBinding, type ElementType,
+  type InsertableElementType, type ListProps, type NodeKind, type ResponsiveAlign, type ResponsiveField,
+  ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
+  allNodes, appendNode, canDeleteElement, cloneWithFreshNodeIds, countElementsByType,
+  isElement, isLockedElement, locate, moveNode, preservesAnchors,
   removeNode, setElementBinding, setListProps, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
 import { BuilderCanvas } from './BuilderCanvas.tsx';
 import { BuilderInspector } from './BuilderInspector.tsx';
+import { BuilderPreviewFrame } from './BuilderPreviewFrame.tsx';
+import { PatternLibraryModal } from './PatternLibraryModal.tsx';
+import { MediaPicker } from '../features/media/MediaPicker.tsx';
 
 interface Props {
   route: ParsedRoute;
@@ -27,59 +33,420 @@ interface Props {
   onApiError: (error: unknown, fallback: string) => void;
 }
 
-const MEDIA_PREVIEW_LIMIT = 64;
-const MEDIA_PREVIEW_BYTES_LIMIT = 48 * 1024 * 1024;
-const PRIVATE_MEDIA_PATH = /^\/api\/admin\/media\/([a-zA-Z0-9_-]{1,128})\/file$/;
+export interface BuilderEditorCoreProps {
+  document: BuilderDocument;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onChangeDocument: (next: BuilderDocument, nextSelected?: string | null, removedId?: string) => boolean;
+  registry: BlockRegistry;
+  csrfToken: string | null;
+  viewport: BuilderViewport;
+  themeRevision: number;
+  patterns: PatternRecord[];
+  patternsLoaded: boolean;
+  onRefreshPatterns: () => void;
+  allowRouteContext?: boolean;
+  allowPatternRef?: boolean;
+  allowList?: boolean;
+  allowContentSlot?: boolean;
+  allowTemplatePart?: boolean;
+  requiresContentSlot?: boolean;
+  availablePartKeys?: string[];
+  diagnostics?: Array<{ node_id: string; code: string; message?: string }>;
+  hadFreeformWrap?: boolean;
+  hadRecovery?: boolean;
+  disabled?: boolean;
+  onMessage?: (text: string, failed?: boolean) => void;
+  onApiError: (error: unknown, fallback: string) => void;
+}
 
-/** A sandbox="" iframe has an opaque origin: SameSite session cookies are not
- * sent when it loads private media. Resolve only exact, authenticated media
- * paths in the parent and embed trusted raster bytes as data URLs. This does
- * not make draft media public or give the iframe scripts or same-origin access.
- */
-async function preparePreviewMarkup(
-  html: string, signal: AbortSignal,
-): Promise<{ html: string; skipped: number }> {
-  const parsed = new DOMParser().parseFromString(html, 'text/html');
-  const images = Array.from(parsed.querySelectorAll('img[src]'));
-  const mediaPaths = [...new Set(images.map(image => image.getAttribute('src') ?? '')
-    .filter(path => PRIVATE_MEDIA_PATH.test(path)))];
-  const replacements = new Map<string, string>();
-  let skipped = Math.max(0, mediaPaths.length - MEDIA_PREVIEW_LIMIT);
-  let bytes = 0;
-  for (const path of mediaPaths.slice(0, MEDIA_PREVIEW_LIMIT)) {
-    if (signal.aborted) throw new DOMException('Preview đã hủy.', 'AbortError');
-    let blob: Blob;
-    try {
-      blob = await api.getPrivatePreviewMedia(path, signal);
-    } catch (cause) {
-      if (cause instanceof api.ApiClientError && cause.status === 401) throw cause;
-      if (signal.aborted) throw cause;
-      skipped += 1;
-      continue;
-    }
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)
-        || !blob.size || bytes + blob.size > MEDIA_PREVIEW_BYTES_LIMIT) {
-      skipped += 1;
-      continue;
-    }
-    bytes += blob.size;
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error ?? new Error('Không đọc được ảnh Preview.'));
-      reader.onabort = () => reject(new DOMException('Preview đã hủy.', 'AbortError'));
-      if (signal.aborted) reader.abort();
-      else reader.readAsDataURL(blob);
-    });
-    replacements.set(path, dataUrl);
-  }
-  images.forEach(image => {
-    const replacement = replacements.get(image.getAttribute('src') ?? '');
-    if (replacement) image.setAttribute('src', replacement);
+export function BuilderEditorCore({
+  document: draft,
+  selectedId,
+  onSelect,
+  onChangeDocument,
+  registry,
+  csrfToken,
+  viewport,
+  themeRevision,
+  patterns,
+  patternsLoaded,
+  onRefreshPatterns,
+  allowRouteContext = false,
+  allowPatternRef = false,
+  allowList = true,
+  allowContentSlot = false,
+  allowTemplatePart = false,
+  requiresContentSlot = false,
+  availablePartKeys,
+  diagnostics = [],
+  hadFreeformWrap = false,
+  hadRecovery = false,
+  disabled = false,
+  onMessage,
+  onApiError,
+}: BuilderEditorCoreProps) {
+  const [sidebarTab, setSidebarTab] = useState<'blocks' | 'patterns' | 'media'>('blocks');
+  const [elementType, setElementType] = useState<InsertableElementType>('core/heading');
+  const [showPatternLibrary, setShowPatternLibrary] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
+
+  const insertableTypes = ELEMENT_TYPES.filter(type => {
+    if (type === 'core/pattern_ref' && !allowPatternRef) return false;
+    if (type === 'core/list' && !allowList) return false;
+    if (type === 'core/content_slot' && !allowContentSlot) return false;
+    if (type === 'core/template_part' && !allowTemplatePart) return false;
+    return true;
   });
-  // DOMParser is inert; scripts from theme HTML stay locked inside the opaque
-  // sandbox on insertion. Preserve server markup without React innerHTML.
-  return { html: '<!doctype html>' + parsed.documentElement.outerHTML, skipped };
+
+  useEffect(() => {
+    if (!insertableTypes.includes(elementType)) {
+      setElementType(insertableTypes[0] ?? 'core/heading');
+    }
+  }, [allowPatternRef, allowList, allowContentSlot, allowTemplatePart]);
+
+  const applyUpdate = (next: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
+    if (!next) return false;
+    if (!preservesAnchors(draft, next, registry, removedId)) {
+      onMessage?.('Node không resolve cần giữ nguyên vị trí, ancestor và nội dung.', true);
+      return false;
+    }
+    if (allNodes(next).length > 512 || JSON.stringify(next).length > 256 * 1024) {
+      onMessage?.('Builder vượt giới hạn 512 node hoặc 256 KiB.', true);
+      return false;
+    }
+    return onChangeDocument(next, nextSelected, removedId);
+  };
+
+  const add = (parentId: string | null, kind: NodeKind) => {
+    if (disabled) return;
+    if (kind === 'element') {
+      if (!allowPatternRef && elementType === 'core/pattern_ref') {
+        onMessage?.('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+        return;
+      }
+      if (!allowList && elementType === 'core/list') {
+        onMessage?.('Pattern không được chứa Danh sách nội dung.', true);
+        return;
+      }
+      if (elementType === 'core/content_slot') {
+        if (!allowContentSlot) {
+          onMessage?.('Loại target này không cho phép thêm core/content_slot.', true);
+          return;
+        }
+        if (countElementsByType(draft, 'core/content_slot') >= 1) {
+          onMessage?.('Template chỉ được chứa tối đa 1 core/content_slot.', true);
+          return;
+        }
+      }
+      if (elementType === 'core/template_part' && !allowTemplatePart) {
+        onMessage?.('Chỉ được chèn Template Part trong Mode Dựng Template.', true);
+        return;
+      }
+    }
+    const next = appendNode(draft, parentId, kind, elementType);
+    if (!next) {
+      onMessage?.('Vị trí thêm node không hợp lệ.', true);
+      return;
+    }
+    applyUpdate(next.document, next.id);
+  };
+
+  const reorder = (id: string, direction: -1 | 1) => {
+    if (disabled) return;
+    const next = moveNode(draft, id, direction);
+    if (next) applyUpdate(next, id);
+  };
+
+  const remove = (id: string) => {
+    if (disabled) return;
+    if (!canDeleteElement(draft, id, { requiresContentSlot })) {
+      onMessage?.('Bắt buộc giữ ít nhất 1 core/content_slot trong template này.', true);
+      return;
+    }
+    const entry = locate(draft, id);
+    if (!entry) return;
+    const lockedCount = allNodes(draft).filter(node =>
+      node.kind === 'element' && node.path.slice(0, entry.path.length)
+        .every((step, index) => step === entry.path[index])
+      && isLockedElement(node.node as BuilderElement, registry)
+    ).length;
+    const prompt = lockedCount
+      ? 'Node chứa ' + lockedCount + ' block chưa resolve. Xóa vĩnh viễn khỏi Builder hiện tại?'
+      : 'Xóa node này và toàn bộ node con?';
+    if (!window.confirm(prompt)) return;
+    const next = removeNode(draft, id);
+    applyUpdate(next, entry.parentId, id);
+  };
+
+  const editField = (id: string, field: string, value: string | number | boolean | undefined) => {
+    if (disabled) return;
+    const entry = locate(draft, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    applyUpdate(setNodeField(draft, id, field, value), id);
+  };
+
+  const editBinding = (id: string, binding: ElementBinding | null) => {
+    if (disabled) return;
+    const entry = locate(draft, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    applyUpdate(setElementBinding(draft, id, binding), id);
+  };
+
+  const editList = (id: string, config: ListProps) => {
+    if (disabled) return;
+    const entry = locate(draft, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    applyUpdate(setListProps(draft, id, config), id);
+  };
+
+  const editResponsive = (
+    id: string, target: BuilderViewport, field: ResponsiveField, value: number | ResponsiveAlign | null,
+  ) => {
+    if (disabled) return;
+    const next = setResponsiveField(draft, id, target, field, value);
+    if (!next) {
+      onMessage?.('Thuộc tính responsive không hợp lệ.', true);
+      return;
+    }
+    applyUpdate(next, id);
+  };
+
+  const insertThemePattern = (sourceDocument: BuilderDocument, title: string): boolean => {
+    if (!csrfToken || disabled) return false;
+    if (sourceDocument.schema_version !== draft.schema_version || !sourceDocument.sections.length) {
+      onMessage?.('Mẫu từ theme không có bố cục Builder tương thích.', true);
+      return false;
+    }
+    const sourceNodes = allNodes(sourceDocument);
+    if (!allowList && sourceNodes.some(node => node.kind === 'element'
+        && (node.node as BuilderElement).type === 'core/list')) {
+      onMessage?.('Target này không cho phép Danh sách nội dung.', true);
+      return false;
+    }
+    const existingNodes = allNodes(draft);
+    const combinedListCount = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
+      && (node.node as BuilderElement).type === 'core/list').length;
+    if (combinedListCount > 8) {
+      onMessage?.('Builder chỉ hỗ trợ tối đa 8 Danh sách nội dung.', true);
+      return false;
+    }
+    const refs = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
+        && (node.node as BuilderElement).type === 'core/pattern_ref')
+      .map(node => Number((node.node as BuilderElement).props.pattern_id));
+    if ((!allowPatternRef && refs.length > 0) || refs.some(id => !Number.isSafeInteger(id) || id <= 0)
+        || new Set(refs).size > 16) {
+      onMessage?.('Mẫu không phù hợp với target hoặc giới hạn 16 Reusable Pattern.', true);
+      return false;
+    }
+    const copy = cloneWithFreshNodeIds(sourceDocument, draft);
+    const selectedSection = locate(draft, selectedId)?.path[0];
+    const insertionIndex = selectedSection === undefined ? draft.sections.length : selectedSection + 1;
+    const next = {
+      ...draft,
+      sections: [
+        ...draft.sections.slice(0, insertionIndex),
+        ...copy.sections,
+        ...draft.sections.slice(insertionIndex),
+      ],
+    };
+    if (!applyUpdate(next, copy.sections[0].id)) return false;
+    onMessage?.('Đã chèn bản sao “' + title + '”. Chưa lưu lên website.');
+    return true;
+  };
+
+  const insertMediaImage = (ids: string[]) => {
+    const mediaId = ids[0];
+    if (!mediaId || !/^[a-zA-Z0-9_-]{1,128}$/.test(mediaId) || !csrfToken || disabled) return;
+    const selected = locate(draft, selectedId);
+    if (selected?.kind === 'element' && isElement(selected.node)
+        && selected.node.type === 'core/image' && !isLockedElement(selected.node, registry)) {
+      if (!applyUpdate(setNodeField(draft, selected.node.id, 'media_id', mediaId), selected.node.id)) return;
+    } else {
+      let next = draft;
+      let columnId: string | undefined;
+      if (selected?.kind === 'element') columnId = selected.parentId ?? undefined;
+      else if (selected?.kind === 'column') columnId = selected.node.id;
+      let sectionId = selected && selected.path.length > 0 ? next.sections[selected.path[0]]?.id : undefined;
+      let rowId = selected && selected.path.length > 1 ? next.sections[selected.path[0]]?.children[selected.path[1]]?.id : undefined;
+      if (!columnId) {
+        if (!sectionId) {
+          const section = appendNode(next, null, 'section', 'core/image');
+          if (!section) return;
+          next = section.document;
+          sectionId = section.id;
+        }
+        if (!rowId) {
+          const row = appendNode(next, sectionId, 'row', 'core/image');
+          if (!row) return;
+          next = row.document;
+          rowId = row.id;
+        }
+        const row = locate(next, rowId);
+        if (row?.kind === 'row' && !columnId) {
+          const rowNode = row.node as BuilderRow;
+          columnId = rowNode.children[rowNode.children.length - 1]?.id;
+        }
+        if (!columnId) {
+          const column = appendNode(next, rowId, 'column', 'core/image');
+          if (!column) return;
+          next = column.document;
+          columnId = column.id;
+        }
+      }
+      const inserted = appendNode(next, columnId, 'element', 'core/image');
+      if (!inserted) return;
+      const populated = setNodeField(inserted.document, inserted.id, 'media_id', mediaId);
+      if (!applyUpdate(populated, inserted.id)) return;
+    }
+    setShowMediaPicker(false);
+    onMessage?.('Đã chèn ảnh từ Media Library vào bản nháp. Chưa lưu lên website.');
+  };
+
+  return (
+    <div className="od-studio-builder-core space-y-3" data-testid="studio-builder-core">
+      <style>{'.od-studio-builder-core .btn-secondary{background:#fff;color:#27272a;border:1px solid #d4d4d8;border-radius:6px;padding:4px 8px;font-weight:500}.od-studio-builder-core .btn-danger{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;padding:4px 8px;font-weight:500}'}</style>
+
+      {(hadFreeformWrap || hadRecovery) && (
+        <div role="status" className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-900" data-testid="studio-block-notice">
+          {hadFreeformWrap && <p>Nội dung văn bản thuần trước đó đã được tự động bọc thành khối UX Builder để chỉnh sửa.</p>}
+          {hadRecovery && <p>Một phần comment block cũ bị sai cú pháp đã được phục hồi an toàn thành khối văn bản.</p>}
+        </div>
+      )}
+
+      {diagnostics.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900" data-testid="studio-diagnostics-banner">
+          <strong>Chẩn đoán khối:</strong>
+          <ul className="mt-1 list-disc pl-4 space-y-0.5">
+            {diagnostics.map((d, idx) => (
+              <li key={`${d.node_id}-${idx}`}>{d.node_id}: {d.message ?? d.code}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1" role="tablist" aria-label="Công cụ UX Builder">
+        <button type="button" role="tab" aria-selected={sidebarTab === 'blocks'}
+          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
+            (sidebarTab === 'blocks' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
+          onClick={() => setSidebarTab('blocks')}>Blocks</button>
+        <button type="button" role="tab" aria-selected={sidebarTab === 'patterns'}
+          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
+            (sidebarTab === 'patterns' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
+          onClick={() => setSidebarTab('patterns')}>Patterns</button>
+        <button type="button" role="tab" aria-selected={sidebarTab === 'media'}
+          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
+            (sidebarTab === 'media' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
+          onClick={() => setSidebarTab('media')}>Media</button>
+      </div>
+
+      {sidebarTab === 'blocks' && (
+        <div className="space-y-3" role="tabpanel">
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white p-2">
+            <label htmlFor="studio-element-type" className="text-xs font-medium text-zinc-600">Element mới</label>
+            <select
+              id="studio-element-type"
+              className="h-8 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900"
+              value={elementType}
+              onChange={event => setElementType(event.target.value as InsertableElementType)}
+            >
+              {insertableTypes.map(type => (
+                <option key={type} value={type}>
+                  {type === 'core/pattern_ref'
+                    ? 'Reusable Pattern'
+                    : type === 'core/content_slot'
+                      ? 'Content Slot'
+                      : type === 'core/template_part'
+                        ? 'Template Part'
+                        : type}
+                </option>
+              ))}
+            </select>
+          </div>
+          <BuilderTree
+            document={draft}
+            selectedId={selectedId}
+            elementType={elementType as ElementType}
+            onSelect={id => onSelect(id)}
+            onAdd={add}
+            onMove={reorder}
+            onDelete={remove}
+          />
+          <BuilderInspector
+            document={draft}
+            selectedId={selectedId}
+            registry={registry}
+            csrfToken={csrfToken}
+            viewport={viewport}
+            allowRouteContext={allowRouteContext}
+            requiresContentSlot={requiresContentSlot}
+            availablePartKeys={availablePartKeys}
+            patterns={patterns}
+            patternsLoaded={patternsLoaded}
+            onRefreshPatterns={onRefreshPatterns}
+            onDeleteNode={remove}
+            onChange={editField}
+            onBindingChange={editBinding}
+            onListChange={editList}
+            onResponsiveChange={editResponsive}
+            onError={onApiError}
+          />
+        </div>
+      )}
+
+      {sidebarTab === 'patterns' && (
+        <div role="tabpanel" className="space-y-2.5 rounded-xl border border-zinc-200 bg-white p-3.5">
+          <h3 className="text-sm font-semibold text-zinc-900">Thư viện Pattern</h3>
+          <p className="text-xs text-zinc-600">Chèn bản sao Section từ mẫu theme v3 sau Section đang chọn.</p>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setShowPatternLibrary(true)}
+            data-testid="studio-open-pattern-library"
+            className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Explore all patterns
+          </button>
+        </div>
+      )}
+
+      {sidebarTab === 'media' && (
+        <div role="tabpanel" className="space-y-2.5 rounded-xl border border-zinc-200 bg-white p-3.5">
+          <h3 className="text-sm font-semibold text-zinc-900">Thư viện Media</h3>
+          <p className="text-xs text-zinc-600">Chọn ảnh để chèn vào cột hiện tại hoặc thay ảnh của khối đang chọn.</p>
+          <button
+            type="button"
+            disabled={disabled || !csrfToken}
+            onClick={() => setShowMediaPicker(true)}
+            data-testid="studio-open-media-picker"
+            className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Chọn ảnh từ Media Library
+          </button>
+        </div>
+      )}
+
+      {showPatternLibrary && (
+        <PatternLibraryModal
+          key={themeRevision}
+          onClose={() => setShowPatternLibrary(false)}
+          onInsert={insertThemePattern}
+          onApiError={onApiError}
+        />
+      )}
+      {showMediaPicker && (
+        <MediaPicker
+          mode="image"
+          acceptKind="image"
+          csrfToken={csrfToken}
+          selectedIds={[]}
+          onApply={insertMediaImage}
+          onClose={() => setShowMediaPicker(false)}
+          onError={onApiError}
+        />
+      )}
+    </div>
+  );
 }
 
 export function BuilderWorkspace({
@@ -89,11 +456,29 @@ export function BuilderWorkspace({
   const draftRef = useRef<BuilderDocument>(EMPTY_DOCUMENT);
   // The accepted route owns the target identity. Never change this independently
   // of App's dirty-navigation guard (including browser Back/Forward).
-  const targetRole = (route.templateRole ?? 'homepage') as 'homepage' | OverrideRole | 'section';
+  // The global Builder opens a valid typed template; Homepage is now Page-scoped.
+  const targetRole = (route.templateRole ?? 'header') as OverrideRole | 'entry';
   const scopeTypeKey = route.typeKey ?? '';
   const scopeEntryId = route.entryId ?? null;
   const scopedPage = targetRole === 'page' && scopeTypeKey === 'page' && scopeEntryId !== null;
-  const scopedSection = targetRole === 'section' && scopeTypeKey === 'section' && scopeEntryId !== null;
+  const scopedEntry = (targetRole === 'entry' && Boolean(scopeTypeKey) && scopeEntryId !== null) || scopedPage;
+  const scopedPattern = scopedEntry && scopeTypeKey === 'pattern';
+  const sharedTarget: TemplateTargetInput | null = scopedEntry || (scopeEntryId !== null && targetRole !== 'single')
+    ? null
+    : targetRole === 'header' || targetRole === 'footer'
+      ? { kind: 'part', part_key: targetRole }
+      : targetRole === 'taxonomy_archive'
+        ? { kind: 'taxonomy', ...(scopeTypeKey ? { taxonomy: scopeTypeKey } : {}) }
+        : targetRole === 'archive' || targetRole === 'single'
+          ? { kind: targetRole, ...(scopeTypeKey ? { content_type: scopeTypeKey } : {}),
+              ...(targetRole === 'single' && scopeEntryId !== null ? { entry_id: scopeEntryId } : {}) }
+          : targetRole === 'page' ? { kind: 'page' } : null;
+  const sharedKey = sharedTarget?.kind === 'part' ? `part:${sharedTarget.part_key}`
+    : sharedTarget?.kind === 'taxonomy' && sharedTarget.taxonomy ? `taxonomy:key:${sharedTarget.taxonomy}`
+    : sharedTarget?.content_type ? `${sharedTarget.kind}:type:${sharedTarget.content_type}${sharedTarget.entry_id !== undefined ? `:id:${sharedTarget.entry_id}` : ''}`
+    : sharedTarget?.kind;
+  const sharedIdRef = useRef<number | null>(null);
+  const entryModeRef = useRef<'editor' | 'builder'>('editor');
   const [scopeTypeInput, setScopeTypeInput] = useState(scopeTypeKey);
   const [pageDetails, setPageDetails] = useState<{ status: 'draft' | 'published'; url: string } | null>(null);
   const [overrideExists, setOverrideExists] = useState(false);
@@ -103,27 +488,29 @@ export function BuilderWorkspace({
   const [registry, setRegistry] = useState<BlockRegistry>({});
   const registryRef = useRef<BlockRegistry>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [elementType, setElementType] = useState<ElementType>('core/heading');
+  const [elementType, setElementType] = useState<InsertableElementType>('core/heading');
   const [mode, setMode] = useState<'canvas' | 'preview'>('canvas');
-  // Pure UI state: changing viewport never changes homepage JSON or revision.
+  // Pure UI state: changing viewport never changes document JSON or revision.
   const [viewport, setViewport] = useState<BuilderViewport>('desktop');
   const [previewHtml, setPreviewHtml] = useState('');
   const [diagnostics, setDiagnostics] = useState<BuilderDiagnostic[]>([]);
   const [revision, setRevision] = useState(0);
   const [savedRevision, setSavedRevision] = useState(0);
   const revisionRef = useRef(0);
+  const savedRevisionRef = useRef(0);
   const [loading, setLoading] = useState(false);
   const [previewing, setPreviewing] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [conflict, setConflict] = useState(false);
-  const [notice, setNotice] = useState('Mở Builder để chỉnh homepage.');
+  const [notice, setNotice] = useState('Mở Builder để chỉnh template hoặc bố cục Page.');
   const [error, setError] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  const [librarySections, setLibrarySections] = useState<sectionApi.SectionRecord[]>([]);
-  const [libraryLoading, setLibraryLoading] = useState(false);
-  const [insertingId, setInsertingId] = useState<number | null>(null);
-  const librarySeq = useRef(0);
+  const [patterns, setPatterns] = useState<PatternRecord[]>([]);
+  const [patternsLoaded, setPatternsLoaded] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<'blocks' | 'patterns' | 'media'>('blocks');
+  const [showPatternLibrary, setShowPatternLibrary] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
+  const patternSeq = useRef(0);
   const ownerRef = useRef<number | null>(null);
   const ownerRoleRef = useRef<AuthUser['role'] | null>(null);
   const loadedRef = useRef(false);
@@ -132,6 +519,34 @@ export function BuilderWorkspace({
   const previewSeq = useRef(0);
   const previewAbort = useRef<AbortController | null>(null);
   const loadSeq = useRef(0);
+  const authority = JSON.stringify([route.rawHash, user?.id, user?.role, csrfToken, resetToken, active]);
+  const authorityRef = useRef(authority);
+  authorityRef.current = authority;
+  const openedTarget = async () => {
+    if (scopedEntry && scopeEntryId !== null) {
+      const opened = await builderApi.getEntryBuilder(scopeTypeKey, scopeEntryId);
+      return { document: opened.document ?? EMPTY_DOCUMENT, version: opened.version,
+        exists: opened.document !== null, sharedId: null, contentMode: opened.content_mode };
+    }
+    if (!sharedTarget) throw new Error('Target Builder không hợp lệ.');
+    const { items } = await builderApi.getTemplateOverrides();
+    const opened = items.find(item => item.canonical_target_key === sharedKey);
+    return { document: opened?.ast_json ?? EMPTY_DOCUMENT, version: opened?.version ?? 0,
+      exists: Boolean(opened), sharedId: opened?.id ?? null, contentMode: null };
+  };
+  const freshPageDetails = async () => {
+    if (!scopedEntry || scopeEntryId === null || scopedPattern) return null;
+    const entry = await getContentEntry(scopeTypeKey, scopeEntryId);
+    // Builder also supports private CPTs; their lack of a public route must
+    // not hide the authenticated editing surface. Do not swallow auth errors.
+    const entryRoute = await api.getEntryRoute(scopeTypeKey, scopeEntryId).catch(cause => {
+      if (cause instanceof api.ApiClientError && cause.status === 404) return null;
+      throw cause;
+    });
+    const url = entryRoute?.entry_version === entry.version && entryRoute.public_url?.startsWith('/') &&
+      !entryRoute.public_url.startsWith('//') ? entryRoute.public_url : '';
+    return { status: entry.publication_status, url };
+  };
 
   const message = (text: string, failed = false) => { setNotice(text); setError(failed); };
   const invalidatePreview = () => {
@@ -144,17 +559,22 @@ export function BuilderWorkspace({
   };
   const clear = () => {
     loadSeq.current += 1;
-    librarySeq.current += 1;
-    setLibraryOpen(false);
-    setLibrarySections([]);
-    setLibraryLoading(false);
-    setInsertingId(null);
+    patternSeq.current += 1;
+    setPatterns([]);
+    setPatternsLoaded(false);
+    setSidebarTab('blocks');
+    setShowPatternLibrary(false);
+    setShowMediaPicker(false);
     invalidatePreview();
     draftRef.current = EMPTY_DOCUMENT;
     setDraft(EMPTY_DOCUMENT);
     revisionRef.current = 0;
     setRevision(0);
     setSavedRevision(0);
+    savedRevisionRef.current = 0;
+    sharedIdRef.current = null;
+    entryModeRef.current = 'editor';
+    setOverrideExists(false);
     setVersion(null);
     versionRef.current = null;
     setSource('empty');
@@ -165,23 +585,43 @@ export function BuilderWorkspace({
     setMode('canvas');
     setPageDetails(null);
     loadedRef.current = false;
+    savingRef.current = false;
+    setSaving(false);
   };
 
   useEffect(() => {
     onDirtyChange(revision !== savedRevision);
   }, [revision, savedRevision, onDirtyChange]);
 
-  // A pending private Section fetch may never insert into a different target,
-  // account, role, or authorization generation after navigation/re-login.
+  // Pattern metadata is private and must be scoped to the current account
+  // and accepted Builder target. Loading the list never mutates the AST.
   useEffect(() => {
-    librarySeq.current += 1;
-    setLibraryOpen(false);
-    setLibrarySections([]);
-    setLibraryLoading(false);
-    setInsertingId(null);
-  }, [route.rawHash, user?.id, user?.role, csrfToken, resetToken]);
+    const seq = ++patternSeq.current;
+    setPatterns([]);
+    setPatternsLoaded(false);
+    if (!active || !user || !csrfToken || route.sub !== 'builder') return;
+    listPatterns().then(data => {
+      if (seq !== patternSeq.current) return;
+      setPatterns(data.items);
+      setPatternsLoaded(true);
+    }).catch(cause => {
+      if (seq === patternSeq.current) onApiError(cause, 'Không tải được danh sách Pattern.');
+    });
+    return () => { patternSeq.current += 1; };
+  }, [active, route.rawHash, user?.id, user?.role, csrfToken, resetToken]);
 
-  // Fetch only the accepted target. An inactive Builder must not fetch homepage
+  const refreshPatterns = () => {
+    if (!active || !user || !csrfToken) return;
+    const seq = ++patternSeq.current;
+    setPatternsLoaded(false);
+    listPatterns().then(data => {
+      if (seq === patternSeq.current) { setPatterns(data.items); setPatternsLoaded(true); }
+    }).catch(cause => {
+      if (seq === patternSeq.current) onApiError(cause, 'Không thể làm mới danh sách Pattern.');
+    });
+  };
+
+  // Fetch only the accepted target. An inactive Builder must not fetch templates
   // in the background while an Editor is working on a Page.
   useEffect(() => {
     if (resetRef.current !== resetToken) {
@@ -203,47 +643,44 @@ export function BuilderWorkspace({
     ownerRef.current = user.id;
     ownerRoleRef.current = user.role;
     if (!active || route.sub !== 'builder') return;
-    if (loadedRef.current) return;
+    const retainDraft = versionRef.current !== null && revisionRef.current !== savedRevisionRef.current;
+    // Re-authorize on session/route changes before restoring or exposing a draft.
+    loadedRef.current = false;
+    savingRef.current = false;
+    setSaving(false);
     let alive = true;
     const requestId = ++loadSeq.current;
     setLoading(true);
-    const openedPromise = targetRole === 'homepage'
-      ? api.getHomepage().then(opened => ({ ...opened, exists: false }))
-      : scopedSection && scopeEntryId !== null
-        ? sectionApi.getSectionDocument(scopeEntryId).then(opened => ({ ...opened, exists: true }))
-        : api.getOverride(targetRole as OverrideRole, scopeTypeKey || null, scopeEntryId);
-    const entryPromise = scopedPage && scopeEntryId !== null
-      ? Promise.all([getContentEntry('page', scopeEntryId), api.getEntryRoute('page', scopeEntryId)])
-          .then(([entry, entryRoute]) => ({
-            status: entry.publication_status,
-            url: entryRoute.custom_path?.startsWith('/') && !entryRoute.custom_path.startsWith('//')
-              ? entryRoute.custom_path
-              : `/content/page/${encodeURIComponent(entry.slug)}`,
-          }))
-      : Promise.resolve(null);
+    const openedPromise = openedTarget();
+    const entryPromise = freshPageDetails();
     Promise.all([openedPromise, api.getRegistry(), entryPromise])
       .then(([opened, descriptors, details]) => {
-        if (!alive || requestId !== loadSeq.current || ownerRef.current !== user.id) return;
-        draftRef.current = opened.document;
-        setDraft(opened.document);
-        setVersion(opened.version);
-        versionRef.current = opened.version;
-        setSource('source' in opened && opened.source ? opened.source : opened.exists ? 'layout' : 'empty');
+        if (!alive || requestId !== loadSeq.current || ownerRef.current !== user.id || authorityRef.current !== authority) return;
+        if (!retainDraft) {
+          draftRef.current = opened.document;
+          setDraft(opened.document);
+          setVersion(opened.version);
+          versionRef.current = opened.version;
+          sharedIdRef.current = opened.sharedId;
+          entryModeRef.current = opened.contentMode ?? 'editor';
+          revisionRef.current = 0;
+          savedRevisionRef.current = 0;
+          setRevision(0);
+          setSavedRevision(0);
+          setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
+        }
+        setSource(opened.exists ? 'layout' : 'empty');
         setOverrideExists(opened.exists);
         setPageDetails(details);
         setRegistry(descriptors);
         registryRef.current = descriptors;
-        revisionRef.current = 0;
-        setRevision(0);
-        setSavedRevision(0);
-        setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
         loadedRef.current = true;
-        setConflict(false);
-        message('Đã mở ' + (scopedPage ? `Page #${scopeEntryId}` : targetRole)
+        setConflict(retainDraft && versionRef.current !== opened.version);
+        message(retainDraft ? 'Đã khôi phục nháp chưa lưu. Version cũ vẫn được giữ để kiểm tra xung đột.' : 'Đã mở ' + (scopedEntry ? `${scopeTypeKey} #${scopeEntryId}` : targetRole)
           + ' (ETag "v' + opened.version + '").');
       })
       .catch(cause => {
-        if (alive && requestId === loadSeq.current) {
+        if (alive && requestId === loadSeq.current && authorityRef.current === authority) {
           message('Không thể tải Builder cho target này.', true);
           onApiError(cause, 'Không thể mở Builder.');
         }
@@ -267,15 +704,15 @@ export function BuilderWorkspace({
     return () => { alive = false; };
   }, [themeRevision, user?.id]);
 
-  const changeDraft = (updated: BuilderDocument | null, nextSelected?: string | null, removedId?: string) => {
-    if (!updated) return;
+  const changeDraft = (updated: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
+    if (!updated) return false;
     if (!preservesAnchors(draftRef.current, updated, registryRef.current, removedId)) {
       message('Node không resolve cần giữ nguyên vị trí, ancestor và nội dung.', true);
-      return;
+      return false;
     }
     if (allNodes(updated).length > 512 || JSON.stringify(updated).length > 256 * 1024) {
       message('Builder vượt giới hạn 512 node hoặc 256 KiB.', true);
-      return;
+      return false;
     }
     draftRef.current = updated;
     setDraft(updated);
@@ -285,54 +722,118 @@ export function BuilderWorkspace({
     setMode('canvas');
     if (nextSelected !== undefined) setSelectedId(nextSelected);
     message('Có thay đổi chưa lưu.');
+    return true;
+  };
+
+  const insertThemePattern = (sourceDocument: BuilderDocument, title: string): boolean => {
+    if (!active || !user || !csrfToken || !loadedRef.current || savingRef.current) return false;
+    if (sourceDocument.schema_version !== draftRef.current.schema_version || !sourceDocument.sections.length) {
+      message('Mẫu từ theme không có bố cục Builder tương thích.', true);
+      return false;
+    }
+    const sourceNodes = allNodes(sourceDocument);
+    if (scopedPattern && sourceNodes.some(node => node.kind === 'element'
+        && ['core/pattern_ref', 'core/list'].includes(
+          (node.node as import('./document.ts').BuilderElement).type))) {
+      message('Pattern CPT không cho phép lồng Reusable Pattern hoặc Danh sách nội dung.', true);
+      return false;
+    }
+    const existingNodes = allNodes(draftRef.current);
+    const combinedListCount = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
+      && (node.node as import('./document.ts').BuilderElement).type === 'core/list').length;
+    if (combinedListCount > 8) {
+      message('Builder chỉ hỗ trợ tối đa 8 Danh sách nội dung.', true);
+      return false;
+    }
+    const refs = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
+        && (node.node as import('./document.ts').BuilderElement).type === 'core/pattern_ref')
+      .map(node => Number((node.node as import('./document.ts').BuilderElement).props.pattern_id));
+    if ((!scopedEntry && refs.length > 0) || refs.some(id => !Number.isSafeInteger(id) || id <= 0)
+        || new Set(refs).size > 16) {
+      message('Mẫu không phù hợp với target hoặc giới hạn 16 Reusable Pattern.', true);
+      return false;
+    }
+    const copy = cloneWithFreshNodeIds(sourceDocument, draftRef.current);
+    // Any selected descendant belongs to exactly one root Section. Copy
+    // immediately after that Section; a missing selection appends at the end.
+    const selectedSection = locate(draftRef.current, selectedId)?.path[0];
+    const insertionIndex = selectedSection === undefined
+      ? draftRef.current.sections.length : selectedSection + 1;
+    const next = { ...draftRef.current, sections: [
+      ...draftRef.current.sections.slice(0, insertionIndex),
+      ...copy.sections,
+      ...draftRef.current.sections.slice(insertionIndex),
+    ] };
+    if (!changeDraft(next, copy.sections[0].id)) return false;
+    message('Đã chèn bản sao “' + title + '” ' +
+      (selectedSection === undefined ? 'vào cuối canvas.' : 'sau Section được chọn.') +
+      ' Chưa lưu lên website.');
+    return true;
+  };
+
+  const insertMediaImage = (ids: string[]) => {
+    const mediaId = ids[0];
+    if (!mediaId || !/^[a-zA-Z0-9_-]{1,128}$/.test(mediaId) || !loadedRef.current
+        || !active || !user || !csrfToken || savingRef.current) return;
+    const selected = locate(draftRef.current, selectedId);
+    if (selected?.kind === 'element' && isElement(selected.node)
+        && selected.node.type === 'core/image' && !isLockedElement(selected.node, registryRef.current)) {
+      if (!changeDraft(setNodeField(draftRef.current, selected.node.id, 'media_id', mediaId), selected.node.id)) return;
+    } else {
+      // Fill only the missing container levels so an image always has the
+      // required Section → Row → Column → Element shape.
+      let next = draftRef.current;
+      let columnId: string | undefined;
+      if (selected?.kind === 'element') columnId = selected.parentId ?? undefined;
+      else if (selected?.kind === 'column') columnId = selected.node.id;
+      let sectionId = selected && selected.path.length > 0
+        ? next.sections[selected.path[0]]?.id : undefined;
+      let rowId = selected && selected.path.length > 1
+        ? next.sections[selected.path[0]]?.children[selected.path[1]]?.id : undefined;
+      if (!columnId) {
+        if (!sectionId) {
+          const section = appendNode(next, null, 'section', 'core/image');
+          if (!section) return;
+          next = section.document;
+          sectionId = section.id;
+        }
+        if (!rowId) {
+          const row = appendNode(next, sectionId, 'row', 'core/image');
+          if (!row) return;
+          next = row.document;
+          rowId = row.id;
+        }
+        const row = locate(next, rowId);
+        if (row?.kind === 'row' && !columnId) {
+          const rowNode = row.node as import('./document.ts').BuilderRow;
+          columnId = rowNode.children[rowNode.children.length - 1]?.id;
+        }
+        if (!columnId) {
+          const column = appendNode(next, rowId, 'column', 'core/image');
+          if (!column) return;
+          next = column.document;
+          columnId = column.id;
+        }
+      }
+      const inserted = appendNode(next, columnId, 'element', 'core/image');
+      if (!inserted) return;
+      const populated = setNodeField(inserted.document, inserted.id, 'media_id', mediaId);
+      if (!changeDraft(populated, inserted.id)) return;
+    }
+    setShowMediaPicker(false);
+    message('Đã chèn ảnh từ Media Library vào bản nháp. Chưa lưu lên website.');
   };
 
   const add = (parentId: string | null, kind: NodeKind) => {
+    if (!scopedEntry && kind === 'element' && elementType === 'core/pattern_ref') {
+      return message('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+    }
+    if (scopedPattern && kind === 'element' && (elementType === 'core/pattern_ref' || elementType === 'core/list')) {
+      return message('Pattern không được chứa Reusable Pattern hoặc Danh sách nội dung.', true);
+    }
     const next = appendNode(draftRef.current, parentId, kind, elementType);
     if (!next) return message('Vị trí thêm node không hợp lệ.', true);
     changeDraft(next.document, next.id);
-  };
-  const openLibrary = async () => {
-    if (!active || !user || !csrfToken || !loadedRef.current || libraryLoading) return;
-    if (libraryOpen) { librarySeq.current += 1; setLibraryOpen(false); return; }
-    const requestId = ++librarySeq.current;
-    const accountId = user.id;
-    setLibraryLoading(true);
-    try {
-      const catalog = await sectionApi.getLocalTemplateLibrary();
-      if (requestId !== librarySeq.current || ownerRef.current !== accountId) return;
-      setLibrarySections(catalog.sections);
-      setLibraryOpen(true);
-    } catch (cause) {
-      if (requestId === librarySeq.current) onApiError(cause, 'Không thể mở thư viện Section.');
-    } finally { if (requestId === librarySeq.current) setLibraryLoading(false); }
-  };
-  const insertSection = async (id: number) => {
-    if (!active || !user || !csrfToken || !loadedRef.current || loading || saving || insertingId !== null) return;
-    const requestId = ++librarySeq.current;
-    const accountId = user.id;
-    setInsertingId(id);
-    try {
-      const sourceDocument = await sectionApi.getSectionDocument(id);
-      if (requestId !== librarySeq.current || ownerRef.current !== accountId || !loadedRef.current) return;
-      const next = copySectionIntoDocument(draftRef.current, sourceDocument.document, selectedId);
-      if (!next) {
-        message('Section rỗng, vượt giới hạn hoặc vị trí chèn không hợp lệ. Không có thay đổi.', true);
-        return;
-      }
-      // Locked provider nodes are preserved in their own Section; copying an
-      // unresolved provider is not equivalent to installing it in this target.
-      const unresolved = allNodes(sourceDocument.document).some(location =>
-        location.kind === 'element' && isLockedElement(location.node as import('./document.ts').BuilderElement, registryRef.current));
-      if (unresolved) {
-        message('Section chứa block chưa resolve. Giữ bản gốc; bật lại provider trước khi chèn bản sao.', true);
-        return;
-      }
-      changeDraft(next.document, next.firstId);
-      message('Đã chèn bản SAO Section #' + id + ' với ID mới. Chỉ là nháp; cần Lưu Builder để áp dụng.');
-    } catch (cause) {
-      if (requestId === librarySeq.current) onApiError(cause, 'Không thể sao chép Section vào Builder.');
-    } finally { if (requestId === librarySeq.current) setInsertingId(null); }
   };
   const reorder = (id: string, direction: -1 | 1) => {
     const next = moveNode(draftRef.current, id, direction);
@@ -389,30 +890,36 @@ export function BuilderWorkspace({
     previewAbort.current = controller;
     const snapshot = draftRef.current;
     const snapshotRevision = revisionRef.current;
+    const snapshotVersion = versionRef.current;
     const accountId = user.id;
+    const requestAuthority = authority;
     setPreviewing(true);
     message('Đang tạo bản Preview từ nháp...');
     try {
-      const result = targetRole === 'homepage'
-        ? await api.previewHomepage(snapshot, csrfToken, controller.signal)
-        : scopedSection && scopeEntryId !== null
-          ? await sectionApi.previewSectionDocument(scopeEntryId, snapshot, csrfToken, controller.signal)
-          : await api.previewOverride(targetRole as OverrideRole, snapshot, csrfToken, scopeTypeKey || null, scopeEntryId, controller.signal);
+      const result = scopedEntry && scopeEntryId !== null
+            ? await builderApi.previewEntryBuilder(scopeTypeKey, scopeEntryId, snapshot, csrfToken, controller.signal)
+            : sharedTarget
+              ? await builderApi.previewTemplateOverride(sharedTarget, snapshot, csrfToken,
+                  sharedTarget.kind === 'single' && scopeEntryId !== null && scopeTypeKey
+                    ? { type_key: scopeTypeKey, entry_id: scopeEntryId } : undefined,
+                  snapshotVersion !== null && snapshotVersion > 0 ? snapshotVersion : undefined,
+                  controller.signal)
+              : (() => { throw new Error('Target Builder không hợp lệ.'); })();
       if (current !== previewSeq.current || revisionRef.current !== snapshotRevision
-          || ownerRef.current !== accountId) return;
-      const prepared = await preparePreviewMarkup(result.html, controller.signal);
-      if (current !== previewSeq.current || revisionRef.current !== snapshotRevision
-          || ownerRef.current !== accountId) return;
-      setPreviewHtml(prepared.html);
+          || ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
+      setPreviewHtml(result.html);
       setDiagnostics(result.diagnostics);
       setMode('preview');
-      message(prepared.skipped
-        ? 'Preview nháp — ' + prepared.skipped + ' ảnh riêng tư chưa hiển thị. Chưa ghi dữ liệu.'
-        : 'Preview nháp — chưa ghi dữ liệu lên website.');
+      message('Đang chuẩn bị Preview nháp...');
     } catch (cause) {
-      if (controller.signal.aborted || current !== previewSeq.current) return;
-      message('Preview thất bại.', true);
-      onApiError(cause, 'Không thể xem trước Builder.');
+      if (controller.signal.aborted || current !== previewSeq.current || authorityRef.current !== requestAuthority) return;
+      if (sharedTarget && cause instanceof api.ApiClientError && cause.status === 412) {
+        setConflict(true);
+        message('Bố cục đã thay đổi từ phiên khác (412). Nháp của bạn vẫn còn.', true);
+      } else {
+        message('Preview thất bại.', true);
+        onApiError(cause, 'Không thể xem trước Builder.');
+      }
     } finally {
       if (current === previewSeq.current) setPreviewing(false);
     }
@@ -420,8 +927,29 @@ export function BuilderWorkspace({
 
   const save = async () => {
     if (!active || !csrfToken || !user || !loadedRef.current || savingRef.current || versionRef.current === null) return;
-    if (scopedPage && !overrideExists && !window.confirm(
-      'Thiết kế mới sẽ thay phần thân Page đang hiển thị sau khi Lưu. ' +
+    const refs = allNodes(draftRef.current).filter(node =>
+      node.kind === 'element' && (node.node as import('./document.ts').BuilderElement).type === 'core/pattern_ref')
+      .map(node => Number((node.node as import('./document.ts').BuilderElement).props.pattern_id));
+    if (!scopedEntry && refs.length > 0) {
+      message('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+      return;
+    }
+    if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
+      message('Mỗi Reusable Pattern cần một Pattern hợp lệ; tối đa 16 Pattern duy nhất trên một trang.', true);
+      return;
+    }
+    if (patternsLoaded && refs.some(id => !patterns.some(pattern => pattern.id === id))) {
+      message('Một Pattern đã bị xóa. Hãy chọn Pattern thay thế trong Inspector trước khi lưu.', true);
+      return;
+    }
+    if (scopedPattern && allNodes(draftRef.current).some(node =>
+      node.kind === 'element' && ['core/list', 'core/pattern_ref'].includes(
+        (node.node as import('./document.ts').BuilderElement).type))) {
+      message('Pattern không được chứa Reusable Pattern hoặc danh sách nội dung.', true);
+      return;
+    }
+    if (scopedEntry && !scopedPattern && entryModeRef.current !== 'builder' && !window.confirm(
+      'Thiết kế mới sẽ thay phần thân nội dung đang hiển thị sau khi Lưu. ' +
       'Nội dung văn bản hiện tại vẫn được giữ để khôi phục khi Reset. Tiếp tục?'
     )) return;
     savingRef.current = true;
@@ -431,43 +959,41 @@ export function BuilderWorkspace({
     const snapshotRevision = revisionRef.current;
     const snapshotVersion = versionRef.current;
     const accountId = user.id;
+    const requestAuthority = authority;
     message('Đang lưu snapshot (If-Match "v' + snapshotVersion + '")...');
     try {
-      if (targetRole === 'homepage') {
-        const result = await api.saveHomepage(snapshot, snapshotVersion, csrfToken);
-        if (ownerRef.current !== accountId) return;
-        versionRef.current = result.version;
-        setVersion(result.version);
-        setSource(result.source);
-        setSavedRevision(snapshotRevision);
-        if (snapshotRevision === revisionRef.current) {
-          invalidatePreview();
-          setDiagnostics(result.diagnostics);
-        }
-      } else {
-        const result = scopedSection && scopeEntryId !== null
-          ? await sectionApi.saveSectionDocument(scopeEntryId, snapshot, snapshotVersion, csrfToken)
-          : await api.saveOverride(targetRole as OverrideRole, snapshot, snapshotVersion, csrfToken, scopeTypeKey || null, scopeEntryId);
-        if (ownerRef.current !== accountId) return;
-        versionRef.current = result.version;
-        setVersion(result.version);
-        setOverrideExists(true);
-        setSource('layout');
-        setSavedRevision(snapshotRevision);
-        if (snapshotRevision === revisionRef.current) {
-          invalidatePreview();
-          setDiagnostics(result.diagnostics);
-        }
+      const result = scopedEntry && scopeEntryId !== null
+            ? await builderApi.saveEntryBuilder(scopeTypeKey, scopeEntryId, snapshot, snapshotVersion, csrfToken)
+            : sharedTarget
+              ? await builderApi.putTemplateOverride(sharedTarget, snapshot, csrfToken, snapshotVersion || undefined)
+              : (() => { throw new Error('Target Builder không hợp lệ.'); })();
+      if (ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
+      versionRef.current = result.version;
+      setVersion(result.version);
+      if ('content_mode' in result) entryModeRef.current = result.content_mode;
+      if ('canonical_target_key' in result) sharedIdRef.current = result.id;
+      setOverrideExists(true);
+      setSource('layout');
+      savedRevisionRef.current = snapshotRevision;
+      setSavedRevision(snapshotRevision);
+      if (snapshotRevision === revisionRef.current) {
+        invalidatePreview();
+        if ('diagnostics' in result && Array.isArray(result.diagnostics)) setDiagnostics(result.diagnostics);
+      }
+      if (scopedEntry) {
+        const details = await freshPageDetails();
+        if (authorityRef.current !== requestAuthority) return;
+        setPageDetails(details);
       }
       message(snapshotRevision === revisionRef.current
-        ? scopedSection
-          ? 'Đã lưu Section. Bố cục chỉ có trong thư viện riêng tư; chưa xuất bản.'
-          : scopedPage && pageDetails?.status === 'draft'
-          ? 'Đã lưu bố cục nháp. Page vẫn chưa xuất bản.'
+        ? scopedPattern
+          ? 'Đã lưu Pattern đồng bộ; mọi nội dung tham chiếu sẽ hiển thị bố cục mới.'
+          : scopedEntry && pageDetails?.status === 'draft'
+          ? 'Đã lưu bố cục nháp. Nội dung vẫn chưa xuất bản.'
           : 'Đã lưu và cập nhật website công khai.'
         : 'Snapshot đã lưu. Các chỉnh sửa mới hơn vẫn chưa được lưu.');
     } catch (cause) {
-      if (ownerRef.current !== accountId) return;
+      if (ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
       if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
         message('Bố cục đã được lưu từ phiên khác (412). Nháp của bạn vẫn còn.', true);
@@ -476,8 +1002,10 @@ export function BuilderWorkspace({
         onApiError(cause, 'Không thể lưu Builder.');
       }
     } finally {
-      savingRef.current = false;
-      setSaving(false);
+      if (authorityRef.current === requestAuthority) {
+        savingRef.current = false;
+        setSaving(false);
+      }
     }
   };
 
@@ -486,47 +1014,32 @@ export function BuilderWorkspace({
     if (confirmDiscard && revisionRef.current !== savedRevision
         && !window.confirm('Bỏ nháp chưa lưu và tải bản trên server?')) return;
     const accountId = user.id;
+    const requestAuthority = authority;
     const requestId = ++loadSeq.current;
     setLoading(true);
     try {
-      if (targetRole === 'homepage') {
-        const opened = await api.getHomepage();
-        if (ownerRef.current !== accountId || requestId !== loadSeq.current) return;
-        invalidatePreview();
-        draftRef.current = opened.document;
-        setDraft(opened.document);
-        versionRef.current = opened.version;
-        setVersion(opened.version);
-        setOverrideExists(false);
-        setSource(opened.source);
-        setPageDetails(null);
-        revisionRef.current = 0;
-        setRevision(0);
-        setSavedRevision(0);
-        setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
-        setConflict(false);
-        message('Đã tải lại homepage (ETag "v' + opened.version + '").');
-      } else {
-        const opened = scopedSection && scopeEntryId !== null
-          ? await sectionApi.getSectionDocument(scopeEntryId).then(result => ({ ...result, exists: true }))
-          : await api.getOverride(targetRole as OverrideRole, scopeTypeKey || null, scopeEntryId);
-        if (ownerRef.current !== accountId || requestId !== loadSeq.current) return;
-        invalidatePreview();
-        draftRef.current = opened.document;
-        setDraft(opened.document);
-        versionRef.current = opened.version;
-        setVersion(opened.version);
-        setOverrideExists(opened.exists);
-        setSource(opened.exists ? 'layout' : 'empty');
-        revisionRef.current = 0;
-        setRevision(0);
-        setSavedRevision(0);
-        setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
-        setConflict(false);
-        message('Đã tải lại ' + targetRole + (opened.exists ? ' (ETag "v' + opened.version + '")' : ' (chưa tạo)') + '.');
-      }
+      const [opened, details] = await Promise.all([openedTarget(), freshPageDetails()]);
+      if (ownerRef.current !== accountId || requestId !== loadSeq.current || authorityRef.current !== requestAuthority) return;
+      invalidatePreview();
+      draftRef.current = opened.document;
+      setDraft(opened.document);
+      versionRef.current = opened.version;
+      setVersion(opened.version);
+      sharedIdRef.current = opened.sharedId;
+      entryModeRef.current = opened.contentMode ?? 'editor';
+      setOverrideExists(opened.exists);
+      setSource(opened.exists ? 'layout' : 'empty');
+      setPageDetails(details);
+      revisionRef.current = 0;
+      savedRevisionRef.current = 0;
+      setRevision(0);
+      setSavedRevision(0);
+      setSelectedId(allNodes(opened.document)[0]?.node.id ?? null);
+      setConflict(false);
+      loadedRef.current = true;
+      message('Đã tải lại ' + targetRole + ' (ETag "v' + opened.version + '").');
     } catch (cause) {
-      if (requestId === loadSeq.current && ownerRef.current === accountId) {
+      if (requestId === loadSeq.current && ownerRef.current === accountId && authorityRef.current === requestAuthority) {
         message('Không thể tải lại Builder.', true);
         onApiError(cause, 'Không thể tải lại template.');
       }
@@ -538,24 +1051,46 @@ export function BuilderWorkspace({
   const reload = () => loadRoleTarget(true);
 
   const resetRoleOverride = async () => {
-    if (!active || targetRole === 'homepage' || scopedSection || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
+    if (!active || scopedPattern || !csrfToken || !user || !overrideExists || versionRef.current === null || versionRef.current < 1) return;
     if (revisionRef.current !== savedRevision
         && !window.confirm('Reset sẽ bỏ nháp chưa lưu. Tiếp tục?')) return;
     if (!window.confirm('Reset bố cục ' + targetRole + ' để sử dụng nội dung dự phòng?')) return;
+    const requestAuthority = authority;
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
-      await api.resetOverride(targetRole as OverrideRole, versionRef.current, csrfToken, scopeTypeKey || null, scopeEntryId);
+      if (scopedEntry && scopeEntryId !== null) {
+        await builderApi.resetEntryBuilder(scopeTypeKey, scopeEntryId, versionRef.current, csrfToken);
+      } else if (sharedIdRef.current !== null) {
+        const result = await builderApi.resetTemplateOverride(sharedIdRef.current, versionRef.current, csrfToken);
+        if (authorityRef.current !== requestAuthority) return;
+        await loadRoleTarget(false);
+        if (authorityRef.current !== requestAuthority) return;
+        message('Đã reset bố cục ' + targetRole + '. Nguồn hiện tại: ' + result.next_effective_source.label);
+        return;
+      }
+      if (authorityRef.current !== requestAuthority) return;
       await loadRoleTarget(false);
+      if (authorityRef.current !== requestAuthority) return;
       message('Đã reset bố cục ' + targetRole + '.');
     } catch (cause) {
-      onApiError(cause, 'Kh?ng th? reset override.');
+      if (authorityRef.current !== requestAuthority) return;
+      if (cause instanceof api.ApiClientError && cause.status === 412) {
+        setConflict(true);
+        message('Reset xung đột version (412). Nháp của bạn vẫn còn.', true);
+      } else onApiError(cause, 'Không thể reset bố cục.');
     } finally {
-      setSaving(false);
+      if (authorityRef.current === requestAuthority) {
+        savingRef.current = false;
+        setSaving(false);
+      }
     }
   };
 
   const dirty = revision !== savedRevision;
   if (!user || !csrfToken || !active) return null;
+  if (ownerRef.current !== user.id || ownerRoleRef.current !== user.role) return null;
   return (
     <div className="builder-workspace min-w-0 space-y-4" data-testid="builder-workspace">
       {/* AdminShell provides an existing builder slot; the tree owns the complete workspace. */}
@@ -563,7 +1098,7 @@ export function BuilderWorkspace({
       <header className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4">
         <div>
           <h2 className="!m-0 text-lg font-bold text-slate-900">
-            {scopedPage ? `Page Builder #${scopeEntryId}` : scopedSection ? `Section Builder #${scopeEntryId}` : targetRole === 'homepage' ? 'Homepage Builder' : 'Override: ' + targetRole}
+            {scopedEntry ? `${scopeTypeKey === 'page' ? 'Page' : scopedPattern ? 'Pattern' : scopeTypeKey} Builder #${scopeEntryId}` : 'Override: ' + targetRole}
           </h2>
           <p className="mt-1 text-xs text-slate-500">
             Nguồn: {source} · ETag: {version === null ? 'Chưa tải' : '"v' + version + '"'}
@@ -574,18 +1109,15 @@ export function BuilderWorkspace({
           <label htmlFor="builder-role-target" className="text-sm font-medium text-slate-600">Role</label>
 
           <select id="builder-role-target" aria-label="Role Builder" className="text-sm"
-            disabled={user.role !== 'admin' || scopedPage || scopedSection}
+            disabled={user.role !== 'admin' || scopedEntry}
             value={targetRole} onChange={event => {
-              const next = event.target.value as 'homepage' | OverrideRole | 'section';
-              if (next === 'page' || next === 'section') return;
-              onNavigateHash(next === 'homepage' ? '#/builder'
-                : `#/builder?template=${next}${scopeTypeKey && (next === 'archive' || next === 'single') ? `&type=${encodeURIComponent(scopeTypeKey)}` : ''}`);
+              const next = event.target.value as OverrideRole | 'entry';
+              if (next === 'entry' || next === 'page') return;
+              onNavigateHash(`#/builder?template=${next}${scopeTypeKey && (next === 'archive' || next === 'single') ? `&type=${encodeURIComponent(scopeTypeKey)}` : ''}`);
             }}>
 
-            <option value="homepage">homepage</option>
-
             <option value="page" disabled={!scopedPage}>page</option>
-            <option value="section" disabled={!scopedSection}>section · riêng tư</option>
+            <option value="entry" disabled={!scopedEntry || scopedPage}>entry · riêng theo CPT</option>
 
             <option value="header">header</option>
 
@@ -599,9 +1131,8 @@ export function BuilderWorkspace({
 
           </select>
 
-          {scopedPage && <span className="text-xs font-medium text-slate-600">page · entry #{scopeEntryId}</span>}
-          {scopedSection && <span className="text-xs font-medium text-slate-600">section · entry #{scopeEntryId} · private</span>}
-          {(targetRole === 'archive' || targetRole === 'single') && !scopedPage && (
+          {scopedEntry && <span className="text-xs font-medium text-slate-600">{scopeTypeKey} · entry #{scopeEntryId}</span>}
+          {(targetRole === 'archive' || targetRole === 'single') && !scopedEntry && (
 
             <input type="text" className="w-28 text-sm" placeholder="type_key"
 
@@ -625,22 +1156,23 @@ export function BuilderWorkspace({
             Tải bản server
           </button>
           <button id="preview" type="button" className="btn-secondary"
-            disabled={!user || loading || previewing || !loadedRef.current}
+            disabled={!user || loading || previewing || !loadedRef.current || (Boolean(sharedTarget) && user.role !== 'admin')}
             onClick={() => void preview()}>Xem trước</button>
-          <button id="save" type="button" disabled={!user || loading || saving || !dirty}
-            onClick={() => void save()}> {saving ? 'Đang lưu…' : scopedSection ? 'Lưu Section' : targetRole === 'homepage' ? 'Lưu homepage' : 'Lưu override'} </button>
-          {targetRole !== 'homepage' && !scopedSection && overrideExists && (
+          <button id="save" type="button" disabled={!user || loading || saving || !loadedRef.current || !dirty}
+            onClick={() => void save()}> {saving ? 'Đang lưu…' : scopedPattern ? 'Lưu Pattern' : scopedPage ? 'Lưu Page' : scopedEntry ? 'Lưu nội dung' : 'Lưu override'} </button>
+          {!scopedPattern && overrideExists && (
             <button type="button" className="btn-secondary" disabled={!user || loading || saving}
               onClick={() => void resetRoleOverride()}>Reset mặc định</button>
           )}
-          {scopedPage && <button type="button" className="btn-secondary"
-            onClick={() => onNavigateHash(`#/pages/${scopeEntryId}/edit`)}>Trở lại Page</button>}
-          {scopedSection && <button type="button" className="btn-secondary"
-            onClick={() => onNavigateHash(`#/sections/${scopeEntryId}/edit`)}>Trở lại Section</button>}
-          {!scopedSection && (scopedPage ? pageDetails?.status === 'published' : true) && (
-            <a href={scopedPage ? pageDetails?.url : '/'} target="_blank" rel="noopener noreferrer"
+          {scopedEntry && <button type="button" className="btn-secondary"
+            onClick={() => onNavigateHash(scopedPattern ? `#/patterns/${scopeEntryId}/edit`
+              : scopeTypeKey === 'page' ? `#/pages/${scopeEntryId}/edit`
+              : scopeTypeKey === 'post' ? `#/posts/${scopeEntryId}/edit`
+                : `#/cpt/${encodeURIComponent(scopeTypeKey)}/${scopeEntryId}/edit`)}>{scopedPattern ? 'Trở lại Pattern' : scopedPage ? 'Trở lại Page' : 'Trở lại nội dung'}</button>}
+          {!scopedPattern && (scopedEntry ? pageDetails?.status === 'published' && Boolean(pageDetails.url) : true) && (
+            <a href={scopedEntry ? pageDetails?.url : '/'} target="_blank" rel="noopener noreferrer"
               className="rounded border border-slate-200 px-3 py-2 text-sm text-sky-700">
-              {scopedPage ? 'Xem Page công khai' : 'Trang công khai'}
+              {scopedEntry ? 'Xem nội dung công khai' : 'Trang công khai'}
             </a>
           )}
         </div>
@@ -648,10 +1180,11 @@ export function BuilderWorkspace({
       <div role={error ? 'alert' : 'status'} className={'rounded-lg border p-3 text-sm ' +
         (error ? 'border-red-200 bg-red-50 text-red-800' : 'border-slate-200 bg-white text-slate-600')}>
         {loading ? 'Đang tải Builder… ' : ''}{notice}
-        {scopedPage && pageDetails?.status === 'draft' &&
+        {scopedEntry && !scopedPattern && pageDetails?.status === 'draft' &&
           <p className="mt-1">Page đang là bản nháp. Lưu bố cục sẽ không xuất bản Page.</p>}
-        {scopedSection && <p className="mt-1">Section này chỉ lưu trong website. Không có URL công khai; Preview chỉ hiển thị sau đăng nhập.</p>}
-        {scopedPage && !overrideExists && loadedRef.current &&
+        {sharedTarget && <p className="mt-1">Preview hiển thị template đang chỉnh sửa; chưa cập nhật website công khai.</p>}
+        {scopedPattern && <p className="mt-1">Pattern không có URL public. Mỗi lần lưu Builder, các trang tham chiếu sẽ dùng bố cục mới. Không thể lồng Reusable Pattern hoặc danh sách nội dung bên trong Pattern.</p>}
+        {scopedEntry && !scopedPattern && !overrideExists && loadedRef.current &&
           <p className="mt-1">Chưa có thiết kế Page riêng. Nội dung văn bản hiện tại vẫn được dùng cho đến khi bạn lưu thiết kế mới. Lưu thiết kế sẽ thay phần thân hiển thị, và Reset sẽ khôi phục phần thân văn bản.</p>}
         {conflict && <button type="button" className="btn-secondary ml-3" onClick={() => void reload()}>
           Xem bản server (cần xác nhận bỏ nháp)
@@ -659,33 +1192,60 @@ export function BuilderWorkspace({
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(245px,0.8fr)_minmax(360px,1.6fr)_minmax(255px,0.9fr)]">
         <div className="min-w-0">
-          <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
-            <label htmlFor="builder-element-type" className="text-xs text-slate-500">Element mới</label>
-            <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
-              value={elementType} onChange={event => setElementType(event.target.value as ElementType)}>
-              {ELEMENT_TYPES.map(type => <option key={type} value={type}>{type}</option>)}
-            </select>
+          <div className="mb-3 flex gap-1 rounded-lg border border-slate-200 bg-white p-1" role="tablist" aria-label="Builder sidebar">
+            <button type="button" role="tab" aria-selected={sidebarTab === 'blocks'} aria-controls="builder-sidebar-blocks"
+              className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
+                (sidebarTab === 'blocks' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
+              onClick={() => setSidebarTab('blocks')}>Blocks</button>
+            <button type="button" role="tab" aria-selected={sidebarTab === 'patterns'} aria-controls="builder-sidebar-patterns"
+              className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
+                (sidebarTab === 'patterns' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
+              onClick={() => setSidebarTab('patterns')}>Patterns</button>
+            <button type="button" role="tab" aria-selected={sidebarTab === 'media'} aria-controls="builder-sidebar-media"
+              className={'min-w-0 flex-1 rounded-md px-3 py-2 text-sm ' +
+                (sidebarTab === 'media' ? 'bg-sky-100 font-semibold text-sky-900' : 'text-slate-700')}
+              onClick={() => setSidebarTab('media')}>Media</button>
           </div>
-          <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-local-library">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <strong className="text-xs">Thư viện Section cục bộ</strong>
-              <button type="button" className="btn-secondary text-xs" disabled={loading || saving || libraryLoading}
-                onClick={() => void openLibrary()}>{libraryLoading ? 'Đang tải…' : libraryOpen ? 'Đóng' : 'Chọn Section'}</button>
+          <div id="builder-sidebar-blocks" role="tabpanel" hidden={sidebarTab !== 'blocks'}>
+            <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
+              <label htmlFor="builder-element-type" className="text-xs text-slate-500">Element mới</label>
+              <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
+                value={elementType} onChange={event => setElementType(event.target.value as InsertableElementType)}>
+                {ELEMENT_TYPES.filter(type =>
+                  type !== 'core/content_slot'
+                  && type !== 'core/template_part'
+                  && (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
+                  && (!scopedPattern || type !== 'core/list'))
+                  .map(type => <option key={type} value={type}>{type === 'core/pattern_ref' ? 'Reusable Pattern' : type}</option>)}
+              </select>
             </div>
-            {libraryOpen && <div className="mt-3 space-y-2">
-              <p className="text-xs text-slate-500">Chèn bản sao với ID mới sau Section đang chọn. Không liên kết với Section gốc.</p>
-              {librarySections.length === 0 && <p className="text-xs">Chưa có Section. Tạo Section tại mục Section riêng tư.</p>}
-              {librarySections.map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-xs">
-                <span className="min-w-0 break-words">#{item.id} · {item.title}</span>
-                <button type="button" disabled={insertingId !== null || loading || saving}
-                  onClick={() => void insertSection(item.id)}>
-                  {insertingId === item.id ? 'Đang chèn…' : 'Chèn bản sao'}
-                </button>
-              </div>)}
-            </div>}
-          </section>
-          <BuilderTree document={draft} selectedId={selectedId} elementType={elementType}
-            onSelect={setSelectedId} onAdd={add} onMove={reorder} onDelete={remove} />
+            {scopedEntry && !scopedPattern && <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-pattern-help">
+              <strong className="text-xs">Reusable Pattern</strong>
+              <p className="mt-1 text-xs text-slate-600">Chọn “Reusable Pattern” ở Element mới, thêm vào Column, rồi chọn Pattern trong Inspector để tham chiếu đồng bộ.</p>
+              <p className="mt-1 text-xs text-slate-600">{patternsLoaded ? `${patterns.length} Pattern sẵn dùng` : 'Đang tải danh sách Pattern…'}</p>
+            </section>}
+            <BuilderTree document={draft} selectedId={selectedId} elementType={elementType as ElementType}
+              onSelect={setSelectedId} onAdd={add} onMove={reorder} onDelete={remove} />
+          </div>
+          {sidebarTab === 'patterns' && <section id="builder-sidebar-patterns" role="tabpanel"
+            className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="!m-0 text-sm font-semibold text-slate-900">Pattern Library</h3>
+            <p className="text-sm text-slate-600">Khám phá mẫu từ theme v3 và chèn bản sao sau Section được chọn. Nếu không chọn node, mẫu sẽ nằm ở cuối canvas. Bản gốc trong theme không thay đổi.</p>
+            <button type="button" className="w-full" data-testid="open-pattern-library"
+              disabled={loading || saving || !loadedRef.current}
+              onClick={() => setShowPatternLibrary(true)}>Explore all patterns</button>
+            {scopedEntry && !scopedPattern && <p className="text-xs text-slate-600">
+              Cần đồng bộ giữa nhiều trang? Dùng block Reusable Pattern ở tab Blocks.
+            </p>}
+          </section>}
+          {sidebarTab === 'media' && <section id="builder-sidebar-media" role="tabpanel"
+            className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+            <h3 className="!m-0 text-sm font-semibold text-slate-900">Media Library</h3>
+            <p className="text-sm text-slate-600">Chọn ảnh để chèn vào bố cục hiện tại hoặc thay ảnh đang chọn. Thay đổi được giữ trong bản nháp cho đến khi Lưu.</p>
+            <button type="button" className="w-full" data-testid="builder-open-media-picker"
+              disabled={loading || saving || !loadedRef.current || !csrfToken}
+              onClick={() => setShowMediaPicker(true)}>Chọn ảnh từ Media Library</button>
+          </section>}
         </div>
         <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white" aria-label="Trình chỉnh sửa canvas">
           <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
@@ -699,16 +1259,21 @@ export function BuilderWorkspace({
             data-testid="builder-structural-viewport">
             <div style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: 'none', minWidth: 0 }}>
               <BuilderCanvas document={draft} selectedId={selectedId} registry={registry}
+                patterns={patterns} patternsLoaded={patternsLoaded}
                 viewport={viewport} onSelect={setSelectedId} />
             </div>
           </div>
           {mode === 'preview' && (
-            <div className="overflow-x-auto" data-testid="builder-preview-viewport">
-              <iframe id="canvas" title="Preview Builder (sandbox opaque)" sandbox=""
-                referrerPolicy="no-referrer" className="!h-[650px] !border-0"
-                style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: 'none', display: 'block' }}
-                srcDoc={previewHtml} />
-            </div>
+            <BuilderPreviewFrame
+              html={previewHtml}
+              viewport={viewport}
+              onApiError={onApiError}
+              onPrepared={({ skipped }) => {
+                message(skipped
+                  ? 'Preview nháp — ' + skipped + ' ảnh riêng tư chưa hiển thị. Chưa ghi dữ liệu.'
+                  : 'Preview nháp — chưa ghi dữ liệu lên website.');
+              }}
+            />
           )}
           {diagnostics.length > 0 && <div className="border-t border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
             <strong>Chẩn đoán renderer:</strong>
@@ -720,6 +1285,7 @@ export function BuilderWorkspace({
         <div className="min-w-0">
           <BuilderInspector document={draft} selectedId={selectedId} registry={registry}
             csrfToken={csrfToken} viewport={viewport}
+            patterns={patterns} patternsLoaded={patternsLoaded} onRefreshPatterns={refreshPatterns}
 
             allowRouteContext={targetRole === 'single' || targetRole === 'page'}
 
@@ -728,6 +1294,12 @@ export function BuilderWorkspace({
             onResponsiveChange={editResponsive} onError={onApiError} />
         </div>
       </div>
+      {showPatternLibrary && <PatternLibraryModal key={themeRevision}
+        onClose={() => setShowPatternLibrary(false)}
+        onInsert={insertThemePattern} onApiError={onApiError} />}
+      {showMediaPicker && <MediaPicker mode="image" acceptKind="image" csrfToken={csrfToken}
+        selectedIds={[]} onApply={insertMediaImage}
+        onClose={() => setShowMediaPicker(false)} onError={onApiError} />}
     </div>
   );
 }

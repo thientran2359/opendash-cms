@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { getDashboard, type DashboardCounts } from '../../api/dashboard.ts';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface DashboardPageProps {
   onApiError: (error: unknown, fallback: string) => void;
@@ -45,47 +46,47 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({ onApiError }) => {
   }, [retryVersion, onApiError]);
 
   return (
-    <section className="mb-8 space-y-4" aria-labelledby="dashboard-stats-heading">
+    <section className="space-y-3" aria-labelledby="dashboard-stats-heading">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 id="dashboard-stats-heading" className="text-lg font-semibold text-slate-900">
+          <h2 id="dashboard-stats-heading" className="text-base font-semibold text-zinc-950">
             Thống kê nội dung
           </h2>
-          <p className="mt-1 text-sm text-slate-600">Số bài viết và trang hiện có trên website.</p>
+          <p className="mt-0.5 text-sm text-zinc-600">Số bài viết và trang hiện có trên website.</p>
         </div>
-        <button
-          type="button"
-          className="btn-secondary"
+        <AdminButton
+          variant="secondary"
+          size="sm"
           onClick={() => setRetryVersion(value => value + 1)}
           disabled={loading}
         >
           {loading ? 'Đang tải...' : 'Làm mới thống kê'}
-        </button>
+        </AdminButton>
       </div>
 
       {error && (
-        <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+        <AdminAlert tone="error" className="space-y-2.5">
           <p>Không tải được thống kê: {error}</p>
-          <button
-            type="button"
-            className="btn-secondary mt-3"
+          <AdminButton
+            variant="secondary"
+            size="sm"
             onClick={() => setRetryVersion(value => value + 1)}
           >
             Thử lại
-          </button>
-        </div>
+          </AdminButton>
+        </AdminAlert>
       )}
 
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-busy={loading}>
         {metrics.map(metric => (
           <article
             key={metric.kind + '-' + metric.status}
-            className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+            className="min-w-0 rounded-xl border border-zinc-200 bg-white p-4"
             data-dashboard-metric={metric.kind + '-' + metric.status}
           >
-            <p className="text-sm font-medium text-slate-600">{metric.label}</p>
-            <p className="mt-3 text-3xl font-bold tabular-nums text-slate-900">
-              {loading ? <span role="status" className="text-lg font-medium text-slate-500">Đang tải…</span>
+            <p className="text-xs font-medium text-zinc-500">{metric.label}</p>
+            <p className="mt-2 text-2xl font-semibold tracking-tight tabular-nums text-zinc-950">
+              {loading ? <span role="status" className="text-sm font-medium text-zinc-400">Đang tải…</span>
                 : counts ? counts[metric.kind][metric.status].toLocaleString('vi-VN')
                   : <span aria-label="Chưa có số liệu">—</span>}
             </p>

@@ -1,5 +1,7 @@
 # Content foundation — November 2026
 
+> **Superseded by docs/designs/cpt-content-builder-and-pattern-library.md:** [Spec 2](../designs/cpt-content-builder-and-pattern-library.md) replaces the Editor/FeaturedImage-only support list and Page-only Builder scope with Generic CPT Builder, private Pattern CPT and Pattern Library in migrations 0043/0044 (S01–S03 merged). Unrelated contracts remain applicable. [Closure/drift gate](../verification/2026-11-21-spec2-closure.md) records remaining conformance gaps; this note does not claim full Verified status.
+
 > [!NOTE]
 > **Trạng thái hiện hành (2026-11-20):** **Implemented** (migrations `0038`–`0041`, bao gồm `0041_provider_rewrite_defaults.sql` cho C4; xem [`docs/designs/SITEMAP.md`](../designs/SITEMAP.md)). Header `implementation NOT_STARTED, verification NOT_RUN` bên dưới là snapshot lịch sử lúc chốt thiết kế.
 

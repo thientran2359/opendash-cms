@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEntryComposite,
   contentEntryPreviewPath,
+  deleteContentEntry,
   effectiveContentTypeSettings,
   getContentEntry,
   getEffectiveEditorConfig,
@@ -13,6 +14,7 @@ import {
 import { runPluginAction } from '../../api/plugins.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
+import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes.ts';
 import type { AuthUser } from '../../types.ts';
 import type {
   ContentFieldValue,
@@ -60,9 +62,11 @@ function slugFromTitle(title: string): string {
 }
 
 function supportAllowsField(typeKey: string, key: string, settings: ContentTypeSettings): boolean {
+  if (key === 'featured_image' && typeKey !== 'section' && typeKey !== 'pattern') {
+    return settings.supports.includes('featured_image');
+  }
   if (typeKey !== 'post' && typeKey !== 'page') return true;
-  if (key === 'body') return settings.supports.includes('editor');
-  if (key === 'featured_image') return settings.supports.includes('featured_image');
+  if (key === 'body') return settings.supports.includes('editor') || settings.supports.includes('builder');
   return true;
 }
 
@@ -75,7 +79,9 @@ function displayEditorConfig(
   const projectPanels = (panels: EffectivePanelProjection[]): EffectivePanelProjection[] =>
     panels.filter(({ panel }) => {
       if (panel.kind.kind !== 'core_built_in') return true;
-      if (panel.kind.core_key === 'body_editor') return settings.supports.includes('editor');
+      if (panel.kind.core_key === 'body_editor') {
+        return settings.supports.includes('editor') || settings.supports.includes('builder');
+      }
       if (panel.kind.core_key === 'featured_image') return settings.supports.includes('featured_image');
       return true;
     }).map(panel => ({
@@ -124,14 +130,29 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   onDirtyChange,
   onNavigateHash,
 }) => {
+  // Pattern is a private, Builder-only CPT. Its metadata mutations go through
+  // PatternsPage (/api/admin/patterns); generic entry editing must not expose
+  // public URLs, publication controls or a second write path for Patterns.
+  const isPattern = typeKey === 'pattern';
   const [config, setConfig] = useState<EffectiveEditorConfigWithSettings | null>(null);
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [publicationStatus, setPublicationStatus] = useState<'draft' | 'published'>('draft');
+  const [builderPromptOpen, setBuilderPromptOpen] = useState(false);
+  const builderDialogRef = useRef<HTMLDialogElement | null>(null);
   const [values, setValues] = useState<Record<string, ContentFieldValue>>({});
   const [clearedFields, setClearedFields] = useState<string[]>([]);
   const [termIds, setTermIds] = useState<number[]>([]);
   const [customPath, setCustomPath] = useState('');
+  const [themeLayouts, setThemeLayouts] = useState<ThemeLayoutCatalog | null>(null);
+  const [selectedThemeKey, setSelectedThemeKey] = useState<string | null>(null);
+  const [themeKeyDirty, setThemeKeyDirty] = useState(false);
+  const [entryTimestamps, setEntryTimestamps] = useState<{ createdAt: string; updatedAt: string } | null>(null);
+  const [customCreatedAt, setCustomCreatedAt] = useState<string | null>(null);
+  const [customUpdatedAt, setCustomUpdatedAt] = useState<string | null>(null);
+  const savedThemeKeyRef = useRef<string | null>(null);
+  const selectedThemeKeyRef = useRef<string | null>(null);
+  const themeKeyDirtyRef = useRef(false);
   const [seoTitle, setSeoTitle] = useState('');
   const [seoDescription, setSeoDescription] = useState('');
   const [seoOgImageId, setSeoOgImageId] = useState('');
@@ -206,7 +227,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     persistDraftPatch({ values: nextValues, cleared_fields: nextCleared });
   };
 
-  const listHashPrefix = typeKey === 'post' ? '#/posts' : typeKey === 'page' ? '#/pages' : `#/cpt/${typeKey}`;
+  const listHashPrefix = typeKey === 'post' ? '#/posts' : typeKey === 'page' ? '#/pages'
+    : isPattern ? '#/patterns' : `#/cpt/${typeKey}`;
 
   const applyPayload = (payload: EditorDraftPayload) => {
     setTitle(payload.title);
@@ -230,7 +252,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     draftRef.current = updated;
     editRevisionRef.current += 1;
     const changed = diffEditorPayload(baseline, updated);
-    setDirty(changed.length > 0);
+    setDirty(changed.length > 0 || themeKeyDirtyRef.current);
     if (!changed.length) {
       editorDraftStore.delete(draftKey);
       return;
@@ -258,7 +280,15 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   }, [dirty, onDirtyChange]);
 
   useEffect(() => {
+    const dialog = builderDialogRef.current;
+    if (!dialog) return;
+    if (builderPromptOpen && !dialog.open) dialog.showModal();
+    else if (!builderPromptOpen && dialog.open) dialog.close();
+  }, [builderPromptOpen]);
+
+  useEffect(() => {
     setConfirmedPublicLink(null);
+    setThemeLayouts(null);
     if (!user) {
       setConfig(null);
       baselineRef.current = null;
@@ -270,6 +300,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     const reqEpoch = editorDraftStore.getSessionEpoch();
     setConfig(null);
     setStatusNote(null);
+    if (isPattern) {
+      baselineRef.current = null;
+      draftRef.current = null;
+      setDirty(false);
+      return;
+    }
 
     (async () => {
       try {
@@ -294,6 +330,18 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         let baseline: EditorDraftPayload;
         let serverPublicPath: string | null = null;
         let routeReadable = true;
+        // Optional theme metadata must not make the entire content editor
+        // unusable during a theme reload/corrupt provider. Only authorization
+        // failures remain fatal; all existing assignments stay in the entry
+        // response and are never implicitly cleared on Save.
+        let layoutCatalog: ThemeLayoutCatalog | null = null;
+        let layoutUnavailable = false;
+        try {
+          layoutCatalog = await getActiveThemeLayouts();
+        } catch (cause) {
+          if (cause instanceof ApiClientError && (cause.status === 401 || cause.status === 403)) throw cause;
+          layoutUnavailable = true;
+        }
         let seoReadable = true;
         if (mode === 'edit' && entryId !== null) {
           // Route/SEO can be forbidden after same-user role downgrade. Never
@@ -311,6 +359,17 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             optional(getEntrySeo(typeKey, entryId)),
           ]);
           if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
+          setEntryTimestamps({ createdAt: rec.created_at, updatedAt: rec.updated_at });
+          setCustomCreatedAt(null);
+          setCustomUpdatedAt(null);
+          const themeKey = typeKey === 'page'
+            ? (rec as typeof rec & { page_layout_key?: string | null }).page_layout_key ?? null
+            : (rec as typeof rec & { custom_template_key?: string | null }).custom_template_key ?? null;
+          savedThemeKeyRef.current = themeKey;
+          selectedThemeKeyRef.current = themeKey;
+          themeKeyDirtyRef.current = false;
+          setSelectedThemeKey(themeKey);
+          setThemeKeyDirty(false);
           routeReadable = routeSnap !== null;
           seoReadable = seoSnap !== null;
           if (rec.publication_status === 'published' && routeSnap?.entry_version === rec.version) {
@@ -322,6 +381,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           baseline = {
             id: rec.id, version: rec.version, title: rec.title, slug: rec.slug,
             slug_touched: true, publication_status: rec.publication_status,
+            content_mode: rec.content_mode,
             values: allowedValues, cleared_fields: [], term_ids: rec.term_ids ?? [],
             custom_path: routeSnap?.custom_path ?? '',
             seo: seoSnap ? {
@@ -331,10 +391,19 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             } : emptySeo,
           };
         } else {
+          setEntryTimestamps(null);
+          setCustomCreatedAt(null);
+          setCustomUpdatedAt(null);
+          savedThemeKeyRef.current = null;
+          selectedThemeKeyRef.current = null;
+          themeKeyDirtyRef.current = false;
+          setSelectedThemeKey(null);
+          setThemeKeyDirty(false);
           baseline = {
             id: null, version: null, title: '', slug: '', slug_touched: false,
             publication_status: effectiveContentTypeSettings(typeKey, freshCfg.settings).publication === 'draft_publish'
               ? 'draft' : 'published',
+            content_mode: 'editor',
             values: {}, cleared_fields: [], term_ids: [], custom_path: '', seo: emptySeo,
           };
         }
@@ -343,6 +412,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           routeReadable, seoReadable,
         );
         if (!active || reqEpoch !== editorDraftStore.getSessionEpoch()) return;
+        setThemeLayouts(layoutCatalog);
         baselineRef.current = baseline;
         setConfirmedPublicLink({
           scope: mediaScopeKey, version: baseline.version ?? 0, path: serverPublicPath,
@@ -355,7 +425,9 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         applyPayload(draftRef.current);
         setDirty(Boolean(restored?.dirty_fields.length));
         setConfig(freshCfg);
-        if (restored && restored.schema_token_at_edit !== freshCfg.schema_token) {
+        if (layoutUnavailable) {
+          setStatusNote('Không tải được danh sách template từ theme. Bản nội dung và lựa chọn cũ vẫn được giữ; không thể chọn template mới cho đến khi tải lại.');
+        } else if (restored && restored.schema_token_at_edit !== freshCfg.schema_token) {
           setStatusNote('Schema đã thay đổi. Nháp được giữ; Lưu sẽ kiểm tra schema token cũ để tránh ghi đè.');
         }
       } catch (err) {
@@ -396,12 +468,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     }, 20);
   };
 
-  const handleSave = async (intent?: 'draft' | 'published') => {
-    if (!config || !csrfToken || saving || saveInFlightRef.current || !draftRef.current || !user) return;
+  const handleSave = async (intent?: 'draft' | 'published', navigateOnCreate = true): Promise<number | null> => {
+    if (isPattern || !config || !csrfToken || saving || saveInFlightRef.current || !draftRef.current || !user) return null;
     const isBuiltInContent = typeKey === 'post' || typeKey === 'page';
-    if (isBuiltInContent && !intent) return;
+    if (isBuiltInContent && !intent) return null;
     const effectiveSettings = effectiveContentTypeSettings(typeKey, config.settings);
-    if (typeKey === 'section') return; // Section uses its dedicated private editor.
     const nextPublication = effectiveSettings.publication === 'draft_publish'
       ? (intent ?? draftRef.current.publication_status)
       : 'published';
@@ -427,7 +498,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       setFieldErrors(nextErrors);
       const firstKey = Object.keys(nextErrors)[0];
       expandPanelContainingField(firstKey);
-      return;
+      return null;
     }
 
     setFieldErrors({});
@@ -448,11 +519,17 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
 
     try {
       const payload = {
+        ...(themeKeyDirtyRef.current ? {
+          [typeKey === 'page' ? 'page_layout_key' : 'custom_template_key']: selectedThemeKeyRef.current,
+        } : {}),
         expected_version: entryId === null ? undefined : (snapshot.version ?? undefined),
         expected_schema_token: expectedSchemaToken,
         title: snapshot.title.trim(),
         slug: snapshot.slug.trim(),
         publication_status: nextPublication,
+        ...((effectiveSettings.supports.includes('builder') || snapshot.content_mode === 'editor') &&
+            baselineRef.current?.content_mode !== snapshot.content_mode
+          ? { content_mode: snapshot.content_mode } : {}),
         values: submitValues,
         // Omitted term_ids retains existing links; [] only clears by user edit.
         term_ids: baselineRef.current && diffEditorPayload(baselineRef.current, snapshot).includes('term_ids')
@@ -467,17 +544,20 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           canonical_url: snapshot.seo?.canonical_url?.trim() || null,
           noindex: Boolean(snapshot.seo?.noindex),
         }} : {}),
+        ...(customCreatedAt ? { created_at: customCreatedAt } : {}),
+        ...(customUpdatedAt ? { updated_at: customUpdatedAt } : {}),
       };
 
       const res =
         entryId === null
           ? await createEntryComposite(typeKey, payload, csrfToken)
           : await updateEntryComposite(typeKey, entryId, payload, csrfToken);
-      if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey) return;
+      if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey) return null;
       const saved: EditorDraftPayload = {
         ...snapshot,
         id: res.entry.id, version: res.entry.version, title: res.entry.title, slug: res.entry.slug,
         slug_touched: true, publication_status: res.entry.publication_status,
+        content_mode: res.entry.content_mode,
         values: res.entry.values, cleared_fields: [], term_ids: res.entry.term_ids ?? snapshot.term_ids,
         custom_path: res.custom_path ?? '',
         seo: res.seo ? {
@@ -487,6 +567,23 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         } : snapshot.seo,
       };
       baselineRef.current = saved;
+      setEntryTimestamps({ createdAt: res.entry.created_at, updatedAt: res.entry.updated_at });
+      setCustomCreatedAt(null);
+      setCustomUpdatedAt(null);
+      const savedSelection = typeKey === 'page'
+        ? (res.entry as typeof res.entry & { page_layout_key?: string | null }).page_layout_key ?? null
+        : (res.entry as typeof res.entry & { custom_template_key?: string | null }).custom_template_key ?? null;
+      savedThemeKeyRef.current = savedSelection;
+      if (editRevisionRef.current === submittedRevision) {
+        selectedThemeKeyRef.current = savedSelection;
+        setSelectedThemeKey(savedSelection);
+        themeKeyDirtyRef.current = false;
+        setThemeKeyDirty(false);
+      } else {
+        const stillDirty = selectedThemeKeyRef.current !== savedSelection;
+        themeKeyDirtyRef.current = stillDirty;
+        setThemeKeyDirty(stillDirty);
+      }
       // A committed slug, route or publication change can invalidate the old
       // link. Require a matching server response before exposing another URL.
       setConfirmedPublicLink(null);
@@ -516,11 +613,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       if (!hasNewerChanges) {
         draftRef.current = saved;
         applyPayload(saved);
-        setDirty(false);
+        setDirty(themeKeyDirtyRef.current);
       } else if (draftRef.current) {
         const remaining = { ...draftRef.current, id: res.entry.id, version: res.entry.version,
           publication_status: draftRef.current.publication_status === snapshot.publication_status
-            ? res.entry.publication_status : draftRef.current.publication_status };
+            ? res.entry.publication_status : draftRef.current.publication_status,
+          content_mode: draftRef.current.content_mode === snapshot.content_mode
+            ? saved.content_mode : draftRef.current.content_mode };
         draftRef.current = remaining;
         const changed = diffEditorPayload(saved, remaining);
         const newKey = editorDraftStore.makeDraftKey(typeKey, res.entry.id);
@@ -534,15 +633,18 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             payload: { ...remaining, custom_path_dirty: changed.includes('custom_path'), seo_dirty: changed.includes('seo') },
           });
         }
-        setDirty(changed.length > 0);
+        setDirty(changed.length > 0 || themeKeyDirtyRef.current);
       }
       setStatusNote(hasNewerChanges
         ? `Đã lưu snapshot v${res.entry.version}; chỉnh sửa mới hơn vẫn chưa lưu.`
         : `Đã lưu thành công (v${res.entry.version}).`);
-      if (entryId === null) {
+      if (entryId === null && navigateOnCreate) {
         onNavigateHash(`${listHashPrefix}/${res.entry.id}/edit`);
       }
+      return res.entry.id;
     } catch (err) {
+      if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey
+          || activeMediaScopeRef.current !== mediaScopeKey) return null;
       if (err instanceof ApiClientError && err.status === 401) {
         editorDraftStore.quarantineAll();
       }
@@ -552,11 +654,21 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         setStatusNote('Thao tác bị từ chối vì xung đột chính sách xuất bản (409). Nháp vẫn được giữ.');
       }
       onApiError(err, 'Không thể lưu nội dung.');
+      return null;
     } finally {
       saveInFlightRef.current = false;
       setSaving(false);
     }
   };
+
+  if (isPattern) {
+    if (!isActive || !user) return null;
+    return <div className="od-admin-card space-y-3" role="status">
+      <p className="text-sm text-slate-700">Pattern là nội dung riêng tư, dùng chung qua Visual Builder.</p>
+      <button type="button" onClick={() => onNavigateHash(entryId === null
+        ? '#/patterns' : `#/patterns/${entryId}/edit`)}>Mở quản lý Pattern</button>
+    </div>;
+  }
 
   if (mode === 'list') {
     if (!isActive || !user) return null;
@@ -572,25 +684,80 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   // Public URLs must come from the server route authority. Never derive a URL
   // from the slug/custom path or from an unsaved editor draft.
   const confirmed = baselineRef.current;
-  const publicPath = settings?.public && typeKey !== 'section'
+  const publicPath = settings?.public && !isPattern
     && confirmed?.id === entryId && confirmed?.publication_status === 'published'
     && confirmedPublicLink?.scope === mediaScopeKey
     && confirmedPublicLink.version === confirmed.version
     ? confirmedPublicLink.path
     : null;
-  const draftPreviewPath = typeKey !== 'section' && confirmed?.id === entryId
+  const draftPreviewPath = !isPattern && confirmed?.id === entryId
     && confirmed.publication_status === 'draft' && entryId !== null
     ? contentEntryPreviewPath(typeKey, entryId) : null;
   const isBuiltIn = typeKey === 'post' || typeKey === 'page';
-  const isDraftPublishCpt = !isBuiltIn && typeKey !== 'section'
-    && settings?.publication === 'draft_publish';
+  const publicationPolicy = settings?.publication ?? (isBuiltIn ? 'draft_publish' : 'immediate');
+  const templateChoices = typeKey === 'page'
+    ? (themeLayouts?.page_layouts.map(layout => ({ key: layout.key, label: layout.label })) ?? [])
+    : (themeLayouts?.custom_templates
+        .filter(tpl => tpl.allowed_types.includes(typeKey))
+        .map(tpl => ({ key: tpl.custom_key, label: tpl.label })) ?? []);
+  const showTemplateBox = typeKey === 'page' || templateChoices.length > 0 || Boolean(selectedThemeKey);
+  const templatePanelNode = showTemplateBox ? (
+    <div className="space-y-1.5" data-testid="theme-template-selection">
+      <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-theme-selector">
+        <span>{typeKey === 'page' ? 'Page Template / Layout' : 'Custom Single Template'}</span>
+        <select
+          id="entry-theme-selector"
+          className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+          value={selectedThemeKey ?? ''}
+          disabled={saving || !csrfToken || !themeLayouts}
+          onChange={event => {
+            const choice = event.target.value || null;
+            selectedThemeKeyRef.current = choice;
+            setSelectedThemeKey(choice);
+            const differs = choice !== savedThemeKeyRef.current;
+            themeKeyDirtyRef.current = differs;
+            setThemeKeyDirty(differs);
+            if (differs) editRevisionRef.current++;
+            setDirty(differs || !!(draftRef.current && baselineRef.current && diffEditorPayload(baselineRef.current, draftRef.current).length));
+          }}
+        >
+          <option value="">Theo theme mặc định</option>
+          {templateChoices.map(choice => (
+            <option key={choice.key} value={choice.key}>{choice.label}</option>
+          ))}
+          {selectedThemeKey && !templateChoices.some(choice => choice.key === selectedThemeKey) && (
+            <option value={selectedThemeKey}>{selectedThemeKey} (theme hiện tại không còn cung cấp — được bảo toàn)</option>
+          )}
+        </select>
+      </label>
+      {themeKeyDirty && <p className="text-xs font-medium text-amber-700">● Chưa lưu</p>}
+    </div>
+  ) : null;
+
+  const handleDelete = async () => {
+    const version = baselineRef.current?.version;
+    if (entryId === null || version === null || version === undefined || !csrfToken || saving) return;
+    if (!window.confirm('Xóa vĩnh viễn nội dung này? Hành động này không thể hoàn tác.')) return;
+    setSaving(true);
+    try {
+      await deleteContentEntry(typeKey, entryId, version, csrfToken);
+      editorDraftStore.delete(draftKey);
+      setDirty(false);
+      onDirtyChange(false);
+      onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)));
+    } catch (err) {
+      onApiError(err, 'Không thể xóa nội dung.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const entryBuilderHash = entryId !== null
+    ? `#/studio/entry/${encodeURIComponent(typeKey)}/${entryId}`
+    : '';
 
   return (
-    <div className="space-y-4">
-      <button type="button" className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        onClick={() => onNavigateHash(entryTableHash(listHashPrefix, parseEntryTableHash(routeHash ?? listHashPrefix)))}>
-        ← Về danh sách
-      </button>
+    <div className="space-y-3">
       {statusNote && (
         <div className={statusNote.includes('(412)') || statusNote.includes('(409)')
           ? 'rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800'
@@ -599,49 +766,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           {statusNote}
         </div>
       )}
-      {draftPreviewPath && (
-        <a href={draftPreviewPath} target="_blank" rel="noopener noreferrer"
-          className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
-          Xem trước bản nháp đã lưu (yêu cầu đăng nhập)
-        </a>
-      )}
-      {isDraftPublishCpt && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3"
-          role="group" aria-label="Lưu nháp và xuất bản">
-          <span className="text-sm text-slate-700">
-            {publicationStatus === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
-          </span>
-          <button type="button" disabled={saving || !csrfToken}
-            onClick={() => void handleSave('draft')}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-50">
-            {publicationStatus === 'published' ? 'Chuyển về nháp' : 'Lưu nháp'}
-          </button>
-          <button type="button" disabled={saving || !csrfToken}
-            onClick={() => void handleSave('published')}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
-            {publicationStatus === 'published' ? 'Cập nhật' : 'Đăng bài'}
-          </button>
-          {publicPath && <a href={publicPath} target="_blank" rel="noopener noreferrer"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
-            Xem nội dung
-          </a>}
-        </div>
-      )}
-      {!isBuiltIn && !isDraftPublishCpt && publicPath && (
-        <a href={publicPath} target="_blank" rel="noopener noreferrer"
-          className="inline-flex rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
-          Xem nội dung
-        </a>
-      )}
-      {/* Legacy renderer has a fixed CPT status select and generic Save button.
-          Keep its Builder action and layout while showing policy-aware actions above. */}
-      <style>{`
-        .c1-immediate [data-panel-id="core:publish_box"] label { display: none; }
-        .c1-draft-publish [data-panel-id="core:publish_box"] label { display: none; }
-        .c1-draft-publish [data-region="header_bar"] > div:last-child > button { display: none; }
-        .c1-draft-publish [data-panel-id="core:publish_box"] div.flex.flex-wrap.items-center.gap-2 > button { display: none; }
-      `}</style>
-      <div className={isDraftPublishCpt ? 'c1-draft-publish' : !isBuiltIn ? 'c1-immediate' : ''}>
+      <div>
       <PanelRegionRenderer
         config={editorConfig ?? config}
         values={values}
@@ -662,8 +787,23 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         userId={user?.id ?? null}
         termIds={termIds}
         publicPath={publicPath}
+        draftPreviewPath={draftPreviewPath}
+        isPublic={settings?.public ?? true}
+        publicationPolicy={publicationPolicy}
+        createdAt={customCreatedAt ?? entryTimestamps?.createdAt ?? null}
+        updatedAt={customUpdatedAt ?? entryTimestamps?.updatedAt ?? null}
+        onCreatedAtChange={val => {
+          setCustomCreatedAt(val);
+          setDirty(true);
+        }}
+        onUpdatedAtChange={val => {
+          setCustomUpdatedAt(val);
+          setDirty(true);
+        }}
+        templatePanelNode={templatePanelNode}
         saving={saving}
         dirty={dirty}
+        onDelete={entryId !== null && baselineRef.current?.version !== null && baselineRef.current?.version !== undefined ? () => void handleDelete() : undefined}
         onToggleCollapse={pid => setCollapsedPanels(prev => ({ ...prev, [pid]: !prev[pid] }))}
         onTitleChange={nextTitle => {
           const nextSlug = draftRef.current?.slug_touched ? slug : slugFromTitle(nextTitle);
@@ -743,15 +883,85 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           }
         }}
         onSave={intent => void handleSave(intent)}
+        canOpenBuilder={!isPattern && Boolean(settings?.supports.includes('builder'))}
         onOpenBuilder={() => {
-          if (entryId === null) {
-            setStatusNote('Vui lòng Lưu nội dung trước khi mở Visual Builder.');
+          if (isPattern || !settings?.supports.includes('builder')) {
+            setStatusNote('Loại nội dung này chưa hỗ trợ UX Builder.');
             return;
           }
-          onNavigateHash(`#/builder?template=${typeKey === 'page' ? 'page' : 'single'}&type=${encodeURIComponent(typeKey)}&entry=${entryId}`);
+          if (dirty) {
+            setBuilderPromptOpen(true);
+            return;
+          }
+          if (entryId === null) {
+            setStatusNote('Vui lòng Lưu nội dung trước khi mở UX Builder.');
+            return;
+          }
+          onNavigateHash(entryBuilderHash);
         }}
       />
       </div>
+      <dialog
+        ref={builderDialogRef}
+        aria-labelledby="builder-unsaved-title"
+        onClose={() => setBuilderPromptOpen(false)}
+        className="od-confirm-dialog m-auto max-w-md rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-xl"
+      >
+        <style>{'dialog.od-confirm-dialog:modal{overscroll-behavior:contain} dialog.od-confirm-dialog::backdrop{overflow:hidden;overscroll-behavior:contain;background:rgba(9,9,11,0.45)}'}</style>
+        <h2 id="builder-unsaved-title" className="text-base font-semibold text-zinc-950">
+          Có thay đổi chưa lưu trong trình soạn thảo
+        </h2>
+        <p className="mt-2 text-sm text-zinc-600">
+          Bạn muốn lưu các chỉnh sửa hiện tại trước khi mở OpenDash Studio (UX Builder) không?
+        </p>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          {entryId !== null && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                setBuilderPromptOpen(false);
+                editorDraftStore.delete(draftKey);
+                setDirty(false);
+                onDirtyChange(false);
+                onNavigateHash(entryBuilderHash);
+              }}
+              data-testid="builder-prompt-discard"
+              className="inline-flex h-9 items-center rounded-md border border-rose-200 bg-rose-50 px-3 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+            >
+              Bỏ thay đổi &amp; mở
+            </button>
+          )}
+          <button
+            type="button"
+            autoFocus
+            disabled={saving}
+            onClick={() => setBuilderPromptOpen(false)}
+            data-testid="builder-prompt-cancel"
+            className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Hủy
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              void (async () => {
+                const intent = publicationPolicy === 'draft_publish' ? publicationStatus : undefined;
+                const savedId = await handleSave(intent, false);
+                setBuilderPromptOpen(false);
+                if (savedId !== null) {
+                  onNavigateHash(`#/studio/entry/${encodeURIComponent(typeKey)}/${savedId}`);
+                }
+              })();
+            }}
+            data-testid="builder-prompt-save"
+            className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
+          >
+            {saving ? 'Đang lưu…' : 'Lưu & mở UX Builder'}
+          </button>
+        </div>
+      </dialog>
       {mediaPicker && mediaPicker.scopeKey === mediaScopeKey && csrfToken && user && config
         && config.schema_token === mediaPicker.schemaToken
         && editorDraftStore.getSessionEpoch() === mediaPicker.sessionEpoch

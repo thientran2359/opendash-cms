@@ -32,7 +32,10 @@ async fn spawn_server() -> TestServer {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let site_root = std::env::temp_dir().join(format!("opendash-m7-s04-t01-{nanos}"));
+    // SitePaths forbids symlinked roots; macOS /var is a link to /private/var.
+    let site_root = fs::canonicalize(std::env::temp_dir())
+        .unwrap()
+        .join(format!("opendash-m7-s04-t01-{nanos}"));
     fs::create_dir_all(&site_root).unwrap();
 
     let bin = env!("CARGO_BIN_EXE_opendash");
@@ -155,7 +158,65 @@ async fn create_post_entry(
         .unwrap();
     assert_eq!(resp.status(), 201);
     let body: Value = resp.json().await.unwrap();
-    (body["id"].as_i64().unwrap(), body["version"].as_i64().unwrap())
+    (
+        body["id"].as_i64().unwrap(),
+        body["version"].as_i64().unwrap(),
+    )
+}
+
+// S03: '/' joins the sitemap only when Reading Settings points to a published
+// Page. Establish that state via the public Admin contract, not a fixture row.
+async fn configure_published_home_page(client: &Client, base_url: &str, cookie: &str, csrf: &str) {
+    let create = client
+        .post(format!("{base_url}/api/admin/content-types/page/entries"))
+        .header(header::COOKIE, cookie)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({ "title": "Trang chủ", "slug": "trang-chu", "values": {}, "term_ids": [] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(create.status(), 201);
+    let new_page: Value = create.json().await.unwrap();
+    let page_id = new_page["id"].as_i64().unwrap();
+    let version = new_page["version"].as_i64().unwrap();
+
+    let publish = client
+        .post(format!(
+            "{base_url}/api/admin/content-types/page/entries/{page_id}/publication"
+        ))
+        .header(header::COOKIE, cookie)
+        .header("X-CSRF-Token", csrf)
+        .header(header::IF_MATCH, format!("\"v{version}\""))
+        .json(&json!({ "status": "published" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status(), 200);
+
+    let reading = client
+        .get(format!("{base_url}/api/admin/settings/reading"))
+        .header(header::COOKIE, cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status(), 200);
+    let etag = reading
+        .headers()
+        .get(header::ETAG)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let set_home = client
+        .put(format!("{base_url}/api/admin/settings/reading"))
+        .header(header::COOKIE, cookie)
+        .header("X-CSRF-Token", csrf)
+        .header(header::IF_MATCH, etag)
+        .json(&json!({ "homepage_page_id": page_id, "posts_page_id": null }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(set_home.status(), 200);
 }
 
 async fn set_entry_status(
@@ -199,7 +260,10 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
         .unwrap();
     assert_eq!(robots_no_origin.status(), 200);
     assert_eq!(
-        robots_no_origin.headers().get(header::CACHE_CONTROL).unwrap(),
+        robots_no_origin
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .unwrap(),
         "no-store"
     );
     let robots_text = robots_no_origin.text().await.unwrap();
@@ -278,6 +342,7 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
         true,
     )
     .await;
+    configure_published_home_page(&client, &srv.base_url, &cookie, &csrf).await;
 
     let robots_on = client
         .get(format!("{}/robots.txt", srv.base_url))
@@ -479,8 +544,8 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
     let part1_xml = part1.text().await.unwrap();
     assert!(part1_xml.contains("<loc>https://example.com/</loc>"));
     assert!(part1_xml.contains("<loc>https://example.com/gioi-thieu</loc>"));
-    assert!(part1_xml.contains("<loc>https://example.com/content/post</loc>"));
-    assert!(part1_xml.contains("<loc>https://example.com/taxonomy/category/tin-tuc</loc>"));
+    assert!(part1_xml.contains("<loc>https://example.com/posts</loc>"));
+    assert!(part1_xml.contains("<loc>https://example.com/category/tin-tuc</loc>"));
     assert!(!part1_xml.contains("secret-noindex"));
     assert!(!part1_xml.contains("draft-only"));
     assert!(!part1_xml.contains("ext-canonical"));
@@ -521,10 +586,13 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
 
     // 4. Boundary pagination: 5000 routes -> 1 part; 5001 routes -> 2 parts.
     let db_path = srv.site_root.join("database").join("opendash.sqlite");
-    let pool = SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
-        .await
-        .unwrap();
-    // Currently indexable routes: '/' (1) + '/content/post' (1) = 2. Insert 4998 more -> 5000.
+    let pool =
+        SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db_path))
+            .await
+            .unwrap();
+    // EGM S01 migration 0043 makes the untouched Core Page non-archived.
+    // Currently indexable routes: published Reading Homepage '/' (1)
+    // and '/posts' (1) = 2. Insert 4998 more -> exactly 5000.
     let mut tx = pool.begin().await.unwrap();
     for i in 1..=4998 {
         sqlx::query(

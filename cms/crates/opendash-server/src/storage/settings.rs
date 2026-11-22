@@ -7,11 +7,171 @@ use opendash_core::id::valid_snake_key_with_limit;
 use serde::{Deserialize, Serialize};
 use sqlx::{SqliteConnection, SqlitePool};
 
-use crate::{error::{ApiError, ApiResult}, storage::media::valid_media_id};
+use crate::{
+    error::{ApiError, ApiResult},
+    storage::media::valid_media_id,
+};
 
 pub const TZDB_VERSION: &str = "2026f";
 pub const MAX_SITE_TITLE_SCALARS: usize = 120;
 pub const MAX_TAGLINE_SCALARS: usize = 240;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadingPageStatus {
+    Unconfigured,
+    Published,
+    Draft,
+    Deleted,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReadingSettings {
+    pub homepage_page_id: Option<i64>,
+    pub posts_page_id: Option<i64>,
+    pub homepage_status: ReadingPageStatus,
+    pub posts_page_status: ReadingPageStatus,
+    pub version: i64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReadingSettingsInput {
+    pub homepage_page_id: Option<i64>,
+    pub posts_page_id: Option<i64>,
+}
+
+async fn reading_page_status_in_conn(
+    conn: &mut SqliteConnection,
+    id: Option<i64>,
+) -> ApiResult<ReadingPageStatus> {
+    let Some(id) = id else {
+        return Ok(ReadingPageStatus::Unconfigured);
+    };
+    let row: Option<(String, String, i64)> = sqlx::query_as(
+        "SELECT e.content_type_key, e.publication_status,
+                COALESCE(json_extract(t.definition_json, '$.settings.public'), 1)
+           FROM content_entries e
+           JOIN content_types t ON t.key = e.content_type_key
+          WHERE e.id = ? AND t.provider_status = 'active'",
+    )
+    .bind(id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(match row {
+        None => ReadingPageStatus::Deleted,
+        Some((key, publication, public))
+            if key == "page" && publication == "published" && public == 1 =>
+        {
+            ReadingPageStatus::Published
+        }
+        Some(_) => ReadingPageStatus::Draft,
+    })
+}
+
+/// A read on an existing SQLite connection can join a public route's snapshot.
+pub async fn get_reading_in_conn(conn: &mut SqliteConnection) -> ApiResult<ReadingSettings> {
+    let (homepage_page_id, posts_page_id, version): (Option<i64>, Option<i64>, i64) =
+        sqlx::query_as(
+            "SELECT homepage_page_id, posts_page_id, version
+               FROM site_reading_settings WHERE id = 1",
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+    let homepage_status = reading_page_status_in_conn(conn, homepage_page_id).await?;
+    let posts_page_status = reading_page_status_in_conn(conn, posts_page_id).await?;
+    Ok(ReadingSettings {
+        homepage_page_id,
+        posts_page_id,
+        homepage_status,
+        posts_page_status,
+        version,
+    })
+}
+
+pub async fn get_reading(db: &SqlitePool) -> ApiResult<ReadingSettings> {
+    let mut tx = db.begin().await?;
+    // Keep IDs, publication state and version from one SQLite read snapshot.
+    let snapshot = get_reading_in_conn(&mut tx).await?;
+    tx.commit().await?;
+    Ok(snapshot)
+}
+
+/// Delete never clears an assignment: retain a tombstone and advance the
+/// settings ETag in the *same transaction* as removal of the Page.
+pub async fn bump_reading_version_on_deleted_entry_in_tx(
+    conn: &mut SqliteConnection,
+    entry_id: i64,
+) -> ApiResult<()> {
+    sqlx::query(
+        "UPDATE site_reading_settings
+            SET version = version + 1, updated_at = datetime('now')
+          WHERE id = 1 AND (homepage_page_id = ? OR posts_page_id = ?)",
+    )
+    .bind(entry_id)
+    .bind(entry_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+/// One SQLite write transaction is the CAS boundary for settings and routes.
+/// Invalid or unpublished IDs cannot be assigned; existing tombstones are
+/// retained until the administrator explicitly chooses new values.
+pub async fn save_reading(
+    db: &SqlitePool,
+    input: ReadingSettingsInput,
+    expected_version: i64,
+) -> ApiResult<ReadingSettings> {
+    let mut tx = db.begin().await?;
+    // Acquire a write reservation before reading a version or validating IDs.
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+    let current = get_reading_in_conn(&mut tx).await?;
+    if current.version != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Reading Settings đã thay đổi. Tải lại trước khi lưu.",
+        ));
+    }
+    if input.homepage_page_id.is_some() && input.homepage_page_id == input.posts_page_id {
+        return Err(ApiError::bad_request(
+            "Trang chủ và Trang bài viết phải là hai Page khác nhau.",
+        ));
+    }
+    for id in [input.homepage_page_id, input.posts_page_id]
+        .into_iter()
+        .flatten()
+    {
+        if id <= 0
+            || reading_page_status_in_conn(&mut tx, Some(id)).await? != ReadingPageStatus::Published
+        {
+            return Err(ApiError::bad_request(
+                "Page được chọn phải tồn tại, public và đã xuất bản.",
+            ));
+        }
+    }
+    let updated = sqlx::query(
+        "UPDATE site_reading_settings
+            SET homepage_page_id = ?, posts_page_id = ?,
+                version = version + 1, updated_at = datetime('now')
+          WHERE id = 1 AND version = ?",
+    )
+    .bind(input.homepage_page_id)
+    .bind(input.posts_page_id)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() != 1 {
+        return Err(ApiError::precondition_failed(
+            "Reading Settings đã thay đổi. Tải lại trước khi lưu.",
+        ));
+    }
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    let saved = get_reading_in_conn(&mut tx).await?;
+    tx.commit().await?;
+    Ok(saved)
+}
 
 static TIMEZONES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
     include_str!("settings_timezones_2026f.txt")
@@ -69,10 +229,17 @@ impl GeneralSettingsInput {
 }
 
 pub async fn get_general(db: &SqlitePool) -> Result<GeneralSettings, sqlx::Error> {
+    let mut conn = db.acquire().await?;
+    get_general_in_conn(&mut conn).await
+}
+
+pub(super) async fn get_general_in_conn(
+    conn: &mut SqliteConnection,
+) -> Result<GeneralSettings, sqlx::Error> {
     sqlx::query_as::<_, GeneralSettings>(
         "SELECT site_title, tagline, timezone, version FROM site_general_settings WHERE id = 1",
     )
-    .fetch_one(db)
+    .fetch_one(conn)
     .await
 }
 
@@ -336,20 +503,18 @@ pub async fn get_theme_options_in_conn(
         return Ok(None);
     };
     let schema = parse_theme_options_schema(&manifest_json).map_err(ApiError::bad_request)?;
-    let version: i64 = sqlx::query_scalar(
-        "SELECT version FROM theme_option_versions WHERE theme_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_optional(&mut *conn)
-    .await?
-    .unwrap_or(1);
+    let version: i64 =
+        sqlx::query_scalar("SELECT version FROM theme_option_versions WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_optional(&mut *conn)
+            .await?
+            .unwrap_or(1);
 
-    let rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_all(&mut *conn)
-    .await?;
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_all(&mut *conn)
+            .await?;
     let mut saved_map = BTreeMap::new();
     for (k, v_json) in rows {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
@@ -411,29 +576,28 @@ pub async fn put_theme_options_in_conn(
                     .fetch_optional(&mut *conn)
                     .await?;
             if exists.is_none() {
-                return Err(ApiError::bad_request("media_id của image_ref không tồn tại."));
+                return Err(ApiError::bad_request(
+                    "media_id của image_ref không tồn tại.",
+                ));
             }
         }
     }
 
-    let current_ver: Option<i64> = sqlx::query_scalar(
-        "SELECT version FROM theme_option_versions WHERE theme_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+    let current_ver: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM theme_option_versions WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_optional(&mut *conn)
+            .await?;
 
     match current_ver {
         None => {
             if expected_version != 1 {
                 return Ok(ThemeOptionsOutcome::Stale);
             }
-            sqlx::query(
-                "INSERT INTO theme_option_versions (theme_id, version) VALUES (?, 2)",
-            )
-            .bind(theme_id)
-            .execute(&mut *conn)
-            .await?;
+            sqlx::query("INSERT INTO theme_option_versions (theme_id, version) VALUES (?, 2)")
+                .bind(theme_id)
+                .execute(&mut *conn)
+                .await?;
         }
         Some(ver) => {
             if ver != expected_version {
@@ -527,12 +691,11 @@ pub async fn check_theme_options_compatibility(
     let new_map: BTreeMap<&str, &ThemeOptionDef> =
         new_schema.iter().map(|d| (d.key.as_str(), d)).collect();
 
-    let saved_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
-    )
-    .bind(theme_id)
-    .fetch_all(db)
-    .await?;
+    let saved_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_all(db)
+            .await?;
 
     for (key, value_json) in saved_rows {
         let Some(new_def) = new_map.get(key.as_str()) else {
@@ -561,22 +724,31 @@ pub async fn get_active_public_theme_options(
         "SELECT r.theme_id, r.manifest_json
          FROM theme_active_selection AS a
          JOIN theme_revisions AS r ON r.revision_id = a.revision_id
-         WHERE a.id = 1 AND r.source_format = 'v2'",
+         WHERE a.id = 1 AND r.source_format = 'v3'",
     )
     .fetch_optional(db)
     .await?;
     let Some((theme_id, manifest_json)) = active else {
         return Ok(BTreeMap::new());
     };
-    let Ok(schema) = parse_theme_options_schema(&manifest_json) else {
+    let mut conn = db.acquire().await?;
+    get_public_theme_options_in_conn(&mut conn, &theme_id, &manifest_json).await
+}
+
+/// Resolve only public values against the revision already captured by the caller.
+pub(super) async fn get_public_theme_options_in_conn(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+    manifest_json: &str,
+) -> ApiResult<BTreeMap<String, serde_json::Value>> {
+    let Ok(schema) = parse_theme_options_schema(manifest_json) else {
         return Ok(BTreeMap::new());
     };
-    let saved_rows: Vec<(String, String)> = sqlx::query_as(
-        "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
-    )
-    .bind(&theme_id)
-    .fetch_all(db)
-    .await?;
+    let saved_rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
+            .bind(theme_id)
+            .fetch_all(conn)
+            .await?;
     let mut saved_map = BTreeMap::new();
     for (k, v_json) in saved_rows {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
@@ -598,10 +770,7 @@ pub async fn get_active_public_theme_options(
                     _ => serde_json::Value::Null,
                 }
             }
-            _ => saved_map
-                .get(&def.key)
-                .cloned()
-                .unwrap_or(def.default),
+            _ => saved_map.get(&def.key).cloned().unwrap_or(def.default),
         };
         out.insert(def.key, val);
     }

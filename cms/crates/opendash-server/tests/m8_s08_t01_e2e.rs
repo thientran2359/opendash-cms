@@ -176,27 +176,26 @@ fn build_theme_zip(theme_id: &str) -> Vec<u8> {
         let mut zip = ZipWriter::new(std::io::Cursor::new(&mut buf));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
         let manifest = json!({
-            "manifest_version": 2,
+            "manifest_version": 3,
             "theme_id": theme_id,
             "name": theme_id,
             "version": "1.0.0",
-            "templates": {
-                "header": "templates/header.html",
-                "single": "templates/single.html"
-            },
+            "templates": [{ "kind": "single", "file": "single.html" }],
+            "parts": { "header": "header.html" },
             "menus": {
                 "slots": ["primary"]
             }
         });
         zip.start_file("theme.json", opts).unwrap();
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
-        zip.start_file("templates/header.html", opts).unwrap();
+        zip.start_file("header.html", opts).unwrap();
         zip.write_all(
             b"<header>{% if menus.primary is defined %}{% for item in menus.primary.items %}<a href=\"{{ item.url }}\">{{ item.label }}</a>{% endfor %}{% endif %}</header>",
         )
         .unwrap();
-        zip.start_file("templates/single.html", opts).unwrap();
-        zip.write_all(b"<article>{{ entry.title }}</article>").unwrap();
+        zip.start_file("single.html", opts).unwrap();
+        zip.write_all(b"<article>{{ entry.title }}{{ od_content() }}</article>")
+            .unwrap();
         zip.finish().unwrap();
     }
     buf
@@ -215,6 +214,84 @@ fn encrypt_age_bytes(plaintext: &[u8], passphrase: &str) -> Vec<u8> {
     out
 }
 
+// S03 public Home is selected from a published Page through Reading Settings.
+// Keep this setup through HTTP so the tests exercise publication and CAS.
+async fn create_s03_home(client: &Client, base: &str, cookie: &str, csrf: &str) -> i64 {
+    let created = client
+        .post(format!("{base}/api/admin/content-types/page/entries"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({"title":"S03 Home","slug":"s03-home","values":{"body":"Home"}}))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let text = created.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "create S03 Page: {text}");
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    let id = entry["id"].as_i64().unwrap();
+    let publish = client
+        .post(format!(
+            "{base}/api/admin/content-types/page/entries/{id}/publication"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(
+            "If-Match",
+            format!("\"v{}\"", entry["version"].as_i64().unwrap()),
+        )
+        .json(&json!({"status":"published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status().as_u16(), 200, "publish Home Page");
+    let reading = client
+        .get(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status().as_u16(), 200);
+    let token = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let selected = client
+        .put(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", token)
+        .json(&json!({"homepage_page_id":id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = selected.status();
+    let text = selected.text().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "save S03 Reading: {text}");
+    id
+}
+
+async fn save_s03_home_doc(
+    client: &Client,
+    base: &str,
+    cookie: &str,
+    csrf: &str,
+    page_id: i64,
+    version: i64,
+    document: &Value,
+) -> reqwest::Response {
+    client
+        .put(format!("{base}/api/admin/entries/page/{page_id}/builder"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", format!("\"v{version}\""))
+        .json(document)
+        .send()
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn full_v1_backup_restore_reedit_and_equivalence() {
     let tmp = TempDirGuard::new("full-v1");
@@ -227,7 +304,8 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
 
     let srv = spawn_server(&source_root, &source_db).await;
     let client = Client::builder().redirect(Policy::none()).build().unwrap();
-    let (cookie, csrf) = setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
+    let (cookie, csrf) =
+        setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
 
     // 1. Settings (general + public)
     let gen_put = client
@@ -258,7 +336,11 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .send()
         .await
         .unwrap();
-    assert!(pub_put.status().is_success(), "public settings: {}", pub_put.status());
+    assert!(
+        pub_put.status().is_success(),
+        "public settings: {}",
+        pub_put.status()
+    );
 
     // 2. Theme install + activate
     let theme_zip = build_theme_zip("m8-e2e-theme");
@@ -357,7 +439,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
     assert_eq!(ct_resp.status(), StatusCode::CREATED);
 
     let cpt_entry_resp = client
-        .post(format!("{}/api/admin/content-types/case_study/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/case_study/entries",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
@@ -374,7 +459,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap();
 
     let pub_entry_resp = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
@@ -423,7 +511,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
 
     // Draft entry must NOT leak publicly after restore.
     let draft_resp = client
-        .post(format!("{}/api/admin/content-types/post/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/post/entries",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .json(&json!({
@@ -436,7 +527,7 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap();
     assert_eq!(draft_resp.status(), StatusCode::CREATED);
 
-    // 5. Media upload + pin in Home SEO + Builder Homepage
+    // 5. Media upload + pin in Home SEO + published Reading Page Builder.
     let png_bytes = minimal_1x1_png();
     let media_resp = client
         .post(format!("{}/api/admin/media", srv.base_url))
@@ -481,33 +572,36 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap()
         .to_vec();
 
-    let builder_put = client
-        .put(format!("{}/api/admin/builder/homepage", srv.base_url))
-        .header(header::COOKIE, &cookie)
-        .header("X-CSRF-Token", &csrf)
-        .header(header::IF_MATCH, "\"v1\"")
-        .json(&json!({
-            "schema_version": 1,
-            "sections": [{
-                "id": "sec1",
+    let home_id = create_s03_home(&client, &srv.base_url, &cookie, &csrf).await;
+    let hero_doc = json!({
+        "schema_version": 1,
+        "sections": [{
+            "id": "sec1",
+            "children": [{
+                "id": "row1",
                 "children": [{
-                    "id": "row1",
+                    "id": "col1",
                     "children": [{
-                        "id": "col1",
-                        "children": [{
-                            "id": "el1",
-                            "type": "core/text",
-                            "props": {
-                                "text": "M8_E2E_BASELINE_HERO"
-                            }
-                        }]
+                        "id": "el1",
+                        "type": "core/text",
+                        "props": {
+                            "text": "M8_E2E_BASELINE_HERO"
+                        }
                     }]
                 }]
             }]
-        }))
-        .send()
-        .await
-        .unwrap();
+        }]
+    });
+    let builder_put = save_s03_home_doc(
+        &client,
+        &srv.base_url,
+        &cookie,
+        &csrf,
+        home_id,
+        2,
+        &hero_doc,
+    )
+    .await;
     assert_eq!(builder_put.status(), StatusCode::OK);
 
     // 6. Contact form
@@ -536,11 +630,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
 
     // 7. Seed plugin + plugin_kv directly in source DB to assert plugin + KV preservation.
     {
-        let mut conn = SqliteConnection::connect_with(
-            &SqliteConnectOptions::new().filename(&source_db),
-        )
-        .await
-        .unwrap();
+        let mut conn =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&source_db))
+                .await
+                .unwrap();
         sqlx::query(
             "INSERT INTO plugins (id, name, version, enabled, manifest_json, wasm_blob)
              VALUES ('e2e-plugin', 'E2E Plugin', '1.0.0', 0, '{}', X'')",
@@ -576,7 +669,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap()
         .to_string();
     let backup_job = poll_job(&client, &srv.base_url, &cookie, &backup_job_id).await;
-    assert_eq!(backup_job["state"], "succeeded", "backup failed: {backup_job}");
+    assert_eq!(
+        backup_job["state"], "succeeded",
+        "backup failed: {backup_job}"
+    );
 
     let dl_resp = client
         .get(format!(
@@ -610,7 +706,10 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
 
     // 10. Upload backup + Admin restore to separate root
     let upload_resp = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -642,13 +741,19 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .unwrap()
         .to_string();
     let restore_job = poll_job(&client, &srv.base_url, &cookie, &restore_job_id).await;
-    assert_eq!(restore_job["state"], "succeeded", "restore failed: {restore_job}");
+    assert_eq!(
+        restore_job["state"], "succeeded",
+        "restore failed: {restore_job}"
+    );
     let restore_summary: Value =
         serde_json::from_str(restore_job["summary_json"].as_str().unwrap()).unwrap();
     let restored_root = PathBuf::from(restore_summary["target_root"].as_str().unwrap());
     assert!(restored_root.join("READY.json").is_file());
     let rebased_db = restored_root.join("database").join("opendash.sqlite");
-    assert!(rebased_db.is_file(), "external DB must be rebased inside restored root");
+    assert!(
+        rebased_db.is_file(),
+        "external DB must be rebased inside restored root"
+    );
 
     // 11. Stop source server, start target server on restored_root
     drop(srv);
@@ -664,7 +769,11 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
     assert_eq!(old_cookie_check.status(), StatusCode::UNAUTHORIZED);
 
     // Safe mode: public has X-Robots-Tag: noindex, nofollow and contact returns 503.
-    let pub_safe = client.get(format!("{}/", target.base_url)).send().await.unwrap();
+    let pub_safe = client
+        .get(format!("{}/", target.base_url))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(pub_safe.status(), StatusCode::OK);
     assert_eq!(
         pub_safe
@@ -763,12 +872,17 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
         .await
         .unwrap();
     assert_eq!(media_pub.status(), StatusCode::OK);
-    assert_eq!(media_pub.bytes().await.unwrap().as_ref(), source_media_bytes.as_slice());
+    assert_eq!(
+        media_pub.bytes().await.unwrap().as_ref(),
+        source_media_bytes.as_slice()
+    );
 
     // Plugin KV + custom CPT & post entry IDs preserved in DB.
     {
         let mut conn = SqliteConnection::connect_with(
-            &SqliteConnectOptions::new().filename(&rebased_db).read_only(true),
+            &SqliteConnectOptions::new()
+                .filename(&rebased_db)
+                .read_only(true),
         )
         .await
         .unwrap();
@@ -794,33 +908,35 @@ async fn full_v1_backup_restore_reedit_and_equivalence() {
     }
 
     // 13. Re-edit & Save on restored target -> verify public reflects edit
-    let reedit_put = client
-        .put(format!("{}/api/admin/builder/homepage", target.base_url))
-        .header(header::COOKIE, &t_cookie)
-        .header("X-CSRF-Token", &t_csrf)
-        .header(header::IF_MATCH, "\"v2\"")
-        .json(&json!({
-            "schema_version": 1,
-            "sections": [{
-                "id": "sec1",
+    let reedit_doc = json!({
+        "schema_version": 1,
+        "sections": [{
+            "id": "sec1",
+            "children": [{
+                "id": "row1",
                 "children": [{
-                    "id": "row1",
+                    "id": "col1",
                     "children": [{
-                        "id": "col1",
-                        "children": [{
-                            "id": "el1",
-                            "type": "core/text",
-                            "props": {
-                                "text": "M8_E2E_REEDITED_HERO"
-                            }
-                        }]
+                        "id": "el1",
+                        "type": "core/text",
+                        "props": {
+                            "text": "M8_E2E_REEDITED_HERO"
+                        }
                     }]
                 }]
             }]
-        }))
-        .send()
-        .await
-        .unwrap();
+        }]
+    });
+    let reedit_put = save_s03_home_doc(
+        &client,
+        &target.base_url,
+        &t_cookie,
+        &t_csrf,
+        home_id,
+        3,
+        &reedit_doc,
+    )
+    .await;
     assert_eq!(reedit_put.status(), StatusCode::OK);
     let reedited_home = client
         .get(format!("{}/", target.base_url))
@@ -855,8 +971,14 @@ async fn upgrade_0031_to_0033_and_interrupted_job_recovery() {
         }
     }
 
-    let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let pool = SqlitePoolOptions::new().connect(&db_url).await.unwrap();
+    let pool = SqlitePoolOptions::new()
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
     sqlx::migrate::Migrator::new(mig_0031.as_path())
         .await
         .unwrap()
@@ -890,11 +1012,10 @@ async fn upgrade_0031_to_0033_and_interrupted_job_recovery() {
     drop(srv);
     let inflight_id = "1".repeat(64);
     {
-        let mut conn = SqliteConnection::connect_with(
-            &SqliteConnectOptions::new().filename(&db_path),
-        )
-        .await
-        .unwrap();
+        let mut conn =
+            SqliteConnection::connect_with(&SqliteConnectOptions::new().filename(&db_path))
+                .await
+                .unwrap();
         sqlx::query(
             "INSERT INTO operation_jobs (id, kind, state, actor_user_id, reason)
              VALUES (?1, 'backup', 'running', '1', 'crash sim')",
@@ -920,7 +1041,8 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
 
     let srv = spawn_server(&source_root, &source_db).await;
     let client = Client::new();
-    let (cookie, csrf) = setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
+    let (cookie, csrf) =
+        setup_and_login(&client, &srv.base_url, "admin", "admin-password-123").await;
 
     // Create 1 valid backup so we have a real .odbackup.age payload.
     let passphrase = "neg-corpus-passphrase";
@@ -963,7 +1085,10 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
     let last = tampered.len() - 1;
     tampered[last] ^= 0xFF;
     let up_tamper = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -994,7 +1119,10 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
 
     // 2. Wrong passphrase -> restore fails.
     let up_wrong_pw = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::CONTENT_TYPE, "application/octet-stream")
@@ -1067,7 +1195,10 @@ async fn negative_corpus_preserves_source_and_never_publishes_target() {
     }
     let newer_age = encrypt_age_bytes(&newer_zip, passphrase);
     let up_newer = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(header::CONTENT_TYPE, "application/octet-stream")

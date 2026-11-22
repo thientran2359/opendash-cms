@@ -1,4 +1,4 @@
-//! #355: the Section CPT is site-owned, entry-scoped, and never public.
+//! EGM #430: Pattern replaces Section with private, Admin-controlled entry Builder.
 use reqwest::{Client, StatusCode};
 use serde_json::{Value, json};
 use std::{
@@ -87,7 +87,7 @@ fn ast(heading: &str) -> Value {
 }
 
 #[tokio::test]
-async fn section_private_crud_document_cas_and_public_fences() {
+async fn pattern_private_crud_document_cas_and_public_fences() {
     let site = start().await;
     let client = Client::new();
     let setup = client
@@ -99,26 +99,24 @@ async fn section_private_crud_document_cas_and_public_fences() {
         .unwrap();
     assert_eq!(setup.status(), StatusCode::CREATED);
     let (cookie, csrf) = login(&client, &site, "siteadmin", "AdminPassword123!").await;
-    let list = format!("{}/api/admin/sections", site.base);
+    let list = format!("{}/api/admin/patterns", site.base);
     let created = client
         .post(&list)
         .header("Cookie", &cookie)
         .header("Origin", &site.base)
         .header("X-CSRF-Token", &csrf)
-        .json(&json!({"title":"Section A","slug":"private-section-a"}))
+        .json(&json!({"title":"Pattern A","slug":"private-pattern-a"}))
         .send()
         .await
         .unwrap();
     assert_eq!(
         created.status(),
         StatusCode::CREATED,
-        "Section create must be a working API"
+        "Pattern create must be a working API"
     );
     let record: Value = created.json().await.unwrap();
     let id = record["id"].as_i64().unwrap();
-    assert_eq!(record["publication_status"], "draft");
-    let entry = format!("{list}/{id}");
-    let doc_url = format!("{entry}/document");
+    let doc_url = format!("{}/api/admin/entries/pattern/{id}/builder", site.base);
     let opened = client
         .get(&doc_url)
         .header("Cookie", &cookie)
@@ -142,7 +140,12 @@ async fn section_private_crud_document_cas_and_public_fences() {
         .unwrap();
     assert_eq!(preview.status(), StatusCode::OK);
     assert_eq!(preview.headers().get("cache-control").unwrap(), "no-store");
-    assert!(preview.text().await.unwrap().contains("Never Public"));
+    assert!(
+        preview.json::<Value>().await.unwrap()["html"]
+            .as_str()
+            .unwrap()
+            .contains("Never Public")
+    );
     let saved = client
         .put(&doc_url)
         .header("Cookie", &cookie)
@@ -180,20 +183,20 @@ async fn section_private_crud_document_cas_and_public_fences() {
     let unauth = client.get(&doc_url).send().await.unwrap();
     assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
     let public_single = client
-        .get(format!("{}/content/section/private-section-a", site.base))
+        .get(format!("{}/content/pattern/private-pattern-a", site.base))
         .send()
         .await
         .unwrap();
     assert_eq!(public_single.status(), StatusCode::NOT_FOUND);
     let public_archive = client
-        .get(format!("{}/content/section", site.base))
+        .get(format!("{}/content/pattern", site.base))
         .send()
         .await
         .unwrap();
     assert_eq!(public_archive.status(), StatusCode::NOT_FOUND);
     let generic_create = client
         .post(format!(
-            "{}/api/admin/content-types/section/entries",
+            "{}/api/admin/content-types/pattern/entries",
             site.base
         ))
         .header("Cookie", &cookie)
@@ -206,14 +209,14 @@ async fn section_private_crud_document_cas_and_public_fences() {
     assert!(!generic_create.status().is_success());
     let generic_update = client
         .put(format!(
-            "{}/api/admin/content-types/section/entries/{id}",
+            "{}/api/admin/content-types/pattern/entries/{id}",
             site.base
         ))
         .header("Cookie", &cookie)
         .header("Origin", &site.base)
         .header("X-CSRF-Token", &csrf)
         .header("If-Match", "\"v2\"")
-        .json(&json!({"title":"Injected","slug":"private-section-a","values":{"body":"public"}}))
+        .json(&json!({"title":"Injected","slug":"private-pattern-a","values":{"body":"public"}}))
         .send()
         .await
         .unwrap();

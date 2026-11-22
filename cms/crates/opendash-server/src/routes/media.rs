@@ -48,7 +48,9 @@ pub async fn media_list(
         Some("video") => Some("video"),
         Some(_) => return Err(ApiError::bad_request("Bộ lọc loại media không hợp lệ.")),
     };
-    Ok(Json(media_storage::list_filtered(&db, kind, limit, offset).await?))
+    Ok(Json(
+        media_storage::list_filtered(&db, kind, limit, offset).await?,
+    ))
 }
 
 fn display_filename(headers: &HeaderMap, extension: &str) -> String {
@@ -126,9 +128,9 @@ pub async fn media_video_upload(
 ) -> ApiResult<Response> {
     require_session_with_csrf(&headers, &db).await?;
     static VIDEO_INGEST_SLOTS: Semaphore = Semaphore::const_new(2);
-    let _slot = VIDEO_INGEST_SLOTS
-        .try_acquire()
-        .map_err(|_| ApiError::too_many_requests("Đang có quá nhiều lượt upload video đồng thời."))?;
+    let _slot = VIDEO_INGEST_SLOTS.try_acquire().map_err(|_| {
+        ApiError::too_many_requests("Đang có quá nhiều lượt upload video đồng thời.")
+    })?;
 
     let declared_type = headers
         .get(header::CONTENT_TYPE)
@@ -165,11 +167,11 @@ pub async fn media_video_upload(
     let mut hasher = Sha256::new();
     let mut total_bytes: u64 = 0;
 
-    while let Some(frame_res) =
-        std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await
+    while let Some(frame_res) = std::future::poll_fn(|cx| Pin::new(&mut body).poll_frame(cx)).await
     {
-        let frame = frame_res
-            .map_err(|_| ApiError::bad_request("Luồng upload video bị gián đoạn hoặc vượt giới hạn."))?;
+        let frame = frame_res.map_err(|_| {
+            ApiError::bad_request("Luồng upload video bị gián đoạn hoặc vượt giới hạn.")
+        })?;
         if let Some(chunk) = frame.data_ref() {
             let next_total = total_bytes
                 .checked_add(chunk.len() as u64)
@@ -195,9 +197,10 @@ pub async fn media_video_upload(
 
     let sha256 = format!("{:x}", hasher.finalize());
     let inspect_path = staging_path.clone();
-    let validated = tokio::task::spawn_blocking(move || inspect_mp4(&inspect_path, total_bytes, sha256))
-        .await
-        .map_err(|_| ApiError::internal("Không thể kiểm tra metadata video."))??;
+    let validated =
+        tokio::task::spawn_blocking(move || inspect_mp4(&inspect_path, total_bytes, sha256))
+            .await
+            .map_err(|_| ApiError::internal("Không thể kiểm tra metadata video."))??;
 
     let filename = display_filename(&headers, "mp4");
     store
@@ -228,7 +231,8 @@ async fn image_response(
     }
     if !thumb && asset.kind == "video" {
         let path = store.canonical_path(id, &asset.extension)?;
-        return crate::media::stream_authorized_video(method, headers, &asset, &path, store, true).await;
+        return crate::media::stream_authorized_video(method, headers, &asset, &path, store, true)
+            .await;
     }
     let bytes = store.read(id, &asset.extension, thumb).await?;
     let mime = if thumb {

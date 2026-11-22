@@ -7,11 +7,13 @@ import {
   AdminColumnCell, type EffectiveListConfig, type ProviderColumn,
 } from '../extensions/AdminContributionRenderer.tsx';
 import { ApiClientError } from '../../api/client.ts';
+import { mediaThumbnailUrl } from '../../api/media.ts';
 import {
   listAllTaxonomyTerms, listTaxonomyDefinitions, resolveTaxonomyTermLabels,
   type TaxonomyDefinition, type TaxonomyTerm, type TaxonomyTermLabel,
 } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
+import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 import type { EntryTableQuery, EntryTableResult, EntryTableRow } from './types.ts';
 
 interface Props {
@@ -25,8 +27,12 @@ interface Props {
   onApiError: (error: unknown, fallback: string) => void;
 }
 
-const control = 'min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800';
-const action = 'rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50';
+const control =
+  'h-9 min-w-0 max-w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 ' +
+  'focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent disabled:opacity-50';
+const sortButton =
+  'inline-flex min-h-6 w-full items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider text-zinc-600 ' +
+  'hover:text-zinc-950 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-od-accent';
 const statuses = ['all', 'draft', 'published'] as const;
 const TERM_RESOLVE_BATCH = 100;
 const TERM_RESOLVE_CONCURRENCY = 2;
@@ -427,14 +433,90 @@ export function EntryListPage({
       ? 'asc' : 'desc';
     updateFilter({ sort: column, order: nextOrder });
   };
+  const deleteSingleRow = async (row: EntryTableRow) => {
+    if (bulkBusyRef.current || !csrfToken) return;
+    if (!window.confirm(`Xóa vĩnh viễn "${row.title}" (#${row.id})? Hành động này không thể hoàn tác.`)) return;
+    const startingScope = scope;
+    bulkBusyRef.current = true;
+    setBulkBusy(true);
+    try {
+      await deleteContentEntry(typeKey, row.id, row.version, csrfToken);
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      setSelected(prev => {
+        const next = new Set(prev);
+        next.delete(row.id);
+        return next;
+      });
+      setRetry(prev => prev + 1);
+    } catch (cause) {
+      if (!aliveRef.current || scopeRef.current !== startingScope) return;
+      if (cause instanceof ApiClientError && cause.status === 401) {
+        onApiError(cause, 'Phiên đăng nhập hết hạn khi xóa mục.');
+      } else {
+        setBulkResults([{ id: row.id, message: `#${row.id}: ${readableError(cause)}`, ok: false }]);
+      }
+    } finally {
+      bulkBusyRef.current = false;
+      if (aliveRef.current) setBulkBusy(false);
+    }
+  };
+
   const editSuffix = queryHash.includes('?') ? queryHash.slice(queryHash.indexOf('?')) : '';
-  const namesFor = (row: EntryTableRow, kind: string) => {
-    if (!row.term_ids.length) return '—';
-    if (!resolved) return 'Đang tải…';
-    const names = row.term_ids.map(id => resolved.labels.get(id))
-      .filter((term): term is TaxonomyTermLabel => term?.kind === kind)
-      .map(term => term.name);
-    return names.join(', ') || (resolved.failed ? 'Không tải được' : '—');
+  const renderTermsCell = (row: EntryTableRow, kind: string) => {
+    if (!row.term_ids.length) return <span className="text-zinc-400">—</span>;
+    if (!resolved) return <span className="text-xs text-zinc-400">Đang tải…</span>;
+    const matched = row.term_ids
+      .map(id => {
+        const term = resolved.labels.get(id);
+        return term?.kind === kind ? { id, name: term.name } : null;
+      })
+      .filter((item): item is { id: number; name: string } => item !== null);
+    if (!matched.length) {
+      return <span className="text-zinc-400">{resolved.failed ? 'Không tải được' : '—'}</span>;
+    }
+    return (
+      <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-0.5">
+        {matched.map((term, idx) => (
+          <span key={term.id} className="inline-flex items-center">
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => {
+                if (kind === 'category') {
+                  updateFilter({
+                    category_id: term.id,
+                    taxonomy_key: undefined,
+                    term_id: undefined,
+                    include_descendants: false,
+                  });
+                } else if (kind === 'tag') {
+                  updateFilter({
+                    tag_id: term.id,
+                    taxonomy_key: undefined,
+                    term_id: undefined,
+                    include_descendants: Boolean(filters.category_id && filters.include_descendants),
+                  });
+                } else {
+                  setTaxonomyChoice(kind);
+                  updateFilter({
+                    taxonomy_key: kind,
+                    term_id: term.id,
+                    category_id: undefined,
+                    tag_id: undefined,
+                    include_descendants: false,
+                  });
+                }
+              }}
+              className="text-left text-zinc-700 hover:text-od-accent hover:underline disabled:opacity-50"
+              title={`Lọc theo ${term.name}`}
+            >
+              {term.name}
+            </button>
+            {idx < matched.length - 1 && <span className="text-zinc-400">,</span>}
+          </span>
+        ))}
+      </span>
+    );
   };
   const selectedOptionLabel = (kind: string, id: number): string => {
     const term = resolved?.labels.get(id);
@@ -444,195 +526,240 @@ export function EntryListPage({
   const selectedTaxonomy = filters.taxonomy_key || taxonomyChoice;
   const chosenDefinition = terms?.definitions.find(def => def.key === selectedTaxonomy);
 
+  const captionId = `entry-table-caption-${typeKey}`;
+  const activeSort = filters.sort ?? 'updated_at';
+  const activeOrder = filters.order ?? 'desc';
+  const ariaSortFor = (field: 'title' | 'updated_at'): 'ascending' | 'descending' | undefined =>
+    activeSort === field ? (activeOrder === 'asc' ? 'ascending' : 'descending') : undefined;
+
   return (
-    <section className="w-full min-w-0 space-y-5" data-testid={`entry-list-${typeKey}`} data-type-key={typeKey}>
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">Nội dung / Danh sách</p>
-          <h2 className="mt-2 text-2xl font-bold text-slate-900">
-            {typeKey === 'post' ? 'Bài viết' : typeKey === 'page' ? 'Trang' : `Nội dung: ${typeKey}`}
-          </h2>
-          <p className="mt-1 text-sm text-slate-600">Tìm kiếm và lọc trên toàn bộ dữ liệu, không chỉ trang đang xem.</p>
+    <section className="w-full min-w-0 space-y-3.5" data-testid={`entry-list-${typeKey}`} data-type-key={typeKey}>
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex flex-wrap items-center gap-1.5" aria-label="Lọc trạng thái" role="group">
+          {statuses.map(status => {
+            const count = data?.status_counts[status] ?? 0;
+            const label = status === 'all' ? 'Tất cả' : status === 'draft' ? 'Bản nháp' : 'Đã xuất bản';
+            const active = (filters.status ?? 'all') === status;
+            return (
+              <AdminButton
+                key={status}
+                variant={active ? 'primary' : 'secondary'}
+                size="sm"
+                aria-pressed={active}
+                disabled={bulkBusy}
+                onClick={() => updateFilter({ status })}
+              >
+                {label} <span className={active ? 'opacity-80' : 'text-zinc-500'}>({count})</span>
+              </AdminButton>
+            );
+          })}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="od-primary-action" disabled={bulkBusy}
-            onClick={() => onNavigateHash(`${base}/new${editSuffix}`)}>+ Thêm mới</button>
-          <button type="button" className={action} disabled={bulkBusy || loading}
-            onClick={() => setRetry(prev => prev + 1)}>Tải lại</button>
-        </div>
-      </header>
-
-      <div className="flex flex-wrap gap-2" aria-label="Lọc trạng thái" role="group">
-        {statuses.map(status => {
-          const count = data?.status_counts[status] ?? 0;
-          const label = status === 'all' ? 'Tất cả' : status === 'draft' ? 'Bản nháp' : 'Đã xuất bản';
-          return <button key={status} type="button" className={action}
-            aria-pressed={(filters.status ?? 'all') === status}
+        <div className="flex flex-wrap items-center gap-2">
+          <AdminButton
+            variant="secondary"
+            size="sm"
+            disabled={bulkBusy || loading}
+            onClick={() => setRetry(prev => prev + 1)}
+          >
+            Tải lại
+          </AdminButton>
+          <AdminButton
+            variant="primary"
+            size="sm"
             disabled={bulkBusy}
-            onClick={() => updateFilter({ status })}>{label} ({count})</button>;
-        })}
+            onClick={() => onNavigateHash(`${base}/new${editSuffix}`)}
+          >
+            + Thêm mới
+          </AdminButton>
+        </div>
       </div>
 
-      <form className="flex flex-wrap items-end gap-2" role="search"
-        onSubmit={event => {
-          event.preventDefault();
-          const q = searchInput.trim().slice(0, 200);
-          updateFilter({ q: q || undefined });
-        }}>
-        <label htmlFor={`entry-table-search-${typeKey}`} className="min-w-[180px] flex-1 text-sm font-medium text-slate-700">
-          Tìm tiêu đề hoặc slug
-          <input id={`entry-table-search-${typeKey}`} type="search" className={`${control} mt-1 block w-full`}
-            value={searchInput} maxLength={200} disabled={bulkBusy}
-            onChange={event => setSearchInput(event.target.value)}
-            placeholder="Nhập từ khóa…" />
-        </label>
-        <button type="submit" className="od-primary-action" disabled={bulkBusy}>Tìm kiếm</button>
-      </form>
+      <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-3.5">
+        <div className="flex flex-wrap items-end gap-2.5">
+          <form className="flex min-w-[220px] flex-1 items-end gap-2" role="search"
+            onSubmit={event => {
+              event.preventDefault();
+              const q = searchInput.trim().slice(0, 200);
+              updateFilter({ q: q || undefined });
+            }}>
+            <label htmlFor={`entry-table-search-${typeKey}`} className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
+              <span>Tìm tiêu đề hoặc slug</span>
+              <input id={`entry-table-search-${typeKey}`} type="search" className={`${control} w-full`}
+                value={searchInput} maxLength={200} disabled={bulkBusy}
+                onChange={event => setSearchInput(event.target.value)}
+                placeholder="Nhập từ khóa…" />
+            </label>
+            <AdminButton type="submit" variant="secondary" disabled={bulkBusy}>Tìm kiếm</AdminButton>
+          </form>
 
-      <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {terms?.categoryEnabled && <label className="min-w-0 text-sm font-medium text-slate-700">
-          Danh mục
-          <select aria-label="Lọc danh mục" className={`${control} mt-1 block w-full`}
-            value={filters.category_id ?? ''} disabled={bulkBusy}
-            onFocus={() => loadFilterOptions('category')}
-            onChange={event => updateFilter({
-              category_id: event.target.value ? Number(event.target.value) : undefined,
-              taxonomy_key: undefined, term_id: undefined,
-              include_descendants: false,
-            })}>
-            <option value="">Mọi danh mục</option>
-            {filters.category_id && !terms.byKind.category?.some(term => term.id === filters.category_id) &&
-              <option value={filters.category_id}>{selectedOptionLabel('category', filters.category_id)}</option>}
-            {terms.byKind.category?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
-            {!terms.byKind.category && <option disabled>Chạm để tải danh mục…</option>}
-          </select>
-        </label>}
-        {terms?.tagEnabled && <label className="min-w-0 text-sm font-medium text-slate-700">
-          Thẻ
-          <select aria-label="Lọc thẻ" className={`${control} mt-1 block w-full`}
-            value={filters.tag_id ?? ''} disabled={bulkBusy}
-            onFocus={() => loadFilterOptions('tag')}
-            onChange={event => updateFilter({ tag_id: event.target.value ? Number(event.target.value) : undefined,
-              taxonomy_key: undefined, term_id: undefined,
-              // A tag is an AND filter, not a reset of the selected category
-              // subtree. Preserve descendants only when a category is active.
-              include_descendants: Boolean(filters.category_id && filters.include_descendants) })}>
-            <option value="">Mọi thẻ</option>
-            {filters.tag_id && !terms.byKind.tag?.some(term => term.id === filters.tag_id) &&
-              <option value={filters.tag_id}>{selectedOptionLabel('tag', filters.tag_id)}</option>}
-            {terms.byKind.tag?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
-            {!terms.byKind.tag && <option disabled>Chạm để tải thẻ…</option>}
-          </select>
-        </label>}
-        {customDefinitions.length > 0 && <label className="min-w-0 text-sm font-medium text-slate-700">
-          Taxonomy tùy chỉnh
-          <select aria-label="Chọn taxonomy để lọc" className={`${control} mt-1 block w-full`}
-            disabled={bulkBusy} value={selectedTaxonomy}
-            onChange={event => {
-              setTaxonomyChoice(event.target.value);
-              updateFilter({ taxonomy_key: undefined,
-                term_id: undefined, category_id: undefined, tag_id: undefined, include_descendants: false });
-            }}>
-            <option value="">Tất cả taxonomy</option>
-            {customDefinitions.map(def => <option key={def.key} value={def.key}>{def.label}</option>)}
-          </select>
-        </label>}
-        {chosenDefinition && <label className="min-w-0 text-sm font-medium text-slate-700">
-          {chosenDefinition.label}
-          <select aria-label={`Lọc theo ${chosenDefinition.label}`} className={`${control} mt-1 block w-full`}
-            disabled={bulkBusy} value={filters.term_id ?? ''}
-            onFocus={() => loadFilterOptions(chosenDefinition.key)}
-            onChange={event => {
-              setTaxonomyChoice(selectedTaxonomy);
-              updateFilter({ taxonomy_key: event.target.value ? selectedTaxonomy : undefined,
-                term_id: event.target.value ? Number(event.target.value) : undefined,
-                include_descendants: false });
-            }}>
-            <option value="">Chọn term</option>
-            {filters.term_id && !terms?.byKind[chosenDefinition.key]?.some(term => term.id === filters.term_id) &&
-              <option value={filters.term_id}>{selectedOptionLabel(chosenDefinition.key, filters.term_id)}</option>}
-            {(terms?.byKind[chosenDefinition.key] ?? []).map(term =>
-              <option key={term.id} value={term.id}>{term.name}</option>)}
-            {!terms?.byKind[chosenDefinition.key] && <option disabled>Chạm để tải term…</option>}
-          </select>
-        </label>}
-        <label className="min-w-0 text-sm font-medium text-slate-700">
-          Tháng cập nhật (UTC)
-          <input type="month" aria-label="Lọc tháng cập nhật" className={`${control} mt-1 block w-full`}
-            value={filters.updated_month ?? ''} disabled={bulkBusy}
-            onChange={event => updateFilter({ updated_month: event.target.value || undefined })} />
-        </label>
-        <label className="min-w-0 text-sm font-medium text-slate-700">
-          Mỗi trang
-          <select aria-label="Số mục mỗi trang" className={`${control} mt-1 block w-full`}
-            value={pageSize} disabled={bulkBusy}
-            onChange={event => updateFilter({ limit: Number(event.target.value) })}>
-            {[10, 20, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
-          </select>
-        </label>
+          {terms?.categoryEnabled && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+            <span>Danh mục</span>
+            <select aria-label="Lọc danh mục" className={`${control} w-full`}
+              value={filters.category_id ?? ''} disabled={bulkBusy}
+              onFocus={() => loadFilterOptions('category')}
+              onChange={event => updateFilter({
+                category_id: event.target.value ? Number(event.target.value) : undefined,
+                taxonomy_key: undefined, term_id: undefined,
+                include_descendants: false,
+              })}>
+              <option value="">Mọi danh mục</option>
+              {filters.category_id && !terms.byKind.category?.some(term => term.id === filters.category_id) &&
+                <option value={filters.category_id}>{selectedOptionLabel('category', filters.category_id)}</option>}
+              {terms.byKind.category?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+              {!terms.byKind.category && <option disabled>Chạm để tải danh mục…</option>}
+            </select>
+          </label>}
+
+          {terms?.tagEnabled && <label className="flex min-w-[130px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+            <span>Thẻ</span>
+            <select aria-label="Lọc thẻ" className={`${control} w-full`}
+              value={filters.tag_id ?? ''} disabled={bulkBusy}
+              onFocus={() => loadFilterOptions('tag')}
+              onChange={event => updateFilter({ tag_id: event.target.value ? Number(event.target.value) : undefined,
+                taxonomy_key: undefined, term_id: undefined,
+                // A tag is an AND filter, not a reset of the selected category
+                // subtree. Preserve descendants only when a category is active.
+                include_descendants: Boolean(filters.category_id && filters.include_descendants) })}>
+              <option value="">Mọi thẻ</option>
+              {filters.tag_id && !terms.byKind.tag?.some(term => term.id === filters.tag_id) &&
+                <option value={filters.tag_id}>{selectedOptionLabel('tag', filters.tag_id)}</option>}
+              {terms.byKind.tag?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
+              {!terms.byKind.tag && <option disabled>Chạm để tải thẻ…</option>}
+            </select>
+          </label>}
+
+          {customDefinitions.length > 0 && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+            <span>Taxonomy</span>
+            <select aria-label="Chọn taxonomy để lọc" className={`${control} w-full`}
+              disabled={bulkBusy} value={selectedTaxonomy}
+              onChange={event => {
+                setTaxonomyChoice(event.target.value);
+                updateFilter({ taxonomy_key: undefined,
+                  term_id: undefined, category_id: undefined, tag_id: undefined, include_descendants: false });
+              }}>
+              <option value="">Tất cả taxonomy</option>
+              {customDefinitions.map(def => <option key={def.key} value={def.key}>{def.label}</option>)}
+            </select>
+          </label>}
+
+          {chosenDefinition && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+            <span>{chosenDefinition.label}</span>
+            <select aria-label={`Lọc theo ${chosenDefinition.label}`} className={`${control} w-full`}
+              disabled={bulkBusy} value={filters.term_id ?? ''}
+              onFocus={() => loadFilterOptions(chosenDefinition.key)}
+              onChange={event => {
+                setTaxonomyChoice(selectedTaxonomy);
+                updateFilter({ taxonomy_key: event.target.value ? selectedTaxonomy : undefined,
+                  term_id: event.target.value ? Number(event.target.value) : undefined,
+                  include_descendants: false });
+              }}>
+              <option value="">Chọn term</option>
+              {filters.term_id && !terms?.byKind[chosenDefinition.key]?.some(term => term.id === filters.term_id) &&
+                <option value={filters.term_id}>{selectedOptionLabel(chosenDefinition.key, filters.term_id)}</option>}
+              {(terms?.byKind[chosenDefinition.key] ?? []).map(term =>
+                <option key={term.id} value={term.id}>{term.name}</option>)}
+              {!terms?.byKind[chosenDefinition.key] && <option disabled>Chạm để tải term…</option>}
+            </select>
+          </label>}
+
+          <label className="flex min-w-[145px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+            <span>Tháng (UTC)</span>
+            <input type="month" aria-label="Lọc tháng cập nhật" className={`${control} w-full`}
+              value={filters.updated_month ?? ''} disabled={bulkBusy}
+              onChange={event => updateFilter({ updated_month: event.target.value || undefined })} />
+          </label>
+
+          <label className="flex w-[88px] flex-col gap-1 text-xs font-medium text-zinc-600">
+            <span>Mỗi trang</span>
+            <select aria-label="Số mục mỗi trang" className={`${control} w-full`}
+              value={pageSize} disabled={bulkBusy}
+              onChange={event => updateFilter({ limit: Number(event.target.value) })}>
+              {[10, 20, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
+            </select>
+          </label>
+        </div>
+
+        {(filters.category_id && terms?.categoryEnabled) || (filters.term_id && chosenDefinition?.hierarchical) ? (
+          <div className="flex flex-wrap items-center gap-4 border-t border-zinc-100 pt-2.5">
+            {filters.category_id && terms?.categoryEnabled && <label className="flex items-center gap-2 text-xs text-zinc-700">
+              <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
+                onChange={event => updateFilter({ include_descendants: event.target.checked })} />
+              Gồm danh mục con
+            </label>}
+            {filters.term_id && chosenDefinition?.hierarchical && <label className="flex items-center gap-2 text-xs text-zinc-700">
+              <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
+                onChange={event => updateFilter({ include_descendants: event.target.checked })} />
+              Gồm các term con của {chosenDefinition.label}
+            </label>}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-zinc-100 pt-2.5">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Thao tác hàng loạt">
+            <span className="text-xs font-medium text-zinc-500">{selectedRows.length} đã chọn</span>
+            {isBuiltIn && <>
+              <AdminButton variant="secondary" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                onClick={() => void performBulk('published')}>Xuất bản đã chọn</AdminButton>
+              <AdminButton variant="secondary" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
+                onClick={() => void performBulk('draft')}>Chuyển về nháp</AdminButton>
+            </>}
+            <AdminButton variant="danger" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
+              onClick={() => void performBulk('delete')}>Xóa đã chọn</AdminButton>
+            {bulkBusy && <span role="status" className="text-xs text-zinc-600">Đang xử lý riêng từng mục…</span>}
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            <span className="text-zinc-500" role="status">{data ? `Tổng: ${data.total} mục` : 'Đang lấy số lượng…'}</span>
+            <AdminButton variant="ghost" size="sm" disabled={bulkBusy}
+              onClick={() => { setSearchInput(''); setTaxonomyChoice(''); onNavigateHash(base); }}>
+              Xóa bộ lọc
+            </AdminButton>
+          </div>
+        </div>
       </div>
-      {termLoadErrors.length > 0 && <p role="alert" className="text-sm text-amber-800">
+
+      {termLoadErrors.length > 0 && <AdminAlert tone="warning" role="alert">
         Không tải được một số term: {termLoadErrors.join('; ')}. Các bộ lọc khác vẫn sử dụng được.
-      </p>}
-      {resolved?.failed && <p role="alert" className="text-sm text-amber-800">
+      </AdminAlert>}
+      {resolved?.failed && <AdminAlert tone="warning" role="alert">
         Không tải được tên của một số term trên trang. Thử Tải lại để hiển thị đầy đủ.
-      </p>}
-      {filters.category_id && terms?.categoryEnabled && <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
-          onChange={event => updateFilter({ include_descendants: event.target.checked })} />
-        Gồm danh mục con
-      </label>}
-      {filters.term_id && chosenDefinition?.hierarchical && <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
-          onChange={event => updateFilter({ include_descendants: event.target.checked })} />
-        Gồm các term con của {chosenDefinition.label}
-      </label>}
-      <div className="flex flex-wrap items-center gap-3 text-sm">
-        <button className={action} disabled={bulkBusy} type="button"
-          onClick={() => { setSearchInput(''); setTaxonomyChoice(''); onNavigateHash(base); }}>Xóa tất cả bộ lọc</button>
-        <span className="text-slate-600" role="status">{data ? `Tổng: ${data.total} mục phù hợp` : 'Đang lấy số lượng…'}</span>
-      </div>
+      </AdminAlert>}
 
-      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Thao tác hàng loạt">
-        <span className="text-sm text-slate-600">{selectedRows.length} mục đã chọn trên trang</span>
-        {isBuiltIn && <>
-          <button className={action} type="button" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-            onClick={() => void performBulk('published')}>Xuất bản đã chọn</button>
-          <button className={action} type="button" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-            onClick={() => void performBulk('draft')}>Chuyển về nháp</button>
-        </>}
-        <button className={action} type="button" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-          onClick={() => void performBulk('delete')}>Xóa đã chọn</button>
-        {bulkBusy && <span role="status" className="text-sm">Đang xử lý riêng từng mục…</span>}
-      </div>
       {bulkResults.length > 0 && (
-        <div className="rounded-lg border border-slate-200 bg-white p-3" aria-label="Kết quả hàng loạt">
-          <p className="mb-2 text-sm font-semibold">Kết quả: {bulkResults.filter(row => row.ok).length} thành công / {bulkResults.length} đã thử</p>
-          <ul className="space-y-1 text-sm">
+        <div className="rounded-lg border border-zinc-200 bg-white p-3" aria-label="Kết quả hàng loạt">
+          <p className="mb-1.5 text-xs font-semibold text-zinc-900">Kết quả: {bulkResults.filter(row => row.ok).length} thành công / {bulkResults.length} đã thử</p>
+          <ul className="space-y-1 text-xs">
             {bulkResults.map(result => <li key={result.id} data-bulk-id={result.id}
               role={result.ok ? 'status' : 'alert'}
-              className={result.ok ? 'text-emerald-800' : 'text-rose-800'}>{result.message}</li>)}
+              className={result.ok ? 'text-emerald-700' : 'text-rose-700'}>{result.message}</li>)}
           </ul>
         </div>
       )}
 
-      {providerNotice && <p role="status" data-testid="provider-action-result"
-        className="text-sm text-slate-700">{providerNotice}</p>}
-      {providerError && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-        Không thể tải cột mở rộng: {providerError}
-        <button type="button" className="ml-2 underline" onClick={() => setRetry(n => n + 1)}>Thử lại</button>
-      </div>}
+      {providerNotice && <AdminAlert tone="info" data-testid="provider-action-result">{providerNotice}</AdminAlert>}
+      {providerError && <AdminAlert tone="error" className="flex flex-wrap items-center gap-2">
+        <span>Không thể tải cột mở rộng: {providerError}</span>
+        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Thử lại</AdminButton>
+      </AdminAlert>}
 
-      {error && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-        {error} <button type="button" className="underline" onClick={() => setRetry(prev => prev + 1)}>Thử lại</button>
-      </div>}
-      {loading && <p role="status" className="text-sm text-slate-600">Đang tải danh sách từ máy chủ…</p>}
-      <div className="w-full min-w-0 max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-white" aria-busy={loading}>
+      {error && <AdminAlert tone="error" className="flex flex-wrap items-center gap-2">
+        <span>{error}</span>
+        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(prev => prev + 1)}>Thử lại</AdminButton>
+      </AdminAlert>}
+
+      {loading && <p role="status" className="text-xs text-zinc-500">Đang tải danh sách từ máy chủ…</p>}
+
+      <div
+        role="region"
+        aria-labelledby={captionId}
+        tabIndex={0}
+        className="w-full min-w-0 max-w-full overflow-x-auto rounded-xl border border-zinc-200 bg-white focus-visible:outline-2 focus-visible:outline-od-accent"
+        aria-busy={loading}
+      >
         <table className="w-full min-w-[780px] table-auto text-left text-sm" data-testid="entry-table">
-          <caption className="sr-only">Bảng nội dung {typeKey}; tìm kiếm, trạng thái và phân trang từ máy chủ</caption>
-          <thead className="border-b border-slate-200 bg-slate-50 text-slate-700">
+          <caption id={captionId} className="sr-only">Bảng nội dung {typeKey}; tìm kiếm, trạng thái và phân trang từ máy chủ</caption>
+          <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wider text-zinc-600">
             <tr>
-              <th scope="col" className="w-10 px-3 py-3">
+              <th scope="col" className="w-10 px-3 py-2.5">
                 <input type="checkbox" aria-label="Chọn tất cả trên trang" checked={allSelected}
                   disabled={!currentRows.length || bulkBusy || loading}
                   onChange={event => setSelected(prev => {
@@ -641,81 +768,159 @@ export function EntryListPage({
                     return next;
                   })} />
               </th>
-              <th scope="col" className="min-w-[160px] px-3 py-3">
-                <button type="button" data-testid="sort-title" className="text-left font-semibold underline-offset-2 hover:underline"
-                  disabled={bulkBusy} onClick={() => sortBy('title')}
-                  aria-label="Sắp xếp theo tiêu đề">Tiêu đề {(filters.sort ?? 'updated_at') === 'title' ? filters.order === 'asc' ? '↑' : '↓' : ''}</button>
-              </th>
-              <th scope="col" className="px-3 py-3">Trạng thái</th>
-              {terms?.categoryEnabled && <th scope="col" className="px-3 py-3">Danh mục</th>}
-              {terms?.tagEnabled && <th scope="col" className="px-3 py-3">Thẻ</th>}
-              {customDefinitions.map(def => <th key={def.key} scope="col" className="px-3 py-3">{def.label}</th>)}
-              {providerColumns.map(column => <th key={column.key} scope="col"
-                className="min-w-[120px] px-3 py-3">{column.label}</th>)}
-              <th scope="col" className="min-w-[135px] px-3 py-3">
-                <button type="button" data-testid="sort-updated" className="font-semibold underline-offset-2 hover:underline"
-                  disabled={bulkBusy} aria-label="Sắp xếp theo ngày cập nhật"
-                  onClick={() => sortBy('updated_at')}>
-                  Ngày cập nhật {(filters.sort ?? 'updated_at') === 'updated_at' ? (filters.order === 'asc' ? '↑' : '↓') : ''}
+              <th scope="col" className="w-14 px-2 py-2.5 text-center">Ảnh</th>
+              <th scope="col" aria-sort={ariaSortFor('title')} className="min-w-[220px] px-3 py-2.5">
+                <button type="button" data-testid="sort-title" className={sortButton}
+                  disabled={bulkBusy} onClick={() => sortBy('title')}>
+                  <span>Tiêu đề</span>
+                  {activeSort === 'title' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
                 </button>
               </th>
-              <th scope="col" className="px-3 py-3">Hành động</th>
+              <th scope="col" className="whitespace-nowrap px-3 py-2.5">Trạng thái</th>
+              {terms?.categoryEnabled && <th scope="col" className="px-3 py-2.5">Danh mục</th>}
+              {terms?.tagEnabled && <th scope="col" className="px-3 py-2.5">Thẻ</th>}
+              {customDefinitions.map(def => <th key={def.key} scope="col" className="px-3 py-2.5">{def.label}</th>)}
+              {providerColumns.map(column => <th key={column.key} scope="col"
+                className="min-w-[120px] px-3 py-2.5">{column.label}</th>)}
+              <th scope="col" aria-sort={ariaSortFor('updated_at')} className="min-w-[140px] whitespace-nowrap px-3 py-2.5">
+                <button type="button" data-testid="sort-updated" className={sortButton}
+                  disabled={bulkBusy} onClick={() => sortBy('updated_at')}>
+                  <span>Ngày cập nhật</span>
+                  {activeSort === 'updated_at' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
+                </button>
+              </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-zinc-100">
             {!loading && !error && currentRows.length === 0 && <tr>
               <td colSpan={5 + (terms?.definitions.length ?? 0) + providerColumns.length}
-                className="px-4 py-8 text-center text-slate-600">
+                className="px-4 py-8 text-center text-sm text-zinc-500">
                 {data?.total === 0 ? 'Không tìm thấy nội dung phù hợp. Có thể xóa bộ lọc để xem lại.' : 'Không có mục trên trang này.'}
               </td>
             </tr>}
             {currentRows.map(row => {
               const path = row.publication_status === 'published' ? safePublicPath(row.public_url) : null;
-              return <tr key={row.id} data-entry-id={row.id} className="align-top">
-                <td className="px-3 py-3"><input type="checkbox" aria-label={`Chọn mục #${row.id}`}
+              const thumbId = typeof row.fields?.featured_image === 'string' ? row.fields.featured_image.trim() : '';
+              return <tr key={row.id} data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
+                <td className="px-3 py-2.5"><input type="checkbox" aria-label={`Chọn mục #${row.id}`}
                   checked={selected.has(row.id)} disabled={bulkBusy}
                   onChange={event => toggleRow(row.id, event.target.checked)} /></td>
-                <td className="break-words px-3 py-3">
-                  <strong className="block font-semibold text-slate-900">{row.title}</strong>
-                  <span className="break-all text-xs text-slate-500">/{row.slug} · #{row.id} · v{row.version}</span>
+                <td className="w-14 px-2 py-2.5">
+                  {thumbId ? (
+                    <img
+                      src={mediaThumbnailUrl(thumbId)}
+                      alt={row.title}
+                      loading="lazy"
+                      className="mx-auto h-10 w-10 rounded-md border border-zinc-200 bg-zinc-50 object-cover"
+                    />
+                  ) : (
+                    <div
+                      className="mx-auto flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-zinc-200 bg-zinc-50 text-zinc-300"
+                      aria-hidden="true"
+                    >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="4" width="18" height="16" rx="2" />
+                        <circle cx="8.5" cy="9.5" r="1.5" />
+                        <path d="m4 17 5-5 4 3 3-4 4 5" />
+                      </svg>
+                    </div>
+                  )}
                 </td>
-                <td className="px-3 py-3">{row.publication_status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}</td>
-                {terms?.categoryEnabled && <td className="break-words px-3 py-3">{namesFor(row, 'category')}</td>}
-                {terms?.tagEnabled && <td className="break-words px-3 py-3">{namesFor(row, 'tag')}</td>}
-                {customDefinitions.map(def => <td key={def.key} className="break-words px-3 py-3">{namesFor(row, def.key)}</td>)}
-                {providerColumns.map(column => <td key={column.key} className="break-words px-3 py-3">
-                  <AdminColumnCell column={column} row={row} busy={providerBusy || bulkBusy}
-                    onRun={(col, entry) => void performProviderAction(col, entry)} />
-                </td>)}
-                <td className="whitespace-nowrap px-3 py-3">{row.updated_at.slice(0, 16)} UTC</td>
-                <td className="px-3 py-3">
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" className="text-sky-700 hover:underline" disabled={bulkBusy}
+                <td className="break-words px-3 py-2.5">
+                  <div className="leading-snug">
+                    <button
+                      type="button"
+                      disabled={bulkBusy}
+                      onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
+                      className="inline text-left text-sm font-semibold text-zinc-950 hover:text-od-accent"
+                    >
+                      {row.title}
+                    </button>
+                    <span className="ml-1.5 inline-block align-middle rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-zinc-500">
+                      #{row.id}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                    <button
+                      type="button"
+                      className="font-medium text-od-accent hover:underline"
+                      disabled={bulkBusy}
                       aria-label={`Chỉnh sửa ${row.title}, ID ${row.id}`}
-                      onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}>Chỉnh sửa</button>
-                    {path && <a href={path} target="_blank" rel="noopener noreferrer" className="text-sky-700 hover:underline"
-                      aria-label={`Xem công khai ${row.title}`}>Xem</a>}
+                      onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
+                    >
+                      Chỉnh sửa
+                    </button>
+                    {path && (
+                      <>
+                        <span className="text-zinc-300" aria-hidden="true">·</span>
+                        <a
+                          href={path}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
+                          aria-label={`Xem công khai ${row.title}`}
+                        >
+                          Xem
+                        </a>
+                      </>
+                    )}
                     {row.publication_status === 'draft' && (
-                      <a href={contentEntryPreviewPath(typeKey, row.id)}
-                        target="_blank" rel="noopener noreferrer" className="text-sky-700 hover:underline"
-                        aria-label={`Xem trước bản nháp đã lưu ${row.title}`}>Xem trước bản nháp</a>
+                      <>
+                        <span className="text-zinc-300" aria-hidden="true">·</span>
+                        <a
+                          href={contentEntryPreviewPath(typeKey, row.id)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
+                          aria-label={`Xem trước bản nháp đã lưu ${row.title}`}
+                        >
+                          Xem trước
+                        </a>
+                      </>
+                    )}
+                    {csrfToken && (
+                      <>
+                        <span className="text-zinc-300" aria-hidden="true">·</span>
+                        <button
+                          type="button"
+                          className="font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
+                          disabled={bulkBusy}
+                          aria-label={`Xóa ${row.title}, ID ${row.id}`}
+                          onClick={() => void deleteSingleRow(row)}
+                        >
+                          Xóa
+                        </button>
+                      </>
                     )}
                   </div>
                 </td>
+                <td className="whitespace-nowrap px-3 py-2.5">
+                  <AdminBadge tone={row.publication_status === 'published' ? 'success' : 'neutral'}>
+                    {row.publication_status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
+                  </AdminBadge>
+                </td>
+                {terms?.categoryEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'category')}</td>}
+                {terms?.tagEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'tag')}</td>}
+                {customDefinitions.map(def => <td key={def.key} className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, def.key)}</td>)}
+                {providerColumns.map(column => <td key={column.key} className="break-words px-3 py-2.5">
+                  <AdminColumnCell column={column} row={row} busy={providerBusy || bulkBusy}
+                    onRun={(col, entry) => void performProviderAction(col, entry)} />
+                </td>)}
+                <td className="whitespace-nowrap px-3 py-2.5 text-xs tabular-nums text-zinc-600">{row.updated_at.slice(0, 16)} UTC</td>
               </tr>;
             })}
           </tbody>
         </table>
       </div>
-      <nav aria-label="Phân trang nội dung" className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-700">
+      <nav aria-label="Phân trang nội dung" className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
         <span data-testid="entry-table-page-info">{data ? `Hiển thị ${data.total ? offset + 1 : 0}–${Math.min(offset + currentRows.length, data.total)} / ${data.total}` : 'Chưa tải trang'}</span>
         <div className="flex items-center gap-2">
-          <button type="button" className={action} disabled={bulkBusy || loading || offset === 0}
-            onClick={() => updateFilter({ offset: Math.max(0, offset - pageSize) }, false)}>Trang trước</button>
-          <span>Trang {Math.floor(offset / pageSize) + 1}{data ? ` / ${Math.max(1, Math.ceil(data.total / pageSize))}` : ''}</span>
-          <button type="button" className={action}
+          <AdminButton variant="secondary" size="sm" disabled={bulkBusy || loading || offset === 0}
+            onClick={() => updateFilter({ offset: Math.max(0, offset - pageSize) }, false)}>Trang trước</AdminButton>
+          <span className="tabular-nums">Trang {Math.floor(offset / pageSize) + 1}{data ? ` / ${Math.max(1, Math.ceil(data.total / pageSize))}` : ''}</span>
+          <AdminButton variant="secondary" size="sm"
             disabled={bulkBusy || loading || !data || offset + pageSize >= data.total || offset + pageSize > 1000000}
-            onClick={() => updateFilter({ offset: offset + pageSize }, false)}>Trang sau</button>
+            onClick={() => updateFilter({ offset: offset + pageSize }, false)}>Trang sau</AdminButton>
         </div>
       </nav>
     </section>

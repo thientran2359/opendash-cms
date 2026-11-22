@@ -50,7 +50,12 @@ async fn spawn_server() -> TestServer {
     let base_url = format!("http://127.0.0.1:{port}");
     let client = Client::new();
     for _ in 0..80 {
-        if client.get(format!("{base_url}/api/health")).send().await.is_ok() {
+        if client
+            .get(format!("{base_url}/api/health"))
+            .send()
+            .await
+            .is_ok()
+        {
             return TestServer {
                 child,
                 site_root,
@@ -290,8 +295,7 @@ fn build_valid_mp4(with_audio: bool) -> (Vec<u8>, String) {
             let hdlr_a = full_box(b"hdlr", 0, 0, &hdlr_a);
 
             let esds_p = vec![
-                0x03, 22, 0x00, 0x02, 0x00,
-                0x04, 17, 0x40, 0x15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0x03, 22, 0x00, 0x02, 0x00, 0x04, 17, 0x40, 0x15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0x05, 2, 0x12, 0x10,
             ];
             let esds = full_box(b"esds", 0, 0, &esds_p);
@@ -355,30 +359,84 @@ fn build_valid_mp4(with_audio: bool) -> (Vec<u8>, String) {
     (bytes, sha)
 }
 
+// S03 public Home is selected from a published Page through Reading Settings.
+// Keep this setup through HTTP so the tests exercise publication and CAS.
+async fn create_s03_home(client: &Client, base: &str, cookie: &str, csrf: &str) -> i64 {
+    let created = client
+        .post(format!("{base}/api/admin/content-types/page/entries"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .json(&json!({"title":"S03 Home","slug":"s03-home","values":{"body":"Home"}}))
+        .send()
+        .await
+        .unwrap();
+    let status = created.status();
+    let text = created.text().await.unwrap();
+    assert_eq!(status.as_u16(), 201, "create S03 Page: {text}");
+    let entry: Value = serde_json::from_str(&text).unwrap();
+    let id = entry["id"].as_i64().unwrap();
+    let publish = client
+        .post(format!(
+            "{base}/api/admin/content-types/page/entries/{id}/publication"
+        ))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(
+            "If-Match",
+            format!("\"v{}\"", entry["version"].as_i64().unwrap()),
+        )
+        .json(&json!({"status":"published"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(publish.status().as_u16(), 200, "publish Home Page");
+    let reading = client
+        .get(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reading.status().as_u16(), 200);
+    let token = reading.headers()["etag"].to_str().unwrap().to_owned();
+    let selected = client
+        .put(format!("{base}/api/admin/settings/reading"))
+        .header("Cookie", cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header("If-Match", token)
+        .json(&json!({"homepage_page_id":id,"posts_page_id":null}))
+        .send()
+        .await
+        .unwrap();
+    let status = selected.status();
+    let text = selected.text().await.unwrap();
+    assert_eq!(status.as_u16(), 200, "save S03 Reading: {text}");
+    id
+}
+
 #[tokio::test]
 async fn video_upload_validation_dedup_and_typed_image_guards() {
     let server = spawn_server().await;
-    let client = Client::builder()
-        .redirect(Policy::none())
-        .build()
-        .unwrap();
+    let client = Client::builder().redirect(Policy::none()).build().unwrap();
     let (cookie, csrf) = setup_and_login(&client, &server.base_url).await;
 
     // 1. Verify SQLite integrity & foreign keys after 0030_media_video.sql
     let db_path = server.site_root.join("database").join("opendash.sqlite");
-    let pool = SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
-        .await
-        .unwrap();
+    let pool =
+        SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db_path))
+            .await
+            .unwrap();
     let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(integrity, "ok");
-    let fk_errors: Vec<(String, i64, String, i64)> =
-        sqlx::query_as("PRAGMA foreign_key_check")
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+    let fk_errors: Vec<(String, i64, String, i64)> = sqlx::query_as("PRAGMA foreign_key_check")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
     assert!(fk_errors.is_empty(), "FK errors: {fk_errors:?}");
     pool.close().await;
 
@@ -427,7 +485,12 @@ async fn video_upload_validation_dedup_and_typed_image_guards() {
     assert_eq!(vid_json["duration_ms"], 1500);
     assert!(vid_json["thumb_width"].is_null());
     assert!(vid_json["thumb_height"].is_null());
-    assert!(vid_json["video_codec"].as_str().unwrap().starts_with("avc1."));
+    assert!(
+        vid_json["video_codec"]
+            .as_str()
+            .unwrap()
+            .starts_with("avc1.")
+    );
     assert_eq!(vid_json["audio_codec"], "mp4a.40.2");
 
     // 4. Dedup preserves original metadata & filename
@@ -516,7 +579,11 @@ async fn video_upload_validation_dedup_and_typed_image_guards() {
     assert_eq!(frag_res.status(), StatusCode::BAD_REQUEST);
 
     // Staging directory must be clean after rejections
-    let staging_dir = server.site_root.join("uploads").join("media").join(".staging");
+    let staging_dir = server
+        .site_root
+        .join("uploads")
+        .join("media")
+        .join(".staging");
     if staging_dir.exists() {
         let count = fs::read_dir(&staging_dir).unwrap().count();
         assert_eq!(count, 0, "staging directory must not retain rejected files");
@@ -554,32 +621,26 @@ async fn video_upload_validation_dedup_and_typed_image_guards() {
         .unwrap();
     assert_eq!(seo_res.status(), StatusCode::UNPROCESSABLE_ENTITY);
 
+    let home_id = create_s03_home(&client, &server.base_url, &cookie, &csrf).await;
     let builder_res = client
-        .post(format!("{}/api/admin/builder/homepage/preview", server.base_url))
+        .post(format!(
+            "{}/api/admin/entries/page/{home_id}/builder/preview",
+            server.base_url
+        ))
         .header(header::ORIGIN, &server.base_url)
         .header(header::COOKIE, &cookie)
         .header("x-csrf-token", &csrf)
         .json(&json!({
-            "version": 1,
-            "document": {
-                "schema_version": 1,
-                "root": {
-                    "id": "root",
-                    "kind": "core/section",
-                    "props": {},
-                    "children": [
-                        {
-                            "id": "img1",
-                            "kind": "core/image",
-                            "props": {
-                                "media_id": mp4_sha,
-                                "alt": "Not an image"
-                            },
-                            "children": []
-                        }
-                    ]
-                }
-            }
+            "schema_version": 1,
+            "sections": [{"id": "sec1", "children": [
+                {"id": "row1", "children": [
+                    {"id": "col1", "children": [
+                        {"id": "img1", "type": "core/image",
+                         "props": {"media_id": mp4_sha, "alt": "Not an image"}}
+                    ]}
+                ]}
+            ]}
+            ]
         }))
         .send()
         .await

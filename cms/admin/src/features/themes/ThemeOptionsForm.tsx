@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import {
   getThemeOptions,
@@ -6,20 +6,44 @@ import {
   type ThemeOptionDef,
   type ThemeOptionsSnapshot,
 } from '../../api/themes.ts';
+import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface Props {
   themeId: string;
   csrfToken: string | null;
   onApiError: (error: unknown, fallback: string) => void;
+  onValuesChange?: (
+    values: Record<string, unknown>,
+    meta: { version: number; dirty: boolean; schema: ThemeOptionDef[] },
+  ) => void;
+  externalValues?: Record<string, unknown> | null;
+  hideSubmitButton?: boolean;
+  reloadToken?: number;
 }
 
-export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiError }) => {
+function sameOptionValues(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+export const ThemeOptionsForm: React.FC<Props> = ({
+  themeId,
+  csrfToken,
+  onApiError,
+  onValuesChange,
+  externalValues,
+  hideSubmitButton = false,
+  reloadToken = 0,
+}) => {
   const [snapshot, setSnapshot] = useState<ThemeOptionsSnapshot | null>(null);
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const onValuesChangeRef = useRef(onValuesChange);
+  onValuesChangeRef.current = onValuesChange;
+  const externalValuesRef = useRef(externalValues);
+  externalValuesRef.current = externalValues;
 
   useEffect(() => {
     let active = true;
@@ -30,7 +54,13 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
       .then(res => {
         if (!active) return;
         setSnapshot(res);
-        setDraft(res.values);
+        const initial = externalValuesRef.current ?? res.values;
+        setDraft(initial);
+        onValuesChangeRef.current?.(initial, {
+          version: res.version,
+          dirty: !sameOptionValues(initial, res.values),
+          schema: res.schema,
+        });
       })
       .catch(cause => {
         if (!active) return;
@@ -45,13 +75,32 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [themeId, onApiError]);
+  }, [themeId, reloadToken, onApiError]);
 
-  if (loading) return <p role="status" className="text-sm text-slate-600">Đang tải tùy chọn theme…</p>;
-  if (!snapshot || snapshot.schema.length === 0) return null;
+  useEffect(() => {
+    if (!snapshot || !externalValues) return;
+    if (!sameOptionValues(externalValues, draft)) {
+      setDraft(externalValues);
+    }
+  }, [externalValues, snapshot]);
+
+  if (loading) return <p role="status" className="text-sm text-zinc-600">Đang tải tùy chọn theme…</p>;
+  if (!snapshot || snapshot.schema.length === 0) {
+    return hideSubmitButton ? (
+      <p className="text-xs text-zinc-500">Theme hiện tại không khai báo tùy chọn (theme_options).</p>
+    ) : null;
+  }
 
   const setField = (key: string, value: unknown) => {
-    setDraft(prev => ({ ...prev, [key]: value }));
+    setDraft(prev => {
+      const next = { ...prev, [key]: value };
+      onValuesChangeRef.current?.(next, {
+        version: snapshot.version,
+        dirty: !sameOptionValues(next, snapshot.values),
+        schema: snapshot.schema,
+      });
+      return next;
+    });
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -86,7 +135,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             checked={Boolean(val)}
             onChange={e => setField(def.key, e.target.checked)}
             disabled={saving}
-            className="h-4 w-4 rounded border-slate-300"
+            className="h-4 w-4 rounded border-zinc-300"
           />
         );
       case 'number':
@@ -99,7 +148,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             step="any"
             onChange={e => setField(def.key, e.target.value === '' ? '' : Number(e.target.value))}
             disabled={saving}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           />
         );
       case 'select':
@@ -108,7 +157,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             value={typeof val === 'string' ? val : ''}
             onChange={e => setField(def.key, e.target.value)}
             disabled={saving}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           >
             {(def.choices ?? []).map(c => (
               <option key={c.value} value={c.value}>{c.label}</option>
@@ -123,7 +172,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             placeholder="Nhập media_id (để trống để bỏ)"
             onChange={e => setField(def.key, e.target.value.trim() === '' ? null : e.target.value.trim())}
             disabled={saving}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           />
         );
       default:
@@ -134,39 +183,76 @@ export const ThemeOptionsForm: React.FC<Props> = ({ themeId, csrfToken, onApiErr
             value={typeof val === 'string' ? val : ''}
             onChange={e => setField(def.key, e.target.value)}
             disabled={saving}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           />
         );
     }
   };
 
+  if (hideSubmitButton) {
+    return (
+      <div data-testid="theme-options-form" className="space-y-3">
+        <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
+          <span>Theme: {themeId}</span>
+          <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>
+        </div>
+        {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
+        {error && <AdminAlert tone="error">{error}</AdminAlert>}
+        <div className="space-y-3">
+          {snapshot.schema.map(def => (
+            <label key={def.key} className={def.type === 'boolean' ? 'flex items-center gap-2.5 text-sm font-medium text-zinc-800' : 'flex flex-col gap-1'}>
+              {def.type === 'boolean' ? (
+                <>
+                  {renderInput(def)}
+                  <span>{def.label}</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs font-medium text-zinc-700">{def.label}</span>
+                  {renderInput(def)}
+                </>
+              )}
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <form
       onSubmit={e => void handleSubmit(e)}
       data-testid="theme-options-form"
-      className="space-y-4 rounded-xl border border-slate-200 bg-white p-4"
+      className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5"
     >
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-base font-semibold text-slate-900">Tùy chọn theme ({themeId})</h3>
-        <span className="text-xs text-slate-500">v{snapshot.version}</span>
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-100 pb-3">
+        <h3 className="text-base font-semibold text-zinc-950">Tùy chọn theme ({themeId})</h3>
+        <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>
       </div>
-      {notice && <p role="status" className="rounded-lg bg-emerald-50 p-2 text-sm text-emerald-900">{notice}</p>}
-      {error && <p role="alert" className="rounded-lg bg-red-50 p-2 text-sm text-red-900">{error}</p>}
-      <div className="space-y-3">
+      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
+      {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      <div className="space-y-3.5">
         {snapshot.schema.map(def => (
-          <label key={def.key} className="block space-y-1">
-            <span className="block text-sm font-medium text-slate-800">{def.label}</span>
-            {renderInput(def)}
+          <label key={def.key} className={def.type === 'boolean' ? 'flex items-center gap-2.5 text-sm font-medium text-zinc-800' : 'flex flex-col gap-1'}>
+            {def.type === 'boolean' ? (
+              <>
+                {renderInput(def)}
+                <span>{def.label}</span>
+              </>
+            ) : (
+              <>
+                <span className="text-sm font-medium text-zinc-800">{def.label}</span>
+                {renderInput(def)}
+              </>
+            )}
           </label>
         ))}
       </div>
-      <button
-        type="submit"
-        disabled={!csrfToken || saving}
-        className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-      >
-        {saving ? 'Đang lưu…' : 'Lưu tùy chọn'}
-      </button>
+      <div className="pt-1">
+        <AdminButton type="submit" variant="primary" size="md" disabled={!csrfToken || saving}>
+          {saving ? 'Đang lưu…' : 'Lưu tùy chọn'}
+        </AdminButton>
+      </div>
     </form>
   );
 };

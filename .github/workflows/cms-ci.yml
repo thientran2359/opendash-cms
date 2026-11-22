@@ -1,0 +1,99 @@
+name: OpenDash CMS Build & Test
+
+# Always run on PRs to main so this job can serve as a Required Check on Ruleset #26833341.
+# Docs-only PRs fast-pass in seconds; any change under cms/ or this workflow runs full Rust + Admin checks.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cms-ci:
+    name: cms-ci
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect CMS code changes
+        id: changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_cms=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+            HEAD_SHA="${{ github.sha }}"
+          fi
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "run_cms=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'cms/crates/**' 'cms/migrations/**' 'cms/admin/**' 'cms/sdk/**' 'cms/Cargo.toml' 'cms/Cargo.lock' 'cms/rust-toolchain.toml' '.github/workflows/cms-ci.yml')"
+          if [ -n "$CHANGED" ]; then
+            echo "CMS changes detected:"
+            echo "$CHANGED"
+            echo "run_cms=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Docs/governance-only change: skipping Rust & Admin build."
+            echo "run_cms=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node 22.16.0
+        if: steps.changes.outputs.run_cms == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+          cache: 'npm'
+          cache-dependency-path: 'cms/admin/package-lock.json'
+
+      - name: Build React Admin
+        if: steps.changes.outputs.run_cms == 'true'
+        working-directory: cms/admin
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup Rust 1.99.1
+        if: steps.changes.outputs.run_cms == 'true'
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.99.1'
+          components: rustfmt
+
+      - name: Rust cache
+        if: steps.changes.outputs.run_cms == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cms
+
+      - name: Check Rust formatting on changed files
+        if: steps.changes.outputs.run_cms == 'true'
+        shell: bash
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          if [ -n "$BASE_SHA" ] && [ "$BASE_SHA" != "0000000000000000000000000000000000000000" ]; then
+            CHANGED_RS="$(git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" -- 'cms/crates/**/*.rs')"
+            if [ -n "$CHANGED_RS" ]; then
+              echo "$CHANGED_RS" | xargs rustfmt --edition 2024 --check
+            else
+              echo "No changed Rust files to check formatting."
+            fi
+          fi
+
+      - name: Run Rust workspace tests (release, locked)
+        if: steps.changes.outputs.run_cms == 'true'
+        run: cargo test --manifest-path cms/Cargo.toml --workspace --release --locked

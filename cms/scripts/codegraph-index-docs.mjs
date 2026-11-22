@@ -3,7 +3,7 @@
 // Re-index the project decisions/contracts/designs in CodeGraph's local docs store.
 // Run from any directory: node cms/scripts/codegraph-index-docs.mjs
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +22,7 @@ const engine = process.env.CODEGRAPH_ENGINE_PATH || join(
 
 // Only official active documents belong in the canonical CodeGraph docs index.
 // Do not index .agents/ drafts, historical proposal threads or retired skills.
-const sources = [
+const baseSources = [
   'docs/README.md',
   'docs/designs/README.md',
   'docs/designs/SITEMAP.md',
@@ -47,6 +47,17 @@ const sources = [
   'docs/decisions/ADR-0018-owner-admin-review.md',
   'docs/decisions/ADR-0019-content-foundation.md',
 ];
+
+// Dynamically discover all EGM Design Specs in docs/designs/*.md.
+const designsDir = join(repo, 'docs', 'designs');
+const dynamicDesignSpecs = existsSync(designsDir)
+  ? readdirSync(designsDir)
+      .filter((name) => name.endsWith('.md') && name !== 'README.md' && name !== 'SITEMAP.md')
+      .sort()
+      .map((name) => `docs/designs/${name}`)
+  : [];
+
+const sources = [...new Set([...baseSources, ...dynamicDesignSpecs])];
 
 // Safe verification, with no installed CodeGraph engine required:
 // node cms/scripts/codegraph-index-docs.mjs --list-sources

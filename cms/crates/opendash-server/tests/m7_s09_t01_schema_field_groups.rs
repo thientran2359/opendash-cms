@@ -20,10 +20,12 @@ struct TempDirGuard(PathBuf);
 impl TempDirGuard {
     fn new(label: &str) -> Self {
         let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "opendash-m7-s09-t01-{label}-{}-{id}",
-            std::process::id()
-        ));
+        let dir = fs::canonicalize(std::env::temp_dir())
+            .expect("canonical temp root")
+            .join(format!(
+                "opendash-m7-s09-t01-{label}-{}-{id}",
+                std::process::id()
+            ));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp dir");
         Self(dir)
@@ -52,11 +54,13 @@ impl RunningServer {
         drop(listener);
 
         let bin = env!("CARGO_BIN_EXE_opendash");
+        let log_path = site_root.join("server-startup.log");
+        let stderr = fs::File::create(&log_path).expect("create startup log");
         let child = Command::new(bin)
             .env("OPENDASH_SITE_ROOT", site_root)
             .env("OPENDASH_PORT", port.to_string())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr))
             .spawn()
             .expect("spawn opendash server");
 
@@ -73,7 +77,10 @@ impl RunningServer {
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        panic!("server failed to become ready at {base_url}");
+        panic!(
+            "server failed to become ready at {base_url}: {}",
+            fs::read_to_string(&log_path).unwrap_or_else(|_| "missing startup log".into())
+        );
     }
 }
 
@@ -131,26 +138,28 @@ async fn login(client: &Client, base: &str, username: &str, password: &str) -> (
     (cookie, body["csrf_token"].as_str().unwrap().to_string())
 }
 
-// C1 includes the private Section builtin, not just the original Post/Page.
-// Keep the schema/CAS checks for every core key and fail if Section becomes public.
+// Core Pattern remains private and supports the unified entry Builder.
 fn assert_core_builtins(cts: &[Value]) {
     let keys = cts
         .iter()
         .map(|ct| ct["descriptor"]["key"].as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(keys, ["page", "post", "section"]);
+    assert_eq!(keys, ["page", "pattern", "post"]);
     for ct in cts {
         assert_eq!(ct["version"], 1);
         assert!(ct["schema_token"].as_str().unwrap().starts_with("sha256:"));
         assert_eq!(ct["owner"]["kind"], "core");
     }
-    let section = &cts[2];
-    assert_eq!(section["descriptor"]["settings"], json!({
-        "public": false,
-        "has_archive": false,
-        "publication": "draft_publish",
-        "supports": []
-    }));
+    let section = &cts[1];
+    assert_eq!(
+        section["descriptor"]["settings"],
+        json!({
+            "public": false,
+            "has_archive": false,
+            "publication": "immediate",
+            "supports": ["builder"]
+        })
+    );
     assert_eq!(section["status"], "active");
 }
 
@@ -177,7 +186,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     assert_eq!(ed_resp.status(), StatusCode::CREATED);
     let (ed_cookie, ed_csrf) = login(&client, &srv.base_url, "editor1", "EditorPassword123!").await;
 
-    // 1. Check GET /api/admin/content-types includes immutable private Section.
+    // 1. Check GET /api/admin/content-types includes immutable private Pattern.
     let cts: Vec<Value> = client
         .get(format!("{}/api/admin/content-types", srv.base_url))
         .header("Cookie", &admin_cookie)
@@ -189,14 +198,16 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .unwrap();
     assert_core_builtins(&cts);
     let mutate_section = client
-        .put(format!("{}/api/admin/content-types/section", srv.base_url))
+        .put(format!("{}/api/admin/content-types/pattern", srv.base_url))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
         .header("If-Match", "\"v1\"")
-        .json(&json!({"key":"section", "label":"Public Section", "fields":[],
+        .json(
+            &json!({"key":"pattern", "label":"Public Pattern", "fields":[],
             "settings":{"public":true,"has_archive":true,"publication":"draft_publish",
-                "supports":["editor","featured_image"]}}))
+                "supports":["editor","featured_image"]}}),
+        )
         .send()
         .await
         .unwrap();
@@ -238,7 +249,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // Create an entry so has_existing_entries = true for portfolio
     let create_entry = client
-        .post(format!("{}/api/admin/content-types/portfolio/entries", srv.base_url))
+        .post(format!(
+            "{}/api/admin/content-types/portfolio/entries",
+            srv.base_url
+        ))
         .header("Cookie", &ed_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &ed_csrf)
@@ -255,7 +269,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // 3. PUT /api/admin/content-types/{type_key}: If-Match 428 / 412, Editor 403, Core 403
     assert_eq!(
         client
-            .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+            .put(format!(
+                "{}/api/admin/content-types/portfolio",
+                srv.base_url
+            ))
             .header("Cookie", &ed_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &ed_csrf)
@@ -269,7 +286,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     );
     assert_eq!(
         client
-            .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+            .put(format!(
+                "{}/api/admin/content-types/portfolio",
+                srv.base_url
+            ))
             .header("Cookie", &admin_cookie)
             .header("Origin", &srv.base_url)
             .header("X-CSRF-Token", &admin_csrf)
@@ -389,7 +409,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // AC-03e: portfolio has_existing_entries = true, client_name is required=true, min_edit_role=editor, default_value=None
     // Attempt PUT changing min_edit_role -> admin WITHOUT default_value -> 422 admin_required_field_missing_default
     let e_fail = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -423,7 +446,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // Now provide valid default_value -> 200 OK (version becomes 2)
     let e_ok = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -450,11 +476,17 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     assert_eq!(e_ok.status(), StatusCode::OK);
     let updated_cpt: Value = e_ok.json().await.unwrap();
     assert_eq!(updated_cpt["version"], 2);
-    assert_ne!(updated_cpt["schema_token"].as_str().unwrap(), old_schema_token);
+    assert_ne!(
+        updated_cpt["schema_token"].as_str().unwrap(),
+        old_schema_token
+    );
 
     // AC-03f: Try removing default_value while required=true, min_edit_role=admin -> 422 admin_required_field_missing_default
     let f_fail = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -589,7 +621,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     );
 
     let collide_cpt_put = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -625,7 +660,10 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // AC-01b: User PUT trying to remove `budget` completely when entries exist -> 409 cannot_remove_field_with_data
     let remove_with_data = client
-        .put(format!("{}/api/admin/content-types/portfolio", srv.base_url))
+        .put(format!(
+            "{}/api/admin/content-types/portfolio",
+            srv.base_url
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &srv.base_url)
         .header("X-CSRF-Token", &admin_csrf)
@@ -660,7 +698,8 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     // 6. Restart round-trip verification: normalized public_exposure & groups persist cleanly
     drop(srv);
     let srv2 = RunningServer::start(site_root).await;
-    let (admin_cookie2, admin_csrf2) = login(&client, &srv2.base_url, "admin", "Password123!").await;
+    let (admin_cookie2, admin_csrf2) =
+        login(&client, &srv2.base_url, "admin", "Password123!").await;
 
     let cts2: Vec<Value> = client
         .get(format!("{}/api/admin/content-types", srv2.base_url))
@@ -696,11 +735,11 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
 
     // 7. Theme manifest field_groups & 3-level tombstone + collision check
     let theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "studio-theme",
         "name": "Studio Theme",
         "version": "1.0.0",
-        "templates": { "home": "templates/home.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "field_groups": [
             {
                 "local_key": "studio_seo_extra",
@@ -716,7 +755,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     .unwrap();
     let theme_zip = build_zip(&[
         ("theme.json", &theme_manifest),
-        ("templates/home.html", b"<main>Studio</main>"),
+        ("index.html", b"<main>Studio</main>"),
     ]);
     let inst_theme = client
         .post(format!("{}/api/admin/themes", srv2.base_url))
@@ -762,13 +801,13 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     assert_eq!(studio_fg["fields"][0]["public_exposure"], "private");
     assert_eq!(studio_fg["fields"][1]["public_exposure"], "public");
 
-    // Theme v2 colliding with existing `client_name` on portfolio -> 409 field_key_collision
+    // Theme v3 colliding with existing `client_name` on portfolio -> 409 field_key_collision
     let bad_theme_manifest = serde_json::to_vec(&json!({
-        "manifest_version": 2,
+        "manifest_version": 3,
         "theme_id": "studio-theme",
         "name": "Studio Theme",
         "version": "1.1.0",
-        "templates": { "home": "templates/home.html" },
+        "templates": [{ "kind": "index", "file": "index.html" }],
         "field_groups": [
             {
                 "local_key": "studio_seo_extra",
@@ -783,7 +822,7 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     .unwrap();
     let bad_theme_zip = build_zip(&[
         ("theme.json", &bad_theme_manifest),
-        ("templates/home.html", b"<main>Studio</main>"),
+        ("index.html", b"<main>Studio</main>"),
     ]);
     let inst_bad = client
         .post(format!("{}/api/admin/themes", srv2.base_url))
@@ -848,7 +887,8 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
     }
 
     let srv3 = RunningServer::start(site_root).await;
-    let (admin_cookie3, admin_csrf3) = login(&client, &srv3.base_url, "admin", "Password123!").await;
+    let (admin_cookie3, admin_csrf3) =
+        login(&client, &srv3.base_url, "admin", "Password123!").await;
 
     // Remove "page" from `user:project_meta` target_types -> `page` association becomes `withdrawn`
     let upd_fg = client

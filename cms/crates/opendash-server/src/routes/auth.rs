@@ -15,7 +15,6 @@ use crate::{
     storage::auth as auth_storage,
 };
 
-
 pub async fn auth_setup(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,

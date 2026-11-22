@@ -9,9 +9,7 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
-use opendash_core::{
-    content::{ContentEntryInput, valid_content_type_key},
-};
+use opendash_core::content::{ContentEntryInput, valid_content_type_key};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqlitePool;
@@ -22,13 +20,12 @@ use crate::{
     error::{ApiError, ApiResult},
     hooks::HookDispatcher,
     storage::{
-        content::load_content_type_definition, entries as entry_storage,
-        entry_table, media as media_storage,
-        page::active_content_templates,
+        content::load_content_type_definition, entries as entry_storage, entry_table,
+        media as media_storage, page::active_content_templates,
     },
 };
 
-pub const MAX_CONTENT_ENTRY_JSON_BYTES: usize = 512 * 1024;
+pub const MAX_CONTENT_ENTRY_JSON_BYTES: usize = 768 * 1024;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -74,29 +71,42 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
                 filter.status = value.into();
             }
             "category_id" => {
-                filter.category_id = Some(value.parse::<i64>().ok()
-                    .filter(|id| *id > 0)
-                    .ok_or_else(|| ApiError::bad_request("category_id không hợp lệ."))?);
+                filter.category_id = Some(
+                    value
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|id| *id > 0)
+                        .ok_or_else(|| ApiError::bad_request("category_id không hợp lệ."))?,
+                );
             }
             "tag_id" => {
-                filter.tag_id = Some(value.parse::<i64>().ok()
-                    .filter(|id| *id > 0)
-                    .ok_or_else(|| ApiError::bad_request("tag_id không hợp lệ."))?);
+                filter.tag_id = Some(
+                    value
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|id| *id > 0)
+                        .ok_or_else(|| ApiError::bad_request("tag_id không hợp lệ."))?,
+                );
             }
             "taxonomy_key" if opendash_core::content::valid_content_type_key(value) => {
                 filter.taxonomy_key = Some(value.to_owned());
             }
             "term_id" => {
-                filter.term_id = Some(value.parse::<i64>().ok()
-                    .filter(|id| *id > 0 && id.to_string() == value)
-                    .ok_or_else(|| ApiError::bad_request("term_id không hợp lệ."))?);
+                filter.term_id = Some(
+                    value
+                        .parse::<i64>()
+                        .ok()
+                        .filter(|id| *id > 0 && id.to_string() == value)
+                        .ok_or_else(|| ApiError::bad_request("term_id không hợp lệ."))?,
+                );
             }
             "include_descendants" if matches!(value, "true" | "false") => {
                 filter.include_descendants = value == "true";
             }
             "updated_month" => {
                 let bytes = value.as_bytes();
-                if bytes.len() != 7 || bytes[4] != b'-'
+                if bytes.len() != 7
+                    || bytes[4] != b'-'
                     || !bytes[..4].iter().chain(&bytes[5..]).all(u8::is_ascii_digit)
                     || value[..4].parse::<u16>().unwrap_or(0) == 0
                     || !(1..=12).contains(&value[5..].parse::<u8>().unwrap_or(0))
@@ -112,12 +122,16 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
                 filter.order = value.into();
             }
             "limit" => {
-                filter.limit = value.parse::<i64>().ok()
+                filter.limit = value
+                    .parse::<i64>()
+                    .ok()
                     .filter(|n| (1..=100).contains(n))
                     .ok_or_else(|| ApiError::bad_request("limit phải là 1..100."))?;
             }
             "offset" => {
-                filter.offset = value.parse::<i64>().ok()
+                filter.offset = value
+                    .parse::<i64>()
+                    .ok()
                     .filter(|n| (0..=1_000_000).contains(n))
                     .ok_or_else(|| ApiError::bad_request("offset phải là 0..1000000."))?;
             }
@@ -128,11 +142,14 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
         || (filter.taxonomy_key.is_some()
             && (filter.category_id.is_some() || filter.tag_id.is_some()))
     {
-        return Err(ApiError::bad_request("taxonomy_key/term_id thiếu cặp hoặc trộn aliases."));
+        return Err(ApiError::bad_request(
+            "taxonomy_key/term_id thiếu cặp hoặc trộn aliases.",
+        ));
     }
-    if filter.include_descendants && filter.category_id.is_none()
-        && filter.taxonomy_key.is_none() {
-        return Err(ApiError::bad_request("include_descendants cần taxonomy filter."));
+    if filter.include_descendants && filter.category_id.is_none() && filter.taxonomy_key.is_none() {
+        return Err(ApiError::bad_request(
+            "include_descendants cần taxonomy filter.",
+        ));
     }
     Ok(filter)
 }
@@ -150,7 +167,9 @@ pub async fn entry_table_get(
         crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
         crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
     };
-    Ok(Json(entry_table::query(&db, &type_key, role, &filter).await?))
+    Ok(Json(
+        entry_table::query(&db, &type_key, role, &filter).await?,
+    ))
 }
 
 /// Declarative provider metadata for the authenticated list. The table's
@@ -179,8 +198,15 @@ pub async fn entry_table_provider_action(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<crate::plugin::PluginManager>>,
-    State(content_registry): State<Arc<tokio::sync::RwLock<
-        opendash_core::registry::RegistryCatalog<opendash_core::content::ContentTypeDefinition>>>>,
+    State(content_registry): State<
+        Arc<
+            tokio::sync::RwLock<
+                opendash_core::registry::RegistryCatalog<
+                    opendash_core::content::ContentTypeDefinition,
+                >,
+            >,
+        >,
+    >,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path((type_key, id, plugin_id, action_id)): Path<(String, i64, String, String)>,
@@ -203,11 +229,17 @@ pub async fn entry_table_provider_action(
         opendash_core::content::FieldRole::Editor
     };
     let config = crate::storage::admin_extensions::effective_list(&db, &type_key, role).await?;
-    if !config.columns.iter().any(|col| col.owner_kind == "plugin" &&
-        col.owner_id == plugin_id && col.action_id.as_deref() == Some(&action_id)) {
-        return Err(ApiError::forbidden("Action không thuộc cột hiệu lực hoặc không đủ quyền."));
+    if !config.columns.iter().any(|col| {
+        col.owner_kind == "plugin"
+            && col.owner_id == plugin_id
+            && col.action_id.as_deref() == Some(&action_id)
+    }) {
+        return Err(ApiError::forbidden(
+            "Action không thuộc cột hiệu lực hoặc không đủ quyền.",
+        ));
     }
-    let record = entry_storage::get_entry(&db, &type_key, id).await?
+    let record = entry_storage::get_entry(&db, &type_key, id)
+        .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
     if record.version != version {
         return Err(ApiError::precondition_failed(
@@ -226,10 +258,18 @@ pub async fn entry_table_provider_action(
         "values": record.values,
     });
     let correlation_id = format!("row-{}", crate::auth::generate_random_token());
-    match plugins.execute_plugin_action(
-        &plugin_id, &action_id, &actor, input,
-        &content_registry, &hooks, correlation_id,
-    ).await {
+    match plugins
+        .execute_plugin_action(
+            &plugin_id,
+            &action_id,
+            &actor,
+            input,
+            &content_registry,
+            &hooks,
+            correlation_id,
+        )
+        .await
+    {
         Ok(response) => Ok((StatusCode::OK, Json(response)).into_response()),
         Err((status, response)) => Ok((status, Json(response)).into_response()),
     }
@@ -335,7 +375,9 @@ pub async fn entry_get(
     let mut entry = entry_storage::get_entry(&db, &type_key, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-    if let Some(eff) = crate::storage::content::load_effective_content_schema(&db, &type_key).await? {
+    if let Some(eff) =
+        crate::storage::content::load_effective_content_schema(&db, &type_key).await?
+    {
         let role = match actor.user.role {
             crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
             crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
@@ -354,8 +396,15 @@ pub async fn entry_create(
     Json(input): Json<ContentEntryInput>,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
-    let schema = content_schema(&db, &type_key).await?;
-    let preflight_schema_token = crate::storage::content::load_effective_content_schema(&db, &type_key).await?.map(|e| e.schema_token);
+    let mut schema = content_schema(&db, &type_key).await?;
+    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
+    let preflight_schema_token = effective.as_ref().map(|e| e.schema_token.clone());
+    if let Some(eff) = &effective
+        && !schema.fields.iter().any(|f| f.key == "body")
+        && let Some(body_fe) = eff.effective_fields.get("body")
+    {
+        schema.fields.push(body_fe.definition.clone());
+    }
     input
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
@@ -370,12 +419,18 @@ pub async fn entry_create(
         "candidate_values": &input.values,
         "term_ids": &input.term_ids,
     });
-    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+    if let Err(veto) = hooks
+        .dispatch_content_before_save(&type_key, candidate)
+        .await
+    {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
     }
     let entry = match preflight_schema_token.as_deref() {
         Some(tok) => {
-            entry_storage::create_entry_with_schema_fence(&db, &actor, &type_key, &schema, &input, tok).await?
+            entry_storage::create_entry_with_schema_fence(
+                &db, &actor, &type_key, &schema, &input, tok,
+            )
+            .await?
         }
         None => entry_storage::create_entry(&db, &actor, &type_key, &schema, &input).await?,
     };
@@ -409,8 +464,15 @@ pub async fn entry_update(
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     let version = expected_version(&headers)?;
-    let schema = content_schema(&db, &type_key).await?;
-    let preflight_schema_token = crate::storage::content::load_effective_content_schema(&db, &type_key).await?.map(|e| e.schema_token);
+    let mut schema = content_schema(&db, &type_key).await?;
+    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
+    let preflight_schema_token = effective.as_ref().map(|e| e.schema_token.clone());
+    if let Some(eff) = &effective
+        && !schema.fields.iter().any(|f| f.key == "body")
+        && let Some(body_fe) = eff.effective_fields.get("body")
+    {
+        schema.fields.push(body_fe.definition.clone());
+    }
     input
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
@@ -425,14 +487,23 @@ pub async fn entry_update(
         "candidate_values": &input.values,
         "term_ids": &input.term_ids,
     });
-    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+    if let Err(veto) = hooks
+        .dispatch_content_before_save(&type_key, candidate)
+        .await
+    {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
     }
     let entry = match preflight_schema_token.as_deref() {
         Some(tok) => {
-            entry_storage::update_entry_with_schema_fence(&db, &actor, &type_key, &schema, id, version, &input, tok).await?
+            entry_storage::update_entry_with_schema_fence(
+                &db, &actor, &type_key, &schema, id, version, &input, tok,
+            )
+            .await?
         }
-        None => entry_storage::update_entry(&db, &actor, &type_key, &schema, id, version, &input).await?,
+        None => {
+            entry_storage::update_entry(&db, &actor, &type_key, &schema, id, version, &input)
+                .await?
+        }
     };
     let _ = hooks
         .dispatch_content_after_save(
@@ -480,26 +551,73 @@ pub async fn entry_publication(
     Ok(([(header::ETAG, etag(record.version))], Json(record)).into_response())
 }
 
-/// Persisted Post/Page preview is private and never shares the public reader.
+/// Persisted entry preview is private and never shares the public reader.
 pub async fn entry_preview(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
 ) -> ApiResult<Response> {
-    require_session(&headers, &db).await?;
+    let actor = require_session(&headers, &db).await?;
     valid_type_key(&type_key)?;
-    if !is_builtin(&type_key) {
-        return Err(ApiError::bad_request("Preview chỉ hỗ trợ Post/Page."));
+    if matches!(type_key.as_str(), "pattern" | "section") {
+        return Err(ApiError::bad_request(
+            "Preview không hỗ trợ Pattern/Section.",
+        ));
     }
-    let schema = content_schema(&db, &type_key).await?;
-    let entry = entry_storage::get_entry(&db, &type_key, id)
+    let mut schema = content_schema(&db, &type_key).await?;
+    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
+    if let Some(eff) = &effective
+        && !schema.fields.iter().any(|f| f.key == "body")
+        && let Some(body_fe) = eff.effective_fields.get("body")
+    {
+        schema.fields.push(body_fe.definition.clone());
+    }
+    let supports_builder = schema
+        .settings
+        .supports(opendash_core::content::ContentSupport::Builder);
+    if !is_builtin(&type_key) && !supports_builder {
+        return Err(ApiError::bad_request(
+            "Preview chỉ hỗ trợ Post/Page hoặc CPT bật Builder.",
+        ));
+    }
+    let mut entry = entry_storage::get_entry(&db, &type_key, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-    let view = content_render::authenticated_preview_view(entry, &schema);
-    let (_, selected_template) = active_content_templates(&db).await?;
-    let raw_html = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    let actor_role = match actor.user.role {
+        crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+        crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+    };
+    if let Some(eff) = &effective {
+        entry_storage::filter_entry_values_for_role(&mut entry, eff, actor_role);
+    }
+    let body_view_allowed = effective.as_ref().is_none_or(|eff| {
+        eff.effective_fields
+            .get("body")
+            .is_none_or(|fe| actor_role >= fe.definition.min_view_role)
+    });
+    let has_blocks = entry
+        .values
+        .get("body")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(opendash_core::builder_blocks::contains_blocks);
     let pub_settings = crate::storage::settings::get_public(&db).await?;
-    let seo_view = crate::seo::SeoView::for_noindex_page(&pub_settings.content_language, &view.title);
+    let seo_view =
+        crate::seo::SeoView::for_noindex_page(&pub_settings.content_language, &entry.title);
+    let raw_html = if supports_builder && body_view_allowed && has_blocks {
+        if let Some(rendered) =
+            crate::storage::builder::preview_saved_entry_body(&db, &actor, &type_key, id).await?
+        {
+            rendered.html
+        } else {
+            let view = content_render::authenticated_preview_view(entry, &schema);
+            let (_, selected_template) = active_content_templates(&db).await?;
+            content_render::render_single(&schema, &view, selected_template.as_deref())?
+        }
+    } else {
+        let view = content_render::authenticated_preview_view(entry, &schema);
+        let (_, selected_template) = active_content_templates(&db).await?;
+        content_render::render_single(&schema, &view, selected_template.as_deref())?
+    };
     let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
     Ok((
         [
@@ -546,8 +664,8 @@ pub async fn entry_composite_create(
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     valid_type_key(&type_key)?;
-    let plan = entry_storage::prepare_composite_entry_save(&db, &actor, &type_key, None, &input)
-        .await?;
+    let plan =
+        entry_storage::prepare_composite_entry_save(&db, &actor, &type_key, None, &input).await?;
     let candidate = json!({
         "operation": "create",
         "type_key": &type_key,
@@ -558,7 +676,10 @@ pub async fn entry_composite_create(
         "candidate_values": &plan.merged_input.values,
         "term_ids": &plan.merged_input.term_ids,
     });
-    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+    if let Err(veto) = hooks
+        .dispatch_content_before_save(&type_key, candidate)
+        .await
+    {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
     }
     let result =
@@ -581,7 +702,10 @@ pub async fn entry_composite_create(
             (header::ETAG, etag(result.entry.version)),
             (
                 header::LOCATION,
-                format!("/api/admin/content-types/{type_key}/entries/{}", result.entry.id),
+                format!(
+                    "/api/admin/content-types/{type_key}/entries/{}",
+                    result.entry.id
+                ),
             ),
         ],
         Json(result),
@@ -612,18 +736,15 @@ pub async fn entry_composite_update(
         "candidate_values": &plan.merged_input.values,
         "term_ids": &plan.merged_input.term_ids,
     });
-    if let Err(veto) = hooks.dispatch_content_before_save(&type_key, candidate).await {
+    if let Err(veto) = hooks
+        .dispatch_content_before_save(&type_key, candidate)
+        .await
+    {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
     }
-    let result = entry_storage::commit_composite_entry_save(
-        &db,
-        &actor,
-        &type_key,
-        Some(id),
-        &input,
-        &plan,
-    )
-    .await?;
+    let result =
+        entry_storage::commit_composite_entry_save(&db, &actor, &type_key, Some(id), &input, &plan)
+            .await?;
     let _ = hooks
         .dispatch_content_after_save(
             &type_key,

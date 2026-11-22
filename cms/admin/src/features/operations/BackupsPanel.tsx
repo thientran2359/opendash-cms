@@ -9,6 +9,7 @@ import {
   type BackupListResponse,
   type OperationJob,
 } from '../../api/operations.ts';
+import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface BackupsPanelProps {
   csrfToken: string | null;
@@ -132,64 +133,67 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
   };
 
   return (
-    <section className="panel" aria-label="Sao lưu mã hóa">
-      <div className="panel-header">
+    <section className="space-y-4" aria-label="Sao lưu mã hóa">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2>Sao lưu mã hóa (.odbackup.age)</h2>
-          <p className="muted">
+          <h2 className="text-base font-semibold text-zinc-950">Sao lưu mã hóa (.odbackup.age)</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">
             {data
               ? `Đang lưu ${data.active_artifact_count} / ${data.max_artifacts} gói sao lưu · tối đa ${data.max_receipts} biên nhận.`
               : 'Đang tải thông tin sao lưu…'}
           </p>
         </div>
-        <button type="button" className="btn-secondary" onClick={() => void refresh()} disabled={busy}>
+        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy}>
           Làm mới
-        </button>
+        </AdminButton>
       </div>
 
-      <form onSubmit={handleCreateBackup} className="stack-sm">
-        <label>
-          Mật khẩu mã hóa (16–128 ký tự, không lưu trên máy chủ)
+      <form onSubmit={handleCreateBackup} className="flex max-w-xl flex-col gap-3">
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Mật khẩu mã hóa (16–128 ký tự, không lưu trên máy chủ)</span>
           <input
             type="password"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
             value={passphrase}
             onChange={(e) => setPassphrase(e.target.value)}
             autoComplete="new-password"
             required
           />
         </label>
-        <label>
-          Xác nhận mật khẩu mã hóa
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Xác nhận mật khẩu mã hóa</span>
           <input
             type="password"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
             value={confirmPassphrase}
             onChange={(e) => setConfirmPassphrase(e.target.value)}
             autoComplete="new-password"
             required
           />
         </label>
-        <label>
-          Ghi chú (tùy chọn)
+        <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
+          <span>Ghi chú (tùy chọn)</span>
           <input
             type="text"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             placeholder="Ví dụ: Trước khi nâng cấp theme"
           />
         </label>
-        <div className="row-gap">
-          <button type="submit" className="btn-primary" disabled={busy || Boolean(activeJob)}>
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <AdminButton type="submit" variant="primary" disabled={busy || Boolean(activeJob)}>
             Tạo bản sao lưu mã hóa
-          </button>
+          </AdminButton>
           {activeJob && (activeJob.state === 'queued' || activeJob.state === 'running') && (
-            <button type="button" className="btn-danger" onClick={handleCancel} disabled={busy}>
+            <AdminButton variant="danger" onClick={handleCancel} disabled={busy}>
               Hủy tác vụ ({activeJob.state})
-            </button>
+            </AdminButton>
           )}
         </div>
       </form>
 
-      {notice && <p className="notice">{notice}</p>}
+      {notice && <AdminAlert tone="info">{notice}</AdminAlert>}
 
       {data && data.artifacts.length > 0 && (
         <table className="table">

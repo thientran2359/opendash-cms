@@ -14,6 +14,7 @@ import {
   type FieldRole,
   type PublicExposure,
 } from './types.ts';
+import { AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface FieldGroupsManagerProps {
   typeKey: string;
@@ -133,40 +134,34 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
   };
 
   return (
-    <div className="space-y-4" data-testid="field-groups-manager">
-      <h3 className="text-base font-semibold text-slate-900">
-        Nhóm trường mở rộng gắn với <code>{typeKey}</code>
+    <div className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5" data-testid="field-groups-manager">
+      <h3 className="text-base font-semibold text-zinc-950">
+        Nhóm trường mở rộng gắn với <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-xs text-zinc-700">{typeKey}</code>
       </h3>
       {relevantGroups.length === 0 ? (
-        <p className="text-sm text-slate-500">Chưa có nhóm trường mở rộng nào gắn với loại nội dung này.</p>
+        <p className="text-sm text-zinc-500">Chưa có nhóm trường mở rộng nào gắn với loại nội dung này.</p>
       ) : (
         <ul className="space-y-2">
           {relevantGroups.map(g => (
-            <li key={g.group_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <li key={g.group_id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-3 text-sm">
               <div>
-                <div className="font-semibold text-slate-900">
-                  {g.title} <span className="text-xs font-normal text-slate-500">({g.group_id})</span>
+                <div className="flex flex-wrap items-center gap-2 font-semibold text-zinc-900">
+                  <span>{g.title}</span>
+                  <span className="font-mono text-xs font-normal text-zinc-500">({g.group_id})</span>
+                  <AdminBadge tone={g.status === 'active' ? 'success' : 'neutral'}>{g.status}</AdminBadge>
                 </div>
-                <div className="text-xs text-slate-600">
-                  Trạng thái: {g.status} · Vùng mặc định: {g.default_region} · {g.fields.length} trường
+                <div className="mt-0.5 text-xs text-zinc-600">
+                  Vùng mặc định: <code className="font-mono">{g.default_region}</code> · {g.fields.length} trường
                 </div>
               </div>
               {g.owner.kind === 'user' && g.status === 'active' && (
                 <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleDetachTarget(g)}
-                    className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
-                  >
+                  <AdminButton variant="secondary" size="sm" onClick={() => void handleDetachTarget(g)}>
                     Gỡ khỏi {typeKey}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleWithdraw(g)}
-                    className="rounded border border-rose-300 bg-white px-2.5 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50"
-                  >
+                  </AdminButton>
+                  <AdminButton variant="danger" size="sm" onClick={() => void handleWithdraw(g)}>
                     Rút nhóm
-                  </button>
+                  </AdminButton>
                 </div>
               )}
             </li>
@@ -174,13 +169,13 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
         </ul>
       )}
 
-      <form onSubmit={handleCreate} className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-        <div className="text-sm font-semibold text-slate-800">Thêm nhóm trường mở rộng mới</div>
+      <form onSubmit={handleCreate} className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/50 p-4">
+        <div className="text-sm font-semibold text-zinc-900">Thêm nhóm trường mở rộng mới</div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <input
             type="text"
             placeholder="local_key (vd: extra_info)"
-            className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={localKey}
             onChange={e => setLocalKey(e.target.value)}
             required
@@ -188,13 +183,13 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
           <input
             type="text"
             placeholder="Tiêu đề nhóm"
-            className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={title}
             onChange={e => setTitle(e.target.value)}
             required
           />
           <select
-            className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={defaultRegion}
             onChange={e => setDefaultRegion(e.target.value as EditorRegion)}
           >
@@ -208,7 +203,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
           <input
             type="text"
             placeholder="Mã trường (vd: client_email)"
-            className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={fieldKey}
             onChange={e => setFieldKey(e.target.value)}
             required
@@ -216,13 +211,13 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
           <input
             type="text"
             placeholder="Nhãn trường"
-            className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={fieldLabel}
             onChange={e => setFieldLabel(e.target.value)}
             required
           />
           <select
-            className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={fieldType}
             onChange={e => setFieldType(e.target.value as ContentFieldType)}
           >
@@ -231,7 +226,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
             ))}
           </select>
           <select
-            className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={`${minViewRole}:${minEditRole}`}
             onChange={e => {
               const [v, ed] = e.target.value.split(':') as [FieldRole, FieldRole];
@@ -244,7 +239,7 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
             <option value="admin:admin">Chỉ Admin xem &amp; sửa</option>
           </select>
           <select
-            className="rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
             value={publicExposure}
             onChange={e => setPublicExposure(e.target.value as PublicExposure)}
           >
@@ -252,13 +247,9 @@ export const FieldGroupsManager: React.FC<FieldGroupsManagerProps> = ({
             <option value="public">Public</option>
           </select>
         </div>
-        <button
-          type="submit"
-          disabled={saving || !csrfToken}
-          className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-        >
+        <AdminButton type="submit" variant="primary" size="sm" disabled={saving || !csrfToken}>
           {saving ? 'Đang tạo...' : 'Tạo nhóm trường'}
-        </button>
+        </AdminButton>
       </form>
     </div>
   );

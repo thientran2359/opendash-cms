@@ -7,25 +7,17 @@ use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::{
     error::{ApiError, ApiResult},
-    public_context::CanonicalUrlBuilder,
     seo::validate_custom_entry_path,
     storage::entries::ContentEntryRecord,
 };
 
-// C3 extends the legacy validator's protected namespace. Centralize the
-// additional roots here so all storage claims enforce one policy.
+// Delegate protected root checks to seo::is_reserved_system_root as single source of truth.
 pub fn is_reserved_route_root(root: &str) -> bool {
-    matches!(root, "uploads" | "static" | "favicon.ico")
-        || crate::seo::validate_custom_entry_path(&format!("/{root}")).is_err()
+    crate::seo::is_reserved_system_root(root)
 }
 
 pub fn validate_c3_custom_entry_path(raw: &str) -> Result<String, &'static str> {
-    let path = validate_custom_entry_path(raw)?;
-    let root = path[1..].split('/').next().unwrap_or("");
-    if matches!(root, "uploads" | "static" | "favicon.ico") {
-        return Err("Đường dẫn dùng tiền tố hệ thống được bảo vệ.");
-    }
-    Ok(path)
+    validate_custom_entry_path(raw)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,6 +38,41 @@ pub enum PublicRouteResolution {
     NotFound,
 }
 
+/// Public Reading Settings state. A configured Page ID is never silently
+/// replaced when the Page becomes draft, private, or is deleted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadingPageState {
+    Unconfigured,
+    Published(i64),
+    Missing,
+}
+
+pub async fn reading_page_state(db: &SqlitePool, homepage: bool) -> ApiResult<ReadingPageState> {
+    let sql = if homepage {
+        "SELECT r.homepage_page_id,
+                EXISTS(SELECT 1 FROM content_entries e
+                    JOIN content_types t ON t.key=e.content_type_key
+                    WHERE e.id=r.homepage_page_id AND e.content_type_key='page'
+                    AND e.publication_status='published' AND t.provider_status='active'
+                    AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
+           FROM site_reading_settings r WHERE r.id=1"
+    } else {
+        "SELECT r.posts_page_id,
+                EXISTS(SELECT 1 FROM content_entries e
+                    JOIN content_types t ON t.key=e.content_type_key
+                    WHERE e.id=r.posts_page_id AND e.content_type_key='page'
+                    AND e.publication_status='published' AND t.provider_status='active'
+                    AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
+           FROM site_reading_settings r WHERE r.id=1"
+    };
+    let (page_id, published): (Option<i64>, i64) = sqlx::query_as(sql).fetch_one(db).await?;
+    Ok(match page_id {
+        None => ReadingPageState::Unconfigured,
+        Some(id) if published != 0 => ReadingPageState::Published(id),
+        Some(_) => ReadingPageState::Missing,
+    })
+}
+
 /// Resolves the canonical public path for an entry ID (custom path if set, else default `/content/{type}/{slug}`).
 /// Returns `None` if the entry does not exist or its CPT provider is inactive.
 pub async fn resolve_entry_path_in_tx(
@@ -64,10 +91,16 @@ pub async fn resolve_public_entry_path_in_tx(
         "SELECT EXISTS(SELECT 1 FROM content_entries e
            JOIN content_types t ON t.key=e.content_type_key
            WHERE e.id=? AND e.publication_status='published'
-             AND e.content_type_key!='section' AND t.provider_status='active'
+             AND e.content_type_key NOT IN ('pattern', 'section')
+             AND t.provider_status='active'
              AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)",
-    ).bind(entry_id).fetch_one(&mut *conn).await?;
-    if visible == 0 { return Ok(None); }
+    )
+    .bind(entry_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if visible == 0 {
+        return Ok(None);
+    }
     crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
@@ -100,7 +133,12 @@ pub async fn validate_route_claim_in_tx(
     let path = validate_c3_custom_entry_path(raw_path).map_err(ApiError::bad_request)?;
     let first_seg = path[1..].split('/').next().unwrap_or("");
     let cpt_conflict: Option<String> = sqlx::query_scalar(
-        "SELECT key FROM content_types WHERE key = ? AND provider_status = 'active' LIMIT 1",
+        "SELECT key FROM content_types
+          WHERE key = ?
+            AND key NOT IN ('post', 'page', 'pattern', 'section')
+            AND provider_status = 'active'
+            AND COALESCE(json_extract(definition_json, '$.settings.public'), 1) = 1
+          LIMIT 1",
     )
     .bind(first_seg)
     .fetch_optional(&mut *conn)
@@ -111,6 +149,47 @@ pub async fn validate_route_claim_in_tx(
         ));
     }
 
+    let taxonomy_conflict: Option<String> = sqlx::query_scalar(
+        "SELECT key FROM taxonomy_definitions
+          WHERE key = ? AND public = 1 AND provider_status = 'active' AND declaration_state = 'declared'
+          LIMIT 1",
+    )
+    .bind(first_seg)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if taxonomy_conflict.is_some() {
+        return Err(ApiError::conflict(
+            "Đường dẫn trùng với gốc taxonomy đang hoạt động.",
+        ));
+    }
+
+    let rewrite_conflict: Option<String> = sqlx::query_scalar(
+        "SELECT resource_key FROM provider_rewrite_defaults
+          WHERE rewrite_base = ? AND provider_status = 'active' AND declaration_state = 'declared'
+          LIMIT 1",
+    )
+    .bind(first_seg)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if rewrite_conflict.is_some() {
+        return Err(ApiError::conflict(
+            "Đường dẫn trùng với tiền tố rewrite mặc định đang hoạt động.",
+        ));
+    }
+
+    if path == "/posts" {
+        let default_posts_active: i64 = sqlx::query_scalar(
+            "SELECT posts_page_id IS NULL FROM site_reading_settings WHERE id = 1",
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+        if default_posts_active != 0 {
+            return Err(ApiError::conflict(
+                "Đường dẫn /posts đang dành cho trang lưu trữ bài viết mặc định.",
+            ));
+        }
+    }
+
     let existing_owner: Option<i64> =
         sqlx::query_scalar("SELECT entry_id FROM entry_public_paths WHERE path = ?")
             .bind(&path)
@@ -119,7 +198,9 @@ pub async fn validate_route_claim_in_tx(
     if let Some(eid) = existing_owner
         && Some(eid) != owner_entry_id
     {
-        return Err(ApiError::conflict("Đường dẫn tùy chỉnh đã được bài viết khác sử dụng."));
+        return Err(ApiError::conflict(
+            "Đường dẫn tùy chỉnh đã được bài viết khác sử dụng.",
+        ));
     }
 
     let redirect_owner: Option<i64> =
@@ -135,10 +216,12 @@ pub async fn validate_route_claim_in_tx(
         ));
     }
 
-    let claim_owner: Option<(String, String)> = sqlx::query_as(
-        "SELECT target_kind,target_id FROM permalink_route_claims WHERE path=?",
-    ).bind(&path).fetch_optional(&mut *conn).await?;
-    if let Some((kind,id)) = claim_owner
+    let claim_owner: Option<(String, String)> =
+        sqlx::query_as("SELECT target_kind,target_id FROM permalink_route_claims WHERE path=?")
+            .bind(&path)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if let Some((kind, id)) = claim_owner
         && (kind != "entry" || id.parse::<i64>().ok() != owner_entry_id)
     {
         return Err(ApiError::conflict(format!(
@@ -147,8 +230,11 @@ pub async fn validate_route_claim_in_tx(
     }
     let historical_owner: Option<(String, String)> = sqlx::query_as(
         "SELECT target_kind,target_id FROM permalink_route_redirects WHERE source_path=?",
-    ).bind(&path).fetch_optional(&mut *conn).await?;
-    if let Some((kind,id)) = historical_owner
+    )
+    .bind(&path)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some((kind, id)) = historical_owner
         && (kind != "entry" || id.parse::<i64>().ok() != owner_entry_id)
     {
         return Err(ApiError::conflict(format!(
@@ -159,7 +245,7 @@ pub async fn validate_route_claim_in_tx(
     Ok(path)
 }
 
-/// Ensures creating a new CPT key does not collide with any existing custom path or redirect.
+/// Ensures creating a new CPT key does not collide with any existing custom path, claim, or live redirect.
 pub async fn check_cpt_root_claim_in_tx(
     conn: &mut SqliteConnection,
     type_key: &str,
@@ -178,8 +264,24 @@ pub async fn check_cpt_root_claim_in_tx(
             "Khóa loại nội dung trùng với đường dẫn tùy chỉnh đang tồn tại.",
         ));
     }
+    let claim_hit: Option<String> = sqlx::query_scalar(
+        "SELECT path FROM permalink_route_claims WHERE path = ? OR path LIKE ? LIMIT 1",
+    )
+    .bind(&exact)
+    .bind(&prefix)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if claim_hit.is_some() {
+        return Err(ApiError::conflict(
+            "Khóa loại nội dung trùng với đường dẫn công khai đang tồn tại.",
+        ));
+    }
+    // Only live-target redirects block new CPT namespaces; orphan redirects whose target
+    // row was deleted remain exact-path redirects without blocking new namespaces.
     let redirect_hit: Option<i64> = sqlx::query_scalar(
-        "SELECT entry_id FROM entry_redirects WHERE source_path = ? OR source_path LIKE ? LIMIT 1",
+        "SELECT r.entry_id FROM entry_redirects r
+           JOIN content_entries e ON e.id = r.entry_id
+          WHERE r.source_path = ? OR r.source_path LIKE ? LIMIT 1",
     )
     .bind(&exact)
     .bind(&prefix)
@@ -190,87 +292,42 @@ pub async fn check_cpt_root_claim_in_tx(
             "Khóa loại nội dung trùng với redirect đang tồn tại.",
         ));
     }
-    Ok(())
-}
-
-/// Checks whether a default `/content/{type_key}/{slug}` path is claimed by another entry's redirect.
-pub async fn check_default_slug_claim_in_tx(
-    conn: &mut SqliteConnection,
-    type_key: &str,
-    slug: &str,
-    owner_entry_id: Option<i64>,
-) -> ApiResult<()> {
-    let Some(default_path) = CanonicalUrlBuilder::entry(type_key, slug) else {
-        return Ok(());
-    };
-    let redirect_owner: Option<i64> =
-        sqlx::query_scalar("SELECT entry_id FROM entry_redirects WHERE source_path = ?")
-            .bind(&default_path)
-            .fetch_optional(&mut *conn)
-            .await?;
-    if let Some(eid) = redirect_owner
-        && Some(eid) != owner_entry_id
-    {
+    let route_redirect_hit: Option<String> = sqlx::query_scalar(
+        "SELECT r.target_id FROM permalink_route_redirects r
+          WHERE (r.source_path = ? OR r.source_path LIKE ?)
+            AND (
+                (r.target_kind = 'entry' AND EXISTS (SELECT 1 FROM content_entries e WHERE CAST(e.id AS TEXT) = r.target_id))
+                OR (r.target_kind = 'term' AND EXISTS (SELECT 1 FROM taxonomy_terms t WHERE CAST(t.id AS TEXT) = r.target_id))
+                OR r.target_kind = 'archive'
+            )
+          LIMIT 1",
+    )
+    .bind(&exact)
+    .bind(&prefix)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if route_redirect_hit.is_some() {
         return Err(ApiError::conflict(
-            "Slug mặc định đang được giữ làm redirect cho một bài viết khác.",
+            "Khóa loại nội dung trùng với redirect đang tồn tại.",
         ));
     }
     Ok(())
 }
 
-/// Records redirect from old default slug URL when an entry's slug changes (and reclaims own alias if reused).
-pub async fn record_slug_change_redirect_in_tx(
-    conn: &mut SqliteConnection,
-    entry_id: i64,
-    type_key: &str,
-    old_slug: &str,
-    new_slug: &str,
-) -> ApiResult<()> {
-    if old_slug == new_slug {
-        return Ok(());
-    }
-    if let Some(new_default) = CanonicalUrlBuilder::entry(type_key, new_slug) {
-        check_default_slug_claim_in_tx(conn, type_key, new_slug, Some(entry_id)).await?;
-        sqlx::query("DELETE FROM entry_redirects WHERE source_path = ? AND entry_id = ?")
-            .bind(&new_default)
-            .bind(entry_id)
-            .execute(&mut *conn)
-            .await?;
-    }
-    let has_custom: Option<String> =
-        sqlx::query_scalar("SELECT path FROM entry_public_paths WHERE entry_id = ?")
-            .bind(entry_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    if has_custom.is_none()
-        && let Some(old_default) = CanonicalUrlBuilder::entry(type_key, old_slug)
-    {
-        sqlx::query(
-            "INSERT OR IGNORE INTO entry_redirects (source_path, entry_id) VALUES (?, ?)",
-        )
-        .bind(&old_default)
-        .bind(entry_id)
-        .execute(&mut *conn)
-        .await?;
-    }
-    Ok(())
-}
-
 /// Sets or clears `entry_public_paths` inside an active transaction, enforcing ENTRY CAS
-/// and cross-table uniqueness, and capturing old custom path in `entry_redirects`.
+/// and cross-table uniqueness, and capturing old custom path in `entry_redirects` only if ever published.
 async fn set_entry_route_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
     expected_entry_version: i64,
     custom_path: Option<&str>,
 ) -> ApiResult<EntryRouteSnapshot> {
-    let row: Option<(i64,)> = sqlx::query_as(
-        "SELECT version FROM content_entries WHERE id = ?",
-    )
-    .bind(entry_id)
-    .fetch_optional(&mut *conn)
-    .await?;
-    let Some((current_ver,)) = row else {
+    let row: Option<(i64, i64)> =
+        sqlx::query_as("SELECT version, has_been_published FROM content_entries WHERE id = ?")
+            .bind(entry_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    let Some((current_ver, has_been_published)) = row else {
         return Err(ApiError::not_found("Không tìm thấy nội dung."));
     };
     if current_ver != expected_entry_version {
@@ -313,7 +370,9 @@ async fn set_entry_route_in_tx(
         ));
     }
 
-    if let Some(old_path) = old_custom {
+    if has_been_published != 0
+        && let Some(old_path) = old_custom
+    {
         sqlx::query("INSERT OR IGNORE INTO entry_redirects (source_path, entry_id) VALUES (?, ?)")
             .bind(&old_path)
             .bind(entry_id)
@@ -403,7 +462,8 @@ pub async fn put_entry_route(
         if exists.is_none() {
             return Err(ApiError::not_found("Không tìm thấy nội dung."));
         }
-        let mut result = set_entry_route_in_tx(&mut conn, entry_id, expected_entry_version, custom_path).await?;
+        let mut result =
+            set_entry_route_in_tx(&mut conn, entry_id, expected_entry_version, custom_path).await?;
         crate::storage::permalinks::sync_claims_in_tx(&mut conn).await?;
         // Resolve only after the canonical claims have been synchronized. The
         // response remains within this writer transaction and matches its ETag.
@@ -437,7 +497,7 @@ pub async fn custom_path_for_published_slug(
           WHERE e.content_type_key = ?
             AND e.slug = ?
             AND e.publication_status = 'published'
-            AND e.content_type_key != 'section'
+            AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
@@ -462,7 +522,7 @@ pub async fn resolve_custom_or_redirect_path(
                JOIN content_types t ON t.key = e.content_type_key
               WHERE p.path = ?
                 AND e.publication_status = 'published'
-                AND e.content_type_key != 'section'
+                AND e.content_type_key != 'pattern'
                 AND t.provider_status = 'active'
                 AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
         )
@@ -470,7 +530,8 @@ pub async fn resolve_custom_or_redirect_path(
         .fetch_optional(db)
         .await?;
         if let Some(eid) = direct_id
-            && let Some(record) = crate::storage::public_content::get_published_by_id(db, eid).await?
+            && let Some(record) =
+                crate::storage::public_content::get_published_by_id(db, eid).await?
         {
             return Ok(PublicRouteResolution::Entry {
                 record,
@@ -487,7 +548,7 @@ pub async fn resolve_custom_or_redirect_path(
            JOIN content_types t ON t.key = e.content_type_key
           WHERE r.source_path = ?
             AND e.publication_status = 'published'
-            AND e.content_type_key != 'section'
+            AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
@@ -514,10 +575,12 @@ pub async fn sync_entry_seo_media_ref_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
 ) -> ApiResult<()> {
-    sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?")
-        .bind(entry_id)
-        .execute(&mut *conn)
-        .await?;
+    sqlx::query(
+        "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
+    )
+    .bind(entry_id)
+    .execute(&mut *conn)
+    .await?;
     let media_id: Option<String> = sqlx::query_scalar(
         "SELECT s.og_image_id
            FROM entry_seo s
@@ -526,7 +589,7 @@ pub async fn sync_entry_seo_media_ref_in_tx(
           WHERE s.entry_id = ?
             AND e.publication_status = 'published'
             AND t.provider_status = 'active'
-            AND e.content_type_key != 'section'
+            AND e.content_type_key != 'pattern'
             AND s.og_image_id IS NOT NULL",
     )
     .bind(entry_id)
@@ -559,7 +622,9 @@ pub(crate) async fn verify_og_media_exists_in_tx(
             .fetch_optional(&mut *conn)
             .await?;
     if exists.is_none() {
-        return Err(ApiError::unprocessable("Ảnh OG không tồn tại trong thư viện media."));
+        return Err(ApiError::unprocessable(
+            "Ảnh OG không tồn tại trong thư viện media.",
+        ));
     }
     Ok(())
 }
@@ -579,14 +644,19 @@ pub async fn get_entry_seo(
     let Some(entry_version) = entry_version else {
         return Err(ApiError::not_found("Không tìm thấy nội dung."));
     };
-    let row: Option<(Option<String>, Option<String>, Option<String>, Option<String>, i64)> =
-        sqlx::query_as(
-            "SELECT title, description, og_image_id, canonical_url, noindex
+    let row: Option<(
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    )> = sqlx::query_as(
+        "SELECT title, description, og_image_id, canonical_url, noindex
                FROM entry_seo WHERE entry_id = ?",
-        )
-        .bind(entry_id)
-        .fetch_optional(db)
-        .await?;
+    )
+    .bind(entry_id)
+    .fetch_optional(db)
+    .await?;
     let (title, description, og_image_id, canonical_url, noindex) =
         row.unwrap_or((None, None, None, None, 0));
     Ok(EntrySeoSnapshot {
@@ -686,13 +756,19 @@ pub async fn put_entry_seo(
 }
 
 pub async fn get_home_seo(db: &SqlitePool) -> ApiResult<HomeSeoSnapshot> {
-    let row: (i64, Option<String>, Option<String>, Option<String>, Option<String>, i64) =
-        sqlx::query_as(
-            "SELECT version, title, description, og_image_id, canonical_url, noindex
+    let row: (
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    ) = sqlx::query_as(
+        "SELECT version, title, description, og_image_id, canonical_url, noindex
                FROM site_home_seo WHERE id = 1",
-        )
-        .fetch_one(db)
-        .await?;
+    )
+    .fetch_one(db)
+    .await?;
     Ok(HomeSeoSnapshot {
         version: row.0,
         title: row.1,
@@ -733,9 +809,11 @@ pub async fn put_home_seo(
             ));
         }
 
-        sqlx::query("DELETE FROM seo_public_media_refs WHERE source_kind = 'home_seo' AND source_id = 1")
-            .execute(&mut *conn)
-            .await?;
+        sqlx::query(
+            "DELETE FROM seo_public_media_refs WHERE source_kind = 'home_seo' AND source_id = 1",
+        )
+        .execute(&mut *conn)
+        .await?;
         if let Some(ref mid) = clean.og_image_id {
             sqlx::query(
                 "INSERT OR IGNORE INTO seo_public_media_refs (source_kind, source_id, media_id)
@@ -785,19 +863,24 @@ pub async fn build_entry_seo_view(
 ) -> ApiResult<SeoView> {
     let general = settings::get_general(db).await?;
     let pub_settings = settings::get_public(db).await?;
-    let row: Option<(Option<String>, Option<String>, Option<String>, Option<String>, i64)> =
-        sqlx::query_as(
-            "SELECT title, description, og_image_id, canonical_url, noindex
+    let row: Option<(
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    )> = sqlx::query_as(
+        "SELECT title, description, og_image_id, canonical_url, noindex
                FROM entry_seo WHERE entry_id = ?",
-        )
-        .bind(entry_id)
-        .fetch_optional(db)
-        .await?;
+    )
+    .bind(entry_id)
+    .fetch_optional(db)
+    .await?;
     let (custom_title, description, og_image_id, custom_canonical, entry_noindex) =
         row.unwrap_or((None, None, None, None, 0));
     let title = custom_title.unwrap_or_else(|| format!("{entry_title} — {}", general.site_title));
-    let canonical_url = custom_canonical
-        .or_else(|| absolute_public_url(&pub_settings, canonical_path));
+    let canonical_url =
+        custom_canonical.or_else(|| absolute_public_url(&pub_settings, canonical_path));
     let og_image_url = if og_image_id.is_some() {
         let public_mid: Option<String> = sqlx::query_scalar(
             "SELECT media_id FROM seo_public_media_refs
@@ -832,18 +915,54 @@ pub async fn build_home_seo_view(db: &SqlitePool) -> ApiResult<SeoView> {
     let general = settings::get_general(db).await?;
     let pub_settings = settings::get_public(db).await?;
     let home = get_home_seo(db).await?;
-    let title = home.title.unwrap_or_else(|| {
+    let mut title = home.title.unwrap_or_else(|| {
         if general.tagline.trim().is_empty() {
             general.site_title.clone()
         } else {
             format!("{} — {}", general.site_title, general.tagline)
         }
     });
-    let canonical_url = home
-        .canonical_url
-        .or_else(|| absolute_public_url(&pub_settings, "/"));
-    let og_image_url = project_og_image_url(&pub_settings, home.og_image_id);
-    let robots = if !pub_settings.indexing_enabled || home.noindex {
+    let mut description = home.description;
+    let mut canonical_url = home.canonical_url;
+    let mut og_image_url = project_og_image_url(&pub_settings, home.og_image_id);
+    let mut noindex = home.noindex;
+    if let ReadingPageState::Published(id) = reading_page_state(db, true).await? {
+        let entry_meta: Option<(
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            i64,
+        )> = sqlx::query_as(
+            "SELECT title, description, og_image_id, canonical_url, noindex
+                   FROM entry_seo WHERE entry_id = ?",
+        )
+        .bind(id)
+        .fetch_optional(db)
+        .await?;
+        if let Some((entry_title, entry_description, entry_image, entry_canonical, entry_noindex)) =
+            entry_meta
+        {
+            if let Some(entry_title) = entry_title {
+                title = entry_title;
+            }
+            description = entry_description.or(description);
+            canonical_url = entry_canonical.or(canonical_url);
+            if entry_image.is_some() {
+                let media_id: Option<String> = sqlx::query_scalar(
+                    "SELECT media_id FROM seo_public_media_refs
+                      WHERE source_kind = 'entry_seo' AND source_id = ? LIMIT 1",
+                )
+                .bind(id)
+                .fetch_optional(db)
+                .await?;
+                og_image_url = project_og_image_url(&pub_settings, media_id);
+            }
+            noindex = entry_noindex != 0;
+        }
+    }
+    let canonical_url = canonical_url.or_else(|| absolute_public_url(&pub_settings, "/"));
+    let robots = if !pub_settings.indexing_enabled || noindex {
         "noindex,nofollow".to_string()
     } else {
         "index,follow".to_string()
@@ -851,11 +970,11 @@ pub async fn build_home_seo_view(db: &SqlitePool) -> ApiResult<SeoView> {
     Ok(SeoView {
         lang: pub_settings.content_language.clone(),
         title: title.clone(),
-        description: home.description.clone(),
+        description: description.clone(),
         canonical_url: canonical_url.clone(),
         robots,
         og_title: title,
-        og_description: home.description,
+        og_description: description,
         og_url: canonical_url,
         og_image_url,
     })
@@ -893,6 +1012,7 @@ pub(crate) async fn apply_entry_route_patch_in_tx(
     conn: &mut SqliteConnection,
     entry_id: i64,
     patch: &PatchField<String>,
+    record_old_redirect: bool,
 ) -> ApiResult<Option<String>> {
     let old_custom: Option<String> =
         sqlx::query_scalar("SELECT path FROM entry_public_paths WHERE entry_id = ?")
@@ -917,7 +1037,7 @@ pub(crate) async fn apply_entry_route_patch_in_tx(
         return Ok(old_custom);
     }
 
-    if let Some(old_path) = old_custom {
+    if record_old_redirect && let Some(old_path) = old_custom {
         sqlx::query("INSERT OR IGNORE INTO entry_redirects (source_path, entry_id) VALUES (?, ?)")
             .bind(&old_path)
             .bind(entry_id)
@@ -961,24 +1081,29 @@ pub(crate) async fn apply_entry_seo_patch_in_tx(
 ) -> ApiResult<Option<EntrySeoSnapshot>> {
     match patch {
         PatchField::Omitted => {
-            let row: Option<(Option<String>, Option<String>, Option<String>, Option<String>, i64)> =
-                sqlx::query_as(
-                    "SELECT title, description, og_image_id, canonical_url, noindex
+            let row: Option<(
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                i64,
+            )> = sqlx::query_as(
+                "SELECT title, description, og_image_id, canonical_url, noindex
                      FROM entry_seo WHERE entry_id = ?",
-                )
-                .bind(entry_id)
-                .fetch_optional(&mut *conn)
-                .await?;
-            Ok(row.map(|(title, description, og_image_id, canonical_url, noindex)| {
-                EntrySeoSnapshot {
+            )
+            .bind(entry_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+            Ok(row.map(
+                |(title, description, og_image_id, canonical_url, noindex)| EntrySeoSnapshot {
                     entry_version,
                     title,
                     description,
                     og_image_id,
                     canonical_url,
                     noindex: noindex != 0,
-                }
-            }))
+                },
+            ))
         }
         PatchField::Clear => {
             sqlx::query(

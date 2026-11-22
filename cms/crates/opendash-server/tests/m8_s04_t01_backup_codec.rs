@@ -52,8 +52,8 @@ fn server_bin() -> &'static str {
 }
 
 fn run_worker(mode: &str, req: &Value) -> (i32, Value) {
-    let mut child = operations_worker_process::spawn(Path::new(server_bin()), mode)
-        .expect("spawn worker");
+    let mut child =
+        operations_worker_process::spawn(Path::new(server_bin()), mode).expect("spawn worker");
 
     {
         let mut stdin = child.stdin.take().expect("stdin");
@@ -121,7 +121,9 @@ async fn m8_s04_t01_encrypted_backup_codec_and_bounded_verifier() {
     let opts = SqliteConnectOptions::new()
         .filename(&db_path)
         .create_if_missing(true);
-    let mut conn = SqliteConnection::connect_with(&opts).await.expect("connect");
+    let mut conn = SqliteConnection::connect_with(&opts)
+        .await
+        .expect("connect");
     let migrator = sqlx::migrate!("../../migrations");
     migrator.run(&mut conn).await.expect("migrate");
     conn.close().await.expect("close");
@@ -256,7 +258,10 @@ async fn m8_s04_t01_encrypted_backup_codec_and_bounded_verifier() {
         }),
     );
     assert_ne!(code, 0, "high work factor must be rejected: {wf_resp}");
-    assert!(t0.elapsed().as_secs() < 5, "preflight must reject before expensive KDF");
+    assert!(
+        t0.elapsed().as_secs() < 5,
+        "preflight must reject before expensive KDF"
+    );
 
     // 10. Extra entry in ZIP rejected.
     let db_bytes = b"sqlite-dummy";
@@ -345,7 +350,11 @@ async fn m8_s04_t01_encrypted_backup_codec_and_bounded_verifier() {
         ("00000002.bin", config_bytes, CompressionMethod::Stored),
         ("00000003.bin", b"abc", CompressionMethod::Stored),
         ("00000004.bin", b"abc", CompressionMethod::Stored),
-        ("manifest.json", &bad_manifest_bytes, CompressionMethod::Stored),
+        (
+            "manifest.json",
+            &bad_manifest_bytes,
+            CompressionMethod::Stored,
+        ),
     ]);
     let case_age = tmp.path().join("case.odbackup.age");
     encrypt_zip_bytes_with_age(&case_zip, passphrase, &case_age);
@@ -373,7 +382,11 @@ async fn m8_s04_t01_encrypted_backup_codec_and_bounded_verifier() {
         ("00000001.bin", db_bytes, CompressionMethod::Stored),
         ("00000002.bin", config_bytes, CompressionMethod::Stored),
         ("00000003.bin", b"abc", CompressionMethod::Stored),
-        ("manifest.json", &trav_manifest_bytes, CompressionMethod::Stored),
+        (
+            "manifest.json",
+            &trav_manifest_bytes,
+            CompressionMethod::Stored,
+        ),
     ]);
     let trav_age = tmp.path().join("trav.odbackup.age");
     encrypt_zip_bytes_with_age(&trav_zip, passphrase, &trav_age);
