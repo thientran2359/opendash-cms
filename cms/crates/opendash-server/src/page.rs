@@ -23,6 +23,69 @@ use serde::Serialize;
 use serde_json::json;
 use sqlx::SqlitePool;
 
+pub use crate::template_sec::RenderBudget;
+
+#[derive(Debug, Clone)]
+pub struct ValidatedBlockTemplate {
+    pub block_id: String,
+    pub source: String,
+}
+
+#[derive(Debug, Default)]
+pub struct BlockTemplateCache {
+    inner: std::sync::RwLock<
+        std::collections::BTreeMap<(String, String), std::sync::Arc<ValidatedBlockTemplate>>,
+    >,
+}
+
+impl BlockTemplateCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn global() -> &'static std::sync::Arc<Self> {
+        static GLOBAL: std::sync::OnceLock<std::sync::Arc<BlockTemplateCache>> =
+            std::sync::OnceLock::new();
+        GLOBAL.get_or_init(|| std::sync::Arc::new(BlockTemplateCache::new()))
+    }
+
+    pub fn get_or_validate(
+        &self,
+        block_id: &str,
+        schema: &opendash_core::block_schema::BlockSchemaV1,
+        template_source: &str,
+    ) -> Result<std::sync::Arc<ValidatedBlockTemplate>, &'static str> {
+        let schema_json =
+            serde_json::to_string(schema).map_err(|_| "Không thể tuần tự hóa block schema.")?;
+        let digest =
+            crate::storage::page::compute_block_definition_digest(&schema_json, template_source);
+        let key = (block_id.to_owned(), digest);
+        if let Some(found) = self
+            .inner
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&key)
+            .cloned()
+        {
+            return Ok(found);
+        }
+        crate::template_sec::validate_block_template_csec(block_id, template_source, schema)?;
+        let mut guard = self.inner.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(found) = guard.get(&key).cloned() {
+            return Ok(found);
+        }
+        if guard.len() >= 256 {
+            guard.clear();
+        }
+        let validated = std::sync::Arc::new(ValidatedBlockTemplate {
+            block_id: block_id.to_owned(),
+            source: template_source.to_owned(),
+        });
+        guard.insert(key, validated.clone());
+        Ok(validated)
+    }
+}
+
 pub struct RenderedBlock {
     pub html: String,
     pub visibility: &'static str,
@@ -164,6 +227,252 @@ fn builder_responsive_css(document: &BuilderDocument) -> String {
     }
     css.push_str("</style>");
     css
+}
+
+fn format_css_number(n: f64, unit: Option<opendash_core::block_schema::CssUnit>) -> Option<String> {
+    if !n.is_finite() {
+        return None;
+    }
+    let suffix = unit.map(|u| u.as_css_suffix()).unwrap_or("");
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        Some(format!("{}{suffix}", n as i64))
+    } else {
+        Some(format!("{n}{suffix}"))
+    }
+}
+
+/// Emits scoped CSS custom properties (`--od-*`) for all active, declared `block.json` v1
+/// `PluginBlock` instances in `document` under `[data-od-node-scope="{scope}-{node_id}"]`.
+pub fn serialize_scoped_block_css(
+    state: &HomeState,
+    document: &BuilderDocument,
+    scope: &str,
+    is_preview: bool,
+) -> ApiResult<String> {
+    use opendash_core::{
+        block_schema::{
+            BlockFieldSpec, MediaFieldKind, valid_block_color, valid_css_select_value,
+            valid_css_var_name, valid_sha256_media_id,
+        },
+        registry::{DeclarationState, ProviderStatus},
+    };
+
+    if scope.is_empty()
+        || !scope
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        return Err(ApiError::bad_request("Scope CSS block không hợp lệ."));
+    }
+
+    let mut desktop_rules = String::new();
+    let mut tablet_rules = String::new();
+    let mut mobile_rules = String::new();
+
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if !valid_package_id(&element.id) {
+                        continue;
+                    }
+                    let ElementContent::Known(KnownElement::PluginBlock(props)) = &element.content
+                    else {
+                        continue;
+                    };
+                    let Some(def) = state.declared_blocks.get(&props.block_id) else {
+                        continue;
+                    };
+                    if def.status != ProviderStatus::Active
+                        || def.declaration_state != DeclarationState::Declared
+                        || def.schema.legacy_mode
+                    {
+                        continue;
+                    }
+
+                    let node_scope = format!("{scope}-{}", element.id);
+                    let mut desktop_props = String::new();
+                    let mut tablet_props = String::new();
+                    let mut mobile_props = String::new();
+
+                    for field in def.schema.schema.flattened_top_fields() {
+                        match field {
+                            BlockFieldSpec::Number {
+                                key,
+                                default,
+                                unit,
+                                css_var: Some(var_name),
+                                responsive,
+                                ..
+                            }
+                            | BlockFieldSpec::Range {
+                                key,
+                                default,
+                                unit,
+                                css_var: Some(var_name),
+                                responsive,
+                                ..
+                            } => {
+                                if !valid_css_var_name(var_name) {
+                                    continue;
+                                }
+                                let raw = props.values.get(key.as_str());
+                                if *responsive && let Some(obj) = raw.and_then(|v| v.as_object()) {
+                                    if let Some(d) = obj
+                                        .get("desktop")
+                                        .and_then(|v| v.as_f64())
+                                        .or(*default)
+                                        .and_then(|n| format_css_number(n, *unit))
+                                    {
+                                        desktop_props.push_str(&format!("{var_name}:{d};"));
+                                    }
+                                    if let Some(t) = obj
+                                        .get("tablet")
+                                        .and_then(|v| v.as_f64())
+                                        .and_then(|n| format_css_number(n, *unit))
+                                    {
+                                        tablet_props.push_str(&format!("{var_name}:{t};"));
+                                    }
+                                    if let Some(m) = obj
+                                        .get("mobile")
+                                        .and_then(|v| v.as_f64())
+                                        .and_then(|n| format_css_number(n, *unit))
+                                    {
+                                        mobile_props.push_str(&format!("{var_name}:{m};"));
+                                    }
+                                } else if let Some(d) = raw
+                                    .and_then(|v| v.as_f64())
+                                    .or(*default)
+                                    .and_then(|n| format_css_number(n, *unit))
+                                {
+                                    desktop_props.push_str(&format!("{var_name}:{d};"));
+                                }
+                            }
+                            BlockFieldSpec::Select {
+                                key,
+                                default,
+                                css_var: Some(var_name),
+                                responsive,
+                                ..
+                            } => {
+                                if !valid_css_var_name(var_name) {
+                                    continue;
+                                }
+                                let raw = props.values.get(key.as_str());
+                                if *responsive && let Some(obj) = raw.and_then(|v| v.as_object()) {
+                                    if let Some(d) = obj
+                                        .get("desktop")
+                                        .and_then(|v| v.as_str())
+                                        .or(default.as_deref())
+                                        .filter(|s| valid_css_select_value(s))
+                                    {
+                                        desktop_props.push_str(&format!("{var_name}:{d};"));
+                                    }
+                                    if let Some(t) = obj
+                                        .get("tablet")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|s| valid_css_select_value(s))
+                                    {
+                                        tablet_props.push_str(&format!("{var_name}:{t};"));
+                                    }
+                                    if let Some(m) = obj
+                                        .get("mobile")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|s| valid_css_select_value(s))
+                                    {
+                                        mobile_props.push_str(&format!("{var_name}:{m};"));
+                                    }
+                                } else if let Some(d) = raw
+                                    .and_then(|v| v.as_str())
+                                    .or(default.as_deref())
+                                    .filter(|s| valid_css_select_value(s))
+                                {
+                                    desktop_props.push_str(&format!("{var_name}:{d};"));
+                                }
+                            }
+                            BlockFieldSpec::Color {
+                                key,
+                                default,
+                                css_var: Some(var_name),
+                                ..
+                            } => {
+                                if !valid_css_var_name(var_name) {
+                                    continue;
+                                }
+                                if let Some(c) = props
+                                    .values
+                                    .get(key.as_str())
+                                    .and_then(|v| v.as_str())
+                                    .or(default.as_deref())
+                                    .filter(|s| !s.is_empty() && valid_block_color(s))
+                                {
+                                    desktop_props.push_str(&format!("{var_name}:{c};"));
+                                }
+                            }
+                            BlockFieldSpec::Media {
+                                key,
+                                media_kind: MediaFieldKind::Image,
+                                default,
+                                css_var: Some(var_name),
+                                ..
+                            } => {
+                                if !valid_css_var_name(var_name) {
+                                    continue;
+                                }
+                                if let Some(id) = props
+                                    .values
+                                    .get(key.as_str())
+                                    .and_then(|v| v.as_str())
+                                    .or(default.as_deref())
+                                    .filter(|s| !s.is_empty() && valid_sha256_media_id(s))
+                                {
+                                    let url_path = if is_preview {
+                                        format!("/api/admin/media/{id}/file")
+                                    } else {
+                                        format!("/media/{id}/file")
+                                    };
+                                    desktop_props
+                                        .push_str(&format!("{var_name}:url(\"{url_path}\");"));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if !desktop_props.is_empty() {
+                        desktop_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"]{{{desktop_props}}}"
+                        ));
+                    }
+                    if !tablet_props.is_empty() {
+                        tablet_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"]{{{tablet_props}}}"
+                        ));
+                    }
+                    if !mobile_props.is_empty() {
+                        mobile_rules.push_str(&format!(
+                            "[data-od-node-scope=\"{node_scope}\"]{{{mobile_props}}}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    if desktop_rules.is_empty() && tablet_rules.is_empty() && mobile_rules.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut css_body = desktop_rules;
+    if !tablet_rules.is_empty() {
+        css_body.push_str(&format!("@media (width < 1024px){{{tablet_rules}}}"));
+    }
+    if !mobile_rules.is_empty() {
+        css_body.push_str(&format!("@media (width < 768px){{{mobile_rules}}}"));
+    }
+    crate::template_sec::validate_safe_scoped_block_css(&css_body, is_preview)
+        .map_err(ApiError::bad_request)?;
+    Ok(format!("<style data-od-block-styles>{css_body}</style>"))
 }
 
 /// Template selection comes from one storage snapshot. Unsupported legacy
@@ -308,14 +617,52 @@ pub fn render_builder_with_annotations(
     pattern_document: bool,
     annotation_scope: RenderAnnotationScope,
 ) -> ApiResult<RenderedLayout> {
+    let scope = if pattern_document { "pat_0" } else { "entry" };
+    let mut budget = RenderBudget::new();
+    render_builder_with_budget(
+        state,
+        document,
+        is_preview,
+        bindings,
+        lists,
+        forms,
+        context,
+        patterns,
+        pattern_document,
+        annotation_scope,
+        scope,
+        &mut budget,
+        BlockTemplateCache::global(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_builder_with_budget(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
+    lists: &ListResults,
+    forms: &ContactFormResults,
+    context: Option<&BuilderTemplateContext<'_>>,
+    patterns: &PatternResults,
+    pattern_document: bool,
+    annotation_scope: RenderAnnotationScope,
+    scope: &str,
+    budget: &mut RenderBudget,
+    cache: &BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
     let mut html = builder_responsive_css(document);
+    let block_css = serialize_scoped_block_css(state, document, scope, is_preview)?;
+    html.push_str(&block_css);
     if pattern_document {
         html.push_str("<div class=\"od-pattern-content\" data-builder-version=\"1\">");
     } else {
         html.push_str("<main data-builder-version=\"1\">");
     }
+    let mut already_charged_bytes = 0usize;
     let mut diagnostics = Vec::new();
     let mut has_active_contact_form = false;
     let sec_attrs = editable_attrs(annotation_scope, is_preview, pattern_document, "section");
@@ -537,24 +884,12 @@ pub fn render_builder_with_annotations(
                             }
                         }
                         ElementContent::Known(KnownElement::PluginBlock(props)) => {
-                            match state
-                                .themes
-                                .get(&props.block_id)
-                                .map(|d| d.template.as_str())
-                            {
-                                Some(template_src) => {
-                                    let rendered = render_plugin_block_csec(
-                                        &props.block_id,
-                                        template_src,
-                                        &props.values,
-                                    )?;
-                                    Some(format!(
-                                        "<div class=\"builder-plugin-block\" data-block-id=\"{}\">{}</div>",
-                                        escape_html(&props.block_id),
-                                        rendered
-                                    ))
-                                }
-                                None => {
+                            use opendash_core::registry::{DeclarationState, ProviderStatus};
+                            let node_scope = format!("{scope}-{}", element.id);
+                            if let Some(def) = state.declared_blocks.get(&props.block_id) {
+                                if def.status != ProviderStatus::Active
+                                    || def.declaration_state != DeclarationState::Declared
+                                {
                                     diagnostics.push(BuilderDiagnostic {
                                         node_id: element.id.clone(),
                                         code: "plugin_block_unavailable",
@@ -563,12 +898,110 @@ pub fn render_builder_with_annotations(
                                         "<div class=\"builder-block-unavailable\" data-block-id=\"{}\"></div>",
                                         escape_html(&props.block_id)
                                     ))
+                                } else {
+                                    let render_res = cache
+                                        .get_or_validate(
+                                            &props.block_id,
+                                            &def.schema.schema,
+                                            &def.template,
+                                        )
+                                        .and_then(|compiled| {
+                                            crate::template_sec::render_block_csec_with_budget(
+                                                &compiled.block_id,
+                                                &compiled.source,
+                                                &def.schema.schema,
+                                                &props.values,
+                                                is_preview,
+                                                budget,
+                                            )
+                                        });
+                                    match render_res {
+                                        Ok(rendered_inner) => {
+                                            already_charged_bytes = already_charged_bytes
+                                                .saturating_add(rendered_inner.len());
+                                            Some(format!(
+                                                "<div class=\"builder-plugin-block\" data-block-id=\"{}\" data-od-node-scope=\"{}\">{}</div>",
+                                                escape_html(&props.block_id),
+                                                escape_html(&node_scope),
+                                                rendered_inner
+                                            ))
+                                        }
+                                        Err(_) => {
+                                            if budget.html_bytes_used
+                                                > crate::template_sec::MAX_RENDERED_HTML_BYTES
+                                            {
+                                                return Err(ApiError::bad_request(
+                                                    "Builder template composition exceeds 512 KiB.",
+                                                ));
+                                            }
+                                            diagnostics.push(BuilderDiagnostic {
+                                                node_id: element.id.clone(),
+                                                code: "plugin_block_render_error",
+                                            });
+                                            Some(format!(
+                                                "<div class=\"builder-block-unavailable\" data-block-id=\"{}\"></div>",
+                                                escape_html(&props.block_id)
+                                            ))
+                                        }
+                                    }
                                 }
+                            } else if let Some(template_src) = state
+                                .themes
+                                .get(&props.block_id)
+                                .map(|d| d.template.as_str())
+                            {
+                                match render_plugin_block_csec_with_budget(
+                                    &props.block_id,
+                                    template_src,
+                                    &props.values,
+                                    budget,
+                                ) {
+                                    Ok(rendered_inner) => {
+                                        already_charged_bytes = already_charged_bytes
+                                            .saturating_add(rendered_inner.len());
+                                        Some(format!(
+                                            "<div class=\"builder-plugin-block\" data-block-id=\"{}\" data-od-node-scope=\"{}\">{}</div>",
+                                            escape_html(&props.block_id),
+                                            escape_html(&node_scope),
+                                            rendered_inner
+                                        ))
+                                    }
+                                    Err(_) => {
+                                        if budget.html_bytes_used
+                                            > crate::template_sec::MAX_RENDERED_HTML_BYTES
+                                        {
+                                            return Err(ApiError::bad_request(
+                                                "Builder template composition exceeds 512 KiB.",
+                                            ));
+                                        }
+                                        diagnostics.push(BuilderDiagnostic {
+                                            node_id: element.id.clone(),
+                                            code: "plugin_block_render_error",
+                                        });
+                                        Some(format!(
+                                            "<div class=\"builder-block-unavailable\" data-block-id=\"{}\"></div>",
+                                            escape_html(&props.block_id)
+                                        ))
+                                    }
+                                }
+                            } else {
+                                diagnostics.push(BuilderDiagnostic {
+                                    node_id: element.id.clone(),
+                                    code: "plugin_block_unavailable",
+                                });
+                                Some(format!(
+                                    "<div class=\"builder-block-unavailable\" data-block-id=\"{}\"></div>",
+                                    escape_html(&props.block_id)
+                                ))
                             }
                         }
                         ElementContent::Known(KnownElement::ContentSlot(_)) => {
                             match context.and_then(|ctx| ctx.content_html) {
-                                Some(html) => Some(html.to_owned()),
+                                Some(slot_html) => {
+                                    already_charged_bytes =
+                                        already_charged_bytes.saturating_add(slot_html.len());
+                                    Some(slot_html.to_owned())
+                                }
                                 None => {
                                     diagnostics.push(BuilderDiagnostic {
                                         node_id: element.id.clone(),
@@ -582,6 +1015,8 @@ pub fn render_builder_with_annotations(
                             match patterns.get(&props.pattern_id) {
                                 Some(pattern) => {
                                     has_active_contact_form |= pattern.has_active_contact_form;
+                                    already_charged_bytes =
+                                        already_charged_bytes.saturating_add(pattern.html.len());
                                     Some(format!(
                                         "<div class=\"od-pattern-ref\" data-pattern-id=\"{}\">{}</div>",
                                         props.pattern_id, pattern.html,
@@ -602,7 +1037,11 @@ pub fn render_builder_with_annotations(
                         }
                         ElementContent::Known(KnownElement::TemplatePart(props)) => {
                             match context.and_then(|ctx| ctx.parts.get(&props.part_key)) {
-                                Some(html) => Some(html.clone()),
+                                Some(part_html) => {
+                                    already_charged_bytes =
+                                        already_charged_bytes.saturating_add(part_html.len());
+                                    Some(part_html.clone())
+                                }
                                 None => {
                                     diagnostics.push(BuilderDiagnostic {
                                         node_id: element.id.clone(),
@@ -701,6 +1140,10 @@ pub fn render_builder_with_annotations(
             "Builder template composition exceeds 512 KiB.",
         ));
     }
+    let own_bytes = html.len().saturating_sub(already_charged_bytes);
+    budget
+        .charge_html_bytes(own_bytes)
+        .map_err(ApiError::bad_request)?;
     Ok(RenderedLayout {
         html,
         diagnostics,
@@ -1108,6 +1551,22 @@ pub fn render_plugin_block_csec(
     template_source: &str,
     values: &std::collections::BTreeMap<String, serde_json::Value>,
 ) -> ApiResult<String> {
+    let mut budget = RenderBudget::new();
+    render_plugin_block_csec_with_budget(block_id, template_source, values, &mut budget)
+}
+
+pub fn render_plugin_block_csec_with_budget(
+    block_id: &str,
+    template_source: &str,
+    values: &std::collections::BTreeMap<String, serde_json::Value>,
+    budget: &mut RenderBudget,
+) -> ApiResult<String> {
+    if budget.fuel_remaining == 0 {
+        return Err(ApiError::bad_request("Đã hết ngân sách fuel render trang."));
+    }
+    let node_fuel = budget
+        .fuel_remaining
+        .min(crate::template_sec::MAX_BLOCK_FUEL_PER_NODE);
     crate::template_sec::validate_template_csec(block_id, template_source)
         .map_err(ApiError::bad_request)?;
     let mut ctx_map = std::collections::BTreeMap::new();
@@ -1115,7 +1574,32 @@ pub fn render_plugin_block_csec(
         ctx_map.insert(k.clone(), crate::template_sec::json_to_safe_value(v));
     }
     let ctx = minijinja::Value::from(ctx_map);
-    crate::template_sec::render_csec(block_id, template_source, ctx).map_err(ApiError::bad_request)
+    let mut env = crate::template_sec::restricted_environment();
+    env.set_fuel(Some(node_fuel));
+    env.add_template(block_id, template_source)
+        .map_err(|_| ApiError::bad_request("Không thể biên dịch template."))?;
+    let captured = env
+        .get_template(block_id)
+        .map_err(|_| ApiError::bad_request("Không tìm thấy template."))?
+        .render_captured(ctx)
+        .map_err(|_| ApiError::bad_request("Lỗi thực thi template (fuel/recursion/undefined)."))?;
+    let (consumed, _) = captured
+        .state()
+        .fuel_levels()
+        .ok_or_else(|| ApiError::bad_request("Thiếu bộ theo dõi fuel."))?;
+    budget.fuel_remaining = budget.fuel_remaining.saturating_sub(consumed);
+    let rendered = captured.output().to_owned();
+    if rendered.len() > crate::template_sec::MAX_RENDERED_HTML_BYTES {
+        return Err(ApiError::bad_request(
+            "HTML render vượt quá giới hạn 512 KiB.",
+        ));
+    }
+    crate::template_sec::validate_template_csec(block_id, &rendered)
+        .map_err(ApiError::bad_request)?;
+    budget
+        .charge_html_bytes(rendered.len())
+        .map_err(ApiError::bad_request)?;
+    Ok(rendered)
 }
 
 #[cfg(test)]
@@ -1189,6 +1673,7 @@ mod m6_s05_tests {
             saved: Some(doc.clone()),
             legacy: None,
             version: 1,
+            ..Default::default()
         };
         crate::storage::builder::register_plugin_block_template(
             &mut active_state,
@@ -1223,6 +1708,7 @@ mod m6_s05_tests {
             saved: Some(doc.clone()),
             legacy: None,
             version: 1,
+            ..Default::default()
         };
         let rendered_disabled = render_builder_with_lists(
             &disabled_state,
@@ -1270,6 +1756,7 @@ mod m6_s05_tests {
             active_id: None,
             active_alias: None,
             active_template: None,
+            ..Default::default()
         };
         let mut lists = ListResults::new();
         lists.insert(
@@ -1317,6 +1804,7 @@ mod m6_s05_tests {
             active_id: None,
             active_alias: None,
             active_template: None,
+            ..Default::default()
         };
         let pattern_doc = BuilderDocument {
             schema_version: 1,
@@ -1469,5 +1957,258 @@ mod m6_s05_tests {
         ));
         assert!(scoped.html.contains("<section data-node-id=\"hdr-sec\">"));
         assert!(scoped.html.contains("<p data-node-id=\"entry-inner\">"));
+    }
+
+    #[test]
+    fn renders_all_five_core_blocks_with_scoped_css_responsive_breakpoints_and_budget_isolation() {
+        let state = HomeState {
+            version: 1,
+            declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
+            ..Default::default()
+        };
+        let media_id = "d".repeat(64);
+        let doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-core".into(),
+                responsive: None,
+                children: vec![RowNode {
+                    id: "row-core".into(),
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "col-core".into(),
+                        responsive: None,
+                        children: vec![
+                            ElementNode {
+                                id: "sp-1".into(),
+                                content: ElementContent::Known(KnownElement::PluginBlock(
+                                    PluginBlockProps {
+                                        block_id: "core/spacer".into(),
+                                        values: BTreeMap::from([(
+                                            "height".into(),
+                                            json!({ "desktop": 64, "tablet": 40, "mobile": 24 }),
+                                        )]),
+                                    },
+                                )),
+                            },
+                            ElementNode {
+                                id: "div-1".into(),
+                                content: ElementContent::Known(KnownElement::PluginBlock(
+                                    PluginBlockProps {
+                                        block_id: "core/divider".into(),
+                                        values: BTreeMap::from([
+                                            ("line_style".into(), json!("dashed")),
+                                            ("thickness".into(), json!(2)),
+                                            (
+                                                "width_pct".into(),
+                                                json!({ "desktop": 80, "mobile": 100 }),
+                                            ),
+                                            ("color".into(), json!("var(--od-token-border)")),
+                                        ]),
+                                    },
+                                )),
+                            },
+                            ElementNode {
+                                id: "ban-1".into(),
+                                content: ElementContent::Known(KnownElement::PluginBlock(
+                                    PluginBlockProps {
+                                        block_id: "core/banner".into(),
+                                        values: BTreeMap::from([
+                                            ("bg_media".into(), json!(media_id)),
+                                            ("overlay_color".into(), json!("#00000080")),
+                                            (
+                                                "min_height".into(),
+                                                json!({ "desktop": 480, "tablet": 360 }),
+                                            ),
+                                            ("focus_x".into(), json!(30)),
+                                            ("focus_y".into(), json!(70)),
+                                            (
+                                                "align".into(),
+                                                json!({ "desktop": "left", "mobile": "center" }),
+                                            ),
+                                            ("heading".into(), json!("Khuyến mãi Mùa Thu")),
+                                            (
+                                                "body".into(),
+                                                json!(
+                                                    "<p>Giảm <strong>50%</strong><script>evil()</script></p>"
+                                                ),
+                                            ),
+                                            ("show_cta".into(), json!(true)),
+                                            ("cta_label".into(), json!("Mua ngay")),
+                                            ("cta_url".into(), json!("/cua-hang")),
+                                        ]),
+                                    },
+                                )),
+                            },
+                            ElementNode {
+                                id: "card-1".into(),
+                                content: ElementContent::Known(KnownElement::PluginBlock(
+                                    PluginBlockProps {
+                                        block_id: "core/card".into(),
+                                        values: BTreeMap::from([
+                                            ("layout".into(), json!("horizontal")),
+                                            ("image".into(), json!(media_id)),
+                                            ("image_alt".into(), json!("Ảnh sản phẩm")),
+                                            ("title".into(), json!("Thẻ VIP")),
+                                            (
+                                                "body".into(),
+                                                json!("<p>Quyền lợi <em>đặc biệt</em></p>"),
+                                            ),
+                                            ("bg_color".into(), json!("#f8fafc")),
+                                            ("show_cta".into(), json!(true)),
+                                            ("cta_label".into(), json!("Đăng ký")),
+                                            ("cta_url".into(), json!("#vip")),
+                                        ]),
+                                    },
+                                )),
+                            },
+                            ElementNode {
+                                id: "acc-1".into(),
+                                content: ElementContent::Known(KnownElement::PluginBlock(
+                                    PluginBlockProps {
+                                        block_id: "core/accordion".into(),
+                                        values: BTreeMap::from([
+                                            ("style".into(), json!("bordered")),
+                                            ("open_first".into(), json!(true)),
+                                            (
+                                                "items".into(),
+                                                json!([
+                                                    { "title": "Câu hỏi 1", "content": "<p>Trả lời <b>1</b></p>", "open": false },
+                                                    { "title": "Câu hỏi 2", "content": "<p>Trả lời <i>2</i></p>", "open": false }
+                                                ]),
+                                            ),
+                                        ]),
+                                    },
+                                )),
+                            },
+                        ],
+                    }],
+                }],
+            }],
+        };
+
+        state.validate(&doc).expect("all 5 core blocks validate");
+
+        let mut budget = RenderBudget::new();
+        let cache = BlockTemplateCache::new();
+        let public_rendered = render_builder_with_budget(
+            &state,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::None,
+            "entry",
+            &mut budget,
+            &cache,
+        )
+        .unwrap();
+
+        assert!(public_rendered.diagnostics.is_empty());
+        assert!(
+            public_rendered
+                .html
+                .contains("<style data-od-block-styles>")
+        );
+        assert!(
+            public_rendered
+                .html
+                .contains("[data-od-node-scope=\"entry-sp-1\"]{--od-spacer-h:64px;}")
+        );
+        assert!(public_rendered.html.contains(
+            "@media (width < 1024px){[data-od-node-scope=\"entry-sp-1\"]{--od-spacer-h:40px;}"
+        ));
+        assert!(public_rendered.html.contains(
+            "@media (width < 768px){[data-od-node-scope=\"entry-sp-1\"]{--od-spacer-h:24px;}"
+        ));
+        assert!(
+            public_rendered
+                .html
+                .contains(&format!("--od-banner-bg:url(\"/media/{media_id}/file\");"))
+        );
+        assert!(
+            public_rendered
+                .html
+                .contains("--od-banner-fx:30%;--od-banner-fy:70%;")
+        );
+        assert!(
+            public_rendered
+                .html
+                .contains("<p>Giảm <strong>50%</strong></p>")
+        );
+        assert!(!public_rendered.html.contains("<script>"));
+        assert!(
+            public_rendered
+                .html
+                .contains("<details class=\"od-accordion-item\" open>")
+        );
+        assert!(
+            public_rendered
+                .html
+                .contains("<details class=\"od-accordion-item\">")
+        );
+
+        // Preview uses /api/admin/media/{id}/file in both CSS and <img>
+        let mut preview_budget = RenderBudget::new();
+        let preview_rendered = render_builder_with_budget(
+            &state,
+            &doc,
+            true,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::EntryBodyOnly,
+            "pat_42",
+            &mut preview_budget,
+            &cache,
+        )
+        .unwrap();
+        assert!(
+            preview_rendered
+                .html
+                .contains("[data-od-node-scope=\"pat_42-ban-1\"]")
+        );
+        assert!(preview_rendered.html.contains(&format!(
+            "--od-banner-bg:url(\"/api/admin/media/{media_id}/file\");"
+        )));
+        let decoded_preview =
+            opendash_core::richtext::decode_html5_entities(&preview_rendered.html);
+        assert!(decoded_preview.contains(&format!("src=\"/api/admin/media/{media_id}/file\"")));
+
+        // Exhausted fuel isolates block with plugin_block_render_error instead of failing request
+        let mut zero_fuel_budget = RenderBudget {
+            fuel_remaining: 0,
+            html_bytes_used: 0,
+        };
+        let isolated = render_builder_with_budget(
+            &state,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::None,
+            "entry",
+            &mut zero_fuel_budget,
+            &cache,
+        )
+        .expect("exhausted fuel must isolate plugin blocks without HTTP 500");
+        assert_eq!(isolated.diagnostics.len(), 5);
+        assert!(
+            isolated
+                .diagnostics
+                .iter()
+                .all(|d| d.code == "plugin_block_render_error")
+        );
     }
 }

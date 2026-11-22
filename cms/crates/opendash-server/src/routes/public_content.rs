@@ -454,6 +454,7 @@ pub(crate) async fn render_canonical_archive(
 
 pub async fn single(
     State(db): State<SqlitePool>,
+    State(block_template_cache): State<std::sync::Arc<crate::page::BlockTemplateCache>>,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     Path((type_key, slug)): Path<(String, String)>,
     OriginalUri(uri): OriginalUri,
@@ -510,7 +511,15 @@ pub async fn single(
     if resolved.redirect {
         return Ok(permanent_redirect(resolved.canonical_path));
     }
-    render_single_entry_response(&db, themes_root, entry, Some(resolved.canonical_path)).await
+    render_entry_response_with_cache(
+        &db,
+        themes_root,
+        entry,
+        Some(resolved.canonical_path),
+        false,
+        &block_template_cache,
+    )
+    .await
 }
 
 pub(crate) async fn render_single_entry_response(
@@ -519,7 +528,15 @@ pub(crate) async fn render_single_entry_response(
     entry: crate::storage::entries::ContentEntryRecord,
     canonical_path_override: Option<String>,
 ) -> ApiResult<Response> {
-    render_entry_response(db, themes_root, entry, canonical_path_override, false).await
+    render_entry_response_with_cache(
+        db,
+        themes_root,
+        entry,
+        canonical_path_override,
+        false,
+        crate::page::BlockTemplateCache::global(),
+    )
+    .await
 }
 
 pub(crate) async fn render_homepage_entry_response(
@@ -530,21 +547,31 @@ pub(crate) async fn render_homepage_entry_response(
     if entry.content_type_key != "page" {
         return render_not_found_response(db, themes_root).await;
     }
-    render_entry_response(db, themes_root, entry, Some("/".to_owned()), true).await
+    render_entry_response_with_cache(
+        db,
+        themes_root,
+        entry,
+        Some("/".to_owned()),
+        true,
+        crate::page::BlockTemplateCache::global(),
+    )
+    .await
 }
 
-async fn render_entry_response(
+async fn render_entry_response_with_cache(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     entry: crate::storage::entries::ContentEntryRecord,
     canonical_path_override: Option<String>,
     is_home: bool,
+    cache: &crate::page::BlockTemplateCache,
 ) -> ApiResult<Response> {
     let db = db.clone();
-    let snapshot = public_content::load_entry_render_snapshot(
+    let snapshot = public_content::load_entry_render_snapshot_with_cache(
         &db,
         entry.id,
         themes_root.as_ref().map(|Extension(root)| root.0.as_path()),
+        cache,
     )
     .await?;
     let Some(snapshot) = snapshot else {
@@ -556,6 +583,7 @@ async fn render_entry_response(
         active: active_v3,
         mut resolution,
         body: entry_body,
+        budget: entry_render_budget,
     } = snapshot;
     if is_home {
         let page_layout_key = entry
@@ -626,7 +654,7 @@ async fn render_entry_response(
             archive_path.as_deref(),
         )?,
     };
-    let mut budget = overrides::PublicCompositionBudget::default();
+    let mut budget = overrides::PublicCompositionBudget::with_render_budget(entry_render_budget);
     let body = render_resolved_public_template_html(
         &db, resolution, active_v3.as_ref(), &site_ctx, &theme_opts,
         &fallback_html, Some((&type_key, &entry.slug)),
@@ -641,12 +669,13 @@ async fn render_entry_response(
     let (header, footer, shell_has_form) = if body.canvas_layout {
         (None, None, false)
     } else {
-        overrides::resolve_and_render_header_footer(
+        overrides::resolve_and_render_header_footer_with_cache(
             &db,
             active_v3.as_ref(),
             &site_ctx,
             &theme_opts,
             &mut budget,
+            cache,
         )
         .await?
     };

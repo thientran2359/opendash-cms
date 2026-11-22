@@ -76,6 +76,7 @@ pub struct PublicEntryRenderSnapshot {
     pub active: Option<super::theme::ActiveThemeV3>,
     pub resolution: super::overrides::TemplateResolution,
     pub body: Option<crate::page::RenderedLayout>,
+    pub budget: crate::page::RenderBudget,
 }
 
 /// Resolve published entry, its own Builder body, and the selected shared
@@ -85,6 +86,21 @@ pub async fn load_entry_render_snapshot(
     db: &SqlitePool,
     id: i64,
     themes_root: Option<&std::path::Path>,
+) -> ApiResult<Option<PublicEntryRenderSnapshot>> {
+    load_entry_render_snapshot_with_cache(
+        db,
+        id,
+        themes_root,
+        crate::page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+pub async fn load_entry_render_snapshot_with_cache(
+    db: &SqlitePool,
+    id: i64,
+    themes_root: Option<&std::path::Path>,
+    cache: &crate::page::BlockTemplateCache,
 ) -> ApiResult<Option<PublicEntryRenderSnapshot>> {
     use super::{builder, builder_binding, content, overrides, theme};
     use crate::error::ApiError;
@@ -170,6 +186,7 @@ pub async fn load_entry_render_snapshot(
                     && fe.definition.min_view_role == FieldRole::Editor
             })
     });
+    let mut render_budget = crate::page::RenderBudget::new();
     let raw_body = entry.values.get("body").and_then(serde_json::Value::as_str);
     let body = if !matches!(entry.content_type_key.as_str(), "pattern" | "section")
         && schema.settings.supports(ContentSupport::Builder)
@@ -190,9 +207,29 @@ pub async fn load_entry_render_snapshot(
         let lists =
             builder::resolve_lists_in_tx(&mut tx, &doc, &std::collections::BTreeMap::new()).await?;
         let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
-        let patterns = builder::resolve_patterns_in_tx(&mut tx, &state, &doc, false).await?;
-        Some(crate::page::render_builder_with_patterns(
-            &state, &doc, false, &bindings, &lists, &forms, None, &patterns, false,
+        let patterns = builder::resolve_patterns_in_tx_with_budget(
+            &mut tx,
+            &state,
+            &doc,
+            false,
+            &mut render_budget,
+            cache,
+        )
+        .await?;
+        Some(crate::page::render_builder_with_budget(
+            &state,
+            &doc,
+            false,
+            &bindings,
+            &lists,
+            &forms,
+            None,
+            &patterns,
+            false,
+            crate::page::RenderAnnotationScope::None,
+            "entry",
+            &mut render_budget,
+            cache,
         )?)
     } else {
         None
@@ -204,6 +241,7 @@ pub async fn load_entry_render_snapshot(
         active,
         resolution,
         body,
+        budget: render_budget,
     }))
 }
 

@@ -180,6 +180,7 @@ pub async fn studio_targets(
 
 pub async fn studio_preview(
     State(db): State<SqlitePool>,
+    State(block_template_cache): State<Arc<crate::page::BlockTemplateCache>>,
     Extension(themes_root): Extension<ThemeStoreRoot>,
     request_headers: HeaderMap,
     body: Bytes,
@@ -200,7 +201,7 @@ pub async fn studio_preview(
     }
     let input: StudioPreviewRequest = serde_json::from_slice(&body)
         .map_err(|_| ApiError::bad_request("Invalid studio preview JSON."))?;
-    let rendered = overrides::preview_studio(
+    let rendered = overrides::preview_studio_with_cache(
         &db,
         &themes_root.0,
         &actor,
@@ -209,6 +210,7 @@ pub async fn studio_preview(
         input.preview_entry.as_ref(),
         input.preview_annotations,
         input.transient.as_ref(),
+        &block_template_cache,
     )
     .await?;
     let mut response_headers = headers(None);
@@ -231,6 +233,7 @@ pub async fn studio_preview(
 /// Render a shared template draft against one private read snapshot.
 pub async fn template_overrides_preview(
     State(db): State<SqlitePool>,
+    State(block_template_cache): State<Arc<crate::page::BlockTemplateCache>>,
     Extension(themes_root): Extension<ThemeStoreRoot>,
     request_headers: HeaderMap,
     body: Bytes,
@@ -252,7 +255,7 @@ pub async fn template_overrides_preview(
     let expected = override_if_match(&request_headers)?;
     let input: TemplateOverridePreviewInput = serde_json::from_slice(&body)
         .map_err(|_| ApiError::bad_request("Invalid template preview JSON."))?;
-    let rendered = overrides::preview_typed_override(
+    let rendered = overrides::preview_typed_override_with_cache(
         &db,
         &themes_root.0,
         &actor,
@@ -260,6 +263,7 @@ pub async fn template_overrides_preview(
         &input.document,
         input.preview_entry.as_ref(),
         expected,
+        &block_template_cache,
     )
     .await?;
     let mut response_headers = headers(None);

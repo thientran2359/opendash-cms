@@ -59,6 +59,9 @@ pub async fn init_db(db_path: &Path) -> Result<SqlitePool, Box<dyn std::error::E
     // user/theme/plugin post/page descriptor during bootstrap.
     content::preflight_builtin_key_collisions(&db).await?;
     sqlx::migrate!("../../migrations").run(&db).await?;
+    page::ensure_embedded_core_blocks(&db)
+        .await
+        .map_err(|e| format!("{}: {}", e.0, e.1))?;
     Ok(db)
 }
 

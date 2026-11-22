@@ -246,6 +246,7 @@ pub async fn entry_builder_put(
 
 pub async fn entry_builder_preview(
     State(db): State<SqlitePool>,
+    State(block_template_cache): State<Arc<crate::page::BlockTemplateCache>>,
     Extension(themes_root): Extension<crate::routes::themes::ThemeStoreRoot>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
@@ -264,13 +265,14 @@ pub async fn entry_builder_preview(
         ));
     }
     let document = decode_document(&headers, &bytes)?;
-    let rendered = builder_storage::preview_entry_builder(
+    let rendered = builder_storage::preview_entry_builder_with_cache(
         &db,
         &themes_root.0,
         &actor,
         &type_key,
         id,
         &document,
+        &block_template_cache,
     )
     .await?;
     let mut response_headers = builder_headers(None);

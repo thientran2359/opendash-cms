@@ -83,6 +83,7 @@ pub struct AppState {
     >,
     pub coordinator: Arc<crate::operations::SiteCoordinator>,
     pub backup_registry: Arc<crate::backup::BackupRuntimeRegistry>,
+    pub block_template_cache: Arc<crate::page::BlockTemplateCache>,
     pub recovery: crate::config::RecoveryState,
     pub runtime_config: crate::config::RuntimeConfigV1,
 }
@@ -114,6 +115,12 @@ impl axum::extract::FromRef<AppState> for Arc<MediaStore> {
 impl axum::extract::FromRef<AppState> for Arc<crate::operations::SiteCoordinator> {
     fn from_ref(state: &AppState) -> Self {
         state.coordinator.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<crate::page::BlockTemplateCache> {
+    fn from_ref(state: &AppState) -> Self {
+        state.block_template_cache.clone()
     }
 }
 

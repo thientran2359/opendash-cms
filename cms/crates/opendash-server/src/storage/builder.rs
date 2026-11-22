@@ -43,11 +43,13 @@ pub struct ThemeDefinition {
     pub template: String,
 }
 
+#[derive(Default)]
 pub struct HomeState {
     pub version: i64,
     pub saved: Option<BuilderDocument>,
     pub legacy: Option<Block>,
     pub themes: BTreeMap<String, ThemeDefinition>,
+    pub declared_blocks: BTreeMap<String, crate::storage::page::RegisteredBlockDef>,
     pub active_id: Option<String>,
     pub active_alias: Option<String>,
     pub active_template: Option<String>,
@@ -237,11 +239,55 @@ impl HomeState {
         Ok(catalog)
     }
 
+    pub fn unified_block_schemas(
+        &self,
+    ) -> ApiResult<RegistryCatalog<opendash_core::block_schema::RegisteredBlockSchema>> {
+        use opendash_core::{block_schema::upcast_legacy_descriptor, registry::OwnedDescriptor};
+        let mut catalog = RegistryCatalog::new();
+        for (block_id, def) in &self.declared_blocks {
+            if !valid_namespaced_block_id(block_id) {
+                return Err(ApiError::internal("Invalid declared block ID"));
+            }
+            catalog.insert_loaded(
+                block_id.clone(),
+                OwnedDescriptor {
+                    owner: def.owner.clone(),
+                    status: def.status,
+                    declaration_state: def.declaration_state,
+                    descriptor: def.schema.clone(),
+                },
+            );
+        }
+        for (id, definition) in &self.themes {
+            if catalog.get(id).is_some() {
+                continue;
+            }
+            if !valid_namespaced_block_id(id) {
+                return Err(ApiError::internal("Invalid installed block ID"));
+            }
+            let namespace = id.split_once('/').expect("validated namespaced ID").0;
+            let legacy_desc = BlockDescriptor {
+                id: id.clone(),
+                fields: definition.fields.clone(),
+            };
+            catalog.insert_loaded(
+                id.clone(),
+                OwnedDescriptor {
+                    owner: ResourceOwner::Theme(namespace.into()),
+                    status: ProviderStatus::Active,
+                    declaration_state: DeclarationState::Declared,
+                    descriptor: upcast_legacy_descriptor(&legacy_desc),
+                },
+            );
+        }
+        Ok(catalog)
+    }
+
     /// Do not trust prior-state information from the client. This method uses
     /// either persisted JSON or a deterministic, read-only M3 projection.
     pub fn validate(&self, document: &BuilderDocument) -> ApiResult<()> {
         document
-            .validate_for_save(&self.descriptors()?, Some(&self.document()))
+            .validate_for_save_with_schemas(&self.unified_block_schemas()?, Some(&self.document()))
             .map_err(|error| ApiError::bad_request(error.to_string()))
     }
 }
@@ -326,11 +372,13 @@ pub(crate) async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<
     )
     .fetch_one(&mut **tx)
     .await?;
+    let declared_blocks = crate::storage::page::load_declared_blocks_in_conn(&mut **tx).await?;
     Ok(HomeState {
         version,
         saved,
         legacy,
         themes,
+        declared_blocks,
         active_id,
         active_alias,
         active_template,
@@ -560,6 +608,26 @@ pub async fn resolve_patterns_in_tx(
     document: &BuilderDocument,
     is_preview: bool,
 ) -> ApiResult<page::PatternResults> {
+    let mut budget = page::RenderBudget::new();
+    resolve_patterns_in_tx_with_budget(
+        tx,
+        state,
+        document,
+        is_preview,
+        &mut budget,
+        page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+pub async fn resolve_patterns_in_tx_with_budget(
+    tx: &mut Transaction<'_, Sqlite>,
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    budget: &mut page::RenderBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<page::PatternResults> {
     let ids = pattern_ids(document);
     let rows = load_pattern_rows_in_tx(tx, &ids).await?;
     let mut results = page::PatternResults::new();
@@ -603,7 +671,8 @@ pub async fn resolve_patterns_in_tx(
         )
         .await?;
         let forms = resolve_contact_forms_in_tx(tx, &doc).await?;
-        let rendered = page::render_builder_with_patterns(
+        let scope = format!("pat_{id}");
+        let rendered = page::render_builder_with_budget(
             state,
             &doc,
             is_preview,
@@ -613,6 +682,10 @@ pub async fn resolve_patterns_in_tx(
             None,
             &page::PatternResults::new(),
             true,
+            RenderAnnotationScope::None,
+            &scope,
+            budget,
+            cache,
         )?;
         results.insert(id, rendered);
     }
@@ -1338,7 +1411,10 @@ async fn validate_entry_builder_document(
     }
     let state = read_home_tx(tx).await?;
     document
-        .validate_for_save(&state.descriptors()?, current.opened.document.as_ref())
+        .validate_for_save_with_schemas(
+            &state.unified_block_schemas()?,
+            current.opened.document.as_ref(),
+        )
         .map_err(|err| ApiError::bad_request(err.to_string()))?;
 
     // Validate this entry's field keys using its effective field ACL.
@@ -1472,6 +1548,31 @@ async fn render_entry_builder_preview_with_scope(
     shared_preview: bool,
     annotation_scope: RenderAnnotationScope,
 ) -> ApiResult<RenderedLayout> {
+    let mut budget = page::RenderBudget::new();
+    render_entry_builder_preview_with_budget(
+        tx,
+        current,
+        state,
+        document,
+        shared_preview,
+        annotation_scope,
+        &mut budget,
+        page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn render_entry_builder_preview_with_budget(
+    tx: &mut Transaction<'_, Sqlite>,
+    current: &EntryBuilderSnapshot,
+    state: &HomeState,
+    document: &BuilderDocument,
+    shared_preview: bool,
+    annotation_scope: RenderAnnotationScope,
+    budget: &mut page::RenderBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     let bindings = builder_binding::resolve_in_tx_with_route(
         tx,
         document,
@@ -1481,13 +1582,19 @@ async fn render_entry_builder_preview_with_scope(
     .await?;
     let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
-    let patterns = resolve_patterns_in_tx(tx, state, document, true).await?;
+    let patterns =
+        resolve_patterns_in_tx_with_budget(tx, state, document, true, budget, cache).await?;
     let parts = BTreeMap::new();
     let context = shared_preview.then_some(page::BuilderTemplateContext {
         content_html: None,
         parts: &parts,
     });
-    page::render_builder_with_annotations(
+    let scope = if current.opened.type_key == "pattern" {
+        format!("pat_{}", current.opened.entry_id)
+    } else {
+        "entry".to_owned()
+    };
+    page::render_builder_with_budget(
         state,
         document,
         true,
@@ -1498,6 +1605,9 @@ async fn render_entry_builder_preview_with_scope(
         &patterns,
         false,
         annotation_scope,
+        &scope,
+        budget,
+        cache,
     )
 }
 
@@ -1509,6 +1619,26 @@ pub(super) async fn preview_saved_page_body_in_tx(
     type_key: &str,
     id: i64,
 ) -> ApiResult<Option<RenderedLayout>> {
+    let mut budget = page::RenderBudget::new();
+    preview_saved_page_body_in_tx_with_budget(
+        tx,
+        actor,
+        type_key,
+        id,
+        &mut budget,
+        page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+pub(super) async fn preview_saved_page_body_in_tx_with_budget(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: &SessionContext,
+    type_key: &str,
+    id: i64,
+    budget: &mut page::RenderBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<Option<RenderedLayout>> {
     let current = entry_builder_snapshot(tx, type_key, id).await?;
     if !current.raw_body_has_blocks {
         return Ok(None);
@@ -1519,7 +1649,17 @@ pub(super) async fn preview_saved_page_body_in_tx(
     let state =
         validate_entry_builder_document(tx, &current, actor_field_role(actor), document).await?;
     Ok(Some(
-        render_entry_builder_preview(tx, &current, &state, document, true).await?,
+        render_entry_builder_preview_with_budget(
+            tx,
+            &current,
+            &state,
+            document,
+            true,
+            RenderAnnotationScope::None,
+            budget,
+            cache,
+        )
+        .await?,
     ))
 }
 
@@ -1543,6 +1683,27 @@ pub async fn preview_entry_builder(
     id: i64,
     document: &BuilderDocument,
 ) -> ApiResult<RenderedLayout> {
+    preview_entry_builder_with_cache(
+        db,
+        themes_root,
+        actor,
+        type_key,
+        id,
+        document,
+        page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+pub async fn preview_entry_builder_with_cache(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    type_key: &str,
+    id: i64,
+    document: &BuilderDocument,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let current = entry_builder_snapshot(&mut tx, type_key, id).await?;
     if type_key != "pattern" {
@@ -1555,13 +1716,22 @@ pub async fn preview_entry_builder(
     } else {
         RenderAnnotationScope::EntryBodyOnly
     };
-    let rendered =
-        render_entry_builder_preview_with_scope(&mut tx, &current, &state, document, false, scope)
-            .await?;
+    let mut render_budget = page::RenderBudget::new();
+    let rendered = render_entry_builder_preview_with_budget(
+        &mut tx,
+        &current,
+        &state,
+        document,
+        false,
+        scope,
+        &mut render_budget,
+        cache,
+    )
+    .await?;
     let out = if type_key == "pattern" {
         rendered
     } else {
-        crate::storage::overrides::wrap_entry_body_in_preview_shell_in_tx(
+        crate::storage::overrides::wrap_entry_body_in_preview_shell_in_tx_with_budget(
             &mut tx,
             themes_root,
             actor_role,
@@ -1570,6 +1740,8 @@ pub async fn preview_entry_builder(
             current.page_layout_key.as_deref(),
             current.custom_template_key.as_deref(),
             rendered,
+            render_budget,
+            cache,
         )
         .await?
     };

@@ -108,6 +108,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         content_registry,
         coordinator,
         backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
+        block_template_cache: crate::page::BlockTemplateCache::global().clone(),
         recovery,
         runtime_config: runtime_cfg.clone(),
     };

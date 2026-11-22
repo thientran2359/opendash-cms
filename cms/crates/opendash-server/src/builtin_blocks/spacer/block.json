@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "core/spacer",
+  "title": "Khoảng trống",
+  "category": "layout",
+  "icon": "move-vertical",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "range",
+      "key": "height",
+      "label": "Chiều cao",
+      "min": 8,
+      "max": 240,
+      "step": 4,
+      "default": 32,
+      "unit": "px",
+      "css_var": "--od-spacer-h",
+      "responsive": true
+    }
+  ]
+}

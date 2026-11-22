@@ -58,6 +58,10 @@ fn is_forbidden_tag(name_lower: &str) -> bool {
             | "math"
             | "foreignobject"
             | "portal"
+            | "xmp"
+            | "noembed"
+            | "noframes"
+            | "plaintext"
     )
 }
 
@@ -91,6 +95,12 @@ fn parse_attributes(
             return Err(DocumentNormalizationDiagnostic::new(
                 "forbidden_event_handler",
                 format!("Thuộc tính sự kiện `{name}` không được phép."),
+            ));
+        }
+        if attrs.iter().any(|(k, _)| k == &name) {
+            return Err(DocumentNormalizationDiagnostic::new(
+                "duplicate_attribute",
+                format!("Thuộc tính `{name}` bị trùng lặp."),
             ));
         }
         while i < bytes.len() && bytes[i].is_ascii_whitespace() {
@@ -199,6 +209,27 @@ fn find_case_insensitive_end_style(raw: &str, start: usize) -> Option<(usize, us
     None
 }
 
+fn find_html5_comment_end(bytes: &[u8], start: usize) -> Option<usize> {
+    let after_open = start + 4;
+    if bytes.get(after_open) == Some(&b'>') {
+        return Some(after_open + 1);
+    }
+    if bytes.get(after_open..after_open + 2) == Some(b"->") {
+        return Some(after_open + 2);
+    }
+    let mut j = after_open;
+    while j < bytes.len() {
+        if bytes[j..].starts_with(b"-->") {
+            return Some(j + 3);
+        }
+        if bytes[j..].starts_with(b"--!>") {
+            return Some(j + 4);
+        }
+        j += 1;
+    }
+    None
+}
+
 fn tokenize(raw: &str) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormalizationDiagnostic> {
     if raw.len() > MAX_PUBLIC_DOCUMENT_BYTES {
         return Err(DocumentNormalizationDiagnostic::new(
@@ -219,13 +250,12 @@ fn tokenize(raw: &str) -> Result<Vec<(TokenKind<'_>, String)>, DocumentNormaliza
             continue;
         }
         if raw[i..].starts_with("<!--") {
-            let Some(rel_end) = raw[i + 4..].find("-->") else {
+            let Some(end) = find_html5_comment_end(bytes, i) else {
                 return Err(DocumentNormalizationDiagnostic::new(
                     "unclosed_comment",
                     "Chú thích HTML chưa được đóng.",
                 ));
             };
-            let end = i + 4 + rel_end + 3;
             out.push((TokenKind::Comment(&raw[i..end]), String::new()));
             i = end;
             continue;
@@ -591,6 +621,20 @@ mod tests {
 
         let script = "<div><script>alert(1)</script></div>";
         assert!(normalize_public_document(script).is_err());
+
+        for smuggled in [
+            "<!-- --!><script>alert(1)</script><!-- -->",
+            "<!--><script>alert(1)</script><!-- -->",
+            "<!---><script>alert(1)</script><!-- -->",
+            "<a href=\"https://ok.example\" href=\"javascript:alert(1)\">x</a>",
+            "<xmp>raw</xmp>",
+            "<plaintext>raw",
+        ] {
+            assert!(
+                normalize_public_document(smuggled).is_err(),
+                "expected reject on {smuggled}"
+            );
+        }
 
         let big = "a".repeat(MAX_PUBLIC_DOCUMENT_BYTES + 1);
         assert!(normalize_public_document(&big).is_err());
