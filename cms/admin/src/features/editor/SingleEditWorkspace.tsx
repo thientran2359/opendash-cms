@@ -280,6 +280,13 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   }, [dirty, onDirtyChange]);
 
   useEffect(() => {
+    const dialog = builderDialogRef.current;
+    if (!dialog) return;
+    if (builderPromptOpen && !dialog.open) dialog.showModal();
+    else if (!builderPromptOpen && dialog.open) dialog.close();
+  }, [builderPromptOpen]);
+
+  useEffect(() => {
     setConfirmedPublicLink(null);
     setThemeLayouts(null);
     if (!user) {
@@ -744,13 +751,6 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       setSaving(false);
     }
   };
-
-  useEffect(() => {
-    const dialog = builderDialogRef.current;
-    if (!dialog) return;
-    if (builderPromptOpen && !dialog.open) dialog.showModal();
-    else if (!builderPromptOpen && dialog.open) dialog.close();
-  }, [builderPromptOpen]);
 
   const entryBuilderHash = entryId !== null
     ? `#/studio/entry/${encodeURIComponent(typeKey)}/${entryId}`

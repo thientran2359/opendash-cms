@@ -419,6 +419,7 @@ export function BuilderPreviewFrame({
       aria-busy={preparing}
     >
       <iframe
+        key={interactive ? 'interactive' : 'static'}
         ref={iframeRef}
         id="canvas"
         title={title}
