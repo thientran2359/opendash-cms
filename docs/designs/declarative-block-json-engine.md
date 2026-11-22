@@ -324,11 +324,20 @@ pub struct RegisteredBlockSchema {
 
 ## Detailed Implementation Plan
 
+### Target Files to Create/Modify
+
+| Phạm vi / Slice | File / Thư mục mục tiêu | Vai trò chính |
+| :--- | :--- | :--- |
+| **Docs & Contracts** | `docs/product/PRODUCT_REQUIREMENTS.md` (đã cập nhật §7 tại PR #470), `cms/migrations/README.md`, `docs/contracts/M8_WRITER_INVENTORY.md`, `docs/contracts/PLUGIN_ABI.md` | Ngoại lệ `repeater` 1 cấp Trình dựng trang, bảng writer `builder_block_definitions`, mở rộng Plugin ZIP `blocks/` (`MAX_PLUGIN_FILES = 72`). |
+| **Slice S01 (`opendash-core`)** | `cms/crates/opendash-core/src/{lib.rs,id.rs,richtext.rs*,block_schema.rs*,theme.rs,builder.rs,builder_blocks.rs}` | `BlockSchemaV1` (12 kiểu field), `richtext` sanitizer thuần Rust, reserved `"core"`/`"legacy"`, `validate_for_save_with_schemas`, trích xuất media & văn bản `plugin_block`. |
+| **Slice S02 (C-SEC & 5 Core Blocks)** | `cms/migrations/0045_declarative_block_engine.sql*`, `cms/crates/opendash-server/src/{app.rs,main.rs,template_sec.rs,document.rs,page.rs}`, `builtin_blocks/**`, `storage/{page,builder,overrides,public_content,restore}.rs`, `routes/{public_content,builder,themes}.rs` | Migration `0045`, đóng lỗ hổng HTML5 comment/duplicate attr/entity, nonce RichText, Scoped CSS `[data-od-node-scope]`, `BlockTemplateCache`, `RenderBudget` toàn request, 5 core blocks nhúng sẵn. |
+| **Slice S03 (Packages & Media ACL)** | `cms/crates/opendash-server/src/{theme.rs,app.rs}`, `plugin/{package.rs,manager.rs}`, `storage/{theme,plugin,builder,entries,overrides,page}.rs`, `routes/builder.rs` | Auto-discovery `blocks/<slug>/` trong Theme v3 & Plugin ZIP, `plugin_revisions.blocks_json`, resync Public ACL khi bật/tắt/đổi theme, `GET /api/admin/builder/blocks`. |
+| **Slice S04 (Studio UI)** | `cms/admin/src/{types.ts,api/builder.ts}`, `features/media/MediaPicker.tsx`, `builder/{document.ts,BlockSchemaForm.tsx*,BuilderPreviewFrame.tsx,BuilderTree.tsx,BuilderCanvas.tsx,BuilderInspector.tsx,BuilderWorkspace.tsx}`, `studio/{StudioWorkspace.tsx,StudioCustomizerNav.tsx}`, `features/editor/{PanelRegionRenderer.tsx,SingleEditWorkspace.tsx}`, `storage/builder.rs#L1106,#L1111` | `<BlockSchemaForm>` 12 kiểu field, CSS data-URI Preview inliner, `MediaPicker` `'any'`, khóa `ProviderInactive`, đổi nhãn `"UX Builder"` sang **OpenDash Studio / Trình dựng trang**. |
+
 ### Slice S01: Core `BlockSchemaV1`, Reserved Package Grammar, Pure-Rust RichText & `validate_known`
 
-- **Dependencies:** Owner phê duyệt Đặc tả & sửa 1 câu ở `docs/product/PRODUCT_REQUIREMENTS.md` §7 (`Status: Approved`).
+- **Dependencies:** Đặc tả `Status: Approved` và `PRODUCT_REQUIREMENTS.md` §7 đã merge vào `main` (PR #470).
 - **File Ownership:**
-  - `docs/product/PRODUCT_REQUIREMENTS.md` — cập nhật `§7` ngoại lệ `repeater` 1 cấp trong `block.json` Trình dựng trang (giữ CPT `repeater` ngoài V1)
   - `cms/crates/opendash-core/src/lib.rs` — export `block_schema`, `richtext`
   - `cms/crates/opendash-core/src/id.rs` — dành riêng `"core"` và `"legacy"` trong `validate_package_id`, giữ `valid_namespaced_block_id` chuẩn `<= 32` mỗi phần
   - `cms/crates/opendash-core/src/richtext.rs` *(tạo mới)* — `sanitize_richtext(raw: &str) -> Result<String, &'static str>`, `strip_richtext_to_plain(raw: &str) -> String`, `decode_html5_entities` (dùng chung cho URL checks)
