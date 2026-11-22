@@ -412,7 +412,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     const retainingEntryDraft = mode2LoadedKeyRef.current === entryIdentity && entryDirty;
     let alive = true;
     setLoading(true);
-    setStatus('Đang tải trình dựng nội dung UX Builder...');
+    setStatus('Đang tải trình dựng nội dung Trình dựng trang...');
     Promise.all([
       builderApi.getEntryBuilder(entryTypeKey, entryId),
       getContentEntry(entryTypeKey, entryId),
@@ -442,14 +442,14 @@ export const StudioWorkspace: React.FC<Props> = ({
           setStatus(`Đang sửa ${entryRec.title} (v${opened.version}).`);
         } else {
           setConflict(entryVersion !== opened.version);
-          setStatus('Đã khôi phục nháp UX Builder chưa lưu từ phiên trước.');
+          setStatus('Đã khôi phục nháp Trình dựng trang chưa lưu từ phiên trước.');
         }
         mode2LoadedKeyRef.current = entryIdentity;
       })
       .catch(cause => {
         if (alive && seq === loadSeqRef.current && authorityRef.current === reqAuthority) {
-          setStatus('Không thể mở trình dựng UX Builder cho nội dung này.', true);
-          onApiError(cause, 'Không thể mở UX Builder.');
+          setStatus('Không thể mở trình dựng Trình dựng trang cho nội dung này.', true);
+          onApiError(cause, 'Không thể mở Trình dựng trang.');
         }
       })
       .finally(() => {
@@ -560,7 +560,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           })
           .catch(cause => {
             if (controller.signal.aborted || seq !== previewSeqRef.current) return;
-            onApiError(cause, 'Không thể tạo bản xem trước UX Builder.');
+            onApiError(cause, 'Không thể tạo bản xem trước Trình dựng trang.');
           });
         return;
       }
@@ -819,16 +819,16 @@ export const StudioWorkspace: React.FC<Props> = ({
       setEntryPublicationStatus(currentStatus);
       setStatus(
         entryPublicationPolicy === 'draft_publish' && currentStatus === 'draft'
-          ? `Đã lưu bản nháp UX Builder (v${currentVersion}). Nội dung vẫn ở trạng thái draft.`
+          ? `Đã lưu bản nháp Trình dựng trang (v${currentVersion}). Nội dung vẫn ở trạng thái draft.`
           : `Đã lưu và cập nhật công khai (v${currentVersion}).`,
       );
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        setStatus('Nội dung đã thay đổi ở phiên khác (412). Nháp UX Builder của bạn vẫn còn.', true);
+        setStatus('Nội dung đã thay đổi ở phiên khác (412). Nháp Trình dựng trang của bạn vẫn còn.', true);
       } else {
-        setStatus('Lưu UX Builder thất bại; nháp của bạn vẫn được giữ.', true);
-        onApiError(cause, 'Không thể lưu UX Builder.');
+        setStatus('Lưu Trình dựng trang thất bại; nháp của bạn vẫn được giữ.', true);
+        onApiError(cause, 'Không thể lưu Trình dựng trang.');
       }
     } finally {
       savingRef.current = false;
@@ -856,7 +856,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setStatus(`Đã đưa nội dung về văn bản thuần (v${res.version}).`);
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) setConflict(true);
-      onApiError(cause, 'Không thể reset nội dung UX Builder.');
+      onApiError(cause, 'Không thể reset nội dung Trình dựng trang.');
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -865,7 +865,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   const handleReloadMode2 = () => {
     if (!isMode2 || !entryTypeKey || entryId === null) return;
-    if (entryDirty && !window.confirm('Tải lại bản trên server sẽ bỏ nháp UX Builder hiện tại. Tiếp tục?')) return;
+    if (entryDirty && !window.confirm('Tải lại bản trên server sẽ bỏ nháp Trình dựng trang hiện tại. Tiếp tục?')) return;
     mode2LoadedKeyRef.current = null;
     setConflict(false);
     const seq = ++loadSeqRef.current;
@@ -884,7 +884,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setEntryHadRecovery(opened.had_recovery);
       resetHistory();
       setStatus(`Đã tải bản mới nhất v${opened.version}.`);
-    }).catch(cause => onApiError(cause, 'Không thể tải lại UX Builder.'))
+    }).catch(cause => onApiError(cause, 'Không thể tải lại Trình dựng trang.'))
       .finally(() => { if (seq === loadSeqRef.current) setLoading(false); });
   };
 
@@ -923,7 +923,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   return (
     <div className="flex h-full w-full flex-col bg-zinc-100 text-zinc-900" data-testid="studio-workspace">
       <StudioTopBar
-        title={isMode2 ? `UX Builder · ${entryTitle || `${entryTypeKey} #${entryId}`}` : 'OpenDash Studio'}
+        title={isMode2 ? `Trình dựng trang · ${entryTitle || `${entryTypeKey} #${entryId}`}` : 'OpenDash Studio'}
         subtitle={isMode2 ? `${entryTypeKey} #${entryId} · ${entryPublicationStatus}` : (activeThemeName ?? activeThemeId ?? undefined)}
         dirty={totalDirty}
         saving={saving}
@@ -959,7 +959,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside
           className="h-72 w-full shrink-0 overflow-hidden border-b border-zinc-200 bg-white md:h-auto md:w-[340px] md:border-r md:border-b-0"
-          aria-label={isMode2 ? 'Bảng dựng nội dung UX Builder' : 'Bảng tùy biến Studio'}
+          aria-label={isMode2 ? 'Bảng dựng nội dung Trình dựng trang' : 'Bảng tùy biến Studio'}
         >
           {isMode2 ? (
             <div className="h-full overflow-y-auto p-3.5" data-testid="studio-mode2-sidebar">
@@ -1027,7 +1027,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               templateEditingEnabled={templateEditingEnabled}
               onInitializeTemplateOverride={() => {
                 setTemplateEditingEnabled(true);
-                setStatus(`Đã khởi tạo bản dựng UX Builder cho "${selectedTarget?.label ?? ''}". Chưa lưu lên CSDL.`);
+                setStatus(`Đã khởi tạo bản dựng Trình dựng trang cho "${selectedTarget?.label ?? ''}". Chưa lưu lên CSDL.`);
               }}
               templateDoc={templateDoc}
               templateSelectedNodeId={templateSelectedNodeId}

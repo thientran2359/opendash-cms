@@ -1223,12 +1223,12 @@ fn check_entry_body_edit_acl(
 ) -> ApiResult<()> {
     let Some(body_field) = schema.effective_fields.get("body") else {
         return Err(ApiError::forbidden(
-            "Loại nội dung không có trường 'body' hợp lệ cho UX Builder.",
+            "Loại nội dung không có trường 'body' hợp lệ cho Trình dựng trang.",
         ));
     };
     if body_field.definition.field_type != ContentFieldType::RichText {
         return Err(ApiError::forbidden(
-            "Trường 'body' phải có kiểu rich_text để dùng UX Builder.",
+            "Trường 'body' phải có kiểu rich_text để dùng Trình dựng trang.",
         ));
     }
     if actor_field_role(actor) < body_field.definition.min_edit_role {

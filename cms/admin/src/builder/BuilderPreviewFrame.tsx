@@ -5,6 +5,7 @@ import { type BuilderDocument, type BuilderViewport, VIEWPORT_WIDTHS, locate } f
 const MEDIA_PREVIEW_LIMIT = 64;
 const MEDIA_PREVIEW_BYTES_LIMIT = 48 * 1024 * 1024;
 const PRIVATE_MEDIA_PATH = /^\/api\/admin\/media\/([a-zA-Z0-9_-]{1,128})\/file$/;
+const CSS_MEDIA_URL = /url\(\s*(["']?)(\/api\/admin\/media\/[a-zA-Z0-9_-]{1,128}\/file|\/media\/[a-zA-Z0-9_-]{1,128}\/file)\1\s*\)/g;
 
 const BRIDGE_SCRIPT = [
   '(function(){',
@@ -131,11 +132,18 @@ export async function preparePreviewMarkup(
     ...Array.from(parsed.querySelectorAll('img[src]')).map(el => ({ el, attr: 'src' })),
     ...Array.from(parsed.querySelectorAll('video[poster]')).map(el => ({ el, attr: 'poster' })),
   ];
+  const scopedStyles = Array.from(parsed.querySelectorAll<HTMLStyleElement>('style[data-od-block-styles]'));
+  const cssPrivatePaths = scopedStyles.flatMap(style =>
+    Array.from((style.textContent ?? '').matchAll(CSS_MEDIA_URL))
+      .map(match => match[2])
+      .filter(path => PRIVATE_MEDIA_PATH.test(path)),
+  );
   const mediaPaths = [
     ...new Set(
-      privateTargets
-        .map(t => t.el.getAttribute(t.attr) ?? '')
-        .filter(path => PRIVATE_MEDIA_PATH.test(path)),
+      [
+        ...privateTargets.map(t => t.el.getAttribute(t.attr) ?? ''),
+        ...cssPrivatePaths,
+      ].filter(path => PRIVATE_MEDIA_PATH.test(path)),
     ),
   ];
   const replacements = new Map<string, string>();
@@ -178,6 +186,16 @@ export async function preparePreviewMarkup(
 
   // Rewrite root-relative `/theme/...` & `/media/...` URLs to `${origin}/...`.
   const resolvedOrigin = options.origin ?? (typeof window !== 'undefined' ? window.location.origin : '');
+  for (const style of scopedStyles) {
+    style.textContent = (style.textContent ?? '').replace(CSS_MEDIA_URL, (original, _quote: string, path: string) => {
+      if (PRIVATE_MEDIA_PATH.test(path)) {
+        const replacement = replacements.get(path);
+        return replacement ? `url("${replacement}")` : original;
+      }
+      const rewritten = rewriteRootRelativeUrl(path, resolvedOrigin);
+      return rewritten ? `url("${rewritten}")` : original;
+    });
+  }
   if (resolvedOrigin) {
     const urlAttributes: Array<[string, string]> = [
       ['link[href]', 'href'],

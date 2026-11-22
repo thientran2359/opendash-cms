@@ -91,7 +91,7 @@ function pageChoiceValue(id: string): number | null {
 
 function sourceBadge(item: StudioTargetItem): { label: string; tone: 'success' | 'neutral' | 'warning' } {
   if (item.effective_source.kind === 'db_override') {
-    return { label: 'UX Builder Override', tone: 'success' };
+    return { label: 'Trình dựng trang Override', tone: 'success' };
   }
   if (item.effective_source.kind === 'active_theme') {
     return { label: 'Theme C-SEC', tone: 'neutral' };
@@ -219,7 +219,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
             >
               <span className="min-w-0">
                 <span className="flex items-center gap-2 text-sm font-medium text-zinc-900">
-                  <span>Template &amp; UX Builder</span>
+                  <span>Template &amp; Trình dựng trang</span>
                   {templateDirty && <span className="h-2 w-2 rounded-full bg-amber-500" title="Template có thay đổi chưa lưu" />}
                 </span>
                 <span className="mt-0.5 block truncate text-xs text-zinc-500">
@@ -468,10 +468,10 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               <p className="font-semibold">
                 {selectedTarget.has_theme_source
                   ? 'Target đang dùng mẫu gốc (C-SEC HTML) từ Theme đang kích hoạt.'
-                  : 'Target hiện chưa có UX Builder Override trong CSDL (đang dùng fallback mặc định).'}
+                  : 'Target hiện chưa có Trình dựng trang Override trong CSDL (đang dùng fallback mặc định).'}
               </p>
               <p className="leading-relaxed">
-                Khởi tạo bản dựng UX Builder sẽ tạo một template override mới cho <code>{selectedTarget.canonical_target_key}</code>.
+                Khởi tạo bản dựng Trình dựng trang sẽ tạo một template override mới cho <code>{selectedTarget.canonical_target_key}</code>.
                 Sau khi bấm <strong>Lưu thay đổi</strong>, bản dựng này sẽ thay thế mẫu gốc của Theme (có thể hoàn tác bằng <em>Reset mặc định</em>).
               </p>
               <AdminButton
@@ -482,7 +482,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 onClick={onInitializeTemplateOverride}
                 data-testid="studio-init-template-override"
               >
-                Khởi tạo bản dựng UX Builder
+                Khởi tạo bản dựng Trình dựng trang
               </AdminButton>
             </div>
           ) : (

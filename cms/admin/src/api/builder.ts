@@ -1,4 +1,4 @@
-import type { BlockRegistry } from '../types.ts';
+import type { BlockRegistry, BlockCatalogItemDto } from '../types.ts';
 import type { ContentMode } from '../features/content/types.ts';
 import type { BuilderDocument } from '../builder/document.ts';
 import { requestBlob, requestJson } from './client.ts';
@@ -171,6 +171,15 @@ export async function getRegistry(): Promise<BlockRegistry> {
     method: 'GET',
     defaultErrorMessage: 'Không thể tải danh sách block.',
   });
+}
+
+/** Unified Core/Theme/Plugin catalog. Templates are never sent to Admin. */
+export async function getBlockSchemas(): Promise<BlockCatalogItemDto[]> {
+  const response = await requestJson<{ items: BlockCatalogItemDto[] }>('/api/admin/builder/blocks', {
+    method: 'GET',
+    defaultErrorMessage: 'Không thể tải danh sách block cho Trình dựng trang.',
+  });
+  return response.items;
 }
 
 export function getPrivatePreviewMedia(path: string, signal: AbortSignal): Promise<Blob> {
