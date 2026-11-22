@@ -48,4 +48,4 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 
 ## 7. Ngoài phạm vi bản đầu (Sau V1)
 
-Bán hàng (e-commerce), AI dựng trang từ ảnh, luồng duyệt/phê duyệt xuất bản nhiều bước (ngoài trạng thái `draft`/`published`), lịch sử và khôi phục phiên bản (revisions), repeater, quan hệ giữa nội dung (relation), khối đồng bộ tự động (synced propagation), lọc nâng cao cho khách truy cập, giao diện plugin JS/HTML tùy ý, tác vụ định kỳ (cron), sao lưu theo lịch, quản lý nội dung đa ngữ và chuyển ngôn ngữ Admin.
+Bán hàng (e-commerce), AI dựng trang từ ảnh, luồng duyệt/phê duyệt xuất bản nhiều bước (ngoài trạng thái `draft`/`published`), lịch sử và khôi phục phiên bản (revisions), repeater cho custom fields của CPT (riêng Trình dựng trang hỗ trợ trường lặp `repeater` tối đa 1 cấp có giới hạn kích thước trong `block.json`), quan hệ giữa nội dung (relation), khối đồng bộ tự động (synced propagation), lọc nâng cao cho khách truy cập, giao diện plugin JS/HTML tùy ý, tác vụ định kỳ (cron), sao lưu theo lịch, quản lý nội dung đa ngữ và chuyển ngôn ngữ Admin.
