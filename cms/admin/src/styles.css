@@ -255,10 +255,6 @@
   margin-top: 0;
 }
 
-.hidden {
-  display: none !important;
-}
-
 .admin-view-tabs {
   display: flex;
   gap: 8px;

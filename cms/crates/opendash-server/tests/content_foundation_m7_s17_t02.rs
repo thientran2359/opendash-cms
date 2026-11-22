@@ -454,10 +454,10 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
         active_provider["public_url"],
         "/content/t02_provider/provider-entry"
     );
-    let fixture_db = sqlx::SqlitePool::connect(&format!(
-        "sqlite://{}",
-        srv.root.join("database/opendash.sqlite").display()
-    ))
+    let fixture_db = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(srv.root.join("database/opendash.sqlite")),
+    )
     .await
     .unwrap();
     let changed = sqlx::query(

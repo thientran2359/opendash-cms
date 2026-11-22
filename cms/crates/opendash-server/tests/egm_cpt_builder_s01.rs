@@ -309,10 +309,10 @@ async fn cpt_builder_capability_cas_body_isolation_and_disable_preservation() {
         .as_str()
         .expect("Builder PUT returns content entry updated_at");
     assert!(!returned_updated_at.is_empty());
-    let db = SqlitePool::connect(&format!(
-        "sqlite://{}",
-        site.root.join("database/opendash.sqlite").display()
-    ))
+    let db = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(site.root.join("database/opendash.sqlite")),
+    )
     .await
     .unwrap();
     // Unified storage: non-pattern entries store Builder AST inside
@@ -639,10 +639,10 @@ async fn auto_injected_cpt_body_without_declared_fields_syncs_media_refs_and_acl
         .as_i64()
         .unwrap();
 
-    let db = SqlitePool::connect(&format!(
-        "sqlite://{}",
-        site.root.join("database/opendash.sqlite").display()
-    ))
+    let db = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(site.root.join("database/opendash.sqlite")),
+    )
     .await
     .unwrap();
     let ref_count: i64 = sqlx::query_scalar(
@@ -840,10 +840,10 @@ async fn plugin_content_save_syncs_entry_builder_media_refs_for_block_body() {
         .unwrap();
     assert_eq!(action_res.status(), StatusCode::OK);
 
-    let db = SqlitePool::connect(&format!(
-        "sqlite://{}",
-        site.root.join("database/opendash.sqlite").display()
-    ))
+    let db = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(site.root.join("database/opendash.sqlite")),
+    )
     .await
     .unwrap();
     let entry_id: i64 = sqlx::query_scalar(

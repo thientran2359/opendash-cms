@@ -586,9 +586,10 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
 
     // 4. Boundary pagination: 5000 routes -> 1 part; 5001 routes -> 2 parts.
     let db_path = srv.site_root.join("database").join("opendash.sqlite");
-    let pool = SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
-        .await
-        .unwrap();
+    let pool =
+        SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db_path))
+            .await
+            .unwrap();
     // EGM S01 migration 0043 makes the untouched Core Page non-archived.
     // Currently indexable routes: published Reading Homepage '/' (1)
     // and '/content/post' (1) = 2. Insert 4998 more -> exactly 5000.

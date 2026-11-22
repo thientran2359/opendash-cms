@@ -23,10 +23,13 @@ fn unique_db_path(name: &str) -> std::path::PathBuf {
 async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtrip() {
     // 1. Verify migration 0024 applies cleanly and supports owner_kind='plugin' alongside 'theme'
     let db_path = unique_db_path("bridge");
-    let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect(&db_url)
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
         .await
         .expect("connect sqlite");
     sqlx::migrate!("../../migrations")

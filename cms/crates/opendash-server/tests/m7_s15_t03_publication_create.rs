@@ -67,10 +67,10 @@ impl Site {
     }
 
     async fn db(&self) -> SqlitePool {
-        SqlitePool::connect(&format!(
-            "sqlite://{}",
-            self.root.join("database/opendash.sqlite").display()
-        ))
+        SqlitePool::connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(self.root.join("database/opendash.sqlite")),
+        )
         .await
         .unwrap()
     }

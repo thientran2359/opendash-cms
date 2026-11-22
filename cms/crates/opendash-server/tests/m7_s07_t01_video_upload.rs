@@ -424,9 +424,10 @@ async fn video_upload_validation_dedup_and_typed_image_guards() {
 
     // 1. Verify SQLite integrity & foreign keys after 0030_media_video.sql
     let db_path = server.site_root.join("database").join("opendash.sqlite");
-    let pool = SqlitePool::connect(&format!("sqlite://{}", db_path.display()))
-        .await
-        .unwrap();
+    let pool =
+        SqlitePool::connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db_path))
+            .await
+            .unwrap();
     let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
         .fetch_one(&pool)
         .await

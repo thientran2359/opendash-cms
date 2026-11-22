@@ -599,10 +599,10 @@ async fn m6_s03_t02_host_actions_rbac_fencing_and_leases() {
     assert_eq!(inflight_status, 409, "inflight_body: {inflight_body}");
 
     // Verify nothing was committed to plugin_kv
-    let pool = SqlitePool::connect(&format!(
-        "sqlite://{}",
-        temp.path.join("database/opendash.sqlite").display()
-    ))
+    let pool = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(temp.path.join("database/opendash.sqlite")),
+    )
     .await
     .unwrap();
     let kv_count: i64 = sqlx::query_scalar(
