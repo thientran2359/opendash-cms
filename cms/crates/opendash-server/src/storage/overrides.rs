@@ -931,14 +931,15 @@ async fn refresh_override_media_refs_in_tx(
     override_id: i64,
     document: &BuilderDocument,
 ) -> ApiResult<()> {
+    let refs = builder::resolve_document_media_refs_in_conn(&mut **tx, document).await?;
     sqlx::query("DELETE FROM template_override_media_refs WHERE override_id = ?")
         .bind(override_id)
         .execute(&mut **tx)
         .await?;
     for (role, ids) in [
-        ("image", builder::image_ids(document)),
-        ("video", builder::video_ids(document)),
-        ("poster", builder::poster_image_ids(document)),
+        ("image", refs.image_ids),
+        ("video", refs.video_ids),
+        ("poster", refs.poster_image_ids),
     ] {
         for media_id in ids {
             sqlx::query(

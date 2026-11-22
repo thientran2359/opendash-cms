@@ -54,6 +54,70 @@ fn verify_supported_values(
     Ok(())
 }
 
+/// Validate comment-block media using the current unified provider catalog.
+/// Only active, declared schemas contribute public media references; inactive
+/// provider values are preserved in the entry body for the delete-pin scanner.
+pub(crate) async fn validated_entry_block_refs_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    raw_body: &str,
+) -> ApiResult<opendash_core::builder_blocks::ExtractedBlockRefs> {
+    let catalog = crate::storage::page::load_unified_block_catalog_in_conn(conn).await?;
+    let mut refs =
+        opendash_core::builder_blocks::extract_block_refs_lenient_with_schemas(raw_body, &catalog);
+    for (kind, ids) in [
+        ("image", &refs.image_ids),
+        ("image", &refs.poster_image_ids),
+        ("video", &refs.video_ids),
+    ] {
+        for id in ids {
+            if !crate::storage::media::valid_media_id(id) {
+                return Err(ApiError::unprocessable(
+                    "ID media trong comment block không hợp lệ.",
+                ));
+            }
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = ? AND lifecycle_state = 'active')",
+            )
+            .bind(id)
+            .bind(kind)
+            .fetch_one(&mut *conn)
+            .await?;
+            if exists == 0 {
+                return Err(ApiError::unprocessable(
+                    "Media tham chiếu trong comment block không tồn tại hoặc không đúng loại.",
+                ));
+            }
+        }
+    }
+    for id in std::mem::take(&mut refs.any_media_ids) {
+        if !crate::storage::media::valid_media_id(&id) {
+            return Err(ApiError::unprocessable(
+                "ID media trong comment block không hợp lệ.",
+            ));
+        }
+        let kind: Option<String> = sqlx::query_scalar(
+            "SELECT kind FROM media_assets WHERE id = ? AND lifecycle_state = 'active'",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *conn)
+        .await?;
+        match kind.as_deref() {
+            Some("image") => {
+                refs.image_ids.insert(id);
+            }
+            Some("video") => {
+                refs.video_ids.insert(id);
+            }
+            _ => {
+                return Err(ApiError::unprocessable(
+                    "Media tham chiếu trong comment block không tồn tại hoặc không đúng loại.",
+                ));
+            }
+        }
+    }
+    Ok(refs)
+}
+
 pub(super) async fn sync_entry_body_refs_in_conn(
     conn: &mut sqlx::SqliteConnection,
     entry_id: i64,
@@ -86,43 +150,7 @@ pub(super) async fn sync_entry_body_refs_in_conn(
         return Ok(());
     }
 
-    let refs = opendash_core::builder_blocks::extract_block_refs_lenient(raw_body);
-    for id in refs.image_ids.iter().chain(refs.poster_image_ids.iter()) {
-        if !crate::storage::media::valid_media_id(id) {
-            return Err(ApiError::unprocessable(
-                "ID ảnh trong comment block không hợp lệ.",
-            ));
-        }
-        let exists: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')",
-        )
-        .bind(id)
-        .fetch_one(&mut *conn)
-        .await?;
-        if exists == 0 {
-            return Err(ApiError::unprocessable(
-                "Ảnh tham chiếu trong comment block không tồn tại trong Media Library.",
-            ));
-        }
-    }
-    for id in &refs.video_ids {
-        if !crate::storage::media::valid_media_id(id) {
-            return Err(ApiError::unprocessable(
-                "ID video trong comment block không hợp lệ.",
-            ));
-        }
-        let exists: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'video' AND lifecycle_state = 'active')",
-        )
-        .bind(id)
-        .fetch_one(&mut *conn)
-        .await?;
-        if exists == 0 {
-            return Err(ApiError::unprocessable(
-                "Video tham chiếu trong comment block không tồn tại trong Media Library.",
-            ));
-        }
-    }
+    let refs = validated_entry_block_refs_in_conn(conn, raw_body).await?;
     if refs.pattern_ids.len() > 16 {
         return Err(ApiError::unprocessable(
             "Builder exceeds 16 Pattern references.",
@@ -153,8 +181,12 @@ pub(super) async fn sync_entry_body_refs_in_conn(
         }
     }
 
-    let body_is_public = body_field.definition.public_exposure
-        == opendash_core::content::PublicExposure::Public
+    let body_is_public = schema
+        .base
+        .descriptor
+        .settings
+        .supports(ContentSupport::Builder)
+        && body_field.definition.public_exposure == opendash_core::content::PublicExposure::Public
         && body_field.definition.min_view_role == FieldRole::Editor;
     if !body_is_public {
         return Ok(());
@@ -1655,6 +1687,15 @@ pub async fn prepare_composite_entry_save(
     let effective_ct_def = effective_as_ct_def(&effective);
     crate::storage::media::require_existing_references(db, &effective_ct_def, &merged_input)
         .await?;
+    if let Some(body) = merged_input.values.get("body").and_then(Value::as_str)
+        && effective.effective_fields.get("body").is_some_and(|field| {
+            field.definition.field_type == opendash_core::content::ContentFieldType::RichText
+        })
+        && opendash_core::builder_blocks::contains_blocks(body)
+    {
+        let mut conn = db.acquire().await?;
+        validated_entry_block_refs_in_conn(&mut conn, body).await?;
+    }
 
     Ok(CompositePreflightPlan {
         preflight_schema_token: effective.schema_token.clone(),
