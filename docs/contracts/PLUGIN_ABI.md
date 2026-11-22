@@ -14,12 +14,15 @@ Gói ZIP cài đặt vào OpenDash phải tuân thủ nghiêm ngặt các giới
    - `manifest.json` (bắt buộc, tối đa `64 KiB`): Chứa thông tin định danh, phiên bản, ranh giới quyền và khai báo mở rộng.
    - `plugin.wasm` (bắt buộc, tối đa `2 MiB`): File nhị phân WebAssembly biên dịch cho `wasm32-unknown-unknown`.
    - `README.md` (tùy chọn).
+   - `blocks/<slug>/block.json` + `blocks/<slug>/render.html` (tùy chọn, luôn đủ cặp): khai báo block Builder theo `BlockSchemaV1` và template MiniJinja được kiểm tra C-SEC; mỗi gói tối đa **32 blocks**, mỗi `slug` dài tối đa 32 ký tự dạng kebab-case. `schema.id` bắt buộc bằng `<plugin-id>/<slug>`; plugin có blocks phải dùng `plugin-id` hợp lệ dài tối đa 32 ký tự. Không cho phép ID `core` hoặc `legacy`.
 2. **Quy tắc an toàn khi giải nén**:
-   - Số lượng file tối đa trong ZIP: **10 files**, kích thước ZIP tối đa **5 MiB**, tổng dung lượng giải nén tối đa **10 MiB**.
-   - Từ chối đường dẫn tuyệt đối, thư mục con, path traversal (`..`, `/`, `\`), symlink hoặc mục trùng lặp.
+   - Tối đa **72 file thường** (bao gồm 64 file block, `manifest.json`, `plugin.wasm` và `README.md`), tối đa **256 ZIP entries** kể cả thư mục rỗng; kích thước ZIP tối đa **5 MiB**, tổng giải nén tối đa **10 MiB**, tỷ lệ giải nén mỗi file tối đa **100:1**.
+   - Từ chối đường dẫn tuyệt đối, traversal (`..`), backslash, symlink, file lạ hoặc file trùng nhau kể cả xung đột chữ hoa/thường. Chỉ chấp nhận thư mục con tại `blocks/<slug>/`; bỏ qua ZIP directory entries rỗng sau khi xác minh đường dẫn.
    - **Không thực thi code tại thời điểm cài đặt**; host chỉ kiểm tra manifest và chữ ký module Wasm (`wasmi::Module::new`).
 3. **Immutable Revisions (`plugins/revisions/<revision_digest>/`)**:
    - Staging qua `.staging/<run_uuid>/`, ghi `.complete` và cập nhật bảng `plugin_revisions`, cột `active_revision_id`, `revision_generation` và `cas_version` trên bảng `plugins` (`0022_plugin_revisions.sql`).
+   - Plugin không khai báo block giữ nguyên công thức revision digest hiện hành và không sinh `blocks.json` trên đĩa. Plugin có block ghi `plugins/revisions/<digest>/blocks.json` canonical (JSON object sorted theo slug: `{ "<slug>": { "schema": { ... }, "template": "..." } }`), đưa bytes vào digest và lưu cùng nội dung tại `plugin_revisions.blocks_json`. Durability verification xác minh cả digest và nội dung canonical.
+   - Cài đặt / nâng cấp đăng ký block trong `builder_block_definitions`; trùng block ID với chủ sở hữu khác trả `409`. Block bị rút khỏi phiên bản mới được ghi nhận `withdrawn`; tắt plugin chuyển block còn khai báo thành `provider_inactive`. Kích hoạt trở lại chỉ phục hồi các block còn khai báo. Media ACL được đồng bộ lại ngay trong transaction.
 
 ---
 

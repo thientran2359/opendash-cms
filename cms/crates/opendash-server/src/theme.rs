@@ -2,8 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub use opendash_core::theme::{Block, BlockDescriptor, Fields};
 use opendash_core::{
+    block_schema::{BlockSchemaV1, RegisteredBlockSchema},
     builder::BuilderDocument,
-    registry::RegistryCatalog,
+    id::valid_kebab_segment_with_limit,
+    registry::{DeclarationState, OwnedDescriptor, ProviderStatus, RegistryCatalog, ResourceOwner},
     theme::{TemplateCandidateKind, ThemeV3Manifest, valid_asset_path},
 };
 use serde::{Deserialize, Serialize};
@@ -26,6 +28,105 @@ pub struct Theme {
     pub content_single_template: Option<String>,
     /// Explicitly supported block from another installed theme; never rewrites home_page.
     pub compatible_block_id: Option<String>,
+}
+
+#[cfg(test)]
+mod s03_package_block_tests {
+    use super::*;
+
+    fn block_schema(owner: &str, slug: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": 1, "id": format!("{owner}/{slug}"),
+            "title": "Banner", "category": "content", "render": "render.html", "fields": []
+        }))
+        .unwrap()
+    }
+
+    fn file_map() -> BTreeMap<String, Vec<u8>> {
+        BTreeMap::from([
+            ("theme.json".into(), br#"{"manifest_version":3,"theme_id":"sample-theme","name":"Sample","version":"1.0.0"}"#.to_vec()),
+            ("blocks/banner/block.json".into(), block_schema("sample-theme", "banner")),
+            ("blocks/banner/render.html".into(), b"<p>Hello</p>".to_vec()),
+        ])
+    }
+
+    #[test]
+    fn v3_discovers_valid_blocks_from_unlisted_manifest_paths() {
+        let parsed = validate_theme_v3_files(file_map()).unwrap();
+        assert_eq!(parsed.manifest.theme_id, "sample-theme");
+    }
+
+    #[test]
+    fn v3_pattern_can_reference_a_block_from_same_theme() {
+        let mut files = file_map();
+        files.insert("theme.json".into(), br#"{"manifest_version":3,"theme_id":"sample-theme","name":"Sample","version":"1.0.0","patterns":[{"key":"notice","title":"Notice","category":"banner","file":"patterns/notice.json"}]}"#.to_vec());
+        let pattern = serde_json::json!({
+            "schema_version":1,
+            "sections":[{"id":"section-one","children":[{"id":"row-one","children":[{
+                "id":"column-one","children":[{
+                    "id":"element-one","type":"plugin/block",
+                    "props":{"block_id":"sample-theme/banner","values":{}}
+                }]
+            }]}]}]
+        });
+        files.insert(
+            "patterns/notice.json".into(),
+            serde_json::to_vec(&pattern).unwrap(),
+        );
+        assert!(validate_theme_v3_files(files.clone()).is_ok());
+
+        let mut unknown = pattern;
+        unknown["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["block_id"] =
+            "other-theme/banner".into();
+        files.insert(
+            "patterns/notice.json".into(),
+            serde_json::to_vec(&unknown).unwrap(),
+        );
+        assert!(validate_theme_v3_files(files).is_err());
+    }
+
+    #[test]
+    fn v3_rejects_unpaired_blocks_wrong_slug_and_unsafe_csec() {
+        let mut files = file_map();
+        files.remove("blocks/banner/render.html");
+        assert!(validate_theme_v3_files(files).is_err());
+
+        let mut files = file_map();
+        files.insert(
+            "blocks/banner/block.json".into(),
+            block_schema("sample-theme", "other"),
+        );
+        assert!(validate_theme_v3_files(files).is_err());
+
+        let mut files = file_map();
+        files.insert(
+            "blocks/banner/render.html".into(),
+            b"<script>alert(1)</script>".to_vec(),
+        );
+        assert!(validate_theme_v3_files(files).is_err());
+
+        let mut files = file_map();
+        files.insert("blocks/Banner/render.html".into(), b"<p>Bad</p>".to_vec());
+        assert!(validate_theme_v3_files(files).is_err());
+    }
+
+    #[test]
+    fn v3_rejects_over_32_blocks_and_invalid_owner() {
+        let mut files = file_map();
+        for i in 0..33 {
+            let slug = format!("notice-{i}");
+            files.insert(
+                format!("blocks/{slug}/block.json"),
+                block_schema("sample-theme", &slug),
+            );
+            files.insert(format!("blocks/{slug}/render.html"), b"<p>Hi</p>".to_vec());
+        }
+        assert!(validate_theme_v3_files(files).is_err());
+
+        let mut files = file_map();
+        files.insert("theme.json".into(), br#"{"manifest_version":3,"theme_id":"abcdefghijklmnopqrstuvwxyz-abcde","name":"Sample","version":"1.0.0"}"#.to_vec());
+        assert!(validate_theme_v3_files(files).is_err());
+    }
 }
 
 pub fn render(template: &str, fields: &Fields, block: &Block) -> Result<String, &'static str> {
@@ -104,6 +205,15 @@ fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
         Some((parent, name)) => (parent, name),
         None => ("", rel_path),
     };
+    if let Some(rest) = rel_path.strip_prefix("blocks/") {
+        if let Some((slug, leaf)) = rest.split_once('/')
+            && valid_kebab_segment_with_limit(slug, 32)
+            && matches!(leaf, "block.json" | "render.html")
+        {
+            return Ok(V2_MAX_TEXT_BYTES);
+        }
+        return Err("Đường dẫn blocks/<slug>/ của theme v3 không hợp lệ.");
+    }
     if !parent.is_empty()
         && parent.split('/').any(|segment| {
             segment.is_empty()
@@ -139,6 +249,60 @@ fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
         }
         _ => Err("Gói theme v3 chứa file ngoài root hoặc bốn thư mục được phép."),
     }
+}
+
+/// Decode strict, paired declarative blocks from a validated package file map.
+/// This is shared by theme and plugin ingestion, and by theme activation after
+/// checking the immutable revision's on-disk file digests.
+pub(crate) fn collect_package_blocks(
+    files: &BTreeMap<String, Vec<u8>>,
+    owner_id: &str,
+) -> Result<Vec<(BlockSchemaV1, String)>, &'static str> {
+    let mut slugs = BTreeSet::new();
+    for path in files.keys().filter(|path| path.starts_with("blocks/")) {
+        let Some(rest) = path.strip_prefix("blocks/") else {
+            unreachable!()
+        };
+        let Some((slug, leaf)) = rest.split_once('/') else {
+            return Err("Đường dẫn block trong gói không hợp lệ.");
+        };
+        if !valid_kebab_segment_with_limit(slug, 32)
+            || !matches!(leaf, "block.json" | "render.html")
+        {
+            return Err("Gói chứa đường dẫn block ngoài hợp đồng.");
+        }
+        slugs.insert(slug.to_owned());
+    }
+    if slugs.len() > 32 {
+        return Err("Mỗi gói chỉ được khai báo tối đa 32 blocks.");
+    }
+    if !slugs.is_empty() && !valid_kebab_segment_with_limit(owner_id, 32) {
+        return Err("Package ID khai báo block phải là kebab-case tối đa 32 ký tự.");
+    }
+
+    let mut blocks = Vec::with_capacity(slugs.len());
+    for slug in slugs {
+        let schema_path = format!("blocks/{slug}/block.json");
+        let template_path = format!("blocks/{slug}/render.html");
+        let raw_schema =
+            std::str::from_utf8(files.get(&schema_path).ok_or("Block thiếu block.json.")?)
+                .map_err(|_| "block.json phải là UTF-8 hợp lệ.")?;
+        let template = std::str::from_utf8(
+            files
+                .get(&template_path)
+                .ok_or("Block thiếu render.html.")?,
+        )
+        .map_err(|_| "render.html phải là UTF-8 hợp lệ.")?;
+        let schema: BlockSchemaV1 =
+            serde_json::from_str(raw_schema).map_err(|_| "block.json không đúng schema v1.")?;
+        schema.validate(owner_id)?;
+        if schema.id != format!("{owner_id}/{slug}") {
+            return Err("ID block không khớp thư mục blocks/<slug>.");
+        }
+        crate::template_sec::validate_block_template_csec(&schema.id, template, &schema)?;
+        blocks.push((schema, template.to_owned()));
+    }
+    Ok(blocks)
 }
 
 fn required_v3_utf8<'a>(
@@ -190,6 +354,8 @@ pub(crate) fn validate_theme_v3_files(
     let manifest: ThemeV3Manifest = serde_json::from_str(&manifest_json)
         .map_err(|_| V2ZipError::BadRequest("theme.json không đúng schema theme v3."))?;
     manifest.validate().map_err(V2ZipError::BadRequest)?;
+    let blocks =
+        collect_package_blocks(&files, &manifest.theme_id).map_err(V2ZipError::BadRequest)?;
     parse_theme_declarations(&manifest_json).map_err(V2ZipError::BadRequest)?;
     if let Some(extensions) = &manifest.admin_extensions {
         extensions
@@ -216,6 +382,40 @@ pub(crate) fn validate_theme_v3_files(
     // Only HTML and patterns explicitly permitted by the v3 manifest may
     // enter the package. Unreferenced executable templates are rejected.
     let mut declared = BTreeSet::from(["theme.json".to_string()]);
+    let mut block_catalog = RegistryCatalog::<RegisteredBlockSchema>::new();
+    for block in crate::storage::page::embedded_core_block_defs().values() {
+        block_catalog.insert_loaded(
+            block.block_id.clone(),
+            OwnedDescriptor {
+                owner: ResourceOwner::Core,
+                status: ProviderStatus::Active,
+                declaration_state: DeclarationState::Declared,
+                descriptor: block.schema.clone(),
+            },
+        );
+    }
+    for (schema, _) in &blocks {
+        declared.insert(format!(
+            "blocks/{}/block.json",
+            schema.id.split_once('/').unwrap().1
+        ));
+        declared.insert(format!(
+            "blocks/{}/render.html",
+            schema.id.split_once('/').unwrap().1
+        ));
+        block_catalog.insert_loaded(
+            schema.id.clone(),
+            OwnedDescriptor {
+                owner: ResourceOwner::Theme(manifest.theme_id.clone()),
+                status: ProviderStatus::Active,
+                declaration_state: DeclarationState::Declared,
+                descriptor: RegisteredBlockSchema {
+                    schema: schema.clone(),
+                    legacy_mode: false,
+                },
+            },
+        );
+    }
     let mut parts = BTreeMap::new();
     for (key, path) in &manifest.parts {
         let source = required_v3_utf8(&files, path)?;
@@ -256,7 +456,7 @@ pub(crate) fn validate_theme_v3_files(
         let document = BuilderDocument::from_json(source.as_bytes())
             .map_err(|_| V2ZipError::BadRequest("Theme Pattern JSON không hợp lệ."))?;
         document
-            .validate_for_save(&RegistryCatalog::<BlockDescriptor>::new(), None)
+            .validate_for_save_with_schemas(&block_catalog, None)
             .map_err(|_| V2ZipError::BadRequest("Theme Pattern Builder AST không hợp lệ."))?;
         if let Some(path) = &pattern.preview_asset {
             let is_raster = [".png", ".jpg", ".jpeg", ".webp", ".gif"]

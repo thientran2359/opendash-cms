@@ -21,7 +21,7 @@ use crate::{
     routes::{
         auth::{auth_login, auth_logout, auth_me, auth_setup},
         builder::{
-            builder, entry_builder_get, entry_builder_preview, entry_builder_put,
+            block_schemas, builder, entry_builder_get, entry_builder_preview, entry_builder_put,
             entry_builder_reset, page, preview, registry, save, serve_asset,
         },
         content::{
@@ -214,6 +214,7 @@ pub fn build_router_with_themes_root(
         .route("/auth/me", get(auth_me))
         .route("/auth/logout", post(auth_logout))
         .route("/api/admin/dashboard", get(dashboard_get))
+        .route("/api/admin/builder/blocks", get(block_schemas))
         .route("/api/admin/library", get(crate::routes::themes::local_library_list))
         .route(
             "/api/admin/patterns",

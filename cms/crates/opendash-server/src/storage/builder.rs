@@ -6,6 +6,7 @@ use std::{
 };
 
 use opendash_core::{
+    block_schema::RegisteredBlockSchema,
     builder::{
         BUILDER_SCHEMA_VERSION, BindingSource, BuilderDocument, ColumnNode, ElementContent,
         ElementNode, KnownElement, LegacyBlockProps, RowNode, SectionNode,
@@ -505,6 +506,116 @@ pub fn poster_image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
     ids
 }
 
+/// Public ACL projection of a Builder document. Unknown and inactive block
+/// schemas never contribute media refs; raw saved values remain untouched so
+/// the separate delete-pin scanner can still protect their assets.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct DocumentMediaRefs {
+    pub image_ids: BTreeSet<String>,
+    pub video_ids: BTreeSet<String>,
+    pub poster_image_ids: BTreeSet<String>,
+    pub any_media_ids: BTreeSet<String>,
+}
+
+pub(crate) fn extract_document_media_refs(
+    document: &BuilderDocument,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> DocumentMediaRefs {
+    let mut refs = DocumentMediaRefs {
+        image_ids: image_ids(document).into_iter().map(str::to_owned).collect(),
+        video_ids: video_ids(document).into_iter().map(str::to_owned).collect(),
+        poster_image_ids: poster_image_ids(document)
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        ..DocumentMediaRefs::default()
+    };
+    for section in &document.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    let ElementContent::Known(KnownElement::PluginBlock(props)) = &element.content
+                    else {
+                        continue;
+                    };
+                    let Some(entry) = schemas.get(&props.block_id) else {
+                        continue;
+                    };
+                    if entry.status != ProviderStatus::Active
+                        || entry.declaration_state != DeclarationState::Declared
+                        || entry.descriptor.legacy_mode
+                    {
+                        continue;
+                    }
+                    let collected = entry.descriptor.schema.collect_media_ids(&props.values);
+                    refs.image_ids.extend(collected.image_ids);
+                    refs.video_ids.extend(collected.video_ids);
+                    refs.any_media_ids.extend(collected.any_ids);
+                }
+            }
+        }
+    }
+    refs
+}
+
+/// Resolve media-kind 'any' against the same SQLite snapshot as the write.
+/// The returned sets are validated, active assets and safe to project into ACL.
+pub(crate) async fn resolve_document_media_refs_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    document: &BuilderDocument,
+) -> ApiResult<DocumentMediaRefs> {
+    let schemas = crate::storage::page::load_unified_block_catalog_in_conn(conn).await?;
+    let mut refs = extract_document_media_refs(document, &schemas);
+    for (expected_kind, ids) in [
+        ("image", &refs.image_ids),
+        ("image", &refs.poster_image_ids),
+        ("video", &refs.video_ids),
+    ] {
+        for id in ids {
+            if !valid_media_id(id) {
+                return Err(ApiError::bad_request("Invalid Builder media ID"));
+            }
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = ? AND lifecycle_state = 'active')",
+            )
+            .bind(id)
+            .bind(expected_kind)
+            .fetch_one(&mut *conn)
+            .await?;
+            if exists == 0 {
+                return Err(ApiError::bad_request(
+                    "Builder media không tồn tại hoặc không đúng loại trong Media Library.",
+                ));
+            }
+        }
+    }
+    for id in std::mem::take(&mut refs.any_media_ids) {
+        if !valid_media_id(&id) {
+            return Err(ApiError::bad_request("Invalid Builder media ID"));
+        }
+        let kind: Option<String> = sqlx::query_scalar(
+            "SELECT kind FROM media_assets WHERE id = ? AND lifecycle_state = 'active'",
+        )
+        .bind(&id)
+        .fetch_optional(&mut *conn)
+        .await?;
+        match kind.as_deref() {
+            Some("image") => {
+                refs.image_ids.insert(id);
+            }
+            Some("video") => {
+                refs.video_ids.insert(id);
+            }
+            _ => {
+                return Err(ApiError::bad_request(
+                    "Builder media không tồn tại hoặc không đúng loại trong Media Library.",
+                ));
+            }
+        }
+    }
+    Ok(refs)
+}
+
 /// A Pattern is a private, single-hop Builder document. References are stored
 /// separately so delete guards and public media ACL never parse client JSON.
 pub fn pattern_ids(document: &BuilderDocument) -> BTreeSet<i64> {
@@ -696,63 +807,13 @@ pub async fn validate_media_refs_in_tx(
     conn: &mut sqlx::SqliteConnection,
     document: &BuilderDocument,
 ) -> ApiResult<()> {
-    for id in image_ids(document)
-        .into_iter()
-        .chain(poster_image_ids(document))
-    {
-        if !valid_media_id(id) {
-            return Err(ApiError::bad_request("Invalid Builder media ID"));
-        }
-        let exists: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')",
-        )
-        .bind(id)
-        .fetch_one(&mut *conn)
-        .await?;
-        if exists == 0 {
-            return Err(ApiError::bad_request(
-                "Image chưa tồn tại trong Media Library.",
-            ));
-        }
-    }
-    for id in video_ids(document) {
-        if !valid_media_id(id) {
-            return Err(ApiError::bad_request("Invalid Builder video ID"));
-        }
-        let exists: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'video' AND lifecycle_state = 'active')",
-        )
-        .bind(id)
-        .fetch_one(&mut *conn)
-        .await?;
-        if exists == 0 {
-            return Err(ApiError::bad_request(
-                "Video chưa tồn tại trong Media Library.",
-            ));
-        }
-    }
+    resolve_document_media_refs_in_conn(conn, document).await?;
     Ok(())
 }
 
 pub async fn check_preview_images(db: &SqlitePool, document: &BuilderDocument) -> ApiResult<()> {
     let mut conn = db.acquire().await?;
-    validate_media_refs_in_tx(&mut conn, document).await?;
-    for id in image_ids(document) {
-        if !valid_media_id(id) {
-            return Err(ApiError::bad_request("Invalid Builder media ID"));
-        }
-        let exists: i64 =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')")
-                .bind(id)
-                .fetch_one(db)
-                .await?;
-        if exists == 0 {
-            return Err(ApiError::bad_request(
-                "Image chưa tồn tại trong Media Library.",
-            ));
-        }
-    }
-    Ok(())
+    validate_media_refs_in_tx(&mut conn, document).await
 }
 
 /// Run a render callback *inside* the SQLite writer transaction before commit.
@@ -784,25 +845,7 @@ where
     }
     let current = read_home_tx(&mut tx).await?;
     current.validate(document)?;
-    let videos = video_ids(document);
-    let posters = poster_image_ids(document);
-    validate_media_refs_in_tx(&mut tx, document).await?;
-    let images = image_ids(document);
-    for id in &images {
-        if !valid_media_id(id) {
-            return Err(ApiError::bad_request("Invalid Builder media ID"));
-        }
-        let exists: i64 =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active')")
-                .bind(id)
-                .fetch_one(&mut *tx)
-                .await?;
-        if exists == 0 {
-            return Err(ApiError::bad_request(
-                "Image chưa tồn tại trong Media Library.",
-            ));
-        }
-    }
+    let media_refs = resolve_document_media_refs_in_conn(&mut tx, document).await?;
     let bindings = builder_binding::resolve_in_tx(&mut tx, document, false).await?;
     let lists = resolve_lists_in_tx(&mut tx, document, &BTreeMap::new()).await?;
     let rendered = render(&current, document, &bindings, &lists)?;
@@ -817,7 +860,7 @@ where
     sqlx::query("DELETE FROM builder_homepage_video_refs")
         .execute(&mut *tx)
         .await?;
-    for id in videos {
+    for id in media_refs.video_ids {
         sqlx::query(
             "INSERT INTO builder_homepage_video_refs (media_id, ref_role) VALUES (?, 'video')",
         )
@@ -825,7 +868,7 @@ where
         .execute(&mut *tx)
         .await?;
     }
-    for id in posters {
+    for id in media_refs.poster_image_ids {
         sqlx::query(
             "INSERT INTO builder_homepage_video_refs (media_id, ref_role) VALUES (?, 'poster')",
         )
@@ -836,7 +879,7 @@ where
     sqlx::query("DELETE FROM builder_homepage_media")
         .execute(&mut *tx)
         .await?;
-    for id in images {
+    for id in media_refs.image_ids {
         sqlx::query("INSERT INTO builder_homepage_media (media_id) VALUES (?)")
             .bind(id)
             .execute(&mut *tx)
@@ -845,6 +888,10 @@ where
     tx.commit().await?;
     Ok((current.version, rendered))
 }
+
+#[cfg(test)]
+#[path = "s03_media_acl_tests.rs"]
+mod s03_media_acl_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1835,10 +1882,11 @@ async fn replace_entry_builder_refs(
                 .await?;
             }
         }
+        let refs = resolve_document_media_refs_in_conn(&mut **tx, document).await?;
         for (role, ids) in [
-            ("image", image_ids(document)),
-            ("video", video_ids(document)),
-            ("poster", poster_image_ids(document)),
+            ("image", refs.image_ids),
+            ("video", refs.video_ids),
+            ("poster", refs.poster_image_ids),
         ] {
             for media_id in ids {
                 sqlx::query("INSERT INTO entry_builder_media_refs(entry_id, media_id, ref_role) VALUES (?, ?, ?)")
