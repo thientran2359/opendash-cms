@@ -3,7 +3,7 @@ import * as api from '../api/index.ts';
 import * as builderApi from '../api/builder.ts';
 import { getContentEntry } from '../api/content.ts';
 import { listPatterns, type PatternRecord } from '../api/patterns.ts';
-import type { AuthUser, BlockRegistry } from '../types.ts';
+import type { AuthUser, BlockCatalogItemDto, BlockPropValue, BlockRegistry } from '../types.ts';
 import type { BuilderDiagnostic, HomepageOpen, OverrideRole, TemplateTargetInput } from '../api/builder.ts';
 import type { ParsedRoute } from '../shell/router.ts';
 import {
@@ -20,6 +20,39 @@ import { BuilderInspector } from './BuilderInspector.tsx';
 import { BuilderPreviewFrame } from './BuilderPreviewFrame.tsx';
 import { PatternLibraryModal } from './PatternLibraryModal.tsx';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
+
+const BLOCK_CATEGORY_ORDER = ['layout', 'media', 'interactive', 'content', 'marketing', 'plugin'] as const;
+const BLOCK_CATEGORY_LABELS: Record<string, string> = {
+  layout: 'Bố cục', media: 'Media', interactive: 'Tương tác',
+  content: 'Nội dung', marketing: 'Marketing', plugin: 'Plugin',
+};
+
+function availableSchemas(catalog: BlockCatalogItemDto[]): BlockCatalogItemDto[] {
+  return catalog.filter(item => item.status === 'active' && item.declaration_state === 'declared');
+}
+
+function BlockTypeOptions({
+  catalog, legacyTypes,
+}: { catalog: BlockCatalogItemDto[]; legacyTypes: InsertableElementType[] }) {
+  const available = availableSchemas(catalog);
+  return <>
+    <optgroup label="Khối chuẩn">
+      {legacyTypes.map(type => <option key={type} value={type}>
+        {type === 'core/pattern_ref' ? 'Reusable Pattern'
+          : type === 'core/content_slot' ? 'Content Slot'
+            : type === 'core/template_part' ? 'Template Part' : type}
+      </option>)}
+    </optgroup>
+    {BLOCK_CATEGORY_ORDER.map(category => {
+      const items = available.filter(item => item.schema.category === category);
+      return items.length ? <optgroup key={category} label={BLOCK_CATEGORY_LABELS[category]}>
+        {items.map(item => <option key={item.block_id} value={item.block_id}>
+          {item.schema.title} ({item.block_id})
+        </option>)}
+      </optgroup> : null;
+    })}
+  </>;
+}
 
 interface Props {
   route: ParsedRoute;
@@ -87,7 +120,8 @@ export function BuilderEditorCore({
   onApiError,
 }: BuilderEditorCoreProps) {
   const [sidebarTab, setSidebarTab] = useState<'blocks' | 'patterns' | 'media'>('blocks');
-  const [elementType, setElementType] = useState<InsertableElementType>('core/heading');
+  const [elementType, setElementType] = useState<string>('core/heading');
+  const [blockSchemas, setBlockSchemas] = useState<BlockCatalogItemDto[]>([]);
   const [showPatternLibrary, setShowPatternLibrary] = useState(false);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
 
@@ -99,15 +133,32 @@ export function BuilderEditorCore({
     return true;
   });
 
+  // The same core editor serves Studio and the compatibility #/builder route.
+  // Refresh when theme changes and on focus after plugin installation/toggling.
   useEffect(() => {
-    if (!insertableTypes.includes(elementType)) {
+    setBlockSchemas([]);
+    if (!csrfToken) return;
+    let alive = true;
+    const refresh = () => {
+      void builderApi.getBlockSchemas()
+        .then(items => { if (alive) setBlockSchemas(items); })
+        .catch(cause => { if (alive) onApiError(cause, 'Không thể tải danh mục block.'); });
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => { alive = false; window.removeEventListener('focus', refresh); };
+  }, [themeRevision, csrfToken]);
+
+  useEffect(() => {
+    if (!insertableTypes.includes(elementType as InsertableElementType)
+      && !availableSchemas(blockSchemas).some(item => item.block_id === elementType)) {
       setElementType(insertableTypes[0] ?? 'core/heading');
     }
-  }, [allowPatternRef, allowList, allowContentSlot, allowTemplatePart]);
+  }, [allowPatternRef, allowList, allowContentSlot, allowTemplatePart, blockSchemas]);
 
   const applyUpdate = (next: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
     if (!next) return false;
-    if (!preservesAnchors(draft, next, registry, removedId)) {
+    if (!preservesAnchors(draft, next, registry, removedId, blockSchemas)) {
       onMessage?.('Node không resolve cần giữ nguyên vị trí, ancestor và nội dung.', true);
       return false;
     }
@@ -144,7 +195,9 @@ export function BuilderEditorCore({
         return;
       }
     }
-    const next = appendNode(draft, parentId, kind, elementType);
+    const schema = blockSchemas.find(item => item.block_id === elementType
+      && item.status === 'active' && item.declaration_state === 'declared')?.schema;
+    const next = appendNode(draft, parentId, kind, elementType as InsertableElementType, { blockSchema: schema });
     if (!next) {
       onMessage?.('Vị trí thêm node không hợp lệ.', true);
       return;
@@ -166,37 +219,42 @@ export function BuilderEditorCore({
     }
     const entry = locate(draft, id);
     if (!entry) return;
+    const next = removeNode(draft, id);
+    if (!next) return;
+    if (!preservesAnchors(draft, next, registry, id, blockSchemas)) {
+      onMessage?.('Không thể xóa riêng node này vì sẽ dịch chuyển block chưa resolve. Hãy xóa cả container chứa các block liên quan.', true);
+      return;
+    }
     const lockedCount = allNodes(draft).filter(node =>
       node.kind === 'element' && node.path.slice(0, entry.path.length)
         .every((step, index) => step === entry.path[index])
-      && isLockedElement(node.node as BuilderElement, registry)
+      && isLockedElement(node.node as BuilderElement, registry, blockSchemas)
     ).length;
     const prompt = lockedCount
       ? 'Node chứa ' + lockedCount + ' block chưa resolve. Xóa vĩnh viễn khỏi Builder hiện tại?'
       : 'Xóa node này và toàn bộ node con?';
     if (!window.confirm(prompt)) return;
-    const next = removeNode(draft, id);
     applyUpdate(next, entry.parentId, id);
   };
 
-  const editField = (id: string, field: string, value: string | number | boolean | undefined) => {
+  const editField = (id: string, field: string, value: BlockPropValue | undefined) => {
     if (disabled) return;
     const entry = locate(draft, id);
-    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry, blockSchemas)) return;
     applyUpdate(setNodeField(draft, id, field, value), id);
   };
 
   const editBinding = (id: string, binding: ElementBinding | null) => {
     if (disabled) return;
     const entry = locate(draft, id);
-    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry, blockSchemas)) return;
     applyUpdate(setElementBinding(draft, id, binding), id);
   };
 
   const editList = (id: string, config: ListProps) => {
     if (disabled) return;
     const entry = locate(draft, id);
-    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry, blockSchemas)) return;
     applyUpdate(setListProps(draft, id, config), id);
   };
 
@@ -260,7 +318,7 @@ export function BuilderEditorCore({
     if (!mediaId || !/^[a-zA-Z0-9_-]{1,128}$/.test(mediaId) || !csrfToken || disabled) return;
     const selected = locate(draft, selectedId);
     if (selected?.kind === 'element' && isElement(selected.node)
-        && selected.node.type === 'core/image' && !isLockedElement(selected.node, registry)) {
+        && selected.node.type === 'core/image' && !isLockedElement(selected.node, registry, blockSchemas)) {
       if (!applyUpdate(setNodeField(draft, selected.node.id, 'media_id', mediaId), selected.node.id)) return;
     } else {
       let next = draft;
@@ -309,7 +367,7 @@ export function BuilderEditorCore({
 
       {(hadFreeformWrap || hadRecovery) && (
         <div role="status" className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-900" data-testid="studio-block-notice">
-          {hadFreeformWrap && <p>Nội dung văn bản thuần trước đó đã được tự động bọc thành khối UX Builder để chỉnh sửa.</p>}
+          {hadFreeformWrap && <p>Nội dung văn bản thuần trước đó đã được tự động bọc thành khối Trình dựng trang để chỉnh sửa.</p>}
           {hadRecovery && <p>Một phần comment block cũ bị sai cú pháp đã được phục hồi an toàn thành khối văn bản.</p>}
         </div>
       )}
@@ -325,7 +383,7 @@ export function BuilderEditorCore({
         </div>
       )}
 
-      <div className="flex gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1" role="tablist" aria-label="Công cụ UX Builder">
+      <div className="flex gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1" role="tablist" aria-label="Công cụ Trình dựng trang">
         <button type="button" role="tab" aria-selected={sidebarTab === 'blocks'}
           className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
             (sidebarTab === 'blocks' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
@@ -348,25 +406,17 @@ export function BuilderEditorCore({
               id="studio-element-type"
               className="h-8 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900"
               value={elementType}
-              onChange={event => setElementType(event.target.value as InsertableElementType)}
+              onChange={event => setElementType(event.target.value)}
             >
-              {insertableTypes.map(type => (
-                <option key={type} value={type}>
-                  {type === 'core/pattern_ref'
-                    ? 'Reusable Pattern'
-                    : type === 'core/content_slot'
-                      ? 'Content Slot'
-                      : type === 'core/template_part'
-                        ? 'Template Part'
-                        : type}
-                </option>
-              ))}
+              <BlockTypeOptions catalog={blockSchemas} legacyTypes={insertableTypes} />
             </select>
           </div>
           <BuilderTree
             document={draft}
             selectedId={selectedId}
             elementType={elementType as ElementType}
+            registry={registry}
+            blockSchemas={blockSchemas}
             onSelect={id => onSelect(id)}
             onAdd={add}
             onMove={reorder}
@@ -376,6 +426,7 @@ export function BuilderEditorCore({
             document={draft}
             selectedId={selectedId}
             registry={registry}
+            blockSchemas={blockSchemas}
             csrfToken={csrfToken}
             viewport={viewport}
             allowRouteContext={allowRouteContext}
@@ -487,8 +538,11 @@ export function BuilderWorkspace({
   const [source, setSource] = useState<HomepageOpen['source']>('empty');
   const [registry, setRegistry] = useState<BlockRegistry>({});
   const registryRef = useRef<BlockRegistry>({});
+  const [blockSchemas, setBlockSchemas] = useState<BlockCatalogItemDto[]>([]);
+  const blockSchemasRef = useRef<BlockCatalogItemDto[]>([]);
+  blockSchemasRef.current = blockSchemas;
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [elementType, setElementType] = useState<InsertableElementType>('core/heading');
+  const [elementType, setElementType] = useState<string>('core/heading');
   const [mode, setMode] = useState<'canvas' | 'preview'>('canvas');
   // Pure UI state: changing viewport never changes document JSON or revision.
   const [viewport, setViewport] = useState<BuilderViewport>('desktop');
@@ -522,6 +576,34 @@ export function BuilderWorkspace({
   const authority = JSON.stringify([route.rawHash, user?.id, user?.role, csrfToken, resetToken, active]);
   const authorityRef = useRef(authority);
   authorityRef.current = authority;
+
+  useEffect(() => {
+    if (!active || !user || !csrfToken) {
+      setBlockSchemas([]);
+      return;
+    }
+    let alive = true;
+    const refresh = () => {
+      void builderApi.getBlockSchemas()
+        .then(items => { if (alive) setBlockSchemas(items); })
+        .catch(cause => { if (alive) onApiError(cause, 'Không thể tải danh mục block.'); });
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => { alive = false; window.removeEventListener('focus', refresh); };
+  }, [active, user?.id, csrfToken, themeRevision]);
+
+  const insertableTypes = ELEMENT_TYPES.filter(type =>
+    type !== 'core/content_slot' && type !== 'core/template_part'
+      && (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
+      && (!scopedPattern || type !== 'core/list'));
+
+  useEffect(() => {
+    if (!insertableTypes.includes(elementType as InsertableElementType)
+        && !availableSchemas(blockSchemas).some(item => item.block_id === elementType)) {
+      setElementType(insertableTypes[0] ?? 'core/heading');
+    }
+  }, [blockSchemas, scopedEntry, scopedPattern]);
   const openedTarget = async () => {
     if (scopedEntry && scopeEntryId !== null) {
       const opened = await builderApi.getEntryBuilder(scopeTypeKey, scopeEntryId);
@@ -581,6 +663,7 @@ export function BuilderWorkspace({
     setSelectedId(null);
     setRegistry({});
     registryRef.current = {};
+    setBlockSchemas([]);
     setConflict(false);
     setMode('canvas');
     setPageDetails(null);
@@ -706,7 +789,7 @@ export function BuilderWorkspace({
 
   const changeDraft = (updated: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
     if (!updated) return false;
-    if (!preservesAnchors(draftRef.current, updated, registryRef.current, removedId)) {
+    if (!preservesAnchors(draftRef.current, updated, registryRef.current, removedId, blockSchemasRef.current)) {
       message('Node không resolve cần giữ nguyên vị trí, ancestor và nội dung.', true);
       return false;
     }
@@ -777,7 +860,7 @@ export function BuilderWorkspace({
         || !active || !user || !csrfToken || savingRef.current) return;
     const selected = locate(draftRef.current, selectedId);
     if (selected?.kind === 'element' && isElement(selected.node)
-        && selected.node.type === 'core/image' && !isLockedElement(selected.node, registryRef.current)) {
+        && selected.node.type === 'core/image' && !isLockedElement(selected.node, registryRef.current, blockSchemasRef.current)) {
       if (!changeDraft(setNodeField(draftRef.current, selected.node.id, 'media_id', mediaId), selected.node.id)) return;
     } else {
       // Fill only the missing container levels so an image always has the
@@ -831,7 +914,9 @@ export function BuilderWorkspace({
     if (scopedPattern && kind === 'element' && (elementType === 'core/pattern_ref' || elementType === 'core/list')) {
       return message('Pattern không được chứa Reusable Pattern hoặc Danh sách nội dung.', true);
     }
-    const next = appendNode(draftRef.current, parentId, kind, elementType);
+    const schema = blockSchemasRef.current.find(item => item.block_id === elementType
+      && item.status === 'active' && item.declaration_state === 'declared')?.schema;
+    const next = appendNode(draftRef.current, parentId, kind, elementType as InsertableElementType, { blockSchema: schema });
     if (!next) return message('Vị trí thêm node không hợp lệ.', true);
     changeDraft(next.document, next.id);
   };
@@ -842,35 +927,40 @@ export function BuilderWorkspace({
   const remove = (id: string) => {
     const entry = locate(draftRef.current, id);
     if (!entry) return;
+    const next = removeNode(draftRef.current, id);
+    if (!next) return;
+    if (!preservesAnchors(draftRef.current, next, registryRef.current, id, blockSchemasRef.current)) {
+      message('Không thể xóa riêng node này vì sẽ dịch chuyển block chưa resolve. Hãy xóa cả container chứa các block liên quan.', true);
+      return;
+    }
     const lockedCount = allNodes(draftRef.current).filter(node =>
       node.kind === 'element' && node.path.slice(0, entry.path.length)
         .every((step, index) => step === entry.path[index])
-      && isLockedElement(node.node as import('./document.ts').BuilderElement, registryRef.current)
+      && isLockedElement(node.node as import('./document.ts').BuilderElement, registryRef.current, blockSchemasRef.current)
     ).length;
     const prompt = lockedCount
       ? 'Node chứa ' + lockedCount + ' block chưa resolve. Xóa vĩnh viễn khỏi Builder hiện tại?'
       : 'Xóa node này và toàn bộ node con?';
     if (!window.confirm(prompt)) return;
-    const next = removeNode(draftRef.current, id);
     changeDraft(next, entry.parentId, id);
   };
-  const editField = (id: string, field: string, value: string | number | boolean | undefined) => {
+  const editField = (id: string, field: string, value: BlockPropValue | undefined) => {
     const entry = locate(draftRef.current, id);
-    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current, blockSchemasRef.current)) return;
     changeDraft(setNodeField(draftRef.current, id, field, value), id);
   };
   // D1 (#104): typed binding objects cannot be passed through the static
   // string/number edit handler; reuse the same immutable draft/CAS pipeline.
   const editBinding = (id: string, binding: ElementBinding | null) => {
     const entry = locate(draftRef.current, id);
-    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current, blockSchemasRef.current)) return;
     changeDraft(setElementBinding(draftRef.current, id, binding), id);
   };
   // #106 Design Delta D2: typed list filters/booleans use the same immutable
   // draft revision, ETag/CAS and stale-preview pipeline as other Inspector edits.
   const editList = (id: string, config: ListProps) => {
     const entry = locate(draftRef.current, id);
-    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current)) return;
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current, blockSchemasRef.current)) return;
     changeDraft(setListProps(draftRef.current, id, config), id);
   };
   const editResponsive = (
@@ -1210,13 +1300,8 @@ export function BuilderWorkspace({
             <div className="mb-3 flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2">
               <label htmlFor="builder-element-type" className="text-xs text-slate-500">Element mới</label>
               <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
-                value={elementType} onChange={event => setElementType(event.target.value as InsertableElementType)}>
-                {ELEMENT_TYPES.filter(type =>
-                  type !== 'core/content_slot'
-                  && type !== 'core/template_part'
-                  && (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
-                  && (!scopedPattern || type !== 'core/list'))
-                  .map(type => <option key={type} value={type}>{type === 'core/pattern_ref' ? 'Reusable Pattern' : type}</option>)}
+                value={elementType} onChange={event => setElementType(event.target.value)}>
+                <BlockTypeOptions catalog={blockSchemas} legacyTypes={insertableTypes} />
               </select>
             </div>
             {scopedEntry && !scopedPattern && <section className="mb-3 rounded-lg border border-slate-200 bg-white p-3" data-testid="builder-pattern-help">
@@ -1225,6 +1310,7 @@ export function BuilderWorkspace({
               <p className="mt-1 text-xs text-slate-600">{patternsLoaded ? `${patterns.length} Pattern sẵn dùng` : 'Đang tải danh sách Pattern…'}</p>
             </section>}
             <BuilderTree document={draft} selectedId={selectedId} elementType={elementType as ElementType}
+              registry={registry} blockSchemas={blockSchemas}
               onSelect={setSelectedId} onAdd={add} onMove={reorder} onDelete={remove} />
           </div>
           {sidebarTab === 'patterns' && <section id="builder-sidebar-patterns" role="tabpanel"
@@ -1258,7 +1344,7 @@ export function BuilderWorkspace({
           <div className={mode === 'canvas' ? 'block overflow-x-auto' : 'hidden'}
             data-testid="builder-structural-viewport">
             <div style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: 'none', minWidth: 0 }}>
-              <BuilderCanvas document={draft} selectedId={selectedId} registry={registry}
+              <BuilderCanvas document={draft} selectedId={selectedId} registry={registry} blockSchemas={blockSchemas}
                 patterns={patterns} patternsLoaded={patternsLoaded}
                 viewport={viewport} onSelect={setSelectedId} />
             </div>
@@ -1283,7 +1369,7 @@ export function BuilderWorkspace({
           </div>}
         </section>
         <div className="min-w-0">
-          <BuilderInspector document={draft} selectedId={selectedId} registry={registry}
+          <BuilderInspector document={draft} selectedId={selectedId} registry={registry} blockSchemas={blockSchemas}
             csrfToken={csrfToken} viewport={viewport}
             patterns={patterns} patternsLoaded={patternsLoaded} onRefreshPatterns={refreshPatterns}
 

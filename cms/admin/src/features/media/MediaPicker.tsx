@@ -5,7 +5,7 @@ type PickerMode = 'browse' | 'image' | 'gallery';
 
 interface MediaPickerProps {
   mode: PickerMode;
-  acceptKind?: MediaKind;
+  acceptKind?: MediaKind | 'any';
   selectedIds: string[];
   csrfToken: string | null;
   onApply: (ids: string[]) => void;
@@ -20,6 +20,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
 }) => {
   const [assets, setAssets] = useState<MediaAsset[]>([]);
   const [picked, setPicked] = useState<string[]>(selectedIds);
+  const [filter, setFilter] = useState<'all' | MediaKind>(acceptKind === 'any' ? 'all' : acceptKind);
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -28,6 +29,9 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
   const [notice, setNotice] = useState('');
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const queryKind = acceptKind === 'any' ? (filter === 'all' ? undefined : filter) : acceptKind;
+  const acceptsVideo = acceptKind === 'video' || acceptKind === 'any';
+  const acceptsImage = acceptKind === 'image' || acceptKind === 'any';
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -38,25 +42,25 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
   useEffect(() => {
     let active = true;
     setLoading(true);
-    listMedia(PAGE_SIZE, offset, acceptKind)
+    listMedia(PAGE_SIZE, offset, queryKind)
       .then(list => { if (active) setAssets(list); })
       .catch(cause => {
         if (active) {
           setError(cause instanceof Error ? cause.message : 'Không thể tải thư viện.');
-          onError(cause, 'Không thể tải thư viện ảnh.');
+          onError(cause, 'Không thể tải thư viện media.');
         }
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [offset, acceptKind]);
+  }, [offset, queryKind]);
 
   const refresh = async () => {
     try {
-      const list = await listMedia(PAGE_SIZE, offset, acceptKind);
+      const list = await listMedia(PAGE_SIZE, offset, queryKind);
       setAssets(list);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Không thể tải thư viện.');
-      onError(cause, 'Không thể tải thư viện ảnh.');
+      onError(cause, 'Không thể tải thư viện media.');
     }
   };
 
@@ -70,15 +74,20 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
     const uploaded: MediaAsset[] = [];
     try {
       for (const file of files) {
-        if (acceptKind === 'video') {
-          if (file.type !== 'video/mp4' && !file.name.toLowerCase().endsWith('.mp4')) {
-            throw new Error('Chỉ chấp nhận video MP4.');
-          }
+        const isVideo = file.type === 'video/mp4' || file.name.toLowerCase().endsWith('.mp4');
+        if (isVideo) {
+          if (!acceptsVideo) throw new Error('Trường này chỉ chấp nhận ảnh.');
           if (file.size === 0 || file.size > 100 * 1024 * 1024) {
             throw new Error('File video phải từ 1 byte đến 100 MiB.');
           }
-          uploaded.push(await uploadVideo(file, csrfToken));
+          // Browsers can label a valid .mp4 as application/octet-stream or
+          // video/quicktime. The video endpoint requires video/mp4; the server
+          // still checks the MP4 signature before accepting uploaded bytes.
+          const normalized = file.type === 'video/mp4' ? file
+            : new File([file], file.name, { type: 'video/mp4', lastModified: file.lastModified });
+          uploaded.push(await uploadVideo(normalized, csrfToken));
         } else {
+          if (!acceptsImage) throw new Error('Trường này chỉ chấp nhận video MP4.');
           if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
             throw new Error('Chỉ chấp nhận JPEG, PNG và WebP.');
           }
@@ -89,17 +98,18 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
         }
       }
       setOffset(0);
-      const refreshed = await listMedia(PAGE_SIZE, 0, acceptKind);
+      if (acceptKind === 'any') setFilter('all');
+      const refreshed = await listMedia(PAGE_SIZE, 0, acceptKind === 'any' ? undefined : queryKind);
       setAssets(refreshed);
-      setNotice(`Đã upload ${uploaded.length} ảnh.`);
+      setNotice(`Đã upload ${uploaded.length} file media.`);
       if (mode === 'image' && uploaded.length === 1) setPicked([uploaded[0].id]);
       if (mode === 'gallery') {
         setPicked(previous => [...new Set([...previous, ...uploaded.map(item => item.id)])].slice(0, 50));
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Upload thất bại.');
-      onError(cause, 'Không thể upload ảnh.');
-      if (uploaded.length) setNotice(`Đã upload thành công ${uploaded.length} ảnh trước khi gặp lỗi.`);
+      onError(cause, 'Không thể upload media.');
+      if (uploaded.length) setNotice(`Đã upload thành công ${uploaded.length} file trước khi gặp lỗi.`);
     } finally {
       setBusy(false);
     }
@@ -154,8 +164,12 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
       >
         <div className="content-section-heading">
           <div>
-            <h3 id="media-picker-title">{mode === 'browse' ? 'Media Library' : 'Chọn ảnh từ Media Library'}</h3>
-            <p className="content-help">Ảnh dành cho Admin và Editor; JPEG/PNG/WebP, tối đa 8 MiB và 20 triệu điểm ảnh.</p>
+            <h3 id="media-picker-title">{mode === 'browse' ? 'Media Library' : 'Chọn media từ Media Library'}</h3>
+            <p className="content-help">
+              {acceptKind === 'image' ? 'Ảnh JPEG/PNG/WebP, tối đa 8 MiB.'
+                : acceptKind === 'video' ? 'Video MP4, tối đa 100 MiB.'
+                  : 'Ảnh JPEG/PNG/WebP (tối đa 8 MiB) và video MP4 (tối đa 100 MiB).'}
+            </p>
           </div>
           <button type="button" ref={closeRef} onClick={onClose} disabled={busy} className="btn-secondary">
             Đóng
@@ -163,25 +177,39 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
         </div>
         <div className="media-toolbar">
           <label className="media-upload-control">
-            <span>+ Upload ảnh</span>
+            <span>{acceptKind === 'image' ? '+ Upload ảnh' : acceptKind === 'video' ? '+ Upload video' : '+ Upload media'}</span>
             <input
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept={acceptKind === 'any' ? 'image/jpeg,image/png,image/webp,video/mp4'
+                : acceptKind === 'video' ? 'video/mp4' : 'image/jpeg,image/png,image/webp'}
               multiple={mode !== 'image'}
               onChange={upload}
               disabled={!csrfToken || busy}
-              aria-label="Upload ảnh vào Media Library"
+              aria-label="Upload media vào Media Library"
             />
           </label>
+          {acceptKind === 'any' && (
+            <label className="form-group">
+              <span>Loại media</span>
+              <select value={filter} onChange={event => {
+                setFilter(event.target.value as 'all' | MediaKind);
+                setOffset(0);
+              }} disabled={busy} aria-label="Lọc loại media">
+                <option value="all">Tất cả</option>
+                <option value="image">Ảnh</option>
+                <option value="video">Video</option>
+              </select>
+            </label>
+          )}
           <label className="form-group">
             <span>Tìm trong trang hiện tại</span>
-            <input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Tên file hoặc mã ảnh" />
+            <input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Tên file hoặc mã media" />
           </label>
           {busy && <span role="status">Đang upload và tạo thumbnail…</span>}
         </div>
         {error && <p className="content-alert error" role="alert">{error}</p>}
         {notice && <p className="content-alert success" role="status">{notice}</p>}
-        <div className="media-grid" role="list" aria-label="Ảnh trong thư viện">
+        <div className="media-grid" role="list" aria-label="Media trong thư viện">
           {filtered.map(asset => {
             const selected = picked.includes(asset.id);
             return (
@@ -206,13 +234,13 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
                     />
                   )}
                   <span className="media-filename">{asset.filename}</span>
-                  <small>{asset.width} × {asset.height} · {(asset.byte_size / 1024).toFixed(0)} KiB</small>
-                  {mode !== 'browse' && <strong>{selected ? '✓ Đã chọn' : 'Chọn ảnh'}</strong>}
+                  <small>{asset.kind === 'video' ? 'Video MP4' : `${asset.width} × ${asset.height}`} · {(asset.byte_size / 1024).toFixed(0)} KiB</small>
+                  {mode !== 'browse' && <strong>{selected ? '✓ Đã chọn' : 'Chọn media'}</strong>}
                 </button>
               </div>
             );
           })}
-          {!loading && !filtered.length && <p className="content-help">Chưa tìm thấy ảnh trên trang này. Hãy upload ảnh mới.</p>}
+          {!loading && !filtered.length && <p className="content-help">Chưa tìm thấy media trên trang này. Hãy upload file mới.</p>}
         </div>
         {loading && <p className="content-help">Đang tải thư viện…</p>}
         <div className="media-dialog-footer">
@@ -227,7 +255,7 @@ export const MediaPicker: React.FC<MediaPickerProps> = ({
               type="button"
               onClick={() => onApply(picked)}
               disabled={busy}
-            >Dùng {mode === 'gallery' ? `${picked.length} ảnh` : 'ảnh đã chọn'}</button>
+            >Dùng {mode === 'gallery' ? `${picked.length} file` : 'media đã chọn'}</button>
           )}
         </div>
       </div>

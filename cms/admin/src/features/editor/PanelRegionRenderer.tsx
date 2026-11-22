@@ -310,10 +310,10 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                         data-testid="od-blocks-badge"
                         className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-900 ring-1 ring-inset ring-sky-200"
                       >
-                        Chứa khối UX Builder (&lt;!-- od:... --&gt;)
+                        Chứa khối Trình dựng trang (&lt;!-- od:... --&gt;)
                       </span>
                     ) : (
-                      <span>Có thể chỉnh trực tiếp hoặc mở UX Builder trực quan.</span>
+                      <span>Có thể chỉnh trực tiếp hoặc mở Trình dựng trang trực quan.</span>
                     )}
                   </div>
                   {canOpenBuilder && (
@@ -324,7 +324,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                       disabled={saving}
                       className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 shadow-2xs transition-colors hover:border-zinc-400 hover:bg-zinc-100 disabled:opacity-50"
                     >
-                      Sửa với UX Builder
+                      Sửa với Trình dựng trang
                     </button>
                   )}
                 </div>
@@ -607,7 +607,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   onClick={onOpenBuilder}
                   className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50"
                 >
-                  Sửa với UX Builder
+                  Sửa với Trình dựng trang
                 </button>
               )}
 

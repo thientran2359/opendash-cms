@@ -2,23 +2,28 @@ import React from 'react';
 import type { BuilderColumn, BuilderDocument, BuilderElement, BuilderRow, BuilderSection, BuilderViewport } from './document.ts';
 import { effectiveResponsive, isLockedElement, rowUsesGrid } from './document.ts';
 import type { PatternRecord } from '../api/patterns.ts';
+import type { BlockCatalogItemDto } from '../types.ts';
 
 interface Props {
   document: BuilderDocument;
   selectedId: string | null;
   viewport: BuilderViewport;
   registry: Record<string, Record<string, string>>;
+  blockSchemas?: BlockCatalogItemDto[];
   patterns: PatternRecord[];
   patternsLoaded: boolean;
   onSelect: (id: string) => void;
 }
 
-function ElementContent({ element, registry, patterns, patternsLoaded }: {
-  element: BuilderElement; registry: Props['registry']; patterns: PatternRecord[]; patternsLoaded: boolean;
+function ElementContent({ element, registry, blockSchemas, patterns, patternsLoaded }: {
+  element: BuilderElement; registry: Props['registry']; blockSchemas: BlockCatalogItemDto[];
+  patterns: PatternRecord[]; patternsLoaded: boolean;
 }) {
-  if (isLockedElement(element, registry)) {
+  if (isLockedElement(element, registry, blockSchemas)) {
     return <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-      Không thể hiển thị: {element.type || 'Block chưa xác định'} (giữ dữ liệu gốc)
+      Block chưa resolve hoặc provider không hoạt động:
+      {' '}{element.type === 'plugin/block' ? String(element.props?.block_id ?? '') : (element.type || 'Block chưa xác định')}
+      {' '}(giữ dữ liệu gốc và vị trí)
     </div>;
   }
   if (element.props.binding) {
@@ -69,11 +74,21 @@ function ElementContent({ element, registry, patterns, patternsLoaded }: {
       return <div className="rounded border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-700">
         Theme block: {String(element.props.block_id ?? '')} · Xem HTML ở tab Preview
       </div>;
+    case 'plugin/block': {
+      const blockId = String(element.props.block_id);
+      const schema = blockSchemas.find(item => item.block_id === blockId)?.schema;
+      return <div className="rounded border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">
+        <span className="block font-semibold">{schema?.title ?? blockId}</span>
+        <span className="mt-1 block break-all text-xs">{blockId} · Chỉnh thuộc tính trong Inspector, xem kết quả ở tab Preview</span>
+      </div>;
+    }
     default: return null;
   }
 }
 
-export function BuilderCanvas({ document, selectedId, registry, patterns, patternsLoaded, viewport, onSelect }: Props) {
+export function BuilderCanvas({
+  document, selectedId, registry, blockSchemas = [], patterns, patternsLoaded, viewport, onSelect,
+}: Props) {
   const selectProps = (id: string) => ({
     type: 'button' as const,
     'data-canvas-id': id,
@@ -90,7 +105,8 @@ export function BuilderCanvas({ document, selectedId, registry, patterns, patter
     <button key={element.id} {...selectProps(element.id)}
       aria-label={'Chọn element ' + element.type + ' ' + element.id}>
       <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-400">{element.type}</span>
-      <ElementContent element={element} registry={registry} patterns={patterns} patternsLoaded={patternsLoaded} />
+      <ElementContent element={element} registry={registry} blockSchemas={blockSchemas}
+        patterns={patterns} patternsLoaded={patternsLoaded} />
     </button>
   );
   const renderColumn = (column: BuilderColumn, inGrid: boolean) => (

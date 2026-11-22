@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
+import type { BlockCatalogItemDto, BlockPropValue } from '../types.ts';
 import type { BuilderDocument, BuilderElement, BuilderViewport, ElementBinding, ListProps, ResponsiveAlign, ResponsiveField, ResponsiveContainer } from './document.ts';
 import {
   VALID_TEMPLATE_PART_KEY,
@@ -15,12 +16,14 @@ import {
 import { BuilderBindingFields } from './BuilderBindingFields.tsx';
 import { BuilderListFields } from './BuilderListFields.tsx';
 import { BuilderContactFormFields } from './BuilderContactFormFields.tsx';
+import { BlockSchemaForm } from './BlockSchemaForm.tsx';
 import type { PatternRecord } from '../api/patterns.ts';
 
 interface Props {
   document: BuilderDocument;
   selectedId: string | null;
   registry: Record<string, Record<string, string>>;
+  blockSchemas?: BlockCatalogItemDto[];
   csrfToken: string | null;
   viewport: BuilderViewport;
   allowRouteContext?: boolean;
@@ -30,7 +33,7 @@ interface Props {
   patternsLoaded: boolean;
   onRefreshPatterns: () => void;
   onDeleteNode?: (id: string) => void;
-  onChange: (id: string, key: string, value: string | number | boolean | undefined) => void;
+  onChange: (id: string, key: string, value: BlockPropValue | undefined) => void;
   onBindingChange: (id: string, binding: ElementBinding | null) => void;
   onListChange: (id: string, config: ListProps) => void;
   onResponsiveChange: (id: string, viewport: BuilderViewport, field: ResponsiveField, value: number | ResponsiveAlign | null) => void;
@@ -45,6 +48,7 @@ export function BuilderInspector({
   document,
   selectedId,
   registry,
+  blockSchemas = [],
   csrfToken,
   viewport,
   allowRouteContext,
@@ -69,7 +73,9 @@ export function BuilderInspector({
     </section>
   );
   const element = isElement(item.node) ? item.node : null;
-  const locked = element ? isLockedElement(element, registry) : false;
+  const block = element?.type === 'plugin/block'
+    ? blockSchemas.find(item => item.block_id === element.props?.block_id) : undefined;
+  const locked = element ? isLockedElement(element, registry, blockSchemas) : false;
   const deletable = canDeleteElement(document, item.node.id, { requiresContentSlot });
   const suggestedPartKeys = [...new Set([...(availablePartKeys ?? []), 'header', 'footer'])];
   const fields: Array<{ key: string; title: string; kind?: 'number' | 'textarea' }> = [];
@@ -101,7 +107,7 @@ export function BuilderInspector({
       ? (values as Record<string, unknown>)[key] : undefined;
     return typeof current === 'string' || typeof current === 'number' ? String(current) : '';
   };
-  const binding = element?.props.binding;
+  const binding = element?.props?.binding;
   const responsiveNode = element ? null : item.node as ResponsiveContainer;
   const responsiveFields = item.kind === 'element' ? [] : RESPONSIVE_FIELDS[item.kind];
   const direct = responsiveNode?.responsive?.[viewport] ?? {};
@@ -118,7 +124,7 @@ export function BuilderInspector({
     <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4" aria-label="Inspector">
       <div>
         <h2 className="!m-0 text-base font-semibold text-slate-900">Thuộc tính</h2>
-        <p className="mt-1 text-sm text-slate-600">{nodeTitle(item)}</p>
+        <p className="mt-1 text-sm text-slate-600">{nodeTitle(item, blockSchemas)}</p>
         <code className="block break-all text-[11px] text-slate-400">{item.node.id}</code>
       </div>
       {responsiveNode && (
@@ -180,6 +186,15 @@ export function BuilderInspector({
       {element?.type === 'legacy/block' && !locked && (
         <p className="text-xs text-slate-500">Block theme: {String(element.props.block_id)}</p>
       )}
+      {element?.type === 'plugin/block' && !locked && block && (
+        <div className="space-y-2" aria-label="Thuộc tính block khai báo">
+          <p className="break-all text-xs text-slate-600">{block.block_id}</p>
+          <BlockSchemaForm key={element.id + ':' + block.block_id} schema={block.schema}
+            values={element.props.values as Record<string, unknown>}
+            onChange={values => onChange(element.id, 'values', values as BlockPropValue)}
+            viewport={viewport} csrfToken={csrfToken} onError={onError} />
+        </div>
+      )}
       {!element && <p className="text-sm text-slate-500">
         Các thay đổi responsive chỉ ghi vào document khi bấm Lưu. Thêm hoặc đổi thứ tự node từ Tree.
       </p>}
@@ -190,6 +205,7 @@ export function BuilderInspector({
         'core/pattern_ref',
         'core/template_part',
         'core/content_slot',
+        'plugin/block',
       ].includes(element.type) && (
         <form className="space-y-3" onSubmit={event => event.preventDefault()} aria-label="Thuộc tính phần tử">
           {fields.map(field => (

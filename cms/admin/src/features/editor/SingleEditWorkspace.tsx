@@ -908,7 +908,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         canOpenBuilder={!isPattern && Boolean(settings?.supports.includes('builder'))}
         onOpenBuilder={() => {
           if (isPattern || !settings?.supports.includes('builder')) {
-            setStatusNote('Loại nội dung này chưa hỗ trợ UX Builder.');
+            setStatusNote('Loại nội dung này chưa hỗ trợ Trình dựng trang.');
             return;
           }
           if (dirty) {
@@ -916,7 +916,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             return;
           }
           if (entryId === null) {
-            setStatusNote('Vui lòng Lưu nội dung trước khi mở UX Builder.');
+            setStatusNote('Vui lòng Lưu nội dung trước khi mở Trình dựng trang.');
             return;
           }
           onNavigateHash(entryBuilderHash);
@@ -934,7 +934,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           Có thay đổi chưa lưu trong trình soạn thảo
         </h2>
         <p className="mt-2 text-sm text-zinc-600">
-          Bạn muốn lưu các chỉnh sửa hiện tại trước khi mở OpenDash Studio (UX Builder) không?
+          Bạn muốn lưu các chỉnh sửa hiện tại trước khi mở OpenDash Studio (Trình dựng trang) không?
         </p>
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           {entryId !== null && (
@@ -980,7 +980,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             data-testid="builder-prompt-save"
             className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
           >
-            {saving ? 'Đang lưu…' : 'Lưu & mở UX Builder'}
+            {saving ? 'Đang lưu…' : 'Lưu & mở Trình dựng trang'}
           </button>
         </div>
       </dialog>

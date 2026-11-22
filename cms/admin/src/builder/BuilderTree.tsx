@@ -1,20 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { BlockCatalogItemDto } from '../types.ts';
 import {
-  type BuilderDocument, type NodeLocation, type ElementType,
-  allNodes, nodeTitle,
+  type BuilderDocument, type NodeLocation, type InsertableElementType,
+  allNodes, isLockedElement, isProtectedNode, nodeTitle,
 } from './document.ts';
 
 interface Props {
   document: BuilderDocument;
   selectedId: string | null;
-  elementType: ElementType;
+  elementType: InsertableElementType;
+  registry?: Record<string, Record<string, string>>;
+  blockSchemas?: BlockCatalogItemDto[];
   onSelect: (id: string) => void;
   onAdd: (parentId: string | null, kind: 'section' | 'row' | 'column' | 'element') => void;
   onMove: (id: string, direction: -1 | 1) => void;
   onDelete: (id: string) => void;
 }
 
-export function BuilderTree({ document, selectedId, elementType, onSelect, onAdd, onMove, onDelete }: Props) {
+export function BuilderTree({
+  document, selectedId, elementType, registry = {}, blockSchemas = [],
+  onSelect, onAdd, onMove, onDelete,
+}: Props) {
   const nodes = allNodes(document);
   const [focusedId, setFocusedId] = useState<string | null>(selectedId);
   const buttons = useRef(new Map<string, HTMLButtonElement>());
@@ -35,7 +41,9 @@ export function BuilderTree({ document, selectedId, elementType, onSelect, onAdd
     let target: string | undefined;
     if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
       event.preventDefault();
-      onMove(item.node.id, event.key === 'ArrowUp' ? -1 : 1);
+      if (!isProtectedNode(document, item.node.id, registry, blockSchemas)) {
+        onMove(item.node.id, event.key === 'ArrowUp' ? -1 : 1);
+      }
       return;
     }
     switch (event.key) {
@@ -59,7 +67,10 @@ export function BuilderTree({ document, selectedId, elementType, onSelect, onAdd
     <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : 'Cấu trúc Builder'} className="space-y-1">
       {nodes.filter(entry => entry.parentId === parentId).map(item => {
         const nextKind = ({ section: 'row', row: 'column', column: 'element' } as const)[item.kind as 'section' | 'row' | 'column'];
-        const label = nodeTitle(item);
+        const label = nodeTitle(item, blockSchemas);
+        const protectedNode = isProtectedNode(document, item.node.id, registry, blockSchemas);
+        const locked = item.kind === 'element'
+          && isLockedElement(item.node as import('./document.ts').BuilderElement, registry, blockSchemas);
         return (
           <li role="none" key={item.node.id}>
             <div className={'min-w-0 overflow-hidden rounded-lg p-1 ' +
@@ -81,6 +92,7 @@ export function BuilderTree({ document, selectedId, elementType, onSelect, onAdd
                   (selectedId === item.node.id ? 'bg-sky-700 text-white' : 'bg-transparent text-slate-700')}
               >
                 <span aria-hidden="true" className="mr-2 text-slate-400">{item.kind === 'element' ? '▣' : '▾'}</span>{label}
+                {locked && <span className="ml-2 text-[10px]" title="Node chỉ đọc, giữ nguyên vị trí">🔒</span>}
               </button>
               </div>
               {selectedId === item.node.id && (
@@ -89,8 +101,10 @@ export function BuilderTree({ document, selectedId, elementType, onSelect, onAdd
                     aria-label={'Thêm ' + nextKind + ' vào ' + label}
                     title={'Thêm ' + nextKind} onClick={() => onAdd(item.node.id, nextKind)}>+</button>}
                   <button type="button" className="btn-secondary !px-1.5 !py-1 text-xs" title="Di chuyển lên (Alt+↑)"
+                    disabled={protectedNode}
                     aria-label={'Di chuyển ' + label + ' lên'} onClick={() => onMove(item.node.id, -1)}>↑</button>
                   <button type="button" className="btn-secondary !px-1.5 !py-1 text-xs" title="Di chuyển xuống (Alt+↓)"
+                    disabled={protectedNode}
                     aria-label={'Di chuyển ' + label + ' xuống'} onClick={() => onMove(item.node.id, 1)}>↓</button>
                   <button type="button" className="btn-danger !px-1.5 !py-1 text-xs"
                     aria-label={'Xóa ' + label} onClick={() => onDelete(item.node.id)}>×</button>

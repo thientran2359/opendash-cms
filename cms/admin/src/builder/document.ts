@@ -1,3 +1,5 @@
+import type { BlockCatalogItemDto, BlockPropValue, BlockSchemaV1 } from '../types.ts';
+
 /** Homepage AST v1. The server validates every Save; this client preserves
  * unknown JSON properties so the Editor never strips historical/bound data. */
 export interface BuilderElement {
@@ -50,7 +52,10 @@ export type NodeKind = 'section' | 'row' | 'column' | 'element';
  * is an insertable core block with its own typed Inspector, no field binding. */
 export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/video' | 'core/button' | 'core/list' | 'core/contact_form';
 export type TemplateElementType = 'core/content_slot' | 'core/template_part';
-export type InsertableElementType = ElementType | 'core/pattern_ref' | TemplateElementType;
+/** Declarative schema IDs are selected in the palette, but their AST type is
+ * always plugin/block. Keep ElementType closed for legacy binding controls. */
+export type InsertableElementType = ElementType | 'core/pattern_ref' | TemplateElementType
+  | 'plugin/block' | (string & {});
 export const ELEMENT_TYPES: InsertableElementType[] = [
   'core/heading',
   'core/text',
@@ -174,7 +179,7 @@ export function newNodeId(kind: NodeKind, document: BuilderDocument): string {
   return id;
 }
 
-export function nodeTitle(location: NodeLocation): string {
+export function nodeTitle(location: NodeLocation, blockCatalog: BlockCatalogItemDto[] = []): string {
   if (location.kind !== 'element') {
     return ({ section: 'Section', row: 'Row', column: 'Column' } as Record<string, string>)[location.kind];
   }
@@ -183,6 +188,11 @@ export function nodeTitle(location: NodeLocation): string {
     const key = typeof element.props?.part_key === 'string' && element.props.part_key
       ? element.props.part_key : 'part';
     return `Template Part (${key})`;
+  }
+  if (element.type === 'plugin/block') {
+    const blockId = typeof element.props?.block_id === 'string' ? element.props.block_id : '';
+    const schema = blockCatalog.find(item => item.block_id === blockId);
+    return schema?.schema.title || (blockId ? `Block (${blockId})` : 'Block chưa nhận diện');
   }
   return ({
     'core/heading': 'Tiêu đề', 'core/text': 'Văn bản',
@@ -225,7 +235,11 @@ function validListTaxonomyFilter(props: {
 
 /** Unknown, malformed, or inactive-provider elements are immutable anchors.
  * The server's is_preserved validator is the final authority. */
-export function isLockedElement(element: BuilderElement, registry: Record<string, Record<string, string>>): boolean {
+export function isLockedElement(
+  element: BuilderElement,
+  registry: Record<string, Record<string, string>>,
+  blockCatalog: BlockCatalogItemDto[] = [],
+): boolean {
   const props = element.props;
   if (!object(props)) return true;
   const binding = props.binding;
@@ -255,19 +269,29 @@ export function isLockedElement(element: BuilderElement, registry: Record<string
     case 'legacy/block':
       return typeof props.block_id !== 'string' || !object(props.values)
         || !Object.hasOwn(registry, props.block_id);
+    case 'plugin/block': {
+      // Rust PluginBlockProps has deny_unknown_fields. An extra top-level
+      // property (including a seemingly valid binding) makes the entire node
+      // unresolved; never offer mutable controls for that preserved payload.
+      if (typeof props.block_id !== 'string' || !object(props.values)
+          || Object.keys(props).some(key => key !== 'block_id' && key !== 'values')) return true;
+      const descriptor = blockCatalog.find(item => item.block_id === props.block_id);
+      return !descriptor || descriptor.status !== 'active' || descriptor.declaration_state !== 'declared';
+    }
     default: return true;
   }
 }
 
 export function isProtectedNode(
   document: BuilderDocument, id: string, registry: Record<string, Record<string, string>>,
+  blockCatalog: BlockCatalogItemDto[] = [],
 ): boolean {
   const entries = allNodes(document);
   const location = entries.find(entry => entry.node.id === id);
   if (!location) return false;
   return entries.some(entry =>
     entry.kind === 'element'
-    && isLockedElement(entry.node as BuilderElement, registry)
+    && isLockedElement(entry.node as BuilderElement, registry, blockCatalog)
     && entry.path.slice(0, location.path.length).every((step, index) => step === location.path[index])
   );
 }
@@ -278,12 +302,13 @@ export function preservesAnchors(
   before: BuilderDocument, after: BuilderDocument,
   registry: Record<string, Record<string, string>>,
   deletedId?: string,
+  blockCatalog: BlockCatalogItemDto[] = [],
 ): boolean {
   const deleted = deletedId ? locate(before, deletedId) : undefined;
   const afterEntries = allNodes(after);
   const beforeEntries = allNodes(before);
   return beforeEntries.every(entry => {
-    if (entry.kind !== 'element' || !isLockedElement(entry.node as BuilderElement, registry)) return true;
+    if (entry.kind !== 'element' || !isLockedElement(entry.node as BuilderElement, registry, blockCatalog)) return true;
     if (deleted && deleted.path.every((step, index) => entry.path[index] === step)) return true;
     const current = afterEntries.find(item => item.node.id === entry.node.id);
     return !!current && JSON.stringify(current.node) === JSON.stringify(entry.node)
@@ -323,8 +348,27 @@ function childrenAt(document: BuilderDocument, location: NodeLocation | undefine
   return current && !isElement(current.node) ? current.node.children : undefined;
 }
 
+/** Group fields are flattened in the server schema. Repeater items hold their
+ * own object values; responsive defaults start at desktop and cascade in UI. */
+function initialBlockValues(fields: BlockSchemaV1['fields']): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const field of fields) {
+    if (field.type === 'group') {
+      Object.assign(values, initialBlockValues(field.fields));
+    } else if (field.type === 'repeater') {
+      values[field.key] = Array.from({ length: field.min_items ?? 0 },
+        () => initialBlockValues(field.fields));
+    } else if ('default' in field && field.default !== undefined && field.default !== null) {
+      values[field.key] = 'responsive' in field && field.responsive
+        ? { desktop: field.default } : field.default;
+    }
+  }
+  return values;
+}
+
 export function appendNode(
   document: BuilderDocument, parentId: string | null, kind: NodeKind, elementType: InsertableElementType,
+  options?: { blockSchema?: BlockSchemaV1 },
 ): { document: BuilderDocument; id: string } | null {
   const parent = locate(document, parentId);
   if ((kind === 'section' && parentId !== null)
@@ -337,8 +381,12 @@ export function appendNode(
   if (kind === 'element' && elementType === 'core/list'
       && allNodes(document).filter(item => item.kind === 'element'
         && (item.node as BuilderElement).type === 'core/list').length >= 8) return null;
+  const blockSchema = options?.blockSchema;
+  const declarative = kind === 'element'
+    && (elementType === 'plugin/block' || blockSchema?.id === elementType);
+  if (declarative && (!blockSchema || blockSchema.schema_version !== 1)) return null;
   const id = newNodeId(kind, next);
-  const defaults: Record<InsertableElementType, Record<string, unknown>> = {
+  const defaults: Record<string, Record<string, unknown>> = {
     'core/heading': { level: 2, text: 'Tiêu đề mới' },
     'core/text': { text: 'Nội dung mới' },
     'core/image': { media_id: '', alt: '' },
@@ -350,7 +398,11 @@ export function appendNode(
     'core/content_slot': {},
     'core/template_part': { part_key: 'header' },
   };
-  const node: BuilderNode = kind === 'element' ? { id, type: elementType, props: { ...defaults[elementType] } }
+  if (kind === 'element' && !declarative && !Object.hasOwn(defaults, elementType)) return null;
+  const node: BuilderNode = kind === 'element'
+    ? declarative && blockSchema
+      ? { id, type: 'plugin/block', props: { block_id: blockSchema.id, values: initialBlockValues(blockSchema.fields) } }
+      : { id, type: elementType, props: { ...defaults[elementType] } }
     : { id, children: [] };
   children.push(node);
   return { document: next, id };
@@ -445,16 +497,24 @@ export function moveNode(document: BuilderDocument, id: string, direction: -1 | 
 }
 
 export function setNodeField(
-  document: BuilderDocument, id: string, field: string, value: string | number | boolean | undefined,
+  document: BuilderDocument, id: string, field: string, value: BlockPropValue | undefined,
 ): BuilderDocument | null {
   const next = clone(document);
   const location = locate(next, id);
   if (!location || !isElement(location.node)) return null;
   const element = location.node;
-  if (element.type === 'legacy/block') {
+  if (element.type === 'plugin/block' && field === 'values') {
+    // The schema form supplies a complete values object. Replace it as one
+    // draft mutation so repeater reorder and responsive edits remain atomic.
+    if (!object(value) || !object(element.props.values)) return null;
+    element.props = { ...element.props, values: { ...value } };
+  } else if (element.type === 'legacy/block' || element.type === 'plugin/block') {
     const values = element.props.values;
     if (!object(values)) return null;
-    element.props = { ...element.props, values: { ...values, [field]: value } };
+    const updated = { ...values };
+    if (value === undefined) delete updated[field];
+    else updated[field] = value;
+    element.props = { ...element.props, values: updated };
   } else {
     if (value === undefined) {
       const rest = { ...element.props };
