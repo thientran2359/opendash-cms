@@ -18,6 +18,8 @@
 3. **Pattern Library (`Explore all patterns` kiểu Gutenberg):** Mở ngăn kéo/modal lưới xem trước ngay trong Visual Builder, liệt kê tất cả mẫu từ thư mục `patterns/*.json` của active theme v3 (DTO giữ trường `source: "theme"` để sẵn sàng mở rộng nguồn Cloud sau này). Bấm chọn mẫu sẽ **COPY / import AST** (sinh mới toàn bộ `node_id`) vào trang đang chỉnh sửa để tùy biến tự do.
 
 > **Phạm vi thay thế hợp đồng cũ:** Sau khi triển khai và kiểm chứng hoàn tất, đặc tả này mở rộng Page-scoped Builder và thay thế tên gọi/mô hình private Section trong [`ADMIN_REVIEW_2026_11.md`](../contracts/ADMIN_REVIEW_2026_11.md), mở rộng `ContentSupport` trong [`CONTENT_FOUNDATION_2026_11.md`](../contracts/CONTENT_FOUNDATION_2026_11.md), và cập nhật ghi chú synced Pattern block (`core/pattern_ref`) trong [`PRODUCT_REQUIREMENTS.md`](../product/PRODUCT_REQUIREMENTS.md).
+>
+> **Cập nhật hợp đồng (`Superseded by docs/designs/opendash-studio-customizer-and-ux-builder.md`):** Phần tách kho lưu song song `values_json["body"]` vs `entry_builder_documents` cho Entry thông thường đã được hợp nhất về chuẩn Gutenberg Comment Block `<!-- od:... -->` trên `values_json["body"]` theo [OpenDash Studio Spec](opendash-studio-customizer-and-ux-builder.md); riêng `pattern` CPT vẫn giữ `entry_builder_documents` và cơ chế `core/pattern_ref` (depth = 1).
 
 ---
 
