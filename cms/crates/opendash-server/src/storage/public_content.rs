@@ -666,29 +666,6 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              )
            LIMIT 1
          ) OR EXISTS (
-           SELECT 1 FROM entry_builder_media_refs AS r
-           JOIN content_entries AS e ON e.id = r.entry_id
-           JOIN content_types AS t ON t.key = e.content_type_key
-           WHERE r.media_id = ? AND e.content_type_key NOT IN ('pattern', 'section')
-             AND e.publication_status = 'published'
-             AND t.provider_status = 'active'
-             AND t.declaration_state = 'declared'
-             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
-             AND EXISTS (SELECT 1 FROM json_each(t.definition_json, '$.settings.supports') WHERE value = 'builder')
-         ) OR EXISTS (
-           -- One-hop Pattern media are public only through an actively
-           -- published, Builder-enabled parent entry. Pattern itself stays
-           -- private and never directly grants media ACL.
-           SELECT 1 FROM entry_builder_media_refs AS r
-           JOIN entry_pattern_refs AS pref ON pref.target_pattern_id = r.entry_id
-           JOIN content_entries AS e ON e.id = pref.source_entry_id
-           JOIN content_types AS t ON t.key = e.content_type_key
-           WHERE r.media_id = ? AND e.content_type_key NOT IN ('pattern', 'section')
-             AND e.publication_status = 'published'
-             AND t.provider_status = 'active' AND t.declaration_state = 'declared'
-             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
-             AND EXISTS (SELECT 1 FROM json_each(t.definition_json, '$.settings.supports') WHERE value = 'builder')
-         ) OR EXISTS (
            SELECT 1 FROM builder_homepage_media AS bm
            JOIN builder_homepage AS b ON b.id = 1
            WHERE bm.media_id = ? AND b.document_json IS NOT NULL
@@ -800,11 +777,49 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     .bind(id)
     .bind(id)
     .bind(id)
-    .bind(id)
-    .bind(id)
     .fetch_one(db)
     .await?;
-    Ok(result != 0)
+    if result != 0 {
+        return Ok(true);
+    }
+
+    // Builder + one-hop Pattern ACL projections are only candidates: a change
+    // in Content Type / Field Group visibility can revoke body access without
+    // rewriting old entry_pattern_refs (which intentionally preserve content).
+    // Re-evaluate the effective schema at the public read boundary so stale
+    // projections cannot serve a private body or an inactive provider.
+    let builder_type_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT e.content_type_key FROM content_entries AS e
+         WHERE e.publication_status = 'published'
+           AND e.content_type_key NOT IN ('pattern', 'section')
+           AND (
+             EXISTS (SELECT 1 FROM entry_builder_media_refs AS r
+                     WHERE r.entry_id = e.id AND r.media_id = ?)
+             OR EXISTS (
+               SELECT 1 FROM entry_pattern_refs AS pref
+               JOIN entry_builder_media_refs AS r ON r.entry_id = pref.target_pattern_id
+               WHERE pref.source_entry_id = e.id AND r.media_id = ?
+             )
+           )",
+    )
+    .bind(id)
+    .bind(id)
+    .fetch_all(db)
+    .await?;
+    if builder_type_keys.is_empty() {
+        return Ok(false);
+    }
+    let mut conn = db.acquire().await?;
+    for type_key in builder_type_keys {
+        if let Some(schema) =
+            crate::storage::content::load_effective_content_schema_in_tx(&mut conn, &type_key)
+                .await?
+            && crate::storage::page::body_can_grant_media(&schema)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]

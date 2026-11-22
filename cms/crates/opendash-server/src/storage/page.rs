@@ -455,7 +455,7 @@ async fn active_media_roles_in_conn(
     Ok(roles)
 }
 
-fn body_can_grant_media(schema: &EffectiveContentSchema) -> bool {
+pub(crate) fn body_can_grant_media(schema: &EffectiveContentSchema) -> bool {
     schema.base.status == ProviderStatus::Active
         && schema.base.declaration_state == DeclarationState::Declared
         && schema.base.descriptor.settings.public

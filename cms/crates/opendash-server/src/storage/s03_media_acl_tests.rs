@@ -152,6 +152,107 @@ async fn plugin_media_respects_catalog_kind_repeater_and_provider_state() {
 }
 
 #[tokio::test]
+async fn plugin_media_public_read_rechecks_body_policy_with_stale_pattern_references() {
+    let (db, _document, _image_id, video_id) = fixture().await;
+    let parent_id = sqlx::query(
+        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+         VALUES('page','stale-parent','Parent','{}','draft')",
+    )
+    .execute(&db)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query("UPDATE content_entries SET publication_status='published' WHERE id=?")
+        .bind(parent_id)
+        .execute(&db)
+        .await
+        .unwrap();
+    let pattern_id = sqlx::query(
+        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
+         VALUES('pattern','stale-pattern','Pattern','{}','draft')",
+    )
+    .execute(&db)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    for entry_id in [parent_id, pattern_id] {
+        sqlx::query(
+            "INSERT INTO entry_builder_media_refs(entry_id,media_id,ref_role) VALUES (?,?,'video')",
+        )
+        .bind(entry_id)
+        .bind(&video_id)
+        .execute(&db)
+        .await
+        .unwrap();
+    }
+    sqlx::query("INSERT INTO entry_pattern_refs(source_entry_id,target_pattern_id) VALUES (?,?)")
+        .bind(parent_id)
+        .bind(pattern_id)
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(
+        crate::storage::public_content::media_is_referenced(&db, &video_id)
+            .await
+            .unwrap(),
+        "published Builder body is allowed to make media public"
+    );
+
+    let definition_raw: String =
+        sqlx::query_scalar("SELECT definition_json FROM content_types WHERE key='page'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    let mut definition: opendash_core::content::ContentTypeDefinition =
+        serde_json::from_str(&definition_raw).unwrap();
+    let body = definition
+        .fields
+        .iter_mut()
+        .find(|field| field.key == "body")
+        .unwrap();
+    body.public_exposure = PublicExposure::Private;
+    sqlx::query("UPDATE content_types SET definition_json=? WHERE key='page'")
+        .bind(serde_json::to_string(&definition).unwrap())
+        .execute(&db)
+        .await
+        .unwrap();
+    let persisted_links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM entry_pattern_refs")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(persisted_links, 1, "resync must not destroy pattern links");
+    assert!(
+        !crate::storage::public_content::media_is_referenced(&db, &video_id)
+            .await
+            .unwrap(),
+        "stale direct + Pattern projections must not grant private body media"
+    );
+
+    sqlx::query("DELETE FROM entry_builder_media_refs WHERE entry_id=?")
+        .bind(parent_id)
+        .execute(&db)
+        .await
+        .unwrap();
+    definition
+        .fields
+        .iter_mut()
+        .find(|field| field.key == "body")
+        .unwrap()
+        .public_exposure = PublicExposure::Public;
+    sqlx::query("UPDATE content_types SET definition_json=? WHERE key='page'")
+        .bind(serde_json::to_string(&definition).unwrap())
+        .execute(&db)
+        .await
+        .unwrap();
+    assert!(
+        crate::storage::public_content::media_is_referenced(&db, &video_id)
+            .await
+            .unwrap(),
+        "a still-linked Pattern must regain public access after body is public"
+    );
+}
+
+#[tokio::test]
 async fn plugin_media_projects_to_home_entry_and_template_acl_with_privacy_guard() {
     let (db, document, image_id, video_id) = fixture().await;
     let raw =

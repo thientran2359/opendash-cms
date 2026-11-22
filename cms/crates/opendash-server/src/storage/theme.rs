@@ -794,18 +794,14 @@ pub async fn activate_revision(
 
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
-    let block_update = async {
-        crate::storage::page::sync_owner_blocks_in_tx(
-            &mut conn,
-            "theme",
-            &revision.theme_id,
-            ProviderStatus::Active,
-            &revision.revision_digest,
-            &blocks,
-        )
-        .await?;
-        crate::storage::page::resync_plugin_block_acls_in_tx(&mut conn).await
-    }
+    let block_update = crate::storage::page::sync_owner_blocks_in_tx(
+        &mut conn,
+        "theme",
+        &revision.theme_id,
+        ProviderStatus::Active,
+        &revision.revision_digest,
+        &blocks,
+    )
     .await;
     if let Err(err) = block_update {
         let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
@@ -861,6 +857,14 @@ pub async fn activate_revision(
 
     match res {
         Ok(done) if done.rows_affected() == 1 => {
+            // The effective CPT body visibility and active theme selection must
+            // already reflect the new revision when projecting public media.
+            // Rebuild after every declaration update, still before COMMIT.
+            if let Err(err) = crate::storage::page::resync_plugin_block_acls_in_tx(&mut conn).await
+            {
+                let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+                return Err(err);
+            }
             sqlx::query("COMMIT").execute(&mut *conn).await?;
             Ok(RevisionActivationOutcome::Activated(
                 get_active_selection(db).await?,
