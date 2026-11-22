@@ -304,9 +304,9 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
     let sync_body = sync_response.text().await.unwrap();
     assert_eq!(sync_status, 200, "fixture claim sync: {sync_body}");
 
-    // Verify public header renders `/content/post/about-v2` and omits Draft Link.
+    // Verify public header renders `/about-v2` and omits Draft Link.
     let html = client
-        .get(format!("{}/content/post/about-v2", srv2.base_url))
+        .get(format!("{}/about-v2", srv2.base_url))
         .send()
         .await
         .unwrap()
@@ -314,8 +314,7 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
         .await
         .unwrap();
     assert!(
-        html.contains(r#"href="/content/post/about-v2""#)
-            || html.contains(r#"href="&#x2f;content&#x2f;post&#x2f;about-v2""#),
+        html.contains(r#"href="/about-v2""#) || html.contains(r#"href="&#x2f;about-v2""#),
         "html was: {html}"
     );
     assert!(html.contains("About Link"));
@@ -337,7 +336,7 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
     }
 
     let html_after_switch = client
-        .get(format!("{}/content/post/about-v2", srv2.base_url))
+        .get(format!("{}/about-v2", srv2.base_url))
         .send()
         .await
         .unwrap()
@@ -345,8 +344,8 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
         .await
         .unwrap();
     assert!(
-        html_after_switch.contains(r#"href="/content/post/about-v2""#)
-            || html_after_switch.contains(r#"href="&#x2f;content&#x2f;post&#x2f;about-v2""#),
+        html_after_switch.contains(r#"href="/about-v2""#)
+            || html_after_switch.contains(r#"href="&#x2f;about-v2""#),
         "html_after_switch was: {html_after_switch}"
     );
     assert!(html_after_switch.contains("About Link"));

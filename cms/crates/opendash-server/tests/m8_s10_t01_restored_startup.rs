@@ -242,13 +242,7 @@ async fn native_false_config_restore_requires_activation_and_survives_restarts()
         .await
         .unwrap();
     assert_eq!(published.status(), StatusCode::OK);
-    public_noindex(
-        &client,
-        &server.url,
-        "/content/post/restore-safe-post",
-        false,
-    )
-    .await;
+    public_noindex(&client, &server.url, "/restore-safe-post", false).await;
 
     let form = client
         .post(format!("{}/api/admin/contact/forms", server.url))
@@ -356,13 +350,7 @@ async fn native_false_config_restore_requires_activation_and_survives_restarts()
     let restore_server = start(&restored).await;
     health_safe(&client, &restore_server.url, true).await;
     public_noindex(&client, &restore_server.url, "/", true).await;
-    public_noindex(
-        &client,
-        &restore_server.url,
-        "/content/post/restore-safe-post",
-        true,
-    )
-    .await;
+    public_noindex(&client, &restore_server.url, "/restore-safe-post", true).await;
     let contact = client
         .post(format!(
             "{}/api/public/contact/{form_id}",
@@ -527,13 +515,7 @@ async fn native_false_config_restore_requires_activation_and_survives_restarts()
 
     let activated_server = start(&restored).await;
     health_safe(&client, &activated_server.url, false).await;
-    public_noindex(
-        &client,
-        &activated_server.url,
-        "/content/post/restore-safe-post",
-        false,
-    )
-    .await;
+    public_noindex(&client, &activated_server.url, "/restore-safe-post", false).await;
     let (fresh_cookie, _) = login(&client, &activated_server.url, "admin", ADMIN_PASSWORD).await;
     let final_status = client
         .get(format!(

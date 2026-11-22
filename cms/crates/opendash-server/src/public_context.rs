@@ -10,6 +10,40 @@ use opendash_core::{
 pub const ARCHIVE_SIZE: i64 = 20;
 pub const MAX_ARCHIVE_PAGE: i64 = 10_000;
 
+/// Single source of truth for the 25 reserved system path prefixes.
+const RESERVED_SYSTEM_ROOTS: &[&str] = &[
+    "admin",
+    "api",
+    "assets",
+    "auth",
+    "builder",
+    "content",
+    "favicon.ico",
+    "forms",
+    "health",
+    "media",
+    "page",
+    "pattern",
+    "preview",
+    "registry",
+    "robots.txt",
+    "save",
+    "section",
+    "sitemap.xml",
+    "sitemaps",
+    "static",
+    "studio",
+    "taxonomy",
+    "theme",
+    "themes",
+    "uploads",
+];
+
+/// Returns `true` when `root` matches any closed reserved system path prefix.
+pub fn is_reserved_system_root(root: &str) -> bool {
+    RESERVED_SYSTEM_ROOTS.contains(&root)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaxonomyKind {
     Category,
@@ -164,6 +198,7 @@ pub fn validate_public_request_path(path: &str) -> Result<(), &'static str> {
     if !path.starts_with('/')
         || path.contains('%')
         || path.contains('#')
+        || path.contains('\\')
         || path.chars().any(char::is_control)
         || (path != "/"
             && path
@@ -218,32 +253,27 @@ impl CanonicalUrlBuilder {
 
     pub fn valid_type(type_key: &str) -> bool {
         valid_content_type_key(type_key)
-            && !matches!(
-                type_key,
-                "api"
-                    | "admin"
-                    | "auth"
-                    | "assets"
-                    | "builder"
-                    | "content"
-                    | "media"
-                    | "preview"
-                    | "registry"
-                    | "save"
-                    | "taxonomy"
-                    | "theme"
-                    | "themes"
-                    | "uploads"
-            )
+            && !is_reserved_system_root(type_key)
+            && type_key != "posts"
     }
 
     pub fn archive(type_key: &str) -> Option<String> {
-        Self::valid_type(type_key).then(|| format!("/content/{type_key}"))
+        if type_key == "post" {
+            Some("/posts".to_owned())
+        } else {
+            Self::valid_type(type_key).then(|| format!("/{type_key}"))
+        }
     }
 
     pub fn entry(type_key: &str, slug: &str) -> Option<String> {
-        (Self::valid_type(type_key) && valid_kebab_segment_with_limit(slug, 64))
-            .then(|| format!("/content/{type_key}/{slug}"))
+        let allow_entry = type_key == "page" || Self::valid_type(type_key);
+        (allow_entry && valid_kebab_segment_with_limit(slug, 64)).then(|| {
+            if matches!(type_key, "post" | "page") {
+                format!("/{slug}")
+            } else {
+                format!("/{type_key}/{slug}")
+            }
+        })
     }
 
     pub fn entry_from_id(id: i64, type_key: &str, slug: &str) -> Option<String> {
@@ -251,8 +281,7 @@ impl CanonicalUrlBuilder {
     }
 
     pub fn taxonomy(kind: TaxonomyKind, slug: &str) -> Option<String> {
-        valid_kebab_segment_with_limit(slug, 64)
-            .then(|| format!("/taxonomy/{}/{slug}", kind.as_str()))
+        valid_kebab_segment_with_limit(slug, 64).then(|| format!("/{}/{slug}", kind.as_str()))
     }
 
     pub fn term_from_id(id: i64, kind: TaxonomyKind, slug: &str) -> Option<String> {
@@ -323,39 +352,24 @@ impl CanonicalUrlBuilder {
         }
     }
 
-    /// A user-bound URL may point outside the CMS. Only known public route
-    /// namespaces are rebuilt, with strict typed query parsing.
+    /// A user-bound URL may point outside the CMS. Preserve external URLs intact
+    /// and check relative CMS paths for disallowed characters or ambiguous double slashes.
     pub fn normalize_internal_link(input: &str) -> Option<String> {
-        if !input.starts_with("/content/") && !input.starts_with("/taxonomy/") {
+        if !input.starts_with('/') {
             return Some(input.to_string());
         }
-        let (path, raw) = input
+        let (path, _raw) = input
             .split_once('?')
             .map_or((input, None), |(a, b)| (a, Some(b)));
-        if path.contains('%') || path.contains('#') {
+        if path.contains("//")
+            || path.contains('%')
+            || path.contains('#')
+            || path.contains('\\')
+            || input.chars().any(char::is_control)
+        {
             return None;
         }
-        let segments: Vec<_> = path.trim_start_matches('/').split('/').collect();
-        match segments.as_slice() {
-            ["content", type_key] => {
-                Self::content_page(type_key, parse_query(raw, QueryScope::ContentArchive).ok()?)
-            }
-            ["content", type_key, slug] => {
-                validate_single_query(raw).ok()?;
-                Self::entry(type_key, slug)
-            }
-            ["taxonomy", "category", slug] => Self::taxonomy_page(
-                TaxonomyKind::Category,
-                slug,
-                parse_query(raw, QueryScope::TaxonomyArchive(TaxonomyKind::Category)).ok()?,
-            ),
-            ["taxonomy", "tag", slug] => Self::taxonomy_page(
-                TaxonomyKind::Tag,
-                slug,
-                parse_query(raw, QueryScope::TaxonomyArchive(TaxonomyKind::Tag)).ok()?,
-            ),
-            _ => None,
-        }
+        Some(input.to_string())
     }
 }
 
@@ -375,13 +389,56 @@ mod request_path_tests {
             "/blog/post/",
             "//blog/post",
             "/blog/post#fragment",
+            "/blog\\post",
             "/blog/post\0",
         ] {
             assert!(validate_public_request_path(path).is_err(), "{path}");
         }
-        for path in ["/", "/blog/post", "/content/post/hello", "/genres/fiction"] {
+        for path in ["/", "/blog/post", "/hello", "/genres/fiction"] {
             assert!(validate_public_request_path(path).is_ok(), "{path}");
         }
+    }
+
+    #[test]
+    fn wordpress_canonical_url_builder_defaults_and_links() {
+        assert_eq!(
+            CanonicalUrlBuilder::entry("page", "about").as_deref(),
+            Some("/about")
+        );
+        assert_eq!(
+            CanonicalUrlBuilder::entry("post", "hello").as_deref(),
+            Some("/hello")
+        );
+        assert_eq!(
+            CanonicalUrlBuilder::entry("project", "alpha").as_deref(),
+            Some("/project/alpha")
+        );
+        assert_eq!(CanonicalUrlBuilder::archive("page"), None);
+        assert_eq!(
+            CanonicalUrlBuilder::archive("post").as_deref(),
+            Some("/posts")
+        );
+        assert_eq!(
+            CanonicalUrlBuilder::archive("project").as_deref(),
+            Some("/project")
+        );
+        assert_eq!(
+            CanonicalUrlBuilder::taxonomy(TaxonomyKind::Category, "news").as_deref(),
+            Some("/category/news")
+        );
+        assert_eq!(
+            CanonicalUrlBuilder::taxonomy(TaxonomyKind::Tag, "rust").as_deref(),
+            Some("/tag/rust")
+        );
+        assert_eq!(
+            CanonicalUrlBuilder::normalize_internal_link("https://example.com/#top%20").as_deref(),
+            Some("https://example.com/#top%20")
+        );
+        assert_eq!(
+            CanonicalUrlBuilder::normalize_internal_link("/about?utm=1").as_deref(),
+            Some("/about?utm=1")
+        );
+        assert_eq!(CanonicalUrlBuilder::normalize_internal_link("/a\\b"), None);
     }
 
     #[test]

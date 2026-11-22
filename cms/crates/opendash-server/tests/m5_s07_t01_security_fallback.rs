@@ -345,7 +345,7 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
     assert!(!home_html.contains("TOP_SECRET_VALUE_999"));
 
     // 2. Accessibility & semantic landmarks smoke on public pages
-    for path in ["/", "/content/post", "/content/post/public-post"] {
+    for path in ["/", "/posts", "/public-post"] {
         let resp = client
             .get(format!("{}{path}", srv.base_url))
             .send()
@@ -465,7 +465,7 @@ async fn damaged_package_fallback_adversarial_csec_acl_csrf_cas_and_accessibilit
     if themes_dir.exists() {
         fs::remove_dir_all(&themes_dir).unwrap();
     }
-    for path in ["/", "/content/post", "/content/post/public-post"] {
+    for path in ["/", "/posts", "/public-post"] {
         let resp = client
             .get(format!("{}{path}", srv.base_url))
             .send()

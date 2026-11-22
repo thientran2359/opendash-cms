@@ -1155,7 +1155,7 @@ mod m5_public_context_tests {
         assert!(get_by_slug(&db, "post", "draft-a").await.unwrap().is_none());
         assert_eq!(
             canonical_entry_by_id(&db, post).await.unwrap().as_deref(),
-            Some("/content/post/new-post-a")
+            Some("/new-post-a")
         );
         assert_eq!(canonical_entry_by_id(&db, draft).await.unwrap(), None);
         sqlx::query("UPDATE taxonomy_terms SET slug='sea-new' WHERE id=?")
@@ -1166,7 +1166,7 @@ mod m5_public_context_tests {
         synchronize_direct_sql_fixture(&db).await;
         assert_eq!(
             canonical_term_by_id(&db, root).await.unwrap().as_deref(),
-            Some("/taxonomy/category/sea-new")
+            Some("/category/sea-new")
         );
         assert!(
             taxonomy_public_page(
@@ -1382,6 +1382,7 @@ mod m5_public_context_tests {
         .execute(&db)
         .await
         .unwrap();
+        synchronize_direct_sql_fixture(&db).await;
         assert!(
             get_by_slug(&db, "news", "hidden-news")
                 .await
@@ -1436,12 +1437,7 @@ mod m5_public_context_tests {
                 .iter()
                 .any(|route| route.path == "/hidden-news")
         );
-        assert!(
-            !routes
-                .routes
-                .iter()
-                .any(|route| route.path == "/content/news")
-        );
+        assert!(!routes.routes.iter().any(|route| route.path == "/news"));
         drop(conn);
 
         sqlx::query(

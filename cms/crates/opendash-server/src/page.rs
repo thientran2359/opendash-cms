@@ -1297,7 +1297,8 @@ mod m6_s05_tests {
         let rendered =
             render_builder_with_lists(&state, &doc, false, &BTreeMap::new(), &lists).unwrap();
         assert!(rendered.html.contains("/blog/new-slug"));
-        assert!(!rendered.html.contains("/content/post/old-slug"));
+        assert!(!rendered.html.contains("/old-slug"));
+        assert!(!rendered.html.contains("href=\"/hidden\""));
         assert!(!rendered.html.contains("href=\"/content/post/hidden\""));
         assert!(rendered.html.contains("&lt;unsafe&gt;"));
         assert!(!rendered.html.contains("<unsafe>"));

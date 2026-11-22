@@ -45,7 +45,7 @@ async fn spawn_server_at(site_root: PathBuf, cleanup_on_drop: bool) -> TestServe
 
     let base_url = format!("http://127.0.0.1:{port}");
     let client = Client::new();
-    for _ in 0..50 {
+    for _ in 0..120 {
         if let Ok(resp) = client.get(format!("{base_url}/api/health")).send().await
             && resp.status().is_success()
         {
@@ -61,13 +61,16 @@ async fn spawn_server_at(site_root: PathBuf, cleanup_on_drop: bool) -> TestServe
     panic!("server did not become healthy at {base_url}");
 }
 
+static NEXT_SITE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 async fn spawn_server() -> TestServer {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
+    let seq = NEXT_SITE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let site_root = std::env::temp_dir().join(format!(
-        "opendash-m5-s03-t02-{}-{nanos}",
+        "opendash-m5-s03-t02-{}-{nanos}-{seq}",
         std::process::id()
     ));
     spawn_server_at(site_root, true).await
@@ -382,7 +385,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .unwrap();
     assert_eq!(saved_before["items"].as_array().unwrap().len(), 0);
     let public_post_1 = client
-        .get(format!("{}/content/post/first-post", srv.base_url))
+        .get(format!("{}/first-post", srv.base_url))
         .send()
         .await
         .unwrap()
@@ -574,7 +577,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
 
     // Both published posts render their own dynamic title + Site Header v1; draft post stays 404
     let body1 = client
-        .get(format!("{}/content/post/first-post", srv.base_url))
+        .get(format!("{}/first-post", srv.base_url))
         .send()
         .await
         .unwrap()
@@ -582,7 +585,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .await
         .unwrap();
     let body2 = client
-        .get(format!("{}/content/post/second-post", srv.base_url))
+        .get(format!("{}/second-post", srv.base_url))
         .send()
         .await
         .unwrap()
@@ -590,7 +593,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
         .await
         .unwrap();
     let draft_res = client
-        .get(format!("{}/content/post/secret-draft", srv.base_url))
+        .get(format!("{}/secret-draft", srv.base_url))
         .send()
         .await
         .unwrap();
@@ -629,7 +632,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
     drop(srv);
     let srv2 = spawn_server_at(site_root, true).await;
     let body1_after_restart = client
-        .get(format!("{}/content/post/first-post", srv2.base_url))
+        .get(format!("{}/first-post", srv2.base_url))
         .send()
         .await
         .unwrap()
@@ -681,7 +684,7 @@ async fn template_overrides_preview_cas_route_context_and_restart() {
     assert_eq!(reset["next_effective_source"]["target_key"], "part:header");
 
     let body1_after_reset = client
-        .get(format!("{}/content/post/first-post", srv2.base_url))
+        .get(format!("{}/first-post", srv2.base_url))
         .send()
         .await
         .unwrap()
@@ -826,7 +829,7 @@ async fn v3_page_canvas_and_custom_single_selections_survive_theme_switch() {
     assert_eq!(page["entry"]["page_layout_key"], "canvas");
     assert_eq!(post["entry"]["custom_template_key"], "feature");
     let page_public = client
-        .get(format!("{origin}/content/page/canvas-visit"))
+        .get(format!("{origin}/canvas-visit"))
         .send()
         .await
         .unwrap();
@@ -838,7 +841,7 @@ async fn v3_page_canvas_and_custom_single_selections_survive_theme_switch() {
         "canvas must omit site header"
     );
     let post_public = client
-        .get(format!("{origin}/content/post/feature-visit"))
+        .get(format!("{origin}/feature-visit"))
         .send()
         .await
         .unwrap();
@@ -907,11 +910,12 @@ async fn v3_page_canvas_and_custom_single_selections_survive_theme_switch() {
             record[selection_key], selection,
             "saved key must survive switching theme"
         );
-        let public = client
-            .get(format!("{origin}/content/{kind}/{slug}"))
-            .send()
-            .await
-            .unwrap();
+        let public_url = if matches!(kind, "post" | "page") {
+            format!("{origin}/{slug}")
+        } else {
+            format!("{origin}/{kind}/{slug}")
+        };
+        let public = client.get(public_url).send().await.unwrap();
         assert_eq!(public.status(), 200);
     }
 }

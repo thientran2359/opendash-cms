@@ -297,7 +297,7 @@ async fn seo_metadata_head_projection_og_media_acl_and_rbac() {
     assert_eq!(pub_media_after.status(), 200);
 
     let post_html_no_origin = client
-        .get(format!("{}/content/post/seo-post", srv.base_url))
+        .get(format!("{}/seo-post", srv.base_url))
         .send()
         .await
         .unwrap()
@@ -336,7 +336,7 @@ async fn seo_metadata_head_projection_og_media_acl_and_rbac() {
     assert_eq!(pub_settings_put.status(), 200);
 
     let post_html = client
-        .get(format!("{}/content/post/seo-post", srv.base_url))
+        .get(format!("{}/seo-post", srv.base_url))
         .send()
         .await
         .unwrap()
@@ -344,9 +344,9 @@ async fn seo_metadata_head_projection_og_media_acl_and_rbac() {
         .await
         .unwrap();
     assert!(post_html.contains("<html lang=\"en-US\">"));
-    assert!(post_html.contains(
-        "<link rel=\"canonical\" href=\"https://cms.example.com/content/post/seo-post\">"
-    ));
+    assert!(
+        post_html.contains("<link rel=\"canonical\" href=\"https://cms.example.com/seo-post\">")
+    );
     assert_eq!(post_html.matches("<head>").count(), 1);
     assert_eq!(post_html.matches("<title>").count(), 1);
 
