@@ -8,10 +8,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use opendash_core::{
+    block_schema::BlockSchemaV1,
     builder::{BuilderDocument, MAX_BUILDER_JSON_BYTES},
     content::valid_content_type_key,
+    registry::{DeclarationState, ProviderStatus, ResourceOwner},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -21,7 +23,10 @@ use crate::{
     hooks::HookDispatcher,
     page::{render_block, save_page},
     routes::public::rendered,
-    storage::{builder as builder_storage, page::list_theme_blocks},
+    storage::{
+        builder as builder_storage,
+        page::{list_theme_blocks, load_unified_block_catalog_in_conn},
+    },
     theme::{Block, Fields},
 };
 
@@ -74,6 +79,93 @@ pub async fn registry(
 ) -> ApiResult<Json<BTreeMap<String, Fields>>> {
     require_session(&headers, &db).await?;
     Ok(Json(list_theme_blocks(&db).await?))
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlockCatalogItemDto {
+    pub block_id: String,
+    pub owner_kind: &'static str,
+    pub owner_id: String,
+    pub status: &'static str,
+    pub declaration_state: &'static str,
+    pub schema: BlockSchemaV1,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlockCatalogDto {
+    pub items: Vec<BlockCatalogItemDto>,
+}
+
+/// Includes inactive/withdrawn schemas for preserving editor content, but never templates.
+pub async fn block_schemas(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    let mut conn = db.acquire().await?;
+    let catalog = load_unified_block_catalog_in_conn(&mut conn).await?;
+    let items = catalog
+        .iter()
+        .filter_map(|(block_id, entry)| {
+            let (owner_kind, owner_id) = match &entry.owner {
+                ResourceOwner::Core => ("core", "core".to_owned()),
+                ResourceOwner::Theme(id) => ("theme", id.clone()),
+                ResourceOwner::Plugin(id) => ("plugin", id.clone()),
+                // No user-owned blocks exist in block.json v1.
+                ResourceOwner::User => return None,
+            };
+            Some(BlockCatalogItemDto {
+                block_id: block_id.clone(),
+                owner_kind,
+                owner_id,
+                status: if entry.status == ProviderStatus::Active {
+                    "active"
+                } else {
+                    "provider_inactive"
+                },
+                declaration_state: if entry.declaration_state == DeclarationState::Declared {
+                    "declared"
+                } else {
+                    "withdrawn"
+                },
+                schema: entry.descriptor.schema.clone(),
+            })
+        })
+        .collect();
+    let mut response = Json(BlockCatalogDto { items }).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+
+#[cfg(test)]
+mod block_schema_api_tests {
+    use super::*;
+
+    #[test]
+    fn schema_catalog_dto_never_serializes_render_template_source() {
+        let schema: BlockSchemaV1 =
+            serde_json::from_str(include_str!("../builtin_blocks/spacer/block.json")).unwrap();
+        let response = BlockCatalogDto {
+            items: vec![BlockCatalogItemDto {
+                block_id: schema.id.clone(),
+                owner_kind: "core",
+                owner_id: "core".into(),
+                status: "active",
+                declaration_state: "declared",
+                schema,
+            }],
+        };
+        let body = serde_json::to_value(response).unwrap();
+        assert!(body["items"][0].get("template").is_none());
+        assert!(body["items"][0].get("schema").is_some());
+        assert!(
+            body.get("items")
+                .and_then(serde_json::Value::as_array)
+                .is_some()
+        );
+    }
 }
 
 pub async fn page(
