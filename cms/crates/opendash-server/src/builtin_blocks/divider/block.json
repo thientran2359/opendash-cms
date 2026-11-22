@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "core/divider",
+  "title": "Đường phân cách",
+  "category": "layout",
+  "icon": "minus",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "select",
+      "key": "line_style",
+      "label": "Kiểu đường",
+      "options": [
+        { "value": "solid", "label": "Nét liền" },
+        { "value": "dashed", "label": "Nét đứt" },
+        { "value": "dotted", "label": "Chấm" }
+      ],
+      "default": "solid",
+      "css_var": "--od-divider-style"
+    },
+    {
+      "type": "range",
+      "key": "thickness",
+      "label": "Độ dày",
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "default": 1,
+      "unit": "px",
+      "css_var": "--od-divider-t"
+    },
+    {
+      "type": "range",
+      "key": "width_pct",
+      "label": "Chiều rộng",
+      "min": 10,
+      "max": 100,
+      "step": 5,
+      "default": 100,
+      "unit": "%",
+      "responsive": true,
+      "css_var": "--od-divider-w"
+    },
+    {
+      "type": "color",
+      "key": "color",
+      "label": "Màu sắc",
+      "default": "#e4e4e7",
+      "css_var": "--od-divider-c"
+    }
+  ]
+}

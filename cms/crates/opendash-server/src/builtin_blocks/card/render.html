@@ -1,0 +1,8 @@
+<article class="od-block-card od-card-layout-{{ layout }}" style="background-color:var(--od-card-bg,#ffffff);border:1px solid #e4e4e7;border-radius:12px;overflow:hidden;">
+  {% if image_url %}<div class="od-card-media"><img src="{{ image_url }}" alt="{{ image_alt }}" loading="lazy"></div>{% endif %}
+  <div class="od-card-content" style="padding:20px;">
+    <h3 class="od-card-title">{{ title }}</h3>
+    {% if body %}<div class="od-card-body">{{ body }}</div>{% endif %}
+    {% if show_cta and cta_label and cta_url %}<div class="od-card-actions"><a class="od-card-cta" href="{{ cta_url }}" rel="noopener noreferrer">{{ cta_label }}</a></div>{% endif %}
+  </div>
+</article>

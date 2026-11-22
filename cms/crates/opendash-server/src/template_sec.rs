@@ -131,12 +131,48 @@ const CONTENT_SLOT_TOKEN: &str = "OD_CONTENT_SLOT_COMPILE_MARKER";
 // Reserved only by the preview compiler, never a template variable or helper.
 const PREVIEW_PART_NONCE_PREFIX: &str = "OD_PREVIEW_PART_";
 
+// Reserved only by the block RichText post-render nonce replacer.
+pub const BLOCK_RICHTEXT_NONCE_PREFIX: &str = "OD_RICHTEXT_";
+
+// Per-node fuel cap within the shared 10,000 request RenderBudget.
+pub const MAX_BLOCK_FUEL_PER_NODE: u64 = 2_000;
+
+#[derive(Debug, Clone)]
+pub struct RenderBudget {
+    pub fuel_remaining: u64,
+    pub html_bytes_used: usize,
+}
+
+impl Default for RenderBudget {
+    fn default() -> Self {
+        Self {
+            fuel_remaining: TEMPLATE_FUEL_LIMIT,
+            html_bytes_used: 0,
+        }
+    }
+}
+
+impl RenderBudget {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn charge_html_bytes(&mut self, add_bytes: usize) -> Result<(), &'static str> {
+        self.html_bytes_used = self.html_bytes_used.saturating_add(add_bytes);
+        if self.html_bytes_used > MAX_RENDERED_HTML_BYTES {
+            return Err("Builder template composition exceeds 512 KiB.");
+        }
+        Ok(())
+    }
+}
+
 /// One budget per private preview. Storage owns graph discovery and records
 /// edge occurrences and the active canonical-key stack before rendering.
 /// Every contiguous C-SEC segment debits the same remaining fuel.
 #[derive(Debug)]
 pub(crate) struct PreviewCompositionBudget {
     pub fuel_remaining: u64,
+    pub html_bytes_used: usize,
     pub expansions: usize,
     pub stack: Vec<String>,
 }
@@ -145,6 +181,7 @@ impl Default for PreviewCompositionBudget {
     fn default() -> Self {
         Self {
             fuel_remaining: TEMPLATE_FUEL_LIMIT,
+            html_bytes_used: 0,
             expansions: 0,
             stack: Vec::new(),
         }
@@ -154,6 +191,27 @@ impl Default for PreviewCompositionBudget {
 impl PreviewCompositionBudget {
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn with_render_budget(rb: RenderBudget) -> Self {
+        Self {
+            fuel_remaining: rb.fuel_remaining,
+            html_bytes_used: rb.html_bytes_used,
+            expansions: 0,
+            stack: Vec::new(),
+        }
+    }
+
+    pub(crate) fn as_render_budget(&self) -> RenderBudget {
+        RenderBudget {
+            fuel_remaining: self.fuel_remaining,
+            html_bytes_used: self.html_bytes_used,
+        }
+    }
+
+    pub(crate) fn sync_from_render_budget(&mut self, rb: &RenderBudget) {
+        self.fuel_remaining = rb.fuel_remaining;
+        self.html_bytes_used = rb.html_bytes_used;
     }
 }
 
@@ -393,6 +451,11 @@ const FORBIDDEN_TAGS: &[&str] = &[
     "noscript",
     "template",
     "portal",
+    "title",
+    "xmp",
+    "noembed",
+    "noframes",
+    "plaintext",
 ];
 
 const ALLOWED_DYNAMIC_URL_VARS: &[&str] = &[
@@ -843,16 +906,33 @@ fn parse_composition_call(expr: &Expr<'_>) -> Result<Option<CompositionCall>, &'
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CommentScanSubState {
+    /// Immediately after `<!--`: `>` closes (`<!-->`), `-` enters `StartDash`.
+    Start,
+    /// Immediately after `<!---`: `>` closes (`<!--->`), `-` enters `Dash2`.
+    StartDash,
+    /// Inside comment body.
+    Body,
+    /// Saw one `-` in comment body.
+    Dash1,
+    /// Saw `--`: `>` closes (`-->`), `!` enters `Dash2Bang`, `-` stays `Dash2`.
+    Dash2,
+    /// Saw `--!`: `>` closes (`--!>`), `-` enters `Dash1`.
+    Dash2Bang,
+}
+
 /// Bounded lexical HTML states for each possible Jinja control-flow path.
 /// A Jinja branch cannot borrow a closing quote/tag from another branch.
-/// The prefix is only used to recognize comments and style tags; it is
+/// The prefix is only used to recognize comments, style, and title tags; it is
 /// deliberately bounded so hostile templates cannot grow validation state.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum HtmlScanState {
     Body,
     Tag { quote: Option<u8>, prefix: String },
-    Comment { trailing_hyphens: u8 },
+    Comment(CommentScanSubState),
     Style { closing_prefix: usize },
+    Title { closing_prefix: usize },
 }
 
 impl HtmlScanState {
@@ -863,13 +943,35 @@ impl HtmlScanState {
                 prefix: "<".to_owned(),
             },
             Self::Body => Self::Body,
-            Self::Comment { trailing_hyphens } => match byte {
-                b'>' if trailing_hyphens == 2 => Self::Body,
-                b'-' => Self::Comment {
-                    trailing_hyphens: trailing_hyphens.saturating_add(1).min(2),
+            Self::Comment(sub) => match sub {
+                CommentScanSubState::Start => match byte {
+                    b'>' => Self::Body,
+                    b'-' => Self::Comment(CommentScanSubState::StartDash),
+                    _ => Self::Comment(CommentScanSubState::Body),
                 },
-                _ => Self::Comment {
-                    trailing_hyphens: 0,
+                CommentScanSubState::StartDash => match byte {
+                    b'>' => Self::Body,
+                    b'-' => Self::Comment(CommentScanSubState::Dash2),
+                    _ => Self::Comment(CommentScanSubState::Body),
+                },
+                CommentScanSubState::Body => match byte {
+                    b'-' => Self::Comment(CommentScanSubState::Dash1),
+                    _ => Self::Comment(CommentScanSubState::Body),
+                },
+                CommentScanSubState::Dash1 => match byte {
+                    b'-' => Self::Comment(CommentScanSubState::Dash2),
+                    _ => Self::Comment(CommentScanSubState::Body),
+                },
+                CommentScanSubState::Dash2 => match byte {
+                    b'>' => Self::Body,
+                    b'!' => Self::Comment(CommentScanSubState::Dash2Bang),
+                    b'-' => Self::Comment(CommentScanSubState::Dash2),
+                    _ => Self::Comment(CommentScanSubState::Body),
+                },
+                CommentScanSubState::Dash2Bang => match byte {
+                    b'>' => Self::Body,
+                    b'-' => Self::Comment(CommentScanSubState::Dash1),
+                    _ => Self::Comment(CommentScanSubState::Body),
                 },
             },
             Self::Style { closing_prefix } => {
@@ -890,17 +992,33 @@ impl HtmlScanState {
                     }
                 }
             }
+            Self::Title { closing_prefix } => {
+                const CLOSE: &[u8] = b"</title>";
+                let lowered = byte.to_ascii_lowercase();
+                let next = if lowered == CLOSE[closing_prefix] {
+                    closing_prefix + 1
+                } else if lowered == b'<' {
+                    1
+                } else {
+                    0
+                };
+                if next == CLOSE.len() {
+                    Self::Body
+                } else {
+                    Self::Title {
+                        closing_prefix: next,
+                    }
+                }
+            }
             Self::Tag {
                 mut quote,
                 mut prefix,
             } => {
-                if prefix.len() < 10 {
+                if prefix.len() < 7 {
                     prefix.push(char::from(byte));
                 }
                 if prefix == "<!--" {
-                    return Self::Comment {
-                        trailing_hyphens: 0,
-                    };
+                    return Self::Comment(CommentScanSubState::Start);
                 }
                 if let Some(q) = quote {
                     if byte == q {
@@ -917,6 +1035,14 @@ impl HtmlScanState {
                             .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>')
                     {
                         return Self::Style { closing_prefix: 0 };
+                    }
+                    if lower.starts_with("<title")
+                        && lower
+                            .as_bytes()
+                            .get(6)
+                            .is_some_and(|b| b.is_ascii_whitespace() || *b == b'>')
+                    {
+                        return Self::Title { closing_prefix: 0 };
                     }
                     return Self::Body;
                 }
@@ -1051,18 +1177,71 @@ pub fn validate_safe_css(css: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Validates a static or post-render URL used in `href`, `src`, `poster`, or `cite`.
+/// Validates a scoped block CSS stylesheet emitted by `page::serialize_scoped_block_css`.
+/// Rejects CSS breakout tokens and allows `/api/admin/media/{64hex}/file` only when `is_preview == true`.
+pub fn validate_safe_scoped_block_css(css: &str, is_preview: bool) -> Result<(), &'static str> {
+    if css.contains('\0')
+        || css.contains("/*")
+        || css.contains("*/")
+        || css.contains('\\')
+        || css.contains('\r')
+        || css.contains('\n')
+    {
+        return Err("Scoped block CSS chứa ký tự hoặc comment bị cấm.");
+    }
+    let lower = css.to_ascii_lowercase();
+    if lower.contains("</style")
+        || lower.contains("@import")
+        || lower.contains("expression(")
+        || lower.contains("-moz-binding")
+        || lower.contains("behavior:")
+    {
+        return Err("Scoped block CSS vi phạm chính sách C-SEC.");
+    }
+
+    let mut idx = 0;
+    while let Some(pos) = lower[idx..].find("url(") {
+        let start = idx + pos + 4;
+        let Some(end_rel) = lower[start..].find(')') else {
+            return Err("CSS url(...) không hợp lệ.");
+        };
+        let raw_inner = css[start..start + end_rel].trim();
+        let inner = raw_inner
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .or_else(|| {
+                raw_inner
+                    .strip_prefix('\'')
+                    .and_then(|s| s.strip_suffix('\''))
+            })
+            .unwrap_or(raw_inner)
+            .trim();
+        let allowed_public = inner.starts_with("/theme/") || inner.starts_with("/media/");
+        let allowed_preview = is_preview && inner.starts_with("/api/admin/media/");
+        if !(allowed_public || allowed_preview)
+            || inner.contains("..")
+            || inner.contains('\\')
+            || inner.contains('{')
+            || inner.contains('}')
+            || inner.contains(';')
+            || inner.bytes().any(|b| b <= 0x1f || b == 0x7f)
+        {
+            return Err("Scoped block CSS url(...) không hợp lệ hoặc không được phép.");
+        }
+        idx = start + end_rel + 1;
+    }
+    Ok(())
+}
+
+/// Validates a static or post-render URL used in `href`, `src`, `poster`, `cite`, `srcset`, or `ping`.
 fn decode_html_entities_for_url(raw: &str) -> String {
-    raw.replace("&#x2f;", "/")
-        .replace("&#x2F;", "/")
-        .replace("&#47;", "/")
-        .replace("&#x3a;", ":")
-        .replace("&#x3A;", ":")
-        .replace("&#58;", ":")
-        .replace("&amp;", "&")
+    opendash_core::richtext::decode_html5_entities(raw)
 }
 
 pub fn validate_safe_url(raw: &str) -> Result<(), &'static str> {
+    if raw.contains('\0') || raw.bytes().any(|b| b <= 0x1f || b == 0x7f) {
+        return Err("URL trong template chứa ký tự điều khiển bị cấm.");
+    }
     let trimmed = raw.trim();
     if trimmed.is_empty()
         || trimmed.bytes().any(|b| b < 0x20 || b == 0x7f)
@@ -1071,19 +1250,38 @@ pub fn validate_safe_url(raw: &str) -> Result<(), &'static str> {
         return Err("URL trong template không hợp lệ.");
     }
     if trimmed.starts_with('/') {
-        if trimmed.starts_with("//") || trimmed.contains("/../") || trimmed.ends_with("/..") {
+        if trimmed.starts_with("//")
+            || trimmed == "/.."
+            || trimmed.contains("/../")
+            || trimmed.ends_with("/..")
+            || trimmed.contains("..")
+        {
             return Err("URL tương đối không được chứa // hoặc ..");
         }
         return Ok(());
     }
     let parsed = url::Url::parse(trimmed).map_err(|_| "URL không hợp lệ.")?;
-    if !matches!(parsed.scheme(), "http" | "https") {
+    if !matches!(parsed.scheme(), "http" | "https") || !parsed.has_host() {
         return Err("Chỉ cho phép URL http(s) hoặc đường dẫn /...");
     }
     if !parsed.username().is_empty() || parsed.password().is_some() {
         return Err("URL không được chứa thông tin đăng nhập.");
     }
     Ok(())
+}
+
+/// Validates a URL used specifically in `<a href="...">`, allowing `#`, `#fragment`,
+/// `mailto:`, and `tel:` in addition to `/...` and `http(s)://...`.
+pub fn validate_safe_href_url(raw: &str) -> Result<(), &'static str> {
+    if raw.contains('\0') || raw.bytes().any(|b| b <= 0x1f || b == 0x7f) {
+        return Err("URL href chứa ký tự điều khiển bị cấm.");
+    }
+    let trimmed = raw.trim();
+    if validate_safe_url(raw).is_ok() || opendash_core::block_schema::valid_block_url(trimmed) {
+        Ok(())
+    } else {
+        Err("URL trong <a href> không hợp lệ hoặc không an toàn.")
+    }
 }
 
 pub fn json_to_safe_value(value: &serde_json::Value) -> Value {
@@ -1278,12 +1476,85 @@ fn validate_call_arg(arg: &minijinja::machinery::ast::CallArg<'_>) -> Result<(),
     }
 }
 
+fn find_html5_comment_end_in_template(bytes: &[u8], start: usize) -> Option<usize> {
+    let after_open = start + 4;
+    if bytes.get(after_open) == Some(&b'>') {
+        return Some(after_open + 1);
+    }
+    if bytes.get(after_open..after_open + 2) == Some(b"->") {
+        return Some(after_open + 2);
+    }
+    let mut j = after_open;
+    while j < bytes.len() {
+        if bytes[j..].starts_with(b"-->") {
+            return Some(j + 3);
+        }
+        if bytes[j..].starts_with(b"--!>") {
+            return Some(j + 4);
+        }
+        j += 1;
+    }
+    None
+}
+
 fn validate_html_and_css_context(src: &str, post_render: bool) -> Result<(), &'static str> {
+    validate_html_and_css_context_with_url_vars(src, post_render, None)
+}
+
+struct BlockUrlVarAllowlist {
+    href_vars: BTreeSet<String>,
+    src_vars: BTreeSet<String>,
+    rep_href_subkeys: BTreeMap<String, BTreeSet<String>>,
+    rep_src_subkeys: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl BlockUrlVarAllowlist {
+    fn allows_href_expr(&self, expr: &str) -> bool {
+        if self.href_vars.contains(expr) || self.src_vars.contains(expr) {
+            return true;
+        }
+        if let Some((_loop_var, sub_key)) = expr.split_once('.') {
+            return self
+                .rep_href_subkeys
+                .values()
+                .any(|set| set.contains(sub_key))
+                || self
+                    .rep_src_subkeys
+                    .values()
+                    .any(|set| set.contains(sub_key));
+        }
+        false
+    }
+
+    fn allows_src_expr(&self, expr: &str) -> bool {
+        if self.src_vars.contains(expr) {
+            return true;
+        }
+        if let Some((_loop_var, sub_key)) = expr.split_once('.') {
+            return self
+                .rep_src_subkeys
+                .values()
+                .any(|set| set.contains(sub_key));
+        }
+        false
+    }
+}
+
+fn validate_html_and_css_context_with_url_vars(
+    src: &str,
+    post_render: bool,
+    block_url_vars: Option<&BlockUrlVarAllowlist>,
+) -> Result<(), &'static str> {
     let lower = src.to_ascii_lowercase();
+    let is_full_doctype_doc =
+        block_url_vars.is_none() && lower.trim_start().starts_with("<!doctype");
 
     // Validate <style>...</style> blocks
     let mut style_search = 0;
     while let Some(open_pos) = lower[style_search..].find("<style") {
+        if block_url_vars.is_some() {
+            return Err("Template block không được chứa thẻ <style> trực tiếp (dùng css_var).");
+        }
         let tag_start = style_search + open_pos;
         let Some(gt_rel) = lower[tag_start..].find('>') else {
             return Err("Thẻ <style> không đóng đúng cú pháp.");
@@ -1305,15 +1576,18 @@ fn validate_html_and_css_context(src: &str, post_render: bool) -> Result<(), &'s
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'<' {
-            // Skip doctype or comments
+            // Skip doctype or comments (using HTML5 comment end rules)
             if lower[i..].starts_with("<!--") {
-                if let Some(end) = lower[i + 4..].find("-->") {
-                    i += 4 + end + 3;
+                if let Some(end) = find_html5_comment_end_in_template(bytes, i) {
+                    i = end;
                     continue;
                 }
                 return Err("HTML comment không đóng.");
             }
             if lower[i..].starts_with("<!doctype") {
+                if block_url_vars.is_some() {
+                    return Err("Template block không được chứa DOCTYPE.");
+                }
                 if let Some(end) = bytes[i..].iter().position(|&b| b == b'>') {
                     i += end + 1;
                     continue;
@@ -1330,7 +1604,9 @@ fn validate_html_and_css_context(src: &str, post_render: bool) -> Result<(), &'s
                 j += 1;
             }
             let tag_name = lower[name_start..j].to_string();
-            if FORBIDDEN_TAGS.contains(&tag_name.as_str()) {
+            if FORBIDDEN_TAGS.contains(&tag_name.as_str())
+                && !(tag_name == "title" && is_full_doctype_doc)
+            {
                 return Err("Template chứa thẻ HTML bị C-SEC cấm.");
             }
 
@@ -1360,7 +1636,7 @@ fn validate_html_and_css_context(src: &str, post_render: bool) -> Result<(), &'s
             }
 
             let attr_slice = &src[j..k];
-            validate_tag_attributes(&tag_name, attr_slice, post_render)?;
+            validate_tag_attributes(&tag_name, attr_slice, post_render, block_url_vars)?;
             i = k + 1;
         } else {
             i += 1;
@@ -1374,6 +1650,7 @@ fn validate_tag_attributes(
     tag_name: &str,
     attr_slice: &str,
     post_render: bool,
+    block_url_vars: Option<&BlockUrlVarAllowlist>,
 ) -> Result<(), &'static str> {
     let attrs = parse_attributes(attr_slice)?;
 
@@ -1415,21 +1692,68 @@ fn validate_tag_attributes(
             validate_safe_css(&val)?;
         }
 
-        if matches!(name.as_str(), "href" | "src" | "poster" | "cite") {
+        if matches!(
+            name.as_str(),
+            "href" | "src" | "poster" | "cite" | "srcset" | "ping"
+        ) {
             if !post_render && (val.contains("{{") || val.contains("{%")) {
+                if matches!(name.as_str(), "srcset" | "ping") {
+                    return Err("C-SEC cấm nội suy {{ ... }} trong thuộc tính srcset/ping.");
+                }
                 let expr_inner = val
                     .trim()
                     .strip_prefix("{{")
                     .and_then(|s| s.strip_suffix("}}"))
                     .map(str::trim)
+                    .filter(|s| !s.contains("{{") && !s.contains("}}") && !s.contains("{%"))
                     .ok_or("URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.")?;
-                if !ALLOWED_DYNAMIC_URL_VARS.contains(&expr_inner) {
+                if let Some(block_vars) = block_url_vars {
+                    let allowed = if tag_name == "a" && name == "href" {
+                        block_vars.allows_href_expr(expr_inner)
+                    } else if matches!(name.as_str(), "src" | "poster") {
+                        block_vars.allows_src_expr(expr_inner)
+                    } else {
+                        false
+                    };
+                    if !allowed {
+                        return Err(
+                            "URL động trong template block phải khớp đúng biến kiểu url (href) hoặc <media_key>_url (src/poster).",
+                        );
+                    }
+                } else if !ALLOWED_DYNAMIC_URL_VARS.contains(&expr_inner) {
                     return Err("URL động trong thuộc tính không nằm trong whitelist typed URL.");
                 }
-            } else if post_render {
-                validate_safe_url(&decode_html_entities_for_url(&val))?;
             } else {
-                validate_safe_url(&val)?;
+                let decoded = decode_html_entities_for_url(&val);
+                if name == "srcset" {
+                    if decoded.trim().is_empty()
+                        || decoded.contains('\0')
+                        || decoded.bytes().any(|b| b <= 0x1f || b == 0x7f)
+                    {
+                        return Err("Thuộc tính srcset không hợp lệ.");
+                    }
+                    for candidate in decoded.split(',') {
+                        let url_part = candidate
+                            .split_whitespace()
+                            .next()
+                            .ok_or("Thuộc tính srcset chứa mục rỗng.")?;
+                        validate_safe_url(url_part)?;
+                    }
+                } else if name == "ping" {
+                    if decoded.trim().is_empty()
+                        || decoded.contains('\0')
+                        || decoded.bytes().any(|b| b <= 0x1f || b == 0x7f)
+                    {
+                        return Err("Thuộc tính ping không hợp lệ.");
+                    }
+                    for target in decoded.split_whitespace() {
+                        validate_safe_url(target)?;
+                    }
+                } else if tag_name == "a" && name == "href" {
+                    validate_safe_href_url(&decoded)?;
+                } else {
+                    validate_safe_url(&decoded)?;
+                }
             }
         }
     }
@@ -1498,11 +1822,893 @@ fn parse_attributes(slice: &str) -> Result<BTreeMap<String, String>, &'static st
         } else {
             String::new()
         };
-        if !name.is_empty() {
-            map.insert(name, val);
+        if !name.is_empty() && map.insert(name, val).is_some() {
+            return Err("Thẻ HTML chứa thuộc tính bị trùng lặp.");
         }
     }
     Ok(map)
+}
+
+#[derive(Default)]
+struct RepeaterSubContext {
+    richtext_subkeys: BTreeSet<String>,
+    href_subkeys: BTreeSet<String>,
+    src_subkeys: BTreeSet<String>,
+    media_raw_subkeys: BTreeSet<String>,
+}
+
+struct BlockSchemaTemplateContext {
+    richtext_vars: BTreeSet<String>,
+    href_vars: BTreeSet<String>,
+    src_vars: BTreeSet<String>,
+    media_raw_vars: BTreeSet<String>,
+    repeaters: BTreeMap<String, RepeaterSubContext>,
+}
+
+impl BlockSchemaTemplateContext {
+    fn from_schema(schema: &opendash_core::block_schema::BlockSchemaV1) -> Self {
+        use opendash_core::block_schema::BlockFieldSpec;
+        let mut ctx = Self {
+            richtext_vars: BTreeSet::new(),
+            href_vars: BTreeSet::new(),
+            src_vars: BTreeSet::new(),
+            media_raw_vars: BTreeSet::new(),
+            repeaters: BTreeMap::new(),
+        };
+        for field in schema.flattened_top_fields() {
+            match field {
+                BlockFieldSpec::Richtext { key, .. } => {
+                    ctx.richtext_vars.insert(key.clone());
+                }
+                BlockFieldSpec::Url { key, .. } => {
+                    ctx.href_vars.insert(key.clone());
+                }
+                BlockFieldSpec::Media { key, .. } => {
+                    ctx.media_raw_vars.insert(key.clone());
+                    ctx.src_vars.insert(format!("{key}_url"));
+                }
+                BlockFieldSpec::Repeater { key, fields, .. } => {
+                    let mut sub_ctx = RepeaterSubContext::default();
+                    for sub in fields {
+                        match sub {
+                            BlockFieldSpec::Richtext { key: sk, .. } => {
+                                sub_ctx.richtext_subkeys.insert(sk.clone());
+                            }
+                            BlockFieldSpec::Url { key: sk, .. } => {
+                                sub_ctx.href_subkeys.insert(sk.clone());
+                            }
+                            BlockFieldSpec::Media { key: sk, .. } => {
+                                sub_ctx.media_raw_subkeys.insert(sk.clone());
+                                sub_ctx.src_subkeys.insert(format!("{sk}_url"));
+                            }
+                            _ => {}
+                        }
+                    }
+                    ctx.repeaters.insert(key.clone(), sub_ctx);
+                }
+                _ => {}
+            }
+        }
+        ctx
+    }
+
+    fn url_allowlist(&self) -> BlockUrlVarAllowlist {
+        BlockUrlVarAllowlist {
+            href_vars: self.href_vars.clone(),
+            src_vars: self.src_vars.clone(),
+            rep_href_subkeys: self
+                .repeaters
+                .iter()
+                .map(|(k, v)| (k.clone(), v.href_subkeys.clone()))
+                .collect(),
+            rep_src_subkeys: self
+                .repeaters
+                .iter()
+                .map(|(k, v)| (k.clone(), v.src_subkeys.clone()))
+                .collect(),
+        }
+    }
+
+    fn is_sensitive_name(&self, id: &str, active_loops: &BTreeMap<String, String>) -> bool {
+        self.richtext_vars.contains(id)
+            || self.href_vars.contains(id)
+            || self.src_vars.contains(id)
+            || self.media_raw_vars.contains(id)
+            || self.repeaters.contains_key(id)
+            || active_loops.contains_key(id)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SensitiveVarKind {
+    Richtext,
+    HrefUrl,
+    MediaUrl,
+    MediaRaw,
+    RepeaterOrLoopItem,
+}
+
+fn classify_bare_sensitive_expr(
+    expr: &Expr<'_>,
+    ctx: &BlockSchemaTemplateContext,
+    active_loops: &BTreeMap<String, String>,
+) -> Option<SensitiveVarKind> {
+    match expr {
+        Expr::Var(v) => {
+            if ctx.richtext_vars.contains(v.id) {
+                Some(SensitiveVarKind::Richtext)
+            } else if ctx.href_vars.contains(v.id) {
+                Some(SensitiveVarKind::HrefUrl)
+            } else if ctx.src_vars.contains(v.id) {
+                Some(SensitiveVarKind::MediaUrl)
+            } else if ctx.media_raw_vars.contains(v.id) {
+                Some(SensitiveVarKind::MediaRaw)
+            } else if ctx.repeaters.contains_key(v.id) || active_loops.contains_key(v.id) {
+                Some(SensitiveVarKind::RepeaterOrLoopItem)
+            } else {
+                None
+            }
+        }
+        Expr::GetAttr(g) => {
+            if let Expr::Var(v) = &g.expr
+                && let Some(rep_key) = active_loops.get(v.id)
+                && let Some(rep) = ctx.repeaters.get(rep_key)
+            {
+                if rep.richtext_subkeys.contains(g.name) {
+                    return Some(SensitiveVarKind::Richtext);
+                }
+                if rep.href_subkeys.contains(g.name) {
+                    return Some(SensitiveVarKind::HrefUrl);
+                }
+                if rep.src_subkeys.contains(g.name) {
+                    return Some(SensitiveVarKind::MediaUrl);
+                }
+                if rep.media_raw_subkeys.contains(g.name) {
+                    return Some(SensitiveVarKind::MediaRaw);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn expr_touches_any_sensitive(
+    expr: &Expr<'_>,
+    ctx: &BlockSchemaTemplateContext,
+    active_loops: &BTreeMap<String, String>,
+) -> bool {
+    if classify_bare_sensitive_expr(expr, ctx, active_loops).is_some() {
+        return true;
+    }
+    match expr {
+        Expr::Var(v) => ctx.is_sensitive_name(v.id, active_loops),
+        Expr::Const(_) => false,
+        Expr::Slice(s) => {
+            expr_touches_any_sensitive(&s.expr, ctx, active_loops)
+                || s.start
+                    .as_ref()
+                    .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                || s.stop
+                    .as_ref()
+                    .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                || s.step
+                    .as_ref()
+                    .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+        }
+        Expr::UnaryOp(u) => expr_touches_any_sensitive(&u.expr, ctx, active_loops),
+        Expr::BinOp(b) => {
+            expr_touches_any_sensitive(&b.left, ctx, active_loops)
+                || expr_touches_any_sensitive(&b.right, ctx, active_loops)
+        }
+        Expr::Compare(c) => {
+            expr_touches_any_sensitive(&c.expr, ctx, active_loops)
+                || c.ops
+                    .iter()
+                    .any(|op| expr_touches_any_sensitive(&op.expr, ctx, active_loops))
+        }
+        Expr::IfExpr(i) => {
+            expr_touches_any_sensitive(&i.test_expr, ctx, active_loops)
+                || expr_touches_any_sensitive(&i.true_expr, ctx, active_loops)
+                || i.false_expr
+                    .as_ref()
+                    .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+        }
+        Expr::GetAttr(g) => {
+            if let Expr::Var(v) = &g.expr
+                && let Some(rep_key) = active_loops.get(v.id)
+                && let Some(rep) = ctx.repeaters.get(rep_key)
+            {
+                return rep.richtext_subkeys.contains(g.name)
+                    || rep.href_subkeys.contains(g.name)
+                    || rep.src_subkeys.contains(g.name)
+                    || rep.media_raw_subkeys.contains(g.name);
+            }
+            expr_touches_any_sensitive(&g.expr, ctx, active_loops)
+        }
+        Expr::GetItem(g) => {
+            expr_touches_any_sensitive(&g.expr, ctx, active_loops)
+                || expr_touches_any_sensitive(&g.subscript_expr, ctx, active_loops)
+        }
+        Expr::List(l) => l
+            .items
+            .iter()
+            .any(|e| expr_touches_any_sensitive(e, ctx, active_loops)),
+        Expr::Tuple(t) => t
+            .items
+            .iter()
+            .any(|e| expr_touches_any_sensitive(e, ctx, active_loops)),
+        Expr::Map(m) => {
+            m.keys
+                .iter()
+                .any(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                || m.values
+                    .iter()
+                    .any(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+        }
+        Expr::Filter(f) => {
+            f.expr
+                .as_ref()
+                .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                || f.args
+                    .iter()
+                    .any(|arg| call_arg_touches_sensitive(arg, ctx, active_loops))
+        }
+        Expr::Test(t) => {
+            expr_touches_any_sensitive(&t.expr, ctx, active_loops)
+                || t.args
+                    .iter()
+                    .any(|arg| call_arg_touches_sensitive(arg, ctx, active_loops))
+        }
+        Expr::Call(_) => true,
+    }
+}
+
+fn call_arg_touches_sensitive(
+    arg: &minijinja::machinery::ast::CallArg<'_>,
+    ctx: &BlockSchemaTemplateContext,
+    active_loops: &BTreeMap<String, String>,
+) -> bool {
+    match arg {
+        minijinja::machinery::ast::CallArg::Pos(e)
+        | minijinja::machinery::ast::CallArg::Kwarg(_, e)
+        | minijinja::machinery::ast::CallArg::PosSplat(e)
+        | minijinja::machinery::ast::CallArg::KwargSplat(e) => {
+            expr_touches_any_sensitive(e, ctx, active_loops)
+        }
+    }
+}
+
+fn check_block_expr_restrictions(
+    expr: &Expr<'_>,
+    ctx: &BlockSchemaTemplateContext,
+    active_loops: &BTreeMap<String, String>,
+) -> Result<(), &'static str> {
+    match expr {
+        Expr::Var(_) | Expr::Const(_) => Ok(()),
+        Expr::GetItem(_) => Err("C-SEC cấm truy cập GetItem ([...]) trong template block."),
+        Expr::Filter(f) => {
+            if f.expr
+                .as_ref()
+                .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
+                || f.args
+                    .iter()
+                    .any(|arg| call_arg_touches_sensitive(arg, ctx, active_loops))
+            {
+                return Err("C-SEC cấm áp dụng filter lên biến richtext/url/media/repeater.");
+            }
+            if let Some(e) = &f.expr {
+                check_block_expr_restrictions(e, ctx, active_loops)?;
+            }
+            for arg in &f.args {
+                check_block_call_arg_restrictions(arg, ctx, active_loops)?;
+            }
+            Ok(())
+        }
+        Expr::Slice(s) => {
+            if expr_touches_any_sensitive(&s.expr, ctx, active_loops) {
+                return Err("C-SEC cấm cắt lát (slice) trên biến nhạy cảm.");
+            }
+            check_block_expr_restrictions(&s.expr, ctx, active_loops)?;
+            if let Some(start) = &s.start {
+                check_block_expr_restrictions(start, ctx, active_loops)?;
+            }
+            if let Some(stop) = &s.stop {
+                check_block_expr_restrictions(stop, ctx, active_loops)?;
+            }
+            if let Some(step) = &s.step {
+                check_block_expr_restrictions(step, ctx, active_loops)?;
+            }
+            Ok(())
+        }
+        Expr::UnaryOp(u) => check_block_expr_restrictions(&u.expr, ctx, active_loops),
+        Expr::BinOp(b) => {
+            check_block_expr_restrictions(&b.left, ctx, active_loops)?;
+            check_block_expr_restrictions(&b.right, ctx, active_loops)
+        }
+        Expr::Compare(c) => {
+            check_block_expr_restrictions(&c.expr, ctx, active_loops)?;
+            for op in &c.ops {
+                check_block_expr_restrictions(&op.expr, ctx, active_loops)?;
+            }
+            Ok(())
+        }
+        Expr::IfExpr(i) => {
+            check_block_expr_restrictions(&i.test_expr, ctx, active_loops)?;
+            check_block_expr_restrictions(&i.true_expr, ctx, active_loops)?;
+            if let Some(f) = &i.false_expr {
+                check_block_expr_restrictions(f, ctx, active_loops)?;
+            }
+            Ok(())
+        }
+        Expr::GetAttr(g) => check_block_expr_restrictions(&g.expr, ctx, active_loops),
+        Expr::List(l) => {
+            for item in &l.items {
+                check_block_expr_restrictions(item, ctx, active_loops)?;
+            }
+            Ok(())
+        }
+        Expr::Tuple(t) => {
+            for item in &t.items {
+                check_block_expr_restrictions(item, ctx, active_loops)?;
+            }
+            Ok(())
+        }
+        Expr::Map(m) => {
+            for (k, v) in m.keys.iter().zip(m.values.iter()) {
+                check_block_expr_restrictions(k, ctx, active_loops)?;
+                check_block_expr_restrictions(v, ctx, active_loops)?;
+            }
+            Ok(())
+        }
+        Expr::Test(t) => {
+            check_block_expr_restrictions(&t.expr, ctx, active_loops)?;
+            for arg in &t.args {
+                check_block_call_arg_restrictions(arg, ctx, active_loops)?;
+            }
+            Ok(())
+        }
+        Expr::Call(_) => Err("C-SEC cấm lời gọi hàm Call trong template block."),
+    }
+}
+
+fn check_block_call_arg_restrictions(
+    arg: &minijinja::machinery::ast::CallArg<'_>,
+    ctx: &BlockSchemaTemplateContext,
+    active_loops: &BTreeMap<String, String>,
+) -> Result<(), &'static str> {
+    match arg {
+        minijinja::machinery::ast::CallArg::Pos(e)
+        | minijinja::machinery::ast::CallArg::Kwarg(_, e)
+        | minijinja::machinery::ast::CallArg::PosSplat(e)
+        | minijinja::machinery::ast::CallArg::KwargSplat(e) => {
+            check_block_expr_restrictions(e, ctx, active_loops)
+        }
+    }
+}
+
+fn walk_block_ast_sequence(
+    children: &[Stmt<'_>],
+    states: &BTreeSet<HtmlScanState>,
+    ctx: &BlockSchemaTemplateContext,
+    active_loops: &BTreeMap<String, String>,
+) -> Result<BTreeSet<HtmlScanState>, &'static str> {
+    let mut current = states.clone();
+    for child in children {
+        current = walk_block_ast_stmt(child, &current, ctx, active_loops)?;
+        bounded_html_states(current.clone())?;
+    }
+    Ok(current)
+}
+
+fn walk_block_ast_stmt(
+    stmt: &Stmt<'_>,
+    states: &BTreeSet<HtmlScanState>,
+    ctx: &BlockSchemaTemplateContext,
+    active_loops: &BTreeMap<String, String>,
+) -> Result<BTreeSet<HtmlScanState>, &'static str> {
+    match stmt {
+        Stmt::Template(t) => walk_block_ast_sequence(&t.children, states, ctx, active_loops),
+        Stmt::EmitRaw(raw) => {
+            let mut result = BTreeSet::new();
+            for initial in states {
+                let final_state = raw
+                    .raw
+                    .bytes()
+                    .fold(initial.clone(), HtmlScanState::consume);
+                result.insert(final_state);
+            }
+            Ok(result)
+        }
+        Stmt::EmitExpr(e) => {
+            check_block_expr_restrictions(&e.expr, ctx, active_loops)?;
+            if let Some(kind) = classify_bare_sensitive_expr(&e.expr, ctx, active_loops) {
+                match kind {
+                    SensitiveVarKind::Richtext => {
+                        if states.iter().any(|s| *s != HtmlScanState::Body) {
+                            return Err(
+                                "Biến richtext chỉ được phép đặt trong phần thân HTML (HtmlScanState::Body).",
+                            );
+                        }
+                    }
+                    SensitiveVarKind::HrefUrl | SensitiveVarKind::MediaUrl => {
+                        if states
+                            .iter()
+                            .any(|s| !matches!(s, HtmlScanState::Tag { quote: Some(_), .. }))
+                        {
+                            return Err(
+                                "Biến url / <media_key>_url chỉ được xuất bên trong thuộc tính URL được trích dẫn.",
+                            );
+                        }
+                    }
+                    SensitiveVarKind::MediaRaw | SensitiveVarKind::RepeaterOrLoopItem => {
+                        return Err(
+                            "Không được xuất trực tiếp biến media ID thô hoặc đối tượng repeater.",
+                        );
+                    }
+                }
+            } else if expr_touches_any_sensitive(&e.expr, ctx, active_loops) {
+                return Err(
+                    "Biến richtext/url/media không được phép ghép chuỗi hoặc biến đổi trong biểu thức xuất.",
+                );
+            }
+            Ok(states.clone())
+        }
+        Stmt::IfCond(cond) => {
+            check_block_expr_restrictions(&cond.expr, ctx, active_loops)?;
+            let mut result = walk_block_ast_sequence(&cond.true_body, states, ctx, active_loops)?;
+            result.extend(walk_block_ast_sequence(
+                &cond.false_body,
+                states,
+                ctx,
+                active_loops,
+            )?);
+            bounded_html_states(result)
+        }
+        Stmt::ForLoop(loop_stmt) => {
+            check_block_expr_restrictions(&loop_stmt.iter, ctx, active_loops)?;
+            if let Some(cond) = &loop_stmt.filter_expr {
+                check_block_expr_restrictions(cond, ctx, active_loops)?;
+            }
+            let mut inner_loops = active_loops.clone();
+            match (&loop_stmt.target, &loop_stmt.iter) {
+                (Expr::Var(target_var), Expr::Var(iter_var)) => {
+                    if ctx.is_sensitive_name(target_var.id, active_loops) {
+                        return Err("Biến vòng lặp for không được che khuất tên biến nhạy cảm.");
+                    }
+                    if let Some(kind) =
+                        classify_bare_sensitive_expr(&loop_stmt.iter, ctx, active_loops)
+                        && kind != SensitiveVarKind::RepeaterOrLoopItem
+                    {
+                        return Err("Không được lặp trực tiếp trên biến richtext/url/media.");
+                    }
+                    if ctx.repeaters.contains_key(iter_var.id) {
+                        inner_loops.insert(target_var.id.to_owned(), iter_var.id.to_owned());
+                    }
+                }
+                _ => {
+                    if expr_touches_any_sensitive(&loop_stmt.iter, ctx, active_loops) {
+                        return Err(
+                            "Vòng lặp for trên repeater bắt buộc dùng cú pháp `{% for item in items %}`.",
+                        );
+                    }
+                }
+            }
+
+            let mut possible = states.clone();
+            let mut frontier = states.clone();
+            let mut settled = false;
+            for _ in 0..64 {
+                let after = walk_block_ast_sequence(&loop_stmt.body, &frontier, ctx, &inner_loops)?;
+                let new_states: BTreeSet<_> = after.difference(&possible).cloned().collect();
+                if new_states.is_empty() {
+                    settled = true;
+                    break;
+                }
+                possible.extend(new_states.iter().cloned());
+                bounded_html_states(possible.clone())?;
+                frontier = new_states;
+            }
+            if !settled {
+                return Err("Không thể xác định vị trí HTML sau vòng lặp trong template block.");
+            }
+            let after_else =
+                walk_block_ast_sequence(&loop_stmt.else_body, &possible, ctx, active_loops)?;
+            possible.extend(after_else);
+            bounded_html_states(possible)
+        }
+        Stmt::Set(s) => {
+            check_block_expr_restrictions(&s.target, ctx, active_loops)?;
+            check_block_expr_restrictions(&s.expr, ctx, active_loops)?;
+            if expr_touches_any_sensitive(&s.target, ctx, active_loops)
+                || expr_touches_any_sensitive(&s.expr, ctx, active_loops)
+            {
+                return Err(
+                    "C-SEC cấm gán (set) hoặc tạo bí danh cho biến richtext/url/media/repeater.",
+                );
+            }
+            Ok(states.clone())
+        }
+        Stmt::SetBlock(sb) => {
+            if sb.filter.is_some() {
+                return Err("C-SEC cấm modifier filter trong khối set.");
+            }
+            if expr_touches_any_sensitive(&sb.target, ctx, active_loops) {
+                return Err("C-SEC cấm ghi đè biến nhạy cảm qua khối set.");
+            }
+            let _ = walk_block_ast_sequence(&sb.body, states, ctx, active_loops)?;
+            // Forbid capturing any sensitive variable inside SetBlock body
+            for child in &sb.body {
+                if stmt_touches_sensitive(child, ctx, active_loops) {
+                    return Err("C-SEC cấm bọc biến richtext/url/media trong khối set.");
+                }
+            }
+            Ok(states.clone())
+        }
+        Stmt::WithBlock(w) => {
+            for (k, v) in &w.assignments {
+                check_block_expr_restrictions(k, ctx, active_loops)?;
+                check_block_expr_restrictions(v, ctx, active_loops)?;
+                if expr_touches_any_sensitive(k, ctx, active_loops)
+                    || expr_touches_any_sensitive(v, ctx, active_loops)
+                {
+                    return Err(
+                        "C-SEC cấm tạo bí danh cho biến richtext/url/media/repeater qua khối with.",
+                    );
+                }
+            }
+            walk_block_ast_sequence(&w.body, states, ctx, active_loops)
+        }
+        _ => Err("Template block sử dụng câu lệnh MiniJinja bị C-SEC cấm."),
+    }
+}
+
+fn stmt_touches_sensitive(
+    stmt: &Stmt<'_>,
+    ctx: &BlockSchemaTemplateContext,
+    active_loops: &BTreeMap<String, String>,
+) -> bool {
+    match stmt {
+        Stmt::Template(t) => t
+            .children
+            .iter()
+            .any(|c| stmt_touches_sensitive(c, ctx, active_loops)),
+        Stmt::EmitRaw(_) => false,
+        Stmt::EmitExpr(e) => expr_touches_any_sensitive(&e.expr, ctx, active_loops),
+        Stmt::IfCond(i) => {
+            expr_touches_any_sensitive(&i.expr, ctx, active_loops)
+                || i.true_body
+                    .iter()
+                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+                || i.false_body
+                    .iter()
+                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+        }
+        Stmt::ForLoop(f) => {
+            expr_touches_any_sensitive(&f.iter, ctx, active_loops)
+                || f.body
+                    .iter()
+                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+                || f.else_body
+                    .iter()
+                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+        }
+        Stmt::Set(s) => {
+            expr_touches_any_sensitive(&s.target, ctx, active_loops)
+                || expr_touches_any_sensitive(&s.expr, ctx, active_loops)
+        }
+        Stmt::SetBlock(sb) => {
+            expr_touches_any_sensitive(&sb.target, ctx, active_loops)
+                || sb
+                    .body
+                    .iter()
+                    .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+        }
+        Stmt::WithBlock(w) => {
+            w.assignments.iter().any(|(k, v)| {
+                expr_touches_any_sensitive(k, ctx, active_loops)
+                    || expr_touches_any_sensitive(v, ctx, active_loops)
+            }) || w
+                .body
+                .iter()
+                .any(|c| stmt_touches_sensitive(c, ctx, active_loops))
+        }
+        _ => true,
+    }
+}
+
+/// Validates a declarative `block.json` v1 `render.html` template using the joint
+/// MiniJinja AST + `HtmlScanState` checker and typed URL/RichText/Repeater rules.
+pub fn validate_block_template_csec(
+    block_id: &str,
+    source: &str,
+    schema: &opendash_core::block_schema::BlockSchemaV1,
+) -> Result<(), &'static str> {
+    if source.trim().is_empty() {
+        return Err("Template block không được để trống.");
+    }
+    if source.len() > MAX_RENDERED_HTML_BYTES {
+        return Err("Template block vượt giới hạn 512 KiB.");
+    }
+    if source.contains(BLOCK_RICHTEXT_NONCE_PREFIX)
+        || source.contains(CONTENT_SLOT_TOKEN)
+        || source.contains(PREVIEW_PART_NONCE_PREFIX)
+    {
+        return Err("Template block chứa chuỗi nonce nội bộ bị cấm.");
+    }
+
+    let ctx = BlockSchemaTemplateContext::from_schema(schema);
+    let url_allowlist = ctx.url_allowlist();
+    validate_html_and_css_context_with_url_vars(source, false, Some(&url_allowlist))?;
+
+    let ast = parse(source, block_id, SyntaxConfig::default())
+        .map_err(|_| "Cú pháp MiniJinja của template block không hợp lệ.")?;
+    validate_stmt(&ast)?;
+
+    let final_states = walk_block_ast_stmt(
+        &ast,
+        &BTreeSet::from([HtmlScanState::Body]),
+        &ctx,
+        &BTreeMap::new(),
+    )?;
+    if final_states.iter().any(|s| *s != HtmlScanState::Body) {
+        return Err("Template block phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment).");
+    }
+
+    let mut env = restricted_environment();
+    env.add_template(block_id, source)
+        .map_err(|_| "Không thể biên dịch template block trong môi trường C-SEC.")?;
+    Ok(())
+}
+
+fn generate_richtext_nonce() -> Result<String, &'static str> {
+    let mut random = [0_u8; 16];
+    OsRng
+        .try_fill_bytes(&mut random)
+        .map_err(|_| "Không tạo được nonce RichText.")?;
+    let mut nonce = String::with_capacity(BLOCK_RICHTEXT_NONCE_PREFIX.len() + 32);
+    nonce.push_str(BLOCK_RICHTEXT_NONCE_PREFIX);
+    for byte in random {
+        use std::fmt::Write;
+        write!(&mut nonce, "{byte:02x}").map_err(|_| "Không tạo được nonce RichText.")?;
+    }
+    Ok(nonce)
+}
+
+fn populate_leaf_field_context(
+    field: &opendash_core::block_schema::BlockFieldSpec,
+    raw_val: Option<&serde_json::Value>,
+    raw_map: Option<&BTreeMap<String, serde_json::Value>>,
+    raw_obj: Option<&serde_json::Map<String, serde_json::Value>>,
+    is_preview: bool,
+    target_map: &mut BTreeMap<String, Value>,
+    nonces: &mut BTreeMap<String, String>,
+) -> Result<(), &'static str> {
+    use opendash_core::{
+        block_schema::{BlockFieldSpec, valid_block_url, valid_sha256_media_id},
+        richtext::sanitize_richtext,
+    };
+
+    let key = field.key().to_owned();
+    match field {
+        BlockFieldSpec::Text { default, .. } | BlockFieldSpec::Textarea { default, .. } => {
+            let s = raw_val
+                .and_then(serde_json::Value::as_str)
+                .or(default.as_deref())
+                .unwrap_or("");
+            target_map.insert(key, Value::from(s.to_owned()));
+        }
+        BlockFieldSpec::Richtext { default, .. } => {
+            let s = raw_val
+                .and_then(serde_json::Value::as_str)
+                .or(default.as_deref())
+                .unwrap_or("");
+            if s.trim().is_empty() {
+                target_map.insert(key, Value::from(""));
+            } else {
+                let clean = sanitize_richtext(s)?;
+                if clean.is_empty() {
+                    target_map.insert(key, Value::from(""));
+                } else {
+                    let nonce = generate_richtext_nonce()?;
+                    nonces.insert(nonce.clone(), clean);
+                    target_map.insert(key, Value::from(nonce));
+                }
+            }
+        }
+        BlockFieldSpec::Number { default, .. } => {
+            let n = extract_scalar_or_desktop_f64(raw_val)
+                .or(*default)
+                .unwrap_or(0.0);
+            target_map.insert(key, Value::from(n));
+        }
+        BlockFieldSpec::Range { default, min, .. } => {
+            let n = extract_scalar_or_desktop_f64(raw_val)
+                .or(*default)
+                .unwrap_or(*min);
+            target_map.insert(key, Value::from(n));
+        }
+        BlockFieldSpec::Boolean { default, .. } => {
+            let b = raw_val
+                .and_then(serde_json::Value::as_bool)
+                .or(*default)
+                .unwrap_or(false);
+            target_map.insert(key, Value::from(b));
+        }
+        BlockFieldSpec::Select {
+            options, default, ..
+        } => {
+            let fallback = default
+                .as_deref()
+                .or_else(|| options.first().map(|o| o.value.as_str()))
+                .unwrap_or("");
+            let s = extract_scalar_or_desktop_str(raw_val).unwrap_or(fallback);
+            target_map.insert(key, Value::from(s.to_owned()));
+        }
+        BlockFieldSpec::Color { default, .. } => {
+            let s = raw_val
+                .and_then(serde_json::Value::as_str)
+                .or(default.as_deref())
+                .unwrap_or("transparent");
+            target_map.insert(key, Value::from(s.to_owned()));
+        }
+        BlockFieldSpec::Media { default, .. } => {
+            let id = raw_val
+                .and_then(serde_json::Value::as_str)
+                .or(default.as_deref())
+                .unwrap_or("");
+            let url = if valid_sha256_media_id(id) {
+                if is_preview {
+                    format!("/api/admin/media/{id}/file")
+                } else {
+                    format!("/media/{id}/file")
+                }
+            } else {
+                String::new()
+            };
+            let alt_key = format!("{key}_alt");
+            let alt = raw_map
+                .and_then(|m| m.get(&alt_key))
+                .or_else(|| raw_obj.and_then(|m| m.get(&alt_key)))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            target_map.insert(format!("{key}_url"), Value::from(url));
+            target_map.insert(alt_key, Value::from(alt.to_owned()));
+            target_map.insert(format!("{key}_width"), Value::from(""));
+            target_map.insert(format!("{key}_height"), Value::from(""));
+            target_map.insert(key, Value::from(id.to_owned()));
+        }
+        BlockFieldSpec::Url { default, .. } => {
+            let raw_u = raw_val
+                .and_then(serde_json::Value::as_str)
+                .or(default.as_deref())
+                .unwrap_or("");
+            let safe_u = if !raw_u.is_empty() && valid_block_url(raw_u) {
+                raw_u
+            } else {
+                ""
+            };
+            target_map.insert(key, Value::from(safe_u.to_owned()));
+        }
+        BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. } => {}
+    }
+    Ok(())
+}
+
+fn extract_scalar_or_desktop_f64(val: Option<&serde_json::Value>) -> Option<f64> {
+    let v = val?;
+    v.as_f64()
+        .or_else(|| v.as_object()?.get("desktop")?.as_f64())
+}
+
+fn extract_scalar_or_desktop_str(val: Option<&serde_json::Value>) -> Option<&str> {
+    let v = val?;
+    v.as_str()
+        .or_else(|| v.as_object()?.get("desktop")?.as_str())
+}
+
+/// Renders a validated `block.json` v1 template under the shared request `RenderBudget`
+/// (`<= 2_000` fuel per node, `<= 10_000` total fuel, `<= 512 KiB` total HTML) with
+/// two-stage `sanitize_richtext` + post-render single-pass `HtmlScanState::Body` nonce replacement.
+pub fn render_block_csec_with_budget(
+    block_id: &str,
+    template_source: &str,
+    schema: &opendash_core::block_schema::BlockSchemaV1,
+    values: &BTreeMap<String, serde_json::Value>,
+    is_preview: bool,
+    budget: &mut RenderBudget,
+) -> Result<String, &'static str> {
+    use opendash_core::block_schema::BlockFieldSpec;
+
+    if budget.fuel_remaining == 0 {
+        return Err("Đã hết ngân sách fuel render trang.");
+    }
+    let node_fuel = budget.fuel_remaining.min(MAX_BLOCK_FUEL_PER_NODE);
+
+    let mut ctx_map: BTreeMap<String, Value> = BTreeMap::new();
+    let mut nonces: BTreeMap<String, String> = BTreeMap::new();
+
+    for field in schema.flattened_top_fields() {
+        match field {
+            BlockFieldSpec::Repeater {
+                key,
+                max_items,
+                fields,
+                ..
+            } => {
+                let mut rendered_items = Vec::new();
+                if let Some(arr) = values
+                    .get(key.as_str())
+                    .and_then(serde_json::Value::as_array)
+                {
+                    for item in arr.iter().take(*max_items) {
+                        if let Some(obj) = item.as_object() {
+                            let mut item_map: BTreeMap<String, Value> = BTreeMap::new();
+                            for sub in fields {
+                                populate_leaf_field_context(
+                                    sub,
+                                    obj.get(sub.key()),
+                                    None,
+                                    Some(obj),
+                                    is_preview,
+                                    &mut item_map,
+                                    &mut nonces,
+                                )?;
+                            }
+                            rendered_items.push(Value::from_pairs(item_map));
+                        }
+                    }
+                }
+                ctx_map.insert(key.clone(), Value::from(rendered_items));
+            }
+            _ => {
+                populate_leaf_field_context(
+                    field,
+                    values.get(field.key()),
+                    Some(values),
+                    None,
+                    is_preview,
+                    &mut ctx_map,
+                    &mut nonces,
+                )?;
+            }
+        }
+    }
+
+    let mut env = restricted_environment();
+    env.set_fuel(Some(node_fuel));
+    env.add_template(block_id, template_source)
+        .map_err(|_| "Không thể biên dịch template block.")?;
+    let captured = env
+        .get_template(block_id)
+        .map_err(|_| "Không tìm thấy template block.")?
+        .render_captured(Value::from_pairs(ctx_map))
+        .map_err(|_| "Lỗi thực thi template block (fuel/recursion/undefined).")?;
+
+    let (consumed, _remaining) = captured
+        .state()
+        .fuel_levels()
+        .ok_or("Thiếu bộ theo dõi fuel cho template block.")?;
+    budget.fuel_remaining = budget.fuel_remaining.saturating_sub(consumed);
+
+    let shell = captured.output();
+    if shell.len() > MAX_RENDERED_HTML_BYTES {
+        return Err("HTML render của block vượt quá giới hạn 512 KiB.");
+    }
+    validate_html_and_css_context(shell, true)?;
+
+    let out = if nonces.is_empty() {
+        shell.to_owned()
+    } else {
+        let nonce_refs: BTreeMap<String, &str> = nonces
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_str()))
+            .collect();
+        insert_preview_fragments(shell, &nonce_refs)?
+    };
+
+    budget.charge_html_bytes(out.len())?;
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -2047,5 +3253,136 @@ mod composition_tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn block_csec_blocks_html5_comment_smuggling_duplicate_attrs_entity_urls_and_richtext_aliasing()
+    {
+        use opendash_core::block_schema::BlockSchemaV1;
+        use serde_json::json;
+
+        let schema: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "core/test-card",
+            "title": "Test Card",
+            "category": "content",
+            "render": "render.html",
+            "fields": [
+                { "type": "text", "key": "title", "label": "Title" },
+                { "type": "richtext", "key": "body", "label": "Body" },
+                { "type": "url", "key": "cta_url", "label": "CTA URL" },
+                { "type": "media", "key": "hero", "label": "Hero", "media_kind": "image" },
+                {
+                    "type": "repeater",
+                    "key": "items",
+                    "label": "Items",
+                    "fields": [
+                        { "type": "text", "key": "label", "label": "Label" },
+                        { "type": "richtext", "key": "content", "label": "Content" },
+                        { "type": "url", "key": "link_url", "label": "Link" },
+                        { "type": "media", "key": "thumb", "label": "Thumb", "media_kind": "image" }
+                    ]
+                }
+            ]
+        }))
+        .unwrap();
+
+        let bad_templates = [
+            "<!-- --!><script>alert(1)</script><!-- -->",
+            "<!--><script>alert(1)</script><!-- -->",
+            "<!---><script>alert(1)</script><!-- -->",
+            "<a href=\"javascript:alert(1)\" href=\"https://ok.example\">x</a>",
+            "<a href=\"/&sol;evil.com\">x</a>",
+            "<a href=\"java&#x09;script:alert(1)\">x</a>",
+            "<img src=\"/media/ok.png\" srcset=\"/&sol;evil.com/a.png 1x\">",
+            "<a href=\"https://ok.example\" ping=\"/&sol;evil.com/track\">x</a>",
+            "<title>bad</title>",
+            "<xmp>bad</xmp>",
+            "<noembed>bad</noembed>",
+            "<noframes>bad</noframes>",
+            "<plaintext>bad",
+            "{% set rt = body %}<div>{{ rt }}</div>",
+            "{% with rt = body %}<div>{{ rt }}</div>{% endwith %}",
+            "<div data-x=\"{{ body }}\"></div>",
+            "<div>{{ body | upper }}</div>",
+            "{% for item in items %}<div title=\"{{ item.content }}\"></div>{% endfor %}",
+            "{% for item in items %}{% set x = item.content %}{{ x }}{% endfor %}",
+            "<div>{{ items[0].label }}</div>",
+            "<a href=\"{{ title }}\">bad non-url field in href</a>",
+            "<img src=\"{{ cta_url }}\">",
+            "<div>OD_RICHTEXT_0123456789abcdef0123456789abcdef</div>",
+        ];
+
+        for bad in bad_templates {
+            assert!(
+                validate_block_template_csec("core/test-card", bad, &schema).is_err(),
+                "expected C-SEC reject for: {bad}"
+            );
+        }
+
+        // Valid template with top-level & repeater richtext, url, and media_url
+        let good_tpl = r#"<section class="card">
+            <h2>{{ title }}</h2>
+            {% if hero_url %}<img src="{{ hero_url }}" alt="{{ hero_alt }}">{% endif %}
+            {% if body %}<div class="body">{{ body }}</div>{% endif %}
+            {% if cta_url %}<a href="{{ cta_url }}">Go</a>{% endif %}
+            {% for item in items %}
+                <div class="item">
+                    <span>{{ item.label }}</span>
+                    {% if item.thumb_url %}<img src="{{ item.thumb_url }}" alt="">{% endif %}
+                    {% if item.content %}<div>{{ item.content }}</div>{% endif %}
+                    {% if item.link_url %}<a href="{{ item.link_url }}">More</a>{% endif %}
+                </div>
+            {% endfor %}
+        </section>"#;
+        validate_block_template_csec("core/test-card", good_tpl, &schema).unwrap();
+
+        let media_id = "a".repeat(64);
+        let values = BTreeMap::from([
+            ("title".into(), json!("Chào <script>alert(1)</script>")),
+            (
+                "body".into(),
+                json!(
+                    "<p>Rich <strong>text</strong> <script>evil()</script><a href=\"https://opendash.vn\">link</a></p>"
+                ),
+            ),
+            ("cta_url".into(), json!("/lien-he")),
+            ("hero".into(), json!(media_id)),
+            (
+                "items".into(),
+                json!([{
+                    "label": "Mục 1",
+                    "content": "<p>Nội dung <em>mục 1</em></p>",
+                    "link_url": "#top",
+                    "thumb": media_id
+                }]),
+            ),
+        ]);
+
+        let mut budget = RenderBudget::new();
+        let rendered = render_block_csec_with_budget(
+            "core/test-card",
+            good_tpl,
+            &schema,
+            &values,
+            false,
+            &mut budget,
+        )
+        .unwrap();
+        let decoded_rendered = opendash_core::richtext::decode_html5_entities(&rendered);
+        assert!(rendered.contains("Chào &lt;script&gt;alert(1)&lt;"));
+        assert!(rendered.contains("<p>Rich <strong>text</strong> <a href=\"https://opendash.vn\" rel=\"noopener noreferrer\">link</a></p>"));
+        assert!(rendered.contains("<p>Nội dung <em>mục 1</em></p>"));
+        assert!(decoded_rendered.contains(&format!("src=\"/media/{media_id}/file\"")));
+        assert!(!rendered.contains("OD_RICHTEXT_"));
+        assert!(budget.fuel_remaining < TEMPLATE_FUEL_LIMIT);
+        assert!(budget.html_bytes_used > 0);
+
+        // Preview mode uses /api/admin/media/{id}/file and validate_safe_scoped_block_css gates it on is_preview
+        let preview_css = format!(
+            "[data-od-node-scope=\"entry-b1\"]{{--od-bg:url(\"/api/admin/media/{media_id}/file\");}}"
+        );
+        validate_safe_scoped_block_css(&preview_css, true).unwrap();
+        assert!(validate_safe_scoped_block_css(&preview_css, false).is_err());
     }
 }

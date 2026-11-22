@@ -897,7 +897,7 @@ async fn validate_typed_document_in_tx(
     let scoped_fields = validate_typed_target_in_tx(tx, target).await?;
     let state = builder::read_home_tx(tx).await?;
     document
-        .validate_for_save(&state.descriptors()?, prior)
+        .validate_for_save_with_schemas(&state.unified_block_schemas()?, prior)
         .map_err(|e| ApiError::bad_request(e.to_string()))?;
     // S02 stores synchronized Pattern references per content entry through
     // entry_pattern_refs. Shared template overrides have no such ownership or
@@ -1196,11 +1196,37 @@ async fn preview_part_graph(
     preview_part_graph_from_edges(tx, &root_key, edges, active, budget).await
 }
 
+fn part_scope_prefix(key: &str, expansion_idx: usize) -> String {
+    match key {
+        "header" => "hdr".to_owned(),
+        "footer" => "ftr".to_owned(),
+        _ => {
+            let clean: String = key
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .take(24)
+                .collect();
+            if clean.is_empty() {
+                format!("tp_{expansion_idx}")
+            } else {
+                format!("tp_{expansion_idx}_{clean}")
+            }
+        }
+    }
+}
+
 struct PreviewRenderContext<'a> {
     state: &'a HomeState,
     graph: &'a BTreeMap<String, PreviewPartSource>,
     theme_context: &'a serde_json::Value,
     route: Option<(&'a str, &'a str)>,
+    cache: &'a page::BlockTemplateCache,
 }
 
 async fn render_preview_builder(
@@ -1210,6 +1236,7 @@ async fn render_preview_builder(
     ctx: &PreviewRenderContext<'_>,
     budget: &mut PreviewCompositionBudget,
     annotation_scope: RenderAnnotationScope,
+    scope: &str,
 ) -> ApiResult<RenderedLayout> {
     let mut parts = BTreeMap::new();
     let mut diagnostics = Vec::new();
@@ -1226,7 +1253,8 @@ async fn render_preview_builder(
     let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
     let empty_patterns = page::PatternResults::new();
-    let mut rendered = page::render_builder_with_annotations(
+    let mut rb = budget.as_render_budget();
+    let mut rendered = page::render_builder_with_budget(
         ctx.state,
         document,
         true,
@@ -1240,7 +1268,11 @@ async fn render_preview_builder(
         &empty_patterns,
         false,
         annotation_scope,
+        scope,
+        &mut rb,
+        ctx.cache,
     )?;
+    budget.sync_from_render_budget(&rb);
     rendered.diagnostics.append(&mut diagnostics);
     Ok(rendered)
 }
@@ -1252,17 +1284,21 @@ async fn render_preview_part(
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<Option<RenderedLayout>> {
     match ctx.graph.get(key) {
-        Some(PreviewPartSource::Builder(doc)) => Ok(Some(
-            Box::pin(render_preview_builder(
-                tx,
-                doc,
-                None,
-                ctx,
-                budget,
-                RenderAnnotationScope::None,
+        Some(PreviewPartSource::Builder(doc)) => {
+            let scope = part_scope_prefix(key, budget.expansions);
+            Ok(Some(
+                Box::pin(render_preview_builder(
+                    tx,
+                    doc,
+                    None,
+                    ctx,
+                    budget,
+                    RenderAnnotationScope::None,
+                    &scope,
+                ))
+                .await?,
             ))
-            .await?,
-        )),
+        }
         Some(PreviewPartSource::Theme(source)) => {
             // Flatten only contiguous Theme-to-Theme edges. Builder boundaries
             // use the server snapshot rather than the surrounding lexical scope.
@@ -1417,6 +1453,30 @@ pub async fn preview_typed_override(
     preview_entry: Option<&TemplatePreviewEntry>,
     expected_version: Option<i64>,
 ) -> ApiResult<RenderedLayout> {
+    preview_typed_override_with_cache(
+        db,
+        themes_root,
+        actor,
+        target,
+        document,
+        preview_entry,
+        expected_version,
+        page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn preview_typed_override_with_cache(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    expected_version: Option<i64>,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     let key = target.canonical_key().map_err(ApiError::bad_request)?;
     let mut tx = db.begin().await?;
     let existing = get_typed_override_on_connection(&mut tx, &key).await?;
@@ -1469,14 +1529,18 @@ pub async fn preview_typed_override(
             && definition.settings.supports(ContentSupport::Builder)
             && record.content_type_key != "pattern"
         {
-            if let Some(mut rendered) = builder::preview_saved_page_body_in_tx(
+            let mut rb = budget.as_render_budget();
+            let res = builder::preview_saved_page_body_in_tx_with_budget(
                 &mut tx,
                 actor,
                 &record.content_type_key,
                 record.id,
+                &mut rb,
+                cache,
             )
-            .await?
-            {
+            .await?;
+            budget.sync_from_render_budget(&rb);
+            if let Some(mut rendered) = res {
                 body_diagnostics.append(&mut rendered.diagnostics);
                 Some(rendered.html)
             } else {
@@ -1505,6 +1569,12 @@ pub async fn preview_typed_override(
         graph: &graph,
         theme_context: &theme_context,
         route,
+        cache,
+    };
+    let root_scope = if target.kind == TemplateCandidateKind::Part {
+        part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
+    } else {
+        "ov".to_owned()
     };
     let mut rendered = render_preview_builder(
         &mut tx,
@@ -1513,6 +1583,7 @@ pub async fn preview_typed_override(
         &ctx,
         &mut budget,
         RenderAnnotationScope::None,
+        &root_scope,
     )
     .await?;
     rendered.diagnostics.append(&mut body_diagnostics);
@@ -1602,20 +1673,27 @@ pub async fn render_override_for_public_with_context(
 
 /// The public S02 graph has one budget across Builder and C-SEC segments.
 pub struct PublicCompositionBudget {
-    remaining_fuel: u64,
+    pub render_budget: page::RenderBudget,
     expansions: usize,
 }
 
 impl Default for PublicCompositionBudget {
     fn default() -> Self {
         Self {
-            remaining_fuel: template_sec::TEMPLATE_FUEL_LIMIT,
+            render_budget: page::RenderBudget::new(),
             expansions: 0,
         }
     }
 }
 
 impl PublicCompositionBudget {
+    pub fn with_render_budget(render_budget: page::RenderBudget) -> Self {
+        Self {
+            render_budget,
+            expansions: 0,
+        }
+    }
+
     fn charge(&mut self, count: usize) -> ApiResult<()> {
         self.expansions = self
             .expansions
@@ -1632,13 +1710,18 @@ impl PublicCompositionBudget {
         slot: Option<&str>,
     ) -> ApiResult<String> {
         self.charge(compiled.part_expansions())?;
-        compiled
+        let html = compiled
             .render_with_remaining_fuel(
                 template_sec::json_to_safe_value(context),
                 slot,
-                &mut self.remaining_fuel,
+                &mut self.render_budget.fuel_remaining,
             )
-            .map_err(ApiError::internal)
+            .map_err(ApiError::internal)?;
+        let own_bytes = html.len().saturating_sub(slot.map_or(0, str::len));
+        self.render_budget
+            .charge_html_bytes(own_bytes)
+            .map_err(ApiError::internal)?;
+        Ok(html)
     }
 }
 
@@ -1647,6 +1730,7 @@ struct PublicBuilderContext<'a> {
     active: Option<&'a ActiveThemeV3>,
     theme_context: &'a serde_json::Value,
     route_entry: Option<(&'a str, &'a str)>,
+    cache: &'a page::BlockTemplateCache,
 }
 
 /// Check the full depth of a contiguous theme graph at its actual Builder
@@ -1689,6 +1773,7 @@ async fn render_public_part(
         validate_content_slots(&target, slots)?;
         let mut next_stack = stack.to_vec();
         next_stack.push(canonical);
+        let scope = part_scope_prefix(key, budget.expansions);
         return Ok(Some(
             Box::pin(render_public_builder(
                 tx,
@@ -1698,6 +1783,7 @@ async fn render_public_part(
                 &next_stack,
                 ctx,
                 budget,
+                &scope,
             ))
             .await?,
         ));
@@ -1724,6 +1810,7 @@ async fn render_public_part(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn render_public_builder(
     tx: &mut Transaction<'_, Sqlite>,
     document: &BuilderDocument,
@@ -1732,6 +1819,7 @@ async fn render_public_builder(
     stack: &[String],
     ctx: &PublicBuilderContext<'_>,
     budget: &mut PublicCompositionBudget,
+    scope: &str,
 ) -> ApiResult<RenderedLayout> {
     let mut parts = BTreeMap::new();
     let mut child_diagnostics = Vec::new();
@@ -1752,7 +1840,8 @@ async fn render_public_builder(
         builder_binding::resolve_in_tx_with_route(tx, document, false, ctx.route_entry).await?;
     let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
-    let mut rendered = page::render_builder_with_template_context(
+    let empty_patterns = page::PatternResults::new();
+    let mut rendered = page::render_builder_with_budget(
         ctx.state,
         document,
         false,
@@ -1763,12 +1852,19 @@ async fn render_public_builder(
             content_html: slot,
             parts: &parts,
         }),
+        &empty_patterns,
+        false,
+        RenderAnnotationScope::None,
+        scope,
+        &mut budget.render_budget,
+        ctx.cache,
     )?;
     rendered.has_active_contact_form |= child_forms;
     rendered.diagnostics.append(&mut child_diagnostics);
     Ok(rendered)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn render_resolved_public_builder(
     db: &SqlitePool,
     record: &TemplateOverrideRecord,
@@ -1778,6 +1874,30 @@ pub async fn render_resolved_public_builder(
     slot: Option<&str>,
     budget: &mut PublicCompositionBudget,
 ) -> ApiResult<RenderedLayout> {
+    render_resolved_public_builder_with_cache(
+        db,
+        record,
+        active,
+        theme_context,
+        route_entry,
+        slot,
+        budget,
+        page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn render_resolved_public_builder_with_cache(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    route_entry: Option<(&str, &str)>,
+    slot: Option<&str>,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let state = builder::read_home_tx(&mut tx).await?;
     let context = PublicBuilderContext {
@@ -1785,10 +1905,20 @@ pub async fn render_resolved_public_builder(
         active,
         theme_context,
         route_entry,
+        cache,
     };
     let stack = vec![record.canonical_target_key.clone()];
-    let rendered =
-        render_public_builder(&mut tx, &record.document, slot, 0, &stack, &context, budget).await?;
+    let rendered = render_public_builder(
+        &mut tx,
+        &record.document,
+        slot,
+        0,
+        &stack,
+        &context,
+        budget,
+        "ov",
+    )
+    .await?;
     tx.commit().await?;
     Ok(rendered)
 }
@@ -1799,6 +1929,25 @@ pub async fn resolve_and_render_header_footer(
     site_ctx: &SiteContext<'_>,
     theme_opts: &BTreeMap<String, serde_json::Value>,
     budget: &mut PublicCompositionBudget,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
+    resolve_and_render_header_footer_with_cache(
+        db,
+        active_v3,
+        site_ctx,
+        theme_opts,
+        budget,
+        page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+pub async fn resolve_and_render_header_footer_with_cache(
+    db: &SqlitePool,
+    active_v3: Option<&ActiveThemeV3>,
+    site_ctx: &SiteContext<'_>,
+    theme_opts: &BTreeMap<String, serde_json::Value>,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
 ) -> ApiResult<(Option<String>, Option<String>, bool)> {
     let menus = crate::storage::menu::resolve_active_slot_menus(db).await?;
     let part_context = serde_json::json!({
@@ -1811,6 +1960,7 @@ pub async fn resolve_and_render_header_footer(
         active: active_v3,
         theme_context: &part_context,
         route_entry: None,
+        cache,
     };
     let header = render_public_part(&mut tx, "header", 0, &[], &context, budget).await?;
     let footer = render_public_part(&mut tx, "footer", 0, &[], &context, budget).await?;
@@ -2213,6 +2363,7 @@ async fn build_preview_context_in_tx(
     Ok((general, options, menus))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn render_preview_named_part_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     key: &str,
@@ -2221,6 +2372,7 @@ async fn render_preview_named_part_in_tx(
     theme_context: &serde_json::Value,
     route: Option<(&str, &str)>,
     budget: &mut PreviewCompositionBudget,
+    cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
     let part_target = TemplateCandidate {
         part_key: Some(key.to_owned()),
@@ -2235,7 +2387,9 @@ async fn render_preview_named_part_in_tx(
             graph: &graph,
             theme_context,
             route,
+            cache,
         };
+        let scope = part_scope_prefix(key, budget.expansions);
         let rendered = render_preview_builder(
             tx,
             &row.document,
@@ -2243,6 +2397,7 @@ async fn render_preview_named_part_in_tx(
             &ctx,
             budget,
             RenderAnnotationScope::None,
+            &scope,
         )
         .await?;
         return Ok(Some(rendered));
@@ -2258,6 +2413,7 @@ async fn render_preview_named_part_in_tx(
             graph: &graph,
             theme_context,
             route,
+            cache,
         };
         return render_preview_part(tx, key, &ctx, budget).await;
     }
@@ -2306,6 +2462,7 @@ fn escape_preview_text(value: &str) -> String {
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn preview_studio(
     db: &SqlitePool,
     themes_root: &Path,
@@ -2315,6 +2472,32 @@ pub async fn preview_studio(
     preview_entry: Option<&TemplatePreviewEntry>,
     preview_annotations: bool,
     transient: Option<&TransientStudioOverrides>,
+) -> ApiResult<RenderedLayout> {
+    preview_studio_with_cache(
+        db,
+        themes_root,
+        actor,
+        target,
+        document,
+        preview_entry,
+        preview_annotations,
+        transient,
+        page::BlockTemplateCache::global(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn preview_studio_with_cache(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: Option<&BuilderDocument>,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    preview_annotations: bool,
+    transient: Option<&TransientStudioOverrides>,
+    cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
     use TemplateCandidateKind as K;
     let key = target.canonical_key().map_err(ApiError::bad_request)?;
@@ -2362,6 +2545,7 @@ pub async fn preview_studio(
     let mut diagnostics = Vec::new();
     let mut has_active_contact_form = false;
     let mut route = None;
+    let mut shared_rb = page::RenderBudget::new();
     let body = if let Some((record, definition)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
         let view = content_render::authenticated_preview_view(record.clone(), definition);
@@ -2376,11 +2560,13 @@ pub async fn preview_studio(
             && definition.settings.supports(ContentSupport::Builder)
             && record.content_type_key != "pattern"
         {
-            if let Some(mut rendered) = builder::preview_saved_page_body_in_tx(
+            if let Some(mut rendered) = builder::preview_saved_page_body_in_tx_with_budget(
                 &mut tx,
                 actor,
                 &record.content_type_key,
                 record.id,
+                &mut shared_rb,
+                cache,
             )
             .await?
             {
@@ -2453,9 +2639,14 @@ pub async fn preview_studio(
     } else {
         RenderAnnotationScope::None
     };
-    let mut preview_budget = PreviewCompositionBudget::new();
-    let mut public_budget = PublicCompositionBudget::default();
+    let mut preview_budget = PreviewCompositionBudget::with_render_budget(shared_rb.clone());
+    let mut public_budget = PublicCompositionBudget::with_render_budget(shared_rb);
     let mut canvas_layout = target.kind == K::PageLayout;
+    let main_scope = if target.kind == K::Part {
+        part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
+    } else {
+        "ov".to_owned()
+    };
 
     let main_html = if let Some(doc) = document {
         let existing = get_typed_override_on_connection(&mut tx, &key).await?;
@@ -2468,6 +2659,7 @@ pub async fn preview_studio(
             graph: &graph,
             theme_context: &theme_context,
             route,
+            cache,
         };
         let mut rendered = render_preview_builder(
             &mut tx,
@@ -2476,6 +2668,7 @@ pub async fn preview_studio(
             &ctx,
             &mut preview_budget,
             scope,
+            &main_scope,
         )
         .await?;
         diagnostics.append(&mut rendered.diagnostics);
@@ -2507,6 +2700,7 @@ pub async fn preview_studio(
                     graph: &graph,
                     theme_context: &theme_context,
                     route,
+                    cache,
                 };
                 let slot = if target.kind == K::Part {
                     None
@@ -2520,6 +2714,7 @@ pub async fn preview_studio(
                     &ctx,
                     &mut preview_budget,
                     scope,
+                    &main_scope,
                 )
                 .await?;
                 diagnostics.append(&mut rendered.diagnostics);
@@ -2535,14 +2730,16 @@ pub async fn preview_studio(
                 } else {
                     Some(slot_fragment.as_str())
                 };
-                render_csec_template_for_preview(
+                let out = render_csec_template_for_preview(
                     &target_key,
                     &html,
                     active.as_ref(),
                     &theme_context,
                     slot,
                     &mut public_budget,
-                )?
+                )?;
+                preview_budget.sync_from_render_budget(&public_budget.render_budget);
+                out
             }
             TemplateResolution::CoreFallback => {
                 if target.kind == K::Part {
@@ -2568,6 +2765,7 @@ pub async fn preview_studio(
             &theme_context,
             route,
             &mut preview_budget,
+            cache,
         )
         .await?;
         let ftr = render_preview_named_part_in_tx(
@@ -2578,6 +2776,7 @@ pub async fn preview_studio(
             &theme_context,
             route,
             &mut preview_budget,
+            cache,
         )
         .await?;
         if let Some(ref h) = hdr {
@@ -2607,7 +2806,7 @@ pub async fn preview_studio(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
+pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     tx: &mut Transaction<'_, Sqlite>,
     themes_root: &Path,
     actor_role: FieldRole,
@@ -2616,6 +2815,8 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
     page_layout_key: Option<&str>,
     custom_template_key: Option<&str>,
     entry_rendered: RenderedLayout,
+    entry_render_budget: page::RenderBudget,
+    cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
     let mut record = entries::get_entry_in_tx(tx, &schema.base.descriptor.key, entry_id)
         .await?
@@ -2667,8 +2868,9 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
         })
         .unwrap_or_else(|_| entry_rendered.html.clone());
 
-    let mut preview_budget = PreviewCompositionBudget::new();
-    let mut public_budget = PublicCompositionBudget::default();
+    let mut preview_budget =
+        PreviewCompositionBudget::with_render_budget(entry_render_budget.clone());
+    let mut public_budget = PublicCompositionBudget::with_render_budget(entry_render_budget);
     let route = Some((record.content_type_key.as_str(), record.slug.as_str()));
     let mut diagnostics = entry_rendered.diagnostics;
     let mut has_active_contact_form = entry_rendered.has_active_contact_form;
@@ -2690,6 +2892,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
                 graph: &graph,
                 theme_context: &theme_context,
                 route,
+                cache,
             };
             let mut tpl_rendered = render_preview_builder(
                 tx,
@@ -2698,6 +2901,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
                 &ctx,
                 &mut preview_budget,
                 RenderAnnotationScope::None,
+                "ov",
             )
             .await?;
             diagnostics.append(&mut tpl_rendered.diagnostics);
@@ -2708,14 +2912,16 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
             if target_key.starts_with("page_layout:") {
                 canvas_layout = true;
             }
-            render_csec_template_for_preview(
+            let out = render_csec_template_for_preview(
                 &target_key,
                 &html,
                 active.as_ref(),
                 &theme_context,
                 Some(&slot_fragment),
                 &mut public_budget,
-            )?
+            )?;
+            preview_budget.sync_from_render_budget(&public_budget.render_budget);
+            out
         }
         TemplateResolution::CoreFallback => slot_fragment,
     };
@@ -2729,6 +2935,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
             &theme_context,
             route,
             &mut preview_budget,
+            cache,
         )
         .await?;
         let ftr = render_preview_named_part_in_tx(
@@ -2739,6 +2946,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx(
             &theme_context,
             route,
             &mut preview_budget,
+            cache,
         )
         .await?;
         (hdr.map(|r| r.html), ftr.map(|r| r.html))

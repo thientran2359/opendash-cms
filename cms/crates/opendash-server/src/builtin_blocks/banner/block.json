@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "id": "core/banner",
+  "title": "Banner",
+  "category": "media",
+  "icon": "image",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "group",
+      "key": "background",
+      "label": "Bố cục & Nền",
+      "fields": [
+        {
+          "type": "media",
+          "key": "bg_media",
+          "label": "Ảnh nền",
+          "media_kind": "image",
+          "css_var": "--od-banner-bg"
+        },
+        {
+          "type": "color",
+          "key": "overlay_color",
+          "label": "Lớp phủ",
+          "default": "transparent",
+          "css_var": "--od-banner-overlay"
+        },
+        {
+          "type": "range",
+          "key": "min_height",
+          "label": "Chiều cao tối thiểu",
+          "min": 160,
+          "max": 800,
+          "default": 360,
+          "unit": "px",
+          "responsive": true,
+          "css_var": "--od-banner-h"
+        },
+        {
+          "type": "range",
+          "key": "focus_x",
+          "label": "Tâm ngang (%)",
+          "min": 0,
+          "max": 100,
+          "default": 50,
+          "unit": "%",
+          "css_var": "--od-banner-fx"
+        },
+        {
+          "type": "range",
+          "key": "focus_y",
+          "label": "Tâm dọc (%)",
+          "min": 0,
+          "max": 100,
+          "default": 50,
+          "unit": "%",
+          "css_var": "--od-banner-fy"
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "key": "content",
+      "label": "Nội dung & CTA",
+      "fields": [
+        {
+          "type": "select",
+          "key": "align",
+          "label": "Căn lề",
+          "options": [
+            { "value": "left", "label": "Trái" },
+            { "value": "center", "label": "Giữa" },
+            { "value": "right", "label": "Phải" }
+          ],
+          "default": "center",
+          "responsive": true,
+          "css_var": "--od-banner-align"
+        },
+        {
+          "type": "text",
+          "key": "heading",
+          "label": "Tiêu đề",
+          "required": true,
+          "default": "Tiêu đề Banner"
+        },
+        {
+          "type": "richtext",
+          "key": "body",
+          "label": "Mô tả"
+        },
+        {
+          "type": "boolean",
+          "key": "show_cta",
+          "label": "Hiện nút CTA",
+          "default": true
+        },
+        {
+          "type": "text",
+          "key": "cta_label",
+          "label": "Nhãn nút",
+          "show_if": { "field": "show_cta", "equals": true },
+          "default": "Khám phá"
+        },
+        {
+          "type": "url",
+          "key": "cta_url",
+          "label": "Liên kết CTA",
+          "show_if": { "field": "show_cta", "equals": true },
+          "default": "#"
+        }
+      ]
+    }
+  ]
+}

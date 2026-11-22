@@ -1949,7 +1949,10 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
             .fetch_one(&db)
             .await
             .unwrap();
-    assert_eq!(migration_version, 45);
+    // EGM Spec 2 S02 adds migration 0044's private Pattern data conversion,
+    // WordPress Permalinks adds 0045, and Declarative Block Engine S02 adds 0046;
+    // the 0040→0041 permalink preservation assertions above must still hold.
+    assert_eq!(migration_version, 46);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

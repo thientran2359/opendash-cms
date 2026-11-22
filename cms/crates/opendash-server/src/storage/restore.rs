@@ -245,6 +245,7 @@ pub async fn validate_and_rebase_copy(db_path: &Path) -> ApiResult<i64> {
         .run(&mut conn)
         .await
         .map_err(|_| ApiError::internal("Không chạy được migrations trên bản sao khôi phục."))?;
+    crate::storage::page::ensure_embedded_core_blocks_in_conn(&mut conn).await?;
 
     // Clear stale auth sessions, active operation leases/queues, and disable SMTP auto-sending.
     sqlx::query("DELETE FROM sessions")
