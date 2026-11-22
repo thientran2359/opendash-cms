@@ -5,19 +5,22 @@
 //! unavailable can be round-tripped without letting clients introduce or edit
 //! such elements.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
 
 use crate::{
+    block_schema::{
+        MAX_NODE_VALUES_BYTES, MAX_NODE_VALUES_KEYS, RegisteredBlockSchema, upcast_legacy_catalog,
+    },
     content::valid_content_type_key,
     id::{
         valid_kebab_segment_with_limit, valid_namespaced_block_id, valid_package_id,
         valid_snake_key,
     },
-    registry::{ProviderStatus, RegistryCatalog},
+    registry::{DeclarationState, ProviderStatus, RegistryCatalog},
     theme::{Block, BlockDescriptor, Fields},
 };
 
@@ -457,9 +460,21 @@ impl BuilderDocument {
         catalog: &RegistryCatalog<BlockDescriptor>,
         previous: Option<&BuilderDocument>,
     ) -> Result<(), BuilderError> {
+        let schemas = upcast_legacy_catalog(catalog);
+        self.validate_for_save_with_schemas(&schemas, previous)
+    }
+
+    /// Validates this document against rich `RegisteredBlockSchema` declarations (`block.json` v1
+    /// and upcast legacy `theme_blocks`).
+    pub fn validate_for_save_with_schemas(
+        &self,
+        catalog: &RegistryCatalog<RegisteredBlockSchema>,
+        previous: Option<&BuilderDocument>,
+    ) -> Result<(), BuilderError> {
         if self.schema_version != BUILDER_SCHEMA_VERSION {
             return Err(BuilderError::Invalid("Unsupported Builder schema version"));
         }
+        let prev_plugin_values = index_previous_plugin_values(previous);
         let mut ids = HashSet::new();
         let mut count = 0;
         let mut sources = HashSet::new();
@@ -493,7 +508,12 @@ impl BuilderDocument {
                                         ));
                                     }
                                 }
-                                validate_known(known, catalog)
+                                validate_known_with_schemas(
+                                    &element.id,
+                                    known,
+                                    catalog,
+                                    &prev_plugin_values,
+                                )
                             }
                             ElementContent::Unresolved(_) => {
                                 Err("Unknown or malformed Builder element")
@@ -513,6 +533,32 @@ impl BuilderDocument {
         self.to_json()?;
         Ok(())
     }
+}
+
+fn index_previous_plugin_values<'a>(
+    previous: Option<&'a BuilderDocument>,
+) -> HashMap<(&'a str, &'a str), &'a BTreeMap<String, Value>> {
+    let mut map = HashMap::new();
+    let Some(prev) = previous else {
+        return map;
+    };
+    for section in &prev.sections {
+        for row in &section.children {
+            for column in &row.children {
+                for element in &column.children {
+                    if let ElementContent::Known(KnownElement::PluginBlock(props)) =
+                        &element.content
+                    {
+                        map.insert(
+                            (element.id.as_str(), props.block_id.as_str()),
+                            &props.values,
+                        );
+                    }
+                }
+            }
+        }
+    }
+    map
 }
 
 fn check_node_id<'a>(
@@ -552,9 +598,11 @@ fn is_preserved(
         .is_some_and(|old| old == element)
 }
 
-fn validate_known(
+fn validate_known_with_schemas(
+    element_id: &str,
     element: &KnownElement,
-    catalog: &RegistryCatalog<BlockDescriptor>,
+    catalog: &RegistryCatalog<RegisteredBlockSchema>,
+    prev_plugin_values: &HashMap<(&str, &str), &BTreeMap<String, Value>>,
 ) -> Result<(), &'static str> {
     match element {
         KnownElement::Heading(props) => {
@@ -614,30 +662,57 @@ fn validate_known(
             if !valid_namespaced_block_id(&props.block_id) {
                 return Err("Invalid legacy block ID");
             }
-            let descriptor = catalog
+            let entry = catalog
                 .get(&props.block_id)
-                .filter(|entry| entry.status == ProviderStatus::Active)
+                .filter(|entry| {
+                    entry.status == ProviderStatus::Active
+                        && entry.declaration_state == DeclarationState::Declared
+                })
                 .ok_or("Legacy block descriptor unavailable")?;
+            let legacy_fields: Fields = entry
+                .descriptor
+                .schema
+                .fields
+                .iter()
+                .map(|field| (field.key().to_owned(), field.label().to_owned()))
+                .collect();
             let block = Block {
                 kind: props.block_id.clone(),
                 values: props.values.clone(),
             };
             block
-                .validate_against_fields(&descriptor.descriptor.fields)
+                .validate_against_fields(&legacy_fields)
                 .map_err(|_| "Legacy field map does not match descriptor")?;
         }
         KnownElement::PluginBlock(props) => {
             if !valid_namespaced_block_id(&props.block_id) {
                 return Err("Invalid plugin block id");
             }
-            if props.values.len() > 64 {
+            if props.values.len() > MAX_NODE_VALUES_KEYS {
                 return Err("Plugin block props exceed limit");
             }
-            let descriptor = catalog
+            let entry = catalog
                 .get(&props.block_id)
                 .ok_or("Unknown plugin block descriptor")?;
-            if descriptor.status != ProviderStatus::Active {
+            if entry.status != ProviderStatus::Active
+                || entry.declaration_state != DeclarationState::Declared
+            {
                 return Err("Plugin block provider is not active");
+            }
+            if entry.descriptor.legacy_mode {
+                let bytes = serde_json::to_vec(&props.values)
+                    .map_err(|_| "Plugin block props invalid JSON")?;
+                if bytes.len() > MAX_NODE_VALUES_BYTES {
+                    return Err("Plugin block props exceed 64 KiB");
+                }
+            } else {
+                let prev_values = prev_plugin_values
+                    .get(&(element_id, props.block_id.as_str()))
+                    .copied();
+                entry
+                    .descriptor
+                    .schema
+                    .validate_values(&props.values, prev_values)?;
             }
         }
         KnownElement::Video(props) => {
@@ -1555,6 +1630,214 @@ mod tests {
         assert!(
             custom_doc
                 .validate_route_context_for_role(Some("single"), Some(&["other".to_string()]))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validate_for_save_with_schemas_enforces_status_declaration_and_schema_evolution() {
+        use crate::{
+            block_schema::BlockSchemaV1,
+            registry::{OwnedDescriptor, ResourceOwner},
+        };
+
+        let media_hex = "a".repeat(64);
+        let schema_v1: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "core/faq",
+            "title": "FAQ",
+            "category": "interactive",
+            "render": "render.html",
+            "fields": [
+                { "type": "text", "key": "heading", "label": "Heading", "required": true },
+                { "type": "media", "key": "icon_img", "label": "Icon", "media_kind": "image" },
+                {
+                    "type": "repeater",
+                    "key": "items",
+                    "label": "Items",
+                    "fields": [
+                        { "type": "text", "key": "question", "label": "Question", "required": true }
+                    ]
+                }
+            ]
+        }))
+        .unwrap();
+        schema_v1.validate("core").unwrap();
+
+        let doc_raw = json!({
+            "schema_version": 1,
+            "sections": [{
+                "id": "sec-1",
+                "children": [{
+                    "id": "row-1",
+                    "children": [
+                        {
+                            "id": "col-1",
+                            "children": [{
+                                "id": "faq-1",
+                                "type": "plugin/block",
+                                "props": {
+                                    "block_id": "core/faq",
+                                    "values": {
+                                        "heading": "Hỏi đáp",
+                                        "icon_img": media_hex,
+                                        "items": [{ "question": "Câu 1" }]
+                                    }
+                                }
+                            }]
+                        },
+                        {
+                            "id": "col-2",
+                            "children": []
+                        }
+                    ]
+                }]
+            }]
+        });
+        let doc_v1 = BuilderDocument::from_json(doc_raw.to_string().as_bytes()).unwrap();
+
+        let mut catalog = RegistryCatalog::new();
+        catalog
+            .register(
+                "core/faq",
+                ResourceOwner::Core,
+                RegisteredBlockSchema {
+                    schema: schema_v1.clone(),
+                    legacy_mode: false,
+                },
+            )
+            .unwrap();
+        doc_v1
+            .validate_for_save_with_schemas(&catalog, None)
+            .unwrap();
+
+        // Reject unsafe URL / color / richtext in active schema
+        let mut bad_doc = doc_v1.clone();
+        let bad_schema: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "core/faq",
+            "title": "FAQ",
+            "category": "interactive",
+            "render": "render.html",
+            "fields": [
+                { "type": "url", "key": "cta_url", "label": "URL" }
+            ]
+        }))
+        .unwrap();
+        catalog
+            .redeclare(
+                "core/faq",
+                ResourceOwner::Core,
+                ProviderStatus::Active,
+                RegisteredBlockSchema {
+                    schema: bad_schema,
+                    legacy_mode: false,
+                },
+            )
+            .unwrap();
+        if let ElementContent::Known(KnownElement::PluginBlock(ref mut p)) =
+            bad_doc.sections[0].children[0].children[0].children[0].content
+        {
+            p.values
+                .insert("cta_url".into(), json!("javascript:alert(1)"));
+        }
+        assert!(
+            bad_doc
+                .validate_for_save_with_schemas(&catalog, None)
+                .is_err()
+        );
+
+        // ProviderInactive & Withdrawn: preserved identically, rejected on edit/move/fresh insert
+        let mut inactive_catalog = RegistryCatalog::new();
+        inactive_catalog.insert_loaded(
+            "core/faq",
+            OwnedDescriptor {
+                owner: ResourceOwner::Core,
+                status: ProviderStatus::ProviderInactive,
+                declaration_state: DeclarationState::Declared,
+                descriptor: RegisteredBlockSchema {
+                    schema: schema_v1.clone(),
+                    legacy_mode: false,
+                },
+            },
+        );
+        doc_v1
+            .validate_for_save_with_schemas(&inactive_catalog, Some(&doc_v1))
+            .unwrap();
+        assert!(
+            doc_v1
+                .validate_for_save_with_schemas(&inactive_catalog, None)
+                .is_err()
+        );
+
+        let mut withdrawn_catalog = RegistryCatalog::new();
+        withdrawn_catalog.insert_loaded(
+            "core/faq",
+            OwnedDescriptor {
+                owner: ResourceOwner::Core,
+                status: ProviderStatus::Active,
+                declaration_state: DeclarationState::Withdrawn,
+                descriptor: RegisteredBlockSchema {
+                    schema: schema_v1,
+                    legacy_mode: false,
+                },
+            },
+        );
+        doc_v1
+            .validate_for_save_with_schemas(&withdrawn_catalog, Some(&doc_v1))
+            .unwrap();
+        assert!(
+            doc_v1
+                .validate_for_save_with_schemas(&withdrawn_catalog, None)
+                .is_err()
+        );
+
+        // Schema evolution on Active block (new required top-level + repeater field) passes even when moved to col-2
+        let schema_v2: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "core/faq",
+            "title": "FAQ",
+            "category": "interactive",
+            "render": "render.html",
+            "fields": [
+                { "type": "text", "key": "heading", "label": "Heading", "required": true },
+                { "type": "text", "key": "newly_required_subtitle", "label": "Subtitle", "required": true },
+                {
+                    "type": "repeater",
+                    "key": "items",
+                    "label": "Items",
+                    "fields": [
+                        { "type": "text", "key": "question", "label": "Question", "required": true },
+                        { "type": "text", "key": "newly_required_answer", "label": "Answer", "required": true }
+                    ]
+                }
+            ]
+        }))
+        .unwrap();
+        let mut v2_catalog = RegistryCatalog::new();
+        v2_catalog
+            .register(
+                "core/faq",
+                ResourceOwner::Core,
+                RegisteredBlockSchema {
+                    schema: schema_v2,
+                    legacy_mode: false,
+                },
+            )
+            .unwrap();
+        let mut moved_doc = doc_v1.clone();
+        let node = moved_doc.sections[0].children[0].children[0]
+            .children
+            .remove(0);
+        moved_doc.sections[0].children[0].children[1]
+            .children
+            .push(node);
+        moved_doc
+            .validate_for_save_with_schemas(&v2_catalog, Some(&doc_v1))
+            .unwrap();
+        assert!(
+            moved_doc
+                .validate_for_save_with_schemas(&v2_catalog, None)
                 .is_err()
         );
     }

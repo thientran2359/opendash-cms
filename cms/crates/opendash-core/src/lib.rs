@@ -1,5 +1,6 @@
 pub mod admin_extensions;
 pub mod backup;
+pub mod block_schema;
 pub mod builder;
 pub mod builder_blocks;
 pub mod contact;
@@ -8,4 +9,5 @@ pub mod hooks;
 pub mod id;
 pub mod plugin;
 pub mod registry;
+pub mod richtext;
 pub mod theme;

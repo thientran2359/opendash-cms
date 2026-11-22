@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    block_schema::RegisteredBlockSchema,
     builder::{
         BUILDER_SCHEMA_VERSION, BindingTarget, BuilderDocument, ButtonProps, ColumnNode,
         ContactFormProps, ContentSlotProps, ElementBinding, ElementContent, ElementNode,
@@ -22,6 +23,7 @@ use crate::{
         VideoProps,
     },
     id::valid_package_id,
+    registry::{DeclarationState, ProviderStatus, RegistryCatalog},
 };
 
 /// Maximum serialized UTF-8 byte length of a `values_json["body"]` string
@@ -76,6 +78,7 @@ pub struct ExtractedBlockRefs {
     pub image_ids: BTreeSet<String>,
     pub video_ids: BTreeSet<String>,
     pub poster_image_ids: BTreeSet<String>,
+    pub any_media_ids: BTreeSet<String>,
     pub pattern_ids: BTreeSet<i64>,
 }
 
@@ -1254,6 +1257,15 @@ pub fn parse_blocks_lenient_or_recover(raw_body: &str) -> ParsedBlockDocument {
 /// Extracts human-readable plain text from `od:text`, `od:heading`, and `od:button`
 /// blocks (used for search/bindings/reset flattening).
 pub fn extract_visible_text(raw_body: &str) -> String {
+    extract_visible_text_with_schemas(raw_body, &RegistryCatalog::new())
+}
+
+/// Extracts human-readable plain text from core blocks and active, declared
+/// `od:plugin_block` schemas (`text`, `textarea`, stripped `richtext`, and repeaters).
+pub fn extract_visible_text_with_schemas(
+    raw_body: &str,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> String {
     if !contains_blocks(raw_body) {
         return raw_body.to_owned();
     }
@@ -1274,6 +1286,18 @@ pub fn extract_visible_text(raw_body: &str) -> String {
                             KnownElement::Button(props) if !props.label.trim().is_empty() => {
                                 parts.push(props.label);
                             }
+                            KnownElement::PluginBlock(props) => {
+                                if let Some(entry) = schemas.get(&props.block_id)
+                                    && entry.status == ProviderStatus::Active
+                                    && entry.declaration_state == DeclarationState::Declared
+                                    && !entry.descriptor.legacy_mode
+                                {
+                                    entry
+                                        .descriptor
+                                        .schema
+                                        .extract_visible_text(&props.values, &mut parts);
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -1287,6 +1311,16 @@ pub fn extract_visible_text(raw_body: &str) -> String {
 /// Scans `<!-- od:... -->` comments leniently to extract referenced media and
 /// pattern IDs even when sibling comments are malformed.
 pub fn extract_block_refs_lenient(raw_body: &str) -> ExtractedBlockRefs {
+    extract_block_refs_lenient_with_schemas(raw_body, &RegistryCatalog::new())
+}
+
+/// Scans `<!-- od:... -->` comments leniently to extract referenced media and
+/// pattern IDs, including `Media` fields from active, declared `od:plugin_block`
+/// schemas (`ProviderInactive`/`Withdrawn`/`legacy_mode` entries emit zero media).
+pub fn extract_block_refs_lenient_with_schemas(
+    raw_body: &str,
+    schemas: &RegistryCatalog<RegisteredBlockSchema>,
+) -> ExtractedBlockRefs {
     let mut refs = ExtractedBlockRefs::default();
     if !contains_blocks(raw_body) {
         return refs;
@@ -1333,6 +1367,19 @@ pub fn extract_block_refs_lenient(raw_body: &str) -> ExtractedBlockRefs {
                 "pattern_ref" => {
                     if let Ok((_, props)) = decode_props_with_id::<PatternRefProps>(json_str) {
                         refs.pattern_ids.insert(props.pattern_id);
+                    }
+                }
+                "plugin_block" => {
+                    if let Ok((_, props)) = decode_props_with_id::<PluginBlockProps>(json_str)
+                        && let Some(entry) = schemas.get(&props.block_id)
+                        && entry.status == ProviderStatus::Active
+                        && entry.declaration_state == DeclarationState::Declared
+                        && !entry.descriptor.legacy_mode
+                    {
+                        let collected = entry.descriptor.schema.collect_media_ids(&props.values);
+                        refs.image_ids.extend(collected.image_ids);
+                        refs.video_ids.extend(collected.video_ids);
+                        refs.any_media_ids.extend(collected.any_ids);
                     }
                 }
                 _ => {}
@@ -1707,6 +1754,135 @@ mod tests {
         assert_eq!(
             extract_visible_text(&blocks),
             "Heading One\n\nParagraph One\n\nRead More"
+        );
+    }
+
+    #[test]
+    fn schema_aware_refs_and_visible_text_gate_on_active_declared_blocks() {
+        use crate::{
+            block_schema::BlockSchemaV1,
+            registry::{OwnedDescriptor, ResourceOwner},
+        };
+
+        let img_hex = "a".repeat(64);
+        let vid_hex = "b".repeat(64);
+        let any_hex = "c".repeat(64);
+        let schema: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "core/showcase",
+            "title": "Showcase",
+            "category": "media",
+            "render": "render.html",
+            "fields": [
+                { "type": "text", "key": "title", "label": "Title" },
+                { "type": "richtext", "key": "summary", "label": "Summary" },
+                { "type": "media", "key": "poster", "label": "Poster", "media_kind": "image" },
+                { "type": "media", "key": "clip", "label": "Clip", "media_kind": "video" },
+                {
+                    "type": "repeater",
+                    "key": "slides",
+                    "label": "Slides",
+                    "fields": [
+                        { "type": "text", "key": "caption", "label": "Caption" },
+                        { "type": "media", "key": "asset", "label": "Asset", "media_kind": "any" }
+                    ]
+                }
+            ]
+        }))
+        .unwrap();
+
+        let doc = BuilderDocument {
+            schema_version: BUILDER_SCHEMA_VERSION,
+            sections: vec![SectionNode {
+                id: "s1".into(),
+                responsive: None,
+                children: vec![RowNode {
+                    id: "r1".into(),
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "c1".into(),
+                        responsive: None,
+                        children: vec![el(
+                            "p1",
+                            KnownElement::PluginBlock(PluginBlockProps {
+                                block_id: "core/showcase".into(),
+                                values: BTreeMap::from([
+                                    ("title".into(), json!("Tiêu đề block")),
+                                    ("summary".into(), json!("<p>Mô tả <b>hay</b></p>")),
+                                    ("poster".into(), json!(img_hex)),
+                                    ("clip".into(), json!(vid_hex)),
+                                    (
+                                        "slides".into(),
+                                        json!([{ "caption": "Slide 1", "asset": any_hex }]),
+                                    ),
+                                ]),
+                            }),
+                        )],
+                    }],
+                }],
+            }],
+        };
+        let body = serialize_builder_document_to_blocks(&doc).unwrap();
+
+        let mut active_catalog = RegistryCatalog::new();
+        active_catalog
+            .register(
+                "core/showcase",
+                ResourceOwner::Core,
+                RegisteredBlockSchema {
+                    schema: schema.clone(),
+                    legacy_mode: false,
+                },
+            )
+            .unwrap();
+
+        let refs = extract_block_refs_lenient_with_schemas(&body, &active_catalog);
+        assert_eq!(refs.image_ids, BTreeSet::from([img_hex]));
+        assert_eq!(refs.video_ids, BTreeSet::from([vid_hex]));
+        assert_eq!(refs.any_media_ids, BTreeSet::from([any_hex]));
+        assert_eq!(
+            extract_visible_text_with_schemas(&body, &active_catalog),
+            "Tiêu đề block\n\nMô tả hay\n\nSlide 1"
+        );
+
+        let mut inactive_catalog = RegistryCatalog::new();
+        inactive_catalog.insert_loaded(
+            "core/showcase",
+            OwnedDescriptor {
+                owner: ResourceOwner::Core,
+                status: ProviderStatus::ProviderInactive,
+                declaration_state: DeclarationState::Declared,
+                descriptor: RegisteredBlockSchema {
+                    schema: schema.clone(),
+                    legacy_mode: false,
+                },
+            },
+        );
+        assert_eq!(
+            extract_block_refs_lenient_with_schemas(&body, &inactive_catalog),
+            ExtractedBlockRefs::default()
+        );
+        assert_eq!(
+            extract_visible_text_with_schemas(&body, &inactive_catalog),
+            ""
+        );
+
+        let mut withdrawn_catalog = RegistryCatalog::new();
+        withdrawn_catalog.insert_loaded(
+            "core/showcase",
+            OwnedDescriptor {
+                owner: ResourceOwner::Core,
+                status: ProviderStatus::Active,
+                declaration_state: DeclarationState::Withdrawn,
+                descriptor: RegisteredBlockSchema {
+                    schema,
+                    legacy_mode: false,
+                },
+            },
+        );
+        assert_eq!(
+            extract_block_refs_lenient_with_schemas(&body, &withdrawn_catalog),
+            ExtractedBlockRefs::default()
         );
     }
 }

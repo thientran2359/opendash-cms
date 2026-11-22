@@ -46,10 +46,13 @@ pub fn valid_namespaced_snake_key(value: &str) -> bool {
 }
 
 /// Validates a package identifier (plugin or theme ID, `3..=64` chars, `[a-z0-9-]`,
-/// not starting or ending with `-`).
+/// not starting or ending with `-`, and not a reserved system name).
 pub fn validate_package_id(id: &str) -> Result<(), &'static str> {
     if id.len() < 3 || id.len() > 64 {
         return Err("ID plugin phải từ 3 đến 64 ký tự.");
+    }
+    if matches!(id, "core" | "legacy") {
+        return Err("ID gói không được dùng tên dành riêng của hệ thống.");
     }
     if !id
         .chars()
@@ -301,6 +304,9 @@ mod tests {
         assert!(validate_semver("1.0.0-0a+001"));
         assert!(valid_namespaced_block_id("legacy-/block-")); // M1 compatibility
         assert!(!valid_package_id("legacy-"));
+        assert!(!valid_package_id("core"));
+        assert!(!valid_package_id("legacy"));
+        assert!(valid_namespaced_block_id("core/banner"));
     }
 
     #[test]
