@@ -280,6 +280,8 @@ export interface CompositeEntrySaveInput {
     canonical_url?: string | null;
     noindex?: boolean;
   } | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface CompositeEntrySaveResult {

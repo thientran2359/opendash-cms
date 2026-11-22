@@ -331,7 +331,10 @@ mod tests {
             .unwrap();
 
         // Omitting `event` withdraws it without losing ownership or descriptor
-        assert_eq!(catalog.withdraw_owner_except(&theme_owner, &["portfolio"]), 1);
+        assert_eq!(
+            catalog.withdraw_owner_except(&theme_owner, &["portfolio"]),
+            1
+        );
         let event = catalog.get("event").unwrap();
         assert_eq!(event.declaration_state, DeclarationState::Withdrawn);
         assert_eq!(event.status, ProviderStatus::Active);
@@ -343,10 +346,7 @@ mod tests {
             catalog.get("event").unwrap().declaration_state,
             DeclarationState::Withdrawn
         );
-        assert_eq!(
-            catalog.get("event").unwrap().status,
-            ProviderStatus::Active
-        );
+        assert_eq!(catalog.get("event").unwrap().status, ProviderStatus::Active);
 
         // Other owner still cannot claim a withdrawn resource
         assert_eq!(

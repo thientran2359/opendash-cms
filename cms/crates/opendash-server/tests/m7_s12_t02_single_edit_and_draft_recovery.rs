@@ -94,7 +94,12 @@ async fn setup_and_login_admin(client: &Client, base: &str) -> (String, String, 
     login(client, base, "admin", "Password123!").await
 }
 
-async fn login(client: &Client, base: &str, username: &str, password: &str) -> (String, String, String) {
+async fn login(
+    client: &Client,
+    base: &str,
+    username: &str,
+    password: &str,
+) -> (String, String, String) {
     let resp = client
         .post(format!("{base}/auth/login"))
         .json(&json!({ "username": username, "password": password }))
@@ -112,7 +117,11 @@ async fn login(client: &Client, base: &str, username: &str, password: &str) -> (
         .join("; ");
     let body: Value = resp.json().await.unwrap();
     let site_id = body["site_instance_id"].as_str().unwrap().to_string();
-    (cookie, body["csrf_token"].as_str().unwrap().to_string(), site_id)
+    (
+        cookie,
+        body["csrf_token"].as_str().unwrap().to_string(),
+        site_id,
+    )
 }
 
 #[tokio::test]
@@ -166,10 +175,14 @@ async fn site_instance_id_downgrade_scrub_and_fallback_save() {
     assert_eq!(cpt.status(), StatusCode::CREATED);
 
     // Alice logs in as Admin -> sees `margin` in effective-editor-config
-    let (alice_cookie1, _, alice_site1) = login(&client, &srv.base_url, "alice", "AlicePassword123!").await;
+    let (alice_cookie1, _, alice_site1) =
+        login(&client, &srv.base_url, "alice", "AlicePassword123!").await;
     assert_eq!(alice_site1, site_id);
     let cfg_before: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/effective-editor-config", srv.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/effective-editor-config",
+            srv.base_url
+        ))
         .header("Cookie", &alice_cookie1)
         .send()
         .await
@@ -193,10 +206,14 @@ async fn site_instance_id_downgrade_scrub_and_fallback_save() {
     assert_eq!(downgrade.status(), StatusCode::OK);
 
     // Alice logs back in as Editor -> `margin` is stripped from effective-editor-config
-    let (alice_cookie2, _, alice_site2) = login(&client, &srv.base_url, "alice", "AlicePassword123!").await;
+    let (alice_cookie2, _, alice_site2) =
+        login(&client, &srv.base_url, "alice", "AlicePassword123!").await;
     assert_eq!(alice_site2, site_id);
     let cfg_after: Value = client
-        .get(format!("{}/api/admin/content-types/portfolio/effective-editor-config", srv.base_url))
+        .get(format!(
+            "{}/api/admin/content-types/portfolio/effective-editor-config",
+            srv.base_url
+        ))
         .header("Cookie", &alice_cookie2)
         .send()
         .await

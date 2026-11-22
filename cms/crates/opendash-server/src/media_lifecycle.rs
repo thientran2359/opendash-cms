@@ -22,8 +22,8 @@ use crate::storage::media_refs::{
 };
 use crate::storage::operations::{
     JobCreateInput, JobTransitionInput, MAX_RETAINED_OPERATION_RECEIPTS, OperationJob,
-    OperationKind, OperationState, bump_maintenance_generation, create_job,
-    get_job, get_maintenance_generation, list_jobs, prune_old_receipts, transition_job_cas,
+    OperationKind, OperationState, bump_maintenance_generation, create_job, get_job,
+    get_maintenance_generation, list_jobs, prune_old_receipts, transition_job_cas,
 };
 
 /// Parses `If-Match: "gv<generation>-v<version>"` (missing -> 428, weak/malformed -> 412).
@@ -55,11 +55,10 @@ pub fn parse_media_if_match(headers: &HeaderMap) -> ApiResult<(i64, i64)> {
             "Header If-Match không đúng định dạng gv<generation>-v<version>.",
         ));
     };
-    let generation: i64 = gen_str
-        .parse()
-        .ok()
-        .filter(|&v| v >= 1)
-        .ok_or_else(|| ApiError::precondition_failed("Generation trong If-Match không hợp lệ."))?;
+    let generation: i64 =
+        gen_str.parse().ok().filter(|&v| v >= 1).ok_or_else(|| {
+            ApiError::precondition_failed("Generation trong If-Match không hợp lệ.")
+        })?;
     let version: i64 = ver_part
         .parse()
         .ok()
@@ -150,7 +149,8 @@ async fn execute_delete_job_inner(
         job.quarantine_thumbnail_rel_path.as_deref(),
     ) {
         if !job.thumbnail_moved {
-            if let Err(code) = move_one_file_to_quarantine(&uploads_root, thumb_src, thumb_dst).await
+            if let Err(code) =
+                move_one_file_to_quarantine(&uploads_root, thumb_src, thumb_dst).await
             {
                 crate::storage::media_lifecycle::set_delete_job_error(db, &job.job_id, code)
                     .await?;
@@ -340,7 +340,11 @@ fn is_64hex(s: &str) -> bool {
 }
 
 fn parse_canonical_media_filename(shard: &str, name: &str) -> Option<String> {
-    if shard.len() != 2 || !shard.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+    if shard.len() != 2
+        || !shard
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    {
         return None;
     }
     if let Some(id) = name.strip_suffix(".thumb.png") {
@@ -784,7 +788,9 @@ pub async fn apply_reconcile(
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy kế hoạch đối soát."))?;
     if plan_job.kind != OperationKind::Reconcile {
-        return Err(ApiError::bad_request("Mã tác vụ không phải kế hoạch đối soát."));
+        return Err(ApiError::bad_request(
+            "Mã tác vụ không phải kế hoạch đối soát.",
+        ));
     }
     let plan_json = plan_job
         .summary_json

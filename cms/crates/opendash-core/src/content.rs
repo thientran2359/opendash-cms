@@ -1046,6 +1046,67 @@ impl EffectiveContentSchema {
             }
         }
 
+        if !is_builtin
+            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
+            && !effective_fields.contains_key("featured_image")
+        {
+            effective_fields.insert(
+                "featured_image".into(),
+                EffectiveFieldEntry {
+                    definition: ContentFieldDefinition {
+                        key: "featured_image".into(),
+                        label: "Ảnh đại diện".into(),
+                        field_type: ContentFieldType::Image,
+                        required: false,
+                        options: Vec::new(),
+                        min_view_role: FieldRole::Editor,
+                        min_edit_role: FieldRole::Editor,
+                        public_exposure: PublicExposure::Public,
+                        default_value: None,
+                        declaration_state: DeclarationState::Declared,
+                    },
+                    owner: ResourceOwner::Core,
+                    source_id: base_source_id.clone(),
+                    effective_status: EffectiveFieldStatus::Active,
+                },
+            );
+        }
+
+        if !is_builtin
+            && !matches!(base.descriptor.key.as_str(), "section" | "pattern")
+            && base.descriptor.settings.supports(ContentSupport::Builder)
+        {
+            if let Some(existing_body) = effective_fields.get("body") {
+                if existing_body.definition.field_type != ContentFieldType::RichText {
+                    return Err(SchemaTransitionError::IncompatibleSchemaChange(format!(
+                        "Trường 'body' trên loại nội dung '{}' phải có kiểu rich_text khi bật ContentSupport::Builder.",
+                        base.descriptor.key
+                    )));
+                }
+            } else {
+                effective_fields.insert(
+                    "body".into(),
+                    EffectiveFieldEntry {
+                        definition: ContentFieldDefinition {
+                            key: "body".into(),
+                            label: "Nội dung".into(),
+                            field_type: ContentFieldType::RichText,
+                            required: false,
+                            options: Vec::new(),
+                            min_view_role: FieldRole::Editor,
+                            min_edit_role: FieldRole::Editor,
+                            public_exposure: PublicExposure::Public,
+                            default_value: None,
+                            declaration_state: DeclarationState::Declared,
+                        },
+                        owner: ResourceOwner::Core,
+                        source_id: base_source_id.clone(),
+                        effective_status: EffectiveFieldStatus::Active,
+                    },
+                );
+            }
+        }
+
         Ok(Self {
             base,
             base_version,
@@ -1110,6 +1171,18 @@ pub fn verify_effective_schema_transition(
     if let Some(old) = old_effective {
         for (old_key, old_entry) in &old.effective_fields {
             let Some(new_entry) = new_effective.effective_fields.get(old_key) else {
+                // Allow removing the synthetic core-injected `body` field when a custom CPT disables Builder.
+                if old_key == "body"
+                    && old_entry.owner == ResourceOwner::Core
+                    && !matches!(old.base.descriptor.key.as_str(), "post" | "page")
+                    && !new_effective
+                        .base
+                        .descriptor
+                        .settings
+                        .supports(ContentSupport::Builder)
+                {
+                    continue;
+                }
                 if has_existing_entries {
                     return Err(SchemaTransitionError::CannotRemoveFieldWithData(format!(
                         "Không thể xóa hẳn trường '{old_key}' khi đã có dữ liệu; hãy đặt declaration_state = withdrawn."
@@ -1588,7 +1661,13 @@ pub fn valid_field_value(field: &ContentFieldDefinition, value: &Value) -> bool 
             s.chars().count() <= 100_000 && (!field.required || !s.trim().is_empty())
         }),
         ContentFieldType::RichText => text.is_some_and(|s| {
-            s.chars().count() <= 200_000 && (!field.required || !s.trim().is_empty())
+            let len_ok = if crate::builder_blocks::contains_blocks(s) {
+                s.len() <= crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES
+                    && s.chars().count() <= crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES
+            } else {
+                s.chars().count() <= 200_000
+            };
+            len_ok && (!field.required || !s.trim().is_empty())
         }),
         ContentFieldType::Number => value.is_number(),
         ContentFieldType::Boolean => value.is_boolean(),
@@ -1962,14 +2041,33 @@ fn panel_sort_key(def: &PanelDefinition, placement: &PanelPlacementConfig) -> (i
     (placement.order, rank, def.panel_id.clone())
 }
 
+fn has_core_body_panel(effective: &EffectiveContentSchema) -> bool {
+    let type_key = effective.base.descriptor.key.as_str();
+    let is_builtin = matches!(type_key, "post" | "page");
+    let settings = &effective.base.descriptor.settings;
+    !matches!(type_key, "section" | "pattern")
+        && (is_builtin
+            || settings.supports(ContentSupport::Editor)
+            || settings.supports(ContentSupport::Builder))
+        && effective
+            .effective_fields
+            .get("body")
+            .is_some_and(|fe| fe.definition.field_type == ContentFieldType::RichText)
+}
+
 pub fn eligible_base_field_keys(effective: &EffectiveContentSchema) -> Vec<String> {
-    let is_builtin = matches!(effective.base.descriptor.key.as_str(), "post" | "page");
+    let type_key = effective.base.descriptor.key.as_str();
+    let use_body_panel = has_core_body_panel(effective);
+    let is_private_reusable = matches!(type_key, "section" | "pattern");
     effective
         .base
         .descriptor
         .fields
         .iter()
-        .filter(|f| !(is_builtin && matches!(f.key.as_str(), "body" | "featured_image")))
+        .filter(|f| {
+            !(use_body_panel && f.key == "body")
+                && !(!is_private_reusable && f.key == "featured_image")
+        })
         .map(|f| f.key.clone())
         .collect()
 }
@@ -1980,7 +2078,7 @@ pub fn build_core_and_group_panels(
     plugin_action_panels: &[PanelDefinition],
 ) -> Vec<PanelDefinition> {
     let type_key = &effective.base.descriptor.key;
-    let is_builtin = matches!(type_key.as_str(), "post" | "page");
+    let use_body_panel = has_core_body_panel(effective);
     let mut panels = Vec::new();
     let all_regions = default_all_content_regions();
 
@@ -2020,7 +2118,7 @@ pub fn build_core_and_group_panels(
         effective_status: EffectiveFieldStatus::Active,
     });
 
-    if is_builtin && effective.effective_fields.contains_key("body") {
+    if use_body_panel {
         panels.push(PanelDefinition {
             panel_id: "core:body_editor".into(),
             owner: ResourceOwner::Core,
@@ -2114,7 +2212,9 @@ pub fn build_core_and_group_panels(
         });
     }
 
-    if is_builtin && effective.effective_fields.contains_key("featured_image") {
+    if !matches!(type_key.as_str(), "section" | "pattern")
+        && effective.effective_fields.contains_key("featured_image")
+    {
         panels.push(PanelDefinition {
             panel_id: "core:featured_image".into(),
             owner: ResourceOwner::Core,
@@ -3184,5 +3284,93 @@ mod tests {
 
         let set: Probe = serde_json::from_str(r#"{"path": "/hello"}"#).unwrap();
         assert_eq!(set.path, PatchField::Set("/hello".to_string()));
+    }
+
+    #[test]
+    fn richtext_allows_384kib_when_containing_blocks_and_keeps_200k_for_plain() {
+        let field = ContentFieldDefinition {
+            key: "body".into(),
+            label: "Nội dung".into(),
+            field_type: ContentFieldType::RichText,
+            required: false,
+            options: vec![],
+            ..Default::default()
+        };
+        let plain_over_200k = "a".repeat(200_001);
+        assert!(!valid_field_value(&field, &json!(plain_over_200k)));
+
+        let block_250k = format!(
+            "<!-- od:text {{\"id\":\"t1\"}} -->\n{}\n<!-- /od:text -->",
+            "a".repeat(250_000)
+        );
+        assert!(valid_field_value(&field, &json!(block_250k)));
+
+        let block_over_384k = format!(
+            "<!-- od:text {{\"id\":\"t1\"}} -->\n{}\n<!-- /od:text -->",
+            "a".repeat(crate::builder_blocks::MAX_BUILDER_BLOCK_BODY_BYTES)
+        );
+        assert!(!valid_field_value(&field, &json!(block_over_384k)));
+    }
+
+    #[test]
+    fn cpt_builder_auto_injects_body_rejects_non_richtext_and_emits_body_panel() {
+        let builder_settings = ContentTypeSettings {
+            public: true,
+            has_archive: true,
+            publication: ContentPublication::DraftPublish,
+            supports: vec![ContentSupport::Builder, ContentSupport::FeaturedImage],
+        };
+        let base_no_body = OwnedDescriptor {
+            owner: ResourceOwner::User,
+            status: ProviderStatus::Active,
+            declaration_state: DeclarationState::Declared,
+            descriptor: ContentTypeDefinition {
+                key: "service".into(),
+                label: "Dịch vụ".into(),
+                fields: vec![],
+                settings: builder_settings.clone(),
+            },
+        };
+        let eff = EffectiveContentSchema::assemble(base_no_body.clone(), 1, vec![]).unwrap();
+        let injected = eff.effective_fields.get("body").expect("body injected");
+        assert_eq!(injected.definition.field_type, ContentFieldType::RichText);
+        assert_eq!(injected.owner, ResourceOwner::Core);
+        assert!(
+            build_core_and_group_panels(&eff, false, &[])
+                .iter()
+                .any(|p| p.panel_id == "core:body_editor")
+        );
+
+        // Disabling Builder on the custom CPT allows removing the synthetic Core `body`
+        // even when entries already exist.
+        let mut disabled_base = base_no_body;
+        disabled_base.descriptor.settings.supports = vec![ContentSupport::FeaturedImage];
+        let eff_disabled = EffectiveContentSchema::assemble(disabled_base, 2, vec![]).unwrap();
+        assert!(!eff_disabled.effective_fields.contains_key("body"));
+        verify_effective_schema_transition(Some(&eff), &eff_disabled, true).unwrap();
+
+        // Non-RichText `body` is rejected when ContentSupport::Builder is enabled.
+        let bad_base = OwnedDescriptor {
+            owner: ResourceOwner::User,
+            status: ProviderStatus::Active,
+            declaration_state: DeclarationState::Declared,
+            descriptor: ContentTypeDefinition {
+                key: "bad_cpt".into(),
+                label: "Bad".into(),
+                fields: vec![ContentFieldDefinition {
+                    key: "body".into(),
+                    label: "Short body".into(),
+                    field_type: ContentFieldType::ShortText,
+                    required: false,
+                    options: vec![],
+                    ..Default::default()
+                }],
+                settings: builder_settings,
+            },
+        };
+        assert!(matches!(
+            EffectiveContentSchema::assemble(bad_base, 1, vec![]),
+            Err(SchemaTransitionError::IncompatibleSchemaChange(_))
+        ));
     }
 }

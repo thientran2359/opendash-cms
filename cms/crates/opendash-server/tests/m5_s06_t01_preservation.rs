@@ -386,14 +386,14 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     // 5a. C3/C4 deny public routing while the owning provider is inactive,
     // even though the site-owned rows must remain editable in Admin.
     let pub_arch = client
-        .get(format!("{}/content/portfolio", srv2.base_url))
+        .get(format!("{}/portfolio", srv2.base_url))
         .send()
         .await
         .unwrap();
     assert_eq!(pub_arch.status(), 404);
 
     let pub_single = client
-        .get(format!("{}/content/portfolio/case-study-1", srv2.base_url))
+        .get(format!("{}/portfolio/case-study-1", srv2.base_url))
         .send()
         .await
         .unwrap();
@@ -641,7 +641,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     // The same provider returning must restore the exact public routes without
     // duplicating the entry or changing its stable identity.
     let restored_archive = client
-        .get(format!("{}/content/portfolio", srv2.base_url))
+        .get(format!("{}/portfolio", srv2.base_url))
         .send()
         .await
         .unwrap();
@@ -649,7 +649,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
     // Theme templates may choose a fixed archive body; the public 200 and
     // authenticated row assertions below are the stable preservation contract.
     let restored_single = client
-        .get(format!("{}/content/portfolio/case-study-1", srv2.base_url))
+        .get(format!("{}/portfolio/case-study-1", srv2.base_url))
         .send()
         .await
         .unwrap();

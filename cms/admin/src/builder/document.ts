@@ -49,8 +49,21 @@ export type NodeKind = 'section' | 'row' | 'column' | 'element';
 /** ElementType is the legacy binding/field registry's closed set. PatternRef
  * is an insertable core block with its own typed Inspector, no field binding. */
 export type ElementType = 'core/heading' | 'core/text' | 'core/image' | 'core/video' | 'core/button' | 'core/list' | 'core/contact_form';
-export type InsertableElementType = ElementType | 'core/pattern_ref';
-export const ELEMENT_TYPES: InsertableElementType[] = ['core/heading', 'core/text', 'core/image', 'core/video', 'core/button', 'core/list', 'core/contact_form', 'core/pattern_ref'];
+export type TemplateElementType = 'core/content_slot' | 'core/template_part';
+export type InsertableElementType = ElementType | 'core/pattern_ref' | TemplateElementType;
+export const ELEMENT_TYPES: InsertableElementType[] = [
+  'core/heading',
+  'core/text',
+  'core/image',
+  'core/video',
+  'core/button',
+  'core/list',
+  'core/contact_form',
+  'core/pattern_ref',
+  'core/content_slot',
+  'core/template_part',
+];
+export const VALID_TEMPLATE_PART_KEY = /^[a-z][a-z0-9-]{0,63}$/;
 export const EMPTY_DOCUMENT: BuilderDocument = { schema_version: 1, sections: [] };
 export interface NodeLocation {
   node: BuilderNode;
@@ -166,10 +179,16 @@ export function nodeTitle(location: NodeLocation): string {
     return ({ section: 'Section', row: 'Row', column: 'Column' } as Record<string, string>)[location.kind];
   }
   const element = location.node as BuilderElement;
+  if (element.type === 'core/template_part') {
+    const key = typeof element.props?.part_key === 'string' && element.props.part_key
+      ? element.props.part_key : 'part';
+    return `Template Part (${key})`;
+  }
   return ({
     'core/heading': 'Tiêu đề', 'core/text': 'Văn bản',
     'core/image': 'Hình ảnh', 'core/video': 'Video', 'core/button': 'Nút', 'core/list': 'Danh sách', 'core/contact_form': 'Form liên hệ',
     'core/pattern_ref': 'Reusable Pattern',
+    'core/content_slot': 'Khung nội dung (Content Slot)',
     'legacy/block': 'Block theme',
   } as Record<string, string>)[element.type] || 'Block chưa nhận diện';
 }
@@ -231,6 +250,8 @@ export function isLockedElement(element: BuilderElement, registry: Record<string
     // Server validation rejects it on Save; retain the Inspector so the user
     // can select a valid Pattern without throwing away the new block.
     case 'core/pattern_ref': return !Number.isSafeInteger(props.pattern_id) || Number(props.pattern_id) < 0;
+    case 'core/content_slot': return Object.keys(props).length > 0;
+    case 'core/template_part': return typeof props.part_key !== 'string';
     case 'legacy/block':
       return typeof props.block_id !== 'string' || !object(props.values)
         || !Object.hasOwn(registry, props.block_id);
@@ -326,11 +347,65 @@ export function appendNode(
     'core/list': { type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6 },
     'core/contact_form': { form_id: 1, submit_label: 'Gửi liên hệ' },
     'core/pattern_ref': { pattern_id: 0 },
+    'core/content_slot': {},
+    'core/template_part': { part_key: 'header' },
   };
   const node: BuilderNode = kind === 'element' ? { id, type: elementType, props: { ...defaults[elementType] } }
     : { id, children: [] };
   children.push(node);
   return { document: next, id };
+}
+
+export function countElementsByType(document: BuilderDocument, elementType: string): number {
+  return allNodes(document).filter(
+    item => item.kind === 'element' && (item.node as BuilderElement).type === elementType,
+  ).length;
+}
+
+export function countDescendantElementsByType(
+  document: BuilderDocument,
+  nodeId: string,
+  elementType: string,
+): number {
+  const target = locate(document, nodeId);
+  if (!target) return 0;
+  return allNodes(document).filter(
+    item =>
+      item.kind === 'element' &&
+      (item.node as BuilderElement).type === elementType &&
+      item.path.length >= target.path.length &&
+      target.path.every((step, idx) => item.path[idx] === step),
+  ).length;
+}
+
+/** Honors TemplateCandidate slot cardinality: never remove the last core/content_slot
+ * when requiresContentSlot is true; core/template_part is always removable. */
+export function canDeleteElement(
+  document: BuilderDocument,
+  nodeId: string,
+  options?: { requiresContentSlot?: boolean },
+): boolean {
+  const target = locate(document, nodeId);
+  if (!target) return false;
+  if (!options?.requiresContentSlot) return true;
+  const totalSlots = countElementsByType(document, 'core/content_slot');
+  const removedSlots = countDescendantElementsByType(document, nodeId, 'core/content_slot');
+  return totalSlots - removedSlots >= 1;
+}
+
+export function createStarterTemplateDocument(requiresContentSlot: boolean): BuilderDocument {
+  let doc: BuilderDocument = { schema_version: 1, sections: [] };
+  const sec = appendNode(doc, null, 'section', 'core/heading');
+  if (!sec) return doc;
+  doc = sec.document;
+  const row = appendNode(doc, sec.id, 'row', 'core/heading');
+  if (!row) return doc;
+  doc = row.document;
+  const col = appendNode(doc, row.id, 'column', 'core/heading');
+  if (!col) return doc;
+  doc = col.document;
+  const el = appendNode(doc, col.id, 'element', requiresContentSlot ? 'core/content_slot' : 'core/heading');
+  return el ? el.document : doc;
 }
 
 /** Typed list updates; never encode filters/booleans as static string props. */

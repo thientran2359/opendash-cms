@@ -417,10 +417,7 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
         .json()
         .await
         .unwrap();
-    assert_eq!(
-        default_url["items"][0]["public_url"],
-        "/content/post/entry-003"
-    );
+    assert_eq!(default_url["items"][0]["public_url"], "/entry-003");
 
     let legacy: Value = client
         .get(format!(

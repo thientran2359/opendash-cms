@@ -51,8 +51,8 @@ fn server_bin() -> &'static str {
 }
 
 fn run_worker(mode: &str, req: &Value) -> (i32, Value) {
-    let mut child = operations_worker_process::spawn(Path::new(server_bin()), mode)
-        .expect("spawn worker");
+    let mut child =
+        operations_worker_process::spawn(Path::new(server_bin()), mode).expect("spawn worker");
 
     {
         let mut stdin = child.stdin.take().expect("stdin");
@@ -165,21 +165,27 @@ async fn m8_s05_t01_restore_rebase_fingerprint_and_failpoints() {
         .execute(&mut conn)
         .await
         .unwrap();
-    sqlx::query("UPDATE site_smtp_settings SET enabled = 1, host = 'smtp.example.com' WHERE id = 1")
-        .execute(&mut conn)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE site_smtp_settings SET enabled = 1, host = 'smtp.example.com' WHERE id = 1",
+    )
+    .execute(&mut conn)
+    .await
+    .unwrap();
     let stale_job_id = "aa".repeat(32);
-    sqlx::query("INSERT INTO operation_jobs (id, kind, state, version) VALUES (?, 'backup', 'running', 1)")
-        .bind(&stale_job_id)
-        .execute(&mut conn)
-        .await
-        .unwrap();
+    sqlx::query(
+        "INSERT INTO operation_jobs (id, kind, state, version) VALUES (?, 'backup', 'running', 1)",
+    )
+    .bind(&stale_job_id)
+    .execute(&mut conn)
+    .await
+    .unwrap();
 
-    let mig_rows = sqlx::query("SELECT version, lower(hex(checksum)) AS hex FROM _sqlx_migrations ORDER BY version ASC")
-        .fetch_all(&mut conn)
-        .await
-        .unwrap();
+    let mig_rows = sqlx::query(
+        "SELECT version, lower(hex(checksum)) AS hex FROM _sqlx_migrations ORDER BY version ASC",
+    )
+    .fetch_all(&mut conn)
+    .await
+    .unwrap();
     let mut mig_checksums = Vec::new();
     let mut max_schema_ver = 0i64;
     for r in mig_rows {
@@ -272,17 +278,20 @@ async fn m8_s05_t01_restore_rebase_fingerprint_and_failpoints() {
     assert_eq!(cfg_json["recovery_safe_mode"], true);
 
     // Verify sanitized restored DB state + preserved Admin user + legitimate triggers
-    let r_opts = SqliteConnectOptions::new().filename(&rebased_db).read_only(true);
+    let r_opts = SqliteConnectOptions::new()
+        .filename(&rebased_db)
+        .read_only(true);
     let mut r_conn = SqliteConnection::connect_with(&r_opts).await.unwrap();
     let sess_cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
         .fetch_one(&mut r_conn)
         .await
         .unwrap();
     assert_eq!(sess_cnt, 0, "sessions must be cleared");
-    let smtp_enabled: i64 = sqlx::query_scalar("SELECT enabled FROM site_smtp_settings WHERE id = 1")
-        .fetch_one(&mut r_conn)
-        .await
-        .unwrap();
+    let smtp_enabled: i64 =
+        sqlx::query_scalar("SELECT enabled FROM site_smtp_settings WHERE id = 1")
+            .fetch_one(&mut r_conn)
+            .await
+            .unwrap();
     assert_eq!(smtp_enabled, 0, "SMTP must be disabled on restore");
     let job_state: String = sqlx::query_scalar("SELECT state FROM operation_jobs WHERE id = ?")
         .bind(&stale_job_id)
@@ -290,10 +299,12 @@ async fn m8_s05_t01_restore_rebase_fingerprint_and_failpoints() {
         .await
         .unwrap();
     assert_eq!(job_state, "interrupted");
-    let admin_cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE username = 'admin' AND role = 'admin'")
-        .fetch_one(&mut r_conn)
-        .await
-        .unwrap();
+    let admin_cnt: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM users WHERE username = 'admin' AND role = 'admin'",
+    )
+    .fetch_one(&mut r_conn)
+    .await
+    .unwrap();
     assert_eq!(admin_cnt, 1);
     r_conn.close().await.unwrap();
 
@@ -337,6 +348,9 @@ async fn m8_s05_t01_restore_rebase_fingerprint_and_failpoints() {
             "failpoint": null
         }),
     );
-    assert_ne!(code, 0, "malicious extra trigger must be rejected: {evil_resp}");
+    assert_ne!(
+        code, 0,
+        "malicious extra trigger must be rejected: {evil_resp}"
+    );
     assert!(!evil_target.exists());
 }

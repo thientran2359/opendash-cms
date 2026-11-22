@@ -103,7 +103,9 @@ pub fn validate_outbound_headers(headers: &BTreeMap<String, String>) -> Result<(
             || v.contains('\0')
             || k.chars().any(|c| c.is_control())
         {
-            return Err("permission_denied: Header chứa ký tự điều khiển hoặc CRLF không hợp lệ.".into());
+            return Err(
+                "permission_denied: Header chứa ký tự điều khiển hoặc CRLF không hợp lệ.".into(),
+            );
         }
         if is_forbidden_header_name(k) {
             return Err(format!(
@@ -187,12 +189,16 @@ pub fn resolve_and_pin_addrs(
     let dns_timeout = std::cmp::min(Duration::from_secs(1), remaining);
     let lookup = format!("{}:{}", clean_host, port);
     let lookup_res = if let Ok(h) = tokio::runtime::Handle::try_current() {
-        h.block_on(async { tokio::time::timeout(dns_timeout, tokio::net::lookup_host(&lookup)).await })
+        h.block_on(async {
+            tokio::time::timeout(dns_timeout, tokio::net::lookup_host(&lookup)).await
+        })
     } else if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
     {
-        rt.block_on(async { tokio::time::timeout(dns_timeout, tokio::net::lookup_host(&lookup)).await })
+        rt.block_on(async {
+            tokio::time::timeout(dns_timeout, tokio::net::lookup_host(&lookup)).await
+        })
     } else {
         return Err("Lỗi DNS: không khởi tạo được runtime.".into());
     };
@@ -206,10 +212,7 @@ pub fn resolve_and_pin_addrs(
     verify_resolved_addrs(&addrs_vec, allow_loopback)
 }
 
-pub fn read_bounded_chunks<R: Read>(
-    mut reader: R,
-    max_bytes: usize,
-) -> Result<Vec<u8>, String> {
+pub fn read_bounded_chunks<R: Read>(mut reader: R, max_bytes: usize) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     let mut chunk = [0u8; STREAM_CHUNK_BYTES];
     loop {
@@ -252,9 +255,7 @@ pub fn execute_scoped_http_request(
         || parsed_url.password().is_some()
         || parsed_url.fragment().is_some()
     {
-        return Err(
-            "permission_denied: URL không được chứa credentials hoặc fragment.".into(),
-        );
+        return Err("permission_denied: URL không được chứa credentials hoặc fragment.".into());
     }
 
     if !manifest.is_http_allowed_with_method(&method_upper, target_url) {

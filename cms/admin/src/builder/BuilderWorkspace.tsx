@@ -7,14 +7,17 @@ import type { AuthUser, BlockRegistry } from '../types.ts';
 import type { BuilderDiagnostic, HomepageOpen, OverrideRole, TemplateTargetInput } from '../api/builder.ts';
 import type { ParsedRoute } from '../shell/router.ts';
 import {
-  type BuilderDocument, type BuilderViewport, type ElementBinding, type ElementType, type InsertableElementType, type ListProps, type NodeKind, type ResponsiveAlign,
-  type ResponsiveField, ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
-  allNodes, appendNode, cloneWithFreshNodeIds, isElement, isLockedElement, locate, moveNode, preservesAnchors,
+  type BuilderDocument, type BuilderElement, type BuilderRow, type BuilderViewport, type ElementBinding, type ElementType,
+  type InsertableElementType, type ListProps, type NodeKind, type ResponsiveAlign, type ResponsiveField,
+  ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
+  allNodes, appendNode, canDeleteElement, cloneWithFreshNodeIds, countElementsByType,
+  isElement, isLockedElement, locate, moveNode, preservesAnchors,
   removeNode, setElementBinding, setListProps, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
 import { BuilderCanvas } from './BuilderCanvas.tsx';
 import { BuilderInspector } from './BuilderInspector.tsx';
+import { BuilderPreviewFrame } from './BuilderPreviewFrame.tsx';
 import { PatternLibraryModal } from './PatternLibraryModal.tsx';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
 
@@ -30,59 +33,420 @@ interface Props {
   onApiError: (error: unknown, fallback: string) => void;
 }
 
-const MEDIA_PREVIEW_LIMIT = 64;
-const MEDIA_PREVIEW_BYTES_LIMIT = 48 * 1024 * 1024;
-const PRIVATE_MEDIA_PATH = /^\/api\/admin\/media\/([a-zA-Z0-9_-]{1,128})\/file$/;
+export interface BuilderEditorCoreProps {
+  document: BuilderDocument;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onChangeDocument: (next: BuilderDocument, nextSelected?: string | null, removedId?: string) => boolean;
+  registry: BlockRegistry;
+  csrfToken: string | null;
+  viewport: BuilderViewport;
+  themeRevision: number;
+  patterns: PatternRecord[];
+  patternsLoaded: boolean;
+  onRefreshPatterns: () => void;
+  allowRouteContext?: boolean;
+  allowPatternRef?: boolean;
+  allowList?: boolean;
+  allowContentSlot?: boolean;
+  allowTemplatePart?: boolean;
+  requiresContentSlot?: boolean;
+  availablePartKeys?: string[];
+  diagnostics?: Array<{ node_id: string; code: string; message?: string }>;
+  hadFreeformWrap?: boolean;
+  hadRecovery?: boolean;
+  disabled?: boolean;
+  onMessage?: (text: string, failed?: boolean) => void;
+  onApiError: (error: unknown, fallback: string) => void;
+}
 
-/** A sandbox="" iframe has an opaque origin: SameSite session cookies are not
- * sent when it loads private media. Resolve only exact, authenticated media
- * paths in the parent and embed trusted raster bytes as data URLs. This does
- * not make draft media public or give the iframe scripts or same-origin access.
- */
-async function preparePreviewMarkup(
-  html: string, signal: AbortSignal,
-): Promise<{ html: string; skipped: number }> {
-  const parsed = new DOMParser().parseFromString(html, 'text/html');
-  const images = Array.from(parsed.querySelectorAll('img[src]'));
-  const mediaPaths = [...new Set(images.map(image => image.getAttribute('src') ?? '')
-    .filter(path => PRIVATE_MEDIA_PATH.test(path)))];
-  const replacements = new Map<string, string>();
-  let skipped = Math.max(0, mediaPaths.length - MEDIA_PREVIEW_LIMIT);
-  let bytes = 0;
-  for (const path of mediaPaths.slice(0, MEDIA_PREVIEW_LIMIT)) {
-    if (signal.aborted) throw new DOMException('Preview đã hủy.', 'AbortError');
-    let blob: Blob;
-    try {
-      blob = await api.getPrivatePreviewMedia(path, signal);
-    } catch (cause) {
-      if (cause instanceof api.ApiClientError && cause.status === 401) throw cause;
-      if (signal.aborted) throw cause;
-      skipped += 1;
-      continue;
-    }
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)
-        || !blob.size || bytes + blob.size > MEDIA_PREVIEW_BYTES_LIMIT) {
-      skipped += 1;
-      continue;
-    }
-    bytes += blob.size;
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error ?? new Error('Không đọc được ảnh Preview.'));
-      reader.onabort = () => reject(new DOMException('Preview đã hủy.', 'AbortError'));
-      if (signal.aborted) reader.abort();
-      else reader.readAsDataURL(blob);
-    });
-    replacements.set(path, dataUrl);
-  }
-  images.forEach(image => {
-    const replacement = replacements.get(image.getAttribute('src') ?? '');
-    if (replacement) image.setAttribute('src', replacement);
+export function BuilderEditorCore({
+  document: draft,
+  selectedId,
+  onSelect,
+  onChangeDocument,
+  registry,
+  csrfToken,
+  viewport,
+  themeRevision,
+  patterns,
+  patternsLoaded,
+  onRefreshPatterns,
+  allowRouteContext = false,
+  allowPatternRef = false,
+  allowList = true,
+  allowContentSlot = false,
+  allowTemplatePart = false,
+  requiresContentSlot = false,
+  availablePartKeys,
+  diagnostics = [],
+  hadFreeformWrap = false,
+  hadRecovery = false,
+  disabled = false,
+  onMessage,
+  onApiError,
+}: BuilderEditorCoreProps) {
+  const [sidebarTab, setSidebarTab] = useState<'blocks' | 'patterns' | 'media'>('blocks');
+  const [elementType, setElementType] = useState<InsertableElementType>('core/heading');
+  const [showPatternLibrary, setShowPatternLibrary] = useState(false);
+  const [showMediaPicker, setShowMediaPicker] = useState(false);
+
+  const insertableTypes = ELEMENT_TYPES.filter(type => {
+    if (type === 'core/pattern_ref' && !allowPatternRef) return false;
+    if (type === 'core/list' && !allowList) return false;
+    if (type === 'core/content_slot' && !allowContentSlot) return false;
+    if (type === 'core/template_part' && !allowTemplatePart) return false;
+    return true;
   });
-  // DOMParser is inert; scripts from theme HTML stay locked inside the opaque
-  // sandbox on insertion. Preserve server markup without React innerHTML.
-  return { html: '<!doctype html>' + parsed.documentElement.outerHTML, skipped };
+
+  useEffect(() => {
+    if (!insertableTypes.includes(elementType)) {
+      setElementType(insertableTypes[0] ?? 'core/heading');
+    }
+  }, [allowPatternRef, allowList, allowContentSlot, allowTemplatePart]);
+
+  const applyUpdate = (next: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
+    if (!next) return false;
+    if (!preservesAnchors(draft, next, registry, removedId)) {
+      onMessage?.('Node không resolve cần giữ nguyên vị trí, ancestor và nội dung.', true);
+      return false;
+    }
+    if (allNodes(next).length > 512 || JSON.stringify(next).length > 256 * 1024) {
+      onMessage?.('Builder vượt giới hạn 512 node hoặc 256 KiB.', true);
+      return false;
+    }
+    return onChangeDocument(next, nextSelected, removedId);
+  };
+
+  const add = (parentId: string | null, kind: NodeKind) => {
+    if (disabled) return;
+    if (kind === 'element') {
+      if (!allowPatternRef && elementType === 'core/pattern_ref') {
+        onMessage?.('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
+        return;
+      }
+      if (!allowList && elementType === 'core/list') {
+        onMessage?.('Pattern không được chứa Danh sách nội dung.', true);
+        return;
+      }
+      if (elementType === 'core/content_slot') {
+        if (!allowContentSlot) {
+          onMessage?.('Loại target này không cho phép thêm core/content_slot.', true);
+          return;
+        }
+        if (countElementsByType(draft, 'core/content_slot') >= 1) {
+          onMessage?.('Template chỉ được chứa tối đa 1 core/content_slot.', true);
+          return;
+        }
+      }
+      if (elementType === 'core/template_part' && !allowTemplatePart) {
+        onMessage?.('Chỉ được chèn Template Part trong Mode Dựng Template.', true);
+        return;
+      }
+    }
+    const next = appendNode(draft, parentId, kind, elementType);
+    if (!next) {
+      onMessage?.('Vị trí thêm node không hợp lệ.', true);
+      return;
+    }
+    applyUpdate(next.document, next.id);
+  };
+
+  const reorder = (id: string, direction: -1 | 1) => {
+    if (disabled) return;
+    const next = moveNode(draft, id, direction);
+    if (next) applyUpdate(next, id);
+  };
+
+  const remove = (id: string) => {
+    if (disabled) return;
+    if (!canDeleteElement(draft, id, { requiresContentSlot })) {
+      onMessage?.('Bắt buộc giữ ít nhất 1 core/content_slot trong template này.', true);
+      return;
+    }
+    const entry = locate(draft, id);
+    if (!entry) return;
+    const lockedCount = allNodes(draft).filter(node =>
+      node.kind === 'element' && node.path.slice(0, entry.path.length)
+        .every((step, index) => step === entry.path[index])
+      && isLockedElement(node.node as BuilderElement, registry)
+    ).length;
+    const prompt = lockedCount
+      ? 'Node chứa ' + lockedCount + ' block chưa resolve. Xóa vĩnh viễn khỏi Builder hiện tại?'
+      : 'Xóa node này và toàn bộ node con?';
+    if (!window.confirm(prompt)) return;
+    const next = removeNode(draft, id);
+    applyUpdate(next, entry.parentId, id);
+  };
+
+  const editField = (id: string, field: string, value: string | number | boolean | undefined) => {
+    if (disabled) return;
+    const entry = locate(draft, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    applyUpdate(setNodeField(draft, id, field, value), id);
+  };
+
+  const editBinding = (id: string, binding: ElementBinding | null) => {
+    if (disabled) return;
+    const entry = locate(draft, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    applyUpdate(setElementBinding(draft, id, binding), id);
+  };
+
+  const editList = (id: string, config: ListProps) => {
+    if (disabled) return;
+    const entry = locate(draft, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry)) return;
+    applyUpdate(setListProps(draft, id, config), id);
+  };
+
+  const editResponsive = (
+    id: string, target: BuilderViewport, field: ResponsiveField, value: number | ResponsiveAlign | null,
+  ) => {
+    if (disabled) return;
+    const next = setResponsiveField(draft, id, target, field, value);
+    if (!next) {
+      onMessage?.('Thuộc tính responsive không hợp lệ.', true);
+      return;
+    }
+    applyUpdate(next, id);
+  };
+
+  const insertThemePattern = (sourceDocument: BuilderDocument, title: string): boolean => {
+    if (!csrfToken || disabled) return false;
+    if (sourceDocument.schema_version !== draft.schema_version || !sourceDocument.sections.length) {
+      onMessage?.('Mẫu từ theme không có bố cục Builder tương thích.', true);
+      return false;
+    }
+    const sourceNodes = allNodes(sourceDocument);
+    if (!allowList && sourceNodes.some(node => node.kind === 'element'
+        && (node.node as BuilderElement).type === 'core/list')) {
+      onMessage?.('Target này không cho phép Danh sách nội dung.', true);
+      return false;
+    }
+    const existingNodes = allNodes(draft);
+    const combinedListCount = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
+      && (node.node as BuilderElement).type === 'core/list').length;
+    if (combinedListCount > 8) {
+      onMessage?.('Builder chỉ hỗ trợ tối đa 8 Danh sách nội dung.', true);
+      return false;
+    }
+    const refs = [...existingNodes, ...sourceNodes].filter(node => node.kind === 'element'
+        && (node.node as BuilderElement).type === 'core/pattern_ref')
+      .map(node => Number((node.node as BuilderElement).props.pattern_id));
+    if ((!allowPatternRef && refs.length > 0) || refs.some(id => !Number.isSafeInteger(id) || id <= 0)
+        || new Set(refs).size > 16) {
+      onMessage?.('Mẫu không phù hợp với target hoặc giới hạn 16 Reusable Pattern.', true);
+      return false;
+    }
+    const copy = cloneWithFreshNodeIds(sourceDocument, draft);
+    const selectedSection = locate(draft, selectedId)?.path[0];
+    const insertionIndex = selectedSection === undefined ? draft.sections.length : selectedSection + 1;
+    const next = {
+      ...draft,
+      sections: [
+        ...draft.sections.slice(0, insertionIndex),
+        ...copy.sections,
+        ...draft.sections.slice(insertionIndex),
+      ],
+    };
+    if (!applyUpdate(next, copy.sections[0].id)) return false;
+    onMessage?.('Đã chèn bản sao “' + title + '”. Chưa lưu lên website.');
+    return true;
+  };
+
+  const insertMediaImage = (ids: string[]) => {
+    const mediaId = ids[0];
+    if (!mediaId || !/^[a-zA-Z0-9_-]{1,128}$/.test(mediaId) || !csrfToken || disabled) return;
+    const selected = locate(draft, selectedId);
+    if (selected?.kind === 'element' && isElement(selected.node)
+        && selected.node.type === 'core/image' && !isLockedElement(selected.node, registry)) {
+      if (!applyUpdate(setNodeField(draft, selected.node.id, 'media_id', mediaId), selected.node.id)) return;
+    } else {
+      let next = draft;
+      let columnId: string | undefined;
+      if (selected?.kind === 'element') columnId = selected.parentId ?? undefined;
+      else if (selected?.kind === 'column') columnId = selected.node.id;
+      let sectionId = selected && selected.path.length > 0 ? next.sections[selected.path[0]]?.id : undefined;
+      let rowId = selected && selected.path.length > 1 ? next.sections[selected.path[0]]?.children[selected.path[1]]?.id : undefined;
+      if (!columnId) {
+        if (!sectionId) {
+          const section = appendNode(next, null, 'section', 'core/image');
+          if (!section) return;
+          next = section.document;
+          sectionId = section.id;
+        }
+        if (!rowId) {
+          const row = appendNode(next, sectionId, 'row', 'core/image');
+          if (!row) return;
+          next = row.document;
+          rowId = row.id;
+        }
+        const row = locate(next, rowId);
+        if (row?.kind === 'row' && !columnId) {
+          const rowNode = row.node as BuilderRow;
+          columnId = rowNode.children[rowNode.children.length - 1]?.id;
+        }
+        if (!columnId) {
+          const column = appendNode(next, rowId, 'column', 'core/image');
+          if (!column) return;
+          next = column.document;
+          columnId = column.id;
+        }
+      }
+      const inserted = appendNode(next, columnId, 'element', 'core/image');
+      if (!inserted) return;
+      const populated = setNodeField(inserted.document, inserted.id, 'media_id', mediaId);
+      if (!applyUpdate(populated, inserted.id)) return;
+    }
+    setShowMediaPicker(false);
+    onMessage?.('Đã chèn ảnh từ Media Library vào bản nháp. Chưa lưu lên website.');
+  };
+
+  return (
+    <div className="od-studio-builder-core space-y-3" data-testid="studio-builder-core">
+      <style>{'.od-studio-builder-core .btn-secondary{background:#fff;color:#27272a;border:1px solid #d4d4d8;border-radius:6px;padding:4px 8px;font-weight:500}.od-studio-builder-core .btn-danger{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;padding:4px 8px;font-weight:500}'}</style>
+
+      {(hadFreeformWrap || hadRecovery) && (
+        <div role="status" className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-900" data-testid="studio-block-notice">
+          {hadFreeformWrap && <p>Nội dung văn bản thuần trước đó đã được tự động bọc thành khối UX Builder để chỉnh sửa.</p>}
+          {hadRecovery && <p>Một phần comment block cũ bị sai cú pháp đã được phục hồi an toàn thành khối văn bản.</p>}
+        </div>
+      )}
+
+      {diagnostics.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-900" data-testid="studio-diagnostics-banner">
+          <strong>Chẩn đoán khối:</strong>
+          <ul className="mt-1 list-disc pl-4 space-y-0.5">
+            {diagnostics.map((d, idx) => (
+              <li key={`${d.node_id}-${idx}`}>{d.node_id}: {d.message ?? d.code}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1" role="tablist" aria-label="Công cụ UX Builder">
+        <button type="button" role="tab" aria-selected={sidebarTab === 'blocks'}
+          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
+            (sidebarTab === 'blocks' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
+          onClick={() => setSidebarTab('blocks')}>Blocks</button>
+        <button type="button" role="tab" aria-selected={sidebarTab === 'patterns'}
+          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
+            (sidebarTab === 'patterns' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
+          onClick={() => setSidebarTab('patterns')}>Patterns</button>
+        <button type="button" role="tab" aria-selected={sidebarTab === 'media'}
+          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
+            (sidebarTab === 'media' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
+          onClick={() => setSidebarTab('media')}>Media</button>
+      </div>
+
+      {sidebarTab === 'blocks' && (
+        <div className="space-y-3" role="tabpanel">
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white p-2">
+            <label htmlFor="studio-element-type" className="text-xs font-medium text-zinc-600">Element mới</label>
+            <select
+              id="studio-element-type"
+              className="h-8 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900"
+              value={elementType}
+              onChange={event => setElementType(event.target.value as InsertableElementType)}
+            >
+              {insertableTypes.map(type => (
+                <option key={type} value={type}>
+                  {type === 'core/pattern_ref'
+                    ? 'Reusable Pattern'
+                    : type === 'core/content_slot'
+                      ? 'Content Slot'
+                      : type === 'core/template_part'
+                        ? 'Template Part'
+                        : type}
+                </option>
+              ))}
+            </select>
+          </div>
+          <BuilderTree
+            document={draft}
+            selectedId={selectedId}
+            elementType={elementType as ElementType}
+            onSelect={id => onSelect(id)}
+            onAdd={add}
+            onMove={reorder}
+            onDelete={remove}
+          />
+          <BuilderInspector
+            document={draft}
+            selectedId={selectedId}
+            registry={registry}
+            csrfToken={csrfToken}
+            viewport={viewport}
+            allowRouteContext={allowRouteContext}
+            requiresContentSlot={requiresContentSlot}
+            availablePartKeys={availablePartKeys}
+            patterns={patterns}
+            patternsLoaded={patternsLoaded}
+            onRefreshPatterns={onRefreshPatterns}
+            onDeleteNode={remove}
+            onChange={editField}
+            onBindingChange={editBinding}
+            onListChange={editList}
+            onResponsiveChange={editResponsive}
+            onError={onApiError}
+          />
+        </div>
+      )}
+
+      {sidebarTab === 'patterns' && (
+        <div role="tabpanel" className="space-y-2.5 rounded-xl border border-zinc-200 bg-white p-3.5">
+          <h3 className="text-sm font-semibold text-zinc-900">Thư viện Pattern</h3>
+          <p className="text-xs text-zinc-600">Chèn bản sao Section từ mẫu theme v3 sau Section đang chọn.</p>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setShowPatternLibrary(true)}
+            data-testid="studio-open-pattern-library"
+            className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Explore all patterns
+          </button>
+        </div>
+      )}
+
+      {sidebarTab === 'media' && (
+        <div role="tabpanel" className="space-y-2.5 rounded-xl border border-zinc-200 bg-white p-3.5">
+          <h3 className="text-sm font-semibold text-zinc-900">Thư viện Media</h3>
+          <p className="text-xs text-zinc-600">Chọn ảnh để chèn vào cột hiện tại hoặc thay ảnh của khối đang chọn.</p>
+          <button
+            type="button"
+            disabled={disabled || !csrfToken}
+            onClick={() => setShowMediaPicker(true)}
+            data-testid="studio-open-media-picker"
+            className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+          >
+            Chọn ảnh từ Media Library
+          </button>
+        </div>
+      )}
+
+      {showPatternLibrary && (
+        <PatternLibraryModal
+          key={themeRevision}
+          onClose={() => setShowPatternLibrary(false)}
+          onInsert={insertThemePattern}
+          onApiError={onApiError}
+        />
+      )}
+      {showMediaPicker && (
+        <MediaPicker
+          mode="image"
+          acceptKind="image"
+          csrfToken={csrfToken}
+          selectedIds={[]}
+          onApply={insertMediaImage}
+          onClose={() => setShowMediaPicker(false)}
+          onError={onApiError}
+        />
+      )}
+    </div>
+  );
 }
 
 export function BuilderWorkspace({
@@ -543,15 +907,10 @@ export function BuilderWorkspace({
               : (() => { throw new Error('Target Builder không hợp lệ.'); })();
       if (current !== previewSeq.current || revisionRef.current !== snapshotRevision
           || ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
-      const prepared = await preparePreviewMarkup(result.html, controller.signal);
-      if (current !== previewSeq.current || revisionRef.current !== snapshotRevision
-          || ownerRef.current !== accountId || authorityRef.current !== requestAuthority) return;
-      setPreviewHtml(prepared.html);
+      setPreviewHtml(result.html);
       setDiagnostics(result.diagnostics);
       setMode('preview');
-      message(prepared.skipped
-        ? 'Preview nháp — ' + prepared.skipped + ' ảnh riêng tư chưa hiển thị. Chưa ghi dữ liệu.'
-        : 'Preview nháp — chưa ghi dữ liệu lên website.');
+      message('Đang chuẩn bị Preview nháp...');
     } catch (cause) {
       if (controller.signal.aborted || current !== previewSeq.current || authorityRef.current !== requestAuthority) return;
       if (sharedTarget && cause instanceof api.ApiClientError && cause.status === 412) {
@@ -853,7 +1212,9 @@ export function BuilderWorkspace({
               <select id="builder-element-type" className="min-w-0 flex-1 text-xs"
                 value={elementType} onChange={event => setElementType(event.target.value as InsertableElementType)}>
                 {ELEMENT_TYPES.filter(type =>
-                  (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
+                  type !== 'core/content_slot'
+                  && type !== 'core/template_part'
+                  && (type !== 'core/pattern_ref' || (scopedEntry && !scopedPattern))
                   && (!scopedPattern || type !== 'core/list'))
                   .map(type => <option key={type} value={type}>{type === 'core/pattern_ref' ? 'Reusable Pattern' : type}</option>)}
               </select>
@@ -903,12 +1264,16 @@ export function BuilderWorkspace({
             </div>
           </div>
           {mode === 'preview' && (
-            <div className="overflow-x-auto" data-testid="builder-preview-viewport">
-              <iframe id="canvas" title="Preview Builder (sandbox opaque)" sandbox=""
-                referrerPolicy="no-referrer" className="!h-[650px] !border-0"
-                style={{ width: VIEWPORT_WIDTHS[viewport], maxWidth: 'none', display: 'block' }}
-                srcDoc={previewHtml} />
-            </div>
+            <BuilderPreviewFrame
+              html={previewHtml}
+              viewport={viewport}
+              onApiError={onApiError}
+              onPrepared={({ skipped }) => {
+                message(skipped
+                  ? 'Preview nháp — ' + skipped + ' ảnh riêng tư chưa hiển thị. Chưa ghi dữ liệu.'
+                  : 'Preview nháp — chưa ghi dữ liệu lên website.');
+              }}
+            />
           )}
           {diagnostics.length > 0 && <div className="border-t border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
             <strong>Chẩn đoán renderer:</strong>

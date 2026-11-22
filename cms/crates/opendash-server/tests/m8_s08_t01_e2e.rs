@@ -971,8 +971,14 @@ async fn upgrade_0031_to_0033_and_interrupted_job_recovery() {
         }
     }
 
-    let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
-    let pool = SqlitePoolOptions::new().connect(&db_url).await.unwrap();
+    let pool = SqlitePoolOptions::new()
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true),
+        )
+        .await
+        .unwrap();
     sqlx::migrate::Migrator::new(mig_0031.as_path())
         .await
         .unwrap()

@@ -153,7 +153,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         "{}/api/admin/content-types/page/entries/{}",
         site.base, ids[0]
     );
-    let public = format!("{}/content/page/scope-a", site.base);
+    let public = format!("{}/scope-a", site.base);
     let open = http
         .get(&a)
         .header("Cookie", &editor_cookie)
@@ -164,9 +164,13 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
     assert_eq!(open.headers()["etag"], "\"v1\"");
     assert_eq!(open.headers()["cache-control"], "no-store");
     let initial: Value = open.json().await.unwrap();
+    assert_eq!(initial["entry_id"], ids[0]);
+    assert_eq!(initial["type_key"], "page");
+    assert_eq!(initial["content_mode"], "editor");
+    assert_eq!(initial["version"], 1);
     assert_eq!(
-        without_updated_at(initial.clone()),
-        json!({"entry_id":ids[0],"type_key":"page","content_mode":"editor","version":1,"document":null})
+        initial["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]["text"],
+        "Original text Page A"
     );
     let wrong_type = format!("{}/api/admin/entries/post/{}/builder", site.base, ids[0]);
     assert_eq!(
@@ -395,9 +399,15 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .json::<Value>()
         .await
         .unwrap();
+    let b_without_ts = without_updated_at(b_open.clone());
+    assert_eq!(b_without_ts["entry_id"], ids[1]);
+    assert_eq!(b_without_ts["type_key"], "page");
+    assert_eq!(b_without_ts["content_mode"], "editor");
+    assert_eq!(b_without_ts["version"], 1);
     assert_eq!(
-        without_updated_at(b_open.clone()),
-        json!({"entry_id":ids[1],"type_key":"page","content_mode":"editor","version":1,"document":null})
+        b_without_ts["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]
+            ["text"],
+        "Original text Page B"
     );
     assert_eq!(
         http.get(&public).send().await.unwrap().status(),
@@ -499,10 +509,12 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .await
         .unwrap();
     assert_eq!(stored["publication_status"], "published");
-    assert_eq!(stored["values"]["body"], "Original text Page A");
+    let stored_body = stored["values"]["body"].as_str().unwrap();
+    assert!(opendash_core::builder_blocks::contains_blocks(stored_body));
+    assert!(stored_body.contains("Published edit A"));
     assert_eq!(stored["version"], 4);
 
-    // Composite mode edits share CAS and preserve both content sources.
+    // Unified `values_json["body"]`: Classic composite edit and UX Builder edit share the same CAS and field.
     let schema = http
         .get(format!(
             "{}/api/admin/content-types/page/effective-editor-config",
@@ -516,26 +528,39 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .await
         .unwrap();
     let token = schema["schema_token"].as_str().unwrap();
-    let composite = |version: i64, mode: &str, status: &str| {
+    let composite = |version: i64, mode: &str, status: &str, values: Value| {
         http.put(format!("{entry}/composite"))
             .header("Cookie", &editor_cookie)
             .header("Origin", &site.base)
             .header("X-CSRF-Token", &editor_csrf)
             .json(&json!({
                 "expected_version":version, "expected_schema_token":token,
-                "title":"Page A","slug":"scope-a","values":{"body":"Original text Page A"},
+                "title":"Page A","slug":"scope-a","values":values,
                 "content_mode":mode,"publication_status":status
             }))
     };
     assert_eq!(
-        composite(3, "editor", "published")
-            .send()
-            .await
-            .unwrap()
-            .status(),
+        composite(
+            3,
+            "editor",
+            "published",
+            json!({"body":"Original text Page A"})
+        )
+        .send()
+        .await
+        .unwrap()
+        .status(),
         StatusCode::PRECONDITION_FAILED
     );
-    let response = composite(4, "editor", "published").send().await.unwrap();
+    let response = composite(
+        4,
+        "editor",
+        "published",
+        json!({"body":"Original text Page A"}),
+    )
+    .send()
+    .await
+    .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["etag"], "\"v5\"");
     let html = http
@@ -552,7 +577,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         http.get(&media).send().await.unwrap().status(),
         StatusCode::NOT_FOUND
     );
-    let retained = http
+    let wrapped_after_classic = http
         .get(&a)
         .header("Cookie", &editor_cookie)
         .send()
@@ -561,9 +586,15 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .json::<Value>()
         .await
         .unwrap();
-    assert_eq!(retained["document"], published_doc);
-    assert_eq!(retained["content_mode"], "editor");
-    let response = composite(5, "builder", "published").send().await.unwrap();
+    assert_eq!(
+        wrapped_after_classic["document"]["sections"][0]["children"][0]["children"][0]["children"]
+            [0]["props"]["text"],
+        "Original text Page A"
+    );
+    assert_eq!(wrapped_after_classic["content_mode"], "editor");
+
+    // Re-save Builder design (`v5 -> v6`), verify public render & media ACL, then reset (`v6 -> v7`).
+    let response = put(5).json(&published_doc).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["etag"], "\"v6\"");
     assert!(
@@ -576,6 +607,10 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
             .unwrap()
             .contains("Published edit A")
     );
+    assert_eq!(
+        http.get(&media).send().await.unwrap().status(),
+        StatusCode::OK
+    );
 
     let response = reset(6)
         .json(&json!({"confirm":true}))
@@ -584,20 +619,35 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["etag"], "\"v7\"");
+    let reset_open = response.json::<Value>().await.unwrap();
+    assert_eq!(reset_open["entry_id"], ids[0]);
+    assert_eq!(reset_open["type_key"], "page");
+    assert_eq!(reset_open["content_mode"], "editor");
+    assert_eq!(reset_open["version"], 7);
     assert_eq!(
-        without_updated_at(response.json::<Value>().await.unwrap()),
-        json!({"entry_id":ids[0],"type_key":"page","content_mode":"editor","version":7,"document":null})
+        reset_open["document"]["sections"][0]["children"][0]["children"][0]["children"][0]["props"]
+            ["text"],
+        "Published edit A"
     );
-    assert!(
-        http.get(&public)
-            .send()
-            .await
-            .unwrap()
-            .text()
-            .await
-            .unwrap()
-            .contains("Original text Page A")
-    );
+    let flattened_entry: Value = http
+        .get(&entry)
+        .header("Cookie", &editor_cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(flattened_entry["values"]["body"], "Published edit A");
+    let public_after_reset = http
+        .get(&public)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(public_after_reset.contains("Published edit A"));
     assert_eq!(
         http.get(&media).send().await.unwrap().status(),
         StatusCode::NOT_FOUND
@@ -612,7 +662,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         StatusCode::NOT_FOUND
     );
     // Re-create on the current entry version, then unpublish and publish via
-    // the composite endpoint. Neither path changes the document.
+    // the composite endpoint without overwriting `body`.
     let response = put(7).json(&document).send().await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["etag"], "\"v8\"");
@@ -628,7 +678,10 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         http.get(&media).send().await.unwrap().status(),
         StatusCode::NOT_FOUND
     );
-    let response = composite(9, "builder", "published").send().await.unwrap();
+    let response = composite(9, "builder", "published", json!({}))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()["etag"], "\"v10\"");
     assert!(

@@ -49,7 +49,7 @@ use crate::{
             plugin_enable, plugin_install, plugin_list, plugin_run, plugin_ui_schema,
         },
         public::public_page,
-        public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
+        public_content::{media_file, media_thumb},
         settings::{
             general_get, general_put, permalinks_get, permalinks_put, public_get, public_put,
             reading_get, reading_put, theme_options_get, theme_options_put, timezones_get,
@@ -83,6 +83,7 @@ pub struct AppState {
     >,
     pub coordinator: Arc<crate::operations::SiteCoordinator>,
     pub backup_registry: Arc<crate::backup::BackupRuntimeRegistry>,
+    pub block_template_cache: Arc<crate::page::BlockTemplateCache>,
     pub recovery: crate::config::RecoveryState,
     pub runtime_config: crate::config::RuntimeConfigV1,
 }
@@ -114,6 +115,12 @@ impl axum::extract::FromRef<AppState> for Arc<MediaStore> {
 impl axum::extract::FromRef<AppState> for Arc<crate::operations::SiteCoordinator> {
     fn from_ref(state: &AppState) -> Self {
         state.coordinator.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<crate::page::BlockTemplateCache> {
+    fn from_ref(state: &AppState) -> Self {
+        state.block_template_cache.clone()
     }
 }
 
@@ -161,10 +168,6 @@ pub fn build_router_with_themes_root(
 
     Router::new()
         .route("/", get(public_page))
-        .route("/content/{type_key}", get(archive))
-        .route("/content/{type_key}/{slug}", get(single))
-        .route("/taxonomy/category/{slug}", get(category_archive))
-        .route("/taxonomy/tag/{slug}", get(tag_archive))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))
@@ -262,6 +265,16 @@ pub fn build_router_with_themes_root(
             "/api/admin/template-overrides/{id}/reset",
             post(crate::routes::themes::template_overrides_reset)
                 .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/studio/targets",
+            get(crate::routes::themes::studio_targets),
+        )
+        .route(
+            "/api/admin/studio/preview",
+            post(crate::routes::themes::studio_preview).layer(DefaultBodyLimit::max(
+                crate::routes::themes::MAX_STUDIO_PREVIEW_JSON_BYTES,
+            )),
         )
         .route(
             "/api/admin/settings/general",

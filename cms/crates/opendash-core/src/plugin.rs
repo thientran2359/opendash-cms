@@ -109,7 +109,10 @@ pub struct PluginManifest {
     pub hook_priority: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub actions: Vec<PluginActionDeclaration>,
-    #[serde(default, skip_serializing_if = "crate::content::CntDeclarations::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "crate::content::CntDeclarations::is_empty"
+    )]
     pub declarations: crate::content::CntDeclarations,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub editor_panels: Vec<crate::content::ManifestActionPanelInput>,
@@ -156,14 +159,22 @@ where
         if grant.content_type == "*" || !crate::content::valid_content_type_key(&grant.content_type)
         {
             return Err(match label {
-                "read" => "content_read_private không cho phép wildcard '*' và phải dùng content_type hợp lệ.",
-                _ => "content_write_private không cho phép wildcard '*' và phải dùng content_type hợp lệ.",
+                "read" => {
+                    "content_read_private không cho phép wildcard '*' và phải dùng content_type hợp lệ."
+                }
+                _ => {
+                    "content_write_private không cho phép wildcard '*' và phải dùng content_type hợp lệ."
+                }
             });
         }
         if !has_base_type_perm(&grant.content_type) {
             return Err(match label {
-                "read" => "content_read_private yêu cầu plugin đã có quyền content_read cho loại nội dung tương ứng.",
-                _ => "content_write_private yêu cầu plugin đã có quyền content_write cho loại nội dung tương ứng.",
+                "read" => {
+                    "content_read_private yêu cầu plugin đã có quyền content_read cho loại nội dung tương ứng."
+                }
+                _ => {
+                    "content_write_private yêu cầu plugin đã có quyền content_write cho loại nội dung tương ứng."
+                }
             });
         }
         if grant.field_keys.is_empty() || grant.field_keys.len() > 64 {
@@ -193,14 +204,26 @@ impl PluginManifest {
                 let value: crate::admin_extensions::AdminExtensions =
                     serde_json::from_value(raw)
                         .map_err(|_| "admin_extensions không đúng cấu trúc.")?;
-                let schema = obj.get("manifest_schema").and_then(serde_json::Value::as_u64)
+                let schema = obj
+                    .get("manifest_schema")
+                    .and_then(serde_json::Value::as_u64)
                     .unwrap_or(1);
                 if schema != 2 {
                     return Err("admin_extensions yêu cầu manifest_schema = 2.");
                 }
-                let actions = obj.get("actions").and_then(serde_json::Value::as_array)
-                    .map(|list| list.iter().filter_map(|action| action.get("id")
-                        .and_then(serde_json::Value::as_str).map(str::to_string)).collect::<Vec<_>>())
+                let actions = obj
+                    .get("actions")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|list| {
+                        list.iter()
+                            .filter_map(|action| {
+                                action
+                                    .get("id")
+                                    .and_then(serde_json::Value::as_str)
+                                    .map(str::to_string)
+                            })
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default();
                 value.validate("plugin", &actions)?;
             }
@@ -412,12 +435,16 @@ impl PluginManifest {
         for ep in &self.editor_panels {
             ep.validate()?;
             if !seen_panel_keys.insert(ep.local_key.as_str()) {
-                return Err("local_key trong editor_panels bị trùng lặp hoặc trùng với field_groups.");
+                return Err(
+                    "local_key trong editor_panels bị trùng lặp hoặc trùng với field_groups.",
+                );
             }
             let Some(act) = self.action(&ep.action_id) else {
                 return Err("editor_panels tham chiếu action_id không tồn tại trong actions.");
             };
-            let min_edit = ep.min_edit_role.unwrap_or(crate::content::FieldRole::Editor);
+            let min_edit = ep
+                .min_edit_role
+                .unwrap_or(crate::content::FieldRole::Editor);
             let act_role = if act.required_role == "admin" {
                 crate::content::FieldRole::Admin
             } else {
@@ -486,7 +513,10 @@ impl PluginManifest {
             || path_and_query.contains("%2f")
             || path_and_query.contains("%5c")
             || path_and_query.contains('\\')
-            || target.path().split('/').any(|seg| seg == "." || seg == "..")
+            || target
+                .path()
+                .split('/')
+                .any(|seg| seg == "." || seg == "..")
         {
             return false;
         }

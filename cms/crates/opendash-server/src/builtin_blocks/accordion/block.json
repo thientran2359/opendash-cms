@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "id": "core/accordion",
+  "title": "Accordion / FAQ",
+  "category": "interactive",
+  "icon": "chevrons-up-down",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "select",
+      "key": "style",
+      "label": "Kiểu hiển thị",
+      "options": [
+        { "value": "bordered", "label": "Có viền" },
+        { "value": "minimal", "label": "Tối giản" }
+      ],
+      "default": "bordered"
+    },
+    {
+      "type": "boolean",
+      "key": "open_first",
+      "label": "Mở sẵn mục đầu",
+      "default": true
+    },
+    {
+      "type": "repeater",
+      "key": "items",
+      "label": "Danh sách mục",
+      "min_items": 1,
+      "max_items": 24,
+      "item_label_field": "title",
+      "fields": [
+        {
+          "type": "text",
+          "key": "title",
+          "label": "Tiêu đề",
+          "required": true
+        },
+        {
+          "type": "richtext",
+          "key": "content",
+          "label": "Nội dung"
+        },
+        {
+          "type": "boolean",
+          "key": "open",
+          "label": "Mở sẵn",
+          "default": false
+        }
+      ]
+    }
+  ]
+}

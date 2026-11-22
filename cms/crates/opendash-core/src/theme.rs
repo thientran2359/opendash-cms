@@ -33,6 +33,10 @@ impl BlockDescriptor {
         }
         Ok(())
     }
+
+    pub fn to_registered_schema(&self) -> crate::block_schema::RegisteredBlockSchema {
+        crate::block_schema::upcast_legacy_descriptor(self)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

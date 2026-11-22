@@ -4,6 +4,11 @@ import type { BuilderDocument } from '../builder/document.ts';
 import { requestBlob, requestJson } from './client.ts';
 
 export interface BuilderDiagnostic { node_id: string; code: string }
+export interface BlockDiagnostic {
+  node_id: string;
+  code: string;
+  message: string;
+}
 export interface HomepageOpen {
   document: BuilderDocument;
   source: 'empty' | 'legacy' | 'layout';
@@ -23,6 +28,11 @@ export interface EntryBuilderOpen {
   version: number;
   updated_at: string;
   document: BuilderDocument | null;
+  publication_status: 'draft' | 'published' | string;
+  publication_policy: 'immediate' | 'draft_publish';
+  diagnostics: BlockDiagnostic[];
+  had_freeform_wrap: boolean;
+  had_recovery: boolean;
 }
 
 /** EGM S02: canonical typed templates replace the old role/scope endpoints.

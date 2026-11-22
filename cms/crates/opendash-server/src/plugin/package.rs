@@ -104,8 +104,10 @@ impl PluginPackage {
         let raw: serde_json::Value = serde_json::from_str(&manifest_text)
             .map_err(|_| "admin_extensions không đúng JSON.")?;
         let admin_extensions = match raw.get("admin_extensions") {
-            Some(value) => Some(serde_json::from_value(value.clone())
-                .map_err(|_| "admin_extensions không đúng cấu trúc.")?),
+            Some(value) => Some(
+                serde_json::from_value(value.clone())
+                    .map_err(|_| "admin_extensions không đúng cấu trúc.")?,
+            ),
             None => None,
         };
 

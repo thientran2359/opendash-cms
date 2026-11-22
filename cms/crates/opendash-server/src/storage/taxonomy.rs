@@ -152,6 +152,28 @@ pub async fn get_definition(db: &SqlitePool, key: &str) -> ApiResult<Option<Taxo
 /// Reconcile provider-owned custom taxonomy declarations in the same writer
 /// transaction as its CPTs, settings and permalink claims. Withdrawal and
 /// disable are state transitions: they never delete terms or memberships.
+async fn ensure_non_reserved_taxonomy_key_in_tx(
+    conn: &mut SqliteConnection,
+    key: &str,
+) -> ApiResult<()> {
+    if crate::seo::is_reserved_system_root(key) || key == "posts" {
+        return Err(ApiError::conflict(
+            "Khóa taxonomy trùng với tiền tố hệ thống được bảo vệ.",
+        ));
+    }
+    let cpt_conflict: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM content_types WHERE key = ? LIMIT 1")
+            .bind(key)
+            .fetch_optional(&mut *conn)
+            .await?;
+    if cpt_conflict.is_some() {
+        return Err(ApiError::conflict(
+            "Khóa taxonomy trùng với khóa loại nội dung đang tồn tại.",
+        ));
+    }
+    Ok(())
+}
+
 pub async fn sync_provider_definitions_in_tx(
     conn: &mut SqliteConnection,
     owner_kind: &str,
@@ -177,6 +199,7 @@ pub async fn sync_provider_definitions_in_tx(
                 "Provider khai báo taxonomy trùng key.",
             ));
         }
+        ensure_non_reserved_taxonomy_key_in_tx(&mut *conn, &taxonomy.key).await?;
         let existing: Option<DefinitionRow> = sqlx::query_as(
             "SELECT key,label,hierarchical,public,version,owner_kind,owner_id,
                     provider_status,declaration_state FROM taxonomy_definitions WHERE key=?",
@@ -313,6 +336,7 @@ pub async fn create_definition(
 ) -> ApiResult<TaxonomyDefinition> {
     input.validate().map_err(ApiError::bad_request)?;
     let mut tx = begin_admin_write(db, actor, false).await?;
+    ensure_non_reserved_taxonomy_key_in_tx(&mut tx, &input.key).await?;
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_definitions")
         .fetch_one(&mut *tx)
         .await
@@ -944,7 +968,7 @@ mod tests {
     use super::*;
     use crate::auth::{AuthUser, Role};
     use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-    use std::{str::FromStr, time::Duration};
+    use std::time::Duration;
 
     async fn fixture(db: &SqlitePool) -> SessionContext {
         sqlx::migrate!("../../migrations").run(db).await.unwrap();
@@ -1190,8 +1214,8 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let options = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))
-            .unwrap()
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Delete)

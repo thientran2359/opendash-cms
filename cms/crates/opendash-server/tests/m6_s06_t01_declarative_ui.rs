@@ -223,11 +223,19 @@ async fn m6_s06_t01_declarative_ui_schema_rbac_csrf_and_forged_action() {
         .await
         .unwrap();
     assert_eq!(admin_schema["schema_version"], 1);
-    assert_eq!(admin_schema["screens"][0]["nodes"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        admin_schema["screens"][0]["nodes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 
     // 5. Missing plugin -> 404
     let missing_res = client
-        .get(format!("{base_url}/api/admin/plugins/nonexistent/ui-schema"))
+        .get(format!(
+            "{base_url}/api/admin/plugins/nonexistent/ui-schema"
+        ))
         .header("Cookie", &admin_cookie)
         .header("Origin", &base_url)
         .send()
@@ -267,11 +275,19 @@ async fn m6_s06_t01_declarative_ui_schema_rbac_csrf_and_forged_action() {
         .json()
         .await
         .unwrap();
-    assert_eq!(editor_schema["screens"][0]["nodes"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        editor_schema["screens"][0]["nodes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     // Missing CSRF -> 403
     let no_csrf_res = client
-        .post(format!("{base_url}/api/admin/plugins/ui-plugin/actions/editor_ping"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/ui-plugin/actions/editor_ping"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .json(&json!({}))
@@ -282,7 +298,9 @@ async fn m6_s06_t01_declarative_ui_schema_rbac_csrf_and_forged_action() {
 
     // Editor calling admin_sync -> 403
     let forbidden_res = client
-        .post(format!("{base_url}/api/admin/plugins/ui-plugin/actions/admin_sync"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/ui-plugin/actions/admin_sync"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .header("X-CSRF-Token", &editor_csrf)
@@ -294,7 +312,9 @@ async fn m6_s06_t01_declarative_ui_schema_rbac_csrf_and_forged_action() {
 
     // Forged action -> 404
     let forged_res = client
-        .post(format!("{base_url}/api/admin/plugins/ui-plugin/actions/forged_action"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/ui-plugin/actions/forged_action"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .header("X-CSRF-Token", &editor_csrf)
@@ -306,7 +326,9 @@ async fn m6_s06_t01_declarative_ui_schema_rbac_csrf_and_forged_action() {
 
     // Editor calling editor_ping -> 200
     let ok_res = client
-        .post(format!("{base_url}/api/admin/plugins/ui-plugin/actions/editor_ping"))
+        .post(format!(
+            "{base_url}/api/admin/plugins/ui-plugin/actions/editor_ping"
+        ))
         .header("Cookie", &editor_cookie)
         .header("Origin", &base_url)
         .header("X-CSRF-Token", &editor_csrf)

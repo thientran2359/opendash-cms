@@ -107,10 +107,7 @@ async fn login_session(
         .find_map(|s| s.split(';').next().map(|kv| kv.to_string()))
         .expect("session cookie");
     let body: Value = login_resp.json().await.expect("login json");
-    let csrf = body["csrf_token"]
-        .as_str()
-        .expect("csrf_token")
-        .to_string();
+    let csrf = body["csrf_token"].as_str().expect("csrf_token").to_string();
     (cookie_header, csrf)
 }
 
@@ -199,7 +196,8 @@ async fn admin_restore_safe_mode_and_operator_activation_flow() {
     assert_eq!(backup_resp.status(), StatusCode::ACCEPTED);
     let backup_job: Value = backup_resp.json().await.expect("backup job json");
     let backup_job_id = backup_job["id"].as_str().expect("backup job id");
-    let finished_backup = poll_job_until_terminal(&client, &srv.base_url, &cookie, backup_job_id).await;
+    let finished_backup =
+        poll_job_until_terminal(&client, &srv.base_url, &cookie, backup_job_id).await;
     assert_eq!(finished_backup["state"], "succeeded");
 
     // 2. Download encrypted archive
@@ -218,7 +216,10 @@ async fn admin_restore_safe_mode_and_operator_activation_flow() {
 
     // 3. Upload archive via streaming restore-uploads
     let upload_resp = client
-        .post(format!("{}/api/admin/operations/restore-uploads", srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/restore-uploads",
+            srv.base_url
+        ))
         .header(reqwest::header::COOKIE, &cookie)
         .header("X-CSRF-Token", &csrf)
         .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
@@ -285,9 +286,15 @@ async fn admin_restore_safe_mode_and_operator_activation_flow() {
 
     // Anonymous contact submit returns 503
     let contact_resp = client
-        .post(format!("{}/api/public/contact/{form_id}", restored_srv.base_url))
+        .post(format!(
+            "{}/api/public/contact/{form_id}",
+            restored_srv.base_url
+        ))
         .header(reqwest::header::ORIGIN, &restored_srv.base_url)
-        .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
         .body("form_version=1&nonce=abc&name=Test")
         .send()
         .await
@@ -295,11 +302,20 @@ async fn admin_restore_safe_mode_and_operator_activation_flow() {
     assert_eq!(contact_resp.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     // Login with known Admin credentials works
-    let (r_cookie, r_csrf) = login_session(&client, &restored_srv.base_url, "admin", "admin-password-123").await;
+    let (r_cookie, r_csrf) = login_session(
+        &client,
+        &restored_srv.base_url,
+        "admin",
+        "admin-password-123",
+    )
+    .await;
 
     // Recovery status reports safe_mode = true, smtp_enabled = false
     let status_resp = client
-        .get(format!("{}/api/admin/operations/recovery/status", restored_srv.base_url))
+        .get(format!(
+            "{}/api/admin/operations/recovery/status",
+            restored_srv.base_url
+        ))
         .header(reqwest::header::COOKIE, &r_cookie)
         .send()
         .await
@@ -315,7 +331,10 @@ async fn admin_restore_safe_mode_and_operator_activation_flow() {
 
     // SMTP test blocked in safe mode
     let smtp_test_resp = client
-        .post(format!("{}/api/admin/settings/smtp/test", restored_srv.base_url))
+        .post(format!(
+            "{}/api/admin/settings/smtp/test",
+            restored_srv.base_url
+        ))
         .header(reqwest::header::COOKIE, &r_cookie)
         .header("X-CSRF-Token", &r_csrf)
         .send()
@@ -325,7 +344,10 @@ async fn admin_restore_safe_mode_and_operator_activation_flow() {
 
     // Activate fails on wrong password
     let bad_pw = client
-        .post(format!("{}/api/admin/operations/recovery/activate", restored_srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/recovery/activate",
+            restored_srv.base_url
+        ))
         .header(reqwest::header::COOKIE, &r_cookie)
         .header("X-CSRF-Token", &r_csrf)
         .json(&json!({
@@ -353,7 +375,10 @@ async fn admin_restore_safe_mode_and_operator_activation_flow() {
 
     // Activate succeeds with valid password and generation
     let ok_act = client
-        .post(format!("{}/api/admin/operations/recovery/activate", restored_srv.base_url))
+        .post(format!(
+            "{}/api/admin/operations/recovery/activate",
+            restored_srv.base_url
+        ))
         .header(reqwest::header::COOKIE, &r_cookie)
         .header("X-CSRF-Token", &r_csrf)
         .json(&json!({
@@ -380,13 +405,16 @@ async fn admin_restore_safe_mode_and_operator_activation_flow() {
 
     // Source DB still intact
     let mut conn = SqliteConnection::connect_with(
-        &SqliteConnectOptions::new().filename(&source_db).read_only(true),
+        &SqliteConnectOptions::new()
+            .filename(&source_db)
+            .read_only(true),
     )
     .await
     .expect("open source db");
-    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM contact_forms WHERE slug = 'lien-he-restore'")
-        .fetch_one(&mut conn)
-        .await
-        .expect("query source");
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM contact_forms WHERE slug = 'lien-he-restore'")
+            .fetch_one(&mut conn)
+            .await
+            .expect("query source");
     assert_eq!(count.0, 1);
 }

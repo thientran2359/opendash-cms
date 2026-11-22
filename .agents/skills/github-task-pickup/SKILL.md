@@ -1,6 +1,6 @@
 ---
 name: github-task-pickup
-description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tục Issue được giao hoặc đề xuất task theo đặc tả EGM đã duyệt. Kiểm Issue/Project; Atlas, Aster, Nova, Harbor và Forge tự chủ với task đủ gate theo ADR-0010. Không chiếm task khác hoặc chạy polling/cron."
+description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tục Issue được giao hoặc đề xuất task theo đặc tả EGM đã duyệt. Kiểm Issue/Project; Atlas, Aster, Nova, Orion, Harbor và Forge tự chủ với task đủ gate theo ADR-0010. Không chiếm task khác hoặc chạy polling/cron."
 ---
 
 # Nhận task thủ công từ GitHub Issues (Chuẩn EGM + Multi-Agent)
@@ -13,7 +13,7 @@ description: "Dùng khi người dùng yêu cầu lấy task GitHub, tiếp tụ
   - **GitHub Issues và Project #3 Status:** trạng thái thực thi live (`Backlog`, `Ready`, `In progress`, `In review`, `Done`) và người phụ trách.
   - **Đặc tả EGM trên `origin/main` tại `source_sha`:** [`docs/designs/<feature>.md`](../../../docs/designs/SITEMAP.md) đã đạt `Status: Approved` sau Goldfish review (`/egm-review` + `/egm-resolve`), đặc biệt mục `## Detailed Implementation Plan` (file ownership, API/schema) và `### Verification Plan`.
   - **Pull Request:** nơi chứa diff, CI checks và bằng chứng kiểm chứng.
-- **Khóa bảo vệ:** **một implementation task active / agent branch**, không ghi đè thay đổi chưa commit, không tự deploy/đánh dấu `VERIFIED` nếu chưa chạy test thật, không tự sửa ACL/credentials. Atlas, Aster, Nova, Harbor và Forge có quyền tự chủ nhận task và tự review/merge khi đạt gate theo [ADR-0010](../../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md).
+- **Khóa bảo vệ:** **một implementation task active / agent branch**, không ghi đè thay đổi chưa commit, không tự deploy/đánh dấu `VERIFIED` nếu chưa chạy test thật, không tự sửa ACL/credentials. Atlas, Aster, Nova, Orion, Harbor và Forge có quyền tự chủ nhận task và tự review/merge khi đạt gate theo [ADR-0010](../../../docs/decisions/ADR-0010-agent-project-and-merge-authority.md).
 - **Nhánh mặc định:** Mọi task mới dùng `agent/<name>` đã đồng bộ an toàn từ `origin/main`; `task/*` chỉ dùng khi cần cô lập thật và ghi lý do trên Issue/PR. Không đổi nhánh để lách PR đang mở hay worktree dirty.
 
 ## Quy trình nhận task

@@ -86,8 +86,16 @@ fn static_output_wasm(output_json: &str) -> Vec<u8> {
 fn kv_write_attempt_wasm() -> Vec<u8> {
     let req = r#"{"op":"kv_set","key":"tamper","value":"1"}"#;
     let out = r#"{"decision":"allow"}"#;
-    let req_esc: String = req.as_bytes().iter().map(|b| format!("\\{b:02x}")).collect();
-    let out_esc: String = out.as_bytes().iter().map(|b| format!("\\{b:02x}")).collect();
+    let req_esc: String = req
+        .as_bytes()
+        .iter()
+        .map(|b| format!("\\{b:02x}"))
+        .collect();
+    let out_esc: String = out
+        .as_bytes()
+        .iter()
+        .map(|b| format!("\\{b:02x}"))
+        .collect();
     let wat_src = format!(
         r#"(module
             (import "opendash_v1" "host_call" (func $host_call (param i32 i32 i32 i32) (result i32)))
@@ -226,7 +234,10 @@ async fn m6_s03_t01_before_save_veto_and_after_save_isolation() {
         .header("Origin", &base_url)
         .header("content-type", "application/zip")
         .header("x-csrf-token", &csrf)
-        .body(build_plugin_zip(&unprivileged_manifest, &static_output_wasm(veto_json)))
+        .body(build_plugin_zip(
+            &unprivileged_manifest,
+            &static_output_wasm(veto_json),
+        ))
         .send()
         .await
         .unwrap();
@@ -263,7 +274,10 @@ async fn m6_s03_t01_before_save_veto_and_after_save_isolation() {
         .header("Origin", &base_url)
         .header("content-type", "application/zip")
         .header("x-csrf-token", &csrf)
-        .body(build_plugin_zip(&priv_veto_manifest, &static_output_wasm(veto_json)))
+        .body(build_plugin_zip(
+            &priv_veto_manifest,
+            &static_output_wasm(veto_json),
+        ))
         .send()
         .await
         .unwrap();
@@ -324,7 +338,10 @@ async fn m6_s03_t01_before_save_veto_and_after_save_isolation() {
         .header("Origin", &base_url)
         .header("content-type", "application/zip")
         .header("x-csrf-token", &csrf)
-        .body(build_plugin_zip(&kv_tamper_manifest, &kv_write_attempt_wasm()))
+        .body(build_plugin_zip(
+            &kv_tamper_manifest,
+            &kv_write_attempt_wasm(),
+        ))
         .send()
         .await
         .unwrap();
@@ -414,7 +431,9 @@ async fn m6_s03_t01_before_save_veto_and_after_save_isolation() {
 
     // Update also fires hooks and enforces CAS (412 on stale version, 200 on v1)
     let stale_upd = client
-        .put(format!("{base_url}/api/admin/content-types/post/entries/{entry_id}"))
+        .put(format!(
+            "{base_url}/api/admin/content-types/post/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &csrf)
@@ -426,7 +445,9 @@ async fn m6_s03_t01_before_save_veto_and_after_save_isolation() {
     assert_eq!(stale_upd.status(), 412);
 
     let ok_upd = client
-        .put(format!("{base_url}/api/admin/content-types/post/entries/{entry_id}"))
+        .put(format!(
+            "{base_url}/api/admin/content-types/post/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &csrf)

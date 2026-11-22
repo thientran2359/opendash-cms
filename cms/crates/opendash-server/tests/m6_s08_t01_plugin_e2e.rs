@@ -540,11 +540,14 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     // Seed plugin-owned settings & template override in SQLite before snapshot
     srv1.stop();
     let db_path = site_dir.path.join("database").join("opendash.sqlite");
-    let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
     {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
-            .connect(&db_url)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&db_path)
+                    .create_if_missing(true),
+            )
             .await
             .unwrap();
         sqlx::query(
@@ -782,7 +785,7 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
     drop(srv3);
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect(&db_url)
+        .connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db_path))
         .await
         .unwrap();
     let (opt_val,): (String,) = sqlx::query_as(

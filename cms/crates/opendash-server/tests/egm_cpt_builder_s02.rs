@@ -373,10 +373,10 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
             .status(),
         StatusCode::BAD_REQUEST
     );
-    let db = SqlitePool::connect(&format!(
-        "sqlite://{}",
-        site.root.join("database/opendash.sqlite").display()
-    ))
+    let db = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(site.root.join("database/opendash.sqlite")),
+    )
     .await
     .unwrap();
     let refs: i64 =
@@ -396,7 +396,7 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
     }
     for slug in ["pattern-home", "pattern-contact", "pattern-about"] {
         let page = http
-            .get(format!("{}/content/page/{slug}", site.base))
+            .get(format!("{}/{slug}", site.base))
             .send()
             .await
             .unwrap();
@@ -447,7 +447,7 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
     );
     for slug in ["pattern-home", "pattern-contact", "pattern-about"] {
         let html = http
-            .get(format!("{}/content/page/{slug}", site.base))
+            .get(format!("{}/{slug}", site.base))
             .send()
             .await
             .unwrap()
@@ -537,7 +537,7 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let page = http
-        .get(format!("{}/content/page/pattern-home", site.base))
+        .get(format!("{}/pattern-home", site.base))
         .send()
         .await
         .unwrap();

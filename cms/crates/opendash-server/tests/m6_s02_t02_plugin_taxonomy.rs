@@ -269,7 +269,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
         .await
         .unwrap();
     assert_eq!(cat_resp.status(), 201);
-    let cat_id = cat_resp.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let cat_id = cat_resp.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     let tag_resp = client
         .post(format!("{base_url}/api/admin/taxonomy/terms"))
@@ -281,7 +283,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
         .await
         .unwrap();
     assert_eq!(tag_resp.status(), 201);
-    let tag_id = tag_resp.json::<Value>().await.unwrap()["id"].as_i64().unwrap();
+    let tag_id = tag_resp.json::<Value>().await.unwrap()["id"]
+        .as_i64()
+        .unwrap();
 
     // Create a draft `post` linked to `cat_id` and a `listing` entry linked to `cat_id` + `tag_id`
     let draft_post = client
@@ -301,7 +305,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     assert_eq!(draft_post.status(), 201);
 
     let entry_resp = client
-        .post(format!("{base_url}/api/admin/content-types/listing/entries"))
+        .post(format!(
+            "{base_url}/api/admin/content-types/listing/entries"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &csrf)
@@ -318,13 +324,14 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     let entry: Value = entry_resp.json().await.unwrap();
     let entry_id = entry["id"].as_i64().unwrap();
 
-    // Draft `post` must NOT leak through /taxonomy/category/engineering, while published `listing` does appear
+    // Draft `post` must NOT leak through /category/engineering, while published `listing` does appear
     let archive_draft = client
-        .get(format!("{base_url}/taxonomy/category/engineering"))
+        .get(format!("{base_url}/category/engineering"))
         .send()
         .await
         .unwrap();
     let archive_status = archive_draft.status();
+    assert_eq!(archive_status, 200);
     let archive_draft_body = archive_draft.text().await.unwrap();
     assert!(
         !archive_draft_body.contains("Secret Draft Post"),
@@ -362,7 +369,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     // eligibility is inactive, explicit term selection must fail atomically,
     // but an ordinary title/value update must preserve prior memberships.
     let fetched_entry: Value = client
-        .get(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .get(format!(
+            "{base_url}/api/admin/content-types/listing/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -373,7 +382,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     assert_eq!(fetched_entry["term_ids"], json!([cat_id, tag_id]));
 
     let blocked_selection = client
-        .put(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .put(format!(
+            "{base_url}/api/admin/content-types/listing/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &csrf)
@@ -389,9 +400,14 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
         .unwrap();
     let blocked_status = blocked_selection.status();
     let blocked_body = blocked_selection.text().await.unwrap();
-    assert_eq!(blocked_status, 400, "inactive term selection: {blocked_body}");
+    assert_eq!(
+        blocked_status, 400,
+        "inactive term selection: {blocked_body}"
+    );
     let after_blocked: Value = client
-        .get(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .get(format!(
+            "{base_url}/api/admin/content-types/listing/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -404,7 +420,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     assert_eq!(after_blocked["version"], fetched_entry["version"]);
 
     let upd = client
-        .put(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .put(format!(
+            "{base_url}/api/admin/content-types/listing/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &csrf)
@@ -421,7 +439,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     let update_body = upd.text().await.unwrap();
     assert_eq!(update_status, 200, "inactive title edit: {update_body}");
     let after_update: Value = client
-        .get(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .get(format!(
+            "{base_url}/api/admin/content-types/listing/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -494,7 +514,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     // With `category` eligibility active again, explicitly changing membership
     // is allowed; withdrawn `tag` membership stays until this deliberate unlink.
     let choose_active = client
-        .put(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .put(format!(
+            "{base_url}/api/admin/content-types/listing/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .header("Origin", &base_url)
         .header("x-csrf-token", &csrf)
@@ -510,7 +532,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     let active_body = choose_active.text().await.unwrap();
     assert_eq!(active_status, 200, "active term selection: {active_body}");
     let after_active: Value = client
-        .get(format!("{base_url}/api/admin/content-types/listing/entries/{entry_id}"))
+        .get(format!(
+            "{base_url}/api/admin/content-types/listing/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie)
         .send()
         .await
@@ -547,7 +571,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     };
 
     let elig_after_restart: Vec<Value> = client
-        .get(format!("{base_url2}/api/admin/taxonomy/eligibility/listing"))
+        .get(format!(
+            "{base_url2}/api/admin/taxonomy/eligibility/listing"
+        ))
         .header("Cookie", &cookie2)
         .send()
         .await
@@ -569,7 +595,9 @@ async fn m6_s02_t02_plugin_taxonomy_eligibility_and_draft_isolation() {
     assert_eq!(tag_row["declaration_state"], "withdrawn");
     assert_eq!(tag_row["provider_status"], "provider_inactive");
     let persisted_entry: Value = client
-        .get(format!("{base_url2}/api/admin/content-types/listing/entries/{entry_id}"))
+        .get(format!(
+            "{base_url2}/api/admin/content-types/listing/entries/{entry_id}"
+        ))
         .header("Cookie", &cookie2)
         .send()
         .await

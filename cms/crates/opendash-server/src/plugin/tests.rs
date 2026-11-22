@@ -166,7 +166,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "Loop Plugin".into(),
             description: "".into(),
@@ -227,15 +229,21 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "Trap Plugin".into(),
             description: "".into(),
             entrypoint: "plugin.wasm".into(),
             permissions: PluginPermissions {
                 sqlite: vec!["kv_write".into()],
-                http: vec![], content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
+                http: vec![],
+                content_read: vec![],
+                network: vec![],
+                content_write: vec![],
+                ..Default::default()
+            },
             editor_panels: vec![],
         };
 
@@ -297,7 +305,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "No Perm".into(),
             description: "".into(),
@@ -365,7 +375,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "Mem Plugin".into(),
             description: "".into(),
@@ -450,7 +462,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "HTTP Plugin".into(),
             description: "".into(),
@@ -459,7 +473,10 @@ mod tests {
                 sqlite: vec![],
                 http: vec![target_url.clone()],
                 content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
+                network: vec![],
+                content_write: vec![],
+                ..Default::default()
+            },
             editor_panels: vec![],
         };
 
@@ -584,7 +601,6 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-
 
         let manager = PluginManager::new(pool.clone(), true);
         let zip_bytes =
@@ -799,7 +815,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "Abort".into(),
             description: "".into(),
@@ -851,7 +869,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "UTF8".into(),
             description: "".into(),
@@ -939,7 +959,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "Worker Teardown Test".into(),
             description: String::new(),
@@ -1029,7 +1051,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "Slow Worker".into(),
             description: String::new(),
@@ -1038,7 +1062,10 @@ mod tests {
                 sqlite: vec![],
                 http: vec![origin.clone()],
                 content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
+                network: vec![],
+                content_write: vec![],
+                ..Default::default()
+            },
             editor_panels: vec![],
         };
 
@@ -1109,7 +1136,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "Echo Recovery".into(),
             description: String::new(),
@@ -1195,7 +1224,9 @@ mod tests {
             version: "1.0.0".into(),
             api_version: 1,
             manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
+            min_host_version: None,
+            declarations: Default::default(),
+            hook_priority: 0,
             actions: vec![],
             name: "Hang Plugin".into(),
             description: String::new(),
@@ -1204,7 +1235,10 @@ mod tests {
                 sqlite: vec![],
                 http: vec![origin.clone()],
                 content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
+                network: vec![],
+                content_write: vec![],
+                ..Default::default()
+            },
             editor_panels: vec![],
         };
 
@@ -1222,14 +1256,16 @@ mod tests {
             .expect("worker did not reach the HTTP server within 10 seconds")
             .expect("HTTP server stopped before the worker sent its request");
         assert_eq!(
-            active_at_request,
-            1,
+            active_at_request, 1,
             "worker must be active at cancellation"
         );
 
         // Caller cancellation must be observed, not a natural worker timeout.
         let cancelled = task.await.expect_err("caller task must be aborted");
-        assert!(cancelled.is_cancelled(), "caller abort must cancel the task");
+        assert!(
+            cancelled.is_cancelled(),
+            "caller abort must cancel the task"
+        );
 
         // Allow guard drop and process kill
         tokio::time::sleep(Duration::from_millis(200)).await;

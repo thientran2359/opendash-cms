@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type {
   ContentFieldDefinition,
   ContentFieldValue,
@@ -8,6 +8,7 @@ import type {
 } from '../content/types.ts';
 import { FieldValueInput } from '../content/FieldValueInput.tsx';
 import { TermPicker } from '../taxonomy/TermPicker.tsx';
+import { mediaThumbnailUrl } from '../../api/media.ts';
 
 export interface PanelRegionRendererProps {
   config: EffectiveEditorConfigProjection;
@@ -29,6 +30,14 @@ export interface PanelRegionRendererProps {
   userId: number | null;
   termIds: number[];
   publicPath: string | null;
+  draftPreviewPath?: string | null;
+  isPublic?: boolean;
+  publicationPolicy?: 'immediate' | 'draft_publish';
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  onCreatedAtChange?: (isoUtc: string | null) => void;
+  onUpdatedAtChange?: (isoUtc: string | null) => void;
+  templatePanelNode?: React.ReactNode;
   onToggleCollapse: (panelId: string) => void;
   onTitleChange: (title: string) => void;
   onSlugChange: (slug: string) => void;
@@ -42,6 +51,7 @@ export interface PanelRegionRendererProps {
   onSeoChange: (patch: { title?: string; description?: string; og_image_id?: string; noindex?: boolean }) => void;
   onRunAction: (pluginId: string, actionId: string, panelId: string) => void;
   onSave: (intent?: 'draft' | 'published') => void;
+  onDelete?: () => void;
   onOpenBuilder: () => void;
   canOpenBuilder: boolean;
   saving: boolean;
@@ -92,6 +102,14 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   userId,
   termIds,
   publicPath,
+  draftPreviewPath,
+  isPublic = true,
+  publicationPolicy,
+  createdAt,
+  updatedAt,
+  onCreatedAtChange,
+  onUpdatedAtChange,
+  templatePanelNode,
   onToggleCollapse,
   onTitleChange,
   onSlugChange,
@@ -105,47 +123,46 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   onSeoChange,
   onRunAction,
   onSave,
+  onDelete,
   onOpenBuilder,
   canOpenBuilder,
   saving,
   dirty,
 }) => {
+  const [editingPermalink, setEditingPermalink] = useState(false);
+  const [editingStatus, setEditingStatus] = useState(false);
+  const [editingCreatedAt, setEditingCreatedAt] = useState(false);
+  const [editingUpdatedAt, setEditingUpdatedAt] = useState(false);
   const isBuiltInContent = config.type_key === 'post' || config.type_key === 'page';
-  const renderSaveActions = (compact = false) => (
-    <div className="flex flex-wrap items-center gap-2">
-      {isBuiltInContent ? (
-        publicationStatus === 'published' ? (
-          <button type="button" onClick={() => onSave('published')} disabled={saving}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
-            {saving ? 'Đang lưu...' : 'Cập nhật'}
-          </button>
-        ) : (
-          <>
-            <button type="button" onClick={() => onSave('draft')} disabled={saving}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 disabled:opacity-50">
-              {saving ? 'Đang lưu...' : 'Lưu nháp'}
-            </button>
-            <button type="button" onClick={() => onSave('published')} disabled={saving}
-              className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
-              Đăng bài
-            </button>
-          </>
-        )
-      ) : (
-        <button type="button" onClick={() => onSave()} disabled={saving}
-          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
-          {saving ? 'Đang lưu...' : 'Lưu'}
-        </button>
-      )}
-      {isBuiltInContent && publicationStatus === 'published' && entryId !== null && publicPath && (
-        <a href={publicPath} target="_blank" rel="noopener noreferrer"
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800">
-          {config.type_key === 'page' ? 'Xem trang' : 'Xem bài viết'}
-        </a>
-      )}
-      {!compact && saving && <span role="status" className="text-xs text-slate-500">Đang lưu dữ liệu...</span>}
-    </div>
-  );
+  const isDraftPublish = publicationPolicy === 'draft_publish' || isBuiltInContent;
+  const permalinkPreview = customPath.trim()
+    ? (customPath.trim().startsWith('/') ? customPath.trim() : `/${customPath.trim()}`)
+    : `/${slug || '...'}`;
+  const parseUtcTimestamp = (raw?: string | null): Date | null => {
+    if (!raw) return null;
+    const iso = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`;
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+  const formatTimestamp = (raw?: string | null): string => {
+    const d = parseUtcTimestamp(raw);
+    if (!d) return raw || 'Ngay khi lưu';
+    return d.toLocaleString('vi-VN', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  };
+  const toDatetimeLocalValue = (raw?: string | null): string => {
+    const d = parseUtcTimestamp(raw) ?? new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+  const fromDatetimeLocalValue = (localVal: string): string | null => {
+    if (!localVal) return null;
+    const d = new Date(localVal);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString().slice(0, 19).replace('T', ' ');
+  };
   const renderField = (fieldKey: string) => {
     const eff: EffectiveFieldProjection | undefined = config.effective_fields[fieldKey];
     if (!eff) return null;
@@ -208,49 +225,170 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
     const kind = proj.panel.kind;
     if (kind.kind === 'core_built_in') {
       switch (kind.core_key) {
-        case 'title_slug':
+        case 'title_slug': {
+          const showSlugEditor = editingPermalink || Boolean(fieldErrors.slug);
           return (
-            <div className="space-y-3">
-              <label className="block text-sm font-medium text-slate-800">
-                Tiêu đề *
+            <div className="space-y-2.5">
+              <div>
                 <input
                   id="entry-title-input"
                   type="text"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  aria-label="Tiêu đề"
+                  placeholder={`Nhập tiêu đề ${config.label.toLowerCase()}...`}
+                  className="h-11 w-full rounded-lg border border-zinc-300 bg-white px-3.5 text-base font-semibold text-zinc-950 placeholder:font-normal placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:outline-od-accent"
                   value={title}
                   onChange={e => onTitleChange(e.target.value)}
                   required
                 />
-                {fieldErrors.title && <span className="text-xs text-rose-700">{fieldErrors.title}</span>}
-              </label>
-              <label className="block text-sm font-medium text-slate-800">
-                Slug *
-                <input
-                  id="entry-slug-input"
-                  type="text"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  value={slug}
-                  onChange={e => onSlugChange(e.target.value)}
-                  required
-                />
-                {fieldErrors.slug && <span className="text-xs text-rose-700">{fieldErrors.slug}</span>}
-              </label>
-              <label className="block text-sm font-medium text-slate-800">
-                Đường dẫn tùy chỉnh (custom_path)
-                <input
-                  type="text"
-                  placeholder="/duong-dan-tuy-chinh"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  value={customPath}
-                  onChange={e => onCustomPathChange(e.target.value)}
-                />
-              </label>
+                {fieldErrors.title && <p className="mt-1 text-xs font-medium text-rose-700" role="alert">{fieldErrors.title}</p>}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-600">
+                <span className="font-medium text-zinc-500">Đường dẫn:</span>
+                {publicPath ? (
+                  <a href={publicPath} target="_blank" rel="noopener noreferrer"
+                    className="font-mono text-od-accent hover:underline">
+                    {publicPath}
+                  </a>
+                ) : (
+                  <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-zinc-700">
+                    {permalinkPreview}
+                  </code>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditingPermalink(prev => !prev)}
+                  className="ml-1 rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50"
+                >
+                  {showSlugEditor ? 'Đóng' : 'Chỉnh sửa'}
+                </button>
+              </div>
+
+              {showSlugEditor && (
+                <div className="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+                    <span>Slug *</span>
+                    <input
+                      id="entry-slug-input"
+                      type="text"
+                      className="h-8 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                      value={slug}
+                      onChange={e => onSlugChange(e.target.value)}
+                      required
+                    />
+                    {fieldErrors.slug && <span className="text-xs text-rose-700">{fieldErrors.slug}</span>}
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+                    <span>Đường dẫn tùy chỉnh (custom_path)</span>
+                    <input
+                      type="text"
+                      placeholder="/duong-dan-tuy-chinh"
+                      className="h-8 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                      value={customPath}
+                      onChange={e => onCustomPathChange(e.target.value)}
+                    />
+                  </label>
+                </div>
+              )}
             </div>
           );
-        case 'body_editor':
-          return renderField('body');
-        case 'featured_image':
-          return renderField('featured_image');
+        }
+        case 'body_editor': {
+          const rawBody = clearedFields.includes('body') ? '' : values.body;
+          const hasOdBlocks = typeof rawBody === 'string' && rawBody.includes('<!-- od:');
+          return (
+            <div className="space-y-2.5">
+              {(canOpenBuilder || hasOdBlocks) && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+                    {hasOdBlocks ? (
+                      <span
+                        data-testid="od-blocks-badge"
+                        className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-900 ring-1 ring-inset ring-sky-200"
+                      >
+                        Chứa khối UX Builder (&lt;!-- od:... --&gt;)
+                      </span>
+                    ) : (
+                      <span>Có thể chỉnh trực tiếp hoặc mở UX Builder trực quan.</span>
+                    )}
+                  </div>
+                  {canOpenBuilder && (
+                    <button
+                      type="button"
+                      data-testid="open-ux-builder-toolbar"
+                      onClick={onOpenBuilder}
+                      disabled={saving}
+                      className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 shadow-2xs transition-colors hover:border-zinc-400 hover:bg-zinc-100 disabled:opacity-50"
+                    >
+                      Sửa với UX Builder
+                    </button>
+                  )}
+                </div>
+              )}
+              {renderField('body')}
+            </div>
+          );
+        }
+        case 'featured_image': {
+          const eff = config.effective_fields.featured_image;
+          if (!eff) return null;
+          const isCleared = clearedFields.includes('featured_image');
+          const imgId = isCleared ? '' : toInputString(values.featured_image).trim();
+          const canEditImg = eff.editable && eff.effective_status === 'active';
+          const imgErr = fieldErrors.featured_image;
+          return (
+            <div className="space-y-2.5" data-field-key="featured_image">
+              {imgId ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={!canEditImg}
+                    onClick={() => onPickMedia('featured_image', 'image')}
+                    className="group relative block w-full overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-left disabled:cursor-default"
+                    title={canEditImg ? 'Bấm để đổi ảnh đại diện' : undefined}
+                  >
+                    <img
+                      src={mediaThumbnailUrl(imgId)}
+                      alt="Ảnh đại diện"
+                      className="max-h-48 w-full object-cover transition-opacity group-hover:opacity-90"
+                    />
+                  </button>
+                  {canEditImg && (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onPickMedia('featured_image', 'image')}
+                        className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50"
+                      >
+                        Đổi ảnh
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onFieldChange('featured_image', '');
+                          onFieldClear('featured_image');
+                        }}
+                        className="text-xs font-medium text-rose-600 hover:text-rose-700 hover:underline"
+                      >
+                        Gỡ ảnh đại diện
+                      </button>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={!canEditImg}
+                  onClick={() => onPickMedia('featured_image', 'image')}
+                  className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-zinc-300 bg-zinc-50/70 px-3 py-5 text-xs font-medium text-zinc-600 transition-colors hover:border-od-accent hover:bg-od-accent-soft/20 hover:text-od-accent disabled:opacity-50"
+                >
+                  <span>+ Chọn ảnh đại diện</span>
+                </button>
+              )}
+              {imgErr && <p className="text-xs font-medium text-rose-700" role="alert">{imgErr}</p>}
+            </div>
+          );
+        }
         case 'base_fields':
           return (
             <div className="space-y-3">
@@ -303,38 +441,211 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           );
         case 'publish_box':
           return (
-            <div className="space-y-3">
-              {isBuiltInContent ? (
-                <p className="text-xs text-slate-600">
-                  {publicationStatus === 'published' ? 'Đã xuất bản' : 'Chưa công khai (bản nháp)'}
-                </p>
-              ) : (
-                <label className="block text-xs font-medium text-slate-700">
-                  Trạng thái xuất bản
-                  <select className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
-                    value={publicationStatus}
-                    onChange={e => onPublicationStatusChange(e.target.value as 'draft' | 'published')}>
-                    <option value="draft">Bản nháp (draft)</option>
-                    <option value="published">Công khai (published)</option>
-                  </select>
-                </label>
+            <div className="space-y-3.5">
+              {/* Top secondary bar: Save Draft + Draft Preview (only for drafts) */}
+              {((isDraftPublish && publicationStatus === 'draft') || draftPreviewPath) && (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  {isDraftPublish && publicationStatus === 'draft' ? (
+                    <button
+                      type="button"
+                      onClick={() => onSave('draft')}
+                      disabled={saving}
+                      className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50 disabled:opacity-50"
+                    >
+                      {saving ? 'Đang lưu...' : 'Lưu nháp'}
+                    </button>
+                  ) : <span />}
+                  {draftPreviewPath && (
+                    <a
+                      href={draftPreviewPath}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 no-underline transition-colors hover:border-zinc-400 hover:bg-zinc-50"
+                    >
+                      Xem trước nháp
+                    </a>
+                  )}
+                </div>
               )}
+
+              {/* WordPress-style metadata rows */}
+              <div className="space-y-2 border-y border-zinc-100 py-2.5 text-xs text-zinc-600">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <span>
+                    Trạng thái:{' '}
+                    <strong className="font-semibold text-zinc-900">
+                      {publicationStatus === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
+                    </strong>
+                  </span>
+                  {isDraftPublish && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingStatus(prev => !prev)}
+                      className="text-od-accent hover:underline"
+                    >
+                      {editingStatus ? 'Đóng' : 'Chỉnh sửa'}
+                    </button>
+                  )}
+                </div>
+                {isDraftPublish && editingStatus && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <select
+                      aria-label="Trạng thái xuất bản"
+                      className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                      value={publicationStatus}
+                      onChange={e => onPublicationStatusChange(e.target.value as 'draft' | 'published')}
+                    >
+                      <option value="draft">Bản nháp</option>
+                      <option value="published">Đã xuất bản</option>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setEditingStatus(false)}
+                      className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+                    >
+                      OK
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between gap-1.5">
+                  <span>
+                    Hiển thị:{' '}
+                    <strong className="font-semibold text-zinc-900">
+                      {isPublic ? 'Công khai' : 'Riêng tư'}
+                    </strong>
+                  </span>
+                  {dirty && <span className="font-medium text-amber-700">● Chưa lưu</span>}
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span>
+                      Ngày tạo:{' '}
+                      <strong className="font-medium text-zinc-800">
+                        {formatTimestamp(createdAt)}
+                      </strong>
+                    </span>
+                    {onCreatedAtChange && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingCreatedAt(prev => !prev)}
+                        className="text-od-accent hover:underline"
+                      >
+                        {editingCreatedAt ? 'Đóng' : 'Chỉnh sửa'}
+                      </button>
+                    )}
+                  </div>
+                  {editingCreatedAt && onCreatedAtChange && (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="datetime-local"
+                        aria-label="Ngày tạo"
+                        className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                        value={toDatetimeLocalValue(createdAt)}
+                        onChange={e => onCreatedAtChange(fromDatetimeLocalValue(e.target.value))}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditingCreatedAt(false)}
+                        className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+                      >
+                        OK
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {entryId !== null && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span>
+                        Cập nhật:{' '}
+                        <strong className="font-medium text-zinc-800">
+                          {formatTimestamp(updatedAt)}
+                        </strong>
+                      </span>
+                      {onUpdatedAtChange && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingUpdatedAt(prev => !prev)}
+                          className="text-od-accent hover:underline"
+                        >
+                          {editingUpdatedAt ? 'Đóng' : 'Chỉnh sửa'}
+                        </button>
+                      )}
+                    </div>
+                    {editingUpdatedAt && onUpdatedAtChange && (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="datetime-local"
+                          aria-label="Ngày cập nhật"
+                          className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+                          value={toDatetimeLocalValue(updatedAt)}
+                          onChange={e => onUpdatedAtChange(fromDatetimeLocalValue(e.target.value))}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditingUpdatedAt(false)}
+                          className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+                        >
+                          OK
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {canOpenBuilder && (
                 <button
                   type="button"
                   onClick={onOpenBuilder}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                  className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50"
                 >
-                  Mở Visual Builder
+                  Sửa với UX Builder
                 </button>
               )}
+
+              {/* Bottom footer bar: Delete + Primary Save/Publish */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                {onDelete ? (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={onDelete}
+                    className="text-xs font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
+                  >
+                    Xóa {config.label.toLowerCase()}
+                  </button>
+                ) : <span />}
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => onSave(isDraftPublish ? (publicationStatus === 'draft' && !editingStatus ? 'published' : publicationStatus) : undefined)}
+                  className="inline-flex h-9 items-center justify-center rounded-md bg-od-accent px-4 text-sm font-medium text-white shadow-2xs transition-colors hover:bg-od-accent-hover disabled:opacity-50"
+                >
+                  {saving
+                    ? 'Đang lưu...'
+                    : isDraftPublish
+                      ? (publicationStatus === 'published' ? 'Cập nhật' : 'Đăng bài')
+                      : (entryId === null ? 'Tạo mới' : 'Cập nhật')}
+                </button>
+              </div>
             </div>
+          );
+        case 'page_attributes':
+          return templatePanelNode ? (
+            <div>{templatePanelNode}</div>
+          ) : (
+            <p className="text-xs text-zinc-500">Không có thuộc tính mở rộng.</p>
           );
         case 'taxonomies':
           return config.taxonomies.length > 0 ? (
             <div data-testid="single-edit-terms">
               <TermPicker userId={userId} selectedIds={termIds} disabled={saving}
                 typeKey={config.type_key} allowedKinds={config.taxonomies}
+                variant="cards"
                 onApiError={onApiError} onChange={onTermIdsChange} />
             </div>
           ) : null;
@@ -395,58 +706,58 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
         .filter(p => p.placement.enabled)
         .map(proj => {
           const isCollapsed = collapsedPanels[proj.panel.panel_id] ?? proj.placement.collapsed_by_default;
+          const isChromelessPanel =
+            proj.panel.kind.kind === 'core_built_in' &&
+            (proj.panel.kind.core_key === 'title_slug' || proj.panel.kind.core_key === 'taxonomies');
           return (
             <section
               key={proj.panel.panel_id}
-              className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+              className={isChromelessPanel ? '' : 'rounded-xl border border-zinc-200 bg-white p-4 shadow-2xs'}
               data-panel-id={proj.panel.panel_id}
             >
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold text-slate-900">{proj.panel.title}</h3>
-                {proj.panel.collapsible && (
-                  <button
-                    type="button"
-                    aria-expanded={!isCollapsed}
-                    onClick={() => onToggleCollapse(proj.panel.panel_id)}
-                    className="rounded border-0 bg-transparent px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
-                  >
-                    {isCollapsed ? 'Mở rộng' : 'Thu gọn'}
-                  </button>
-                )}
-              </div>
-              {!isCollapsed && <div className="mt-3">{renderPanelBody(proj)}</div>}
+              {!isChromelessPanel && (
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-zinc-900">{proj.panel.title}</h3>
+                  {proj.panel.collapsible && (
+                    <button
+                      type="button"
+                      aria-expanded={!isCollapsed}
+                      onClick={() => onToggleCollapse(proj.panel.panel_id)}
+                      className="rounded border-0 bg-transparent px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
+                    >
+                      {isCollapsed ? 'Mở rộng' : 'Thu gọn'}
+                    </button>
+                  )}
+                </div>
+              )}
+              {!isCollapsed && <div className={isChromelessPanel ? '' : 'mt-3'}>{renderPanelBody(proj)}</div>}
             </section>
           );
         })}
     </div>
   );
 
-  // Exact DOM order: header_bar -> main_top -> main_primary -> main_bottom -> sidebar (AC-04d)
+  const hasPageAttributesPanel = config.regions.sidebar.some(
+    p => p.panel.kind.kind === 'core_built_in' && p.panel.kind.core_key === 'page_attributes',
+  );
+
   return (
     <div className="space-y-3.5" data-testid="single-edit-5-regions">
-      <header
-        className="flex flex-wrap items-center justify-between gap-2.5 rounded-lg border border-zinc-200 bg-white px-3.5 py-2"
-        data-region="header_bar"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
-            {config.type_key}
-          </span>
-          <h2 className="m-0 text-sm font-semibold text-zinc-900">
-            {entryId === null ? `Thêm ${config.label} mới` : `Chỉnh sửa #${entryId}`}
-          </h2>
-          {dirty && <span className="text-xs font-medium text-amber-700">● Chưa lưu</span>}
-        </div>
-        {renderSaveActions(true)}
-      </header>
-
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <div className="space-y-4 lg:col-span-8">
           {renderRegion('main_top', config.regions.main_top, 'space-y-4')}
           {renderRegion('main_primary', config.regions.main_primary, 'space-y-4')}
           {renderRegion('main_bottom', config.regions.main_bottom, 'space-y-4')}
         </div>
-        {renderRegion('sidebar', config.regions.sidebar, 'space-y-4 lg:col-span-4')}
+        <div className="space-y-4 lg:col-span-4">
+          {renderRegion('sidebar', config.regions.sidebar, 'space-y-4')}
+          {templatePanelNode && !hasPageAttributesPanel && (
+            <section className="rounded-xl border border-zinc-200 bg-white p-4">
+              <h3 className="text-sm font-semibold text-zinc-900">Template</h3>
+              <div className="mt-3">{templatePanelNode}</div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

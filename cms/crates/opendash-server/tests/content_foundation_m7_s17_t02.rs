@@ -191,10 +191,7 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
     let table_path = format!("{}/api/admin/content-types/post/entry-table", srv.base);
     assert_eq!(client.get(table_path).send().await.unwrap().status(), 401);
     let initial = table(&client, &srv.base, &cookie).await;
-    assert_eq!(
-        row(&initial, published_id)["public_url"],
-        "/content/post/visible"
-    );
+    assert_eq!(row(&initial, published_id)["public_url"], "/visible");
     assert!(row(&initial, draft_id)["public_url"].is_null());
     let route_path = format!("/api/admin/content-types/post/entries/{published_id}/route");
     let draft_route_path = format!("/api/admin/content-types/post/entries/{draft_id}/route");
@@ -222,7 +219,7 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
     let published_snapshot = published_route.json::<Value>().await.unwrap();
     assert_eq!(published_snapshot["entry_version"], published_version);
     assert!(published_snapshot["custom_path"].is_null());
-    assert_eq!(published_snapshot["public_url"], "/content/post/visible");
+    assert_eq!(published_snapshot["public_url"], "/visible");
     let editor_creation = client
         .post(format!("{}/api/admin/users", srv.base))
         .header(header::COOKIE, &cookie)
@@ -452,12 +449,12 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
         .unwrap();
     assert_eq!(
         active_provider["public_url"],
-        "/content/t02_provider/provider-entry"
+        "/t02_provider/provider-entry"
     );
-    let fixture_db = sqlx::SqlitePool::connect(&format!(
-        "sqlite://{}",
-        srv.root.join("database/opendash.sqlite").display()
-    ))
+    let fixture_db = sqlx::SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(srv.root.join("database/opendash.sqlite")),
+    )
     .await
     .unwrap();
     let changed = sqlx::query(
@@ -481,7 +478,7 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
     assert!(inactive_provider["public_url"].is_null());
     assert_eq!(
         client
-            .get(format!("{}/content/t02_provider/provider-entry", srv.base))
+            .get(format!("{}/t02_provider/provider-entry", srv.base))
             .send()
             .await
             .unwrap()
@@ -511,7 +508,7 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
     assert!(preview.text().await.unwrap().contains("T02 secret"));
     assert_eq!(
         client
-            .get(format!("{}/content/post/secret", srv.base))
+            .get(format!("{}/secret", srv.base))
             .send()
             .await
             .unwrap()
@@ -553,7 +550,7 @@ async fn admin_view_url_tracks_saved_route_and_draft_preview_stays_private() {
     );
     assert_eq!(
         client
-            .get(format!("{}/content/post/visible", srv.base))
+            .get(format!("{}/visible", srv.base))
             .send()
             .await
             .unwrap()

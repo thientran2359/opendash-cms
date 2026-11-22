@@ -10,12 +10,31 @@ export type AdminView =
   | 'taxonomy'
   | 'themes'
   | 'builder'
+  | 'studio'
+  | 'studio-entry'
   | 'plugins'
   | 'users'
   | 'profile'
   | 'tools'
   | 'settings'
   | 'content';
+
+export type StudioPanelId =
+  | 'root'
+  | 'identity'
+  | 'theme-options'
+  | 'menus'
+  | 'reading'
+  | 'templates';
+
+const STUDIO_PANELS: StudioPanelId[] = [
+  'root',
+  'identity',
+  'theme-options',
+  'menus',
+  'reading',
+  'templates',
+];
 
 export interface ParsedRoute {
   view: AdminView;
@@ -25,6 +44,9 @@ export interface ParsedRoute {
   taxonomyKind?: string;
   taxonomyMode?: 'definitions' | 'list' | 'new' | 'edit' | 'invalid';
   templateRole?: string;
+  studioPanel?: StudioPanelId;
+  studioTemplateKey?: string;
+  redirectHash?: string;
   rawHash: string;
   isLegacyContentRedirect?: boolean;
 }
@@ -32,7 +54,13 @@ export interface ParsedRoute {
 export function parseAdminRoute(hash: string, pathname: string = '/admin/'): ParsedRoute {
   if (!hash || hash === '#' || hash === '#/') {
     if (pathname.replace(/\/$/, '') === '/builder') {
-      return { view: 'builder', sub: 'builder', rawHash: '#/builder' };
+      return {
+        view: 'studio',
+        sub: 'root',
+        studioPanel: 'root',
+        rawHash: '#/studio',
+        redirectHash: '#/studio',
+      };
     }
     return { view: 'dashboard', sub: 'dashboard', rawHash: '#/dashboard' };
   }
@@ -155,24 +183,128 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     if (sub === 'menus') return { view: 'themes', sub: 'menus', rawHash: '#/appearance/menus' };
     return { view: 'themes', sub: 'themes', rawHash: '#/appearance/themes' };
   }
+  if (first === 'studio') {
+    if (segs[1] === 'entry') {
+      const rawTypeKey = segs[2] ? decodeURIComponent(segs[2]) : undefined;
+      const entryId = segs[3] && /^[1-9]\d*$/.test(segs[3]) && Number.isSafeInteger(Number(segs[3]))
+        ? Number(segs[3])
+        : undefined;
+      const valid =
+        segs.length === 4 &&
+        Boolean(rawTypeKey) &&
+        rawTypeKey !== 'pattern' &&
+        rawTypeKey !== 'section' &&
+        /^[a-z][a-z0-9_]{0,63}$/.test(rawTypeKey ?? '') &&
+        entryId !== undefined;
+      return {
+        view: 'studio-entry',
+        sub: valid ? 'entry' : 'invalid',
+        typeKey: rawTypeKey,
+        entryId,
+        rawHash: hash,
+      };
+    }
+    const rawPanel = params.get('panel');
+    const studioTemplateKey = params.get('template') ?? undefined;
+    const validPanel = rawPanel && STUDIO_PANELS.includes(rawPanel as StudioPanelId)
+      ? (rawPanel as StudioPanelId)
+      : studioTemplateKey
+        ? 'templates'
+        : 'root';
+    const valid = segs.length === 1 && (!rawPanel || STUDIO_PANELS.includes(rawPanel as StudioPanelId));
+    return {
+      view: 'studio',
+      sub: valid ? validPanel : 'invalid',
+      studioPanel: validPanel,
+      studioTemplateKey,
+      rawHash: hash,
+    };
+  }
   if (first === 'builder') {
     const entryParam = params.get('entry');
     const entryId = entryParam && /^[1-9]\d*$/.test(entryParam) && Number.isSafeInteger(Number(entryParam))
       ? Number(entryParam) : undefined;
     const templateRole = params.get('template') ?? undefined;
     const typeKey = params.get('type') ?? undefined;
-    const scopedPage = templateRole === 'page' && typeKey === 'page' && entryId !== undefined;
-    const scopedEntry = templateRole === 'entry' && !!typeKey && typeKey !== 'section'
-      && /^[a-z][a-z0-9_]{0,63}$/.test(typeKey) && entryId !== undefined;
-    const noScope = !entryParam && !templateRole && !typeKey && !queryPart;
-    const validGlobal = !entryParam && templateRole !== 'page' &&
-      (templateRole === 'header' || templateRole === 'footer'
-        || templateRole === 'taxonomy_archive' || templateRole === 'archive'
-        || templateRole === 'single') && (!typeKey || /^[a-z][a-z0-9_]{0,63}$/.test(typeKey));
-    const validAdminScopedSingle = templateRole === 'single' && !!typeKey && entryId !== undefined;
+    const validType = Boolean(typeKey && /^[a-z][a-z0-9_]{0,63}$/.test(typeKey));
+
+    // Keep Pattern Builder on legacy BuilderWorkspace until patterns move to Studio.
+    if (templateRole === 'entry' && typeKey === 'pattern' && entryId !== undefined) {
+      return {
+        view: 'builder',
+        sub: 'builder',
+        templateRole,
+        typeKey,
+        entryId,
+        rawHash: hash,
+      };
+    }
+    if (templateRole === 'page' && typeKey === 'page' && entryId !== undefined) {
+      return {
+        view: 'studio-entry',
+        sub: 'entry',
+        typeKey: 'page',
+        entryId,
+        rawHash: hash,
+        redirectHash: `#/studio/entry/page/${entryId}`,
+      };
+    }
+    if (templateRole === 'entry' && validType && typeKey !== 'section' && entryId !== undefined) {
+      return {
+        view: 'studio-entry',
+        sub: 'entry',
+        typeKey,
+        entryId,
+        rawHash: hash,
+        redirectHash: `#/studio/entry/${encodeURIComponent(typeKey!)}/${entryId}`,
+      };
+    }
+    if (!entryParam && !templateRole && !typeKey && !queryPart) {
+      return {
+        view: 'studio',
+        sub: 'root',
+        studioPanel: 'root',
+        rawHash: hash,
+        redirectHash: '#/studio',
+      };
+    }
+    if (templateRole === 'single' && validType && entryId !== undefined) {
+      const studioTemplateKey = `single:type:${typeKey}:id:${entryId}`;
+      return {
+        view: 'studio',
+        sub: 'templates',
+        studioPanel: 'templates',
+        studioTemplateKey,
+        rawHash: hash,
+        redirectHash: `#/studio?panel=templates&template=${encodeURIComponent(studioTemplateKey)}`,
+      };
+    }
+    if (!entryParam && (!typeKey || validType) && (
+      templateRole === 'header' || templateRole === 'footer'
+      || templateRole === 'taxonomy_archive' || templateRole === 'archive' || templateRole === 'single'
+    )) {
+      const mappedKey =
+        templateRole === 'header'
+          ? 'part:header'
+          : templateRole === 'footer'
+            ? 'part:footer'
+            : templateRole === 'taxonomy_archive'
+              ? (typeKey ? `taxonomy:key:${typeKey}` : 'taxonomy')
+              : typeKey
+                ? `${templateRole}:type:${typeKey}`
+                : templateRole;
+      return {
+        view: 'studio',
+        sub: 'templates',
+        studioPanel: 'templates',
+        studioTemplateKey: mappedKey,
+        rawHash: hash,
+        redirectHash: `#/studio?panel=templates&template=${encodeURIComponent(mappedKey)}`,
+      };
+    }
     return {
       view: 'builder',
-      sub: scopedEntry || scopedPage || noScope || validGlobal || validAdminScopedSingle ? 'builder' : 'invalid',
+      sub: 'invalid',
       templateRole,
       typeKey,
       entryId,
@@ -213,6 +345,16 @@ export function isRouteAllowed(route: ParsedRoute, role: Role): boolean {
   if (route.view === 'patterns' && route.sub === 'invalid') return false;
   if (route.view === 'taxonomy' && route.taxonomyMode === 'invalid') return false;
   if (route.view === 'builder' && route.sub !== 'builder') return false;
+  if (route.view === 'studio' && (route.sub === 'invalid' || role !== 'admin')) return false;
+  if (route.view === 'studio-entry') {
+    return route.sub === 'entry'
+      && !!route.typeKey
+      && route.typeKey !== 'section'
+      && route.typeKey !== 'pattern'
+      && /^[a-z][a-z0-9_]{0,63}$/.test(route.typeKey)
+      && Number.isSafeInteger(route.entryId)
+      && (route.entryId ?? 0) > 0;
+  }
   if (role === 'admin') return true;
   if (route.view === 'patterns') return false;
   // Editors may update term extension values on an existing term. Creating
@@ -236,5 +378,5 @@ export function parseAdminView(hash: string, pathname: string = '/admin/'): Admi
 
 export function isViewAllowed(view: AdminView, role: Role): boolean {
   if (role === 'admin') return true;
-  return !['themes', 'plugins', 'users', 'tools', 'settings', 'patterns'].includes(view);
+  return !['themes', 'plugins', 'users', 'tools', 'settings', 'patterns', 'studio'].includes(view);
 }

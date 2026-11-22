@@ -1172,7 +1172,6 @@ pub async fn execute_sample_import_with_cutpoint(
                 } else {
                     "{}".to_string()
                 };
-                crate::storage::seo::check_default_slug_claim_in_tx(&mut *conn, &p.content_type, &p.slug, None).await?;
                 let entry_id: i64 = sqlx::query_scalar(
                     "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, version)
                      VALUES (?, ?, ?, ?, 'draft', 1) RETURNING id",
@@ -1183,6 +1182,27 @@ pub async fn execute_sample_import_with_cutpoint(
                 .bind(&values_json)
                 .fetch_one(&mut *conn)
                 .await?;
+
+                if let Some(effective) = crate::storage::content::load_effective_content_schema_in_tx(
+                    &mut *conn,
+                    &p.content_type,
+                )
+                .await?
+                {
+                    let values_map: BTreeMap<String, serde_json::Value> = p
+                        .values
+                        .as_object()
+                        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                        .unwrap_or_default();
+                    crate::storage::entries::sync_entry_body_refs_in_conn(
+                        &mut *conn,
+                        entry_id,
+                        &effective,
+                        &values_map,
+                        None,
+                    )
+                    .await?;
+                }
 
                 page_id_by_object.insert(p.object_key.clone(), entry_id);
                 let target_hash = sha256_hex(format!("{}:{}:draft", p.slug, p.title).as_bytes());
@@ -1210,6 +1230,7 @@ pub async fn execute_sample_import_with_cutpoint(
                 });
             }
         }
+        crate::storage::permalinks::sync_claims_in_tx(&mut *conn).await?;
 
         // Insert menus + items + slot assignment + provenance
         for item in &plan.items {

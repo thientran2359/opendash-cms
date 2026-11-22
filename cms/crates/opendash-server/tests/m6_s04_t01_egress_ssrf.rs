@@ -112,6 +112,8 @@ fn spawn_mock_http_server() -> MockHttpServer {
         while !stop_clone.load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    // Accepted streams inherit listener non-blocking mode on Windows Winsock.
+                    let _ = stream.set_nonblocking(false);
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                     let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
                     let mut buf = [0u8; 4096];

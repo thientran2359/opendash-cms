@@ -1174,6 +1174,7 @@ mod tests {
             content_registry,
             coordinator,
             backup_registry: Arc::new(crate::backup::BackupRuntimeRegistry::new()),
+            block_template_cache: crate::page::BlockTemplateCache::global().clone(),
             recovery,
             runtime_config,
         };

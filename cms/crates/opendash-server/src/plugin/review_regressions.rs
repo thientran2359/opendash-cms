@@ -63,9 +63,11 @@ async fn invocation_timeout_must_not_commit_later() {
         id: "late-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
-            manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
-            actions: vec![],
+        manifest_schema: 1,
+        min_host_version: None,
+        declarations: Default::default(),
+        hook_priority: 0,
+        actions: vec![],
         name: "Probe".into(),
         description: String::new(),
         entrypoint: "plugin.wasm".into(),
@@ -73,8 +75,11 @@ async fn invocation_timeout_must_not_commit_later() {
             sqlite: vec!["kv_write".into()],
             http: vec![origin],
             content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
-            editor_panels: vec![],
+            network: vec![],
+            content_write: vec![],
+            ..Default::default()
+        },
+        editor_panels: vec![],
     };
     let result = PluginRuntime::new()
         .run_plugin(
@@ -197,9 +202,11 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
         id: "commit-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
-            manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
-            actions: vec![],
+        manifest_schema: 1,
+        min_host_version: None,
+        declarations: Default::default(),
+        hook_priority: 0,
+        actions: vec![],
         name: "Probe".into(),
         description: String::new(),
         entrypoint: "plugin.wasm".into(),
@@ -207,8 +214,11 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
             sqlite: vec!["kv_write".into()],
             http: vec![origin],
             content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
-            editor_panels: vec![],
+            network: vec![],
+            content_write: vec![],
+            ..Default::default()
+        },
+        editor_panels: vec![],
     };
     let result = PluginRuntime::new()
         .run_plugin(
@@ -335,9 +345,11 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
         id: "commit-success-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
-            manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
-            actions: vec![],
+        manifest_schema: 1,
+        min_host_version: None,
+        declarations: Default::default(),
+        hook_priority: 0,
+        actions: vec![],
         name: "Probe".into(),
         description: String::new(),
         entrypoint: "plugin.wasm".into(),
@@ -345,8 +357,11 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
             sqlite: vec!["kv_write".into()],
             http: vec![origin],
             content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
-            editor_panels: vec![],
+            network: vec![],
+            content_write: vec![],
+            ..Default::default()
+        },
+        editor_panels: vec![],
     };
 
     let result = PluginRuntime::new()
@@ -424,17 +439,23 @@ async fn ipc_kv_get_stuck_parent_must_cancel_and_clean_up() {
         id: "ipc-hang-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
-            manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
-            actions: vec![],
+        manifest_schema: 1,
+        min_host_version: None,
+        declarations: Default::default(),
+        hook_priority: 0,
+        actions: vec![],
         name: "Probe".into(),
         description: String::new(),
         entrypoint: "plugin.wasm".into(),
         permissions: PluginPermissions {
             sqlite: vec!["kv_read".into()],
-            http: vec![], content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
-            editor_panels: vec![],
+            http: vec![],
+            content_read: vec![],
+            network: vec![],
+            content_write: vec![],
+            ..Default::default()
+        },
+        editor_panels: vec![],
     };
 
     let runtime = PluginRuntime::new();
@@ -486,13 +507,13 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
     let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     let temp_db = std::env::temp_dir().join(format!("staged_abort_{}.sqlite", std::process::id()));
     let _ = std::fs::remove_file(&temp_db);
-    let db_url = format!(
-        "sqlite://{}?mode=rwc",
-        temp_db.to_str().unwrap().replace('\\', "/")
-    );
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
-        .connect(&db_url)
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&temp_db)
+                .create_if_missing(true),
+        )
         .await
         .unwrap();
     sqlx::query("CREATE TABLE plugin_kv(plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(plugin_id,key))")
@@ -532,17 +553,23 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
         id: "staged-abort-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
-            manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
-            actions: vec![],
+        manifest_schema: 1,
+        min_host_version: None,
+        declarations: Default::default(),
+        hook_priority: 0,
+        actions: vec![],
         name: "Probe".into(),
         description: String::new(),
         entrypoint: "plugin.wasm".into(),
         permissions: PluginPermissions {
             sqlite: vec!["kv_write".into()],
-            http: vec![], content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
-            editor_panels: vec![],
+            http: vec![],
+            content_read: vec![],
+            network: vec![],
+            content_write: vec![],
+            ..Default::default()
+        },
+        editor_panels: vec![],
     };
 
     let runtime = PluginRuntime::new();
@@ -660,17 +687,23 @@ async fn ipc_kv_get_stuck_parent_must_timeout_and_clean_up() {
         id: "ipc-timeout-probe".into(),
         version: "1.0.0".into(),
         api_version: 1,
-            manifest_schema: 1,
-            min_host_version: None, declarations: Default::default(), hook_priority: 0,
-            actions: vec![],
+        manifest_schema: 1,
+        min_host_version: None,
+        declarations: Default::default(),
+        hook_priority: 0,
+        actions: vec![],
         name: "Probe".into(),
         description: String::new(),
         entrypoint: "plugin.wasm".into(),
         permissions: PluginPermissions {
             sqlite: vec!["kv_read".into()],
-            http: vec![], content_read: vec![],
-            network: vec![], content_write: vec![], ..Default::default() },
-            editor_panels: vec![],
+            http: vec![],
+            content_read: vec![],
+            network: vec![],
+            content_write: vec![],
+            ..Default::default()
+        },
+        editor_panels: vec![],
     };
 
     let runtime = PluginRuntime::new();
