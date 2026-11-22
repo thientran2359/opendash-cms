@@ -1,7 +1,7 @@
 # Declarative `block.json` Block Engine & OpenDash Studio Schema-Driven Blocks
 
 - **Author:** Nova (Elephant)
-- **Status:** Approved
+- **Status:** Verified
 - **Date:** 2026-11-22
 - **Baseline:** `main@a5e0d50`
 - **Approved By:** Owner
