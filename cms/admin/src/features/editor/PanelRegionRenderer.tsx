@@ -29,6 +29,7 @@ export interface PanelRegionRendererProps {
   entryId: number | null;
   userId: number | null;
   termIds: number[];
+  primaryCategoryTermId: number | null;
   publicPath: string | null;
   draftPreviewPath?: string | null;
   isPublic?: boolean;
@@ -43,6 +44,7 @@ export interface PanelRegionRendererProps {
   onSlugChange: (slug: string) => void;
   onPublicationStatusChange: (status: 'draft' | 'published') => void;
   onTermIdsChange: (ids: number[]) => void;
+  onPrimaryCategoryChange: (id: number | null) => void;
   onApiError: (error: unknown, fallback: string) => void;
   onFieldChange: (key: string, value: ContentFieldValue) => void;
   onPickMedia: (fieldKey: string, kind: 'image' | 'gallery') => void;
@@ -101,6 +103,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   entryId,
   userId,
   termIds,
+  primaryCategoryTermId,
   publicPath,
   draftPreviewPath,
   isPublic = true,
@@ -115,6 +118,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   onSlugChange,
   onPublicationStatusChange,
   onTermIdsChange,
+  onPrimaryCategoryChange,
   onApiError,
   onFieldChange,
   onPickMedia,
@@ -646,6 +650,10 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
               <TermPicker userId={userId} selectedIds={termIds} disabled={saving}
                 typeKey={config.type_key} allowedKinds={config.taxonomies}
                 variant="cards"
+                primaryCategoryTermId={config.type_key === 'post' && config.taxonomies.includes('category')
+                  ? primaryCategoryTermId : null}
+                onPrimaryCategoryChange={config.type_key === 'post' && config.taxonomies.includes('category')
+                  ? onPrimaryCategoryChange : undefined}
                 onApiError={onApiError} onChange={onTermIdsChange} />
             </div>
           ) : null;

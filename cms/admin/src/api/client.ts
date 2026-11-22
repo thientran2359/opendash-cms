@@ -1,10 +1,18 @@
+export interface PermalinkConflictItem {
+  path: string;
+  new_target: string;
+  existing_target: string;
+}
+
 export class ApiClientError extends Error {
   status: number;
+  readonly conflicts?: PermalinkConflictItem[];
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, conflicts?: PermalinkConflictItem[]) {
     super(message);
     this.name = 'ApiClientError';
     this.status = status;
+    this.conflicts = conflicts;
   }
 }
 
@@ -111,10 +119,21 @@ export async function requestJson<T>(url: string, options: ApiRequestOptions): P
   const text = await res.text();
   if (!res.ok) {
     let msg = text;
+    let conflicts: PermalinkConflictItem[] | undefined;
     try {
       const errObj = JSON.parse(text);
       if (errObj && typeof errObj.error === 'string') {
         msg = errObj.error;
+      }
+      if (res.status === 409 && Array.isArray(errObj?.conflicts)) {
+        // Only expose the known structured permalink conflict shape. Other
+        // errors keep their existing message/status handling.
+        conflicts = errObj.conflicts.filter((item: unknown): item is PermalinkConflictItem => {
+          if (!item || typeof item !== 'object') return false;
+          const row = item as Record<string, unknown>;
+          return typeof row.path === 'string' && typeof row.new_target === 'string'
+            && typeof row.existing_target === 'string';
+        }).slice(0, 20);
       }
     } catch {
       // plain text error response
@@ -122,7 +141,7 @@ export async function requestJson<T>(url: string, options: ApiRequestOptions): P
     if (res.status === 413 && options.oversizeErrorMessage) {
       msg = options.oversizeErrorMessage;
     }
-    throw new ApiClientError(res.status, msg || options.defaultErrorMessage);
+    throw new ApiClientError(res.status, msg || options.defaultErrorMessage, conflicts);
   }
 
   try {
