@@ -144,6 +144,8 @@ gate from this design clarification and premerge regression evidence.
 
 ## 4. Permalinks and route authority (C3)
 
+> **Superseded by [`docs/designs/wordpress-style-permalinks.md`](../designs/wordpress-style-permalinks.md) (Verified 2026-11-22):** Cơ chế mặc định `/content/{type}/{slug}` / `/taxonomy/{kind}/{slug}`, cấu hình `post_structure` mặc định `/content/post/%postname%`, Page giữ legacy `/content/page/{slug}`, nhãn opt-out `"legacy"` cho explicit `null`, và quy tắc `DynamicPattern` cũ trong mục này đã được thay thế bởi WordPress-Style Permalinks Phase 1 (mặc định `/{slug}`, `/{cpt}/{slug}`, `/{tax}/{slug}`, `/posts`, hỗ trợ `%category%` + Primary Category, opt-in `auto_unique_slug` và trailing-slash `301` an toàn trong `public_fallback`).
+
 One storage-backed resolver for entry/term/archive/home with stable target IDs,
 used by public matching, canonical/OG/sitemap, menus, Builder bindings/list items,
 editor View links and redirects. No consumer may concatenate a competing URL.
