@@ -373,10 +373,10 @@ async fn pattern_references_are_synced_private_one_hop_and_cas_guarded() {
             .status(),
         StatusCode::BAD_REQUEST
     );
-    let db = SqlitePool::connect(&format!(
-        "sqlite://{}",
-        site.root.join("database/opendash.sqlite").display()
-    ))
+    let db = SqlitePool::connect_with(
+        sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(site.root.join("database/opendash.sqlite")),
+    )
     .await
     .unwrap();
     let refs: i64 =

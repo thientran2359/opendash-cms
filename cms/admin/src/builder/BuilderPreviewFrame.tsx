@@ -292,6 +292,7 @@ export function BuilderPreviewFrame({
   onPrepared,
 }: BuilderPreviewFrameProps) {
   const [preparedHtml, setPreparedHtml] = useState<string>('');
+  const [preparedSeq, setPreparedSeq] = useState<number>(0);
   const [preparing, setPreparing] = useState<boolean>(false);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const nonceRef = useRef<string>(generateStudioNonce());
@@ -331,6 +332,7 @@ export function BuilderPreviewFrame({
         if (controller.signal.aborted || seq !== seqRef.current) return;
         nonceRef.current = nextNonce;
         setPreparedHtml(result.html);
+        setPreparedSeq(v => v + 1);
         onPreparedRef.current?.({ skipped: result.skipped });
       })
       .catch(cause => {
@@ -389,23 +391,27 @@ export function BuilderPreviewFrame({
     return () => window.removeEventListener('message', onMessage);
   }, [interactive]);
 
-  useEffect(() => {
+  const sendHighlight = () => {
     if (!interactive) return;
     const targetWindow = iframeRef.current?.contentWindow;
     if (!targetWindow) return;
-    const shouldScroll = lastPickedFromIframeRef.current !== selectedId;
-    if (lastPickedFromIframeRef.current === selectedId) {
+    const shouldScroll = lastPickedFromIframeRef.current !== selectedIdRef.current;
+    if (lastPickedFromIframeRef.current === selectedIdRef.current) {
       lastPickedFromIframeRef.current = null;
     }
     targetWindow.postMessage(
       {
         type: 'od-highlight',
         nonce: nonceRef.current,
-        selectedId: selectedId ?? null,
+        selectedId: selectedIdRef.current ?? null,
         scroll: shouldScroll,
       },
       '*',
     );
+  };
+
+  useEffect(() => {
+    sendHighlight();
   }, [interactive, selectedId, preparedHtml]);
 
   const width = VIEWPORT_WIDTHS[viewport];
@@ -418,22 +424,37 @@ export function BuilderPreviewFrame({
       data-viewport-width={width}
       aria-busy={preparing}
     >
-      <iframe
-        key={interactive ? 'interactive' : 'static'}
-        ref={iframeRef}
-        id="canvas"
-        title={title}
-        sandbox={interactive ? 'allow-scripts' : ''}
-        referrerPolicy="no-referrer"
-        className={`mx-auto bg-white shadow-xs ${frameClassName}`.trim()}
-        style={{
-          width: viewport === 'desktop' ? '100%' : width,
-          minWidth: viewport === 'desktop' ? undefined : width,
-          maxWidth: viewport === 'desktop' ? width : 'none',
-          display: 'block',
-        }}
-        srcDoc={preparedHtml}
-      />
+      {preparedHtml ? (
+        <iframe
+          key={`${interactive ? 'interactive' : 'static'}-${preparedSeq}`}
+          ref={iframeRef}
+          id="canvas"
+          title={title}
+          sandbox={interactive ? 'allow-scripts' : ''}
+          referrerPolicy="no-referrer"
+          onLoad={sendHighlight}
+          className={`mx-auto bg-white shadow-xs ${frameClassName}`.trim()}
+          style={{
+            width: viewport === 'desktop' ? '100%' : width,
+            minWidth: viewport === 'desktop' ? undefined : width,
+            maxWidth: viewport === 'desktop' ? width : 'none',
+            display: 'block',
+          }}
+          srcDoc={preparedHtml}
+        />
+      ) : (
+        <div
+          className={`mx-auto flex items-center justify-center bg-white text-xs text-zinc-500 shadow-xs ${frameClassName}`.trim()}
+          style={{
+            width: viewport === 'desktop' ? '100%' : width,
+            minWidth: viewport === 'desktop' ? undefined : width,
+            maxWidth: viewport === 'desktop' ? width : 'none',
+          }}
+          data-testid="builder-preview-preparing"
+        >
+          Đang chuẩn bị bản xem trước…
+        </div>
+      )}
     </div>
   );
 }

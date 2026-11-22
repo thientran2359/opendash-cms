@@ -507,13 +507,13 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
     let _serial_plugin_test = crate::plugin::PLUGIN_TEST_SERIAL.lock().await;
     let temp_db = std::env::temp_dir().join(format!("staged_abort_{}.sqlite", std::process::id()));
     let _ = std::fs::remove_file(&temp_db);
-    let db_url = format!(
-        "sqlite://{}?mode=rwc",
-        temp_db.to_str().unwrap().replace('\\', "/")
-    );
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
-        .connect(&db_url)
+        .connect_with(
+            sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&temp_db)
+                .create_if_missing(true),
+        )
         .await
         .unwrap();
     sqlx::query("CREATE TABLE plugin_kv(plugin_id TEXT, key TEXT, value_json TEXT, updated_at TEXT, PRIMARY KEY(plugin_id,key))")

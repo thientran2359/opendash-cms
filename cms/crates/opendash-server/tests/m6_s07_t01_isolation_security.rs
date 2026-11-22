@@ -328,7 +328,7 @@ async fn m6_s07_t01_adversarial_isolation_ssrf_trap_disable_and_zero_late_writes
     let db_path = dir.path.join("database").join("opendash.sqlite");
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .connect(&format!("sqlite://{}", db_path.display()))
+        .connect_with(sqlx::sqlite::SqliteConnectOptions::new().filename(&db_path))
         .await
         .unwrap();
     let count: i64 =

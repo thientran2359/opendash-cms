@@ -1190,8 +1190,8 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let options = SqliteConnectOptions::from_str(&format!("sqlite://{}", path.display()))
-            .unwrap()
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Delete)
