@@ -544,8 +544,8 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
     let part1_xml = part1.text().await.unwrap();
     assert!(part1_xml.contains("<loc>https://example.com/</loc>"));
     assert!(part1_xml.contains("<loc>https://example.com/gioi-thieu</loc>"));
-    assert!(part1_xml.contains("<loc>https://example.com/content/post</loc>"));
-    assert!(part1_xml.contains("<loc>https://example.com/taxonomy/category/tin-tuc</loc>"));
+    assert!(part1_xml.contains("<loc>https://example.com/posts</loc>"));
+    assert!(part1_xml.contains("<loc>https://example.com/category/tin-tuc</loc>"));
     assert!(!part1_xml.contains("secret-noindex"));
     assert!(!part1_xml.contains("draft-only"));
     assert!(!part1_xml.contains("ext-canonical"));
@@ -592,7 +592,7 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
             .unwrap();
     // EGM S01 migration 0043 makes the untouched Core Page non-archived.
     // Currently indexable routes: published Reading Homepage '/' (1)
-    // and '/content/post' (1) = 2. Insert 4998 more -> exactly 5000.
+    // and '/posts' (1) = 2. Insert 4998 more -> exactly 5000.
     let mut tx = pool.begin().await.unwrap();
     for i in 1..=4998 {
         sqlx::query(

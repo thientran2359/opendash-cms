@@ -5,11 +5,11 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     Extension,
-    extract::{OriginalUri, Path, RawQuery, State},
+    extract::{Path, State},
     http::{HeaderMap, Method, StatusCode, header},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
-use opendash_core::{content::ContentTypeDefinition, id::valid_kebab_segment_with_limit};
+use opendash_core::content::ContentTypeDefinition;
 use sqlx::SqlitePool;
 
 use crate::{
@@ -18,7 +18,7 @@ use crate::{
     media::MediaStore,
     public_context::{
         ARCHIVE_SIZE, CanonicalUrlBuilder, MAX_ARCHIVE_PAGE, PublicQuery, PublicRequestContext,
-        QueryScope, TaxonomyKind, parse_query, validate_public_request_path, validate_single_query,
+        QueryScope, TaxonomyKind, parse_query,
     },
     routes::themes::ThemeStoreRoot,
     storage::{
@@ -27,33 +27,11 @@ use crate::{
         media,
         overrides::{self, PublicTemplateContext, TemplateResolution},
         page::active_content_templates,
-        permalinks::{self, PublicRouteTarget},
-        public_content,
+        permalinks, public_content,
         seo::{self, ReadingPageState},
         settings, theme as theme_storage,
     },
 };
-
-fn check_type_key(type_key: &str) -> ApiResult<()> {
-    if CanonicalUrlBuilder::valid_type(type_key) {
-        Ok(())
-    } else {
-        Err(ApiError::not_found("Không tìm thấy loại nội dung."))
-    }
-}
-
-fn public_html(html: String) -> Response {
-    (
-        [
-            (header::CONTENT_SECURITY_POLICY, "default-src 'none'; img-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-            (header::REFERRER_POLICY, "no-referrer"),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        Html(html),
-    )
-        .into_response()
-}
 
 struct ResolvedPublicHtml {
     html: String,
@@ -271,39 +249,7 @@ pub(crate) async fn render_not_found_response(
     Ok(response)
 }
 
-pub async fn archive(
-    State(db): State<SqlitePool>,
-    themes_root: Option<Extension<ThemeStoreRoot>>,
-    Path(type_key): Path<String>,
-    OriginalUri(uri): OriginalUri,
-    RawQuery(raw): RawQuery,
-) -> ApiResult<Response> {
-    validate_public_request_path(uri.path()).map_err(ApiError::bad_request)?;
-    check_type_key(&type_key)?;
-    let legacy_path = CanonicalUrlBuilder::archive(&type_key)
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
-    if uri.path() != legacy_path {
-        return Err(ApiError::not_found("Đường dẫn nội dung không hợp lệ."));
-    }
-    let Some(resolved) = permalinks::resolve_public_path(&db, uri.path()).await? else {
-        return render_not_found_response(&db, themes_root).await;
-    };
-    if !matches!(&resolved.target, PublicRouteTarget::Archive(key) if key == &type_key) {
-        return render_not_found_response(&db, themes_root).await;
-    }
-    let query =
-        parse_query(raw.as_deref(), QueryScope::ContentArchive).map_err(ApiError::bad_request)?;
-    if resolved.redirect {
-        return Ok(permanent_redirect(CanonicalUrlBuilder::with_query(
-            resolved.canonical_path,
-            query,
-            QueryScope::ContentArchive,
-        )));
-    }
-    render_canonical_archive(db, themes_root, type_key, resolved.canonical_path, raw).await
-}
-
-/// Called both by legacy static routes and the canonical fallback router.
+/// Called by the canonical fallback router.
 /// The incoming route must already have been resolved by storage.
 pub(crate) async fn render_canonical_archive(
     db: SqlitePool,
@@ -450,67 +396,6 @@ pub(crate) async fn render_canonical_archive(
         )?,
         body.has_active_contact_form || shell_has_form,
     ))
-}
-
-pub async fn single(
-    State(db): State<SqlitePool>,
-    themes_root: Option<Extension<ThemeStoreRoot>>,
-    Path((type_key, slug)): Path<(String, String)>,
-    OriginalUri(uri): OriginalUri,
-    RawQuery(raw): RawQuery,
-) -> ApiResult<Response> {
-    validate_public_request_path(uri.path()).map_err(ApiError::bad_request)?;
-    check_type_key(&type_key)?;
-    if !valid_kebab_segment_with_limit(&slug, 64) {
-        return Err(ApiError::not_found("Không tìm thấy nội dung."));
-    }
-    let legacy_path = CanonicalUrlBuilder::entry(&type_key, &slug)
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-    if uri.path() != legacy_path {
-        return Err(ApiError::not_found("Đường dẫn nội dung không hợp lệ."));
-    }
-    let Some(resolved) = permalinks::resolve_public_path(&db, uri.path()).await? else {
-        return render_not_found_response(&db, themes_root).await;
-    };
-    let entry_id = match resolved.target {
-        PublicRouteTarget::Entry(entry_id) => {
-            validate_single_query(raw.as_deref()).map_err(ApiError::bad_request)?;
-            entry_id
-        }
-        // The Posts Page keeps its own Page URL, but it is routed to the
-        // post archive. The explicit /content/page/:slug route must honor the
-        // same claim as the fallback dispatcher (and archive pagination).
-        PublicRouteTarget::Archive(ref archive_type)
-            if type_key == "page" && archive_type == "post" =>
-        {
-            let query = parse_query(raw.as_deref(), QueryScope::ContentArchive)
-                .map_err(ApiError::bad_request)?;
-            if resolved.redirect {
-                return Ok(permanent_redirect(CanonicalUrlBuilder::with_query(
-                    resolved.canonical_path,
-                    query,
-                    QueryScope::ContentArchive,
-                )));
-            }
-            return render_canonical_archive(
-                db,
-                themes_root,
-                "post".to_owned(),
-                resolved.canonical_path,
-                raw,
-            )
-            .await;
-        }
-        _ => return render_not_found_response(&db, themes_root).await,
-    };
-    // Resolve by stable ID so an old slug never selects a replacement entry.
-    let Some(entry) = public_content::get_published_by_id(&db, entry_id).await? else {
-        return render_not_found_response(&db, themes_root).await;
-    };
-    if resolved.redirect {
-        return Ok(permanent_redirect(resolved.canonical_path));
-    }
-    render_single_entry_response(&db, themes_root, entry, Some(resolved.canonical_path)).await
 }
 
 pub(crate) async fn render_single_entry_response(
@@ -670,84 +555,6 @@ async fn render_entry_response(
         )?,
         body.has_active_contact_form || entry_has_form || shell_has_form,
     ))
-}
-
-pub async fn category_archive(
-    State(db): State<SqlitePool>,
-    themes_root: Option<Extension<ThemeStoreRoot>>,
-    Path(slug): Path<String>,
-    OriginalUri(uri): OriginalUri,
-    RawQuery(raw): RawQuery,
-) -> ApiResult<Response> {
-    taxonomy_archive(
-        &db,
-        themes_root.map(|Extension(r)| r),
-        TaxonomyKind::Category,
-        &slug,
-        uri.path(),
-        raw.as_deref(),
-    )
-    .await
-}
-
-pub async fn tag_archive(
-    State(db): State<SqlitePool>,
-    themes_root: Option<Extension<ThemeStoreRoot>>,
-    Path(slug): Path<String>,
-    OriginalUri(uri): OriginalUri,
-    RawQuery(raw): RawQuery,
-) -> ApiResult<Response> {
-    taxonomy_archive(
-        &db,
-        themes_root.map(|Extension(r)| r),
-        TaxonomyKind::Tag,
-        &slug,
-        uri.path(),
-        raw.as_deref(),
-    )
-    .await
-}
-
-async fn taxonomy_archive(
-    db: &SqlitePool,
-    themes_root: Option<ThemeStoreRoot>,
-    kind: TaxonomyKind,
-    slug: &str,
-    request_path: &str,
-    raw_query: Option<&str>,
-) -> ApiResult<Response> {
-    validate_public_request_path(request_path).map_err(ApiError::bad_request)?;
-    let legacy_path = CanonicalUrlBuilder::taxonomy(kind, slug)
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy taxonomy."))?;
-    if request_path != legacy_path {
-        return Err(ApiError::not_found("Đường dẫn taxonomy không hợp lệ."));
-    }
-    let resolved = permalinks::resolve_public_path(db, request_path)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Không tìm thấy taxonomy."))?;
-    let PublicRouteTarget::Term(term_id) = resolved.target else {
-        return Err(ApiError::not_found("Không tìm thấy taxonomy."));
-    };
-    let query =
-        parse_query(raw_query, QueryScope::TaxonomyArchive(kind)).map_err(ApiError::bad_request)?;
-    if resolved.redirect {
-        // Verify the stored target's current taxonomy kind before redirecting.
-        require_term_kind(db, term_id, Some(kind)).await?;
-        return Ok(permanent_redirect(CanonicalUrlBuilder::with_query(
-            resolved.canonical_path,
-            query,
-            QueryScope::TaxonomyArchive(kind),
-        )));
-    }
-    render_canonical_taxonomy(
-        db,
-        themes_root,
-        term_id,
-        resolved.canonical_path,
-        raw_query,
-        Some(kind),
-    )
-    .await
 }
 
 async fn require_term_kind(

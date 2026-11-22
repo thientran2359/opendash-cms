@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use crate::{
     auth::{require_admin, require_admin_with_csrf},
     error::{ApiError, ApiResult},
-    storage::permalinks::{self, PermalinkSettings, PermalinkSettingsInput},
+    storage::permalinks::{self, PermalinkPutError, PermalinkSettings, PermalinkSettingsInput},
     storage::settings::{
         self, GeneralSettings, GeneralSettingsInput, PublicSaveOutcome, PublicSiteSettings,
         PublicSiteSettingsInput, ReadingSettings, ReadingSettingsInput, SaveOutcome,
@@ -180,8 +180,16 @@ pub async fn permalinks_put(
             ApiError::bad_request("Cấu hình permalink không hợp lệ.")
         }
     })?;
-    let saved = permalinks::put_settings(&db, expected, &input).await?;
-    Ok(permalink_settings_response(saved))
+    match permalinks::put_settings(&db, expected, &input).await {
+        Ok(saved) => Ok(permalink_settings_response(saved)),
+        Err(PermalinkPutError::Conflicts(payload)) => Ok((
+            StatusCode::CONFLICT,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(payload),
+        )
+            .into_response()),
+        Err(PermalinkPutError::Api(err)) => Err(err),
+    }
 }
 
 fn reading_settings_response(settings: ReadingSettings) -> Response {

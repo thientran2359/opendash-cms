@@ -49,7 +49,7 @@ use crate::{
             plugin_enable, plugin_install, plugin_list, plugin_run, plugin_ui_schema,
         },
         public::public_page,
-        public_content::{archive, category_archive, media_file, media_thumb, single, tag_archive},
+        public_content::{media_file, media_thumb},
         settings::{
             general_get, general_put, permalinks_get, permalinks_put, public_get, public_put,
             reading_get, reading_put, theme_options_get, theme_options_put, timezones_get,
@@ -161,10 +161,6 @@ pub fn build_router_with_themes_root(
 
     Router::new()
         .route("/", get(public_page))
-        .route("/content/{type_key}", get(archive))
-        .route("/content/{type_key}/{slug}", get(single))
-        .route("/taxonomy/category/{slug}", get(category_archive))
-        .route("/taxonomy/tag/{slug}", get(tag_archive))
         .route("/media/{id}/file", get(media_file))
         .route("/media/{id}/thumbnail", get(media_thumb))
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))

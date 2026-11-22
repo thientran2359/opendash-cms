@@ -4,27 +4,12 @@ use opendash_core::id::valid_kebab_segment_with_limit;
 pub const MAX_CUSTOM_PATH_BYTES: usize = 256;
 pub const MAX_CUSTOM_PATH_SEGMENTS: usize = 5;
 
-const RESERVED_SYSTEM_ROOTS: &[&str] = &[
-    "admin",
-    "api",
-    "assets",
-    "auth",
-    "builder",
-    "content",
-    "forms",
-    "health",
-    "media",
-    "page",
-    "preview",
-    "registry",
-    "robots.txt",
-    "save",
-    "sitemap.xml",
-    "sitemaps",
-    "taxonomy",
-    "theme",
-    "themes",
-];
+pub use crate::public_context::is_reserved_system_root;
+
+/// Returns `true` when `key` cannot be used as a new CPT or Taxonomy key.
+pub fn is_reserved_namespace_key(key: &str) -> bool {
+    is_reserved_system_root(key) || matches!(key, "posts" | "category" | "tag")
+}
 
 /// Validates a custom entry path: `/` followed by 1..=5 ASCII kebab segments,
 /// each <= 64 bytes, whole path <= 256 bytes, no trailing slash, query, fragment,
@@ -56,7 +41,7 @@ pub fn validate_custom_entry_path(raw: &str) -> Result<String, &'static str> {
             return Err("Mỗi đoạn đường dẫn phải là ASCII kebab-case (1–64 bytes).");
         }
     }
-    if RESERVED_SYSTEM_ROOTS.contains(&segments[0]) {
+    if is_reserved_system_root(segments[0]) {
         return Err("Đường dẫn không được trùng với tiền tố hệ thống được bảo vệ.");
     }
     Ok(raw.to_owned())

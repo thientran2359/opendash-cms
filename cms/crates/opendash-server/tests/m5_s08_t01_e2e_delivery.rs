@@ -431,7 +431,7 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
     // archive and single routes are unavailable until that provider returns.
     assert_eq!(
         client
-            .get(format!("{}/content/portfolio", srv2.base_url))
+            .get(format!("{}/portfolio", srv2.base_url))
             .send()
             .await
             .unwrap()
@@ -439,7 +439,7 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
         404
     );
     let pub_single = client
-        .get(format!("{}/content/portfolio/e2e-work", srv2.base_url))
+        .get(format!("{}/portfolio/e2e-work", srv2.base_url))
         .send()
         .await
         .unwrap();
@@ -483,13 +483,13 @@ async fn m5_s08_t01_cross_module_e2e_delivery_import_preservation_and_security()
         200
     );
     let restored_archive = client
-        .get(format!("{}/content/portfolio", srv2.base_url))
+        .get(format!("{}/portfolio", srv2.base_url))
         .send()
         .await
         .unwrap();
     assert_eq!(restored_archive.status(), 200);
     let restored_single = client
-        .get(format!("{}/content/portfolio/e2e-work", srv2.base_url))
+        .get(format!("{}/portfolio/e2e-work", srv2.base_url))
         .send()
         .await
         .unwrap();

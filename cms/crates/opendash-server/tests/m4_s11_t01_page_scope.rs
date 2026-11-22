@@ -153,7 +153,7 @@ async fn editor_page_exact_scope_acl_draft_cas_reset() {
         "{}/api/admin/content-types/page/entries/{}",
         site.base, ids[0]
     );
-    let public = format!("{}/content/page/scope-a", site.base);
+    let public = format!("{}/scope-a", site.base);
     let open = http
         .get(&a)
         .header("Cookie", &editor_cookie)

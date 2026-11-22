@@ -621,7 +621,7 @@ async fn studio_s02_rbac_transient_preview_and_annotation_scoping() {
         .unwrap();
     assert_eq!(set_home.status(), StatusCode::OK);
 
-    for public_path in ["/", "/content/page/studio-s02-page"] {
+    for public_path in ["/", "/studio-s02-page"] {
         let res = http
             .get(format!("{}{public_path}", site.base))
             .send()

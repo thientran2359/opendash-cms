@@ -25,6 +25,8 @@ impl Drop for Server {
     }
 }
 
+static NEXT_SITE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 async fn start() -> Server {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
@@ -33,10 +35,11 @@ async fn start() -> Server {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let root = std::env::temp_dir()
-        .canonicalize()
-        .unwrap()
-        .join(format!("opendash-m7-s17-t01-{suffix}"));
+    let seq = NEXT_SITE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let root = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "opendash-m7-s17-t01-{}-{suffix}-{seq}",
+        std::process::id()
+    ));
     fs::create_dir_all(&root).unwrap();
     let child = Command::new(env!("CARGO_BIN_EXE_opendash"))
         .env("OPENDASH_SITE_ROOT", &root)
@@ -181,10 +184,10 @@ async fn c3_permalinks_preserve_legacy_routes_then_redirect_single_hop_with_cas(
     assert_eq!(before.headers()[header::CACHE_CONTROL], "no-store");
     let settings: Value = before.json().await.unwrap();
     let version = settings["version"].as_i64().unwrap();
-    assert_eq!(settings["post_structure"], "/content/post/%postname%");
+    assert_eq!(settings["post_structure"], "/%postname%");
     assert_eq!(
         client
-            .get(format!("{}/content/post/alpha", srv.base))
+            .get(format!("{}/alpha", srv.base))
             .send()
             .await
             .unwrap()
@@ -235,7 +238,7 @@ async fn c3_permalinks_preserve_legacy_routes_then_redirect_single_hop_with_cas(
         .unwrap();
     assert_eq!(new_route.status(), 200);
     let old_route = client
-        .get(format!("{}/content/post/alpha", srv.base))
+        .get(format!("{}/alpha", srv.base))
         .send()
         .await
         .unwrap();
@@ -321,7 +324,7 @@ async fn c3_settings_collision_does_not_change_committed_namespace() {
     );
     assert_eq!(
         client
-            .get(format!("{}/content/post/taken", srv.base))
+            .get(format!("{}/taken", srv.base))
             .send()
             .await
             .unwrap()

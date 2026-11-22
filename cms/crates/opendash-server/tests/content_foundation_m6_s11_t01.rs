@@ -17,6 +17,8 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 const CPT: &str = "listing_c4";
 const TAX: &str = "genre_c4";
 
+static NEXT_SITE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 struct Site(PathBuf);
 impl Site {
     fn new() -> Self {
@@ -24,11 +26,13 @@ impl Site {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
+        let seq = NEXT_SITE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // macOS /var is a symlink; site-root validation rejects symlink components.
         let path = std::env::temp_dir().canonicalize().unwrap().join(format!(
-            "opendash_c4_{}_{}",
+            "opendash_c4_{}_{}_{}",
             std::process::id(),
-            nanos
+            nanos,
+            seq
         ));
         fs::create_dir_all(&path).unwrap();
         Self(path)
@@ -1442,10 +1446,10 @@ async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
     )
     .await;
     assert_eq!(published["publication_status"], "published");
-    let legacy_entry = format!("/content/{CPT}/inherited-entry");
-    let legacy_term = format!("/taxonomy/{TAX}/fiction-c4");
-    route(&raw_client, &base, &legacy_entry, StatusCode::OK, None).await;
-    route(&raw_client, &base, &legacy_term, StatusCode::OK, None).await;
+    let initial_entry = format!("/{CPT}/inherited-entry");
+    let initial_term = format!("/{TAX}/fiction-c4");
+    route(&raw_client, &base, &initial_entry, StatusCode::OK, None).await;
+    route(&raw_client, &base, &initial_term, StatusCode::OK, None).await;
     let initial = settings(&client, &base, &cookie).await;
     assert_eq!(initial["content_type_bases"], json!({}));
     assert_eq!(initial["taxonomy_bases"], json!({}));
@@ -1490,7 +1494,7 @@ async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
     route(
         &raw_client,
         &base,
-        &legacy_entry,
+        &initial_entry,
         StatusCode::MOVED_PERMANENTLY,
         Some("/catalog-c4/inherited-entry"),
     )
@@ -1498,13 +1502,13 @@ async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
     route(
         &raw_client,
         &base,
-        &legacy_term,
+        &initial_term,
         StatusCode::MOVED_PERMANENTLY,
         Some("/topics-c4/fiction-c4"),
     )
     .await;
 
-    // Change both bases. Both legacy aliases and the prior provider URLs
+    // Change both bases. Both initial aliases and the prior provider URLs
     // redirect directly to the latest stable-ID canonical destinations.
     manifest["version"] = json!("1.0.2");
     manifest["declarations"]["content_types"][0]["rewrite_base"] = json!("library-c4");
@@ -1541,7 +1545,7 @@ async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
         None,
     )
     .await;
-    for old in [&legacy_entry[..], "/catalog-c4/inherited-entry"] {
+    for old in [&initial_entry[..], "/catalog-c4/inherited-entry"] {
         route(
             &raw_client,
             &base,
@@ -1551,7 +1555,7 @@ async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
         )
         .await;
     }
-    for old in [&legacy_term[..], "/topics-c4/fiction-c4"] {
+    for old in [&initial_term[..], "/topics-c4/fiction-c4"] {
         route(
             &raw_client,
             &base,
@@ -1653,15 +1657,15 @@ async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
     );
     assert_eq!(removed["content_type_bases"], json!({}));
     assert_eq!(removed["taxonomy_bases"], json!({}));
-    route(&raw_client, &base, &legacy_entry, StatusCode::OK, None).await;
-    route(&raw_client, &base, &legacy_term, StatusCode::OK, None).await;
+    route(&raw_client, &base, &initial_entry, StatusCode::OK, None).await;
+    route(&raw_client, &base, &initial_term, StatusCode::OK, None).await;
     for old in ["/catalog-c4/inherited-entry", "/library-c4/inherited-entry"] {
         route(
             &raw_client,
             &base,
             old,
             StatusCode::MOVED_PERMANENTLY,
-            Some(&legacy_entry),
+            Some(&initial_entry),
         )
         .await;
     }
@@ -1671,7 +1675,7 @@ async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
             &base,
             old,
             StatusCode::MOVED_PERMANENTLY,
-            Some(&legacy_term),
+            Some(&initial_term),
         )
         .await;
     }
@@ -1692,8 +1696,8 @@ async fn c4_same_owner_default_add_change_remove_published_no_site_override() {
         .await
         .unwrap();
     for (path, target_kind, stable_id) in [
-        (legacy_entry.as_str(), "entry", entry_id),
-        (legacy_term.as_str(), "term", term_id),
+        (initial_entry.as_str(), "entry", entry_id),
+        (initial_term.as_str(), "term", term_id),
     ] {
         let actual: (String, String) =
             sqlx::query_as("SELECT target_kind,target_id FROM permalink_route_claims WHERE path=?")
@@ -1808,11 +1812,12 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     .await
     .unwrap();
     let canonical_entry = "/issues-c4/historic-book";
-    let canonical_term = format!("/taxonomy/{kind}/historic-term");
+    let pre0045_term = format!("/taxonomy/{kind}/historic-term");
+    let rebuilt_term = format!("/{kind}/historic-term");
     for (path, target_kind, target_id) in [
         (canonical_entry.to_owned(), "entry", entry_id.to_string()),
         ("/issues-c4".to_owned(), "archive", type_key.to_owned()),
-        (canonical_term.clone(), "term", term_id.to_string()),
+        (pre0045_term.clone(), "term", term_id.to_string()),
     ] {
         sqlx::query("INSERT INTO permalink_route_claims(path,target_kind,target_id) VALUES(?,?,?)")
             .bind(path)
@@ -1848,7 +1853,7 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
         .unwrap();
     }
     // Pin the exact 0040 ledger and route history independently of the
-    // server's HTTP resolver; the 0041 migration is additive-only.
+    // server's HTTP resolver; 0041 is additive-only and 0045 rebuilds claims to WordPress defaults.
     let claims_before: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT path,target_kind,target_id FROM permalink_route_claims ORDER BY path",
     )
@@ -1895,17 +1900,29 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     );
     assert_eq!(
         client
-            .get(format!("{base}{canonical_term}"))
+            .get(format!("{base}{rebuilt_term}"))
             .send()
             .await
             .unwrap()
             .status(),
         StatusCode::OK,
     );
+    // Under WordPress permalinks (0045), /content/... is a reserved system root
+    // that always returns 404 (no fallback), while non-reserved historical
+    // aliases retain single-hop 301 redirects to canonical URLs.
+    assert_eq!(
+        client
+            .get(format!("{base}{legacy_entry}"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND,
+        "{legacy_entry} must return 404 after WordPress default migration"
+    );
     for (old, new) in [
-        (legacy_entry.as_str(), canonical_entry),
         ("/earlier-books-c4/historic-book", canonical_entry),
-        ("/earlier-genres-c4/historic-term", canonical_term.as_str()),
+        ("/earlier-genres-c4/historic-term", rebuilt_term.as_str()),
     ] {
         let response = client.get(format!("{base}{old}")).send().await.unwrap();
         assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY, "{old}");
@@ -1915,7 +1932,7 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
                 .get(reqwest::header::LOCATION)
                 .and_then(|value| value.to_str().ok()),
             Some(new),
-            "0041 must retain stable-ID redirect to original canonical URL",
+            "upgrade must retain stable-ID redirect to canonical URL",
         );
     }
     let db = SqlitePoolOptions::new()
@@ -1932,9 +1949,7 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
             .fetch_one(&db)
             .await
             .unwrap();
-    // EGM Spec 2 S02 adds migration 0044's private Pattern data conversion;
-    // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 44);
+    assert_eq!(migration_version, 45);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await
@@ -1952,6 +1967,28 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     .fetch_all(&db)
     .await
     .unwrap();
-    assert_eq!(claims_after, claims_before);
+    for expected in [
+        (
+            "/issues-c4".to_owned(),
+            "archive".to_owned(),
+            type_key.to_owned(),
+        ),
+        (
+            canonical_entry.to_owned(),
+            "entry".to_owned(),
+            entry_id.to_string(),
+        ),
+        (rebuilt_term.clone(), "term".to_owned(), term_id.to_string()),
+    ] {
+        assert!(
+            claims_after.contains(&expected),
+            "missing expected claim {expected:?} in {claims_after:?}"
+        );
+    }
+    assert!(
+        claims_before
+            .iter()
+            .any(|(p, k, id)| p == "/issues-c4" && k == "archive" && id == type_key)
+    );
     assert_eq!(redirects_after, redirects_before);
 }
