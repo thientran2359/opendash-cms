@@ -143,6 +143,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   const [values, setValues] = useState<Record<string, ContentFieldValue>>({});
   const [clearedFields, setClearedFields] = useState<string[]>([]);
   const [termIds, setTermIds] = useState<number[]>([]);
+  const [primaryCategoryTermId, setPrimaryCategoryTermId] = useState<number | null>(null);
   const [customPath, setCustomPath] = useState('');
   const [themeLayouts, setThemeLayouts] = useState<ThemeLayoutCatalog | null>(null);
   const [selectedThemeKey, setSelectedThemeKey] = useState<string | null>(null);
@@ -237,6 +238,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     setValues(payload.values);
     setClearedFields(payload.cleared_fields);
     setTermIds(payload.term_ids);
+    setPrimaryCategoryTermId(payload.primary_category_term_id);
     setCustomPath(payload.custom_path ?? '');
     setSeoTitle(payload.seo?.title ?? '');
     setSeoDescription(payload.seo?.description ?? '');
@@ -383,6 +385,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             slug_touched: true, publication_status: rec.publication_status,
             content_mode: rec.content_mode,
             values: allowedValues, cleared_fields: [], term_ids: rec.term_ids ?? [],
+            primary_category_term_id: rec.primary_category_term_id ?? null,
             custom_path: routeSnap?.custom_path ?? '',
             seo: seoSnap ? {
               title: seoSnap.title, description: seoSnap.description,
@@ -404,7 +407,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             publication_status: effectiveContentTypeSettings(typeKey, freshCfg.settings).publication === 'draft_publish'
               ? 'draft' : 'published',
             content_mode: 'editor',
-            values: {}, cleared_fields: [], term_ids: [], custom_path: '', seo: emptySeo,
+            values: {}, cleared_fields: [], term_ids: [], primary_category_term_id: null,
+            custom_path: '', seo: emptySeo,
           };
         }
         const restored = editorDraftStore.restoreAuthorizedDraft(
@@ -534,6 +538,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         // Omitted term_ids retains existing links; [] only clears by user edit.
         term_ids: baselineRef.current && diffEditorPayload(baselineRef.current, snapshot).includes('term_ids')
           ? snapshot.term_ids : undefined,
+        // Primary Category is writable only while category remains eligible for post.
+        // Omitted means preserve; explicit null means clear the previous choice.
+        ...(typeKey === 'post' && config.taxonomies.includes('category')
+          && baselineRef.current?.primary_category_term_id !== snapshot.primary_category_term_id
+          ? { primary_category_term_id: snapshot.primary_category_term_id } : {}),
+        ...(entryId === null ? { auto_unique_slug: true } : {}),
         ...(canWriteRouteRef.current ? {
           custom_path: snapshot.custom_path?.trim() ? snapshot.custom_path.trim() : null,
         } : {}),
@@ -559,6 +569,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         slug_touched: true, publication_status: res.entry.publication_status,
         content_mode: res.entry.content_mode,
         values: res.entry.values, cleared_fields: [], term_ids: res.entry.term_ids ?? snapshot.term_ids,
+        primary_category_term_id: res.entry.primary_category_term_id ?? null,
         custom_path: res.custom_path ?? '',
         seo: res.seo ? {
           title: res.seo.title, description: res.seo.description,
@@ -651,7 +662,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
       if (err instanceof ApiClientError && err.status === 412) {
         setStatusNote('Có xung đột version hoặc schema (412). Nháp vẫn được giữ để xử lý.');
       } else if (err instanceof ApiClientError && err.status === 409) {
-        setStatusNote('Thao tác bị từ chối vì xung đột chính sách xuất bản (409). Nháp vẫn được giữ.');
+        setStatusNote('Xung đột đường dẫn tĩnh hoặc slug (409). Hãy chọn đường dẫn khác hoặc xem chi tiết xung đột. Nháp vẫn được giữ.');
       }
       onApiError(err, 'Không thể lưu nội dung.');
       return null;
@@ -786,6 +797,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         entryId={entryId}
         userId={user?.id ?? null}
         termIds={termIds}
+        primaryCategoryTermId={primaryCategoryTermId}
         publicPath={publicPath}
         draftPreviewPath={draftPreviewPath}
         isPublic={settings?.public ?? true}
@@ -822,7 +834,17 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         onTermIdsChange={nextIds => {
           const sorted = [...nextIds].sort((a, b) => a - b);
           setTermIds(sorted);
-          persistDraftPatch({ term_ids: sorted });
+          const currentPrimary = draftRef.current?.primary_category_term_id ?? null;
+          const nextPrimary = currentPrimary !== null && !sorted.includes(currentPrimary)
+            ? null : currentPrimary;
+          if (nextPrimary !== currentPrimary) setPrimaryCategoryTermId(null);
+          persistDraftPatch({ term_ids: sorted, primary_category_term_id: nextPrimary });
+        }}
+        onPrimaryCategoryChange={id => {
+          if (typeKey !== 'post' || !config.taxonomies.includes('category')) return;
+          if (id !== null && !draftRef.current?.term_ids.includes(id)) return;
+          setPrimaryCategoryTermId(id);
+          persistDraftPatch({ primary_category_term_id: id });
         }}
         onApiError={onApiError}
         onFieldChange={(fk, val) => {

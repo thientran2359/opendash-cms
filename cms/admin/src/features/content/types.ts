@@ -80,6 +80,7 @@ export interface ContentEntryInput {
 
 export interface ContentEntryRecord extends ContentEntryInput {
   term_ids: number[];
+  primary_category_term_id?: number | null;
   id: number;
   content_type_key: string;
   publication_status: 'draft' | 'published';
@@ -272,6 +273,8 @@ export interface CompositeEntrySaveInput {
   content_mode?: ContentMode;
   values: Record<string, ContentFieldValue>;
   term_ids?: number[];
+  primary_category_term_id?: number | null;
+  auto_unique_slug?: boolean;
   custom_path?: string | null;
   seo?: {
     title?: string | null;

@@ -20,6 +20,8 @@ interface TermsProps {
 interface TermPickerProps extends TermsProps {
   selectedIds: number[];
   onChange: (ids: number[]) => void;
+  primaryCategoryTermId?: number | null;
+  onPrimaryCategoryChange?: (id: number | null) => void;
   allowedKinds?: TaxonomyKind[];
   /** 'cards' renders each taxonomy as its own standalone sidebar card (WordPress-style). */
   variant?: 'default' | 'cards';
@@ -123,7 +125,8 @@ function useTermOptions(userId: number | null, typeKey: string | undefined,
 }
 
 /** Native checkboxes preserve keyboard navigation and leave unknown saved IDs removable. */
-export function TermPicker({ userId, typeKey, disabled, selectedIds, onChange, onApiError, allowedKinds, variant = 'default' }: TermPickerProps) {
+export function TermPicker({ userId, typeKey, disabled, selectedIds, onChange,
+  primaryCategoryTermId = null, onPrimaryCategoryChange, onApiError, allowedKinds, variant = 'default' }: TermPickerProps) {
   const { definitions, byKind, loading, error, reload } = useTermOptions(userId, typeKey, onApiError, allowedKinds);
   const searchId = useId();
   const [search, setSearch] = useState('');
@@ -162,6 +165,7 @@ export function TermPicker({ userId, typeKey, disabled, selectedIds, onChange, o
       }
     }
     setSelectionError('');
+    if (!checked && id === primaryCategoryTermId) onPrimaryCategoryChange?.(null);
     onChange([...new Set(checked ? [...selectedIds, id] : selectedIds.filter(value => value !== id))]
       .sort((a, b) => a - b));
   };
@@ -256,18 +260,32 @@ export function TermPicker({ userId, typeKey, disabled, selectedIds, onChange, o
                   )}
                   <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
                     {visible.map(({ term, depth }) => (
-                      <label key={term.id} className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-sm text-zinc-800 hover:bg-zinc-50">
-                        <input
-                          type="checkbox"
-                          className="shrink-0"
-                          checked={selected.has(term.id)}
-                          onChange={event => toggle(term.id, event.target.checked)}
-                          disabled={disabled || loading || Boolean(error) || (!selected.has(term.id) && (group.count >= maxTerms(group.kind) || selected.size >= 96))}
-                        />
-                        <span className="min-w-0 truncate" style={{ paddingLeft: `${Math.min(depth, 6) * 12}px` }} title={`${term.name} (${term.slug})`}>
-                          {term.name}
-                        </span>
-                      </label>
+                      <div key={term.id} className="flex min-w-0 items-center justify-between gap-2 rounded-md px-1.5 py-1 text-sm text-zinc-800 hover:bg-zinc-50">
+                        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            className="shrink-0"
+                            checked={selected.has(term.id)}
+                            onChange={event => toggle(term.id, event.target.checked)}
+                            disabled={disabled || loading || Boolean(error) || (!selected.has(term.id) && (group.count >= maxTerms(group.kind) || selected.size >= 96))}
+                          />
+                          <span className="min-w-0 truncate" style={{ paddingLeft: `${Math.min(depth, 6) * 12}px` }} title={`${term.name} (${term.slug})`}>
+                            {term.name}
+                          </span>
+                        </label>
+                        {typeKey === 'post' && group.kind === 'category' && selected.has(term.id) && onPrimaryCategoryChange && (
+                          <button
+                            type="button"
+                            data-testid={`set-primary-term-${term.id}`}
+                            aria-pressed={primaryCategoryTermId === term.id}
+                            disabled={disabled || loading || Boolean(error)}
+                            onClick={() => onPrimaryCategoryChange(term.id)}
+                            className="shrink-0 rounded-md border border-zinc-200 px-2 py-0.5 text-[11px] font-medium text-od-accent hover:bg-od-accent-soft disabled:opacity-50"
+                          >
+                            {primaryCategoryTermId === term.id ? 'Chính' : 'Đặt làm chính'}
+                          </button>
+                        )}
+                      </div>
                     ))}
                     {!loading && visible.length === 0 && (
                       <p className="py-1 text-xs text-zinc-500">{q ? 'Không có mục khớp tìm kiếm.' : 'Chưa có mục nào.'}</p>

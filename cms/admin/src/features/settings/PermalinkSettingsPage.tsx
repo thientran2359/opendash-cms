@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { ApiClientError } from '../../api/client.ts';
+import { ApiClientError, type PermalinkConflictItem } from '../../api/client.ts';
 import {
   getPermalinkSettings, savePermalinkSettings,
   type PermalinkSettings, type PermalinkSettingsDraft,
@@ -17,13 +17,14 @@ interface Props {
   onDirtyChange?: (dirty: boolean) => void;
 }
 
-const LEGACY = '/content/post/%postname%';
 const PRESETS = [
-  { value: LEGACY, label: 'Mặc định · /content/post/%postname%' },
-  { value: '/%postname%', label: 'Tên bài · /%postname%' },
+  { value: '/%postname%', label: 'Mặc định · /%postname%' },
   { value: '/blog/%postname%', label: 'Blog · /blog/%postname%' },
+  { value: '/%category%/%postname%', label: 'Danh mục chính · /%category%/%postname%' },
+  { value: '/archives/%post_id%', label: 'ID bài viết · /archives/%post_id%' },
 ];
 const CUSTOM = 'custom';
+const TOKENS = ['%category%', '%postname%', '%post_id%'] as const;
 type DraftRecord = { baselineVersion: number; draft: PermalinkSettingsDraft };
 const pendingDrafts = new Map<string, DraftRecord>();
 
@@ -47,9 +48,22 @@ function sameDraft(left: PermalinkSettingsDraft, right: PermalinkSettingsDraft):
     && sameBases(left.taxonomy_bases, right.taxonomy_bases);
 }
 
-function baseChoice(bases: Record<string, string | null>, name: string): 'inherit' | 'legacy' | 'custom' {
+function baseChoice(bases: Record<string, string | null>, name: string): 'inherit' | 'system' | 'custom' {
   if (!Object.prototype.hasOwnProperty.call(bases, name)) return 'inherit';
-  return bases[name] === null ? 'legacy' : 'custom';
+  return bases[name] === null ? 'system' : 'custom';
+}
+
+/** Insert category before a terminal post token; switch mutually exclusive
+ * terminal tokens instead of producing a structure the server would reject. */
+function withPostToken(structure: string, token: typeof TOKENS[number]): string {
+  const parts = structure.split('/').filter(Boolean);
+  if (parts.includes(token)) return structure;
+  const end = parts[parts.length - 1];
+  const isTerminal = end === '%postname%' || end === '%post_id%';
+  if (token === '%category%') parts.splice(isTerminal ? parts.length - 1 : parts.length, 0, token);
+  else if (isTerminal) parts[parts.length - 1] = token;
+  else parts.push(token);
+  return `/${parts.join('/')}`;
 }
 
 export function discardPermalinkDraft(siteId: string, userId: number): void {
@@ -85,8 +99,10 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conflicts, setConflicts] = useState<PermalinkConflictItem[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
+  const [customMode, setCustomMode] = useState(false);
   const draftRef = useRef<PermalinkSettingsDraft | null>(null);
   draftRef.current = draft;
   const loadSerialRef = useRef(0);
@@ -105,6 +121,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     loadInFlightRef.current = true;
     setLoading(true);
     setError(null);
+    setConflicts([]);
     try {
       const [config, typeCatalog, taxonomyCatalog] = await Promise.all([
         getPermalinkSettings(signal), listContentTypes(), listTaxonomyDefinitions(signal),
@@ -117,16 +134,18 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
       const pending = pendingDrafts.get(key);
       if (pending) {
         setDraft(pending.draft);
+        setCustomMode(!PRESETS.some(item => item.value === pending.draft.post_structure));
         setStale(pending.baselineVersion !== config.version);
       } else {
         setDraft(draftFor(config));
+        setCustomMode(!PRESETS.some(item => item.value === config.post_structure));
         setStale(false);
       }
 
       // Every preview path is returned by the canonical server entry-table API,
       // using CURRENT saved settings. Unsaved form values never synthesize URLs.
       const publicTypes = typeCatalog.filter(type =>
-        type.descriptor.key !== 'section'
+        !['section', 'pattern'].includes(type.descriptor.key)
         && effectiveContentTypeSettings(type.descriptor.key, type.descriptor.settings).public
         && type.status === 'active',
       );
@@ -176,6 +195,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     if (!saved || !key || loadInFlightRef.current) return;
     setDraft(next);
     setError(null);
+    setConflicts([]);
     setNotice(null);
     if (sameDraft(next, draftFor(saved))) pendingDrafts.delete(key);
     else {
@@ -203,8 +223,10 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     if (!saved || !key || stale) return;
     pendingDrafts.delete(key);
     setDraft(draftFor(saved));
+    setCustomMode(!PRESETS.some(item => item.value === saved.post_structure));
     setStale(false);
     setError(null);
+    setConflicts([]);
     setNotice('Đã bỏ bản nhập chưa lưu; sử dụng cấu hình hiện tại trên máy chủ.');
   }
 
@@ -214,7 +236,9 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     // so a later result cannot erase a newer edit typed during the request.
     pendingDrafts.delete(key);
     setDraft(null);
+    setCustomMode(false);
     setStale(false);
+    setConflicts([]);
     setNotice('Đã bỏ bản nhập, đang tải phiên bản mới từ máy chủ.');
     void load();
   }
@@ -226,6 +250,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     const baselineVersion = saved.version;
     setSaving(true);
     setError(null);
+    setConflicts([]);
     setNotice(null);
     try {
       const result = await savePermalinkSettings(payload, baselineVersion, csrfToken);
@@ -238,6 +263,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
       } else {
         pendingDrafts.delete(key);
         setDraft(draftFor(result));
+        setCustomMode(!PRESETS.some(item => item.value === result.post_structure));
       }
       setStale(false);
       setNotice('Đã lưu permalink. Các URL công khai được cập nhật đồng bộ trên máy chủ.');
@@ -250,6 +276,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
         setError('Cấu hình đã thay đổi ở phiên khác (412). Bản nhập của bạn được giữ; tải phiên mới và đối chiếu trước khi lưu lại.');
       } else if (reason instanceof ApiClientError && reason.status === 409) {
         setError(`Đường dẫn bị xung đột (409). Máy chủ trả về: ${errorText(reason)}. Không thay đổi nào được lưu.`);
+        setConflicts(reason.conflicts ?? []);
       } else {
         setError(errorText(reason));
       }
@@ -260,7 +287,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
   }
 
   const typeOptions = types.filter(type =>
-    !['post', 'page', 'section'].includes(type.descriptor.key)
+    !['post', 'page', 'section', 'pattern'].includes(type.descriptor.key)
     && type.status === 'active'
     && effectiveContentTypeSettings(type.descriptor.key, type.descriptor.settings).public,
   );
@@ -272,9 +299,9 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
   const typeKeys = Array.from(new Set([
     ...typeOptions.map(type => type.descriptor.key),
     ...Object.keys(saved?.content_type_bases ?? {}).filter(keyName =>
-      !['post', 'page', 'section'].includes(keyName)),
+      !['post', 'page', 'section', 'pattern'].includes(keyName)),
     ...Object.keys(draft?.content_type_bases ?? {}).filter(keyName =>
-      !['post', 'page', 'section'].includes(keyName)),
+      !['post', 'page', 'section', 'pattern'].includes(keyName)),
   ])).sort();
   const taxonomyKeys = Array.from(new Set([
     ...taxonomyOptions.map(type => type.key),
@@ -288,8 +315,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     else delete bases[name];
     updateDraft({ ...draft, [kind]: bases });
   }
-  const preset = draft && PRESETS.some(item => item.value === draft.post_structure)
-    ? draft.post_structure : CUSTOM;
+  const preset = customMode ? CUSTOM : (draft?.post_structure ?? CUSTOM);
 
   return (
     <section className="min-w-0 space-y-5" data-testid="permalink-settings" aria-labelledby="permalink-heading">
@@ -297,11 +323,23 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
         <h2 id="permalink-heading" className="text-base font-semibold text-zinc-950">Đường dẫn tĩnh</h2>
         <p className="mt-1 text-sm text-zinc-600">
           Chọn cách tạo URL công khai cho bài viết, CPT và taxonomy. URL đang dùng chỉ đổi sau khi Lưu thành công.
-          Page giữ đường dẫn hiện tại; Section luôn riêng tư.
+          Page luôn dùng đường dẫn gốc (/&lt;slug&gt;); Pattern luôn riêng tư.
         </p>
       </header>
       {loading && <p role="status" className="text-sm text-zinc-500">Đang tải cấu hình permalink…</p>}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
+      {conflicts.length > 0 && (
+        <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-900" data-testid="permalink-conflicts">
+          <p className="font-semibold">Các đường dẫn bị xung đột (tối đa 20 mục từ máy chủ):</p>
+          <ul className="mt-2 list-inside list-disc space-y-1 break-all font-mono text-xs">
+            {conflicts.map((item, index) => (
+              <li key={`${item.path}:${item.new_target}:${index}`}>
+                <span className="font-semibold">{item.path}</span> — {item.new_target} trùng với {item.existing_target}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {stale && (
         <AdminAlert tone="warning" className="space-y-2">
@@ -324,26 +362,45 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
           <div className="space-y-2">
             <label htmlFor="permalink-post-preset" className="block text-sm font-medium text-zinc-800">Cấu trúc bài viết Post</label>
             <select id="permalink-post-preset" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
-              value={preset} disabled={loading} onChange={event => updateDraft({
-                ...draft, post_structure: event.target.value === CUSTOM
-                  ? '/bai-viet/%postname%' : event.target.value,
-              })}>
+              value={preset} disabled={loading} onChange={event => {
+                if (event.target.value === CUSTOM) {
+                  // Selecting Custom keeps the current preset as an editable starting point.
+                  setCustomMode(true);
+                  setError(null);
+                  setNotice(null);
+                  setConflicts([]);
+                } else {
+                  setCustomMode(false);
+                  updateDraft({ ...draft, post_structure: event.target.value });
+                }
+              }}>
               {PRESETS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
               <option value={CUSTOM}>Tùy chỉnh</option>
             </select>
-            {preset === CUSTOM && (
-              <div className="space-y-1">
+            {customMode && (
+              <div className="space-y-2">
                 <label htmlFor="permalink-post-custom" className="block text-xs font-medium text-zinc-700">Định dạng tùy chỉnh</label>
                 <input id="permalink-post-custom" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-3 font-mono text-sm text-zinc-900"
                   value={draft.post_structure} maxLength={512} disabled={loading}
                   onChange={event => updateDraft({ ...draft, post_structure: event.target.value })} />
               </div>
             )}
-            <p className="text-xs text-zinc-500">Hỗ trợ tối đa 8 đoạn, literal kebab-case và một token cuối: %postname% hoặc %post_id%. Không hỗ trợ ngày, category hoặc đường dẫn phân cấp.</p>
+            <div className="flex flex-wrap gap-1.5" aria-label="Thêm thẻ vào cấu trúc permalink">
+              {TOKENS.map(token => (
+                <AdminButton key={token} variant="secondary" size="sm" disabled={loading}
+                  onClick={() => {
+                    setCustomMode(true);
+                    updateDraft({ ...draft, post_structure: withPostToken(draft.post_structure, token) });
+                  }}>
+                  {token}
+                </AdminButton>
+              ))}
+            </div>
+            <p className="text-xs text-zinc-500">Hỗ trợ literal kebab-case cùng các thẻ %category%, %postname%, %post_id% (không dùng ngày/tháng/năm).</p>
           </div>
           <div>
             <h3 className="text-sm font-semibold text-zinc-900">Đường dẫn cơ sở cho Custom Post Type</h3>
-            <p className="mb-3 mt-0.5 text-xs text-zinc-500">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc dùng đường dẫn legacy. Base tùy chỉnh gồm 1–3 đoạn kebab-case, không có dấu / ở đầu/cuối.</p>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-500">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc Mặc định hệ thống (/{'{key}'}/{'{slug}'}). Base tùy chỉnh gồm 1–3 đoạn kebab-case, không có dấu / ở đầu/cuối.</p>
             {typeKeys.length === 0 && <p className="text-sm text-zinc-500">Chưa có CPT công khai có thể cấu hình.</p>}
             <div className="grid gap-3.5 sm:grid-cols-2">
               {typeKeys.map(keyName => {
@@ -362,14 +419,14 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                     onChange={event => updateBaseChoice('content_type_bases', keyName, event.target.value || null)}
                     placeholder="VD: projects" />
                   <p className="mt-1 text-xs text-zinc-500" data-testid={`cpt-base-mode-${keyName}`}>
-                    {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng URL legacy.'
-                      : choice === 'legacy' ? 'Đang chọn đường dẫn legacy riêng cho website.'
+                    {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng Mặc định hệ thống (/{key}/{slug}).'
+                      : choice === 'system' ? 'Mặc định hệ thống (/{key}/{slug}).'
                         : 'Đang dùng base tùy chỉnh của website.'}
                   </p>
                   {available && <div className="mt-2.5 flex flex-wrap gap-1.5">
-                    <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'legacy'}
+                    <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'system'}
                       onClick={() => updateBaseChoice('content_type_bases', keyName, null)}
-                      aria-label={`Dùng đường dẫn legacy cho CPT ${keyName}`}>Dùng đường dẫn legacy</AdminButton>
+                      aria-label={`Mặc định hệ thống (/{key}/{slug}) cho CPT ${keyName}`}>Mặc định hệ thống (/{'{key}'}/{'{slug}'})</AdminButton>
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'inherit'}
                       onClick={() => updateBaseChoice('content_type_bases', keyName, undefined)}
                       aria-label={`Kế thừa mặc định cho CPT ${keyName}`}>Kế thừa mặc định</AdminButton>
@@ -384,7 +441,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
           </div>
           <div>
             <h3 className="text-sm font-semibold text-zinc-900">Đường dẫn cơ sở cho Taxonomy</h3>
-            <p className="mb-3 mt-0.5 text-xs text-zinc-500">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc dùng đường dẫn legacy. Không cấu hình đường dẫn term phân cấp.</p>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-500">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc Mặc định hệ thống (/{'{kind}'}/{'{slug}'}). Không cấu hình đường dẫn term phân cấp.</p>
             {taxonomyKeys.length === 0 && <p className="text-sm text-zinc-500">Chưa có taxonomy công khai có thể cấu hình.</p>}
             <div className="grid gap-3.5 sm:grid-cols-2">
               {taxonomyKeys.map(keyName => {
@@ -403,14 +460,14 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                     onChange={event => updateBaseChoice('taxonomy_bases', keyName, event.target.value || null)}
                     placeholder="VD: genres" />
                   <p className="mt-1 text-xs text-zinc-500" data-testid={`taxonomy-base-mode-${keyName}`}>
-                    {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng URL legacy.'
-                      : choice === 'legacy' ? 'Đang chọn đường dẫn legacy riêng cho website.'
+                    {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng Mặc định hệ thống (/{kind}/{slug}).'
+                      : choice === 'system' ? 'Mặc định hệ thống (/{kind}/{slug}).'
                         : 'Đang dùng base tùy chỉnh của website.'}
                   </p>
                   {available && <div className="mt-2.5 flex flex-wrap gap-1.5">
-                    <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'legacy'}
+                    <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'system'}
                       onClick={() => updateBaseChoice('taxonomy_bases', keyName, null)}
-                      aria-label={`Dùng đường dẫn legacy cho Taxonomy ${keyName}`}>Dùng đường dẫn legacy</AdminButton>
+                      aria-label={`Mặc định hệ thống (/{kind}/{slug}) cho Taxonomy ${keyName}`}>Mặc định hệ thống (/{'{kind}'}/{'{slug}'})</AdminButton>
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'inherit'}
                       onClick={() => updateBaseChoice('taxonomy_bases', keyName, undefined)}
                       aria-label={`Kế thừa mặc định cho Taxonomy ${keyName}`}>Kế thừa mặc định</AdminButton>

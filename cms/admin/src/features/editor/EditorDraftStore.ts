@@ -15,6 +15,7 @@ export interface EditorDraftPayload {
   values: Record<string, ContentFieldValue>;
   cleared_fields: string[];
   term_ids: number[];
+  primary_category_term_id: number | null;
   custom_path?: string | null;
   custom_path_dirty?: boolean;
   seo?: {
@@ -47,7 +48,7 @@ export function diffEditorPayload(
   draft: EditorDraftPayload,
 ): string[] {
   const changed: string[] = [];
-  for (const key of ['title', 'slug', 'publication_status', 'content_mode', 'term_ids', 'custom_path', 'seo'] as const) {
+  for (const key of ['title', 'slug', 'publication_status', 'content_mode', 'term_ids', 'primary_category_term_id', 'custom_path', 'seo'] as const) {
     if (JSON.stringify(baseline[key]) !== JSON.stringify(draft[key])) changed.push(key);
   }
   const fieldKeys = new Set([
@@ -179,12 +180,19 @@ export class EditorDraftStore {
         (freshConfig.settings?.supports.includes('builder') || saved.payload.content_mode === 'editor')
         ? saved.payload.content_mode : fresh.content_mode,
       term_ids: savedDirty.has('term_ids') ? [...saved.payload.term_ids] : [...fresh.term_ids],
+      primary_category_term_id: savedDirty.has('primary_category_term_id')
+        && freshConfig.taxonomies.includes('category')
+        ? (saved.payload.primary_category_term_id ?? null) : fresh.primary_category_term_id,
       values,
       cleared_fields: clearedFields,
       custom_path: routeReadable && saved.payload.custom_path_dirty
         ? saved.payload.custom_path : fresh.custom_path,
       seo: seoReadable && saved.payload.seo_dirty ? saved.payload.seo : fresh.seo,
     };
+    // A term removed by the server must not survive as the draft's primary.
+    if (next.primary_category_term_id !== null && !next.term_ids.includes(next.primary_category_term_id)) {
+      next.primary_category_term_id = null;
+    }
     next.custom_path_dirty = routeReadable && diffEditorPayload(fresh, next).includes('custom_path');
     next.seo_dirty = seoReadable && diffEditorPayload(fresh, next).includes('seo');
     const restored = {
