@@ -9,9 +9,11 @@ import type { ParsedRoute } from '../shell/router.ts';
 import {
   type BuilderDocument, type BuilderElement, type BuilderRow, type BuilderViewport, type ElementBinding, type ElementType,
   type InsertableElementType, type ListProps, type NodeKind, type ResponsiveAlign, type ResponsiveField,
+  type StudioBuilderClipboard,
   ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
-  allNodes, appendNode, canDeleteElement, cloneWithFreshNodeIds, countElementsByType,
-  isElement, isLockedElement, locate, moveNode, preservesAnchors,
+  allNodes, appendNode, appendRowWithColumns, canDeleteElement, canPasteOptions, cloneWithFreshNodeIds,
+  copyNodeOptions, countElementsByType, duplicateNode, isElement, isLockedElement, isProtectedNode, locate, moveNode,
+  pasteNodeOptions, preservesAnchors, reorderSiblingNode,
   removeNode, setElementBinding, setListProps, setNodeField, setResponsiveField,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
@@ -20,6 +22,8 @@ import { BuilderInspector } from './BuilderInspector.tsx';
 import { BuilderPreviewFrame } from './BuilderPreviewFrame.tsx';
 import { PatternLibraryModal } from './PatternLibraryModal.tsx';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
+import { StudioBlockTree } from '../studio/StudioBlockTree.tsx';
+import { StudioBlockCatalog } from '../studio/StudioBlockCatalog.tsx';
 
 const BLOCK_CATEGORY_ORDER = ['layout', 'media', 'interactive', 'content', 'marketing', 'plugin'] as const;
 const BLOCK_CATEGORY_LABELS: Record<string, string> = {
@@ -67,6 +71,12 @@ interface Props {
 }
 
 export interface BuilderEditorCoreProps {
+  builderView: StudioBuilderView;
+  onBuilderViewChange: (view: StudioBuilderView) => void;
+  addTargetParentId: string | null;
+  onAddTargetParentIdChange: (id: string | null) => void;
+  clipboard: StudioBuilderClipboard | null;
+  onClipboardChange: (value: StudioBuilderClipboard | null) => void;
   document: BuilderDocument;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -93,7 +103,15 @@ export interface BuilderEditorCoreProps {
   onApiError: (error: unknown, fallback: string) => void;
 }
 
+export type StudioBuilderView = 'tree' | 'properties' | 'add';
+
 export function BuilderEditorCore({
+  builderView,
+  onBuilderViewChange,
+  addTargetParentId,
+  onAddTargetParentIdChange,
+  clipboard,
+  onClipboardChange,
   document: draft,
   selectedId,
   onSelect,
@@ -119,8 +137,8 @@ export function BuilderEditorCore({
   onMessage,
   onApiError,
 }: BuilderEditorCoreProps) {
-  const [sidebarTab, setSidebarTab] = useState<'blocks' | 'patterns' | 'media'>('blocks');
-  const [elementType, setElementType] = useState<string>('core/heading');
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  const [mediaTargetColumnId, setMediaTargetColumnId] = useState<string | null>(null);
   const [blockSchemas, setBlockSchemas] = useState<BlockCatalogItemDto[]>([]);
   const [showPatternLibrary, setShowPatternLibrary] = useState(false);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
@@ -149,13 +167,6 @@ export function BuilderEditorCore({
     return () => { alive = false; window.removeEventListener('focus', refresh); };
   }, [themeRevision, csrfToken]);
 
-  useEffect(() => {
-    if (!insertableTypes.includes(elementType as InsertableElementType)
-      && !availableSchemas(blockSchemas).some(item => item.block_id === elementType)) {
-      setElementType(insertableTypes[0] ?? 'core/heading');
-    }
-  }, [allowPatternRef, allowList, allowContentSlot, allowTemplatePart, blockSchemas]);
-
   const applyUpdate = (next: BuilderDocument | null, nextSelected?: string | null, removedId?: string): boolean => {
     if (!next) return false;
     if (!preservesAnchors(draft, next, registry, removedId, blockSchemas)) {
@@ -169,18 +180,41 @@ export function BuilderEditorCore({
     return onChangeDocument(next, nextSelected, removedId);
   };
 
-  const add = (parentId: string | null, kind: NodeKind) => {
+  const openAdd = (parentId: string | null) => {
+    if (disabled) return;
+    onAddTargetParentIdChange(parentId);
+    onBuilderViewChange('add');
+  };
+
+  const finishInsert = (next: BuilderDocument, id: string): boolean => {
+    if (!applyUpdate(next, id)) return false;
+    setCollapsedIds(previous => {
+      const expanded = new Set(previous);
+      const location = locate(next, id);
+      let parent = location?.parentId;
+      while (parent) {
+        expanded.delete(parent);
+        parent = locate(next, parent)?.parentId ?? null;
+      }
+      return expanded;
+    });
+    onBuilderViewChange('tree');
+    onAddTargetParentIdChange(null);
+    return true;
+  };
+
+  const add = (parentId: string | null, kind: 'section' | 'column' | 'element', selectedType: InsertableElementType = 'core/heading') => {
     if (disabled) return;
     if (kind === 'element') {
-      if (!allowPatternRef && elementType === 'core/pattern_ref') {
+      if (!allowPatternRef && selectedType === 'core/pattern_ref') {
         onMessage?.('Reusable Pattern chỉ hỗ trợ Builder của từng entry/Page.', true);
         return;
       }
-      if (!allowList && elementType === 'core/list') {
+      if (!allowList && selectedType === 'core/list') {
         onMessage?.('Pattern không được chứa Danh sách nội dung.', true);
         return;
       }
-      if (elementType === 'core/content_slot') {
+      if (selectedType === 'core/content_slot') {
         if (!allowContentSlot) {
           onMessage?.('Loại target này không cho phép thêm core/content_slot.', true);
           return;
@@ -190,19 +224,58 @@ export function BuilderEditorCore({
           return;
         }
       }
-      if (elementType === 'core/template_part' && !allowTemplatePart) {
+      if (selectedType === 'core/template_part' && !allowTemplatePart) {
         onMessage?.('Chỉ được chèn Template Part trong Mode Dựng Template.', true);
         return;
       }
     }
-    const schema = blockSchemas.find(item => item.block_id === elementType
+    const schema = blockSchemas.find(item => item.block_id === selectedType
       && item.status === 'active' && item.declaration_state === 'declared')?.schema;
-    const next = appendNode(draft, parentId, kind, elementType as InsertableElementType, { blockSchema: schema });
+    const next = appendNode(draft, parentId, kind, selectedType, { blockSchema: schema });
     if (!next) {
       onMessage?.('Vị trí thêm node không hợp lệ.', true);
       return;
     }
-    applyUpdate(next.document, next.id);
+    finishInsert(next.document, next.id);
+  };
+
+  const addRow = (sectionId: string, count: 1 | 2 | 3) => {
+    if (disabled) return;
+    const next = appendRowWithColumns(draft, sectionId, count);
+    if (next) finishInsert(next.document, next.id);
+    else onMessage?.('Không thể thêm Row vào Section này.', true);
+  };
+
+  const duplicate = (id: string) => {
+    if (disabled) return;
+    const result = duplicateNode(draft, id, registry, blockSchemas);
+    if (result) finishInsert(result.document, result.id);
+    else onMessage?.('Không thể nhân bản node bị khóa hoặc vượt giới hạn Builder.', true);
+  };
+
+  const copyOptions = (id: string) => {
+    if (disabled) return;
+    const result = copyNodeOptions(draft, id, registry, blockSchemas);
+    if (result) onClipboardChange(result);
+    else onMessage?.('Node này không cho phép sao chép thuộc tính.', true);
+  };
+
+  const canPaste = (id: string) => {
+    const location = locate(draft, id);
+    return Boolean(location && canPasteOptions(clipboard, location,
+      isProtectedNode(draft, id, registry, blockSchemas)));
+  };
+
+  const pasteOptions = (id: string) => {
+    if (disabled || !clipboard || !canPaste(id)) return;
+    const next = pasteNodeOptions(draft, id, clipboard);
+    if (!applyUpdate(next, id)) onMessage?.('Thuộc tính sao chép không hợp lệ ở node này.', true);
+  };
+
+  const reorderSibling = (sourceId: string, targetId: string, position: 'before' | 'after') => {
+    if (disabled) return;
+    const next = reorderSiblingNode(draft, sourceId, targetId, position, registry, blockSchemas);
+    if (!applyUpdate(next, sourceId)) onMessage?.('Không thể di chuyển qua node được bảo vệ.', true);
   };
 
   const reorder = (id: string, direction: -1 | 1) => {
@@ -270,7 +343,7 @@ export function BuilderEditorCore({
     applyUpdate(next, id);
   };
 
-  const insertThemePattern = (sourceDocument: BuilderDocument, title: string): boolean => {
+  const insertThemePattern = (sourceDocument: BuilderDocument, title: string, appendAtEnd = false): boolean => {
     if (!csrfToken || disabled) return false;
     if (sourceDocument.schema_version !== draft.schema_version || !sourceDocument.sections.length) {
       onMessage?.('Mẫu từ theme không có bố cục Builder tương thích.', true);
@@ -299,7 +372,7 @@ export function BuilderEditorCore({
     }
     const copy = cloneWithFreshNodeIds(sourceDocument, draft);
     const selectedSection = locate(draft, selectedId)?.path[0];
-    const insertionIndex = selectedSection === undefined ? draft.sections.length : selectedSection + 1;
+    const insertionIndex = appendAtEnd || selectedSection === undefined ? draft.sections.length : selectedSection + 1;
     const next = {
       ...draft,
       sections: [
@@ -308,7 +381,7 @@ export function BuilderEditorCore({
         ...draft.sections.slice(insertionIndex),
       ],
     };
-    if (!applyUpdate(next, copy.sections[0].id)) return false;
+    if (!finishInsert(next, copy.sections[0].id)) return false;
     onMessage?.('Đã chèn bản sao “' + title + '”. Chưa lưu lên website.');
     return true;
   };
@@ -317,14 +390,15 @@ export function BuilderEditorCore({
     const mediaId = ids[0];
     if (!mediaId || !/^[a-zA-Z0-9_-]{1,128}$/.test(mediaId) || !csrfToken || disabled) return;
     const selected = locate(draft, selectedId);
-    if (selected?.kind === 'element' && isElement(selected.node)
+    if (!mediaTargetColumnId && selected?.kind === 'element' && isElement(selected.node)
         && selected.node.type === 'core/image' && !isLockedElement(selected.node, registry, blockSchemas)) {
       if (!applyUpdate(setNodeField(draft, selected.node.id, 'media_id', mediaId), selected.node.id)) return;
     } else {
       let next = draft;
-      let columnId: string | undefined;
-      if (selected?.kind === 'element') columnId = selected.parentId ?? undefined;
-      else if (selected?.kind === 'column') columnId = selected.node.id;
+      let columnId: string | undefined = mediaTargetColumnId ?? undefined;
+      if (!columnId && selected?.kind === 'element') columnId = selected.parentId ?? undefined;
+      else if (!columnId && selected?.kind === 'column') columnId = selected.node.id;
+      if (mediaTargetColumnId && locate(next, mediaTargetColumnId)?.kind !== 'column') return;
       let sectionId = selected && selected.path.length > 0 ? next.sections[selected.path[0]]?.id : undefined;
       let rowId = selected && selected.path.length > 1 ? next.sections[selected.path[0]]?.children[selected.path[1]]?.id : undefined;
       if (!columnId) {
@@ -355,10 +429,16 @@ export function BuilderEditorCore({
       const inserted = appendNode(next, columnId, 'element', 'core/image');
       if (!inserted) return;
       const populated = setNodeField(inserted.document, inserted.id, 'media_id', mediaId);
-      if (!applyUpdate(populated, inserted.id)) return;
+      if (!populated || !finishInsert(populated, inserted.id)) return;
     }
     setShowMediaPicker(false);
+    setMediaTargetColumnId(null);
     onMessage?.('Đã chèn ảnh từ Media Library vào bản nháp. Chưa lưu lên website.');
+  };
+
+  const openMedia = (columnId: string | null = null) => {
+    setMediaTargetColumnId(columnId);
+    setShowMediaPicker(true);
   };
 
   return (
@@ -383,46 +463,35 @@ export function BuilderEditorCore({
         </div>
       )}
 
-      <div className="flex gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1" role="tablist" aria-label="Công cụ Trình dựng trang">
-        <button type="button" role="tab" aria-selected={sidebarTab === 'blocks'}
-          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
-            (sidebarTab === 'blocks' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
-          onClick={() => setSidebarTab('blocks')}>Blocks</button>
-        <button type="button" role="tab" aria-selected={sidebarTab === 'patterns'}
-          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
-            (sidebarTab === 'patterns' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
-          onClick={() => setSidebarTab('patterns')}>Patterns</button>
-        <button type="button" role="tab" aria-selected={sidebarTab === 'media'}
-          className={'min-w-0 flex-1 rounded-md px-2 py-1.5 text-xs font-medium ' +
-            (sidebarTab === 'media' ? 'bg-white text-zinc-950 shadow-2xs ring-1 ring-zinc-200' : 'text-zinc-600 hover:text-zinc-900')}
-          onClick={() => setSidebarTab('media')}>Media</button>
-      </div>
+      {builderView === 'tree' && (
+        <StudioBlockTree
+          document={draft}
+          selectedId={selectedId}
+          registry={registry}
+          blockSchemas={blockSchemas}
+          disabled={disabled}
+          collapsedIds={collapsedIds}
+          onCollapsedIdsChange={setCollapsedIds}
+          onSelect={onSelect}
+          onEdit={id => { onSelect(id); onBuilderViewChange('properties'); }}
+          onAdd={openAdd}
+          onMove={reorder}
+          onReorder={reorderSibling}
+          canReorder={(sourceId, targetId, position) => Boolean(
+            reorderSiblingNode(draft, sourceId, targetId, position, registry, blockSchemas))}
+          onDuplicate={duplicate}
+          onCopy={copyOptions}
+          onPaste={pasteOptions}
+          canPaste={canPaste}
+          onDelete={remove}
+          canDelete={id => canDeleteElement(draft, id, { requiresContentSlot })}
+          onOpenPatternLibrary={() => setShowPatternLibrary(true)}
+          onOpenMediaPicker={() => openMedia()}
+        />
+      )}
 
-      {sidebarTab === 'blocks' && (
-        <div className="space-y-3" role="tabpanel">
-          <div className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white p-2">
-            <label htmlFor="studio-element-type" className="text-xs font-medium text-zinc-600">Element mới</label>
-            <select
-              id="studio-element-type"
-              className="h-8 min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900"
-              value={elementType}
-              onChange={event => setElementType(event.target.value)}
-            >
-              <BlockTypeOptions catalog={blockSchemas} legacyTypes={insertableTypes} />
-            </select>
-          </div>
-          <BuilderTree
-            document={draft}
-            selectedId={selectedId}
-            elementType={elementType as ElementType}
-            registry={registry}
-            blockSchemas={blockSchemas}
-            onSelect={id => onSelect(id)}
-            onAdd={add}
-            onMove={reorder}
-            onDelete={remove}
-          />
-          <BuilderInspector
+      {builderView === 'properties' && (
+        <BuilderInspector
             document={draft}
             selectedId={selectedId}
             registry={registry}
@@ -435,53 +504,36 @@ export function BuilderEditorCore({
             patterns={patterns}
             patternsLoaded={patternsLoaded}
             onRefreshPatterns={onRefreshPatterns}
-            onDeleteNode={remove}
+            hideHeader
+            hideDeleteButton
             onChange={editField}
             onBindingChange={editBinding}
             onListChange={editList}
             onResponsiveChange={editResponsive}
             onError={onApiError}
-          />
-        </div>
+        />
       )}
 
-      {sidebarTab === 'patterns' && (
-        <div role="tabpanel" className="space-y-2.5 rounded-xl border border-zinc-200 bg-white p-3.5">
-          <h3 className="text-sm font-semibold text-zinc-900">Thư viện Pattern</h3>
-          <p className="text-xs text-zinc-600">Chèn bản sao Section từ mẫu theme v3 sau Section đang chọn.</p>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => setShowPatternLibrary(true)}
-            data-testid="studio-open-pattern-library"
-            className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
-          >
-            Explore all patterns
-          </button>
-        </div>
-      )}
-
-      {sidebarTab === 'media' && (
-        <div role="tabpanel" className="space-y-2.5 rounded-xl border border-zinc-200 bg-white p-3.5">
-          <h3 className="text-sm font-semibold text-zinc-900">Thư viện Media</h3>
-          <p className="text-xs text-zinc-600">Chọn ảnh để chèn vào cột hiện tại hoặc thay ảnh của khối đang chọn.</p>
-          <button
-            type="button"
-            disabled={disabled || !csrfToken}
-            onClick={() => setShowMediaPicker(true)}
-            data-testid="studio-open-media-picker"
-            className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
-          >
-            Chọn ảnh từ Media Library
-          </button>
-        </div>
+      {builderView === 'add' && (
+        <StudioBlockCatalog
+          document={draft}
+          parentId={addTargetParentId}
+          insertableTypes={insertableTypes}
+          blockSchemas={blockSchemas}
+          disabled={disabled}
+          onAddNode={add}
+          onAddRowWithColumns={addRow}
+          onOpenPatternLibrary={() => setShowPatternLibrary(true)}
+          onOpenMediaPicker={id => openMedia(id)}
+        />
       )}
 
       {showPatternLibrary && (
         <PatternLibraryModal
           key={themeRevision}
           onClose={() => setShowPatternLibrary(false)}
-          onInsert={insertThemePattern}
+          onInsert={(source, title) => insertThemePattern(source, title,
+            builderView === 'add' && addTargetParentId === null)}
           onApiError={onApiError}
         />
       )}
@@ -492,7 +544,7 @@ export function BuilderEditorCore({
           csrfToken={csrfToken}
           selectedIds={[]}
           onApply={insertMediaImage}
-          onClose={() => setShowMediaPicker(false)}
+          onClose={() => { setShowMediaPicker(false); setMediaTargetColumnId(null); }}
           onError={onApiError}
         />
       )}

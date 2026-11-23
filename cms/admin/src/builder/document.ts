@@ -77,6 +77,15 @@ export interface NodeLocation {
   path: number[];
 }
 
+/** Copy only editable configuration, never a node ID or an element binding. */
+export interface StudioBuilderClipboard {
+  kind: NodeKind;
+  elementType?: string;
+  blockId?: string;
+  responsive?: BuilderResponsive;
+  props?: Record<string, unknown>;
+}
+
 export function allNodes(document: BuilderDocument): NodeLocation[] {
   const found: NodeLocation[] = [];
   document.sections.forEach((section, s) => {
@@ -207,6 +216,50 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** Match the fields accepted by Rust's KnownElement / Props
+ * #[serde(deny_unknown_fields)]. A historic element carrying an extra field
+ * is Unresolved on the server and must remain an immutable anchor. */
+const ELEMENT_PROP_KEYS: Record<string, readonly string[]> = {
+  'core/heading': ['level', 'text', 'binding'],
+  'core/text': ['text', 'binding'],
+  'core/image': ['media_id', 'alt', 'binding'],
+  'core/video': ['media_id', 'poster_image_id', 'controls', 'muted'],
+  'core/button': ['label', 'url', 'binding'],
+  'core/list': ['type_key', 'category_id', 'tag_id', 'taxonomy_key', 'term_id',
+    'include_descendants', 'sort', 'page_size'],
+  'core/contact_form': ['form_id', 'submit_label'],
+  'core/pattern_ref': ['pattern_id'],
+  'core/content_slot': [],
+  'core/template_part': ['part_key'],
+  'legacy/block': ['block_id', 'values'],
+  'plugin/block': ['block_id', 'values'],
+};
+
+function hasUnexpectedElementFields(element: BuilderElement): boolean {
+  const allowed = ELEMENT_PROP_KEYS[element.type];
+  return !allowed
+    || Object.keys(element).some(key => key !== 'id' && key !== 'type' && key !== 'props')
+    || !object(element.props)
+    || Object.keys(element.props).some(key => !allowed.includes(key));
+}
+
+function hasInvalidCoreBinding(element: BuilderElement): boolean {
+  const binding = element.props.binding;
+  if (binding === undefined) return false;
+  if (!object(binding) || typeof binding.type_key !== 'string'
+      || typeof binding.entry_slug !== 'string'
+      || !['text', 'media_id', 'alt', 'label', 'url'].includes(String(binding.target))
+      || Object.keys(binding).some(key => !['type_key', 'entry_slug', 'source', 'target'].includes(key))
+      || !object(binding.source)) return true;
+  const source = binding.source;
+  const sourceKeys = source.kind === 'title' ? ['kind']
+    : source.kind === 'field' ? ['kind', 'key']
+      : source.kind === 'route_context' ? ['kind', 'field_key'] : null;
+  return !sourceKeys || Object.keys(source).some(key => !sourceKeys.includes(key))
+    || (source.kind === 'field' && typeof source.key !== 'string')
+    || (source.kind === 'route_context' && typeof source.field_key !== 'string');
+}
+
 /** Mirrors the core/list validation contract for both editor updates and
  * locked historical nodes. Category + tag may coexist; generic filters
  * cannot be mixed with those legacy aliases.
@@ -241,11 +294,7 @@ export function isLockedElement(
   blockCatalog: BlockCatalogItemDto[] = [],
 ): boolean {
   const props = element.props;
-  if (!object(props)) return true;
-  const binding = props.binding;
-  if (binding !== undefined && (!object(binding) || typeof binding.type_key !== 'string'
-      || typeof binding.entry_slug !== 'string' || !object(binding.source)
-      || typeof binding.target !== 'string')) return true;
+  if (hasUnexpectedElementFields(element) || hasInvalidCoreBinding(element)) return true;
   switch (element.type) {
     case 'core/heading': return !Number.isInteger(props.level) || Number(props.level) < 1
       || Number(props.level) > 6 || typeof props.text !== 'string';
@@ -406,6 +455,258 @@ export function appendNode(
     : { id, children: [] };
   children.push(node);
   return { document: next, id };
+}
+
+/** The server rejects documents beyond either bound. Count UTF-8 bytes, not
+ * JavaScript string units, because Builder content can contain Unicode. */
+function withinBuilderLimits(document: BuilderDocument): boolean {
+  return allNodes(document).length <= 512
+    && new TextEncoder().encode(JSON.stringify(document)).byteLength <= 256 * 1024;
+}
+
+/** Duplicate an editable subtree without moving any immutable anchor. */
+export function duplicateNode(
+  document: BuilderDocument, id: string,
+  registry: Record<string, Record<string, string>>,
+  blockCatalog: BlockCatalogItemDto[] = [],
+): { document: BuilderDocument; id: string } | null {
+  const source = locate(document, id);
+  if (!source || isProtectedNode(document, id, registry, blockCatalog)
+      || countDescendantElementsByType(document, id, 'core/content_slot') > 0
+      || countElementsByType(document, 'core/list')
+        + countDescendantElementsByType(document, id, 'core/list') > 8) return null;
+
+  // Server validation grants historical schema-upgrade exemptions only to
+  // the original (element.id, block_id). Every clone has a fresh ID, so all
+  // declarative blocks in the copied subtree must pass fresh-node checks.
+  const sourcePath = source.path;
+  for (const entry of allNodes(document)) {
+    if (entry.kind !== 'element'
+        || !sourcePath.every((step, depth) => entry.path[depth] === step)) continue;
+    const element = entry.node as BuilderElement;
+    if (element.type !== 'plugin/block') continue;
+    const descriptor = blockCatalog.find(item => item.block_id === element.props.block_id
+      && item.status === 'active' && item.declaration_state === 'declared');
+    if (!descriptor || !object(element.props.values)
+        || !pluginValuesReadyForFreshNode(element.props.values, descriptor.schema)) return null;
+  }
+
+  const next = clone(document);
+  const siblings = childrenAt(next, source.parentId ? locate(next, source.parentId) : undefined);
+  if (!siblings) return null;
+  const index = source.path[source.path.length - 1];
+  siblings.splice(index + 1, 0, clone(siblings[index]));
+  // The duplicate is already in next, so every generated ID is unique even
+  // when the cloned subtree contains several nested nodes of the same kind.
+  const duplicatePath = [...source.path.slice(0, -1), index + 1];
+  const inserted = allNodes(next).filter(entry =>
+    duplicatePath.every((step, depth) => entry.path[depth] === step));
+  for (const entry of inserted) entry.node.id = newNodeId(entry.kind, next);
+
+  if (distinctPatternIdCount(next) > 16 || !withinBuilderLimits(next)
+      || !preservesAnchors(document, next, registry, undefined, blockCatalog)) return null;
+  return { document: next, id: inserted[0].node.id };
+}
+
+/** Creates one row with its columns as a single undoable document mutation. */
+export function appendRowWithColumns(
+  document: BuilderDocument, sectionId: string, columnCount: 1 | 2 | 3,
+): { document: BuilderDocument; id: string } | null {
+  if (![1, 2, 3].includes(columnCount) || locate(document, sectionId)?.kind !== 'section') return null;
+  const row = appendNode(document, sectionId, 'row', 'core/heading');
+  if (!row) return null;
+  let next = row.document;
+  for (let index = 0; index < columnCount; index += 1) {
+    const column = appendNode(next, row.id, 'column', 'core/heading');
+    if (!column) return null;
+    next = column.document;
+  }
+  const addedRow = locate(next, row.id)?.node;
+  if (!addedRow || isElement(addedRow)) return null;
+  if (columnCount > 1) addedRow.responsive = { desktop: { columns_per_row: columnCount } };
+  return withinBuilderLimits(next) ? { document: next, id: row.id } : null;
+}
+
+/** Group fields are flattened in PluginBlockProps.values; repeater values
+ * belong to their declared top-level repeater field. */
+function declaredBlockKeys(fields: BlockSchemaV1['fields']): Set<string> {
+  const keys = new Set<string>();
+  for (const field of fields) {
+    if (field.type === 'group') {
+      for (const key of declaredBlockKeys(field.fields)) keys.add(key);
+    } else {
+      keys.add(field.key);
+    }
+  }
+  return keys;
+}
+
+/** Check the constraints that require previous_values=None in the Rust
+ * BlockSchemaV1 validator: newly required fields, visible group/field rules,
+ * responsive required values, and repeater min_items/subfields. */
+function pluginValuesReadyForFreshNode(
+  values: Record<string, unknown>, schema: BlockSchemaV1,
+): boolean {
+  if (Object.keys(values).length > 64
+      || new TextEncoder().encode(JSON.stringify(values)).byteLength > 64 * 1024) return false;
+  const fields = schema.fields.flatMap(field => field.type === 'group' ? field.fields : [field]);
+  const defaults = new Map(fields.map(field =>
+    [field.key, 'default' in field ? field.default : undefined]));
+  const visible = (rule: { field: string; equals: string | number | boolean | null } | null | undefined) => {
+    if (!rule) return true;
+    const value = values[rule.field] ?? defaults.get(rule.field) ?? null;
+    return value === rule.equals;
+  };
+  type Field = BlockSchemaV1['fields'][number];
+  const readyLeaf = (field: Field, value: unknown, required: boolean): boolean => {
+    if (value === undefined || value === null) return !required || !('required' in field && field.required);
+    if (field.type === 'group' || field.type === 'repeater') return false;
+    const responsive = 'responsive' in field && field.responsive;
+    if (responsive && object(value)) {
+      if (Object.keys(value).some(key => !['desktop', 'tablet', 'mobile'].includes(key))) return false;
+      const entries = Object.values(value).filter(item => item !== null && item !== undefined);
+      if (required && 'required' in field && field.required && entries.length === 0) return false;
+      return entries.every(item => readyLeaf(field, item, false));
+    }
+    if (field.type === 'number' || field.type === 'range') {
+      return typeof value === 'number' && Number.isFinite(value)
+        && (field.min === undefined || field.min === null || value >= field.min)
+        && (field.max === undefined || field.max === null || value <= field.max);
+    }
+    if (field.type === 'boolean') return typeof value === 'boolean';
+    if (field.type === 'select') return typeof value === 'string'
+      && field.options.some(option => option.value === value);
+    return typeof value === 'string'
+      && (!required || !('required' in field && field.required) || value.trim().length > 0);
+  };
+  const readyField = (field: Field, data: Record<string, unknown>, isVisible: boolean): boolean => {
+    const current = data[field.key];
+    if (field.type !== 'repeater') return readyLeaf(field, current, isVisible);
+    if (current === undefined || current === null) return !isVisible || (field.min_items ?? 0) === 0;
+    if (!Array.isArray(current) || current.length > (field.max_items ?? 32)
+        || (isVisible && current.length < (field.min_items ?? 0))) return false;
+    return current.every(item => object(item)
+      && Object.keys(item).length <= 64
+      && field.fields.every(child => readyLeaf(child, item[child.key],
+        isVisible && visible(child.show_if))));
+  };
+  return schema.fields.every(field => field.type === 'group'
+    ? field.fields.every(child => readyField(child, values,
+      visible(field.show_if) && visible(child.show_if)))
+    : readyField(field, values, visible(field.show_if)));
+}
+
+function distinctPatternIdCount(document: BuilderDocument): number {
+  return new Set(allNodes(document)
+    .filter(entry => entry.kind === 'element'
+      && (entry.node as BuilderElement).type === 'core/pattern_ref')
+    .map(entry => (entry.node as BuilderElement).props.pattern_id)).size;
+}
+
+export function copyNodeOptions(
+  document: BuilderDocument, id: string,
+  registry: Record<string, Record<string, string>>,
+  blockCatalog: BlockCatalogItemDto[] = [],
+): StudioBuilderClipboard | null {
+  const item = locate(document, id);
+  if (!item) return null;
+  if (!isElement(item.node)) {
+    const responsive = item.node.responsive;
+    return { kind: item.kind, responsive: responsive && Object.keys(responsive).length
+      ? clone(responsive) : undefined };
+  }
+
+  const element = item.node;
+  if (element.type === 'core/content_slot' || isLockedElement(element, registry, blockCatalog)) return null;
+  const clipboard: StudioBuilderClipboard = { kind: 'element', elementType: element.type };
+  if (element.type === 'plugin/block' || element.type === 'legacy/block') {
+    clipboard.blockId = element.props.block_id as string;
+    const values = element.props.values as Record<string, unknown>;
+    if (element.type === 'plugin/block') {
+      const active = blockCatalog.find(item => item.block_id === clipboard.blockId
+        && item.status === 'active' && item.declaration_state === 'declared');
+      if (!active) return null;
+      const keys = declaredBlockKeys(active.schema.fields);
+      // Clone the entire JSON payload first: optional draft fields may be
+      // undefined, and cloning an individual undefined value would throw.
+      clipboard.props = { values: Object.fromEntries(
+        Object.entries(clone(values)).filter(([key]) => keys.has(key)),
+      ) };
+      if (!pluginValuesReadyForFreshNode(
+        clipboard.props.values as Record<string, unknown>, active.schema,
+      )) return null;
+    } else {
+      clipboard.props = { values: clone(values) };
+    }
+  } else {
+    clipboard.props = clone(element.props);
+    delete clipboard.props.binding;
+  }
+  return clipboard;
+}
+
+export function canPasteOptions(
+  clipboard: StudioBuilderClipboard | null, target: NodeLocation, locked: boolean,
+): boolean {
+  if (!clipboard || locked || clipboard.kind !== target.kind) return false;
+  if (target.kind !== 'element') return true;
+  if (!isElement(target.node) || target.node.type !== clipboard.elementType
+      || target.node.type === 'core/content_slot') return false;
+  return (target.node.type !== 'plugin/block' && target.node.type !== 'legacy/block')
+    || target.node.props.block_id === clipboard.blockId;
+}
+
+/** Never transfer binding references or a block_id to the target node. */
+export function pasteNodeOptions(
+  document: BuilderDocument, id: string, clipboard: StudioBuilderClipboard,
+): BuilderDocument | null {
+  const next = clone(document);
+  const target = locate(next, id);
+  if (!target || !canPasteOptions(clipboard, target, false)) return null;
+  if (isElement(target.node)
+      && (hasUnexpectedElementFields(target.node) || hasInvalidCoreBinding(target.node))) return null;
+  if (!isElement(target.node)) {
+    if (clipboard.responsive && Object.keys(clipboard.responsive).length) {
+      target.node.responsive = clone(clipboard.responsive);
+    } else {
+      delete target.node.responsive;
+    }
+  } else if (target.node.type === 'plugin/block' || target.node.type === 'legacy/block') {
+    if (!object(clipboard.props?.values) || !object(target.node.props.values)) return null;
+    target.node.props.values = clone(clipboard.props.values);
+  } else {
+    if (!object(clipboard.props)) return null;
+    const props = clone(clipboard.props);
+    delete props.binding;
+    if (target.node.props.binding !== undefined) props.binding = target.node.props.binding;
+    target.node.props = props;
+  }
+  return distinctPatternIdCount(next) <= 16 && withinBuilderLimits(next) ? next : null;
+}
+
+/** Drag/drop may reorder siblings only if preserved nodes retain their exact
+ * index, ancestor IDs, and serialized element content. */
+export function reorderSiblingNode(
+  document: BuilderDocument, sourceId: string, targetId: string,
+  position: 'before' | 'after', registry: Record<string, Record<string, string>>,
+  blockCatalog: BlockCatalogItemDto[] = [],
+): BuilderDocument | null {
+  if (sourceId === targetId || (position !== 'before' && position !== 'after')) return null;
+  const source = locate(document, sourceId);
+  const target = locate(document, targetId);
+  if (!source || !target || source.kind !== target.kind || source.parentId !== target.parentId
+      || isProtectedNode(document, sourceId, registry, blockCatalog)) return null;
+  const next = clone(document);
+  const siblings = childrenAt(next, source.parentId ? locate(next, source.parentId) : undefined);
+  if (!siblings) return null;
+  const sourceIndex = source.path[source.path.length - 1];
+  const [moving] = siblings.splice(sourceIndex, 1);
+  const targetIndex = siblings.findIndex(node => node.id === targetId);
+  if (!moving || targetIndex === -1) return null;
+  const insertIndex = targetIndex + (position === 'after' ? 1 : 0);
+  if (insertIndex === sourceIndex) return null;
+  siblings.splice(insertIndex, 0, moving);
+  return preservesAnchors(document, next, registry, undefined, blockCatalog) ? next : null;
 }
 
 export function countElementsByType(document: BuilderDocument, elementType: string): number {

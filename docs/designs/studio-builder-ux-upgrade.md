@@ -25,7 +25,7 @@ OpenDash Studio đã hoàn thiện nền tảng kỹ thuật hai chế độ (Mo
 
 ## The Problem
 
-1. **Không gian làm việc phân mảnh & trùng lặp header ([`StudioWorkspace.tsx#L925-L1049`](../../cms/admin/src/studio/StudioWorkspace.tsx#L925-L1049), [`StudioTopBar.tsx`](../../cms/admin/src/studio/StudioTopBar.tsx), [`StudioCustomizerNav.tsx#L152-L163`](../../cms/admin/src/studio/StudioCustomizerNav.tsx#L152-L163)):**
+1. **Không gian làm việc phân mảnh & trùng lặp header ([`StudioWorkspace.tsx#L925-L1049`](../../cms/admin/src/studio/StudioWorkspace.tsx#L925-L1049), `StudioTopBar.tsx` (đã thay thế trong S01), [`StudioCustomizerNav.tsx#L152-L163`](../../cms/admin/src/studio/StudioCustomizerNav.tsx#L152-L163)):**
    - `StudioTopBar` cố định 48px phía trên toàn màn hình, trong khi `StudioCustomizerNav` lại vẽ thêm `renderDrawerHeader` ở tất cả 6 màn con Mode 1, tạo hai tầng tiêu đề và nút quay lại chồng chéo.
    - `StudioWorkspace.tsx#L1106` hardcode `frameClassName="!h-[calc(100vh-120px)]"` cho thanh topbar cũ và `<aside>` dùng `h-72` trên mobile không đủ chỗ cho Header + Workspace + Footer.
 2. **Thao tác cây & màn thuộc tính bị trộn lẫn ([`BuilderWorkspace.tsx#L386-L446`](../../cms/admin/src/builder/BuilderWorkspace.tsx#L386-L446), [`BuilderTree.tsx`](../../cms/admin/src/builder/BuilderTree.tsx), [`BuilderInspector.tsx`](../../cms/admin/src/builder/BuilderInspector.tsx)):**

@@ -4,8 +4,8 @@ import type { PatternRecord } from '../api/patterns.ts';
 import type { GeneralSettingsDraft, ReadingSettings, ReadingSettingsDraft } from '../api/settings.ts';
 import type { StudioTargetGroup, StudioTargetItem } from '../api/studio.ts';
 import type { ThemeOptionDef } from '../api/themes.ts';
-import { BuilderEditorCore } from '../builder/BuilderWorkspace.tsx';
-import type { BuilderDocument, BuilderViewport } from '../builder/document.ts';
+import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderWorkspace.tsx';
+import type { BuilderDocument, BuilderViewport, StudioBuilderClipboard } from '../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../components/AdminPrimitives.tsx';
 import { ThemeOptionsForm } from '../features/themes/ThemeOptionsForm.tsx';
 import type { StudioPanelId } from '../shell/router.ts';
@@ -15,7 +15,6 @@ interface Props {
   panel: StudioPanelId;
   onPanelChange: (panel: StudioPanelId) => void;
   activeThemeId: string | null;
-  activeThemeName: string | null;
   generalDraft: GeneralSettingsDraft | null;
   generalDirty: boolean;
   timezones: string[];
@@ -59,6 +58,12 @@ interface Props {
   onBuilderMessage: (msg: string, failed?: boolean) => void;
   onApiError: (error: unknown, fallback: string) => void;
   disabled?: boolean;
+  builderView: StudioBuilderView;
+  onBuilderViewChange: (view: StudioBuilderView) => void;
+  addTargetParentId: string | null;
+  onAddTargetParentIdChange: (id: string | null) => void;
+  clipboard: StudioBuilderClipboard | null;
+  onClipboardChange: (value: StudioBuilderClipboard | null) => void;
 }
 
 const INPUT_CLASS =
@@ -103,7 +108,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   panel,
   onPanelChange,
   activeThemeId,
-  activeThemeName,
   generalDraft,
   generalDirty,
   timezones,
@@ -144,23 +148,16 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   onBuilderMessage,
   onApiError,
   disabled = false,
+  builderView,
+  onBuilderViewChange,
+  addTargetParentId,
+  onAddTargetParentIdChange,
+  clipboard,
+  onClipboardChange,
 }) => {
   const selectedTarget = selectedTargetKey
     ? targets.find(item => item.canonical_target_key === selectedTargetKey) ?? null
     : null;
-
-  const renderDrawerHeader = (heading: string, onBack: () => void, backLabel = '← Tùy biến') => (
-    <div className="flex items-center gap-2 border-b border-zinc-200 bg-zinc-50/70 px-3 py-2.5">
-      <button
-        type="button"
-        onClick={onBack}
-        className="rounded-md px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-200/70 hover:text-zinc-950"
-      >
-        {backLabel}
-      </button>
-      <h2 className="truncate text-sm font-semibold text-zinc-950">{heading}</h2>
-    </div>
-  );
 
   if (panel === 'root') {
     const customizerItems: Array<{ id: StudioPanelId; label: string; desc: string; dirty: boolean }> = [
@@ -172,13 +169,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
 
     return (
       <nav className="flex h-full flex-col overflow-y-auto" aria-label="Điều hướng OpenDash Studio" data-testid="studio-nav-root">
-        <div className="border-b border-zinc-200 px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Đang tùy biến</p>
-          <p className="mt-0.5 truncate text-sm font-semibold text-zinc-950">
-            {activeThemeName ?? activeThemeId ?? 'Theme mặc định'}
-          </p>
-        </div>
-
         <div className="space-y-5 p-3">
           <div>
             <p className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -238,7 +228,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     const legacyTz = Boolean(generalDraft && timezones.length > 0 && !timezones.includes(generalDraft.timezone));
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-identity">
-        {renderDrawerHeader('Nhận diện Site', () => onPanelChange('root'))}
         <div className="space-y-4 p-4">
           {!generalDraft ? (
             <p className="text-xs text-zinc-500">Đang tải cài đặt website…</p>
@@ -300,7 +289,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   if (panel === 'theme-options') {
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-theme-options">
-        {renderDrawerHeader('Tùy chọn Giao diện', () => onPanelChange('root'))}
         <div className="space-y-4 p-4">
           {!activeThemeId ? (
             <AdminAlert tone="info">
@@ -325,7 +313,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   if (panel === 'menus') {
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-menus">
-        {renderDrawerHeader('Vị trí Menu', () => onPanelChange('root'))}
         <div className="space-y-4 p-4">
           {!activeThemeId || !menuSlots ? (
             <AdminAlert tone="info">
@@ -383,7 +370,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     );
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-reading">
-        {renderDrawerHeader('Trang chủ & Đọc', () => onPanelChange('root'))}
         <div className="space-y-4 p-4">
           {!readingDraft ? (
             <p className="text-xs text-zinc-500">Đang tải cấu hình Reading…</p>
@@ -456,7 +442,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     const allowRouteContext = ['single', 'page', 'page_layout', 'single_custom'].includes(selectedTarget.target.kind);
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-template-editor">
-        {renderDrawerHeader(selectedTarget.label, () => onSelectTarget(null), '← Danh sách Template')}
         <div className="space-y-3 p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
             <code className="font-mono text-zinc-800">{selectedTarget.canonical_target_key}</code>
@@ -487,6 +472,13 @@ export const StudioCustomizerNav: React.FC<Props> = ({
             </div>
           ) : (
             <BuilderEditorCore
+              key={selectedTarget.canonical_target_key}
+              builderView={builderView}
+              onBuilderViewChange={onBuilderViewChange}
+              addTargetParentId={addTargetParentId}
+              onAddTargetParentIdChange={onAddTargetParentIdChange}
+              clipboard={clipboard}
+              onClipboardChange={onClipboardChange}
               document={templateDoc}
               selectedId={templateSelectedNodeId}
               onSelect={onSelectTemplateNode}
@@ -517,7 +509,6 @@ export const StudioCustomizerNav: React.FC<Props> = ({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-templates">
-      {renderDrawerHeader('Dựng Template', () => onPanelChange('root'))}
       <div className="space-y-4 p-3">
         {targets.length === 0 ? (
           <p className="px-1 text-xs text-zinc-500">Đang tải danh sách template…</p>

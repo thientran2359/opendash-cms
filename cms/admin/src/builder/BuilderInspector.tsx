@@ -33,6 +33,10 @@ interface Props {
   patternsLoaded: boolean;
   onRefreshPatterns: () => void;
   onDeleteNode?: (id: string) => void;
+  /** Studio supplies its own contextual heading above the Inspector. */
+  hideHeader?: boolean;
+  /** Studio keeps destructive actions in the block's contextual menu. */
+  hideDeleteButton?: boolean;
   onChange: (id: string, key: string, value: BlockPropValue | undefined) => void;
   onBindingChange: (id: string, binding: ElementBinding | null) => void;
   onListChange: (id: string, config: ListProps) => void;
@@ -58,6 +62,8 @@ export function BuilderInspector({
   patternsLoaded,
   onRefreshPatterns,
   onDeleteNode,
+  hideHeader = false,
+  hideDeleteButton = false,
   onChange,
   onBindingChange,
   onListChange,
@@ -68,7 +74,7 @@ export function BuilderInspector({
   const item = locate(document, selectedId);
   if (!item) return (
     <section className="rounded-xl border border-slate-200 bg-white p-4" aria-label="Inspector">
-      <h2 className="!mt-0 text-base font-semibold">Thuộc tính</h2>
+      {!hideHeader && <h2 className="!mt-0 text-base font-semibold">Thuộc tính</h2>}
       <p className="text-sm text-slate-500">Chọn một node trong Tree hoặc Canvas để chỉnh sửa.</p>
     </section>
   );
@@ -122,11 +128,11 @@ export function BuilderInspector({
   };
   return (
     <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-4" aria-label="Inspector">
-      <div>
+      {!hideHeader && <div>
         <h2 className="!m-0 text-base font-semibold text-slate-900">Thuộc tính</h2>
         <p className="mt-1 text-sm text-slate-600">{nodeTitle(item, blockSchemas)}</p>
         <code className="block break-all text-[11px] text-slate-400">{item.node.id}</code>
-      </div>
+      </div>}
       {responsiveNode && (
         <fieldset className="space-y-3 rounded-lg border border-slate-200 p-3" aria-label="Responsive overrides">
           <legend className="px-1 text-sm font-semibold text-slate-800">
@@ -352,7 +358,7 @@ export function BuilderInspector({
           <pre className="mt-2 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(binding, null, 2)}</pre>
         </div>
       )}
-      {onDeleteNode && (
+      {!hideDeleteButton && onDeleteNode && (
         <div className="border-t border-zinc-100 pt-3">
           <button
             type="button"
