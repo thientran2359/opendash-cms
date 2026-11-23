@@ -8,7 +8,7 @@ const source = await readFile(new URL('../src/builder/document.ts', import.meta.
 const { code } = await transform(source, { loader: 'ts', format: 'esm', target: 'es2022' });
 const {
   allNodes, appendRowWithColumns, canPasteOptions, copyNodeOptions, duplicateNode,
-  locate, pasteNodeOptions, preservesAnchors, reorderSiblingNode,
+  isLockedElement, locate, pasteNodeOptions, preservesAnchors, reorderSiblingNode,
 } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 
 const registry = { 'theme/banner': { title: 'text' } };
@@ -68,6 +68,35 @@ test('duplicateNode rejects locked subtree, content slot, and an anchor shifted 
   assert.equal(duplicateNode(makeDoc([element('slot', 'core/content_slot', {})]), 'row-1', registry), null);
 });
 
+test('historical unresolved core props remain immutable anchors for duplicate, reorder and paste', () => {
+  const legacy = element('historical', 'core/text', { text: 'Saved', unsupported_legacy: true });
+  const doc = makeDoc([element('first'), legacy, element('last')]);
+  assert.equal(isLockedElement(legacy, registry, catalog), true);
+  assert.equal(copyNodeOptions(doc, 'historical', registry, catalog), null);
+  assert.equal(duplicateNode(doc, 'historical', registry, catalog), null);
+  assert.equal(duplicateNode(doc, 'column-1', registry, catalog), null);
+  assert.equal(duplicateNode(doc, 'first', registry, catalog), null);
+  assert.equal(reorderSiblingNode(doc, 'first', 'last', 'after', registry, catalog), null);
+  const source = copyNodeOptions(doc, 'first', registry, catalog);
+  assert.equal(pasteNodeOptions(doc, 'historical', source), null);
+  assert.ok(duplicateNode(doc, 'last', registry, catalog));
+  assert.deepEqual(doc.sections[0].children[0].children[0].children.map(n => n.id),
+    ['first', 'historical', 'last']);
+  // The server also rejects unexpected element-level fields and binding on non-bindable types.
+  assert.equal(isLockedElement({ ...element('extra'), unexpected: true }, registry, catalog), true);
+  const legacyBinding = element('old-binding', 'core/text', {
+    text: 'Saved', binding: {
+      type_key: 'page', entry_slug: 'home', target: 'text',
+      source: { kind: 'title', unexpected_legacy: true },
+    },
+  });
+  assert.equal(isLockedElement(legacyBinding, registry, catalog), true);
+  assert.equal(pasteNodeOptions(makeDoc([legacyBinding]), 'old-binding', source), null);
+  assert.equal(isLockedElement(element('video', 'core/video', {
+    media_id: '', controls: true, muted: false, binding: { kind: 'title' },
+  }), registry, catalog), true);
+});
+
 test('duplicateNode enforces list count, 512-node bound, and UTF-8 256KiB bound', () => {
   const lists = Array.from({ length: 8 }, (_, n) => element(`list-${n}`, 'core/list', {
     type_key: 'post', include_descendants: false, sort: 'id_desc', page_size: 6,
@@ -79,6 +108,35 @@ test('duplicateNode enforces list count, 512-node bound, and UTF-8 256KiB bound'
   const patterns = makeDoc(Array.from({ length: 16 }, (_, n) =>
     element(`pattern-${n}`, 'core/pattern_ref', { pattern_id: n + 1 })));
   assert.ok(duplicateNode(patterns, 'pattern-0', registry));
+});
+
+test('schema evolution: fresh plugin copies must satisfy newly required visible fields', () => {
+  const evolvedSchema = { ...schema, fields: [
+    { type: 'boolean', key: 'show_more', label: 'Show more', default: false },
+    { type: 'text', key: 'required_new', label: 'Required', required: true },
+    { type: 'group', key: 'details', label: 'Details', show_if: { field: 'show_more', equals: true },
+      fields: [{ type: 'text', key: 'conditional', label: 'Conditional', required: true }] },
+    { type: 'repeater', key: 'items', label: 'Items', min_items: 1, fields: [
+      { type: 'text', key: 'label', label: 'Label', required: true },
+    ] },
+  ] };
+  const evolvedCatalog = [{ ...activeBlock, schema: evolvedSchema }];
+  const old = makeDoc([element('old', 'plugin/block', { block_id: 'plugin/hero', values: {
+    show_more: false, items: [{ label: 'Good' }],
+  } })]);
+  assert.equal(duplicateNode(old, 'old', registry, evolvedCatalog), null);
+  assert.equal(duplicateNode(old, 'row-1', registry, evolvedCatalog), null);
+  assert.equal(copyNodeOptions(old, 'old', registry, evolvedCatalog), null);
+  const ready = copy(old);
+  ready.sections[0].children[0].children[0].children[0].props.values.required_new = 'Ready';
+  assert.ok(duplicateNode(ready, 'old', registry, evolvedCatalog));
+  assert.ok(copyNodeOptions(ready, 'old', registry, evolvedCatalog));
+  ready.sections[0].children[0].children[0].children[0].props.values.show_more = true;
+  assert.equal(duplicateNode(ready, 'old', registry, evolvedCatalog), null);
+  ready.sections[0].children[0].children[0].children[0].props.values.conditional = 'Visible';
+  assert.ok(duplicateNode(ready, 'old', registry, evolvedCatalog));
+  ready.sections[0].children[0].children[0].children[0].props.values.items = [{ label: '' }];
+  assert.equal(duplicateNode(ready, 'old', registry, evolvedCatalog), null);
 });
 
 test('appendRowWithColumns creates an atomic 1/2/3-column grid and stays sparse for single column', () => {
@@ -121,7 +179,7 @@ test('copy/paste container options deep-clones responsive and deletes empty over
 test('core options omit source binding and preserve the target binding', () => {
   const binding = { type_key: 'page', entry_slug: 'home', source: { kind: 'title' }, target: 'text' };
   const doc = makeDoc([
-    element('source', 'core/text', { text: 'From source', binding, extra: { enabled: true } }),
+    element('source', 'core/text', { text: 'From source', binding }),
     element('target', 'core/text', { text: 'Original', binding: { ...binding, entry_slug: 'target' } }),
     element('other', 'core/button', { label: 'Press', url: '/' }),
   ]);
@@ -135,6 +193,20 @@ test('core options omit source binding and preserve the target binding', () => {
   assert.equal(locate(pasted, 'target').node.props.binding.entry_slug, 'target');
   assert.equal(locate(doc, 'target').node.props.text, 'Original');
   assert.equal(pasteNodeOptions(doc, 'other', clipboard), null);
+});
+
+test('pasting a Pattern reference cannot introduce a seventeenth distinct ID', () => {
+  const patterns = makeDoc(Array.from({ length: 17 }, (_, i) =>
+    element(`pattern-${i}`, 'core/pattern_ref', { pattern_id: i === 16 ? 1 : i + 1 })));
+  const foreign = makeDoc([element('different', 'core/pattern_ref', { pattern_id: 17 })]);
+  const clipboard = copyNodeOptions(foreign, 'different', registry, catalog);
+  assert.ok(clipboard);
+  assert.equal(pasteNodeOptions(patterns, 'pattern-16', clipboard), null);
+  const same = copyNodeOptions(patterns, 'pattern-1', registry, catalog);
+  const next = pasteNodeOptions(patterns, 'pattern-16', same);
+  assert.ok(next);
+  assert.equal(locate(next, 'pattern-16').node.props.pattern_id, 2);
+  assert.equal(locate(patterns, 'pattern-16').node.props.pattern_id, 1);
 });
 
 test('plugin copy drops unknown values, flattens group keys, and never adds top-level binding', () => {
