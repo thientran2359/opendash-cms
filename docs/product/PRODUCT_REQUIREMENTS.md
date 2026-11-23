@@ -8,7 +8,7 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 
 - **Giai đoạn phát hành:** Usable Beta nội bộ (ưu tiên macOS cho cold walkthrough) → common Release Candidate (RC) → V1 public (Windows, macOS, Linux VPS).
 - **Cơ chế phân phối:** Rust + SQLite, đóng gói thành **một file thực thi duy nhất** (`opendash` / `opendash.exe`). Mỗi bản cài quản lý một website.
-- **Vận hành:** Developer hoặc quản trị máy chủ triển khai trên VPS Linux (hoặc chạy cục bộ trên macOS/Windows); chủ website làm việc qua trình duyệt. Giao diện Admin ưu tiên tiếng Việt; mỗi website phục vụ một ngôn ngữ nội dung. Công khai mã nguồn (giấy phép và mô hình thu phí do chủ dự án chốt trước khi phát hành công khai).
+- **Vận hành:** Developer hoặc quản trị máy chủ triển khai trên VPS Linux (hoặc chạy cục bộ trên macOS/Windows); chủ website làm việc qua trình duyệt. Giao diện Admin ưu tiên tiếng Việt; website hỗ trợ một hoặc nhiều ngôn ngữ nội dung và bản địa hóa chuỗi giao diện của Theme. Công khai mã nguồn (giấy phép và mô hình thu phí do chủ dự án chốt trước khi phát hành công khai).
 - **Sao lưu & Phục hồi:** Admin cho sao lưu (mã hóa bằng passphrase) và phục hồi thủ công sang site root mới (Safe Mode trước khi kích hoạt tường minh), bao gồm DB, media, cấu hình, theme, plugin và SMTP secrets.
 
 ## 2. Nội dung, Lưu vs Xuất bản và Phân quyền
@@ -45,7 +45,8 @@ OpenDash là CMS cho blog và website giới thiệu, dành cho người dùng q
 
 - **Media:** Upload và quản lý ảnh (JPEG/PNG/WebP) và video (MP4), kiểm soát quyền truy cập media theo trạng thái xuất bản/`public_exposure`, xóa an toàn theo tham chiếu (`media_refs`) và đối soát/quarantine.
 - **Liên hệ & SEO:** Tạo contact form qua Admin/Builder, lưu submissions, gửi thông báo qua SMTP TLS/STARTTLS; cấu hình đường dẫn tĩnh (permalinks) với 301 redirect tự động, tiêu đề/mô tả SEO, OG image, canonical, `robots.txt` và `sitemap.xml`.
+- **Đa ngôn ngữ nội dung & Theme L10n:** Quản trị viên cấu hình danh sách ngôn ngữ nội dung (mặc định 1 ngôn ngữ; khi chỉ có 1 ngôn ngữ, ẩn các điều khiển đa ngôn ngữ tại màn hình nội dung, giao diện và OpenDash Studio, chỉ giữ mục thêm ngôn ngữ trong Cài đặt). Khi dùng nhiều ngôn ngữ, mỗi bản dịch là một bản ghi/term độc lập liên kết qua nhóm dịch, tạo mới qua sao chép ban đầu (Copy-on-create), giữ trạng thái Lưu/Xuất bản độc lập, ẩn tiền tố URL ở ngôn ngữ mặc định, tự động phát `hreflang`/`sitemap.xml` và hỗ trợ từ điển bản địa hóa + bộ chuyển ngôn ngữ thuần HTML/CSS trong Theme.
 
 ## 7. Ngoài phạm vi bản đầu (Sau V1)
 
-Bán hàng (e-commerce), AI dựng trang từ ảnh, luồng duyệt/phê duyệt xuất bản nhiều bước (ngoài trạng thái `draft`/`published`), lịch sử và khôi phục phiên bản (revisions), repeater cho custom fields của CPT (riêng Trình dựng trang hỗ trợ trường lặp `repeater` tối đa 1 cấp có giới hạn kích thước trong `block.json`), quan hệ giữa nội dung (relation), khối đồng bộ tự động (synced propagation), lọc nâng cao cho khách truy cập, giao diện plugin JS/HTML tùy ý, tác vụ định kỳ (cron), sao lưu theo lịch, quản lý nội dung đa ngữ và chuyển ngôn ngữ Admin.
+Bán hàng (e-commerce), AI dựng trang từ ảnh, luồng duyệt/phê duyệt xuất bản nhiều bước (ngoài trạng thái `draft`/`published`), lịch sử và khôi phục phiên bản (revisions), repeater cho custom fields của CPT (riêng Trình dựng trang hỗ trợ trường lặp `repeater` tối đa 1 cấp có giới hạn kích thước trong `block.json`), quan hệ giữa nội dung (relation), khối đồng bộ tự động (synced propagation), lọc nâng cao cho khách truy cập, giao diện plugin JS/HTML tùy ý, tác vụ định kỳ (cron), sao lưu theo lịch, chuyển ngôn ngữ giao diện Admin (Admin UI & API L10n), tự động đồng bộ trường không dịch giữa các bản dịch, và đa ngôn ngữ theo nhiều tên miền/subdomain.
