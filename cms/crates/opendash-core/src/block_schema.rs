@@ -28,6 +28,173 @@ pub const ALLOWED_COLOR_TOKENS: [&str; 6] = [
     "var(--od-token-border)",
 ];
 
+pub const GLOBAL_PUBLIC_URL_OPTION_KEYS: &[&str] = &[
+    "social_facebook",
+    "social_youtube",
+    "social_tiktok",
+    "social_instagram",
+    "social_x",
+    "social_linkedin",
+    "social_email",
+];
+pub const GLOBAL_PUBLIC_MEDIA_OPTION_KEYS: &[&str] = &["site_logo"];
+
+pub fn global_site_option_fields() -> Vec<BlockFieldSpec> {
+    vec![
+        BlockFieldSpec::Group {
+            key: "social_links_group".to_owned(),
+            label: "Mạng xã hội".to_owned(),
+            show_if: None,
+            fields: vec![
+                BlockFieldSpec::Url {
+                    key: "social_facebook".to_owned(),
+                    label: "Facebook".to_owned(),
+                    required: false,
+                    default: None,
+                    placeholder: Some("https://facebook.com/yourpage".to_owned()),
+                    show_if: None,
+                },
+                BlockFieldSpec::Url {
+                    key: "social_youtube".to_owned(),
+                    label: "YouTube".to_owned(),
+                    required: false,
+                    default: None,
+                    placeholder: Some("https://youtube.com/@yourchannel".to_owned()),
+                    show_if: None,
+                },
+                BlockFieldSpec::Url {
+                    key: "social_tiktok".to_owned(),
+                    label: "TikTok".to_owned(),
+                    required: false,
+                    default: None,
+                    placeholder: Some("https://tiktok.com/@yourhandle".to_owned()),
+                    show_if: None,
+                },
+                BlockFieldSpec::Url {
+                    key: "social_instagram".to_owned(),
+                    label: "Instagram".to_owned(),
+                    required: false,
+                    default: None,
+                    placeholder: Some("https://instagram.com/yourhandle".to_owned()),
+                    show_if: None,
+                },
+                BlockFieldSpec::Url {
+                    key: "social_x".to_owned(),
+                    label: "X (Twitter)".to_owned(),
+                    required: false,
+                    default: None,
+                    placeholder: Some("https://x.com/yourhandle".to_owned()),
+                    show_if: None,
+                },
+                BlockFieldSpec::Url {
+                    key: "social_linkedin".to_owned(),
+                    label: "LinkedIn".to_owned(),
+                    required: false,
+                    default: None,
+                    placeholder: Some("https://linkedin.com/in/yourprofile".to_owned()),
+                    show_if: None,
+                },
+                BlockFieldSpec::Url {
+                    key: "social_email".to_owned(),
+                    label: "Email liên hệ".to_owned(),
+                    required: false,
+                    default: None,
+                    placeholder: Some("mailto:hello@example.com".to_owned()),
+                    show_if: None,
+                },
+            ],
+        },
+        BlockFieldSpec::Group {
+            key: "brand_contact_group".to_owned(),
+            label: "Thương hiệu & Liên hệ chung".to_owned(),
+            show_if: None,
+            fields: vec![
+                BlockFieldSpec::Media {
+                    key: "site_logo".to_owned(),
+                    label: "Logo website".to_owned(),
+                    media_kind: MediaFieldKind::Image,
+                    required: false,
+                    default: None,
+                    css_var: None,
+                    show_if: None,
+                },
+                BlockFieldSpec::Color {
+                    key: "brand_primary_color".to_owned(),
+                    label: "Màu chủ đạo".to_owned(),
+                    required: false,
+                    default: Some("#2563eb".to_owned()),
+                    css_var: None,
+                    show_if: None,
+                },
+                BlockFieldSpec::Text {
+                    key: "contact_phone".to_owned(),
+                    label: "Số điện thoại".to_owned(),
+                    max_chars: Some(40),
+                    required: false,
+                    default: None,
+                    placeholder: Some("0901 234 567".to_owned()),
+                    show_if: None,
+                },
+                BlockFieldSpec::Textarea {
+                    key: "contact_address".to_owned(),
+                    label: "Địa chỉ".to_owned(),
+                    max_chars: Some(300),
+                    required: false,
+                    default: None,
+                    show_if: None,
+                },
+                BlockFieldSpec::Text {
+                    key: "footer_note".to_owned(),
+                    label: "Ghi chú chân trang".to_owned(),
+                    max_chars: Some(240),
+                    required: false,
+                    default: None,
+                    placeholder: Some("© 2026 OpenDash".to_owned()),
+                    show_if: None,
+                },
+            ],
+        },
+    ]
+}
+
+pub fn default_value_for_field_spec(spec: &BlockFieldSpec) -> Value {
+    if let Some(v) = spec.default_json_value() {
+        return v;
+    }
+    match spec {
+        BlockFieldSpec::Text { .. }
+        | BlockFieldSpec::Textarea { .. }
+        | BlockFieldSpec::Richtext { .. }
+        | BlockFieldSpec::Color { .. }
+        | BlockFieldSpec::Media { .. }
+        | BlockFieldSpec::Url { .. } => Value::String(String::new()),
+        BlockFieldSpec::Number { .. } => serde_json::json!(0),
+        BlockFieldSpec::Range { min, .. } => serde_json::json!(min),
+        BlockFieldSpec::Boolean { .. } => Value::Bool(false),
+        BlockFieldSpec::Select { options, .. } | BlockFieldSpec::RadioButtons { options, .. } => {
+            options
+                .first()
+                .map(|o| Value::String(o.value.clone()))
+                .unwrap_or_else(|| Value::String(String::new()))
+        }
+        BlockFieldSpec::Spacing { .. } => serde_json::json!({}),
+        BlockFieldSpec::Link { .. } => {
+            serde_json::json!({ "url": "", "new_tab": false, "nofollow": false })
+        }
+        BlockFieldSpec::Repeater { .. } => serde_json::json!([]),
+        BlockFieldSpec::Group { .. } => Value::Null,
+    }
+}
+
+pub fn global_site_option_defaults() -> BTreeMap<String, Value> {
+    let fields = global_site_option_fields();
+    let mut out = BTreeMap::new();
+    for leaf in flattened_field_specs(&fields) {
+        out.insert(leaf.key().to_owned(), default_value_for_field_spec(leaf));
+    }
+    out
+}
+
 const fn default_repeater_max() -> usize {
     32
 }
@@ -82,6 +249,66 @@ impl CssUnit {
 pub struct SelectOption {
     pub value: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectDisplay {
+    Dropdown,
+    Buttons,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpacingValue {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left: Option<f64>,
+}
+
+impl SpacingValue {
+    pub fn sides(&self) -> [Option<f64>; 4] {
+        [self.top, self.right, self.bottom, self.left]
+    }
+
+    pub fn format_css(&self, unit: CssUnit) -> Option<String> {
+        let sides = self.sides();
+        if sides.iter().all(Option::is_none) {
+            return None;
+        }
+        let suffix = unit.as_css_suffix();
+        let mut parts = Vec::with_capacity(4);
+        for side in sides {
+            let n = side.unwrap_or(0.0);
+            if !n.is_finite() {
+                return None;
+            }
+            if n.fract() == 0.0 && n.abs() < 1e15 {
+                parts.push(format!("{}{suffix}", n as i64));
+            } else {
+                parts.push(format!("{n}{suffix}"));
+            }
+        }
+        Some(parts.join(" "))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LinkValue {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub new_tab: bool,
+    #[serde(default)]
+    pub nofollow: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -197,10 +424,57 @@ pub enum BlockFieldSpec {
         required: bool,
         #[serde(default)]
         default: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display: Option<SelectDisplay>,
         #[serde(default)]
         css_var: Option<String>,
         #[serde(default)]
         responsive: bool,
+        #[serde(default)]
+        show_if: Option<ShowIfRule>,
+    },
+    RadioButtons {
+        key: String,
+        label: String,
+        options: Vec<SelectOption>,
+        #[serde(default)]
+        required: bool,
+        #[serde(default)]
+        default: Option<String>,
+        #[serde(default)]
+        css_var: Option<String>,
+        #[serde(default)]
+        responsive: bool,
+        #[serde(default)]
+        show_if: Option<ShowIfRule>,
+    },
+    Spacing {
+        key: String,
+        label: String,
+        #[serde(default)]
+        min: Option<f64>,
+        #[serde(default)]
+        max: Option<f64>,
+        #[serde(default)]
+        unit: Option<CssUnit>,
+        #[serde(default)]
+        default: Option<SpacingValue>,
+        #[serde(default)]
+        css_var: Option<String>,
+        #[serde(default)]
+        responsive: bool,
+        #[serde(default)]
+        show_if: Option<ShowIfRule>,
+    },
+    Link {
+        key: String,
+        label: String,
+        #[serde(default)]
+        required: bool,
+        #[serde(default)]
+        default: Option<LinkValue>,
+        #[serde(default)]
+        placeholder: Option<String>,
         #[serde(default)]
         show_if: Option<ShowIfRule>,
     },
@@ -274,6 +548,10 @@ pub struct BlockSchemaV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     pub render: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_parents: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_children: Option<Vec<String>>,
     #[serde(default)]
     pub fields: Vec<BlockFieldSpec>,
 }
@@ -301,9 +579,12 @@ impl BlockFieldSpec {
             | BlockFieldSpec::Range { key, .. }
             | BlockFieldSpec::Boolean { key, .. }
             | BlockFieldSpec::Select { key, .. }
+            | BlockFieldSpec::RadioButtons { key, .. }
+            | BlockFieldSpec::Spacing { key, .. }
             | BlockFieldSpec::Color { key, .. }
             | BlockFieldSpec::Media { key, .. }
             | BlockFieldSpec::Url { key, .. }
+            | BlockFieldSpec::Link { key, .. }
             | BlockFieldSpec::Group { key, .. }
             | BlockFieldSpec::Repeater { key, .. } => key,
         }
@@ -318,9 +599,12 @@ impl BlockFieldSpec {
             | BlockFieldSpec::Range { label, .. }
             | BlockFieldSpec::Boolean { label, .. }
             | BlockFieldSpec::Select { label, .. }
+            | BlockFieldSpec::RadioButtons { label, .. }
+            | BlockFieldSpec::Spacing { label, .. }
             | BlockFieldSpec::Color { label, .. }
             | BlockFieldSpec::Media { label, .. }
             | BlockFieldSpec::Url { label, .. }
+            | BlockFieldSpec::Link { label, .. }
             | BlockFieldSpec::Group { label, .. }
             | BlockFieldSpec::Repeater { label, .. } => label,
         }
@@ -335,9 +619,12 @@ impl BlockFieldSpec {
             | BlockFieldSpec::Range { show_if, .. }
             | BlockFieldSpec::Boolean { show_if, .. }
             | BlockFieldSpec::Select { show_if, .. }
+            | BlockFieldSpec::RadioButtons { show_if, .. }
+            | BlockFieldSpec::Spacing { show_if, .. }
             | BlockFieldSpec::Color { show_if, .. }
             | BlockFieldSpec::Media { show_if, .. }
             | BlockFieldSpec::Url { show_if, .. }
+            | BlockFieldSpec::Link { show_if, .. }
             | BlockFieldSpec::Group { show_if, .. }
             | BlockFieldSpec::Repeater { show_if, .. } => show_if.as_ref(),
         }
@@ -355,16 +642,23 @@ impl BlockFieldSpec {
             } | BlockFieldSpec::Select {
                 responsive: true,
                 ..
+            } | BlockFieldSpec::RadioButtons {
+                responsive: true,
+                ..
+            } | BlockFieldSpec::Spacing {
+                responsive: true,
+                ..
             }
         )
     }
 
-    fn default_json_value(&self) -> Option<Value> {
+    pub fn default_json_value(&self) -> Option<Value> {
         match self {
             BlockFieldSpec::Text { default, .. }
             | BlockFieldSpec::Textarea { default, .. }
             | BlockFieldSpec::Richtext { default, .. }
             | BlockFieldSpec::Select { default, .. }
+            | BlockFieldSpec::RadioButtons { default, .. }
             | BlockFieldSpec::Color { default, .. }
             | BlockFieldSpec::Media { default, .. }
             | BlockFieldSpec::Url { default, .. } => {
@@ -374,6 +668,12 @@ impl BlockFieldSpec {
                 default.and_then(|n| serde_json::Number::from_f64(n).map(Value::Number))
             }
             BlockFieldSpec::Boolean { default, .. } => default.map(Value::Bool),
+            BlockFieldSpec::Spacing { default, .. } => {
+                default.and_then(|s| serde_json::to_value(s).ok())
+            }
+            BlockFieldSpec::Link { default, .. } => {
+                default.as_ref().and_then(|l| serde_json::to_value(l).ok())
+            }
             BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. } => None,
         }
     }
@@ -486,6 +786,8 @@ fn valid_icon_name(raw: &str) -> bool {
 fn check_scope_reserved_key(
     spec: &BlockFieldSpec,
     scope_media_keys: &BTreeSet<&str>,
+    scope_link_keys: &BTreeSet<&str>,
+    scope_spacing_keys: &BTreeSet<&str>,
 ) -> Result<(), &'static str> {
     let key = spec.key();
     if !valid_snake_key_with_limit(key, 32) {
@@ -500,8 +802,28 @@ fn check_scope_reserved_key(
             );
         }
     }
-    if !matches!(spec, BlockFieldSpec::Url { .. }) && (key == "url" || key.ends_with("_url")) {
-        return Err("Chỉ field kiểu Url mới được dùng tên 'url' hoặc hậu tố '_url'.");
+    for suffix in ["_url", "_target", "_rel", "_new_tab", "_nofollow"] {
+        if let Some(prefix) = key.strip_suffix(suffix)
+            && scope_link_keys.contains(prefix)
+        {
+            return Err(
+                "Khóa field không được trùng biến tổng hợp <link_key>_{url,target,rel,new_tab,nofollow} của field Link cùng phạm vi.",
+            );
+        }
+    }
+    if let Some(prefix) = key.strip_suffix("_classes")
+        && scope_spacing_keys.contains(prefix)
+    {
+        return Err(
+            "Khóa field không được trùng biến tổng hợp <spacing_key>_classes của field Spacing cùng phạm vi.",
+        );
+    }
+    if !matches!(
+        spec,
+        BlockFieldSpec::Url { .. } | BlockFieldSpec::Link { .. }
+    ) && (key == "url" || key.ends_with("_url"))
+    {
+        return Err("Chỉ field kiểu Url hoặc Link mới được dùng tên 'url' hoặc hậu tố '_url'.");
     }
     Ok(())
 }
@@ -659,12 +981,24 @@ fn validate_primitive_field<'a>(
             css_var,
             responsive,
             ..
+        }
+        | BlockFieldSpec::RadioButtons {
+            options,
+            default,
+            css_var,
+            responsive,
+            ..
         } => {
             if in_repeater && (*responsive || css_var.is_some()) {
                 return Err("Field bên trong Repeater không hỗ trợ responsive hoặc css_var.");
             }
-            if options.is_empty() || options.len() > 32 {
-                return Err("Select phải có từ 1 đến 32 lựa chọn.");
+            let max_opts = if matches!(spec, BlockFieldSpec::RadioButtons { .. }) {
+                8
+            } else {
+                32
+            };
+            if options.is_empty() || options.len() > max_opts {
+                return Err("Số lượng lựa chọn của Select/RadioButtons vượt giới hạn hợp lệ.");
             }
             let mut seen_opts = BTreeSet::new();
             for opt in options {
@@ -675,6 +1009,11 @@ fn validate_primitive_field<'a>(
                     return Err("Giá trị option Select không được trùng lặp.");
                 }
                 validate_label(&opt.label)?;
+                if let Some(icon) = &opt.icon
+                    && !valid_icon_name(icon)
+                {
+                    return Err("Tên icon option chỉ được gồm [a-z0-9-] (1..=32 ký tự).");
+                }
                 if css_var.is_some() && !valid_css_select_value(&opt.value) {
                     return Err("Option Select có css_var phải khớp ^[a-z0-9_-]{1,32}$.");
                 }
@@ -683,6 +1022,31 @@ fn validate_primitive_field<'a>(
                 && !seen_opts.contains(def.as_str())
             {
                 return Err("Giá trị mặc định Select không có trong danh sách options.");
+            }
+            collect_css_var(css_var.as_deref(), seen_css_vars)?;
+        }
+        BlockFieldSpec::Spacing {
+            min,
+            max,
+            default,
+            css_var,
+            responsive,
+            ..
+        } => {
+            if in_repeater && (*responsive || css_var.is_some()) {
+                return Err("Field bên trong Repeater không hỗ trợ responsive hoặc css_var.");
+            }
+            let lo = min.unwrap_or(0.0);
+            let hi = max.unwrap_or(256.0);
+            if !lo.is_finite() || !hi.is_finite() || lo > hi {
+                return Err("Khoảng min/max của Spacing không hợp lệ.");
+            }
+            if let Some(def) = default {
+                for side in def.sides().into_iter().flatten() {
+                    if !side.is_finite() || side < lo || side > hi {
+                        return Err("Giá trị mặc định Spacing nằm ngoài [min, max].");
+                    }
+                }
             }
             collect_css_var(css_var.as_deref(), seen_css_vars)?;
         }
@@ -736,6 +1100,23 @@ fn validate_primitive_field<'a>(
                 return Err("Placeholder Url vượt quá 120 ký tự.");
             }
         }
+        BlockFieldSpec::Link {
+            default,
+            placeholder,
+            ..
+        } => {
+            if let Some(def) = default
+                && !def.url.is_empty()
+                && !valid_block_url(&def.url)
+            {
+                return Err("URL mặc định trong field Link không hợp lệ.");
+            }
+            if let Some(ph) = placeholder
+                && ph.chars().count() > 120
+            {
+                return Err("Placeholder Link vượt quá 120 ký tự.");
+            }
+        }
         BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. } => {
             return Err("Không thể lồng Group/Repeater tại đây.");
         }
@@ -768,173 +1149,31 @@ impl BlockSchemaV1 {
         if owner_prefix != expected_owner_prefix {
             return Err("ID block không khớp tiền tố owner của gói sở hữu.");
         }
-
-        let mut seen_top_keys: BTreeSet<&str> = BTreeSet::new();
-        let mut seen_css_vars: BTreeSet<&str> = BTreeSet::new();
-        let mut top_real_fields: Vec<&BlockFieldSpec> = Vec::new();
-        let mut group_keys: Vec<&str> = Vec::new();
-        let mut group_rules: Vec<(&str, &ShowIfRule)> = Vec::new();
-
-        for field in &self.fields {
-            if let BlockFieldSpec::Group {
-                key,
-                label,
-                fields,
-                show_if,
-            } = field
-            {
-                if !valid_snake_key_with_limit(key, 32) {
-                    return Err("Khóa Group không hợp lệ.");
-                }
-                if key == "url" || key.ends_with("_url") {
-                    return Err("Khóa Group không được dùng tên 'url' hoặc hậu tố '_url'.");
-                }
-                validate_label(label)?;
-                if !seen_top_keys.insert(key.as_str()) {
-                    return Err("Khóa field trùng lặp trong block.");
-                }
-                if fields.is_empty() {
-                    return Err("Group không được rỗng.");
-                }
-                group_keys.push(key.as_str());
-                if let Some(rule) = show_if {
-                    group_rules.push((key.as_str(), rule));
-                }
-                for child in fields {
-                    if matches!(child, BlockFieldSpec::Group { .. }) {
-                        return Err("Không cho phép lồng Group trong Group.");
-                    }
-                    if !seen_top_keys.insert(child.key()) {
-                        return Err("Khóa field trùng lặp trong block.");
-                    }
-                    top_real_fields.push(child);
-                }
-            } else {
-                if !seen_top_keys.insert(field.key()) {
-                    return Err("Khóa field trùng lặp trong block.");
-                }
-                top_real_fields.push(field);
-            }
-        }
-
-        if top_real_fields.len() > MAX_TOP_REAL_FIELDS {
-            return Err("Block vượt quá giới hạn tối đa 32 field thực top-level.");
-        }
-
-        let top_media_keys: BTreeSet<&str> = top_real_fields
-            .iter()
-            .filter_map(|f| match f {
-                BlockFieldSpec::Media { key, .. } => Some(key.as_str()),
-                _ => None,
-            })
-            .collect();
-
-        for gkey in group_keys {
-            for suffix in ["_url", "_alt", "_width", "_height"] {
-                if let Some(prefix) = gkey.strip_suffix(suffix)
-                    && top_media_keys.contains(prefix)
-                {
+        for constraint_list in [&self.allowed_parents, &self.allowed_children] {
+            if let Some(items) = constraint_list {
+                if items.is_empty() || items.len() > 32 {
                     return Err(
-                        "Khóa Group không được trùng biến tổng hợp <media_key>_{url,alt,width,height}.",
+                        "allowed_parents / allowed_children phải có 1..=32 phần tử khi được khai báo.",
                     );
                 }
+                for item in items {
+                    let valid_token = !item.is_empty()
+                        && item.len() <= 80
+                        && item.bytes().all(|b| {
+                            b.is_ascii_lowercase()
+                                || b.is_ascii_digit()
+                                || matches!(b, b'_' | b'-' | b'/')
+                        });
+                    if !valid_token {
+                        return Err(
+                            "Phần tử trong allowed_parents / allowed_children chứa ký tự không hợp lệ.",
+                        );
+                    }
+                }
             }
         }
 
-        let top_flat_map: BTreeMap<&str, &BlockFieldSpec> =
-            top_real_fields.iter().map(|f| (f.key(), *f)).collect();
-
-        let mut total_leaf_fields = 0usize;
-        let mut total_repeater_max_items = 0usize;
-
-        for field in &top_real_fields {
-            check_scope_reserved_key(field, &top_media_keys)?;
-
-            if let Some(rule) = field.show_if() {
-                validate_show_if_rule(rule, Some(field.key()), &top_flat_map)?;
-            }
-
-            if let BlockFieldSpec::Repeater {
-                label,
-                min_items,
-                max_items,
-                item_label_field,
-                fields,
-                ..
-            } = field
-            {
-                validate_label(label)?;
-                if *max_items == 0 || *max_items > MAX_REPEATER_ITEMS || *min_items > *max_items {
-                    return Err(
-                        "Số phần tử Repeater phải thỏa 1 <= max_items <= 32 và min <= max.",
-                    );
-                }
-                total_repeater_max_items += *max_items;
-                if total_repeater_max_items > MAX_TOTAL_REPEATER_ITEMS {
-                    return Err("Tổng max_items của các Repeater trong block vượt quá 64.");
-                }
-                if fields.is_empty() {
-                    return Err("Repeater bắt buộc có ít nhất 1 sub-field.");
-                }
-
-                let mut rep_keys: BTreeSet<&str> = BTreeSet::new();
-                let mut rep_media_keys: BTreeSet<&str> = BTreeSet::new();
-                let mut rep_sub_map: BTreeMap<&str, &BlockFieldSpec> = BTreeMap::new();
-
-                for sub in fields {
-                    if matches!(
-                        sub,
-                        BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. }
-                    ) {
-                        return Err("Repeater chỉ được chứa 10 kiểu field nguyên thủy.");
-                    }
-                    if !rep_keys.insert(sub.key()) {
-                        return Err("Khóa sub-field bị trùng trong Repeater.");
-                    }
-                    if matches!(sub, BlockFieldSpec::Media { .. }) {
-                        rep_media_keys.insert(sub.key());
-                    }
-                    rep_sub_map.insert(sub.key(), sub);
-                }
-
-                for sub in fields {
-                    check_scope_reserved_key(sub, &rep_media_keys)?;
-                    if let Some(rule) = sub.show_if() {
-                        validate_show_if_rule(rule, None, &top_flat_map)?;
-                    }
-                    validate_primitive_field(sub, true, &mut seen_css_vars)?;
-                    total_leaf_fields += 1;
-                }
-
-                if let Some(label_key) = item_label_field {
-                    let Some(target) = rep_sub_map.get(label_key.as_str()) else {
-                        return Err("item_label_field không tồn tại trong Repeater.fields.");
-                    };
-                    if !matches!(
-                        target,
-                        BlockFieldSpec::Text { .. }
-                            | BlockFieldSpec::Select { .. }
-                            | BlockFieldSpec::Number { .. }
-                            | BlockFieldSpec::Url { .. }
-                    ) {
-                        return Err("item_label_field chỉ được trỏ tới Text/Select/Number/Url.");
-                    }
-                }
-            } else {
-                validate_primitive_field(field, false, &mut seen_css_vars)?;
-                total_leaf_fields += 1;
-            }
-        }
-
-        for (group_key, rule) in group_rules {
-            validate_show_if_rule(rule, Some(group_key), &top_flat_map)?;
-        }
-
-        if total_leaf_fields > MAX_TOTAL_LEAF_FIELDS {
-            return Err("Tổng số field lá của block (kể cả trong Repeater) vượt quá 48.");
-        }
-
-        Ok(())
+        validate_field_specs(&self.fields)
     }
 
     pub fn validate_values(
@@ -942,83 +1181,11 @@ impl BlockSchemaV1 {
         values: &BTreeMap<String, Value>,
         previous_values: Option<&BTreeMap<String, Value>>,
     ) -> Result<(), &'static str> {
-        if values.len() > MAX_NODE_VALUES_KEYS {
-            return Err("Số lượng khóa props.values của block vượt quá giới hạn 64.");
-        }
-        let serialized_len = serde_json::to_vec(values)
-            .map_err(|_| "Không thể tuần tự hóa dữ liệu block.")?
-            .len();
-        if serialized_len > MAX_NODE_VALUES_BYTES {
-            return Err("Kích thước dữ liệu props.values của block vượt quá 64 KiB.");
-        }
-
-        let top_flat_fields = self.flattened_top_fields();
-        let defaults_map: BTreeMap<&str, Option<Value>> = top_flat_fields
-            .iter()
-            .map(|f| (f.key(), f.default_json_value()))
-            .collect();
-
-        for field in &self.fields {
-            if let BlockFieldSpec::Group {
-                fields, show_if, ..
-            } = field
-            {
-                for child in fields {
-                    validate_top_entry(
-                        child,
-                        show_if.as_ref(),
-                        values,
-                        previous_values,
-                        &defaults_map,
-                    )?;
-                }
-            } else {
-                validate_top_entry(field, None, values, previous_values, &defaults_map)?;
-            }
-        }
-
-        Ok(())
+        validate_field_values(&self.fields, values, previous_values)
     }
 
     pub fn collect_media_ids(&self, values: &BTreeMap<String, Value>) -> CollectedBlockMediaIds {
-        let mut out = CollectedBlockMediaIds::default();
-        for field in self.flattened_top_fields() {
-            match field {
-                BlockFieldSpec::Media {
-                    key, media_kind, ..
-                } => {
-                    if let Some(val) = values.get(key.as_str()).and_then(Value::as_str)
-                        && valid_sha256_media_id(val)
-                    {
-                        push_collected_media(&mut out, *media_kind, val);
-                    }
-                }
-                BlockFieldSpec::Repeater { key, fields, .. } => {
-                    let Some(items) = values.get(key.as_str()).and_then(Value::as_array) else {
-                        continue;
-                    };
-                    for item in items.iter().take(MAX_REPEATER_ITEMS) {
-                        let Some(obj) = item.as_object() else {
-                            continue;
-                        };
-                        for sub in fields {
-                            if let BlockFieldSpec::Media {
-                                key: sub_key,
-                                media_kind,
-                                ..
-                            } = sub
-                                && let Some(val) = obj.get(sub_key.as_str()).and_then(Value::as_str)
-                                && valid_sha256_media_id(val)
-                            {
-                                push_collected_media(&mut out, *media_kind, val);
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-        out
+        collect_field_media_ids(&self.fields, values)
     }
 
     pub fn extract_visible_text(&self, values: &BTreeMap<String, Value>, out: &mut Vec<String>) {
@@ -1082,16 +1249,313 @@ impl BlockSchemaV1 {
     }
 
     pub fn flattened_top_fields(&self) -> Vec<&BlockFieldSpec> {
-        let mut out = Vec::new();
-        for field in &self.fields {
-            if let BlockFieldSpec::Group { fields, .. } = field {
-                out.extend(fields.iter());
-            } else {
-                out.push(field);
+        flattened_field_specs(&self.fields)
+    }
+}
+
+pub fn flattened_field_specs(fields: &[BlockFieldSpec]) -> Vec<&BlockFieldSpec> {
+    let mut out = Vec::new();
+    for field in fields {
+        if let BlockFieldSpec::Group { fields, .. } = field {
+            out.extend(fields.iter());
+        } else {
+            out.push(field);
+        }
+    }
+    out
+}
+
+pub fn validate_field_specs(fields: &[BlockFieldSpec]) -> Result<(), &'static str> {
+    let mut seen_top_keys: BTreeSet<&str> = BTreeSet::new();
+    let mut seen_css_vars: BTreeSet<&str> = BTreeSet::new();
+    let mut top_real_fields: Vec<&BlockFieldSpec> = Vec::new();
+    let mut group_keys: Vec<&str> = Vec::new();
+    let mut group_rules: Vec<(&str, &ShowIfRule)> = Vec::new();
+
+    for field in fields {
+        if let BlockFieldSpec::Group {
+            key,
+            label,
+            fields,
+            show_if,
+        } = field
+        {
+            if !valid_snake_key_with_limit(key, 32) {
+                return Err("Khóa Group không hợp lệ.");
+            }
+            if key == "url" || key.ends_with("_url") {
+                return Err("Khóa Group không được dùng tên 'url' hoặc hậu tố '_url'.");
+            }
+            validate_label(label)?;
+            if !seen_top_keys.insert(key.as_str()) {
+                return Err("Khóa field trùng lặp trong block.");
+            }
+            if fields.is_empty() {
+                return Err("Group không được rỗng.");
+            }
+            group_keys.push(key.as_str());
+            if let Some(rule) = show_if {
+                group_rules.push((key.as_str(), rule));
+            }
+            for child in fields {
+                if matches!(child, BlockFieldSpec::Group { .. }) {
+                    return Err("Không cho phép lồng Group trong Group.");
+                }
+                if !seen_top_keys.insert(child.key()) {
+                    return Err("Khóa field trùng lặp trong block.");
+                }
+                top_real_fields.push(child);
+            }
+        } else {
+            if !seen_top_keys.insert(field.key()) {
+                return Err("Khóa field trùng lặp trong block.");
+            }
+            top_real_fields.push(field);
+        }
+    }
+
+    if top_real_fields.len() > MAX_TOP_REAL_FIELDS {
+        return Err("Block vượt quá giới hạn tối đa 32 field thực top-level.");
+    }
+
+    let top_media_keys: BTreeSet<&str> = top_real_fields
+        .iter()
+        .filter_map(|f| match f {
+            BlockFieldSpec::Media { key, .. } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    let top_link_keys: BTreeSet<&str> = top_real_fields
+        .iter()
+        .filter_map(|f| match f {
+            BlockFieldSpec::Link { key, .. } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+    let top_spacing_keys: BTreeSet<&str> = top_real_fields
+        .iter()
+        .filter_map(|f| match f {
+            BlockFieldSpec::Spacing { key, .. } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect();
+
+    for gkey in group_keys {
+        for suffix in ["_url", "_alt", "_width", "_height"] {
+            if let Some(prefix) = gkey.strip_suffix(suffix)
+                && top_media_keys.contains(prefix)
+            {
+                return Err(
+                    "Khóa Group không được trùng biến tổng hợp <media_key>_{url,alt,width,height}.",
+                );
             }
         }
-        out
+        for suffix in ["_url", "_target", "_rel", "_new_tab", "_nofollow"] {
+            if let Some(prefix) = gkey.strip_suffix(suffix)
+                && top_link_keys.contains(prefix)
+            {
+                return Err(
+                    "Khóa Group không được trùng biến tổng hợp <link_key>_{url,target,rel,new_tab,nofollow}.",
+                );
+            }
+        }
+        if let Some(prefix) = gkey.strip_suffix("_classes")
+            && top_spacing_keys.contains(prefix)
+        {
+            return Err("Khóa Group không được trùng biến tổng hợp <spacing_key>_classes.");
+        }
     }
+
+    let top_flat_map: BTreeMap<&str, &BlockFieldSpec> =
+        top_real_fields.iter().map(|f| (f.key(), *f)).collect();
+
+    let mut total_leaf_fields = 0usize;
+    let mut total_repeater_max_items = 0usize;
+
+    for field in &top_real_fields {
+        check_scope_reserved_key(field, &top_media_keys, &top_link_keys, &top_spacing_keys)?;
+
+        if let Some(rule) = field.show_if() {
+            validate_show_if_rule(rule, Some(field.key()), &top_flat_map)?;
+        }
+
+        if let BlockFieldSpec::Repeater {
+            label,
+            min_items,
+            max_items,
+            item_label_field,
+            fields,
+            ..
+        } = field
+        {
+            validate_label(label)?;
+            if *max_items == 0 || *max_items > MAX_REPEATER_ITEMS || *min_items > *max_items {
+                return Err("Số phần tử Repeater phải thỏa 1 <= max_items <= 32 và min <= max.");
+            }
+            total_repeater_max_items += *max_items;
+            if total_repeater_max_items > MAX_TOTAL_REPEATER_ITEMS {
+                return Err("Tổng max_items của các Repeater trong block vượt quá 64.");
+            }
+            if fields.is_empty() {
+                return Err("Repeater bắt buộc có ít nhất 1 sub-field.");
+            }
+
+            let mut rep_keys: BTreeSet<&str> = BTreeSet::new();
+            let mut rep_media_keys: BTreeSet<&str> = BTreeSet::new();
+            let mut rep_link_keys: BTreeSet<&str> = BTreeSet::new();
+            let mut rep_spacing_keys: BTreeSet<&str> = BTreeSet::new();
+            let mut rep_sub_map: BTreeMap<&str, &BlockFieldSpec> = BTreeMap::new();
+
+            for sub in fields {
+                if matches!(
+                    sub,
+                    BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. }
+                ) {
+                    return Err("Repeater chỉ được chứa các kiểu field nguyên thủy.");
+                }
+                if !rep_keys.insert(sub.key()) {
+                    return Err("Khóa sub-field bị trùng trong Repeater.");
+                }
+                if matches!(sub, BlockFieldSpec::Media { .. }) {
+                    rep_media_keys.insert(sub.key());
+                }
+                if matches!(sub, BlockFieldSpec::Link { .. }) {
+                    rep_link_keys.insert(sub.key());
+                }
+                if matches!(sub, BlockFieldSpec::Spacing { .. }) {
+                    rep_spacing_keys.insert(sub.key());
+                }
+                rep_sub_map.insert(sub.key(), sub);
+            }
+
+            for sub in fields {
+                check_scope_reserved_key(sub, &rep_media_keys, &rep_link_keys, &rep_spacing_keys)?;
+                if let Some(rule) = sub.show_if() {
+                    validate_show_if_rule(rule, None, &top_flat_map)?;
+                }
+                validate_primitive_field(sub, true, &mut seen_css_vars)?;
+                total_leaf_fields += 1;
+            }
+
+            if let Some(label_key) = item_label_field {
+                let Some(target) = rep_sub_map.get(label_key.as_str()) else {
+                    return Err("item_label_field không tồn tại trong Repeater.fields.");
+                };
+                if !matches!(
+                    target,
+                    BlockFieldSpec::Text { .. }
+                        | BlockFieldSpec::Select { .. }
+                        | BlockFieldSpec::RadioButtons { .. }
+                        | BlockFieldSpec::Number { .. }
+                        | BlockFieldSpec::Url { .. }
+                ) {
+                    return Err(
+                        "item_label_field chỉ được trỏ tới Text/Select/RadioButtons/Number/Url.",
+                    );
+                }
+            }
+        } else {
+            validate_primitive_field(field, false, &mut seen_css_vars)?;
+            total_leaf_fields += 1;
+        }
+    }
+
+    for (group_key, rule) in group_rules {
+        validate_show_if_rule(rule, Some(group_key), &top_flat_map)?;
+    }
+
+    if total_leaf_fields > MAX_TOTAL_LEAF_FIELDS {
+        return Err("Tổng số field lá của block (kể cả trong Repeater) vượt quá 48.");
+    }
+
+    Ok(())
+}
+
+pub fn validate_field_values(
+    fields: &[BlockFieldSpec],
+    values: &BTreeMap<String, Value>,
+    previous_values: Option<&BTreeMap<String, Value>>,
+) -> Result<(), &'static str> {
+    if values.len() > MAX_NODE_VALUES_KEYS {
+        return Err("Số lượng khóa props.values của block vượt quá giới hạn 64.");
+    }
+    let serialized_len = serde_json::to_vec(values)
+        .map_err(|_| "Không thể tuần tự hóa dữ liệu block.")?
+        .len();
+    if serialized_len > MAX_NODE_VALUES_BYTES {
+        return Err("Kích thước dữ liệu props.values của block vượt quá 64 KiB.");
+    }
+
+    let top_flat_fields = flattened_field_specs(fields);
+    let defaults_map: BTreeMap<&str, Option<Value>> = top_flat_fields
+        .iter()
+        .map(|f| (f.key(), f.default_json_value()))
+        .collect();
+
+    for field in fields {
+        if let BlockFieldSpec::Group {
+            fields, show_if, ..
+        } = field
+        {
+            for child in fields {
+                validate_top_entry(
+                    child,
+                    show_if.as_ref(),
+                    values,
+                    previous_values,
+                    &defaults_map,
+                )?;
+            }
+        } else {
+            validate_top_entry(field, None, values, previous_values, &defaults_map)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn collect_field_media_ids(
+    fields: &[BlockFieldSpec],
+    values: &BTreeMap<String, Value>,
+) -> CollectedBlockMediaIds {
+    let mut out = CollectedBlockMediaIds::default();
+    for field in flattened_field_specs(fields) {
+        match field {
+            BlockFieldSpec::Media {
+                key, media_kind, ..
+            } => {
+                if let Some(val) = values.get(key.as_str()).and_then(Value::as_str)
+                    && valid_sha256_media_id(val)
+                {
+                    push_collected_media(&mut out, *media_kind, val);
+                }
+            }
+            BlockFieldSpec::Repeater { key, fields, .. } => {
+                let Some(items) = values.get(key.as_str()).and_then(Value::as_array) else {
+                    continue;
+                };
+                for item in items.iter().take(MAX_REPEATER_ITEMS) {
+                    let Some(obj) = item.as_object() else {
+                        continue;
+                    };
+                    for sub in fields {
+                        if let BlockFieldSpec::Media {
+                            key: sub_key,
+                            media_kind,
+                            ..
+                        } = sub
+                            && let Some(val) = obj.get(sub_key.as_str()).and_then(Value::as_str)
+                            && valid_sha256_media_id(val)
+                        {
+                            push_collected_media(&mut out, *media_kind, val);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 fn push_collected_media(out: &mut CollectedBlockMediaIds, kind: MediaFieldKind, id: &str) {
@@ -1121,9 +1585,12 @@ fn validate_show_if_rule(
     };
     if matches!(
         target,
-        BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. }
+        BlockFieldSpec::Group { .. }
+            | BlockFieldSpec::Repeater { .. }
+            | BlockFieldSpec::Spacing { .. }
+            | BlockFieldSpec::Link { .. }
     ) {
-        return Err("show_if không được trỏ tới Group hoặc Repeater.");
+        return Err("show_if không được trỏ tới Group, Repeater, Spacing hoặc Link.");
     }
     if target.is_responsive() {
         return Err("show_if không được trỏ tới field có responsive: true.");
@@ -1242,6 +1709,14 @@ fn validate_top_entry(
     validate_leaf_value(field, cur_val, visible && !upgrade_exempt)
 }
 
+pub fn validate_single_field_value(
+    field: &BlockFieldSpec,
+    val: Option<&Value>,
+    enforce_required: bool,
+) -> Result<(), &'static str> {
+    validate_leaf_value(field, val, enforce_required)
+}
+
 fn validate_leaf_value(
     field: &BlockFieldSpec,
     val: Option<&Value>,
@@ -1300,11 +1775,14 @@ fn field_is_required(field: &BlockFieldSpec) -> bool {
         | BlockFieldSpec::Richtext { required, .. }
         | BlockFieldSpec::Number { required, .. }
         | BlockFieldSpec::Select { required, .. }
+        | BlockFieldSpec::RadioButtons { required, .. }
         | BlockFieldSpec::Color { required, .. }
         | BlockFieldSpec::Media { required, .. }
-        | BlockFieldSpec::Url { required, .. } => *required,
+        | BlockFieldSpec::Url { required, .. }
+        | BlockFieldSpec::Link { required, .. } => *required,
         BlockFieldSpec::Range { .. }
         | BlockFieldSpec::Boolean { .. }
+        | BlockFieldSpec::Spacing { .. }
         | BlockFieldSpec::Group { .. }
         | BlockFieldSpec::Repeater { .. } => false,
     }
@@ -1377,10 +1855,32 @@ fn validate_scalar_leaf(
                 return Err("Giá trị Boolean phải là true hoặc false.");
             }
         }
-        BlockFieldSpec::Select { options, .. } => {
-            let s = val.as_str().ok_or("Giá trị Select phải là chuỗi.")?;
+        BlockFieldSpec::Select { options, .. } | BlockFieldSpec::RadioButtons { options, .. } => {
+            let s = val
+                .as_str()
+                .ok_or("Giá trị Select/RadioButtons phải là chuỗi.")?;
             if !options.iter().any(|opt| opt.value == s) {
-                return Err("Giá trị Select không nằm trong danh sách options.");
+                return Err("Giá trị Select/RadioButtons không nằm trong danh sách options.");
+            }
+        }
+        BlockFieldSpec::Spacing { min, max, .. } => {
+            let obj = val
+                .as_object()
+                .ok_or("Giá trị Spacing phải là JSON object {top, right, bottom, left}.")?;
+            let lo = min.unwrap_or(0.0);
+            let hi = max.unwrap_or(256.0);
+            for (side_key, side_val) in obj {
+                if !matches!(side_key.as_str(), "top" | "right" | "bottom" | "left") {
+                    return Err("Khóa cạnh Spacing không hợp lệ.");
+                }
+                if !side_val.is_null() {
+                    let n = side_val
+                        .as_f64()
+                        .ok_or("Giá trị cạnh Spacing phải là số.")?;
+                    if !n.is_finite() || n < lo || n > hi {
+                        return Err("Giá trị cạnh Spacing nằm ngoài [min, max].");
+                    }
+                }
             }
         }
         BlockFieldSpec::Color { required, .. } => {
@@ -1411,6 +1911,43 @@ fn validate_scalar_leaf(
                 }
             } else if !valid_block_url(s) {
                 return Err("URL trong block không an toàn hoặc sai cú pháp.");
+            }
+        }
+        BlockFieldSpec::Link { required, .. } => {
+            let url_str = match val {
+                Value::String(s) => s.as_str(),
+                Value::Object(obj) => {
+                    for (k, v) in obj {
+                        match k.as_str() {
+                            "url" => {
+                                if !v.is_string() {
+                                    return Err("Thuộc tính Link.url phải là chuỗi.");
+                                }
+                            }
+                            "new_tab" | "nofollow" => {
+                                if !v.is_boolean() {
+                                    return Err(
+                                        "Thuộc tính Link.{new_tab,nofollow} phải là boolean.",
+                                    );
+                                }
+                            }
+                            _ => return Err("Khóa không hợp lệ trong object Link."),
+                        }
+                    }
+                    obj.get("url").and_then(Value::as_str).unwrap_or("")
+                }
+                _ => {
+                    return Err(
+                        "Giá trị Link phải là chuỗi URL hoặc object {url, new_tab, nofollow}.",
+                    );
+                }
+            };
+            if url_str.is_empty() {
+                if enforce_required && *required {
+                    return Err("Field Link bắt buộc không được để trống URL.");
+                }
+            } else if !valid_block_url(url_str) {
+                return Err("URL trong field Link không an toàn hoặc sai cú pháp.");
             }
         }
         BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. } => {
@@ -1446,6 +1983,8 @@ pub fn upcast_legacy_descriptor(desc: &BlockDescriptor) -> RegisteredBlockSchema
             category: BlockCategory::Plugin,
             icon: None,
             render: "render.html".to_owned(),
+            allowed_parents: None,
+            allowed_children: None,
             fields,
         },
         legacy_mode: true,
@@ -1703,6 +2242,8 @@ mod tests {
             category: BlockCategory::Content,
             icon: None,
             render: "render.html".into(),
+            allowed_parents: None,
+            allowed_children: None,
             fields: (0..33)
                 .map(|i| BlockFieldSpec::Text {
                     key: format!("f_{i}"),
@@ -1725,6 +2266,8 @@ mod tests {
             category: BlockCategory::Content,
             icon: None,
             render: "render.html".into(),
+            allowed_parents: None,
+            allowed_children: None,
             fields: (0..3)
                 .map(|i| BlockFieldSpec::Repeater {
                     key: format!("r_{i}"),
@@ -1866,5 +2409,107 @@ mod tests {
         let mut texts = Vec::new();
         schema.extract_visible_text(&cur, &mut texts);
         assert_eq!(texts, vec!["Xin chào", "Item 1", "Chi tiết 1"]);
+    }
+
+    #[test]
+    fn validates_spacing_radio_buttons_and_link_fields() {
+        let schema: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "my-theme/cta-banner",
+            "title": "CTA Banner",
+            "category": "marketing",
+            "render": "render.html",
+            "fields": [
+                {
+                    "type": "radio_buttons",
+                    "key": "align",
+                    "label": "Căn chữ",
+                    "options": [
+                        { "value": "left", "label": "Trái", "icon": "align-left" },
+                        { "value": "center", "label": "Giữa", "icon": "align-center" },
+                        { "value": "right", "label": "Phải", "icon": "align-right" }
+                    ],
+                    "default": "center",
+                    "responsive": true,
+                    "css_var": "--od-cta-align"
+                },
+                {
+                    "type": "spacing",
+                    "key": "pad",
+                    "label": "Padding",
+                    "min": 0,
+                    "max": 120,
+                    "unit": "px",
+                    "default": { "top": 24, "right": 16, "bottom": 24, "left": 16 },
+                    "responsive": true,
+                    "css_var": "--od-cta-pad"
+                },
+                {
+                    "type": "link",
+                    "key": "cta",
+                    "label": "Nút chính",
+                    "required": true,
+                    "default": { "url": "/lien-he", "new_tab": false, "nofollow": false }
+                }
+            ]
+        }))
+        .unwrap();
+        schema.validate("my-theme").unwrap();
+
+        let valid_vals = BTreeMap::from([
+            (
+                "align".into(),
+                json!({ "desktop": "center", "mobile": "left" }),
+            ),
+            (
+                "pad".into(),
+                json!({ "desktop": { "top": 32, "right": 16, "bottom": 32, "left": 16 } }),
+            ),
+            (
+                "cta".into(),
+                json!({ "url": "https://opendash.vn", "new_tab": true, "nofollow": true }),
+            ),
+        ]);
+        schema.validate_values(&valid_vals, None).unwrap();
+
+        let bad_spacing = BTreeMap::from([
+            ("pad".into(), json!({ "desktop": { "top": 500 } })),
+            ("cta".into(), json!({ "url": "/ok" })),
+        ]);
+        assert!(schema.validate_values(&bad_spacing, None).is_err());
+
+        let bad_link = BTreeMap::from([(
+            "cta".into(),
+            json!({ "url": "javascript:alert(1)", "new_tab": false }),
+        )]);
+        assert!(schema.validate_values(&bad_link, None).is_err());
+
+        let colliding: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "my-theme/cta-banner",
+            "title": "CTA",
+            "category": "marketing",
+            "render": "render.html",
+            "fields": [
+                { "type": "link", "key": "cta", "label": "Link" },
+                { "type": "text", "key": "cta_target", "label": "Bad collision" }
+            ]
+        }))
+        .unwrap();
+        assert!(colliding.validate("my-theme").is_err());
+
+        let spacing_colliding: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "my-theme/cta-spacing",
+            "title": "CTA Spacing",
+            "category": "marketing",
+            "render": "render.html",
+            "fields": [
+                { "type": "spacing", "key": "pad", "label": "Padding" },
+                { "type": "text", "key": "pad_classes", "label": "Bad collision" }
+            ]
+        }))
+        .unwrap();
+        assert!(spacing_colliding.validate("my-theme").is_err());
     }
 }

@@ -111,7 +111,7 @@ function buildMenuTree(
     },
     {
       id: 'studio',
-      label: 'OpenDash Studio',
+      label: 'Tùy chỉnh giao diện',
       icon: 'builder',
       hash: '#/studio',
       group: 'appearance',
@@ -127,18 +127,6 @@ function buildMenuTree(
       children: [
         { label: 'Themes đã cài', hash: '#/appearance/themes' },
         { label: 'Cài theme', hash: '#/appearance/library' },
-      ],
-    },
-    {
-      id: 'theme-options',
-      label: 'Tùy chọn theme',
-      icon: 'palette',
-      hash: '#/appearance/options',
-      group: 'appearance',
-      adminOnly: true,
-      children: [
-        { label: 'Tùy chọn theme', hash: '#/appearance/options' },
-        { label: 'Menus', hash: '#/appearance/menus' },
       ],
     },
     {
@@ -301,10 +289,10 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           ? 'schema' : 'posts')
         : route.view === 'profile'
           ? 'users'
-          : route.view === 'builder' || route.view === 'studio'
+          : route.view === 'builder' || route.view === 'studio' || route.view === 'studio-entry'
             ? 'studio'
             : route.view === 'themes'
-              ? (route.sub === 'options' || route.sub === 'menus' ? 'theme-options' : 'themes')
+              ? 'themes'
               : route.view === 'settings' && route.sub === 'content-types'
                 ? 'schema'
                 : route.view === 'settings' && route.sub === 'contact'

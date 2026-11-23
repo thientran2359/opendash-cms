@@ -1,3 +1,4 @@
+import type { BlockFieldSpec } from '../types.ts';
 import { requestJson } from './client.ts';
 
 /** SITE-01. All values originate from the server's typed singleton. */
@@ -143,5 +144,33 @@ export function saveReadingSettings(
     contentType: 'application/json',
     body: JSON.stringify(draft),
     defaultErrorMessage: 'Không thể lưu cấu hình trang chủ và trang bài viết.',
+  });
+}
+
+export interface GlobalSiteOptionsSnapshot {
+  version: number;
+  fields: BlockFieldSpec[];
+  values: Record<string, unknown>;
+}
+
+export function getGlobalSiteOptions(signal?: AbortSignal): Promise<GlobalSiteOptionsSnapshot> {
+  return requestJson<GlobalSiteOptionsSnapshot>('/api/admin/settings/site-options', {
+    signal,
+    defaultErrorMessage: 'Không thể tải tùy chọn toàn trang.',
+  });
+}
+
+export function saveGlobalSiteOptions(
+  values: Record<string, unknown>,
+  version: number,
+  csrfToken: string,
+): Promise<GlobalSiteOptionsSnapshot> {
+  return requestJson<GlobalSiteOptionsSnapshot>('/api/admin/settings/site-options', {
+    method: 'PUT',
+    csrfToken,
+    ifMatchVersion: version,
+    contentType: 'application/json',
+    body: JSON.stringify({ values }),
+    defaultErrorMessage: 'Không thể lưu tùy chọn toàn trang.',
   });
 }

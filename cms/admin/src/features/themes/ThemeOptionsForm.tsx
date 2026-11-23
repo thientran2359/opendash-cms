@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import {
   getThemeOptions,
@@ -6,11 +6,15 @@ import {
   type ThemeOptionDef,
   type ThemeOptionsSnapshot,
 } from '../../api/themes.ts';
+import { BlockSchemaForm } from '../../builder/BlockSchemaForm.tsx';
+import type { BuilderViewport } from '../../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import type { BlockFieldSpec, BlockSchemaV1 } from '../../types.ts';
 
 interface Props {
   themeId: string;
   csrfToken: string | null;
+  viewport?: BuilderViewport;
   onApiError: (error: unknown, fallback: string) => void;
   onValuesChange?: (
     values: Record<string, unknown>,
@@ -25,9 +29,92 @@ function sameOptionValues(a: Record<string, unknown>, b: Record<string, unknown>
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function upcastDefToBlockField(def: ThemeOptionDef): BlockFieldSpec {
+  switch (def.type) {
+    case 'boolean':
+      return {
+        type: 'boolean',
+        key: def.key,
+        label: def.label,
+        default: typeof def.default === 'boolean' ? def.default : false,
+      };
+    case 'number':
+      return {
+        type: 'number',
+        key: def.key,
+        label: def.label,
+        min: def.min ?? null,
+        max: def.max ?? null,
+        default: typeof def.default === 'number' ? def.default : 0,
+      };
+    case 'select':
+      return {
+        type: 'select',
+        key: def.key,
+        label: def.label,
+        options: (def.choices ?? []).map(c => ({ value: c.value, label: c.label })),
+        default: typeof def.default === 'string' ? def.default : undefined,
+      };
+    case 'image_ref':
+    case 'media':
+      return {
+        type: 'media',
+        key: def.key,
+        label: def.label,
+        media_kind: 'image',
+        default: typeof def.default === 'string' ? def.default : undefined,
+      };
+    case 'url':
+      return {
+        type: 'url',
+        key: def.key,
+        label: def.label,
+        default: typeof def.default === 'string' ? def.default : '',
+      };
+    case 'textarea':
+      return {
+        type: 'textarea',
+        key: def.key,
+        label: def.label,
+        max_chars: 4096,
+        default: typeof def.default === 'string' ? def.default : '',
+      };
+    default:
+      return {
+        type: 'text',
+        key: def.key,
+        label: def.label,
+        max_chars: 4096,
+        default: typeof def.default === 'string' ? def.default : '',
+      };
+  }
+}
+
+function normalizeValuesForSchema(
+  next: Record<string, unknown>,
+  schema: ThemeOptionDef[],
+  baseline: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...next };
+  for (const def of schema) {
+    const val = out[def.key];
+    if (def.type === 'image_ref') {
+      if (val === '' || val === undefined) out[def.key] = null;
+    } else if (def.type === 'number' && (val === '' || val === undefined)) {
+      out[def.key] = typeof def.default === 'number' ? def.default : 0;
+    } else if (def.type === 'spacing' && val === undefined) {
+      out[def.key] = {};
+    } else if (val === undefined && def.key in baseline) {
+      out[def.key] = baseline[def.key];
+    }
+  }
+  return out;
+}
+
 export const ThemeOptionsForm: React.FC<Props> = ({
   themeId,
   csrfToken,
+  viewport = 'desktop',
   onApiError,
   onValuesChange,
   externalValues,
@@ -84,22 +171,35 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     }
   }, [externalValues, snapshot]);
 
+  const blockSchema: BlockSchemaV1 | null = useMemo(() => {
+    if (!snapshot) return null;
+    const fields = snapshot.fields && snapshot.fields.length > 0
+      ? snapshot.fields
+      : snapshot.schema.map(upcastDefToBlockField);
+    return {
+      schema_version: 1,
+      id: `theme/${themeId}`,
+      title: themeId,
+      category: 'content',
+      render: 'render.html',
+      fields,
+    };
+  }, [snapshot, themeId]);
+
   if (loading) return <p role="status" className="text-sm text-zinc-600">Đang tải tùy chọn theme…</p>;
-  if (!snapshot || snapshot.schema.length === 0) {
+  if (!snapshot || !blockSchema || blockSchema.fields.length === 0) {
     return hideSubmitButton ? (
-      <p className="text-xs text-zinc-500">Theme hiện tại không khai báo tùy chọn (theme_options).</p>
+      <p className="text-xs text-zinc-500">Theme hiện tại không khai báo tùy chọn riêng (theme_options).</p>
     ) : null;
   }
 
-  const setField = (key: string, value: unknown) => {
-    setDraft(prev => {
-      const next = { ...prev, [key]: value };
-      onValuesChangeRef.current?.(next, {
-        version: snapshot.version,
-        dirty: !sameOptionValues(next, snapshot.values),
-        schema: snapshot.schema,
-      });
-      return next;
+  const handleChangeValues = (nextRaw: Record<string, unknown>) => {
+    const normalized = normalizeValuesForSchema(nextRaw, snapshot.schema, snapshot.values);
+    setDraft(normalized);
+    onValuesChangeRef.current?.(normalized, {
+      version: snapshot.version,
+      dirty: !sameOptionValues(normalized, snapshot.values),
+      schema: snapshot.schema,
     });
   };
 
@@ -113,6 +213,11 @@ export const ThemeOptionsForm: React.FC<Props> = ({
       const saved = await saveThemeOptions(themeId, draft, snapshot.version, csrfToken);
       setSnapshot(saved);
       setDraft(saved.values);
+      onValuesChangeRef.current?.(saved.values, {
+        version: saved.version,
+        dirty: false,
+        schema: saved.schema,
+      });
       setNotice('Đã lưu tùy chọn theme.');
     } catch (cause) {
       const stale = cause instanceof ApiClientError && cause.status === 412;
@@ -125,116 +230,24 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     }
   };
 
-  const renderInput = (def: ThemeOptionDef) => {
-    const val = draft[def.key];
-    switch (def.type) {
-      case 'boolean':
-        return (
-          <input
-            type="checkbox"
-            checked={Boolean(val)}
-            onChange={e => setField(def.key, e.target.checked)}
-            disabled={saving}
-            className="h-4 w-4 rounded border-zinc-300"
-          />
-        );
-      case 'number':
-        return (
-          <input
-            type="number"
-            value={typeof val === 'number' ? val : ''}
-            min={def.min}
-            max={def.max}
-            step="any"
-            onChange={e => setField(def.key, e.target.value === '' ? '' : Number(e.target.value))}
-            disabled={saving}
-            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-          />
-        );
-      case 'select':
-        return (
-          <select
-            value={typeof val === 'string' ? val : ''}
-            onChange={e => setField(def.key, e.target.value)}
-            disabled={saving}
-            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-          >
-            {(def.choices ?? []).map(c => (
-              <option key={c.value} value={c.value}>{c.label}</option>
-            ))}
-          </select>
-        );
-      case 'image_ref':
-        return (
-          <input
-            type="text"
-            value={typeof val === 'string' ? val : ''}
-            placeholder="Nhập media_id (để trống để bỏ)"
-            onChange={e => setField(def.key, e.target.value.trim() === '' ? null : e.target.value.trim())}
-            disabled={saving}
-            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-          />
-        );
-      case 'url': {
-        const value = typeof val === 'string' ? val : '';
-        const scalarCount = Array.from(value).length;
-        return (
-          <div className="space-y-1">
-            <input
-              type="text"
-              inputMode="url"
-              maxLength={8192}
-              value={value}
-              onChange={e => setField(def.key, e.target.value)}
-              disabled={saving}
-              aria-invalid={scalarCount > 4096}
-              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-            />
-            <p className="text-xs text-zinc-500">Đường dẫn /…, liên kết https://…, #mục, mailto: hoặc tel:; tối đa 4.096 ký tự Unicode. ({scalarCount}/4096)</p>
-            {scalarCount > 4096 && <p role="alert" className="text-xs text-red-700">URL vượt giới hạn 4.096 ký tự Unicode. Giá trị nháp được giữ để sửa.</p>}
-          </div>
-        );
-      }
-      default:
-        return (
-          <input
-            type="text"
-            maxLength={4096}
-            value={typeof val === 'string' ? val : ''}
-            onChange={e => setField(def.key, e.target.value)}
-            disabled={saving}
-            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
-          />
-        );
-    }
-  };
-
   if (hideSubmitButton) {
     return (
       <div data-testid="theme-options-form" className="space-y-3">
         <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
-          <span>Theme: {themeId}</span>
+          <span>Theme: <strong className="font-medium text-zinc-700">{themeId}</strong></span>
           <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>
         </div>
         {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
         {error && <AdminAlert tone="error">{error}</AdminAlert>}
-        <div className="space-y-3">
-          {snapshot.schema.map(def => (
-            <label key={def.key} className={def.type === 'boolean' ? 'flex items-center gap-2.5 text-sm font-medium text-zinc-800' : 'flex flex-col gap-1'}>
-              {def.type === 'boolean' ? (
-                <>
-                  {renderInput(def)}
-                  <span>{def.label}</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-xs font-medium text-zinc-700">{def.label}</span>
-                  {renderInput(def)}
-                </>
-              )}
-            </label>
-          ))}
-        </div>
+        <BlockSchemaForm
+          schema={blockSchema}
+          values={draft}
+          onChange={handleChangeValues}
+          viewport={viewport}
+          csrfToken={csrfToken}
+          onError={onApiError}
+          disabled={saving}
+        />
       </div>
     );
   }
@@ -251,23 +264,15 @@ export const ThemeOptionsForm: React.FC<Props> = ({
       </div>
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
-      <div className="space-y-3.5">
-        {snapshot.schema.map(def => (
-          <label key={def.key} className={def.type === 'boolean' ? 'flex items-center gap-2.5 text-sm font-medium text-zinc-800' : 'flex flex-col gap-1'}>
-            {def.type === 'boolean' ? (
-              <>
-                {renderInput(def)}
-                <span>{def.label}</span>
-              </>
-            ) : (
-              <>
-                <span className="text-sm font-medium text-zinc-800">{def.label}</span>
-                {renderInput(def)}
-              </>
-            )}
-          </label>
-        ))}
-      </div>
+      <BlockSchemaForm
+        schema={blockSchema}
+        values={draft}
+        onChange={handleChangeValues}
+        viewport={viewport}
+        csrfToken={csrfToken}
+        onError={onApiError}
+        disabled={saving}
+      />
       <div className="pt-1">
         <AdminButton type="submit" variant="primary" size="md" disabled={!csrfToken || saving}>
           {saving ? 'Đang lưu…' : 'Lưu tùy chọn'}

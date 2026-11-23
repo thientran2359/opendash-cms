@@ -54,6 +54,7 @@ pub struct HomeState {
     pub active_id: Option<String>,
     pub active_alias: Option<String>,
     pub active_template: Option<String>,
+    pub site_options: BTreeMap<String, serde_json::Value>,
 }
 
 /// Only public-safe display text and a canonical, storage-resolved href leave
@@ -305,15 +306,20 @@ fn project_legacy(block: &Block) -> BuilderDocument {
         schema_version: BUILDER_SCHEMA_VERSION,
         sections: vec![SectionNode {
             id: format!("legacy-section-{suffix}"),
+            meta: None,
             responsive: None,
+            style: None,
             children: vec![RowNode {
                 id: format!("legacy-row-{suffix}"),
+                meta: None,
                 responsive: None,
                 children: vec![ColumnNode {
                     id: format!("legacy-column-{suffix}"),
+                    meta: None,
                     responsive: None,
                     children: vec![ElementNode {
                         id: format!("legacy-element-{suffix}"),
+                        meta: None,
                         content: ElementContent::Known(KnownElement::Legacy(LegacyBlockProps {
                             block_id: block.kind.clone(),
                             values: block.values.clone(),
@@ -374,6 +380,9 @@ pub(crate) async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<
     .fetch_one(&mut **tx)
     .await?;
     let declared_blocks = crate::storage::page::load_declared_blocks_in_conn(&mut **tx).await?;
+    let site_options =
+        crate::storage::settings::get_active_merged_public_options_in_conn(&mut **tx, false)
+            .await?;
     Ok(HomeState {
         version,
         saved,
@@ -383,6 +392,7 @@ pub(crate) async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<
         active_id,
         active_alias,
         active_template,
+        site_options,
     })
 }
 
@@ -455,6 +465,14 @@ pub async fn legacy_page(db: &SqlitePool) -> ApiResult<Option<Block>> {
 pub fn image_ids(document: &BuilderDocument) -> BTreeSet<&str> {
     let mut ids = BTreeSet::new();
     for section in &document.sections {
+        if let Some(bg_media) = section
+            .style
+            .as_ref()
+            .and_then(|s| s.background_media_id.as_deref())
+            .filter(|id| !id.is_empty())
+        {
+            ids.insert(bg_media);
+        }
         for row in &section.children {
             for column in &row.children {
                 for element in &column.children {
@@ -1686,6 +1704,21 @@ pub(super) async fn preview_saved_page_body_in_tx_with_budget(
     budget: &mut page::RenderBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
+    preview_saved_page_body_in_tx_with_options_and_budget(
+        tx, actor, type_key, id, None, budget, cache,
+    )
+    .await
+}
+
+pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
+    tx: &mut Transaction<'_, Sqlite>,
+    actor: &SessionContext,
+    type_key: &str,
+    id: i64,
+    site_options_override: Option<&BTreeMap<String, serde_json::Value>>,
+    budget: &mut page::RenderBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<Option<RenderedLayout>> {
     let current = entry_builder_snapshot(tx, type_key, id).await?;
     if !current.raw_body_has_blocks {
         return Ok(None);
@@ -1693,8 +1726,11 @@ pub(super) async fn preview_saved_page_body_in_tx_with_budget(
     let Some(document) = current.opened.document.as_ref() else {
         return Ok(None);
     };
-    let state =
+    let mut state =
         validate_entry_builder_document(tx, &current, actor_field_role(actor), document).await?;
+    if let Some(opts) = site_options_override {
+        state.site_options = opts.clone();
+    }
     Ok(Some(
         render_entry_builder_preview_with_budget(
             tx,

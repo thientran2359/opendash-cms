@@ -1,9 +1,29 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { BlockFieldSpec, BlockSchemaV1, BlockMediaKind, BlockShowIfRule } from '../types.ts';
+import type {
+  BlockFieldSpec,
+  BlockLinkValue,
+  BlockMediaKind,
+  BlockSchemaV1,
+  BlockShowIfRule,
+  BlockSpacingValue,
+} from '../types.ts';
 import type { BuilderViewport } from './document.ts';
-import { VIEWPORT_LABELS } from './document.ts';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
+import {
+  ColorSwatchControl,
+  LightboxRichTextTrigger,
+  LinkControl,
+  MediaCardControl,
+  RangeNumberControl,
+  ResponsiveDot,
+  SegmentedButtonsControl,
+  SpacingBoxControl,
+  STUDIO_INPUT_CLASS,
+  ToggleSwitchControl,
+  formatSpacingSummary,
+  type ResponsiveDotInfo,
+} from './StudioFieldControls.tsx';
 
 interface BlockSchemaFormProps {
   schema: BlockSchemaV1;
@@ -15,13 +35,8 @@ interface BlockSchemaFormProps {
   disabled?: boolean;
 }
 
-const INPUT_CLASS = 'w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-900 disabled:bg-zinc-100';
-const BUTTON_CLASS = 'rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs text-zinc-700 disabled:opacity-50';
-const VIEWPORTS: BuilderViewport[] = ['desktop', 'tablet', 'mobile'];
-const COLOR_TOKENS = [
-  'transparent', 'currentColor', 'var(--od-token-primary)', 'var(--od-token-accent)',
-  'var(--od-token-surface)', 'var(--od-token-muted)', 'var(--od-token-text)', 'var(--od-token-border)',
-];
+const BUTTON_CLASS =
+  'rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-45';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -31,13 +46,26 @@ function primitiveDefault(field: BlockFieldSpec): unknown {
   return 'default' in field ? field.default : undefined;
 }
 
+function isResponsiveField(field: BlockFieldSpec): boolean {
+  return (
+    field.type === 'number' ||
+    field.type === 'range' ||
+    field.type === 'select' ||
+    field.type === 'radio_buttons' ||
+    field.type === 'spacing'
+  ) && Boolean(field.responsive);
+}
+
 /** Group fields are stored flat, never under the group key. */
 function topFields(fields: BlockFieldSpec[]): BlockFieldSpec[] {
   return fields.flatMap(field => field.type === 'group' ? topFields(field.fields) : [field]);
 }
 
-function visible(rule: BlockShowIfRule | null | undefined, root: Record<string, unknown>,
-  defaults: Map<string, unknown>): boolean {
+function visible(
+  rule: BlockShowIfRule | null | undefined,
+  root: Record<string, unknown>,
+  defaults: Map<string, unknown>,
+): boolean {
   if (!rule) return true;
   const candidate = root[rule.field] == null ? defaults.get(rule.field) : root[rule.field];
   return (candidate ?? null) === rule.equals;
@@ -49,20 +77,21 @@ function initialItem(fields: BlockFieldSpec[]): Record<string, unknown> {
     if (field.type === 'group' || field.type === 'repeater') continue;
     const initial = primitiveDefault(field);
     if (initial !== undefined && initial !== null) {
-      item[field.key] = field.type === 'number' || field.type === 'range' || field.type === 'select'
-        ? field.responsive ? { desktop: initial } : initial
-        : initial;
+      item[field.key] = isResponsiveField(field) ? { desktop: initial } : initial;
     }
   }
   return item;
 }
 
 /** A field can become required when show_if changes. Materialize its declared
- * default at that moment so the values sent to Rust match what the UI shows.
- * Existing hidden/unknown keys are never removed or overwritten. */
+ * default at that moment so the values sent to Rust match what the UI shows. */
 function initializeNewlyVisibleFields(
-  fields: BlockFieldSpec[], previous: Record<string, unknown>, updated: Record<string, unknown>,
-  defaults: Map<string, unknown>, oldParentVisible = true, newParentVisible = true,
+  fields: BlockFieldSpec[],
+  previous: Record<string, unknown>,
+  updated: Record<string, unknown>,
+  defaults: Map<string, unknown>,
+  oldParentVisible = true,
+  newParentVisible = true,
 ): void {
   for (const field of fields) {
     const wasVisible = oldParentVisible && visible(field.show_if, previous, defaults);
@@ -78,8 +107,7 @@ function initializeNewlyVisibleFields(
     }
     const fallback = primitiveDefault(field);
     if (fallback === undefined || fallback === null) continue;
-    updated[field.key] = (field.type === 'number' || field.type === 'range' || field.type === 'select')
-      && field.responsive ? { desktop: fallback } : fallback;
+    updated[field.key] = isResponsiveField(field) ? { desktop: fallback } : fallback;
   }
 }
 
@@ -96,78 +124,51 @@ function replaceValueAtPath(root: unknown, path: Array<string | number>, value: 
   return copy;
 }
 
+function isSpacingSideObj(value: unknown): value is BlockSpacingValue {
+  if (!isObject(value)) return false;
+  return 'top' in value || 'right' in value || 'bottom' in value || 'left' in value;
+}
+
 /** Keep any old scalar as desktop when introducing breakpoint overrides. */
-function toResponsiveObject(value: unknown): Record<string, unknown> {
-  if (isObject(value)) return { ...value };
+function toResponsiveObject(value: unknown, isSpacingType = false): Record<string, unknown> {
+  if (isObject(value)) {
+    if (isSpacingType && isSpacingSideObj(value)) return { desktop: value };
+    return { ...value };
+  }
   return value === undefined || value === null ? {} : { desktop: value };
 }
 
-function directBreakpoint(value: unknown, breakpoint: BuilderViewport): unknown {
-  if (isObject(value)) return value[breakpoint];
+function directBreakpoint(value: unknown, breakpoint: BuilderViewport, isSpacingType = false): unknown {
+  if (isObject(value)) {
+    if (isSpacingType && isSpacingSideObj(value)) {
+      return breakpoint === 'desktop' ? value : undefined;
+    }
+    return value[breakpoint];
+  }
   return breakpoint === 'desktop' ? value : undefined;
 }
 
-function inheritedBreakpoint(value: unknown, breakpoint: BuilderViewport, fallback: unknown): unknown {
-  if (!isObject(value)) return value ?? fallback;
-  if (breakpoint === 'mobile') return value.mobile ?? value.tablet ?? value.desktop ?? fallback;
-  if (breakpoint === 'tablet') return value.tablet ?? value.desktop ?? fallback;
-  return value.desktop ?? fallback;
+function spacingObjectsEqual(a: unknown, b: unknown): boolean {
+  const ao = isObject(a) ? a as BlockSpacingValue : {};
+  const bo = isObject(b) ? b as BlockSpacingValue : {};
+  return (ao.top ?? 0) === (bo.top ?? 0)
+    && (ao.right ?? 0) === (bo.right ?? 0)
+    && (ao.bottom ?? 0) === (bo.bottom ?? 0)
+    && (ao.left ?? 0) === (bo.left ?? 0);
 }
 
-interface RichTextProps {
-  value: string;
-  onChange: (next: string) => void;
-  disabled: boolean;
-  id: string;
-  maxBytes?: number | null;
-}
-
-/** HTML source editor with safe allowlisted tag shortcuts; Rust sanitizes on Save/render.
- * Keeping HTML as text avoids inserting untrusted markup into Admin's own DOM. */
-export function RichTextFieldControl({ value, onChange, disabled, id, maxBytes }: RichTextProps) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const inputBytes = new TextEncoder().encode(value).length;
-  const wrap = (before: string, after: string) => {
-    const el = ref.current;
-    if (!el) return;
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    const selected = value.slice(start, end);
-    const updated = value.slice(0, start) + before + selected + after + value.slice(end);
-    onChange(updated);
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(start + before.length, end + before.length);
-    });
-  };
-  return (
-    <div className="space-y-1.5">
-      <div className="flex flex-wrap gap-1" role="toolbar" aria-label="Định dạng RichText">
-        {([
-          ['Đậm', '<strong>', '</strong>'],
-          ['Nghiêng', '<em>', '</em>'],
-          ['Đoạn', '<p>', '</p>'],
-          ['Danh sách', '<ul><li>', '</li></ul>'],
-          ['Liên kết', '<a href=\"#\">', '</a>'],
-        ] as const).map(([label, before, after]) => (
-          <button key={label} type="button" disabled={disabled} className={BUTTON_CLASS}
-            onClick={() => wrap(before, after)}>{label}</button>
-        ))}
-      </div>
-      <textarea ref={ref} id={id} rows={5} value={value} disabled={disabled}
-        className={INPUT_CLASS} onChange={event => onChange(event.target.value)}
-        aria-describedby={id + '-help'} />
-      <p id={id + '-help'} className="text-xs text-zinc-500">
-        Hỗ trợ p, br, strong, em, u, ul, ol, li, blockquote và liên kết an toàn.
-        {maxBytes ? ` Tối đa ${maxBytes} byte sau khi làm sạch.` : ''}
-      </p>
-      {maxBytes != null && <p role="status" className={'text-xs ' +
-        (inputBytes > maxBytes ? 'text-amber-700' : 'text-zinc-500')}>
-        Văn bản hiện tại: {inputBytes} byte trước khi làm sạch.
-        {inputBytes > maxBytes ? ' Nội dung có thể bị từ chối khi Lưu nếu bản đã làm sạch vẫn vượt giới hạn.' : ''}
-      </p>}
-    </div>
-  );
+function normalizeLinkValue(value: unknown): BlockLinkValue {
+  if (typeof value === 'string') {
+    return { url: value, new_tab: false, nofollow: false };
+  }
+  if (isObject(value)) {
+    return {
+      url: typeof value.url === 'string' ? value.url : '',
+      new_tab: Boolean(value.new_tab),
+      nofollow: Boolean(value.nofollow),
+    };
+  }
+  return { url: '', new_tab: false, nofollow: false };
 }
 
 interface FieldControlProps {
@@ -182,134 +183,285 @@ interface FieldControlProps {
 function FieldControl({ field, current, viewport, disabled, onSet, onPickMedia }: FieldControlProps) {
   const id = useId();
   const fallback = primitiveDefault(field);
-  const responsive = (field.type === 'number' || field.type === 'range' || field.type === 'select')
-    && Boolean(field.responsive);
-  const resolved = responsive ? directBreakpoint(current, viewport) : current;
-  const value = resolved === undefined ? (responsive && viewport !== 'desktop' ? undefined : fallback) : resolved;
-  const parentValue = responsive ? inheritedBreakpoint(current,
-    viewport === 'mobile' ? 'tablet' : 'desktop', fallback) : undefined;
+  const responsive = isResponsiveField(field);
+  const isSpacing = field.type === 'spacing';
+
+  const effDesktop = responsive ? (directBreakpoint(current, 'desktop', isSpacing) ?? fallback) : current;
+  const effTablet = responsive ? (directBreakpoint(current, 'tablet', isSpacing) ?? effDesktop) : effDesktop;
+  const effMobile = responsive ? (directBreakpoint(current, 'mobile', isSpacing) ?? effTablet) : effTablet;
+
+  const value = responsive
+    ? (viewport === 'desktop' ? effDesktop : viewport === 'tablet' ? effTablet : effMobile)
+    : current;
+
   const setValue = (next: unknown) => {
     if (!responsive) {
       onSet(next);
       return;
     }
-    const overrides = toResponsiveObject(current);
+    const overrides = toResponsiveObject(current, isSpacing);
     if (next === undefined) delete overrides[viewport];
     else overrides[viewport] = next;
     onSet(Object.keys(overrides).length ? overrides : undefined);
   };
-  const unset = responsive && directBreakpoint(current, viewport) !== undefined;
-  const stringValue = value == null ? '' : String(value);
-  const effectiveValue = responsive && value === undefined
-    ? inheritedBreakpoint(current, viewport, fallback) : value;
-  const reset = responsive && viewport !== 'desktop'
-    ? <button type="button" className={BUTTON_CLASS} disabled={disabled || !unset}
-        onClick={() => setValue(undefined)}>Kế thừa</button>
-    : null;
+
+  const resetResponsive = () => {
+    if (!responsive) return;
+    if (viewport === 'desktop') {
+      onSet(effDesktop !== undefined ? { desktop: effDesktop } : undefined);
+    } else {
+      const overrides = toResponsiveObject(current, isSpacing);
+      delete overrides[viewport];
+      onSet(Object.keys(overrides).length ? overrides : undefined);
+    }
+  };
+
+  const differs = responsive && (isSpacing
+    ? (!spacingObjectsEqual(effDesktop, effTablet) || !spacingObjectsEqual(effTablet, effMobile))
+    : ((effDesktop ?? null) !== (effTablet ?? null) || (effTablet ?? null) !== (effMobile ?? null)));
+
   const unit = 'unit' in field && field.unit ? field.unit : '';
-  let control;
+  const formatSummaryVal = (v: unknown): string => {
+    if (isSpacing) {
+      const box = isObject(v) ? v as BlockSpacingValue : undefined;
+      return unit && unit !== 'px'
+        ? `${box?.top ?? 0}${unit} ${box?.right ?? 0}${unit}`
+        : formatSpacingSummary(box, 'p', false);
+    }
+    if (field.type === 'select' || field.type === 'radio_buttons') {
+      const str = v == null ? '' : String(v);
+      return field.options.find(o => o.value === str)?.label ?? (str || '—');
+    }
+    return v == null || v === '' ? '—' : `${String(v)}${unit}`;
+  };
+
+  const responsiveInfo: ResponsiveDotInfo | undefined = responsive
+    ? {
+        differs,
+        viewport,
+        summary: `Desktop: ${formatSummaryVal(effDesktop)} · Tablet: ${formatSummaryVal(effTablet)} · Mobile: ${formatSummaryVal(effMobile)}`,
+        onReset: resetResponsive,
+        testId: `field-amber-${field.key}`,
+      }
+    : undefined;
+
+  const reqStar = 'required' in field && field.required ? ' *' : '';
+  const fieldLabel = `${field.label}${reqStar}`;
+  const stringValue = value == null ? '' : String(value);
+
   switch (field.type) {
-    case 'text':
-    case 'url':
-      control = (
-        <input id={id} type="text" className={INPUT_CLASS} value={stringValue}
-          maxLength={field.type === 'text' ? field.max_chars ?? 256 : 2048}
-          placeholder={field.placeholder ?? ''} disabled={disabled}
-          onChange={event => setValue(event.target.value)} />
-      );
-      break;
-    case 'textarea':
-      control = <textarea id={id} className={INPUT_CLASS} rows={4} value={stringValue}
-        maxLength={field.max_chars ?? 4000} disabled={disabled}
-        onChange={event => setValue(event.target.value)} />;
-      break;
-    case 'richtext':
-      control = <RichTextFieldControl id={id} value={stringValue}
-        disabled={disabled} maxBytes={field.max_bytes}
-        onChange={setValue} />;
-      break;
     case 'boolean':
-      control = <input id={id} type="checkbox" checked={value === true}
-        disabled={disabled} onChange={event => setValue(event.target.checked)} />;
-      break;
-    case 'number':
-    case 'range': {
+      return (
+        <ToggleSwitchControl
+          id={id}
+          label={field.label}
+          checked={value === true}
+          disabled={disabled}
+          onChange={setValue}
+        />
+      );
+
+    case 'richtext':
+      return (
+        <LightboxRichTextTrigger
+          id={id}
+          label={fieldLabel}
+          value={stringValue}
+          maxBytes={field.max_bytes}
+          disabled={disabled}
+          onChange={setValue}
+        />
+      );
+
+    case 'color':
+      return (
+        <ColorSwatchControl
+          id={id}
+          label={fieldLabel}
+          value={stringValue}
+          disabled={disabled}
+          onChange={setValue}
+        />
+      );
+
+    case 'media':
+      return (
+        <MediaCardControl
+          id={id}
+          label={fieldLabel}
+          value={stringValue}
+          acceptKind={field.media_kind ?? 'any'}
+          disabled={disabled}
+          onPick={() => onPickMedia(field.media_kind ?? 'any', stringValue)}
+          onClear={() => setValue('')}
+        />
+      );
+
+    case 'link':
+      return (
+        <LinkControl
+          id={id}
+          label={fieldLabel}
+          value={normalizeLinkValue(value)}
+          placeholder={field.placeholder ?? undefined}
+          disabled={disabled}
+          onChange={next => setValue(next)}
+        />
+      );
+
+    case 'spacing': {
+      const currentSpacing = isObject(value) ? value as BlockSpacingValue : undefined;
+      return (
+        <SpacingBoxControl
+          label={fieldLabel}
+          propPrefix="p"
+          value={currentSpacing}
+          min={field.min ?? 0}
+          max={field.max ?? 256}
+          unit={unit || 'px'}
+          allowTailwind={!unit || unit === 'px'}
+          disabled={disabled}
+          responsiveInfo={responsiveInfo}
+          testIdPrefix={`field-spacing-${field.key}`}
+          onChange={next => {
+            const hasSide = Object.values(next).some(v => typeof v === 'number');
+            setValue(hasSide ? next : undefined);
+          }}
+        />
+      );
+    }
+
+    case 'range':
+    case 'number': {
       const min = field.min ?? (field.type === 'range' ? 0 : undefined);
       const max = field.max ?? (field.type === 'range' ? 100 : undefined);
-      const isRange = field.type === 'range';
-      const numberValue = value == null ? '' : String(value);
-      const displayValue = effectiveValue == null ? '' : String(effectiveValue);
-      control = (
-        <div className="flex items-center gap-2">
-          <input id={id} type={isRange ? 'range' : 'number'} className={isRange ? 'min-w-0 flex-1' : INPUT_CLASS}
-            min={min ?? undefined} max={max ?? undefined} step={field.step ?? (isRange ? 1 : 'any')}
-            value={isRange ? (displayValue || String(min ?? 0)) : numberValue}
-            placeholder={responsive && viewport !== 'desktop' ? `Kế thừa: ${displayValue}` : undefined}
+      const useSlider = field.type === 'range'
+        || (min != null && max != null && max - min <= 400);
+      const numericVal = typeof value === 'number' ? value : undefined;
+
+      if (useSlider) {
+        return (
+          <RangeNumberControl
+            id={id}
+            label={fieldLabel}
+            value={numericVal}
+            fallbackValue={typeof fallback === 'number' ? fallback : undefined}
+            min={min ?? 0}
+            max={max ?? 100}
+            step={field.step ?? 1}
+            unit={unit || undefined}
             disabled={disabled}
-            onChange={event => {
-              if (!event.target.value) { setValue(null); return; }
-              const next = Number(event.target.value);
-              if (Number.isFinite(next)) setValue(next);
-            }} />
-          {unit && <span className="text-xs text-zinc-500">{unit}</span>}
-          {isRange && <output className="text-xs tabular-nums">{displayValue}</output>}
-          {reset}
+            responsiveInfo={responsiveInfo}
+            onChange={next => setValue(next === undefined ? (responsive ? undefined : null) : next)}
+          />
+        );
+      }
+
+      return (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor={id} className="text-xs font-semibold text-zinc-800">{fieldLabel}</label>
+              <ResponsiveDot info={responsiveInfo} />
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              id={id}
+              type="number"
+              className={STUDIO_INPUT_CLASS}
+              min={min ?? undefined}
+              max={max ?? undefined}
+              step={field.step ?? 'any'}
+              value={numericVal ?? ''}
+              disabled={disabled}
+              onChange={event => {
+                if (!event.target.value) { setValue(responsive ? undefined : null); return; }
+                const next = Number(event.target.value);
+                if (Number.isFinite(next)) setValue(next);
+              }}
+            />
+            {unit && <span className="text-xs text-zinc-500">{unit}</span>}
+          </div>
         </div>
       );
-      break;
     }
-    case 'select':
-      control = (
-        <div className="flex items-center gap-2">
-          <select id={id} className={INPUT_CLASS} value={value == null ? '' : String(value)}
-            disabled={disabled} onChange={event => setValue(event.target.value || (responsive ? undefined : ''))}>
-            {(responsive && viewport !== 'desktop' || value == null) &&
-              <option value="">{responsive && viewport !== 'desktop'
-                ? `Kế thừa: ${String(parentValue ?? '')}` : 'Chưa chọn'}</option>}
-            {field.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+
+    case 'radio_buttons':
+    case 'select': {
+      const asButtons = field.type === 'radio_buttons'
+        || field.display === 'buttons'
+        || (field.display !== 'dropdown' && field.options.length <= 4 && field.options.every(o => o.label.length <= 14));
+      if (asButtons) {
+        return (
+          <SegmentedButtonsControl
+            label={fieldLabel}
+            value={value == null ? '' : String(value)}
+            options={field.options}
+            disabled={disabled}
+            responsiveInfo={responsiveInfo}
+            onChange={next => setValue(next)}
+          />
+        );
+      }
+      return (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor={id} className="text-xs font-semibold text-zinc-800">{fieldLabel}</label>
+              <ResponsiveDot info={responsiveInfo} />
+            </div>
+          </div>
+          <select
+            id={id}
+            className={STUDIO_INPUT_CLASS}
+            value={value == null ? '' : String(value)}
+            disabled={disabled}
+            onChange={event => setValue(event.target.value || (responsive ? undefined : ''))}
+          >
+            {value == null && <option value="">Chưa chọn</option>}
+            {field.options.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
           </select>
-          {reset}
         </div>
       );
-      break;
-    case 'color': {
-      const hex = /^#[0-9a-fA-F]{6}$/.test(stringValue);
-      control = (
-        <div className="flex items-center gap-2">
-          <input id={id} type="text" className={INPUT_CLASS} list={id + '-tokens'}
-            value={stringValue} disabled={disabled}
-            placeholder="#ffffff, transparent hoặc token" onChange={event => setValue(event.target.value)} />
-          <datalist id={id + '-tokens'}>{COLOR_TOKENS.map(token => <option key={token} value={token} />)}</datalist>
-          {hex && <input type="color" value={stringValue} disabled={disabled}
-            aria-label={`Chọn màu cho ${field.label}`} onChange={event => setValue(event.target.value)} />}
-        </div>
-      );
-      break;
     }
-    case 'media':
-      control = (
-        <div className="flex flex-wrap items-center gap-2">
-          <input id={id} type="text" readOnly className={INPUT_CLASS}
-            value={stringValue} placeholder="Chưa chọn media" aria-label={field.label} />
-          <button type="button" className={BUTTON_CLASS} disabled={disabled}
-            onClick={() => onPickMedia(field.media_kind ?? 'any', stringValue)}>
-            Chọn media
-          </button>
-          {stringValue && <button type="button" className={BUTTON_CLASS}
-            disabled={disabled} onClick={() => setValue('')}>Bỏ chọn</button>}
+
+    case 'textarea':
+      return (
+        <div className="space-y-1.5">
+          <label htmlFor={id} className="block text-xs font-semibold text-zinc-800">{fieldLabel}</label>
+          <textarea
+            id={id}
+            rows={4}
+            value={stringValue}
+            maxLength={field.max_chars ?? 4000}
+            disabled={disabled}
+            onChange={event => setValue(event.target.value)}
+            className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-sky-600 disabled:bg-zinc-100"
+          />
         </div>
       );
-      break;
+
+    case 'text':
+    case 'url':
+      return (
+        <div className="space-y-1.5">
+          <label htmlFor={id} className="block text-xs font-semibold text-zinc-800">{fieldLabel}</label>
+          <input
+            id={id}
+            type="text"
+            className={STUDIO_INPUT_CLASS}
+            value={stringValue}
+            maxLength={field.type === 'text' ? field.max_chars ?? 256 : 2048}
+            placeholder={field.placeholder ?? ''}
+            disabled={disabled}
+            onChange={event => setValue(event.target.value)}
+          />
+        </div>
+      );
   }
-  return (
-    <div className="space-y-1.5">
-      <label htmlFor={id} className="block text-xs font-semibold text-zinc-800">
-        {field.label}{'required' in field && field.required ? ' *' : ''}
-        {responsive && <span className="ml-1 font-normal text-zinc-500">({VIEWPORT_LABELS[viewport]})</span>}
-      </label>
-      {control}
-    </div>
-  );
 }
 
 interface PickerState {
@@ -323,16 +475,14 @@ interface PickerState {
 export function BlockSchemaForm({
   schema, values, onChange, viewport, csrfToken, onError, disabled = false,
 }: BlockSchemaFormProps) {
-  const [breakpoint, setBreakpoint] = useState<BuilderViewport>(viewport);
   const [picker, setPicker] = useState<PickerState | null>(null);
+  const [expandedRepeaters, setExpandedRepeaters] = useState<Set<string>>(() => new Set());
   const latestValues = useRef(values);
   const latestOnChange = useRef(onChange);
   latestValues.current = values;
   latestOnChange.current = onChange;
-  useEffect(() => setBreakpoint(viewport), [viewport]);
+
   const defaults = new Map(topFields(schema.fields).map(field => [field.key, primitiveDefault(field)]));
-  const hasResponsive = topFields(schema.fields).some(field =>
-    (field.type === 'number' || field.type === 'range' || field.type === 'select') && field.responsive);
 
   const patchRoot = (key: string, next: unknown) => {
     const previous = latestValues.current;
@@ -343,19 +493,30 @@ export function BlockSchemaForm({
     onChange(updated);
   };
 
+  const toggleRepeaterItem = (itemKey: string) => {
+    setExpandedRepeaters(prev => {
+      const next = new Set(prev);
+      if (next.has(itemKey)) next.delete(itemKey);
+      else next.add(itemKey);
+      return next;
+    });
+  };
+
   const renderFields = (
-    fields: BlockFieldSpec[], current: Record<string, unknown>,
-    patch: (key: string, value: unknown) => void, prefix: string,
+    fields: BlockFieldSpec[],
+    current: Record<string, unknown>,
+    patch: (key: string, value: unknown) => void,
+    prefix: string,
     path: Array<string | number>,
   ): ReactNode => fields.map(field => {
     const key = prefix + field.key;
     if (!visible(field.show_if, values, defaults)) return null;
     if (field.type === 'group') {
       return (
-        <fieldset key={key} className="space-y-3 rounded-md border border-zinc-200 p-3">
-          <legend className="px-1 text-sm font-semibold text-zinc-800">{field.label}</legend>
+        <div key={key} role="group" aria-label={field.label} className="space-y-3 border-t border-zinc-200 pt-3">
+          <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">{field.label}</h3>
           {renderFields(field.fields, current, patch, key + '.', path)}
-        </fieldset>
+        </div>
       );
     }
     if (field.type === 'repeater') {
@@ -364,79 +525,129 @@ export function BlockSchemaForm({
       const max = field.max_items ?? 32;
       const mutate = (next: unknown[]) => patch(field.key, next);
       return (
-        <fieldset key={key} className="space-y-3 rounded-md border border-zinc-200 p-3">
-          <legend className="px-1 text-sm font-semibold text-zinc-800">{field.label}</legend>
-          <p className="text-xs text-zinc-500">{items.length} / {max} mục{items.length < min ? ` · Cần tối thiểu ${min} mục` : ''}</p>
-          {items.map((item, index) => {
-            const row = isObject(item) ? item : {};
-            const labelValue = field.item_label_field ? row[field.item_label_field] : undefined;
-            return (
-              <div key={index} className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50 p-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <strong className="text-xs text-zinc-700">
-                    {typeof labelValue === 'string' && labelValue ? labelValue : `Mục ${index + 1}`}
-                  </strong>
-                  <div className="flex flex-wrap gap-1">
-                    <button type="button" className={BUTTON_CLASS} disabled={disabled || items.length >= max}
-                      onClick={() => mutate([...items.slice(0, index + 1), JSON.parse(JSON.stringify(row)), ...items.slice(index + 1)])}>
-                      Nhân bản
+        <div key={key} role="group" aria-label={field.label} className="space-y-2.5 border-t border-zinc-200 pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">{field.label}</h3>
+            <span className="text-[11px] text-zinc-500">
+              {items.length}/{max}{items.length < min ? ` · tối thiểu ${min}` : ''}
+            </span>
+          </div>
+          <div className="divide-y divide-zinc-200 border-y border-zinc-200">
+            {items.map((item, index) => {
+              const row = isObject(item) ? item : {};
+              const labelValue = field.item_label_field ? row[field.item_label_field] : undefined;
+              const itemKey = `${key}.${index}`;
+              const expanded = expandedRepeaters.has(itemKey);
+              const titleText = typeof labelValue === 'string' && labelValue ? labelValue : `Mục ${index + 1}`;
+              return (
+                <div key={index} className="py-1.5">
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      type="button"
+                      aria-expanded={expanded}
+                      onClick={() => toggleRepeaterItem(itemKey)}
+                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1 text-left text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+                    >
+                      <span className="text-zinc-400" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+                      <span className="truncate">{titleText}</span>
                     </button>
-                    <button type="button" className={BUTTON_CLASS} disabled={disabled || index === 0}
-                      onClick={() => {
-                        const next = [...items];
-                        [next[index - 1], next[index]] = [next[index], next[index - 1]];
-                        mutate(next);
-                      }}>Lên</button>
-                    <button type="button" className={BUTTON_CLASS} disabled={disabled || index === items.length - 1}
-                      onClick={() => {
-                        const next = [...items];
-                        [next[index + 1], next[index]] = [next[index], next[index + 1]];
-                        mutate(next);
-                      }}>Xuống</button>
-                    <button type="button" className={BUTTON_CLASS} disabled={disabled || items.length <= min}
-                      onClick={() => mutate(items.filter((_, idx) => idx !== index))}>Xóa</button>
+                    <div className="flex shrink-0 items-center gap-0.5">
+                      <button
+                        type="button"
+                        title="Di chuyển lên"
+                        aria-label={`Lên ${titleText}`}
+                        className={BUTTON_CLASS}
+                        disabled={disabled || index === 0}
+                        onClick={() => {
+                          const next = [...items];
+                          [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                          mutate(next);
+                        }}
+                      >↑</button>
+                      <button
+                        type="button"
+                        title="Di chuyển xuống"
+                        aria-label={`Xuống ${titleText}`}
+                        className={BUTTON_CLASS}
+                        disabled={disabled || index === items.length - 1}
+                        onClick={() => {
+                          const next = [...items];
+                          [next[index + 1], next[index]] = [next[index], next[index + 1]];
+                          mutate(next);
+                        }}
+                      >↓</button>
+                      <button
+                        type="button"
+                        title="Nhân bản mục"
+                        aria-label={`Nhân bản ${titleText}`}
+                        className={BUTTON_CLASS}
+                        disabled={disabled || items.length >= max}
+                        onClick={() => {
+                          const nextIdx = index + 1;
+                          mutate([...items.slice(0, nextIdx), JSON.parse(JSON.stringify(row)), ...items.slice(nextIdx)]);
+                          setExpandedRepeaters(prev => new Set(prev).add(`${key}.${nextIdx}`));
+                        }}
+                      >⧉</button>
+                      <button
+                        type="button"
+                        title="Xóa mục"
+                        aria-label={`Xóa ${titleText}`}
+                        className={BUTTON_CLASS + ' text-rose-700 hover:bg-rose-50'}
+                        disabled={disabled || items.length <= min}
+                        onClick={() => mutate(items.filter((_, idx) => idx !== index))}
+                      >×</button>
+                    </div>
                   </div>
+                  {expanded && (
+                    <div className="mt-2 space-y-3 pl-3">
+                      {renderFields(field.fields, row, (subKey, subValue) => {
+                        const updated = { ...row };
+                        if (subValue === undefined) delete updated[subKey];
+                        else updated[subKey] = subValue;
+                        mutate(items.map((old, idx) => idx === index ? updated : old));
+                      }, `${itemKey}.`, [...path, field.key, index])}
+                    </div>
+                  )}
                 </div>
-                {renderFields(field.fields, row, (subKey, subValue) => {
-                  const updated = { ...row };
-                  if (subValue === undefined) delete updated[subKey];
-                  else updated[subKey] = subValue;
-                  mutate(items.map((old, idx) => idx === index ? updated : old));
-                }, key + '.' + index + '.', [...path, field.key, index])}
-              </div>
-            );
-          })}
-          <button type="button" className={BUTTON_CLASS} disabled={disabled || items.length >= max}
-            onClick={() => mutate([...items, initialItem(field.fields)])}>+ Thêm mục</button>
-        </fieldset>
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-45"
+            disabled={disabled || items.length >= max}
+            onClick={() => {
+              const newIdx = items.length;
+              mutate([...items, initialItem(field.fields)]);
+              setExpandedRepeaters(prev => new Set(prev).add(`${key}.${newIdx}`));
+            }}
+          >
+            + Thêm mục
+          </button>
+        </div>
       );
     }
     return (
-      <FieldControl key={key} field={field} current={current[field.key]} viewport={breakpoint}
-        disabled={disabled} onSet={next => patch(field.key, next)}
-        onPickMedia={(kind, currentId) => setPicker({ kind, current: currentId, path: [...path, field.key] })} />
+      <FieldControl
+        key={key}
+        field={field}
+        current={current[field.key]}
+        viewport={viewport}
+        disabled={disabled}
+        onSet={next => patch(field.key, next)}
+        onPickMedia={(kind, currentId) => setPicker({ kind, current: currentId, path: [...path, field.key] })}
+      />
     );
   });
 
   return (
-    <div className="space-y-4" aria-label={`Thuộc tính block ${schema.title}`}>
-      {hasResponsive && (
-        <fieldset className="space-y-1">
-          <legend className="text-xs font-semibold text-zinc-700">Breakpoint cho trường responsive</legend>
-          <div className="flex flex-wrap gap-1">
-            {VIEWPORTS.map(bp => (
-              <button key={bp} type="button"
-                className={BUTTON_CLASS + (breakpoint === bp ? ' border-od-accent bg-zinc-100 font-semibold' : '')}
-                aria-pressed={breakpoint === bp} disabled={disabled}
-                onClick={() => setBreakpoint(bp)}>{VIEWPORT_LABELS[bp]}</button>
-            ))}
-          </div>
-          <p className="text-xs text-zinc-500">Tablet và Mobile kế thừa giá trị từ màn hình rộng hơn cho đến khi đặt riêng.</p>
-        </fieldset>
-      )}
+    <div className="space-y-3.5" aria-label={`Thuộc tính block ${schema.title}`}>
       {renderFields(schema.fields, values, patchRoot, 'block.', [])}
       {picker && (
-        <MediaPicker mode="image" acceptKind={picker.kind} csrfToken={csrfToken}
+        <MediaPicker
+          mode="image"
+          acceptKind={picker.kind}
+          csrfToken={csrfToken}
           selectedIds={picker.current ? [picker.current] : []}
           onApply={ids => {
             if (ids[0]) {
@@ -445,7 +656,9 @@ export function BlockSchemaForm({
             }
             setPicker(null);
           }}
-          onClose={() => setPicker(null)} onError={onError} />
+          onClose={() => setPicker(null)}
+          onError={onError}
+        />
       )}
     </div>
   );

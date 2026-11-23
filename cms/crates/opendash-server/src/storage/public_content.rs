@@ -685,6 +685,10 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              AND json_extract(opt.value, '$.public') = 1
          ) OR EXISTS (
            SELECT 1
+           FROM site_global_option_media_refs AS gom
+           WHERE gom.media_id = ?
+         ) OR EXISTS (
+           SELECT 1
            FROM seo_public_media_refs AS sm
            JOIN content_entries AS e ON sm.source_kind = 'entry_seo' AND e.id = sm.source_id
            JOIN content_types AS t ON t.key = e.content_type_key
@@ -770,6 +774,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              )
          )"#,
     )
+    .bind(id)
     .bind(id)
     .bind(id)
     .bind(id)

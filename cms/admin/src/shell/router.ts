@@ -179,8 +179,24 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
       };
     }
     if (sub === 'library') return { view: 'themes', sub: 'library', rawHash: '#/appearance/library' };
-    if (sub === 'options') return { view: 'themes', sub: 'options', rawHash: '#/appearance/options' };
-    if (sub === 'menus') return { view: 'themes', sub: 'menus', rawHash: '#/appearance/menus' };
+    if (sub === 'options') {
+      return {
+        view: 'studio',
+        sub: 'theme-options',
+        studioPanel: 'theme-options',
+        rawHash: '#/appearance/options',
+        redirectHash: '#/studio?panel=theme-options',
+      };
+    }
+    if (sub === 'menus') {
+      return {
+        view: 'studio',
+        sub: 'menus',
+        studioPanel: 'menus',
+        rawHash: '#/appearance/menus',
+        redirectHash: '#/studio?panel=menus',
+      };
+    }
     return { view: 'themes', sub: 'themes', rawHash: '#/appearance/themes' };
   }
   if (first === 'studio') {

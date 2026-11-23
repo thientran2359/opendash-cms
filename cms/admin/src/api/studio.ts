@@ -37,6 +37,7 @@ export interface StudioTargetsResponse {
 
 export interface TransientStudioOverrides {
   general?: GeneralSettingsDraft;
+  global_options?: Record<string, unknown>;
   theme_options?: Record<string, unknown>;
   menu_slots?: Record<string, number | null>;
 }
@@ -73,6 +74,9 @@ export function postStudioPreview(
         tagline: input.transient.general.tagline,
         timezone: input.transient.general.timezone,
       };
+    }
+    if (input.transient.global_options) {
+      transient.global_options = input.transient.global_options;
     }
     if (input.transient.theme_options) {
       transient.theme_options = input.transient.theme_options;

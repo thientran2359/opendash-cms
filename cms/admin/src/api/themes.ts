@@ -1,3 +1,4 @@
+import type { BlockFieldSpec } from '../types.ts';
 import { requestJson } from './client.ts';
 
 export interface ThemeItem {
@@ -45,7 +46,23 @@ export function isV3ThemeInstall(response: ThemeInstallResponse): response is Th
   return 'revision_id' in response;
 }
 
-export type ThemeOptionType = 'string' | 'url' | 'number' | 'boolean' | 'select' | 'image_ref';
+export type ThemeOptionType =
+  | 'string'
+  | 'url'
+  | 'number'
+  | 'boolean'
+  | 'select'
+  | 'image_ref'
+  | 'text'
+  | 'textarea'
+  | 'richtext'
+  | 'range'
+  | 'radio_buttons'
+  | 'color'
+  | 'spacing'
+  | 'media'
+  | 'link'
+  | 'repeater';
 
 export interface ThemeOptionChoice {
   value: string;
@@ -67,6 +84,7 @@ export interface ThemeOptionsSnapshot {
   theme_id: string;
   version: number;
   schema: ThemeOptionDef[];
+  fields?: BlockFieldSpec[];
   values: Record<string, unknown>;
 }
 

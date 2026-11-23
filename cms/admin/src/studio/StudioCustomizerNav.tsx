@@ -1,16 +1,23 @@
 import React from 'react';
 import type { MenuRecord, MenuSlotsSnapshot } from '../api/menus.ts';
 import type { PatternRecord } from '../api/patterns.ts';
-import type { GeneralSettingsDraft, ReadingSettings, ReadingSettingsDraft } from '../api/settings.ts';
+import type {
+  GeneralSettingsDraft,
+  GlobalSiteOptionsSnapshot,
+  ReadingSettings,
+  ReadingSettingsDraft,
+} from '../api/settings.ts';
 import type { StudioTargetGroup, StudioTargetItem } from '../api/studio.ts';
 import type { ThemeOptionDef } from '../api/themes.ts';
+import { BlockSchemaForm } from '../builder/BlockSchemaForm.tsx';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderWorkspace.tsx';
 import type { StudioMenuRequest } from './StudioBlockTree.tsx';
 import type { BuilderDocument, BuilderViewport, StudioBuilderClipboard } from '../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../components/AdminPrimitives.tsx';
 import { ThemeOptionsForm } from '../features/themes/ThemeOptionsForm.tsx';
 import type { StudioPanelId } from '../shell/router.ts';
-import type { BlockRegistry } from '../types.ts';
+import type { BlockRegistry, BlockSchemaV1 } from '../types.ts';
+import { StudioMenuManager } from './StudioMenuManager.tsx';
 
 interface Props {
   panel: StudioPanelId;
@@ -21,6 +28,10 @@ interface Props {
   timezones: string[];
   onGeneralChange: (draft: GeneralSettingsDraft) => void;
   csrfToken: string | null;
+  globalOptionsSnapshot: GlobalSiteOptionsSnapshot | null;
+  globalOptionsDraft: Record<string, unknown> | null;
+  globalOptionsDirty: boolean;
+  onGlobalOptionsChange: (values: Record<string, unknown>) => void;
   themeOptionsDraft: Record<string, unknown> | null;
   themeOptionsDirty: boolean;
   themeOptionsReloadToken: number;
@@ -33,7 +44,7 @@ interface Props {
   menuSlotsDirty: boolean;
   menusList: MenuRecord[];
   onMenuSlotChange: (slot: string, menuId: number | null) => void;
-  onNavigateHash: (hash: string) => void;
+  onMenusMutated: () => Promise<void> | void;
   readingDraft: ReadingSettingsDraft | null;
   readingDirty: boolean;
   readingSettings: ReadingSettings | null;
@@ -68,6 +79,7 @@ interface Props {
   menuRequest?: StudioMenuRequest | null;
   onMenuRequestHandled?: () => void;
   canvasPickSeq?: number;
+  openPatternSeq?: number;
 }
 
 const INPUT_CLASS =
@@ -117,6 +129,10 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   timezones,
   onGeneralChange,
   csrfToken,
+  globalOptionsSnapshot,
+  globalOptionsDraft,
+  globalOptionsDirty,
+  onGlobalOptionsChange,
   themeOptionsDraft,
   themeOptionsDirty,
   themeOptionsReloadToken,
@@ -126,7 +142,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   menuSlotsDirty,
   menusList,
   onMenuSlotChange,
-  onNavigateHash,
+  onMenusMutated,
   readingDraft,
   readingDirty,
   readingSettings,
@@ -161,6 +177,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   menuRequest,
   onMenuRequestHandled,
   canvasPickSeq,
+  openPatternSeq,
 }) => {
   const selectedTarget = selectedTargetKey
     ? targets.find(item => item.canonical_target_key === selectedTargetKey) ?? null
@@ -169,19 +186,19 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   if (panel === 'root') {
     const customizerItems: Array<{ id: StudioPanelId; label: string; desc: string; dirty: boolean }> = [
       { id: 'identity', label: 'Nhận diện Site', desc: 'Tiêu đề website, khẩu hiệu & múi giờ', dirty: generalDirty },
-      { id: 'theme-options', label: 'Tùy chọn Giao diện', desc: 'Logo, màu sắc & cấu hình theme', dirty: themeOptionsDirty },
-      { id: 'menus', label: 'Vị trí Menu', desc: 'Gắn menu vào các vùng hiển thị theme', dirty: menuSlotsDirty },
+      { id: 'theme-options', label: 'Tùy chọn Giao diện', desc: 'Mạng xã hội, thương hiệu & tùy chọn theme', dirty: globalOptionsDirty || themeOptionsDirty },
+      { id: 'menus', label: 'Menu & Vị trí', desc: 'Tạo, sửa cây menu & gắn vị trí hiển thị', dirty: menuSlotsDirty },
       { id: 'reading', label: 'Trang chủ & Đọc', desc: 'Chọn trang chủ tĩnh & trang tin tức', dirty: readingDirty },
     ];
 
     return (
-      <nav className="flex h-full flex-col overflow-y-auto" aria-label="Điều hướng OpenDash Studio" data-testid="studio-nav-root">
+      <nav className="flex h-full flex-col overflow-y-auto" aria-label="Điều hướng Tùy chỉnh giao diện" data-testid="studio-nav-root">
         <div className="space-y-5 p-3">
           <div>
             <p className="mb-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
               Tùy biến Website
             </p>
-            <ul className="space-y-1">
+            <ul className="m-0 list-none space-y-1 p-0">
               {customizerItems.map(item => (
                 <li key={item.id}>
                   <button
@@ -294,24 +311,70 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   }
 
   if (panel === 'theme-options') {
+    const globalSchema: BlockSchemaV1 | null = globalOptionsSnapshot
+      ? {
+          schema_version: 1,
+          id: 'site/global-options',
+          title: 'Tùy chọn toàn trang',
+          category: 'content',
+          render: 'render.html',
+          fields: globalOptionsSnapshot.fields,
+        }
+      : null;
+
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-theme-options">
-        <div className="space-y-4 p-4">
-          {!activeThemeId ? (
-            <AdminAlert tone="info">
-              Chưa có Theme v3 đang kích hoạt để cấu hình tùy chọn.
-            </AdminAlert>
-          ) : (
-            <ThemeOptionsForm
-              themeId={activeThemeId}
-              csrfToken={csrfToken}
-              onApiError={onApiError}
-              hideSubmitButton
-              externalValues={themeOptionsDraft}
-              reloadToken={themeOptionsReloadToken}
-              onValuesChange={onThemeOptionsChange}
-            />
-          )}
+        <div className="space-y-5 p-4">
+          <section className="space-y-3" data-testid="global-site-options-section">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-800">
+                  Tùy chọn toàn trang
+                </h2>
+                <p className="mt-0.5 text-[11px] text-zinc-500">
+                  Dùng chung cho nhiều block &amp; giữ nguyên khi đổi Theme.
+                </p>
+              </div>
+              {globalOptionsSnapshot && (
+                <AdminBadge tone="neutral">v{globalOptionsSnapshot.version}</AdminBadge>
+              )}
+            </div>
+            {globalSchema ? (
+              <BlockSchemaForm
+                schema={globalSchema}
+                values={globalOptionsDraft ?? globalOptionsSnapshot?.values ?? {}}
+                onChange={onGlobalOptionsChange}
+                viewport={viewport}
+                csrfToken={csrfToken}
+                onError={onApiError}
+                disabled={disabled}
+              />
+            ) : (
+              <p className="text-xs text-zinc-500">Đang tải tùy chọn toàn trang…</p>
+            )}
+          </section>
+
+          <section className="space-y-3 border-t border-zinc-200 pt-4" data-testid="theme-specific-options-section">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-zinc-800">
+              Tùy chọn riêng của Theme
+            </h2>
+            {!activeThemeId ? (
+              <AdminAlert tone="info">
+                Chưa có Theme v3 đang kích hoạt để cấu hình tùy chọn riêng.
+              </AdminAlert>
+            ) : (
+              <ThemeOptionsForm
+                themeId={activeThemeId}
+                csrfToken={csrfToken}
+                viewport={viewport}
+                onApiError={onApiError}
+                hideSubmitButton
+                externalValues={themeOptionsDraft}
+                reloadToken={themeOptionsReloadToken}
+                onValuesChange={onThemeOptionsChange}
+              />
+            )}
+          </section>
         </div>
       </div>
     );
@@ -319,54 +382,18 @@ export const StudioCustomizerNav: React.FC<Props> = ({
 
   if (panel === 'menus') {
     return (
-      <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-menus">
-        <div className="space-y-4 p-4">
-          {!activeThemeId || !menuSlots ? (
-            <AdminAlert tone="info">
-              Theme hiện tại chưa kích hoạt hoặc không khai báo vùng menu (menu slots).
-            </AdminAlert>
-          ) : menuSlots.available_slots.length === 0 ? (
-            <p className="text-xs text-zinc-500">Theme {activeThemeId} không khai báo slot menu nào.</p>
-          ) : (
-            <div className="space-y-3">
-              {menuSlots.available_slots.map(slot => {
-                const assigned = menuSlotsDraft?.[slot] ?? null;
-                return (
-                  <label key={slot} className="block space-y-1 text-xs font-medium text-zinc-700" htmlFor={`studio-menu-slot-${slot}`}>
-                    <span>Vị trí: <code className="font-mono text-zinc-900">{slot}</code></span>
-                    <select
-                      id={`studio-menu-slot-${slot}`}
-                      disabled={disabled}
-                      className={INPUT_CLASS}
-                      value={assigned ?? ''}
-                      onChange={e => onMenuSlotChange(slot, pageChoiceValue(e.target.value))}
-                    >
-                      <option value="">(Không gắn menu)</option>
-                      {menusList.map(menu => (
-                        <option key={menu.id} value={menu.id}>{menu.title} ({menu.menu_key})</option>
-                      ))}
-                    </select>
-                  </label>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="border-t border-zinc-200 pt-3">
-            <p className="text-xs text-zinc-500">
-              Cần thêm hoặc sửa các liên kết bên trong một menu?
-            </p>
-            <AdminButton
-              variant="secondary"
-              size="sm"
-              className="mt-2 w-full"
-              onClick={() => onNavigateHash('#/appearance/menus')}
-            >
-              Mở trình quản lý cây Menu ↗
-            </AdminButton>
-          </div>
-        </div>
-      </div>
+      <StudioMenuManager
+        activeThemeId={activeThemeId}
+        menuSlots={menuSlots}
+        menuSlotsDraft={menuSlotsDraft}
+        menusList={menusList}
+        onMenuSlotChange={onMenuSlotChange}
+        csrfToken={csrfToken}
+        disabled={disabled}
+        onMenusMutated={onMenusMutated}
+        onApiError={onApiError}
+        onMessage={onBuilderMessage}
+      />
     );
   }
 
@@ -449,7 +476,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
     const allowRouteContext = ['single', 'page', 'page_layout', 'single_custom'].includes(selectedTarget.target.kind);
     return (
       <div className="flex h-full flex-col overflow-y-auto" data-testid="studio-panel-template-editor">
-        <div className="space-y-3 p-3.5">
+        <div className="space-y-2.5 px-1.5 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs">
             <code className="font-mono text-zinc-800">{selectedTarget.canonical_target_key}</code>
             <AdminBadge tone={badge.tone}>{badge.label}</AdminBadge>
@@ -489,6 +516,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               menuRequest={menuRequest}
               onMenuRequestHandled={onMenuRequestHandled}
               canvasPickSeq={canvasPickSeq}
+              openPatternSeq={openPatternSeq}
               document={templateDoc}
               selectedId={templateSelectedNodeId}
               onSelect={onSelectTemplateNode}
@@ -531,7 +559,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 <p className="px-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
                   {GROUP_LABELS[group]}
                 </p>
-                <ul className="space-y-1">
+                <ul className="m-0 list-none space-y-1 p-0">
                   {groupItems.map(item => {
                     const badge = sourceBadge(item);
                     return (

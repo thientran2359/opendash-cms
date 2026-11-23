@@ -53,7 +53,8 @@ use crate::{
         settings::{
             general_get, general_put, locales_create, locales_get, locales_set_default,
             locales_update, permalinks_get, permalinks_put, public_get, public_put, reading_get,
-            reading_put, theme_options_get, theme_options_put, timezones_get,
+            reading_put, site_options_get, site_options_put, theme_options_get, theme_options_put,
+            timezones_get,
         },
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_definitions_create,
@@ -295,6 +296,12 @@ pub fn build_router_with_themes_root(
             get(reading_get)
                 .put(reading_put)
                 .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/settings/site-options",
+            get(site_options_get)
+                .put(site_options_put)
+                .layer(DefaultBodyLimit::max(64 * 1024)),
         )
         .route(
             "/api/admin/locales",

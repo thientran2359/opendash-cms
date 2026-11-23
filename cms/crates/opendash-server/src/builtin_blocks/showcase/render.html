@@ -1,0 +1,35 @@
+<div class="od-block-showcase border {{ box_padding_classes }}{% if theme_variant == 'dark' %} bg-slate-900 text-white border-slate-800{% elif theme_variant == 'tinted' %} bg-od-surface-alt text-od-text border-od-border{% elif theme_variant == 'bordered' %} bg-od-surface text-od-text border-2 border-slate-300{% elif theme_variant == 'elevated' %} bg-od-surface text-od-text border-od-border shadow-xl{% else %} bg-od-surface text-od-text border-od-border shadow-sm{% endif %}" data-od-spacing="box_padding" style="border-radius:var(--od-showcase-radius,16px);border-top:4px solid var(--od-showcase-accent,#0284c7);text-align:var(--od-showcase-align,left);">
+  {% if cover_image_url %}
+    <div class="mb-5 overflow-hidden rounded-xl">
+      <img class="h-56 w-full object-cover" src="{{ cover_image_url }}" alt="{{ cover_image_alt }}" />
+    </div>
+  {% endif %}
+  <div class="inline-flex items-center gap-2 rounded-full border border-od-border bg-od-surface-alt px-3 py-1 text-xs font-semibold text-od-text mb-3">
+    <span>Showcase #{{ badge_count }}</span>
+    <span>·</span>
+    <span>{{ theme_variant }}</span>
+  </div>
+  <h2 class="font-od-heading text-2xl font-bold tracking-tight md:text-3xl">{{ heading }}</h2>
+  {% if summary %}<p class="mt-2 text-base leading-relaxed opacity-85">{{ summary }}</p>{% endif %}
+  {% if rich_body %}<div class="od-prose mt-4">{{ rich_body }}</div>{% endif %}
+  {% if highlights %}
+    <div class="mt-5 grid gap-3 sm:grid-cols-2">
+      {% for item in highlights %}
+        <div class="rounded-lg border border-od-border/70 bg-white/10 p-3">
+          <div class="text-sm font-semibold">{{ item.title }}</div>
+          {% if item.detail %}<div class="mt-1 text-xs opacity-80">{{ item.detail }}</div>{% endif %}
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  {% if show_cta %}
+    <div class="mt-6 flex flex-wrap items-center gap-3">
+      {% if primary_link_url %}
+        <a class="inline-flex items-center rounded-lg bg-od-primary px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700" href="{{ primary_link_url }}" target="{{ primary_link_target }}" rel="{{ primary_link_rel }}">Liên kết chính</a>
+      {% endif %}
+      {% if reference_url %}
+        <a class="inline-flex items-center rounded-lg border border-current px-4 py-2.5 text-sm font-medium opacity-85 hover:opacity-100" href="{{ reference_url }}" rel="noopener noreferrer">Tài liệu tham khảo</a>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>

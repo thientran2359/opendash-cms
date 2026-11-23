@@ -56,6 +56,14 @@ const EMBEDDED_CORE_BLOCK_SOURCES: &[(&str, &str)] = &[
         include_str!("../builtin_blocks/accordion/block.json"),
         include_str!("../builtin_blocks/accordion/render.html"),
     ),
+    (
+        include_str!("../builtin_blocks/showcase/block.json"),
+        include_str!("../builtin_blocks/showcase/render.html"),
+    ),
+    (
+        include_str!("../builtin_blocks/social-follow/block.json"),
+        include_str!("../builtin_blocks/social-follow/render.html"),
+    ),
 ];
 
 pub fn compute_block_definition_digest(schema_json: &str, template: &str) -> String {
@@ -788,7 +796,7 @@ mod s02_block_registry_tests {
         .fetch_one(&db)
         .await
         .unwrap();
-        assert_eq!(core_cnt, 5);
+        assert_eq!(core_cnt, EMBEDDED_CORE_BLOCK_SOURCES.len() as i64);
 
         let mut conn = db.acquire().await.unwrap();
         let b1: BlockSchemaV1 = serde_json::from_value(json!({

@@ -2,12 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent, KeyboardEvent, ReactNode } from 'react';
 import type { BlockCatalogItemDto } from '../types.ts';
 import {
-  type BuilderDocument, type BuilderElement, type NodeLocation,
-  allNodes, isLockedElement, isProtectedNode, nodeTitle,
+  type BuilderDocument, type BuilderElement, type VisibleNodeLocation,
+  isLockedElement, isProtectedNode, nodeTitle, visibleNodesInTree,
 } from '../builder/document.ts';
 
 export type StudioDropPosition = 'before' | 'after';
-export type StudioMenuRequest = { nodeId: string; mode: 'open' | 'toggle'; seq: number };
+export type StudioMenuRequest = {
+  nodeId: string;
+  mode: 'open' | 'toggle';
+  seq: number;
+  anchor?: { x: number; y: number } | null;
+};
 
 export interface StudioBlockTreeProps {
   document: BuilderDocument;
@@ -15,8 +20,8 @@ export interface StudioBlockTreeProps {
   registry?: Record<string, Record<string, string>>;
   blockSchemas?: BlockCatalogItemDto[];
   disabled?: boolean;
-  collapsedIds: Set<string>;
-  onCollapsedIdsChange: (next: Set<string>) => void;
+  expandedIds: Set<string>;
+  onExpandedIdsChange: (next: Set<string>) => void;
   menuRequest?: StudioMenuRequest | null;
   onMenuRequestHandled?: () => void;
   canvasPickSeq?: number;
@@ -33,13 +38,13 @@ export interface StudioBlockTreeProps {
   canPaste: (id: string) => boolean;
   onDelete: (id: string) => void;
   canDelete?: (id: string) => boolean;
-  onOpenPatternLibrary: () => void;
-  onOpenMediaPicker: () => void;
+  onOpenPatternLibrary?: () => void;
+  onOpenMediaPicker?: () => void;
 }
 
 type IconName =
   | 'settings' | 'chevron-down' | 'chevron-right' | 'plus' | 'pencil'
-  | 'copy' | 'paste' | 'up' | 'down' | 'trash' | 'lock' | 'grip' | 'sliders';
+  | 'copy' | 'paste' | 'up' | 'down' | 'trash' | 'lock' | 'sliders';
 
 /** Tiny inline SVGs keep the Studio tree independent of an icon package. */
 function TreeIcon({ name }: { name: IconName }) {
@@ -55,7 +60,6 @@ function TreeIcon({ name }: { name: IconName }) {
     down: <><path d="m12 19-5-5m5 5 5-5M12 19V5" /></>,
     trash: <><path d="M4 7h16M10 4h4l1 3M6 7l1 13h10l1-13M10 11v6M14 11v6" /></>,
     lock: <><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 1 1 8 0v3" /></>,
-    grip: <><circle cx="9" cy="5" r="1" /><circle cx="15" cy="5" r="1" /><circle cx="9" cy="12" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="9" cy="19" r="1" /><circle cx="15" cy="19" r="1" /></>,
     sliders: <><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="2" fill="white" /><circle cx="15" cy="17" r="2" fill="white" /></>,
   };
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
@@ -69,16 +73,16 @@ const CONTAINER_LABEL: Record<'section' | 'row' | 'column', string> = {
 
 export function StudioBlockTree({
   document, selectedId, registry = {}, blockSchemas = [], disabled = false,
-  collapsedIds, onCollapsedIdsChange, menuRequest, onMenuRequestHandled,
+  expandedIds, onExpandedIdsChange, menuRequest, onMenuRequestHandled,
   canvasPickSeq = 0,
   onSelect, onEdit, onAdd, onMove, onReorder, canReorder,
   onDuplicate, onCopy, onPaste, canPaste, onDelete, canDelete,
-  onOpenPatternLibrary, onOpenMediaPicker,
 }: StudioBlockTreeProps) {
-  const nodes = useMemo(() => allNodes(document), [document]);
+  const nodes = useMemo(() => visibleNodesInTree(document), [document]);
   const byId = useMemo(() => new Map(nodes.map(item => [item.node.id, item])), [nodes]);
   const [focusedId, setFocusedId] = useState<string | null>(selectedId);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; position: StudioDropPosition } | null>(null);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -88,11 +92,11 @@ export function StudioBlockTree({
   const previousCanvasPickSeq = useRef(canvasPickSeq);
   const previousSelectedId = useRef(selectedId);
 
-  const isVisible = (item: NodeLocation): boolean => {
-    let parent = item.parentId;
+  const isVisible = (item: VisibleNodeLocation): boolean => {
+    let parent = item.visualParentId;
     while (parent) {
-      if (collapsedIds.has(parent)) return false;
-      parent = byId.get(parent)?.parentId ?? null;
+      if (!expandedIds.has(parent)) return false;
+      parent = byId.get(parent)?.visualParentId ?? null;
     }
     return true;
   };
@@ -126,27 +130,53 @@ export function StudioBlockTree({
     if (disabled && openMenuId) setOpenMenuId(null);
   }, [disabled, openMenuId]);
 
-  // Canvas double-click/gear requests bring hidden descendants into view before opening the menu.
+  const computePopoverPos = (id: string, anchor?: { x: number; y: number } | null): { top: number; left: number } => {
+    const vw = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const vh = typeof window !== 'undefined' ? window.innerHeight : 800;
+    const menuW = 180;
+    const menuH = 230;
+    let rawTop = 120;
+    let rawLeft = 40;
+    if (anchor) {
+      rawLeft = anchor.x + 8;
+      rawTop = anchor.y + 8;
+    } else {
+      const rect = triggerRefs.current.get(id)?.getBoundingClientRect();
+      if (rect) {
+        rawLeft = rect.right + 6;
+        rawTop = rect.top;
+      }
+    }
+    return {
+      left: Math.max(8, Math.min(rawLeft, vw - menuW - 8)),
+      top: Math.max(8, Math.min(rawTop, vh - menuH - 8)),
+    };
+  };
+
+  // Canvas gear requests bring hidden descendants into view before opening the floating popover.
   useEffect(() => {
     if (!menuRequest || handledMenuSeq.current === menuRequest.seq) return;
     handledMenuSeq.current = menuRequest.seq;
     const target = byId.get(menuRequest.nodeId);
     if (target && !disabled) {
       onSelect(menuRequest.nodeId);
-      const next = new Set(collapsedIds);
-      let parent = target.parentId;
+      const next = new Set(expandedIds);
+      let parent = target.visualParentId;
       while (parent) {
-        next.delete(parent);
-        parent = byId.get(parent)?.parentId ?? null;
+        next.add(parent);
+        parent = byId.get(parent)?.visualParentId ?? null;
       }
-      if (next.size !== collapsedIds.size) onCollapsedIdsChange(next);
-      setOpenMenuId(current => menuRequest.mode === 'toggle' && current === menuRequest.nodeId
-        ? null : menuRequest.nodeId);
+      if (next.size !== expandedIds.size) onExpandedIdsChange(next);
+      setOpenMenuId(current => {
+        const willOpen = !(menuRequest.mode === 'toggle' && current === menuRequest.nodeId);
+        if (willOpen) setMenuPos(computePopoverPos(menuRequest.nodeId, menuRequest.anchor));
+        return willOpen ? menuRequest.nodeId : null;
+      });
       setFocusedId(menuRequest.nodeId);
       rowRefs.current.get(menuRequest.nodeId)?.scrollIntoView({ block: 'nearest' });
     }
     onMenuRequestHandled?.();
-  }, [menuRequest, byId, collapsedIds, disabled, onSelect, onCollapsedIdsChange, onMenuRequestHandled]);
+  }, [menuRequest, byId, expandedIds, disabled, onSelect, onExpandedIdsChange, onMenuRequestHandled]);
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -165,7 +195,7 @@ export function StudioBlockTree({
     const firstEnabledItem = menu?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
     if (firstEnabledItem) firstEnabledItem.focus();
     else menu?.focus();
-  }, [openMenuId, collapsedIds]);
+  }, [openMenuId, expandedIds]);
 
   const focusRow = (id: string) => {
     setFocusedId(id);
@@ -177,20 +207,31 @@ export function StudioBlockTree({
     setOpenMenuId(null);
     if (restoreFocus && id) triggerRefs.current.get(id)?.focus();
   };
+  const openMenuAt = (id: string, anchor?: { x: number; y: number } | null) => {
+    if (disabled) return;
+    onSelect(id);
+    setFocusedId(id);
+    setMenuPos(computePopoverPos(id, anchor));
+    setOpenMenuId(id);
+  };
   const toggleMenu = (id: string) => {
     if (disabled) return;
     onSelect(id);
     setFocusedId(id);
-    setOpenMenuId(current => current === id ? null : id);
+    setOpenMenuId(current => {
+      if (current === id) return null;
+      setMenuPos(computePopoverPos(id));
+      return id;
+    });
   };
-  const moveAvailable = (item: NodeLocation, direction: -1 | 1): boolean => {
+  const moveAvailable = (item: VisibleNodeLocation, direction: -1 | 1): boolean => {
     if (disabled || isProtectedNode(document, item.node.id, registry, blockSchemas)) return false;
-    const siblings = nodes.filter(entry => entry.parentId === item.parentId && entry.kind === item.kind);
+    const siblings = nodes.filter(entry => entry.visualParentId === item.visualParentId);
     const index = siblings.findIndex(entry => entry.node.id === item.node.id);
     const neighbor = siblings[index + direction];
     return !!neighbor && canReorder(item.node.id, neighbor.node.id, direction < 0 ? 'before' : 'after');
   };
-  const handleRowKey = (event: KeyboardEvent<HTMLButtonElement>, item: NodeLocation) => {
+  const handleRowKey = (event: KeyboardEvent<HTMLButtonElement>, item: VisibleNodeLocation) => {
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
       event.preventDefault();
       toggleMenu(item.node.id);
@@ -208,16 +249,16 @@ export function StudioBlockTree({
       case 'ArrowDown': target = visibleNodes[index + 1]?.node.id; break;
       case 'ArrowUp': target = visibleNodes[index - 1]?.node.id; break;
       case 'ArrowLeft':
-        if (item.kind !== 'element' && !collapsedIds.has(item.node.id)) {
-          onCollapsedIdsChange(new Set([...collapsedIds, item.node.id]));
-        } else target = item.parentId ?? undefined;
+        if (item.kind !== 'element' && expandedIds.has(item.node.id)) {
+          const next = new Set(expandedIds);
+          next.delete(item.node.id);
+          onExpandedIdsChange(next);
+        } else target = item.visualParentId ?? undefined;
         break;
       case 'ArrowRight':
-        if (item.kind !== 'element' && collapsedIds.has(item.node.id)) {
-          const next = new Set(collapsedIds);
-          next.delete(item.node.id);
-          onCollapsedIdsChange(next);
-        } else target = nodes.find(entry => entry.parentId === item.node.id)?.node.id;
+        if (item.kind !== 'element' && !expandedIds.has(item.node.id)) {
+          onExpandedIdsChange(new Set([...expandedIds, item.node.id]));
+        } else target = nodes.find(entry => entry.visualParentId === item.node.id)?.node.id;
         break;
       case 'Home': target = firstVisibleId ?? undefined; break;
       case 'End': target = visibleNodes[visibleNodes.length - 1]?.node.id; break;
@@ -298,24 +339,24 @@ export function StudioBlockTree({
 
   const renderLevel = (parentId: string | null, depth: number): ReactNode => (
     <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : 'Cấu trúc trang'}
-      className="space-y-1">
-      {nodes.filter(entry => entry.parentId === parentId).map((item, index) => {
+      className={'m-0 list-none space-y-0.5 p-0 ' + (parentId ? 'ml-2.5 border-l border-slate-200 pl-1' : '')}>
+      {nodes.filter(entry => entry.visualParentId === parentId).map(item => {
         const id = item.node.id;
         const isContainer = item.kind !== 'element';
-        const expanded = isContainer && !collapsedIds.has(id);
+        const expanded = isContainer && expandedIds.has(id);
         const protectedNode = isProtectedNode(document, id, registry, blockSchemas);
         const locked = item.kind === 'element'
           && isLockedElement(item.node as BuilderElement, registry, blockSchemas);
-        const label = nodeTitle(item, blockSchemas)
-          + (isContainer ? ' ' + (index + 1) : '');
+        const label = nodeTitle(item, blockSchemas);
+        const htmlId = item.node.meta?.html_id?.trim() || '';
         const canOperate = !disabled && !protectedNode;
         const up = moveAvailable(item, -1);
         const down = moveAvailable(item, 1);
         const toggleCollapse = () => {
-          const next = new Set(collapsedIds);
+          const next = new Set(expandedIds);
           if (next.has(id)) next.delete(id);
           else next.add(id);
-          onCollapsedIdsChange(next);
+          onExpandedIdsChange(next);
         };
         const menuItem = (title: string, icon: IconName, action: () => void, allowed = true) => (
           <button type="button" role="menuitem" key={title} disabled={!allowed || disabled}
@@ -333,25 +374,24 @@ export function StudioBlockTree({
             onDragLeave={event => handleDragLeave(event, id)}
             onDrop={event => handleDrop(event, id)}
             onDragEnd={() => { setDragId(null); setDrop(null); }}
+            onContextMenu={event => {
+              event.preventDefault();
+              event.stopPropagation();
+              openMenuAt(id, { x: event.clientX, y: event.clientY });
+            }}
             className={'rounded-lg border border-transparent ' + dropClass
               + (selectedId === id ? ' bg-sky-50' : ' hover:bg-slate-50')}
           >
-            <div className="flex min-w-0 items-center gap-1 px-1 py-0.5" style={{ paddingLeft: 4 + depth * 10 }}>
-              <button type="button" ref={element => {
-                if (element) triggerRefs.current.set(id, element);
-                else triggerRefs.current.delete(id);
-              }} aria-label={'Mở thao tác ' + label} aria-haspopup="menu" aria-expanded={openMenuId === id}
-                tabIndex={-1}
-                title={'Thao tác ' + label}
-                className="rounded p-1 text-slate-500 hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-sky-600"
-                onClick={() => toggleMenu(id)}>
-                <TreeIcon name="settings" />
-              </button>
-              {isContainer && <button type="button" aria-label={(expanded ? 'Thu gọn ' : 'Mở rộng ') + label}
-                aria-expanded={expanded} tabIndex={-1} onClick={toggleCollapse}
-                className="rounded p-1 text-slate-500 hover:bg-slate-200">
-                <TreeIcon name={expanded ? 'chevron-down' : 'chevron-right'} />
-              </button>}
+            <div className="flex min-w-0 items-center gap-0.5 px-1 py-0.5">
+              {isContainer ? (
+                <button type="button" aria-label={(expanded ? 'Thu gọn ' : 'Mở rộng ') + label}
+                  aria-expanded={expanded} tabIndex={-1} onClick={toggleCollapse}
+                  className="rounded p-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800">
+                  <TreeIcon name={expanded ? 'chevron-down' : 'chevron-right'} />
+                </button>
+              ) : (
+                <span className="w-4 shrink-0" aria-hidden="true" />
+              )}
               {locked && <span title="Block được bảo toàn, chỉ có thể xóa" className="text-amber-700">
                 <TreeIcon name="lock" /></span>}
               <button type="button" role="treeitem" aria-level={depth + 1} aria-selected={selectedId === id}
@@ -364,15 +404,28 @@ export function StudioBlockTree({
                 tabIndex={tabStopId === id ? 0 : -1}
                 onFocus={() => setFocusedId(id)}
                 onClick={() => onSelect(id)}
-                onDoubleClick={() => toggleMenu(id)}
+                onDoubleClick={() => { if (!disabled && !protectedNode) onEdit(id); }}
                 onKeyDown={event => handleRowKey(event, item)}
                 data-node-id={id}
-                className={'min-w-0 flex-1 truncate rounded px-1 py-1.5 text-left text-xs font-medium focus-visible:outline-2 focus-visible:outline-sky-600 '
+                className={'flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1 text-left text-xs font-medium focus-visible:outline-2 focus-visible:outline-sky-600 '
                   + (selectedId === id ? 'text-sky-900' : 'text-slate-700')}>
-                {label}
+                <span className="truncate">{label}</span>
+                {htmlId && (
+                  <span className="shrink-0 rounded bg-slate-100 px-1 py-0.5 font-mono text-[10px] font-normal text-slate-500">
+                    #{htmlId}
+                  </span>
+                )}
               </button>
-              {canOperate && <span className="cursor-grab text-slate-400" title="Kéo để đổi thứ tự cùng tầng">
-                <TreeIcon name="grip" /></span>}
+              <button type="button" ref={element => {
+                if (element) triggerRefs.current.set(id, element);
+                else triggerRefs.current.delete(id);
+              }} aria-label={'Mở thao tác ' + label} aria-haspopup="menu" aria-expanded={openMenuId === id}
+                tabIndex={-1}
+                title={'Thao tác ' + label}
+                className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-sky-600"
+                onClick={() => toggleMenu(id)}>
+                <TreeIcon name="settings" />
+              </button>
             </div>
             {openMenuId === id && <div role="menu" tabIndex={-1} aria-label={'Thao tác ' + label}
               ref={element => {
@@ -380,7 +433,8 @@ export function StudioBlockTree({
                 else menuRefs.current.delete(id);
               }}
               onKeyDown={handleMenuKey}
-              className="mx-2 mb-2 grid grid-cols-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm"
+              style={menuPos ? { top: menuPos.top, left: menuPos.left } : undefined}
+              className="fixed z-50 grid w-44 grid-cols-1 rounded-lg border border-slate-200 bg-white p-1 shadow-lg ring-1 ring-black/5"
               data-studio-menu-node-id={id}>
               {menuItem('Chỉnh sửa', 'pencil', () => invoke(id, onEdit), canOperate)}
               {menuItem('Nhân bản', 'copy', () => invoke(id, onDuplicate), canOperate)}
@@ -394,8 +448,7 @@ export function StudioBlockTree({
           {isContainer && expanded && <>
             {renderLevel(id, depth + 1)}
             <button type="button" disabled={disabled} onClick={() => onAdd(id)}
-              className="mb-1 mt-1 flex w-full items-center gap-1 rounded px-2 py-1.5 text-left text-xs text-sky-700 hover:bg-sky-50 disabled:opacity-50"
-              style={{ paddingLeft: 20 + depth * 10 }}>
+              className="mb-1 ml-3 mt-0.5 flex w-[calc(100%-0.75rem)] items-center gap-1 rounded px-2 py-1 text-left text-xs text-sky-700 hover:bg-sky-50 disabled:opacity-50">
               <TreeIcon name="plus" />Thêm vào {CONTAINER_LABEL[item.kind as 'section' | 'row' | 'column']}
             </button>
           </>}
@@ -403,26 +456,16 @@ export function StudioBlockTree({
       })}
     </ul>
   );
-  return <section aria-label="Cấu trúc trang" className="min-w-0 space-y-3 p-2"
+  return <section aria-label="Cấu trúc trang" className="min-w-0 space-y-2.5 p-0"
     onDragLeave={event => { if (leftBounds(event)) setDrop(null); }}>
-    {document.sections.length ? renderLevel(null, 0) : (
+    {nodes.length ? renderLevel(null, 0) : (
       <p className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-        Trang chưa có Section. Thêm Section để bắt đầu bố cục.</p>
+        Trang chưa có nội dung. Thêm Block hoặc Section để bắt đầu bố cục.</p>
     )}
     <button type="button" disabled={disabled} onClick={() => onAdd(null)}
       className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700 hover:bg-sky-100 disabled:opacity-50">
-      <TreeIcon name="plus" />Thêm Section
+      <TreeIcon name="plus" />Thêm Block
     </button>
-    <div className="grid grid-cols-2 gap-2">
-      <button type="button" data-testid="studio-open-pattern-library" disabled={disabled}
-        onClick={onOpenPatternLibrary} className="rounded-lg border border-slate-200 px-2 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-        Patterns
-      </button>
-      <button type="button" data-testid="studio-open-media-picker" disabled={disabled}
-        onClick={onOpenMediaPicker} className="rounded-lg border border-slate-200 px-2 py-2 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-        Media
-      </button>
-    </div>
-    <p className="text-[11px] text-slate-500">↑/↓ chọn node, ←/→ thu gọn/mở rộng, Shift+F10 mở thao tác, Alt+↑/↓ đổi thứ tự.</p>
+    <p className="px-1 text-[10px] text-slate-400">Nhấp đúp để chỉnh sửa · Chuột phải để mở thao tác · Kéo thả để đổi thứ tự.</p>
   </section>;
 }

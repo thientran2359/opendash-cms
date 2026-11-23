@@ -42,11 +42,205 @@ pub struct Responsive {
     pub mobile: Option<ResponsiveStyle>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoxSpacing {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<i16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub right: Option<i16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bottom: Option<i16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub left: Option<i16>,
+}
+
+impl BoxSpacing {
+    pub fn is_empty(&self) -> bool {
+        self.top.is_none() && self.right.is_none() && self.bottom.is_none() && self.left.is_none()
+    }
+
+    pub fn sides(&self) -> [Option<i16>; 4] {
+        [self.top, self.right, self.bottom, self.left]
+    }
+}
+
+pub const TW_PADDING_STEPS: &[i16] = &[0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64];
+pub const TW_MARGIN_STEPS: &[i16] = &[
+    -32, -24, -16, -12, -8, -6, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32,
+];
+pub const TW_GAP_STEPS: &[u16] = &[0, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16];
+
+fn px_to_tw_step(px: i16, steps: &[i16], allow_negative: bool) -> Option<i16> {
+    if (!allow_negative && px < 0) || px % 4 != 0 {
+        return None;
+    }
+    let step = px / 4;
+    if steps.contains(&step) {
+        Some(step)
+    } else {
+        None
+    }
+}
+
+pub fn gap_px_to_tw_step(gap_px: u8) -> Option<u16> {
+    if gap_px % 4 != 0 {
+        return None;
+    }
+    let step = u16::from(gap_px / 4);
+    TW_GAP_STEPS.contains(&step).then_some(step)
+}
+
+fn fmt_tw_spacing(bp: &str, prop: &str, axis: &str, step: i16) -> String {
+    if step < 0 {
+        format!("{bp}-{prop}{axis}-{}", step.unsigned_abs())
+    } else {
+        format!("{bp}{prop}{axis}-{step}")
+    }
+}
+
+/// Compiles desktop-first `BoxSpacing` cascades across Desktop / Tablet / Mobile into
+/// minimal mobile-first Tailwind classes (`base`, `md:`, `lg:`).
+/// Returns `None` if any specified pixel value does not align to the allowed Tailwind scale.
+pub fn compile_box_spacing_tailwind(
+    prop: &str,
+    desktop: Option<BoxSpacing>,
+    tablet: Option<BoxSpacing>,
+    mobile: Option<BoxSpacing>,
+    allow_negative: bool,
+) -> Option<Vec<String>> {
+    let d_raw = desktop.map(|b| b.sides()).unwrap_or([None; 4]);
+    let t_raw = tablet.map(|b| b.sides()).unwrap_or([None; 4]);
+    let m_raw = mobile.map(|b| b.sides()).unwrap_or([None; 4]);
+
+    let d_eff: [Option<i16>; 4] = d_raw;
+    let t_eff: [Option<i16>; 4] = std::array::from_fn(|i| t_raw[i].or(d_eff[i]));
+    let m_eff: [Option<i16>; 4] = std::array::from_fn(|i| m_raw[i].or(t_eff[i]));
+
+    let active = |i: usize| d_eff[i].is_some() || t_eff[i].is_some() || m_eff[i].is_some();
+    if !(0..4).any(active) {
+        return Some(Vec::new());
+    }
+
+    let steps = if allow_negative {
+        TW_MARGIN_STEPS
+    } else {
+        TW_PADDING_STEPS
+    };
+    let normalize = |arr: [Option<i16>; 4]| -> Option<[Option<i16>; 4]> {
+        let mut out = [None; 4];
+        for i in 0..4 {
+            if active(i) {
+                let px = arr[i].unwrap_or(0);
+                out[i] = Some(px_to_tw_step(px, steps, allow_negative)?);
+            }
+        }
+        Some(out)
+    };
+
+    let m = normalize(m_eff)?;
+    let t = normalize(t_eff)?;
+    let d = normalize(d_eff)?;
+
+    let mut classes = Vec::new();
+    let emit_bp =
+        |bp: &str, cur: [Option<i16>; 4], prev: Option<[Option<i16>; 4]>, out: &mut Vec<String>| {
+            if let Some(p) = prev
+                && cur == p
+            {
+                return;
+            }
+            if let (Some(v0), Some(v1), Some(v2), Some(v3)) = (cur[0], cur[1], cur[2], cur[3])
+                && v0 == v1
+                && v1 == v2
+                && v2 == v3
+            {
+                out.push(fmt_tw_spacing(bp, prop, "", v0));
+                return;
+            }
+            match prev {
+                None => {
+                    if cur[1].is_some() && cur[1] == cur[3] {
+                        out.push(fmt_tw_spacing(bp, prop, "x", cur[1].unwrap()));
+                    } else {
+                        if let Some(vr) = cur[1] {
+                            out.push(fmt_tw_spacing(bp, prop, "r", vr));
+                        }
+                        if let Some(vl) = cur[3] {
+                            out.push(fmt_tw_spacing(bp, prop, "l", vl));
+                        }
+                    }
+                    if cur[0].is_some() && cur[0] == cur[2] {
+                        out.push(fmt_tw_spacing(bp, prop, "y", cur[0].unwrap()));
+                    } else {
+                        if let Some(vt) = cur[0] {
+                            out.push(fmt_tw_spacing(bp, prop, "t", vt));
+                        }
+                        if let Some(vb) = cur[2] {
+                            out.push(fmt_tw_spacing(bp, prop, "b", vb));
+                        }
+                    }
+                }
+                Some(p) => {
+                    if cur[1] != p[1] || cur[3] != p[3] {
+                        if cur[1] == cur[3]
+                            && let Some(vx) = cur[1]
+                        {
+                            out.push(fmt_tw_spacing(bp, prop, "x", vx));
+                        } else {
+                            if cur[1] != p[1]
+                                && let Some(vr) = cur[1]
+                            {
+                                out.push(fmt_tw_spacing(bp, prop, "r", vr));
+                            }
+                            if cur[3] != p[3]
+                                && let Some(vl) = cur[3]
+                            {
+                                out.push(fmt_tw_spacing(bp, prop, "l", vl));
+                            }
+                        }
+                    }
+                    if cur[0] != p[0] || cur[2] != p[2] {
+                        if cur[0] == cur[2]
+                            && let Some(vy) = cur[0]
+                        {
+                            out.push(fmt_tw_spacing(bp, prop, "y", vy));
+                        } else {
+                            if cur[0] != p[0]
+                                && let Some(vt) = cur[0]
+                            {
+                                out.push(fmt_tw_spacing(bp, prop, "t", vt));
+                            }
+                            if cur[2] != p[2]
+                                && let Some(vb) = cur[2]
+                            {
+                                out.push(fmt_tw_spacing(bp, prop, "b", vb));
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+    emit_bp("", m, None, &mut classes);
+    emit_bp("md:", t, Some(m), &mut classes);
+    emit_bp("lg:", d, Some(t), &mut classes);
+    Some(classes)
+}
+
+fn empty_box_spacing_option(value: &Option<BoxSpacing>) -> bool {
+    value.as_ref().is_none_or(BoxSpacing::is_empty)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResponsiveStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub padding_px: Option<u8>,
+    #[serde(default, skip_serializing_if = "empty_box_spacing_option")]
+    pub padding: Option<BoxSpacing>,
+    #[serde(default, skip_serializing_if = "empty_box_spacing_option")]
+    pub margin: Option<BoxSpacing>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gap_px: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,11 +255,14 @@ pub enum TextAlign {
     Start,
     Center,
     End,
+    Justify,
 }
 
 impl ResponsiveStyle {
     pub fn is_empty(&self) -> bool {
         self.padding_px.is_none()
+            && empty_box_spacing_option(&self.padding)
+            && empty_box_spacing_option(&self.margin)
             && self.gap_px.is_none()
             && self.columns_per_row.is_none()
             && self.text_align.is_none()
@@ -95,11 +292,188 @@ fn empty_responsive_option(value: &Option<Responsive>) -> bool {
     value.as_ref().is_none_or(Responsive::is_empty)
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodeVisibility {
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hide_desktop: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hide_tablet: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hide_mobile: bool,
+}
+
+impl NodeVisibility {
+    pub fn is_empty(&self) -> bool {
+        !self.hide_desktop && !self.hide_tablet && !self.hide_mobile
+    }
+}
+
+fn empty_visibility_option(value: &Option<NodeVisibility>) -> bool {
+    value.as_ref().is_none_or(NodeVisibility::is_empty)
+}
+
+/// Optional common UX Builder metadata on any Section, Row, Column, or Element.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodeMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub html_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class_name: Option<String>,
+    #[serde(default, skip_serializing_if = "empty_visibility_option")]
+    pub visibility: Option<NodeVisibility>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub synthetic: bool,
+}
+
+impl NodeMeta {
+    pub fn is_empty(&self) -> bool {
+        self.name.as_deref().is_none_or(str::is_empty)
+            && self.html_id.as_deref().is_none_or(str::is_empty)
+            && self.class_name.as_deref().is_none_or(str::is_empty)
+            && empty_visibility_option(&self.visibility)
+            && !self.synthetic
+    }
+}
+
+pub fn empty_node_meta_option(value: &Option<NodeMeta>) -> bool {
+    value.as_ref().is_none_or(NodeMeta::is_empty)
+}
+
+fn validate_node_meta(
+    meta: Option<&NodeMeta>,
+    has_responsive: bool,
+    is_element: bool,
+) -> Result<(), BuilderError> {
+    let Some(meta) = meta else {
+        return Ok(());
+    };
+    if is_element && meta.synthetic {
+        return Err(BuilderError::Invalid("Element cannot be synthetic"));
+    }
+    if meta.synthetic
+        && (has_responsive
+            || meta.html_id.as_deref().is_some_and(|s| !s.is_empty())
+            || meta.class_name.as_deref().is_some_and(|s| !s.is_empty())
+            || !empty_visibility_option(&meta.visibility))
+    {
+        return Err(BuilderError::Invalid(
+            "Synthetic wrapper cannot carry responsive or custom HTML attributes",
+        ));
+    }
+    if let Some(name) = meta.name.as_deref()
+        && !name.is_empty()
+    {
+        if name.trim().is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control)
+        {
+            return Err(BuilderError::Invalid("Invalid Builder node name"));
+        }
+    }
+    if let Some(html_id) = meta.html_id.as_deref()
+        && !html_id.is_empty()
+    {
+        let valid = html_id.len() <= 64
+            && html_id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'));
+        if !valid {
+            return Err(BuilderError::Invalid("Invalid Builder node HTML ID"));
+        }
+    }
+    if let Some(class_name) = meta.class_name.as_deref()
+        && !class_name.is_empty()
+    {
+        let valid = class_name.len() <= 256
+            && class_name.bytes().all(|b| {
+                b.is_ascii_alphanumeric()
+                    || matches!(
+                        b,
+                        b' ' | b'-' | b'_' | b':' | b'/' | b'.' | b'[' | b']' | b'%' | b'#'
+                    )
+            });
+        if !valid {
+            return Err(BuilderError::Invalid("Invalid Builder node CSS class"));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum LayoutKind {
     Section,
     Row,
     Column,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionWidth {
+    Full,
+    Boxed,
+    Wide,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SectionStyle {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_media_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_width: Option<SectionWidth>,
+}
+
+impl SectionStyle {
+    pub fn is_empty(&self) -> bool {
+        self.background_color.as_deref().is_none_or(str::is_empty)
+            && self
+                .background_media_id
+                .as_deref()
+                .is_none_or(str::is_empty)
+            && self.content_width.is_none()
+    }
+}
+
+pub fn empty_section_style_option(value: &Option<SectionStyle>) -> bool {
+    value.as_ref().is_none_or(SectionStyle::is_empty)
+}
+
+fn validate_section_style(
+    style: Option<&SectionStyle>,
+    is_synthetic: bool,
+) -> Result<(), BuilderError> {
+    let Some(style) = style else {
+        return Ok(());
+    };
+    if style.is_empty() {
+        return Ok(());
+    }
+    if is_synthetic {
+        return Err(BuilderError::Invalid(
+            "Synthetic section cannot carry custom styling",
+        ));
+    }
+    if let Some(color) = style.background_color.as_deref()
+        && !color.is_empty()
+        && !crate::block_schema::valid_block_color(color)
+    {
+        return Err(BuilderError::Invalid("Invalid Section background color"));
+    }
+    if let Some(media_id) = style.background_media_id.as_deref()
+        && !media_id.is_empty()
+        && !valid_media_id(media_id)
+    {
+        return Err(BuilderError::Invalid("Invalid Section background media ID"));
+    }
+    Ok(())
 }
 
 fn validate_responsive(
@@ -120,6 +494,24 @@ fn validate_responsive(
             return Err(BuilderError::Invalid(
                 "Builder responsive value out of range",
             ));
+        }
+        if let Some(pad) = style.padding {
+            for side in pad.sides().into_iter().flatten() {
+                if !(0..=256).contains(&side) {
+                    return Err(BuilderError::Invalid(
+                        "Builder responsive padding out of range",
+                    ));
+                }
+            }
+        }
+        if let Some(mar) = style.margin {
+            for side in mar.sides().into_iter().flatten() {
+                if !(-128..=256).contains(&side) {
+                    return Err(BuilderError::Invalid(
+                        "Builder responsive margin out of range",
+                    ));
+                }
+            }
         }
         let wrong_context = match kind {
             LayoutKind::Section => {
@@ -147,13 +539,23 @@ pub struct BuilderDocument {
     pub sections: Vec<SectionNode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SectionNode {
     pub id: String,
     #[serde(default, skip_serializing_if = "empty_responsive_option")]
     pub responsive: Option<Responsive>,
+    #[serde(default, skip_serializing_if = "empty_section_style_option")]
+    pub style: Option<SectionStyle>,
+    #[serde(default, skip_serializing_if = "empty_node_meta_option")]
+    pub meta: Option<NodeMeta>,
     pub children: Vec<RowNode>,
+}
+
+impl SectionNode {
+    pub fn is_synthetic(&self) -> bool {
+        self.meta.as_ref().is_some_and(|m| m.synthetic)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -162,7 +564,15 @@ pub struct RowNode {
     pub id: String,
     #[serde(default, skip_serializing_if = "empty_responsive_option")]
     pub responsive: Option<Responsive>,
+    #[serde(default, skip_serializing_if = "empty_node_meta_option")]
+    pub meta: Option<NodeMeta>,
     pub children: Vec<ColumnNode>,
+}
+
+impl RowNode {
+    pub fn is_synthetic(&self) -> bool {
+        self.meta.as_ref().is_some_and(|m| m.synthetic)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -171,12 +581,22 @@ pub struct ColumnNode {
     pub id: String,
     #[serde(default, skip_serializing_if = "empty_responsive_option")]
     pub responsive: Option<Responsive>,
+    #[serde(default, skip_serializing_if = "empty_node_meta_option")]
+    pub meta: Option<NodeMeta>,
     pub children: Vec<ElementNode>,
+}
+
+impl ColumnNode {
+    pub fn is_synthetic(&self) -> bool {
+        self.meta.as_ref().is_some_and(|m| m.synthetic)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ElementNode {
     pub id: String,
+    #[serde(default, skip_serializing_if = "empty_node_meta_option")]
+    pub meta: Option<NodeMeta>,
     #[serde(flatten)]
     pub content: ElementContent,
 }
@@ -258,10 +678,12 @@ pub struct HeadingProps {
     pub binding: Option<ElementBinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextProps {
     pub text: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub rich: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<ElementBinding>,
 }
@@ -275,11 +697,15 @@ pub struct ImageProps {
     pub binding: Option<ElementBinding>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ButtonProps {
     pub label: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub new_tab: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub nofollow: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<ElementBinding>,
 }
@@ -482,14 +908,31 @@ impl BuilderDocument {
         for (s, section) in self.sections.iter().enumerate() {
             check_node_id(&section.id, &mut ids, &mut count)?;
             validate_responsive(section.responsive.as_ref(), LayoutKind::Section)?;
+            validate_section_style(section.style.as_ref(), section.is_synthetic())?;
+            validate_node_meta(
+                section.meta.as_ref(),
+                section.responsive.as_ref().is_some_and(|r| !r.is_empty()),
+                false,
+            )?;
             for (r, row) in section.children.iter().enumerate() {
                 check_node_id(&row.id, &mut ids, &mut count)?;
                 validate_responsive(row.responsive.as_ref(), LayoutKind::Row)?;
+                validate_node_meta(
+                    row.meta.as_ref(),
+                    row.responsive.as_ref().is_some_and(|r| !r.is_empty()),
+                    false,
+                )?;
                 for (c, column) in row.children.iter().enumerate() {
                     check_node_id(&column.id, &mut ids, &mut count)?;
                     validate_responsive(column.responsive.as_ref(), LayoutKind::Column)?;
+                    validate_node_meta(
+                        column.meta.as_ref(),
+                        column.responsive.as_ref().is_some_and(|r| !r.is_empty()),
+                        false,
+                    )?;
                     for (e, element) in column.children.iter().enumerate() {
                         check_node_id(&element.id, &mut ids, &mut count)?;
+                        validate_node_meta(element.meta.as_ref(), false, true)?;
                         let result = match &element.content {
                             ElementContent::Known(known) => {
                                 if matches!(known, KnownElement::List(_)) {
@@ -618,6 +1061,10 @@ fn validate_known_with_schemas(
                 || !valid_binding(props.binding.as_ref(), &[BindingTarget::Text])
             {
                 return Err("Invalid Text content");
+            }
+            if props.rich {
+                crate::richtext::sanitize_richtext(&props.text)
+                    .map_err(|_| "Invalid RichText HTML in core/text")?;
             }
         }
         KnownElement::Image(props) => {
@@ -918,6 +1365,7 @@ mod tests {
     fn element(id: &str, content: KnownElement) -> ElementNode {
         ElementNode {
             id: id.into(),
+            meta: None,
             content: ElementContent::Known(content),
         }
     }
@@ -927,12 +1375,16 @@ mod tests {
             schema_version: BUILDER_SCHEMA_VERSION,
             sections: vec![SectionNode {
                 id: "section-1".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "row-1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "column-1".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![
                             element(
@@ -947,6 +1399,7 @@ mod tests {
                                 "text-1",
                                 KnownElement::Text(TextProps {
                                     text: "<script>plain text</script>".into(),
+                                    rich: false,
                                     binding: None,
                                 }),
                             ),
@@ -963,6 +1416,8 @@ mod tests {
                                 KnownElement::Button(ButtonProps {
                                     label: "Explore".into(),
                                     url: "/species?order=latest".into(),
+                                    new_tab: false,
+                                    nofollow: false,
                                     binding: None,
                                 }),
                             ),
@@ -1104,7 +1559,7 @@ mod tests {
                     &format!("node-{index}"),
                     KnownElement::Text(TextProps {
                         text: "x".into(),
-                        binding: None,
+                        ..Default::default()
                     }),
                 )
             })
@@ -1116,18 +1571,22 @@ mod tests {
         oversized.sections = (0..100)
             .map(|s| SectionNode {
                 id: format!("section-{s}"),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: format!("row-{s}"),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: format!("column-{s}"),
+                        meta: None,
                         responsive: None,
                         children: vec![element(
                             &format!("text-{s}"),
                             KnownElement::Text(TextProps {
                                 text: "x".repeat(5000),
-                                binding: None,
+                                ..Default::default()
                             }),
                         )],
                     }],
@@ -1159,7 +1618,7 @@ mod tests {
             KnownElement::Button(ButtonProps {
                 label: "Go".into(),
                 url: "javascript:alert(1)".into(),
-                binding: None,
+                ..Default::default()
             }),
         ] {
             let mut doc = fixture();
@@ -1237,6 +1696,7 @@ mod tests {
             .children
             .push(ElementNode {
                 id: "unknown-1".into(),
+                meta: None,
                 content: ElementContent::Unresolved(serde_json::from_value(unknown).unwrap()),
             });
         assert!(persisted.validate_for_save(&registry(), None).is_err());
@@ -1272,6 +1732,7 @@ mod tests {
                         source: BindingSource::Title,
                         target: BindingTarget::Text,
                     }),
+                    ..Default::default()
                 }),
             ));
         }
@@ -1313,6 +1774,7 @@ mod tests {
                         source: BindingSource::Title,
                         target: BindingTarget::Text,
                     }),
+                    ..Default::default()
                 }),
             ));
         assert!(doc.validate_for_save(&registry(), None).is_err());
@@ -1438,7 +1900,7 @@ mod tests {
             json!({"padding_px": 1.5}),
             json!({"padding_px": "10"}),
             json!({"padding_px": true}),
-            json!({"text_align": "justify"}),
+            json!({"text_align": "diagonal"}),
             json!({"gap_px": 0, "color": "red"}),
         ] {
             let mut value = serde_json::to_value(&original).unwrap();
@@ -1839,6 +2301,146 @@ mod tests {
             moved_doc
                 .validate_for_save_with_schemas(&v2_catalog, None)
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn section_style_box_spacing_rich_text_and_button_flags_validate() {
+        let mut doc = fixture();
+        doc.sections[0].style = Some(SectionStyle {
+            background_color: Some("#f8fafc".into()),
+            background_media_id: Some("b".repeat(64)),
+            content_width: Some(SectionWidth::Boxed),
+        });
+        doc.sections[0].responsive = Some(Responsive {
+            desktop: Some(ResponsiveStyle {
+                padding: Some(BoxSpacing {
+                    top: Some(48),
+                    right: Some(16),
+                    bottom: Some(48),
+                    left: Some(16),
+                }),
+                margin: Some(BoxSpacing {
+                    top: Some(-12),
+                    right: None,
+                    bottom: Some(24),
+                    left: None,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        doc.sections[0].children[0].children[0].responsive = Some(Responsive {
+            desktop: Some(ResponsiveStyle {
+                text_align: Some(TextAlign::Justify),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        doc.sections[0].children[0].children[0].children[1].content =
+            ElementContent::Known(KnownElement::Text(TextProps {
+                text: "<p>Xin chào <strong>OpenDash</strong></p>".into(),
+                rich: true,
+                binding: None,
+            }));
+        doc.sections[0].children[0].children[0].children[3].content =
+            ElementContent::Known(KnownElement::Button(ButtonProps {
+                label: "Đọc thêm".into(),
+                url: "https://opendash.vn".into(),
+                new_tab: true,
+                nofollow: true,
+                binding: None,
+            }));
+
+        doc.validate_for_save(&registry(), None).unwrap();
+        let encoded = doc.to_json().unwrap();
+        let decoded = BuilderDocument::from_json(&encoded).unwrap();
+        assert_eq!(decoded, doc);
+
+        // Synthetic section cannot carry style
+        let mut syn = doc.clone();
+        syn.sections[0].meta = Some(NodeMeta {
+            synthetic: true,
+            ..Default::default()
+        });
+        assert!(syn.validate_for_save(&registry(), None).is_err());
+
+        // Bad section background color fails
+        let mut bad_color = doc.clone();
+        bad_color.sections[0]
+            .style
+            .as_mut()
+            .unwrap()
+            .background_color = Some("expression(alert(1))".into());
+        assert!(bad_color.validate_for_save(&registry(), None).is_err());
+    }
+
+    #[test]
+    fn compiles_box_spacing_to_minimal_mobile_first_tailwind_classes() {
+        let uniform = BoxSpacing {
+            top: Some(32),
+            right: Some(32),
+            bottom: Some(32),
+            left: Some(32),
+        };
+        assert_eq!(
+            compile_box_spacing_tailwind("p", Some(uniform), None, None, false),
+            Some(vec!["p-8".into()])
+        );
+
+        let d_xy = BoxSpacing {
+            top: Some(48),
+            right: Some(24),
+            bottom: Some(48),
+            left: Some(24),
+        };
+        let m_xy = BoxSpacing {
+            top: Some(32),
+            right: Some(16),
+            bottom: Some(32),
+            left: Some(16),
+        };
+        assert_eq!(
+            compile_box_spacing_tailwind("p", Some(d_xy), None, Some(m_xy), false),
+            Some(vec![
+                "px-4".into(),
+                "py-8".into(),
+                "md:px-6".into(),
+                "md:py-12".into(),
+            ])
+        );
+
+        let mobile_only = BoxSpacing {
+            top: Some(16),
+            right: Some(16),
+            bottom: Some(16),
+            left: Some(16),
+        };
+        assert_eq!(
+            compile_box_spacing_tailwind("p", None, None, Some(mobile_only), false),
+            Some(vec!["p-4".into(), "md:p-0".into()])
+        );
+
+        let neg_margin = BoxSpacing {
+            top: Some(-24),
+            right: None,
+            bottom: None,
+            left: None,
+        };
+        assert_eq!(
+            compile_box_spacing_tailwind("m", None, None, Some(neg_margin), true),
+            Some(vec!["-mt-6".into(), "md:mt-0".into()])
+        );
+
+        let custom_px = BoxSpacing {
+            top: Some(37),
+            right: None,
+            bottom: None,
+            left: None,
+        };
+        assert_eq!(
+            compile_box_spacing_tailwind("p", Some(custom_px), None, None, false),
+            None
         );
     }
 }

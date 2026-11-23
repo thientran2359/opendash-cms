@@ -16,10 +16,11 @@ use crate::{
     error::{ApiError, ApiResult},
     storage::permalinks::{self, PermalinkPutError, PermalinkSettings, PermalinkSettingsInput},
     storage::settings::{
-        self, CreateLocaleInput, GeneralSettings, GeneralSettingsInput, LocaleMutationError,
-        LocaleQuery, PublicSaveOutcome, PublicSiteSettings, PublicSiteSettingsInput,
-        ReadingSettings, ReadingSettingsInput, SaveOutcome, SiteLocalesSnapshot,
-        ThemeOptionsOutcome, ThemeOptionsSnapshot, UpdateLocaleInput,
+        self, CreateLocaleInput, GeneralSettings, GeneralSettingsInput, GlobalSiteOptionsOutcome,
+        GlobalSiteOptionsSnapshot, LocaleMutationError, LocaleQuery, PublicSaveOutcome,
+        PublicSiteSettings, PublicSiteSettingsInput, ReadingSettings, ReadingSettingsInput,
+        SaveOutcome, SiteLocalesSnapshot, ThemeOptionsOutcome, ThemeOptionsSnapshot,
+        UpdateLocaleInput,
     },
 };
 
@@ -374,6 +375,45 @@ pub async fn theme_options_put(
         ThemeOptionsOutcome::NotFound => Err(ApiError::not_found("Không tìm thấy theme.")),
         ThemeOptionsOutcome::Stale => Err(ApiError::precondition_failed(
             "Theme options đã thay đổi ở phiên khác. Tải lại trước khi lưu.",
+        )),
+    }
+}
+
+fn site_options_response(snapshot: GlobalSiteOptionsSnapshot) -> Response {
+    (no_store_headers(Some(snapshot.version)), Json(snapshot)).into_response()
+}
+
+pub async fn site_options_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let snapshot = settings::get_global_site_options(&db).await?;
+    Ok(site_options_response(snapshot))
+}
+
+pub async fn site_options_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    input: Result<Json<ThemeOptionsPutInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) = input.map_err(|err| {
+        if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            ApiError(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Dữ liệu tùy chọn toàn trang vượt quá 64 KiB.".into(),
+            )
+        } else {
+            ApiError::bad_request("Dữ liệu tùy chọn toàn trang không hợp lệ.")
+        }
+    })?;
+    match settings::put_global_site_options(&db, version, input.values).await? {
+        GlobalSiteOptionsOutcome::Saved(saved) => Ok(site_options_response(saved)),
+        GlobalSiteOptionsOutcome::Stale => Err(ApiError::precondition_failed(
+            "Tùy chọn toàn trang đã thay đổi ở phiên khác. Tải lại trước khi lưu.",
         )),
     }
 }

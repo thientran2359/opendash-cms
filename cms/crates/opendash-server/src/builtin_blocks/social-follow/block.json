@@ -1,0 +1,122 @@
+{
+  "schema_version": 1,
+  "id": "core/social-follow",
+  "title": "Mạng xã hội (Social Follow)",
+  "category": "marketing",
+  "icon": "share",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "text",
+      "key": "heading",
+      "label": "Tiêu đề (tùy chọn)",
+      "max_chars": 120,
+      "placeholder": "Kết nối với chúng tôi",
+      "default": ""
+    },
+    {
+      "type": "group",
+      "key": "channels_group",
+      "label": "Kênh hiển thị (lấy link từ Tùy chọn giao diện)",
+      "fields": [
+        {
+          "type": "boolean",
+          "key": "show_facebook",
+          "label": "Facebook",
+          "default": true
+        },
+        {
+          "type": "boolean",
+          "key": "show_youtube",
+          "label": "YouTube",
+          "default": true
+        },
+        {
+          "type": "boolean",
+          "key": "show_tiktok",
+          "label": "TikTok",
+          "default": true
+        },
+        {
+          "type": "boolean",
+          "key": "show_instagram",
+          "label": "Instagram",
+          "default": true
+        },
+        {
+          "type": "boolean",
+          "key": "show_x",
+          "label": "X (Twitter)",
+          "default": false
+        },
+        {
+          "type": "boolean",
+          "key": "show_linkedin",
+          "label": "LinkedIn",
+          "default": false
+        },
+        {
+          "type": "boolean",
+          "key": "show_email",
+          "label": "Email liên hệ",
+          "default": false
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "key": "style_group",
+      "label": "Giao diện & Bố cục",
+      "fields": [
+        {
+          "type": "radio_buttons",
+          "key": "display_style",
+          "label": "Kiểu nút",
+          "options": [
+            { "value": "pill", "label": "Icon + Tên" },
+            { "value": "icon_only", "label": "Chỉ Icon" },
+            { "value": "minimal", "label": "Tối giản" }
+          ],
+          "default": "pill"
+        },
+        {
+          "type": "radio_buttons",
+          "key": "button_size",
+          "label": "Kích thước",
+          "options": [
+            { "value": "sm", "label": "Nhỏ" },
+            { "value": "md", "label": "Vừa" },
+            { "value": "lg", "label": "Lớn" }
+          ],
+          "default": "md"
+        },
+        {
+          "type": "radio_buttons",
+          "key": "align",
+          "label": "Căn chỉnh",
+          "responsive": true,
+          "options": [
+            { "value": "left", "label": "Trái", "icon": "align-left" },
+            { "value": "center", "label": "Giữa", "icon": "align-center" },
+            { "value": "right", "label": "Phải", "icon": "align-right" }
+          ],
+          "default": "left"
+        },
+        {
+          "type": "boolean",
+          "key": "open_new_tab",
+          "label": "Mở liên kết ở tab mới",
+          "default": true
+        },
+        {
+          "type": "spacing",
+          "key": "box_padding",
+          "label": "Khoảng đệm (Padding)",
+          "unit": "px",
+          "responsive": true,
+          "default": { "top": 8, "right": 0, "bottom": 8, "left": 0 }
+        }
+      ]
+    }
+  ]
+}

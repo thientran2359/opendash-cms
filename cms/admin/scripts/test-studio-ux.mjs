@@ -9,8 +9,10 @@ import { transform } from 'esbuild';
 const source = await readFile(new URL('../src/builder/document.ts', import.meta.url), 'utf8');
 const { code } = await transform(source, { loader: 'ts', format: 'esm', target: 'es2022' });
 const {
-  allNodes, appendRowWithColumns, canPasteOptions, copyNodeOptions, duplicateNode,
-  isLockedElement, locate, pasteNodeOptions, preservesAnchors, reorderSiblingNode,
+  allNodes, appendFreeformElement, appendRowWithColumns, canPasteOptions, copyNodeOptions, duplicateNode,
+  isLockedElement, locate, nodeTitle, pasteNodeOptions, patchNodeFields, preservesAnchors, removeNode,
+  reorderSiblingNode, setContainerBoxSpacing, setNodeMeta, setResponsiveField, setSectionStyle,
+  syncContainerResponsiveToDesktop, visibleNodesInTree,
 } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 
 const registry = { 'theme/banner': { title: 'text' } };
@@ -78,6 +80,7 @@ test('canvas bridge mounts only Section/non-replaced Element gear; gear click an
       }
       return null;
     }
+    getBoundingClientRect() { return { left: 10, top: 20, right: 34, bottom: 44 }; }
   }
   const section = new Node('section', 'section-id', 'section');
   const row = new Node('div', 'row-id', 'row');
@@ -122,10 +125,12 @@ test('canvas bridge mounts only Section/non-replaced Element gear; gear click an
   assert.deepEqual(nodes.flatMap(node => node.children.map(child => child.getAttribute('data-od-gear'))),
     ['section-id', 'element-id'], 'bridge must only add the two gear controls');
 
-  function dispatch(type, target) {
+  function dispatch(type, target, coords = { clientX: 0, clientY: 0 }) {
     const state = { prevented: false, stopped: false };
     listeners.get(type)({
       target,
+      clientX: coords.clientX,
+      clientY: coords.clientY,
       preventDefault() { state.prevented = true; },
       stopPropagation() { state.stopped = true; },
     });
@@ -136,14 +141,15 @@ test('canvas bridge mounts only Section/non-replaced Element gear; gear click an
   assert.deepEqual(dispatch('click', gearPath), { prevented: true, stopped: true });
   assert.deepEqual(JSON.parse(JSON.stringify(messages)), [{
     type: 'od-studio-menu', nonce: 'test-nonce', nodeId: 'element-id', mode: 'toggle',
+    rect: { left: 34, top: 20 },
   }]);
   assert.equal(element.getAttribute('data-od-selected'), '1');
   messages.length = 0;
   dispatch('dblclick', gearPath);
-  assert.equal(messages.length, 0, 'double-click on gear must not dispatch an open after toggle');
+  assert.equal(messages.length, 0, 'double-click on gear must not dispatch an edit after toggle');
   assert.deepEqual(dispatch('dblclick', section), { prevented: true, stopped: true });
   assert.equal(messages.length, 1);
-  assert.equal(messages[0].mode, 'open');
+  assert.equal(messages[0].type, 'od-studio-edit');
   assert.equal(messages[0].nodeId, 'section-id');
   assert.equal(section.getAttribute('data-od-selected'), '1');
   assert.equal(element.getAttribute('data-od-selected'), null);
@@ -151,6 +157,13 @@ test('canvas bridge mounts only Section/non-replaced Element gear; gear click an
   dispatch('click', row);
   assert.equal(messages.length, 1);
   assert.equal(messages[0].type, 'od-studio-pick', 'ordinary canvas selection must remain intact');
+  messages.length = 0;
+  assert.deepEqual(dispatch('contextmenu', row, { clientX: 120, clientY: 240 }), { prevented: true, stopped: true });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [{
+    type: 'od-studio-menu', nonce: 'test-nonce', nodeId: 'row-id', mode: 'open',
+    rect: { left: 120, top: 240 },
+  }]);
+  assert.equal(row.getAttribute('data-od-selected'), '1');
 });
 
 function element(id, type = 'core/text', props = { text: id }) {
@@ -390,4 +403,198 @@ test('reorderSiblingNode preserves immutable anchor position and ancestor IDs', 
   assert.equal(preservesAnchors(doc, valid, registry, undefined, inactive), true);
   assert.deepEqual(locate(valid, 'column-1').node.children.map(n => n.id),
     ['before-1', 'before-2', 'locked', 'after-2', 'after-1']);
+});
+
+test('appendFreeformElement, visibleNodesInTree, setNodeMeta, and transparent carrier operations work end-to-end', () => {
+  let doc = { schema_version: 1, sections: [] };
+  const h1 = appendFreeformElement(doc, null, 'core/heading');
+  assert.ok(h1);
+  doc = h1.document;
+  const b1 = appendFreeformElement(doc, null, 'core/button');
+  assert.ok(b1);
+  doc = b1.document;
+
+  const visible = visibleNodesInTree(doc);
+  assert.deepEqual(visible.map(n => n.node.id), [h1.id, b1.id]);
+  assert.equal(visible[0].visualParentId, null);
+  assert.equal(visible[1].visualParentId, null);
+
+  doc = setNodeMeta(doc, h1.id, {
+    name: 'Hero Heading',
+    html_id: 'hero-title',
+    class_name: 'text-3xl font-bold',
+    visibility: { hide_mobile: true },
+  });
+  assert.ok(doc);
+  const h1Loc = locate(doc, h1.id);
+  assert.equal(nodeTitle(h1Loc), 'Hero Heading');
+  assert.equal(isLockedElement(h1Loc.node, registry, catalog), false);
+
+  const reordered = reorderSiblingNode(doc, b1.id, h1.id, 'before', registry, catalog);
+  assert.ok(reordered);
+  assert.deepEqual(visibleNodesInTree(reordered).map(n => n.node.id), [b1.id, h1.id]);
+
+  const removed = removeNode(reordered, h1.id);
+  assert.ok(removed);
+  assert.deepEqual(visibleNodesInTree(removed).map(n => n.node.id), [b1.id]);
+});
+
+test('Wave 4 schema types (spacing, radio_buttons, link) initialize, validate, and copy/paste cleanly', () => {
+  const wave4Schema = {
+    schema_version: 1,
+    id: 'plugin/wave4',
+    title: 'Wave 4 Card',
+    category: 'content',
+    render: 'card.html',
+    fields: [
+      { type: 'spacing', key: 'box_pad', label: 'Padding', default: { top: 16, right: 24, bottom: 16, left: 24 } },
+      {
+        type: 'radio_buttons', key: 'align', label: 'Align', default: 'center',
+        options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }],
+      },
+      {
+        type: 'link', key: 'cta', label: 'CTA', required: true,
+        default: { url: '/about', new_tab: true, nofollow: false },
+      },
+    ],
+  };
+  const wave4Block = {
+    block_id: 'plugin/wave4', owner_kind: 'plugin', owner_id: 'wave4',
+    status: 'active', declaration_state: 'declared', schema: wave4Schema,
+  };
+  const wave4Catalog = [wave4Block];
+
+  // initialBlockValues via appendFreeformElement initializes spacing, radio_buttons, and link defaults.
+  const appended = appendFreeformElement({ schema_version: 1, sections: [] }, null, 'plugin/block', { blockSchema: wave4Schema });
+  assert.ok(appended);
+  const createdLoc = locate(appended.document, appended.id);
+  assert.deepEqual(createdLoc.node.props.values, {
+    box_pad: { top: 16, right: 24, bottom: 16, left: 24 },
+    align: 'center',
+    cta: { url: '/about', new_tab: true, nofollow: false },
+  });
+
+  // copyNodeOptions / duplicateNode succeed when required link.url is non-empty, and reject when empty.
+  const validClipboard = copyNodeOptions(appended.document, appended.id, registry, wave4Catalog);
+  assert.ok(validClipboard);
+  assert.deepEqual(validClipboard.props.values, createdLoc.node.props.values);
+
+  const emptyUrlDoc = makeDoc([
+    element('p-empty', 'plugin/block', {
+      block_id: 'plugin/wave4',
+      values: { box_pad: { top: 8 }, align: 'left', cta: { url: '   ', new_tab: false, nofollow: true } },
+    }),
+    element('p-target', 'plugin/block', {
+      block_id: 'plugin/wave4',
+      values: { box_pad: { top: 4 }, align: 'center', cta: { url: '/old', new_tab: false, nofollow: false } },
+    }),
+  ]);
+  assert.equal(copyNodeOptions(emptyUrlDoc, 'p-empty', registry, wave4Catalog), null);
+  assert.equal(duplicateNode(emptyUrlDoc, 'p-empty', registry, wave4Catalog), null);
+
+  const pasted = pasteNodeOptions(emptyUrlDoc, 'p-target', validClipboard);
+  assert.ok(pasted);
+  assert.deepEqual(locate(pasted, 'p-target').node.props.values, validClipboard.props.values);
+});
+
+test('setSectionStyle, setContainerBoxSpacing, patchNodeFields, rich core/text, and button flags stay unlocked', () => {
+  let doc = makeDoc([
+    element('txt-1', 'core/text', { text: 'Plain' }),
+    element('btn-1', 'core/button', { label: 'Read more', url: '/blog' }),
+  ]);
+
+  // Section style + 4-side padding/margin + justify alignment round-trip cleanly.
+  doc = setSectionStyle(doc, 'section-1', {
+    background_color: '#0f172a',
+    background_media_id: '018f0000-0000-7000-8000-000000000001',
+    content_width: 'wide',
+  });
+  doc = setContainerBoxSpacing(doc, 'section-1', 'desktop', 'padding', { top: 48, right: 24, bottom: 48, left: 24 });
+  doc = setContainerBoxSpacing(doc, 'section-1', 'mobile', 'margin', { top: 12, bottom: 12 });
+  assert.deepEqual(doc.sections[0].style, {
+    background_color: '#0f172a',
+    background_media_id: '018f0000-0000-7000-8000-000000000001',
+    content_width: 'wide',
+  });
+  assert.deepEqual(doc.sections[0].responsive.desktop.padding, { top: 48, right: 24, bottom: 48, left: 24 });
+  assert.deepEqual(doc.sections[0].responsive.mobile.margin, { top: 12, bottom: 12 });
+
+  // Copy/paste section options preserves section.style and deep-clones box spacing.
+  const secClip = copyNodeOptions(doc, 'section-1', registry, catalog);
+  assert.ok(secClip);
+  const targetDoc = makeDoc();
+  const secPasted = pasteNodeOptions(targetDoc, 'section-1', secClip);
+  assert.ok(secPasted);
+  assert.deepEqual(secPasted.sections[0].style, doc.sections[0].style);
+  assert.deepEqual(secPasted.sections[0].responsive, doc.sections[0].responsive);
+
+  // Clearing section style removes empty style key cleanly.
+  const clearedStyleDoc = setSectionStyle(doc, 'section-1', {
+    background_color: undefined,
+    background_media_id: undefined,
+    content_width: undefined,
+  });
+  assert.equal(Object.hasOwn(clearedStyleDoc.sections[0], 'style'), false);
+
+  // Core elements remain unlocked when using Wave 4 fields (rich text & button flags).
+  doc = patchNodeFields(doc, 'txt-1', { text: '<p>Xin <strong>chào</strong></p>', rich: true });
+  doc = patchNodeFields(doc, 'btn-1', { url: 'https://example.com', new_tab: true, nofollow: true });
+  const txtNode = locate(doc, 'txt-1').node;
+  const btnNode = locate(doc, 'btn-1').node;
+  assert.equal(txtNode.props.rich, true);
+  assert.equal(txtNode.props.text, '<p>Xin <strong>chào</strong></p>');
+  assert.equal(btnNode.props.new_tab, true);
+  assert.equal(btnNode.props.nofollow, true);
+  assert.equal(isLockedElement(txtNode, registry, catalog), false);
+  assert.equal(isLockedElement(btnNode, registry, catalog), false);
+});
+
+test('syncContainerResponsiveToDesktop clears tablet/mobile overrides for columns, padding(+padding_px), and margin', () => {
+  let doc = makeDoc();
+  doc.sections[0].responsive = {
+    desktop: { padding_px: 32 },
+    tablet: { padding_px: 16, margin: { top: 8 } },
+    mobile: { padding: { top: 12, bottom: 12 }, margin: { top: -16 } },
+  };
+  doc = setResponsiveField(doc, 'row-1', 'desktop', 'columns_per_row', 3);
+  doc = setResponsiveField(doc, 'row-1', 'tablet', 'columns_per_row', 2);
+  doc = setResponsiveField(doc, 'row-1', 'mobile', 'columns_per_row', 1);
+  doc = setResponsiveField(doc, 'row-1', 'mobile', 'gap_px', 16);
+
+  // Syncing columns drops tablet & mobile columns_per_row while preserving gap_px on mobile.
+  doc = syncContainerResponsiveToDesktop(doc, 'row-1', 'columns_per_row');
+  assert.deepEqual(locate(doc, 'row-1').node.responsive, {
+    desktop: { columns_per_row: 3 },
+    mobile: { gap_px: 16 },
+  });
+
+  // Syncing padding drops tablet.padding_px and mobile.padding while keeping tablet.margin & mobile.margin.
+  doc = syncContainerResponsiveToDesktop(doc, 'section-1', 'padding');
+  assert.deepEqual(doc.sections[0].responsive, {
+    desktop: { padding_px: 32 },
+    tablet: { margin: { top: 8 } },
+    mobile: { margin: { top: -16 } },
+  });
+
+  // Syncing margin prunes now-empty tablet & mobile viewport keys cleanly.
+  doc = syncContainerResponsiveToDesktop(doc, 'section-1', 'margin');
+  assert.deepEqual(doc.sections[0].responsive, {
+    desktop: { padding_px: 32 },
+  });
+});
+
+test('unified appearance routes redirect #/appearance/options and #/appearance/menus into Studio panels', async () => {
+  const routerSource = await readFile(new URL('../src/shell/router.ts', import.meta.url), 'utf8');
+  const { code: routerCode } = await transform(routerSource, { loader: 'ts', format: 'esm', target: 'es2022' });
+  const { parseAdminRoute } = await import(`data:text/javascript;base64,${Buffer.from(routerCode).toString('base64')}`);
+
+  const optsRoute = parseAdminRoute('#/appearance/options');
+  assert.equal(optsRoute.view, 'studio');
+  assert.equal(optsRoute.studioPanel, 'theme-options');
+  assert.equal(optsRoute.redirectHash, '#/studio?panel=theme-options');
+
+  const menusRoute = parseAdminRoute('#/appearance/menus');
+  assert.equal(menusRoute.view, 'studio');
+  assert.equal(menusRoute.studioPanel, 'menus');
+  assert.equal(menusRoute.redirectHash, '#/studio?panel=menus');
 });
