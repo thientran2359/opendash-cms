@@ -22,7 +22,7 @@ function localServer(port: number) {
     host: '127.0.0.1',
     port,
     strictPort: true,
-    proxy: { '^/(api/|auth/|registry$|page$|theme$|preview$|save$|$)': backend },
+    proxy: { '^/(api/|auth/|assets/opendash-tailwind\\.css$|registry$|page$|theme$|preview$|save$|$)': backend },
   };
 }
 

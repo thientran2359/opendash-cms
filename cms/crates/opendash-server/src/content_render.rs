@@ -17,42 +17,31 @@ use crate::{
 pub const DEFAULT_ARCHIVE: &str = r##"<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ content_type.label }} — {{ site.title }}</title>
-<style>
-body{font:16px/1.6 system-ui,sans-serif;margin:0 auto;padding:2rem 1rem;max-width:850px;color:#172033;overflow-wrap:anywhere;box-sizing:border-box}
-a{color:#155e9b}article{padding:1rem 0;border-bottom:1px solid #d8dfe9}
-img{max-width:100%;height:auto;max-height:260px;object-fit:contain;border-radius:8px}
-nav{display:flex;gap:1rem;margin-top:2rem}
-</style></head><body><main>
-<header><strong>{{ site.title }}</strong>{% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}</header>
-<h1>{{ content_type.label }}</h1>
+</head><body><main class="mx-auto max-w-4xl px-4 py-8 text-od-text">
+<header class="mb-8"><strong class="text-xl font-od-heading font-semibold">{{ site.title }}</strong>{% if site.tagline %}<p class="text-od-muted">{{ site.tagline }}</p>{% endif %}</header>
+<h1 class="mb-6 text-3xl font-od-heading font-bold">{{ content_type.label }}</h1>
 {% for entry in entries %}
-<article><h2>{% if entry.url %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</h2>
-{% if entry.cover_url %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}<img src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy">{% if entry.url %}</a>{% endif %}{% endif %}
+<article class="od-prose border-b border-od-border py-5"><h2>{% if entry.url %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</h2>
+{% if entry.cover_url %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}<img class="max-h-64 max-w-full rounded-lg object-contain" src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy">{% if entry.url %}</a>{% endif %}{% endif %}
 </article>
 {% else %}<p>Chưa có nội dung.</p>{% endfor %}
-<nav>{% if previous_url %}<a href="{{ previous_url }}">← Trang trước</a>{% endif %}
+<nav class="mt-8 flex gap-4">{% if previous_url %}<a href="{{ previous_url }}">← Trang trước</a>{% endif %}
 {% if next_url %}<a href="{{ next_url }}">Trang sau →</a>{% endif %}</nav>
 </main></body></html>"##;
 
 pub const DEFAULT_SINGLE: &str = r##"<!doctype html>
 <html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ entry.title }} — {{ site.title }}</title>
-<style>
-body{font:16px/1.6 system-ui,sans-serif;margin:0 auto;padding:2rem 1rem;max-width:850px;color:#172033;overflow-wrap:anywhere;box-sizing:border-box}
-a{color:#155e9b}dl{margin-top:2rem}dt{font-weight:700;margin-top:1.5rem}
-dd{margin:0.3rem 0 1rem;white-space:pre-wrap;overflow-wrap:anywhere}
-img{max-width:100%;height:auto;border-radius:8px}
-.gallery{display:flex;flex-wrap:wrap;gap:0.75rem}.gallery img{width:190px;height:150px;object-fit:contain}
-</style></head><body><main>
-<header><strong>{{ site.title }}</strong>{% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}</header>
-{% if archive_url %}<nav><a href="{{ archive_url }}">← {{ content_type.label }}</a></nav>{% endif %}
-<article><h1>{{ entry.title }}</h1>
-<dl>{% for field in entry.fields %}
+</head><body><main class="mx-auto max-w-4xl px-4 py-8 text-od-text">
+<header class="mb-8"><strong class="text-xl font-od-heading font-semibold">{{ site.title }}</strong>{% if site.tagline %}<p class="text-od-muted">{{ site.tagline }}</p>{% endif %}</header>
+{% if archive_url %}<nav class="mb-6"><a class="text-od-primary hover:underline" href="{{ archive_url }}">← {{ content_type.label }}</a></nav>{% endif %}
+<article class="od-prose"><h1>{{ entry.title }}</h1>
+<dl class="mt-8">{% for field in entry.fields %}
 {% if field.text or field.image_url or field.gallery_urls %}
-<dt>{{ field.label }}</dt>
-{% if field.image_url %}<dd><img src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>
-{% elif field.gallery_urls %}<dd class="gallery">{% for url in field.gallery_urls %}<img src="{{ url }}" alt="{{ field.label }}" loading="lazy">{% endfor %}</dd>
-{% else %}<dd>{{ field.text }}</dd>{% endif %}
+<dt class="mt-6 font-semibold">{{ field.label }}</dt>
+{% if field.image_url %}<dd class="my-2"><img class="h-auto max-w-full rounded-lg" src="{{ field.image_url }}" alt="{{ field.label }}" loading="lazy"></dd>
+{% elif field.gallery_urls %}<dd class="my-2 flex flex-wrap gap-3">{% for url in field.gallery_urls %}<img class="h-36 w-48 rounded-lg object-contain" src="{{ url }}" alt="{{ field.label }}" loading="lazy">{% endfor %}</dd>
+{% else %}<dd class="my-2 whitespace-pre-wrap break-words">{{ field.text }}</dd>{% endif %}
 {% endif %}
 {% endfor %}</dl>
 </article></main></body></html>"##;
@@ -346,6 +335,12 @@ pub fn compose_document_with_seo(
             escape_html_attr(og_img)
         ));
     }
+    if !styles
+        .iter()
+        .any(|style| style.contains("/assets/opendash-tailwind.css"))
+    {
+        head.push_str("<link rel=\"stylesheet\" href=\"/assets/opendash-tailwind.css\">");
+    }
     for style in styles {
         head.push_str(&style);
     }
@@ -425,6 +420,25 @@ pub fn render_single_with_site_and_archive(
 mod tests {
     use super::*;
     use opendash_core::content::{ContentFieldDefinition, ContentFieldType};
+
+    #[test]
+    fn public_document_injects_one_tailwind_stylesheet_without_legacy_body_width() {
+        let seo = crate::seo::SeoView::for_noindex_page("vi", "Trang thử nghiệm");
+        let html = compose_document_with_seo(
+            Some("<header>Header</header>"),
+            "<main class=\"od-prose\"><article>Classic Editor</article></main>",
+            Some("<footer>Footer</footer>"),
+            &seo,
+        )
+        .unwrap();
+        let stylesheet = "<link rel=\"stylesheet\" href=\"/assets/opendash-tailwind.css\">";
+        assert_eq!(html.matches(stylesheet).count(), 1);
+        assert!(html.contains("<head>"));
+        assert!(html.contains("<main class=\"od-prose\">"));
+        assert!(!DEFAULT_SINGLE.contains("max-width:850px"));
+        assert!(!DEFAULT_ARCHIVE.contains("max-width:850px"));
+        assert!(!html.contains("max-width:850px"));
+    }
 
     #[test]
     fn escapes_untrusted_title_rich_text_and_template_tokens() {

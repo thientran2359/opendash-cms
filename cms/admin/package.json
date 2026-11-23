@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc && vite build",
+    "build:public-tailwind": "node ./scripts/build-public-tailwind.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "vite",
     "preview": "vite preview"

@@ -3,6 +3,7 @@ mod auth;
 mod backup;
 mod backup_archive;
 mod backup_worker;
+mod builtin_themes;
 mod config;
 mod contact;
 mod content_render;
