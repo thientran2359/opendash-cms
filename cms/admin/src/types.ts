@@ -26,7 +26,18 @@ export interface BlockShowIfRule {
   field: string;
   equals: string | number | boolean | null;
 }
-export interface BlockSelectOption { value: string; label: string }
+export interface BlockSelectOption { value: string; label: string; icon?: string | null }
+export interface BlockSpacingValue {
+  top?: number | null;
+  right?: number | null;
+  bottom?: number | null;
+  left?: number | null;
+}
+export interface BlockLinkValue {
+  url: string;
+  new_tab?: boolean;
+  nofollow?: boolean;
+}
 interface BlockFieldBase {
   key: string;
   label: string;
@@ -59,7 +70,23 @@ interface BlockNumericField extends BlockFieldWithDefault<number> {
 interface BlockSelectField extends BlockFieldWithDefault<string> {
   type: 'select';
   options: BlockSelectOption[];
+  display?: 'dropdown' | 'buttons' | null;
   required?: boolean;
+  css_var?: string | null;
+  responsive?: boolean;
+}
+interface BlockRadioButtonsField extends BlockFieldWithDefault<string> {
+  type: 'radio_buttons';
+  options: BlockSelectOption[];
+  required?: boolean;
+  css_var?: string | null;
+  responsive?: boolean;
+}
+interface BlockSpacingField extends BlockFieldWithDefault<BlockSpacingValue> {
+  type: 'spacing';
+  min?: number | null;
+  max?: number | null;
+  unit?: BlockCssUnit | null;
   css_var?: string | null;
   responsive?: boolean;
 }
@@ -79,6 +106,11 @@ interface BlockUrlField extends BlockFieldWithDefault<string> {
   required?: boolean;
   placeholder?: string | null;
 }
+interface BlockLinkField extends BlockFieldWithDefault<BlockLinkValue> {
+  type: 'link';
+  required?: boolean;
+  placeholder?: string | null;
+}
 interface BlockBooleanField extends BlockFieldWithDefault<boolean> {
   type: 'boolean';
 }
@@ -95,8 +127,8 @@ interface BlockRepeaterField extends BlockFieldBase {
 }
 export type BlockFieldSpec =
   | BlockTextField | BlockRichTextField | BlockNumericField | BlockSelectField
-  | BlockColorField | BlockMediaField | BlockUrlField | BlockBooleanField
-  | BlockGroupField | BlockRepeaterField;
+  | BlockRadioButtonsField | BlockSpacingField | BlockColorField | BlockMediaField
+  | BlockUrlField | BlockLinkField | BlockBooleanField | BlockGroupField | BlockRepeaterField;
 export interface BlockSchemaV1 {
   schema_version: 1;
   id: string;
@@ -104,6 +136,8 @@ export interface BlockSchemaV1 {
   category: BlockCategory;
   icon?: string | null;
   render: string;
+  allowed_parents?: string[] | null;
+  allowed_children?: string[] | null;
   fields: BlockFieldSpec[];
 }
 export interface BlockCatalogItemDto {

@@ -59,15 +59,20 @@ async fn m6_s05_t01_migration_0024_owner_neutral_bridge_and_builder_ast_roundtri
         schema_version: 1,
         sections: vec![SectionNode {
             id: "sec-1".into(),
+            meta: None,
             responsive: None,
+            style: None,
             children: vec![RowNode {
                 id: "row-1".into(),
+                meta: None,
                 responsive: None,
                 children: vec![ColumnNode {
                     id: "col-1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ElementNode {
                         id: "el-1".into(),
+                        meta: None,
                         content: ElementContent::Known(KnownElement::PluginBlock(
                             PluginBlockProps {
                                 block_id: "acme-plugin/hero".into(),

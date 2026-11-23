@@ -13,8 +13,9 @@ use crate::{
 };
 use opendash_core::{
     builder::{
-        BindingTarget, BuilderDocument, ElementContent, KnownElement, Responsive, ResponsiveStyle,
-        TextAlign,
+        BindingTarget, BoxSpacing, BuilderDocument, ElementContent, KnownElement, NodeMeta,
+        Responsive, ResponsiveStyle, SectionWidth, TextAlign, compile_box_spacing_tailwind,
+        gap_px_to_tw_step,
     },
     hooks::HookEvent,
     id::valid_package_id,
@@ -134,33 +135,188 @@ enum ContainerKind {
     Column,
 }
 
-fn responsive_declarations(style: Option<&ResponsiveStyle>, kind: ContainerKind) -> String {
-    let mut css = String::new();
-    let Some(style) = style else { return css };
-    if let Some(value) = style.padding_px {
-        css.push_str(&format!("padding:{value}px;"));
+fn push_box_spacing_css(css: &mut String, prop: &str, spacing: Option<BoxSpacing>) {
+    let Some(s) = spacing else { return };
+    if let Some(v) = s.top {
+        css.push_str(&format!("{prop}-top:{v}px;"));
     }
-    if matches!(kind, ContainerKind::Row) {
-        if let Some(value) = style.gap_px {
-            css.push_str(&format!("gap:{value}px;"));
-        }
-        if let Some(value) = style.columns_per_row {
-            css.push_str(&format!(
-                "grid-template-columns:repeat({value},minmax(0,1fr));"
-            ));
+    if let Some(v) = s.right {
+        css.push_str(&format!("{prop}-right:{v}px;"));
+    }
+    if let Some(v) = s.bottom {
+        css.push_str(&format!("{prop}-bottom:{v}px;"));
+    }
+    if let Some(v) = s.left {
+        css.push_str(&format!("{prop}-left:{v}px;"));
+    }
+}
+
+fn box_or_legacy_px(style: Option<&ResponsiveStyle>) -> Option<BoxSpacing> {
+    let style = style?;
+    if let Some(pad) = style.padding.filter(|b| !b.is_empty()) {
+        return Some(pad);
+    }
+    style.padding_px.map(|px| BoxSpacing {
+        top: Some(i16::from(px)),
+        right: Some(i16::from(px)),
+        bottom: Some(i16::from(px)),
+        left: Some(i16::from(px)),
+    })
+}
+
+fn align_tailwind_class(align: TextAlign) -> &'static str {
+    match align {
+        TextAlign::Start => "text-left",
+        TextAlign::Center => "text-center",
+        TextAlign::End => "text-right",
+        TextAlign::Justify => "text-justify",
+    }
+}
+
+struct ContainerRenderPlan {
+    tailwind_classes: Vec<String>,
+    fallback_desktop_css: String,
+    fallback_tablet_css: String,
+    fallback_mobile_css: String,
+}
+
+fn plan_container_styles(
+    responsive: Option<&Responsive>,
+    kind: ContainerKind,
+    row_section_width: Option<SectionWidth>,
+) -> ContainerRenderPlan {
+    let mut tailwind_classes = Vec::new();
+    let mut fallback_desktop_css = String::new();
+    let mut fallback_tablet_css = String::new();
+    let mut fallback_mobile_css = String::new();
+
+    if matches!(kind, ContainerKind::Row)
+        && let Some(cw) = row_section_width
+    {
+        match cw {
+            SectionWidth::Boxed => {
+                tailwind_classes.extend(["w-full", "max-w-7xl", "mx-auto"].map(str::to_owned));
+            }
+            SectionWidth::Wide => {
+                tailwind_classes
+                    .extend(["w-full", "max-w-screen-2xl", "mx-auto"].map(str::to_owned));
+            }
+            SectionWidth::Full => {
+                tailwind_classes.extend(["w-full", "max-w-none"].map(str::to_owned));
+            }
         }
     }
+
+    let Some(resp) = responsive else {
+        return ContainerRenderPlan {
+            tailwind_classes,
+            fallback_desktop_css,
+            fallback_tablet_css,
+            fallback_mobile_css,
+        };
+    };
+
+    let d = resp.desktop.as_ref();
+    let t = resp.tablet.as_ref();
+    let m = resp.mobile.as_ref();
+
+    let (d_pad, t_pad, m_pad) = (
+        box_or_legacy_px(d),
+        box_or_legacy_px(t),
+        box_or_legacy_px(m),
+    );
+    if let Some(pad_classes) = compile_box_spacing_tailwind("p", d_pad, t_pad, m_pad, false) {
+        tailwind_classes.extend(pad_classes);
+    } else {
+        push_box_spacing_css(&mut fallback_desktop_css, "padding", d_pad);
+        push_box_spacing_css(&mut fallback_tablet_css, "padding", t_pad);
+        push_box_spacing_css(&mut fallback_mobile_css, "padding", m_pad);
+    }
+
+    let (d_mar, t_mar, m_mar) = (
+        d.and_then(|s| s.margin).filter(|b| !b.is_empty()),
+        t.and_then(|s| s.margin).filter(|b| !b.is_empty()),
+        m.and_then(|s| s.margin).filter(|b| !b.is_empty()),
+    );
+    if let Some(mar_classes) = compile_box_spacing_tailwind("m", d_mar, t_mar, m_mar, true) {
+        tailwind_classes.extend(mar_classes);
+    } else {
+        push_box_spacing_css(&mut fallback_desktop_css, "margin", d_mar);
+        push_box_spacing_css(&mut fallback_tablet_css, "margin", t_mar);
+        push_box_spacing_css(&mut fallback_mobile_css, "margin", m_mar);
+    }
+
+    if matches!(kind, ContainerKind::Row) && resp.opts_into_grid() {
+        tailwind_classes.push("grid".to_owned());
+        let d_col = d.and_then(|s| s.columns_per_row);
+        let t_col = t.and_then(|s| s.columns_per_row).or(d_col);
+        let m_col = m.and_then(|s| s.columns_per_row).or(t_col);
+        let m_v = m_col.unwrap_or(1);
+        let t_v = t_col.unwrap_or(1);
+        let d_v = d_col.unwrap_or(1);
+        tailwind_classes.push(format!("grid-cols-{m_v}"));
+        if t_v != m_v {
+            tailwind_classes.push(format!("md:grid-cols-{t_v}"));
+        }
+        if d_v != t_v {
+            tailwind_classes.push(format!("lg:grid-cols-{d_v}"));
+        }
+
+        let d_gap = d.and_then(|s| s.gap_px);
+        let t_gap = t.and_then(|s| s.gap_px).or(d_gap);
+        let m_gap = m.and_then(|s| s.gap_px).or(t_gap);
+        if d_gap.is_some() || t_gap.is_some() || m_gap.is_some() {
+            let m_g = m_gap.unwrap_or(0);
+            let t_g = t_gap.unwrap_or(0);
+            let d_g = d_gap.unwrap_or(0);
+            if let (Some(gm), Some(gt), Some(gd)) = (
+                gap_px_to_tw_step(m_g),
+                gap_px_to_tw_step(t_g),
+                gap_px_to_tw_step(d_g),
+            ) {
+                tailwind_classes.push(format!("gap-{gm}"));
+                if gt != gm {
+                    tailwind_classes.push(format!("md:gap-{gt}"));
+                }
+                if gd != gt {
+                    tailwind_classes.push(format!("lg:gap-{gd}"));
+                }
+            } else {
+                fallback_desktop_css.push_str(&format!("gap:{}px;", d_gap.unwrap_or(0)));
+                if let Some(tg) = t.and_then(|s| s.gap_px) {
+                    fallback_tablet_css.push_str(&format!("gap:{tg}px;"));
+                }
+                if let Some(mg) = m.and_then(|s| s.gap_px) {
+                    fallback_mobile_css.push_str(&format!("gap:{mg}px;"));
+                }
+            }
+        }
+    }
+
     if matches!(kind, ContainerKind::Column) {
-        if let Some(value) = style.text_align {
-            let value = match value {
-                TextAlign::Start => "start",
-                TextAlign::Center => "center",
-                TextAlign::End => "end",
-            };
-            css.push_str(&format!("text-align:{value};"));
+        let d_al = d.and_then(|s| s.text_align);
+        let t_al = t.and_then(|s| s.text_align).or(d_al);
+        let m_al = m.and_then(|s| s.text_align).or(t_al);
+        if d_al.is_some() || t_al.is_some() || m_al.is_some() {
+            let m_cls = align_tailwind_class(m_al.unwrap_or(TextAlign::Start));
+            let t_cls = align_tailwind_class(t_al.unwrap_or(TextAlign::Start));
+            let d_cls = align_tailwind_class(d_al.unwrap_or(TextAlign::Start));
+            tailwind_classes.push(m_cls.to_owned());
+            if t_cls != m_cls {
+                tailwind_classes.push(format!("md:{t_cls}"));
+            }
+            if d_cls != t_cls {
+                tailwind_classes.push(format!("lg:{d_cls}"));
+            }
         }
     }
-    css
+
+    ContainerRenderPlan {
+        tailwind_classes,
+        fallback_desktop_css,
+        fallback_tablet_css,
+        fallback_mobile_css,
+    }
 }
 
 fn push_scoped_rule(target: &mut String, id: &str, properties: &str) {
@@ -173,49 +329,148 @@ fn push_scoped_rule(target: &mut String, id: &str, properties: &str) {
     }
 }
 
-/// One CSS source is used for both authenticated Preview and public HTML.
-/// The range queries preserve exact CSS-pixel boundaries, including fractions.
-fn builder_responsive_css(document: &BuilderDocument) -> String {
+fn push_visibility_rule(target: &mut String, id: &str) {
+    if valid_package_id(id) {
+        target.push_str(&format!(
+            "main[data-builder-version=\"1\"] [data-node-id=\"{id}\"],.od-pattern-content[data-builder-version=\"1\"] [data-node-id=\"{id}\"]{{display:none !important;}}"
+        ));
+    }
+}
+
+fn meta_id_attr(meta: Option<&NodeMeta>) -> String {
+    match meta
+        .and_then(|m| m.html_id.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(id) => format!(" id=\"{}\"", escape_html(id)),
+        None => String::new(),
+    }
+}
+
+fn merge_class_attr(
+    base_class: Option<&str>,
+    tw_classes: &[String],
+    meta: Option<&NodeMeta>,
+) -> String {
+    let mut tokens: Vec<String> = Vec::new();
+    if let Some(base) = base_class.filter(|s| !s.is_empty()) {
+        tokens.push(base.to_owned());
+    }
+    tokens.extend(tw_classes.iter().cloned());
+    if let Some(extra) = meta
+        .and_then(|m| m.class_name.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        tokens.push(escape_html(extra));
+    }
+    if tokens.is_empty() {
+        String::new()
+    } else {
+        format!(" class=\"{}\"", tokens.join(" "))
+    }
+}
+
+/// Emits `<style data-builder-responsive>` only for properties that cannot be represented
+/// as static Tailwind utility classes: Section backgrounds, node Visibility, and custom pixel fallbacks.
+fn builder_responsive_css(document: &BuilderDocument, is_preview: bool) -> String {
     let mut desktop = String::new();
     let mut tablet = String::new();
     let mut mobile = String::new();
-    let mut append = |id: &str, responsive: Option<&Responsive>, kind: ContainerKind| {
-        let Some(responsive) = responsive else { return };
-        let mut base = String::new();
-        if matches!(kind, ContainerKind::Row) && responsive.opts_into_grid() {
-            base.push_str("display:grid;grid-template-columns:repeat(1,minmax(0,1fr));gap:0px;");
+    let mut vis_desktop = String::new();
+    let mut vis_tablet = String::new();
+    let mut vis_mobile = String::new();
+    let mut append_visibility = |id: &str, meta: Option<&NodeMeta>| {
+        let Some(vis) = meta.and_then(|m| m.visibility.as_ref()) else {
+            return;
+        };
+        if vis.hide_desktop {
+            push_visibility_rule(&mut vis_desktop, id);
         }
-        base.push_str(&responsive_declarations(responsive.desktop.as_ref(), kind));
-        push_scoped_rule(&mut desktop, id, &base);
-        push_scoped_rule(
-            &mut tablet,
-            id,
-            &responsive_declarations(responsive.tablet.as_ref(), kind),
-        );
-        push_scoped_rule(
-            &mut mobile,
-            id,
-            &responsive_declarations(responsive.mobile.as_ref(), kind),
-        );
+        if vis.hide_tablet {
+            push_visibility_rule(&mut vis_tablet, id);
+        }
+        if vis.hide_mobile {
+            push_visibility_rule(&mut vis_mobile, id);
+        }
     };
     for section in &document.sections {
-        append(
-            &section.id,
-            section.responsive.as_ref(),
-            ContainerKind::Section,
-        );
+        if !section.is_synthetic() {
+            let plan =
+                plan_container_styles(section.responsive.as_ref(), ContainerKind::Section, None);
+            push_scoped_rule(&mut desktop, &section.id, &plan.fallback_desktop_css);
+            push_scoped_rule(&mut tablet, &section.id, &plan.fallback_tablet_css);
+            push_scoped_rule(&mut mobile, &section.id, &plan.fallback_mobile_css);
+            append_visibility(&section.id, section.meta.as_ref());
+            if let Some(style) = section.style.as_ref()
+                && valid_package_id(&section.id)
+            {
+                let mut sec_css = String::new();
+                if let Some(bg_color) = style
+                    .background_color
+                    .as_deref()
+                    .filter(|s| !s.is_empty() && opendash_core::block_schema::valid_block_color(s))
+                {
+                    sec_css.push_str(&format!("background-color:{bg_color};"));
+                }
+                if let Some(bg_media) = style
+                    .background_media_id
+                    .as_deref()
+                    .filter(|id| !id.is_empty() && valid_package_id(id))
+                {
+                    let media_prefix = if is_preview {
+                        "/api/admin/media"
+                    } else {
+                        "/media"
+                    };
+                    sec_css.push_str(&format!(
+                        "background-image:url(\"{media_prefix}/{bg_media}/file\");background-size:cover;background-position:center;"
+                    ));
+                }
+                push_scoped_rule(&mut desktop, &section.id, &sec_css);
+            }
+        }
+        let row_section_width = (!section.is_synthetic())
+            .then(|| section.style.as_ref().and_then(|s| s.content_width))
+            .flatten();
         for row in &section.children {
-            append(&row.id, row.responsive.as_ref(), ContainerKind::Row);
-            for column in &row.children {
-                append(
-                    &column.id,
-                    column.responsive.as_ref(),
-                    ContainerKind::Column,
+            if !row.is_synthetic() {
+                let plan = plan_container_styles(
+                    row.responsive.as_ref(),
+                    ContainerKind::Row,
+                    row_section_width,
                 );
+                push_scoped_rule(&mut desktop, &row.id, &plan.fallback_desktop_css);
+                push_scoped_rule(&mut tablet, &row.id, &plan.fallback_tablet_css);
+                push_scoped_rule(&mut mobile, &row.id, &plan.fallback_mobile_css);
+                append_visibility(&row.id, row.meta.as_ref());
+            }
+            for column in &row.children {
+                if !column.is_synthetic() {
+                    let plan = plan_container_styles(
+                        column.responsive.as_ref(),
+                        ContainerKind::Column,
+                        None,
+                    );
+                    push_scoped_rule(&mut desktop, &column.id, &plan.fallback_desktop_css);
+                    push_scoped_rule(&mut tablet, &column.id, &plan.fallback_tablet_css);
+                    push_scoped_rule(&mut mobile, &column.id, &plan.fallback_mobile_css);
+                    append_visibility(&column.id, column.meta.as_ref());
+                }
+                for element in &column.children {
+                    append_visibility(&element.id, element.meta.as_ref());
+                }
             }
         }
     }
-    if desktop.is_empty() && tablet.is_empty() && mobile.is_empty() {
+    if desktop.is_empty()
+        && tablet.is_empty()
+        && mobile.is_empty()
+        && vis_desktop.is_empty()
+        && vis_tablet.is_empty()
+        && vis_mobile.is_empty()
+    {
         return String::new();
     }
     let mut css = format!("<style data-builder-responsive>{desktop}");
@@ -224,6 +479,17 @@ fn builder_responsive_css(document: &BuilderDocument) -> String {
     }
     if !mobile.is_empty() {
         css.push_str(&format!("@media (width < 768px){{{mobile}}}"));
+    }
+    if !vis_desktop.is_empty() {
+        css.push_str(&format!("@media (width >= 1024px){{{vis_desktop}}}"));
+    }
+    if !vis_tablet.is_empty() {
+        css.push_str(&format!(
+            "@media (width >= 768px) and (width < 1024px){{{vis_tablet}}}"
+        ));
+    }
+    if !vis_mobile.is_empty() {
+        css.push_str(&format!("@media (width < 768px){{{vis_mobile}}}"));
     }
     css.push_str("</style>");
     css
@@ -354,6 +620,13 @@ pub fn serialize_scoped_block_css(
                                 css_var: Some(var_name),
                                 responsive,
                                 ..
+                            }
+                            | BlockFieldSpec::RadioButtons {
+                                key,
+                                default,
+                                css_var: Some(var_name),
+                                responsive,
+                                ..
                             } => {
                                 if !valid_css_var_name(var_name) {
                                     continue;
@@ -388,6 +661,90 @@ pub fn serialize_scoped_block_css(
                                     .filter(|s| valid_css_select_value(s))
                                 {
                                     desktop_props.push_str(&format!("{var_name}:{d};"));
+                                }
+                            }
+                            BlockFieldSpec::Spacing {
+                                key,
+                                default,
+                                unit,
+                                css_var,
+                                responsive,
+                                ..
+                            } => {
+                                let css_unit =
+                                    unit.unwrap_or(opendash_core::block_schema::CssUnit::Px);
+                                let raw = props.values.get(key.as_str());
+                                if let Some(var_name) = css_var {
+                                    if !valid_css_var_name(var_name) {
+                                        continue;
+                                    }
+                                    let parse_spacing = |v: &serde_json::Value| {
+                                        serde_json::from_value::<
+                                            opendash_core::block_schema::SpacingValue,
+                                        >(v.clone())
+                                        .ok()
+                                        .and_then(|sv| sv.format_css(css_unit))
+                                    };
+                                    if *responsive
+                                        && let Some(obj) = raw.and_then(|v| v.as_object())
+                                        && !(obj.contains_key("top")
+                                            || obj.contains_key("right")
+                                            || obj.contains_key("bottom")
+                                            || obj.contains_key("left"))
+                                    {
+                                        if let Some(d) =
+                                            obj.get("desktop").and_then(&parse_spacing).or_else(
+                                                || default.and_then(|sv| sv.format_css(css_unit)),
+                                            )
+                                        {
+                                            desktop_props.push_str(&format!("{var_name}:{d};"));
+                                        }
+                                        if let Some(t) = obj.get("tablet").and_then(&parse_spacing)
+                                        {
+                                            tablet_props.push_str(&format!("{var_name}:{t};"));
+                                        }
+                                        if let Some(m) = obj.get("mobile").and_then(&parse_spacing)
+                                        {
+                                            mobile_props.push_str(&format!("{var_name}:{m};"));
+                                        }
+                                    } else if let Some(d) = raw
+                                        .and_then(&parse_spacing)
+                                        .or_else(|| default.and_then(|sv| sv.format_css(css_unit)))
+                                    {
+                                        desktop_props.push_str(&format!("{var_name}:{d};"));
+                                    }
+                                } else if crate::template_sec::spacing_field_tailwind_classes(
+                                    raw,
+                                    *default,
+                                    *responsive,
+                                    css_unit,
+                                )
+                                .is_none()
+                                {
+                                    let (d_sv, t_sv, m_sv) =
+                                        crate::template_sec::extract_spacing_breakpoint_values(
+                                            raw,
+                                            *default,
+                                            *responsive,
+                                        );
+                                    if let Some(d_css) = d_sv.and_then(|sv| sv.format_css(css_unit))
+                                    {
+                                        desktop_rules.push_str(&format!(
+                                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{key}\"]{{padding:{d_css};}}"
+                                        ));
+                                    }
+                                    if let Some(t_css) = t_sv.and_then(|sv| sv.format_css(css_unit))
+                                    {
+                                        tablet_rules.push_str(&format!(
+                                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{key}\"]{{padding:{t_css};}}"
+                                        ));
+                                    }
+                                    if let Some(m_css) = m_sv.and_then(|sv| sv.format_css(css_unit))
+                                    {
+                                        mobile_rules.push_str(&format!(
+                                            "[data-od-node-scope=\"{node_scope}\"] [data-od-spacing=\"{key}\"]{{padding:{m_css};}}"
+                                        ));
+                                    }
                                 }
                             }
                             BlockFieldSpec::Color {
@@ -654,7 +1011,7 @@ pub fn render_builder_with_budget(
 ) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
-    let mut html = builder_responsive_css(document);
+    let mut html = builder_responsive_css(document, is_preview);
     let block_css = serialize_scoped_block_css(state, document, scope, is_preview)?;
     html.push_str(&block_css);
     if pattern_document {
@@ -670,20 +1027,56 @@ pub fn render_builder_with_budget(
     let col_attrs = editable_attrs(annotation_scope, is_preview, pattern_document, "column");
     let el_attrs = editable_attrs(annotation_scope, is_preview, pattern_document, "element");
     for section in &document.sections {
-        html.push_str(&format!(
-            "<section data-node-id=\"{}\"{sec_attrs}>",
-            escape_html(&section.id)
-        ));
-        for row in &section.children {
+        if !section.is_synthetic() {
+            let sec_id_attr = meta_id_attr(section.meta.as_ref());
+            let sec_plan =
+                plan_container_styles(section.responsive.as_ref(), ContainerKind::Section, None);
+            let sec_class_attr =
+                merge_class_attr(None, &sec_plan.tailwind_classes, section.meta.as_ref());
             html.push_str(&format!(
-                "<div class=\"builder-row\" data-node-id=\"{}\"{row_attrs}>",
-                escape_html(&row.id)
+                "<section{sec_id_attr}{sec_class_attr} data-node-id=\"{}\"{sec_attrs}>",
+                escape_html(&section.id)
             ));
-            for column in &row.children {
+        }
+        let row_section_width = (!section.is_synthetic())
+            .then(|| section.style.as_ref().and_then(|s| s.content_width))
+            .flatten();
+        for row in &section.children {
+            if !row.is_synthetic() {
+                let row_id_attr = meta_id_attr(row.meta.as_ref());
+                let row_plan = plan_container_styles(
+                    row.responsive.as_ref(),
+                    ContainerKind::Row,
+                    row_section_width,
+                );
+                let row_class_attr = merge_class_attr(
+                    Some("builder-row"),
+                    &row_plan.tailwind_classes,
+                    row.meta.as_ref(),
+                );
                 html.push_str(&format!(
-                    "<div class=\"builder-column\" data-node-id=\"{}\"{col_attrs}>",
-                    escape_html(&column.id)
+                    "<div{row_id_attr}{row_class_attr} data-node-id=\"{}\"{row_attrs}>",
+                    escape_html(&row.id)
                 ));
+            }
+            for column in &row.children {
+                if !column.is_synthetic() {
+                    let col_id_attr = meta_id_attr(column.meta.as_ref());
+                    let col_plan = plan_container_styles(
+                        column.responsive.as_ref(),
+                        ContainerKind::Column,
+                        None,
+                    );
+                    let col_class_attr = merge_class_attr(
+                        Some("builder-column"),
+                        &col_plan.tailwind_classes,
+                        column.meta.as_ref(),
+                    );
+                    html.push_str(&format!(
+                        "<div{col_id_attr}{col_class_attr} data-node-id=\"{}\"{col_attrs}>",
+                        escape_html(&column.id)
+                    ));
+                }
                 for element in &column.children {
                     let mut materialized = None;
                     if let ElementContent::Known(known) = &element.content {
@@ -744,7 +1137,13 @@ pub fn render_builder_with_budget(
                             text = escape_html(&props.text)
                         )),
                         ElementContent::Known(KnownElement::Text(props)) => {
-                            Some(format!("<p>{}</p>", escape_html(&props.text)))
+                            if props.rich && props.binding.is_none() {
+                                let clean = opendash_core::richtext::sanitize_richtext(&props.text)
+                                    .unwrap_or_else(|_| escape_html(&props.text));
+                                Some(format!("<div class=\"od-rich-text\">{clean}</div>"))
+                            } else {
+                                Some(format!("<p>{}</p>", escape_html(&props.text)))
+                            }
                         }
                         ElementContent::Known(KnownElement::Image(props)) => {
                             let path = if is_preview {
@@ -782,11 +1181,23 @@ pub fn render_builder_with_budget(
                             }
                             Some(format!("<video {attrs}></video>"))
                         }
-                        ElementContent::Known(KnownElement::Button(props)) => Some(format!(
-                            "<a href=\"{}\" rel=\"noopener noreferrer\">{}</a>",
-                            escape_html(&props.url),
-                            escape_html(&props.label)
-                        )),
+                        ElementContent::Known(KnownElement::Button(props)) => {
+                            let target_attr = if props.new_tab {
+                                " target=\"_blank\""
+                            } else {
+                                ""
+                            };
+                            let rel_attr = match (props.new_tab, props.nofollow) {
+                                (true, true) => "noopener noreferrer nofollow",
+                                (false, true) => "nofollow",
+                                _ => "noopener noreferrer",
+                            };
+                            Some(format!(
+                                "<a href=\"{}\"{target_attr} rel=\"{rel_attr}\">{}</a>",
+                                escape_html(&props.url),
+                                escape_html(&props.label)
+                            ))
+                        }
                         ElementContent::Known(KnownElement::List(props)) => {
                             match lists.get(&element.id) {
                                 Some(ResolvedList::MissingConfig) => {
@@ -906,11 +1317,12 @@ pub fn render_builder_with_budget(
                                             &def.template,
                                         )
                                         .and_then(|compiled| {
-                                            crate::template_sec::render_block_csec_with_budget(
+                                            crate::template_sec::render_block_csec_with_options_and_budget(
                                                 &compiled.block_id,
                                                 &compiled.source,
                                                 &def.schema.schema,
                                                 &props.values,
+                                                Some(&state.site_options),
                                                 is_preview,
                                                 budget,
                                             )
@@ -1118,17 +1530,26 @@ pub fn render_builder_with_budget(
                                 "Builder template composition exceeds 512 KiB.",
                             ));
                         }
+                        let el_id_attr = meta_id_attr(element.meta.as_ref());
+                        let el_class_attr =
+                            merge_class_attr(Some("builder-element"), &[], element.meta.as_ref());
                         html.push_str(&format!(
-                            "<div class=\"builder-element\" data-node-id=\"{}\"{el_attrs}>{fragment}</div>",
+                            "<div{el_id_attr}{el_class_attr} data-node-id=\"{}\"{el_attrs}>{fragment}</div>",
                             escape_html(&element.id)
                         ));
                     }
                 }
+                if !column.is_synthetic() {
+                    html.push_str("</div>");
+                }
+            }
+            if !row.is_synthetic() {
                 html.push_str("</div>");
             }
-            html.push_str("</div>");
         }
-        html.push_str("</section>");
+        if !section.is_synthetic() {
+            html.push_str("</section>");
+        }
     }
     html.push_str(if pattern_document {
         "</div>"
@@ -1644,15 +2065,20 @@ mod m6_s05_tests {
             schema_version: 1,
             sections: vec![SectionNode {
                 id: "sec-1".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "row-1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "col-1".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![ElementNode {
                             id: "el-1".into(),
+                            meta: None,
                             content: ElementContent::Known(KnownElement::PluginBlock(
                                 PluginBlockProps {
                                     block_id: "acme-plugin/hero".into(),
@@ -1733,15 +2159,20 @@ mod m6_s05_tests {
             schema_version: 1,
             sections: vec![SectionNode {
                 id: "sec-1".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "row-1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "col-1".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![ElementNode {
                             id: "list-1".into(),
+                            meta: None,
                             content: ElementContent::Known(KnownElement::List(props)),
                         }],
                     }],
@@ -1811,15 +2242,20 @@ mod m6_s05_tests {
             schema_version: 1,
             sections: vec![SectionNode {
                 id: "psec-1".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "prow-1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "pcol-1".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![ElementNode {
                             id: "phead-1".into(),
+                            meta: None,
                             content: ElementContent::Known(KnownElement::Heading(HeadingProps {
                                 level: 3,
                                 text: "Inner pattern".into(),
@@ -1851,16 +2287,21 @@ mod m6_s05_tests {
             schema_version: 1,
             sections: vec![SectionNode {
                 id: "sec-1".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "row-1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "col-1".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![
                             ElementNode {
                                 id: "part-1".into(),
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::TemplatePart(
                                     TemplatePartProps {
                                         part_key: "header".into(),
@@ -1869,12 +2310,14 @@ mod m6_s05_tests {
                             },
                             ElementNode {
                                 id: "pat-1".into(),
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::PatternRef(
                                     PatternRefProps { pattern_id: 7 },
                                 )),
                             },
                             ElementNode {
                                 id: "slot-1".into(),
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::ContentSlot(
                                     ContentSlotProps {},
                                 )),
@@ -1972,16 +2415,21 @@ mod m6_s05_tests {
             schema_version: 1,
             sections: vec![SectionNode {
                 id: "sec-core".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "row-core".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "col-core".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![
                             ElementNode {
                                 id: "sp-1".into(),
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::PluginBlock(
                                     PluginBlockProps {
                                         block_id: "core/spacer".into(),
@@ -1994,6 +2442,7 @@ mod m6_s05_tests {
                             },
                             ElementNode {
                                 id: "div-1".into(),
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::PluginBlock(
                                     PluginBlockProps {
                                         block_id: "core/divider".into(),
@@ -2011,6 +2460,7 @@ mod m6_s05_tests {
                             },
                             ElementNode {
                                 id: "ban-1".into(),
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::PluginBlock(
                                     PluginBlockProps {
                                         block_id: "core/banner".into(),
@@ -2043,6 +2493,7 @@ mod m6_s05_tests {
                             },
                             ElementNode {
                                 id: "card-1".into(),
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::PluginBlock(
                                     PluginBlockProps {
                                         block_id: "core/card".into(),
@@ -2065,6 +2516,7 @@ mod m6_s05_tests {
                             },
                             ElementNode {
                                 id: "acc-1".into(),
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::PluginBlock(
                                     PluginBlockProps {
                                         block_id: "core/accordion".into(),
@@ -2211,5 +2663,498 @@ mod m6_s05_tests {
                 .iter()
                 .all(|d| d.code == "plugin_block_render_error")
         );
+    }
+
+    #[test]
+    fn renders_node_meta_attributes_visibility_and_omits_synthetic_wrappers() {
+        use opendash_core::builder::{
+            ColumnNode, ElementContent, ElementNode, HeadingProps, KnownElement, NodeMeta,
+            NodeVisibility, RowNode, SectionNode,
+        };
+
+        let state = HomeState::default();
+        let cache = BlockTemplateCache::new();
+        let doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-syn".into(),
+                meta: Some(NodeMeta {
+                    synthetic: true,
+                    ..Default::default()
+                }),
+                responsive: None,
+                style: None,
+                children: vec![RowNode {
+                    id: "row-syn".into(),
+                    meta: Some(NodeMeta {
+                        synthetic: true,
+                        ..Default::default()
+                    }),
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "col-syn".into(),
+                        meta: Some(NodeMeta {
+                            synthetic: true,
+                            ..Default::default()
+                        }),
+                        responsive: None,
+                        children: vec![ElementNode {
+                            id: "el-hero".into(),
+                            meta: Some(NodeMeta {
+                                name: Some("Tiêu đề Hero".into()),
+                                html_id: Some("hero-anchor".into()),
+                                class_name: Some("py-8 text-center".into()),
+                                visibility: Some(NodeVisibility {
+                                    hide_desktop: false,
+                                    hide_tablet: true,
+                                    hide_mobile: false,
+                                }),
+                                synthetic: false,
+                            }),
+                            content: ElementContent::Known(KnownElement::Heading(HeadingProps {
+                                level: 2,
+                                text: "Hello UX Builder".into(),
+                                binding: None,
+                            })),
+                        }],
+                    }],
+                }],
+            }],
+        };
+
+        let mut budget = RenderBudget::new();
+        let rendered = render_builder_with_budget(
+            &state,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::None,
+            "entry",
+            &mut budget,
+            &cache,
+        )
+        .unwrap();
+
+        assert!(!rendered.html.contains("<section"));
+        assert!(!rendered.html.contains("builder-row"));
+        assert!(!rendered.html.contains("builder-column"));
+        assert!(rendered.html.contains("id=\"hero-anchor\""));
+        assert!(
+            rendered
+                .html
+                .contains("class=\"builder-element py-8 text-center\"")
+        );
+        assert!(
+            rendered
+                .html
+                .contains("@media (width >= 768px) and (width < 1024px)")
+        );
+        assert!(
+            rendered
+                .html
+                .contains("[data-node-id=\"el-hero\"]{display:none !important;}")
+        );
+    }
+
+    #[test]
+    fn renders_section_style_box_spacing_rich_text_button_flags_and_new_schema_fields() {
+        use opendash_core::{
+            block_schema::BlockSchemaV1,
+            builder::{
+                BoxSpacing, ButtonProps, ColumnNode, ElementContent, ElementNode, KnownElement,
+                PluginBlockProps, Responsive, ResponsiveStyle, RowNode, SectionNode, SectionStyle,
+                SectionWidth, TextAlign, TextProps,
+            },
+            registry::{DeclarationState, ProviderStatus, ResourceOwner},
+        };
+
+        let bg_id = "f".repeat(64);
+        let schema: BlockSchemaV1 = serde_json::from_value(json!({
+            "schema_version": 1,
+            "id": "demo/ux-card",
+            "title": "UX Card",
+            "category": "content",
+            "render": "render.html",
+            "fields": [
+                {
+                    "type": "radio_buttons",
+                    "key": "align",
+                    "label": "Align",
+                    "options": [{ "value": "left", "label": "Trái" }, { "value": "center", "label": "Giữa" }],
+                    "css_var": "--od-card-align",
+                    "responsive": true
+                },
+                {
+                    "type": "spacing",
+                    "key": "pad",
+                    "label": "Padding",
+                    "unit": "px",
+                    "css_var": "--od-card-pad",
+                    "responsive": true
+                },
+                { "type": "link", "key": "cta", "label": "CTA" }
+            ]
+        }))
+        .unwrap();
+        let template = "<div class=\"ux-card\"><a href=\"{{ cta_url }}\" target=\"{{ cta_target }}\" rel=\"{{ cta_rel }}\">Go</a></div>".to_string();
+        crate::template_sec::validate_block_template_csec("demo/ux-card", &template, &schema)
+            .expect("C-SEC template using Link synthetic attrs must pass validation");
+
+        let mut declared = crate::storage::page::embedded_core_block_defs().clone();
+        declared.insert(
+            "demo/ux-card".into(),
+            crate::storage::page::RegisteredBlockDef {
+                block_id: "demo/ux-card".into(),
+                owner: ResourceOwner::Theme("demo".into()),
+                status: ProviderStatus::Active,
+                declaration_state: DeclarationState::Declared,
+                schema: opendash_core::block_schema::RegisteredBlockSchema {
+                    schema: schema.clone(),
+                    legacy_mode: false,
+                },
+                template,
+                revision_digest: "rev-demo-1".into(),
+            },
+        );
+        let state = HomeState {
+            version: 1,
+            declared_blocks: declared,
+            ..Default::default()
+        };
+
+        let doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-ux".into(),
+                meta: None,
+                responsive: Some(Responsive {
+                    desktop: Some(ResponsiveStyle {
+                        padding: Some(BoxSpacing {
+                            top: Some(40),
+                            right: Some(16),
+                            bottom: Some(40),
+                            left: Some(16),
+                        }),
+                        margin: Some(BoxSpacing {
+                            top: Some(0),
+                            bottom: Some(24),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                style: Some(SectionStyle {
+                    background_color: Some("#0f172a".into()),
+                    background_media_id: Some(bg_id.clone()),
+                    content_width: Some(SectionWidth::Boxed),
+                }),
+                children: vec![RowNode {
+                    id: "row-ux".into(),
+                    meta: None,
+                    responsive: Some(Responsive {
+                        desktop: Some(ResponsiveStyle {
+                            columns_per_row: Some(3),
+                            gap_px: Some(24),
+                            ..Default::default()
+                        }),
+                        mobile: Some(ResponsiveStyle {
+                            columns_per_row: Some(1),
+                            gap_px: Some(16),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    children: vec![ColumnNode {
+                        id: "col-ux".into(),
+                        meta: None,
+                        responsive: Some(Responsive {
+                            desktop: Some(ResponsiveStyle {
+                                text_align: Some(TextAlign::Justify),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }),
+                        children: vec![
+                            ElementNode {
+                                id: "el-rich".into(),
+                                meta: None,
+                                content: ElementContent::Known(KnownElement::Text(TextProps {
+                                    text:
+                                        "<p>Hello <strong>Rich</strong><script>bad()</script></p>"
+                                            .into(),
+                                    rich: true,
+                                    binding: None,
+                                })),
+                            },
+                            ElementNode {
+                                id: "el-btn".into(),
+                                meta: None,
+                                content: ElementContent::Known(KnownElement::Button(ButtonProps {
+                                    label: "Visit".into(),
+                                    url: "https://opendash.vn".into(),
+                                    new_tab: true,
+                                    nofollow: true,
+                                    binding: None,
+                                })),
+                            },
+                            ElementNode {
+                                id: "el-ux".into(),
+                                meta: None,
+                                content: ElementContent::Known(KnownElement::PluginBlock(
+                                    PluginBlockProps {
+                                        block_id: "demo/ux-card".into(),
+                                        values: BTreeMap::from([
+                                            (
+                                                "align".into(),
+                                                json!({ "desktop": "center", "mobile": "left" }),
+                                            ),
+                                            (
+                                                "pad".into(),
+                                                json!({ "desktop": { "top": 20, "right": 12, "bottom": 20, "left": 12 } }),
+                                            ),
+                                            (
+                                                "cta".into(),
+                                                json!({ "url": "https://opendash.vn/docs", "new_tab": true, "nofollow": false }),
+                                            ),
+                                        ]),
+                                    },
+                                )),
+                            },
+                        ],
+                    }],
+                }],
+            },
+            SectionNode {
+                id: "sec-custom".into(),
+                meta: None,
+                responsive: Some(Responsive {
+                    desktop: Some(ResponsiveStyle {
+                        padding: Some(BoxSpacing {
+                            top: Some(37),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                style: None,
+                children: vec![RowNode {
+                    id: "row-custom".into(),
+                    meta: None,
+                    responsive: Some(Responsive {
+                        desktop: Some(ResponsiveStyle {
+                            columns_per_row: Some(2),
+                            gap_px: Some(19),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    children: vec![],
+                }],
+            }],
+        };
+
+        let mut budget = RenderBudget::new();
+        let cache = BlockTemplateCache::new();
+        let preview = render_builder_with_budget(
+            &state,
+            &doc,
+            true,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::EntryBodyOnly,
+            "entry",
+            &mut budget,
+            &cache,
+        )
+        .unwrap();
+
+        assert!(preview.html.contains("background-color:#0f172a;"));
+        assert!(preview.html.contains(&format!(
+            "background-image:url(\"/api/admin/media/{bg_id}/file\");"
+        )));
+        assert!(preview.html.contains("class=\"px-4 py-10 mt-0 mb-6\""));
+        assert!(
+            preview
+                .html
+                .contains("class=\"builder-row w-full max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6\"")
+        );
+        assert!(
+            preview
+                .html
+                .contains("class=\"builder-column text-justify\"")
+        );
+        assert!(!preview.html.contains("padding-top:40px;"));
+        assert!(!preview.html.contains("text-align:justify;"));
+        assert!(preview.html.contains("padding-top:37px;"));
+        assert!(preview.html.contains("gap:19px;"));
+        assert!(
+            preview
+                .html
+                .contains("class=\"builder-row grid grid-cols-2\"")
+        );
+        assert!(
+            preview
+                .html
+                .contains("<div class=\"od-rich-text\"><p>Hello <strong>Rich</strong></p></div>")
+        );
+        assert!(!preview.html.contains("<script>"));
+        assert!(
+            preview
+                .html
+                .contains("target=\"_blank\" rel=\"noopener noreferrer nofollow\"")
+        );
+        assert!(preview.html.contains("--od-card-align:center;"));
+        assert!(preview.html.contains("--od-card-pad:20px 12px 20px 12px;"));
+        assert!(
+            preview
+                .html
+                .contains("target=\"_blank\" rel=\"noopener noreferrer\">Go</a>")
+        );
+    }
+
+    #[test]
+    fn renders_social_follow_block_from_site_options_for_public_and_preview() {
+        use opendash_core::builder::{
+            ColumnNode, ElementContent, ElementNode, KnownElement, PluginBlockProps, RowNode,
+            SectionNode,
+        };
+
+        let doc = BuilderDocument {
+            schema_version: 1,
+            sections: vec![SectionNode {
+                id: "sec-sf".into(),
+                meta: None,
+                responsive: None,
+                style: None,
+                children: vec![RowNode {
+                    id: "row-sf".into(),
+                    meta: None,
+                    responsive: None,
+                    children: vec![ColumnNode {
+                        id: "col-sf".into(),
+                        meta: None,
+                        responsive: None,
+                        children: vec![ElementNode {
+                            id: "sf-1".into(),
+                            meta: None,
+                            content: ElementContent::Known(KnownElement::PluginBlock(
+                                PluginBlockProps {
+                                    block_id: "core/social-follow".into(),
+                                    values: BTreeMap::from([
+                                        ("heading".into(), json!("Theo dõi")),
+                                        ("show_facebook".into(), json!(true)),
+                                        ("show_youtube".into(), json!(false)),
+                                        ("display_style".into(), json!("pill")),
+                                        ("open_new_tab".into(), json!(true)),
+                                    ]),
+                                },
+                            )),
+                        }],
+                    }],
+                }],
+            }],
+        };
+
+        let cache = BlockTemplateCache::new();
+        let state_with_links = HomeState {
+            version: 1,
+            declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
+            site_options: BTreeMap::from([
+                (
+                    "social_facebook".into(),
+                    json!("https://facebook.com/opendash"),
+                ),
+                (
+                    "social_youtube".into(),
+                    json!("https://youtube.com/@opendash"),
+                ),
+            ]),
+            ..Default::default()
+        };
+        let mut budget = RenderBudget::new();
+        let rendered = render_builder_with_budget(
+            &state_with_links,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::None,
+            "entry",
+            &mut budget,
+            &cache,
+        )
+        .unwrap();
+        assert!(
+            rendered.diagnostics.is_empty(),
+            "{:?}",
+            rendered.diagnostics
+        );
+        let decoded_html = opendash_core::richtext::decode_html5_entities(&rendered.html);
+        assert!(
+            decoded_html.contains("href=\"https://facebook.com/opendash\""),
+            "{decoded_html}"
+        );
+        assert!(!decoded_html.contains("youtube.com/@opendash"));
+        assert!(decoded_html.contains("target=\"_blank\" rel=\"noopener noreferrer\""));
+
+        // Empty global links: public omits output, preview shows configuration hint.
+        let state_empty = HomeState {
+            version: 1,
+            declared_blocks: crate::storage::page::embedded_core_block_defs().clone(),
+            ..Default::default()
+        };
+        let mut pub_budget = RenderBudget::new();
+        let pub_empty = render_builder_with_budget(
+            &state_empty,
+            &doc,
+            false,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::None,
+            "entry",
+            &mut pub_budget,
+            &cache,
+        )
+        .unwrap();
+        assert!(!pub_empty.html.contains("od-social-follow"));
+
+        let mut prev_budget = RenderBudget::new();
+        let prev_empty = render_builder_with_budget(
+            &state_empty,
+            &doc,
+            true,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            None,
+            &BTreeMap::new(),
+            false,
+            RenderAnnotationScope::EntryBodyOnly,
+            "entry",
+            &mut prev_budget,
+            &cache,
+        )
+        .unwrap();
+        assert!(prev_empty.html.contains("od-social-follow-empty"));
+        assert!(prev_empty.html.contains("Tùy chỉnh giao diện"));
     }
 }

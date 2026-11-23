@@ -1676,6 +1676,11 @@ fn validate_theme_html_context(
     validate_html_and_css_context_with_url_vars(src, post_render, None, Some(policy))
 }
 
+fn is_sensitive_global_option_key(key: &str) -> bool {
+    opendash_core::block_schema::GLOBAL_PUBLIC_URL_OPTION_KEYS.contains(&key)
+        || opendash_core::block_schema::GLOBAL_PUBLIC_MEDIA_OPTION_KEYS.contains(&key)
+}
+
 struct BlockUrlVarAllowlist {
     href_vars: BTreeSet<String>,
     src_vars: BTreeSet<String>,
@@ -1687,6 +1692,9 @@ impl BlockUrlVarAllowlist {
     fn allows_href_expr(&self, expr: &str) -> bool {
         if self.href_vars.contains(expr) || self.src_vars.contains(expr) {
             return true;
+        }
+        if let Some(opt_key) = expr.strip_prefix("options.") {
+            return opendash_core::block_schema::GLOBAL_PUBLIC_URL_OPTION_KEYS.contains(&opt_key);
         }
         if let Some((_loop_var, sub_key)) = expr.split_once('.') {
             return self
@@ -1704,6 +1712,9 @@ impl BlockUrlVarAllowlist {
     fn allows_src_expr(&self, expr: &str) -> bool {
         if self.src_vars.contains(expr) {
             return true;
+        }
+        if let Some(opt_key) = expr.strip_prefix("options.") {
+            return opendash_core::block_schema::GLOBAL_PUBLIC_MEDIA_OPTION_KEYS.contains(&opt_key);
         }
         if let Some((_loop_var, sub_key)) = expr.split_once('.') {
             return self
@@ -2047,8 +2058,11 @@ impl BlockSchemaTemplateContext {
                 BlockFieldSpec::Richtext { key, .. } => {
                     ctx.richtext_vars.insert(key.clone());
                 }
-                BlockFieldSpec::Url { key, .. } => {
+                BlockFieldSpec::Url { key, .. } | BlockFieldSpec::Link { key, .. } => {
                     ctx.href_vars.insert(key.clone());
+                    if matches!(field, BlockFieldSpec::Link { .. }) {
+                        ctx.href_vars.insert(format!("{key}_url"));
+                    }
                 }
                 BlockFieldSpec::Media { key, .. } => {
                     ctx.media_raw_vars.insert(key.clone());
@@ -2061,8 +2075,12 @@ impl BlockSchemaTemplateContext {
                             BlockFieldSpec::Richtext { key: sk, .. } => {
                                 sub_ctx.richtext_subkeys.insert(sk.clone());
                             }
-                            BlockFieldSpec::Url { key: sk, .. } => {
+                            BlockFieldSpec::Url { key: sk, .. }
+                            | BlockFieldSpec::Link { key: sk, .. } => {
                                 sub_ctx.href_subkeys.insert(sk.clone());
+                                if matches!(sub, BlockFieldSpec::Link { .. }) {
+                                    sub_ctx.href_subkeys.insert(format!("{sk}_url"));
+                                }
                             }
                             BlockFieldSpec::Media { key: sk, .. } => {
                                 sub_ctx.media_raw_subkeys.insert(sk.clone());
@@ -2097,7 +2115,8 @@ impl BlockSchemaTemplateContext {
     }
 
     fn is_sensitive_name(&self, id: &str, active_loops: &BTreeMap<String, String>) -> bool {
-        self.richtext_vars.contains(id)
+        matches!(id, "options" | "theme_options" | "od_is_preview")
+            || self.richtext_vars.contains(id)
             || self.href_vars.contains(id)
             || self.src_vars.contains(id)
             || self.media_raw_vars.contains(id)
@@ -2137,21 +2156,33 @@ fn classify_bare_sensitive_expr(
             }
         }
         Expr::GetAttr(g) => {
-            if let Expr::Var(v) = &g.expr
-                && let Some(rep_key) = active_loops.get(v.id)
-                && let Some(rep) = ctx.repeaters.get(rep_key)
-            {
-                if rep.richtext_subkeys.contains(g.name) {
-                    return Some(SensitiveVarKind::Richtext);
+            if let Expr::Var(v) = &g.expr {
+                if v.id == "options" {
+                    if opendash_core::block_schema::GLOBAL_PUBLIC_URL_OPTION_KEYS.contains(&g.name)
+                    {
+                        return Some(SensitiveVarKind::HrefUrl);
+                    }
+                    if opendash_core::block_schema::GLOBAL_PUBLIC_MEDIA_OPTION_KEYS
+                        .contains(&g.name)
+                    {
+                        return Some(SensitiveVarKind::MediaUrl);
+                    }
                 }
-                if rep.href_subkeys.contains(g.name) {
-                    return Some(SensitiveVarKind::HrefUrl);
-                }
-                if rep.src_subkeys.contains(g.name) {
-                    return Some(SensitiveVarKind::MediaUrl);
-                }
-                if rep.media_raw_subkeys.contains(g.name) {
-                    return Some(SensitiveVarKind::MediaRaw);
+                if let Some(rep_key) = active_loops.get(v.id)
+                    && let Some(rep) = ctx.repeaters.get(rep_key)
+                {
+                    if rep.richtext_subkeys.contains(g.name) {
+                        return Some(SensitiveVarKind::Richtext);
+                    }
+                    if rep.href_subkeys.contains(g.name) {
+                        return Some(SensitiveVarKind::HrefUrl);
+                    }
+                    if rep.src_subkeys.contains(g.name) {
+                        return Some(SensitiveVarKind::MediaUrl);
+                    }
+                    if rep.media_raw_subkeys.contains(g.name) {
+                        return Some(SensitiveVarKind::MediaRaw);
+                    }
                 }
             }
             None
@@ -2202,14 +2233,18 @@ fn expr_touches_any_sensitive(
                     .is_some_and(|e| expr_touches_any_sensitive(e, ctx, active_loops))
         }
         Expr::GetAttr(g) => {
-            if let Expr::Var(v) = &g.expr
-                && let Some(rep_key) = active_loops.get(v.id)
-                && let Some(rep) = ctx.repeaters.get(rep_key)
-            {
-                return rep.richtext_subkeys.contains(g.name)
-                    || rep.href_subkeys.contains(g.name)
-                    || rep.src_subkeys.contains(g.name)
-                    || rep.media_raw_subkeys.contains(g.name);
+            if let Expr::Var(v) = &g.expr {
+                if v.id == "options" {
+                    return is_sensitive_global_option_key(g.name);
+                }
+                if let Some(rep_key) = active_loops.get(v.id)
+                    && let Some(rep) = ctx.repeaters.get(rep_key)
+                {
+                    return rep.richtext_subkeys.contains(g.name)
+                        || rep.href_subkeys.contains(g.name)
+                        || rep.src_subkeys.contains(g.name)
+                        || rep.media_raw_subkeys.contains(g.name);
+                }
             }
             expr_touches_any_sensitive(&g.expr, ctx, active_loops)
         }
@@ -2454,6 +2489,9 @@ fn walk_block_ast_stmt(
         }
         Stmt::ForLoop(loop_stmt) => {
             check_block_expr_restrictions(&loop_stmt.iter, ctx, active_loops)?;
+            if expr_touches_any_sensitive(&loop_stmt.target, ctx, active_loops) {
+                return Err("Biến vòng lặp for không được che khuất tên biến nhạy cảm.");
+            }
             if let Some(cond) = &loop_stmt.filter_expr {
                 check_block_expr_restrictions(cond, ctx, active_loops)?;
             }
@@ -2724,6 +2762,9 @@ fn populate_leaf_field_context(
         }
         BlockFieldSpec::Select {
             options, default, ..
+        }
+        | BlockFieldSpec::RadioButtons {
+            options, default, ..
         } => {
             let fallback = default
                 .as_deref()
@@ -2731,6 +2772,20 @@ fn populate_leaf_field_context(
                 .unwrap_or("");
             let s = extract_scalar_or_desktop_str(raw_val).unwrap_or(fallback);
             target_map.insert(key, Value::from(s.to_owned()));
+        }
+        BlockFieldSpec::Spacing {
+            default,
+            unit,
+            responsive,
+            ..
+        } => {
+            let css_unit = unit.unwrap_or(opendash_core::block_schema::CssUnit::Px);
+            let formatted = extract_spacing_css(raw_val, *default, css_unit).unwrap_or_default();
+            let classes = spacing_field_tailwind_classes(raw_val, *default, *responsive, css_unit)
+                .map(|list| list.join(" "))
+                .unwrap_or_default();
+            target_map.insert(format!("{key}_classes"), Value::from(classes));
+            target_map.insert(key, Value::from(formatted));
         }
         BlockFieldSpec::Color { default, .. } => {
             let s = raw_val
@@ -2777,9 +2832,147 @@ fn populate_leaf_field_context(
             };
             target_map.insert(key, Value::from(safe_u.to_owned()));
         }
+        BlockFieldSpec::Link { default, .. } => {
+            let (raw_u, new_tab, nofollow) = match raw_val {
+                Some(serde_json::Value::Object(obj)) => (
+                    obj.get("url")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or(""),
+                    obj.get("new_tab")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                    obj.get("nofollow")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                ),
+                Some(serde_json::Value::String(s)) => (s.as_str(), false, false),
+                _ => match default.as_ref() {
+                    Some(def) => (def.url.as_str(), def.new_tab, def.nofollow),
+                    None => ("", false, false),
+                },
+            };
+            let safe_u = if !raw_u.is_empty() && valid_block_url(raw_u) {
+                raw_u
+            } else {
+                ""
+            };
+            let target_attr = if new_tab { "_blank" } else { "_self" };
+            let rel_attr = match (new_tab, nofollow) {
+                (true, true) => "noopener noreferrer nofollow",
+                (true, false) => "noopener noreferrer",
+                (false, true) => "nofollow",
+                (false, false) => "",
+            };
+            target_map.insert(format!("{key}_url"), Value::from(safe_u.to_owned()));
+            target_map.insert(format!("{key}_target"), Value::from(target_attr));
+            target_map.insert(format!("{key}_rel"), Value::from(rel_attr));
+            target_map.insert(format!("{key}_new_tab"), Value::from(new_tab));
+            target_map.insert(format!("{key}_nofollow"), Value::from(nofollow));
+            target_map.insert(key, Value::from(safe_u.to_owned()));
+        }
         BlockFieldSpec::Group { .. } | BlockFieldSpec::Repeater { .. } => {}
     }
     Ok(())
+}
+
+pub(crate) fn extract_spacing_breakpoint_values(
+    val: Option<&serde_json::Value>,
+    fallback: Option<opendash_core::block_schema::SpacingValue>,
+    responsive: bool,
+) -> (
+    Option<opendash_core::block_schema::SpacingValue>,
+    Option<opendash_core::block_schema::SpacingValue>,
+    Option<opendash_core::block_schema::SpacingValue>,
+) {
+    use opendash_core::block_schema::SpacingValue;
+    let parse_sv = |v: &serde_json::Value| serde_json::from_value::<SpacingValue>(v.clone()).ok();
+    match val.and_then(|v| v.as_object()) {
+        Some(obj)
+            if obj.contains_key("top")
+                || obj.contains_key("right")
+                || obj.contains_key("bottom")
+                || obj.contains_key("left") =>
+        {
+            let d = val.and_then(parse_sv).or(fallback);
+            (d, None, None)
+        }
+        Some(obj) => {
+            let d = obj.get("desktop").and_then(parse_sv).or(fallback);
+            let t = if responsive {
+                obj.get("tablet").and_then(parse_sv)
+            } else {
+                None
+            };
+            let m = if responsive {
+                obj.get("mobile").and_then(parse_sv)
+            } else {
+                None
+            };
+            (d, t, m)
+        }
+        None => (fallback, None, None),
+    }
+}
+
+pub(crate) fn spacing_field_tailwind_classes(
+    val: Option<&serde_json::Value>,
+    fallback: Option<opendash_core::block_schema::SpacingValue>,
+    responsive: bool,
+    unit: opendash_core::block_schema::CssUnit,
+) -> Option<Vec<String>> {
+    use opendash_core::{
+        block_schema::{CssUnit, SpacingValue},
+        builder::{BoxSpacing, compile_box_spacing_tailwind},
+    };
+    if unit != CssUnit::Px {
+        return None;
+    }
+    let to_box = |sv: SpacingValue| -> Option<BoxSpacing> {
+        let conv = |opt: Option<f64>| -> Option<Option<i16>> {
+            match opt {
+                None => Some(None),
+                Some(n)
+                    if n.is_finite()
+                        && n.fract() == 0.0
+                        && n >= 0.0
+                        && n <= f64::from(i16::MAX) =>
+                {
+                    Some(Some(n as i16))
+                }
+                Some(_) => None,
+            }
+        };
+        Some(BoxSpacing {
+            top: conv(sv.top)?,
+            right: conv(sv.right)?,
+            bottom: conv(sv.bottom)?,
+            left: conv(sv.left)?,
+        })
+    };
+
+    let (d_sv, t_sv, m_sv) = extract_spacing_breakpoint_values(val, fallback, responsive);
+    let d_box = match d_sv {
+        Some(sv) => Some(to_box(sv)?),
+        None => None,
+    };
+    let t_box = match t_sv {
+        Some(sv) => Some(to_box(sv)?),
+        None => None,
+    };
+    let m_box = match m_sv {
+        Some(sv) => Some(to_box(sv)?),
+        None => None,
+    };
+    compile_box_spacing_tailwind("p", d_box, t_box, m_box, false)
+}
+
+fn extract_spacing_css(
+    val: Option<&serde_json::Value>,
+    fallback: Option<opendash_core::block_schema::SpacingValue>,
+    unit: opendash_core::block_schema::CssUnit,
+) -> Option<String> {
+    let (d_sv, _, _) = extract_spacing_breakpoint_values(val, fallback, false);
+    d_sv?.format_css(unit)
 }
 
 fn extract_scalar_or_desktop_f64(val: Option<&serde_json::Value>) -> Option<f64> {
@@ -2802,6 +2995,26 @@ pub fn render_block_csec_with_budget(
     template_source: &str,
     schema: &opendash_core::block_schema::BlockSchemaV1,
     values: &BTreeMap<String, serde_json::Value>,
+    is_preview: bool,
+    budget: &mut RenderBudget,
+) -> Result<String, &'static str> {
+    render_block_csec_with_options_and_budget(
+        block_id,
+        template_source,
+        schema,
+        values,
+        None,
+        is_preview,
+        budget,
+    )
+}
+
+pub fn render_block_csec_with_options_and_budget(
+    block_id: &str,
+    template_source: &str,
+    schema: &opendash_core::block_schema::BlockSchemaV1,
+    values: &BTreeMap<String, serde_json::Value>,
+    site_options: Option<&BTreeMap<String, serde_json::Value>>,
     is_preview: bool,
     budget: &mut RenderBudget,
 ) -> Result<String, &'static str> {
@@ -2861,6 +3074,22 @@ pub fn render_block_csec_with_budget(
             }
         }
     }
+
+    let mut merged_options = opendash_core::block_schema::global_site_option_defaults();
+    if let Some(extra_options) = site_options {
+        for (k, v) in extra_options {
+            merged_options.insert(k.clone(), v.clone());
+        }
+    }
+    let options_value = Value::from_pairs(
+        merged_options
+            .into_iter()
+            .map(|(k, v)| (k, json_to_safe_value(&v))),
+    );
+    ctx_map.entry("options".to_owned()).or_insert(options_value);
+    ctx_map
+        .entry("od_is_preview".to_owned())
+        .or_insert_with(|| Value::from(is_preview));
 
     let mut env = restricted_environment();
     env.set_fuel(Some(node_fuel));
@@ -3021,6 +3250,42 @@ mod composition_tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn block_csec_global_options_bridge_enforces_typed_urls_and_forbids_shadowing() {
+        let schema: opendash_core::block_schema::BlockSchemaV1 =
+            serde_json::from_value(serde_json::json!({
+                "schema_version": 1,
+                "id": "demo/bridge",
+                "title": "Bridge Test",
+                "category": "content",
+                "render": "render.html",
+                "fields": [
+                    { "type": "boolean", "key": "show_fb", "label": "FB", "default": true }
+                ]
+            }))
+            .unwrap();
+
+        let valid_tpl = r#"{% if show_fb and options.social_facebook %}<a href="{{ options.social_facebook }}">FB</a>{% endif %}{% if options.site_logo %}<img src="{{ options.site_logo }}" alt="Logo">{% endif %}<p>{{ options.contact_phone }}</p>"#;
+        assert!(validate_block_template_csec("demo/bridge", valid_tpl, &schema).is_ok());
+
+        for forbidden in [
+            r#"<a href="{{ options.contact_phone }}">bad</a>"#,
+            r#"<a href="{{ options.unknown_key }}">bad</a>"#,
+            r#"<a href="{{ theme_options.social_facebook }}">bad</a>"#,
+            r#"<p>{{ options.social_facebook }}</p>"#,
+            r#"<p>{{ options }}</p>"#,
+            r#"<a href="{{ options.social_facebook | upper }}">bad</a>"#,
+            r#"{% set options = {'social_facebook': '/evil'} %}<a href="{{ options.social_facebook }}">bad</a>"#,
+            r#"{% with options = {'social_facebook': '/evil'} %}<a href="{{ options.social_facebook }}">bad</a>{% endwith %}"#,
+            r#"{% for options, x in [] %}<a href="{{ options.social_facebook }}">bad</a>{% endfor %}"#,
+        ] {
+            assert!(
+                validate_block_template_csec("demo/bridge", forbidden, &schema).is_err(),
+                "{forbidden}"
+            );
+        }
     }
 
     fn parts(items: &[(&str, &str)]) -> BTreeMap<String, String> {

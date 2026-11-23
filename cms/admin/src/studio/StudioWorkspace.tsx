@@ -6,12 +6,15 @@ import { getMenuSlots, listMenus, putMenuSlots, type MenuRecord, type MenuSlotsS
 import { listPatterns, type PatternRecord } from '../api/patterns.ts';
 import {
   getGeneralSettings,
+  getGlobalSiteOptions,
   getReadingSettings,
   getTimezoneCatalog,
   saveGeneralSettings,
+  saveGlobalSiteOptions,
   saveReadingSettings,
   type GeneralSettings,
   type GeneralSettingsDraft,
+  type GlobalSiteOptionsSnapshot,
   type ReadingSettings,
   type ReadingSettingsDraft,
 } from '../api/settings.ts';
@@ -28,7 +31,7 @@ import {
   createStarterTemplateDocument,
   isElement,
   locate,
-  nodeTitle,
+  visibleNodesInTree,
   type BuilderDocument,
   type BuilderElement,
   type BuilderViewport,
@@ -103,7 +106,6 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [previewHtml, setPreviewHtml] = useState('');
-  const [previewSkipped, setPreviewSkipped] = useState(0);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState(false);
   const [conflict, setConflict] = useState(false);
@@ -116,6 +118,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [menuRequest, setMenuRequest] = useState<StudioMenuRequest | null>(null);
   const menuRequestSeqRef = useRef(0);
   const [canvasPickSeq, setCanvasPickSeq] = useState(0);
+  const [patternRequestSeq, setPatternRequestSeq] = useState(0);
 
   // Mode 1 state
   const [panel, setPanel] = useState<StudioPanelId>(route.studioPanel ?? 'root');
@@ -136,11 +139,15 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [menuSlotsDraft, setMenuSlotsDraft] = useState<Record<string, number | null> | null>(null);
   const [menusList, setMenusList] = useState<MenuRecord[]>([]);
 
+  const [globalOptionsSaved, setGlobalOptionsSaved] = useState<GlobalSiteOptionsSnapshot | null>(null);
+  const [globalOptionsDraft, setGlobalOptionsDraft] = useState<Record<string, unknown> | null>(null);
+
   const [themeOptionsVersion, setThemeOptionsVersion] = useState<number | null>(null);
   const [themeOptionsDraft, setThemeOptionsDraft] = useState<Record<string, unknown> | null>(null);
   const [themeOptionsDirty, setThemeOptionsDirty] = useState(false);
   const [themeOptionsReloadToken, setThemeOptionsReloadToken] = useState(0);
   const [mode1ReloadSeq, setMode1ReloadSeq] = useState(0);
+  const [menuPreviewSeq, setMenuPreviewSeq] = useState(0);
 
   const [overrideDocs, setOverrideDocs] = useState<Record<string, builderApi.TypedTemplateOverride>>({});
   const [templateEditingEnabled, setTemplateEditingEnabled] = useState(false);
@@ -202,7 +209,6 @@ export const StudioWorkspace: React.FC<Props> = ({
     previewAbortRef.current?.abort();
     previewAbortRef.current = null;
     setPreviewHtml('');
-    setPreviewSkipped(0);
     setConflict(false);
     resetHistory();
     mode1LoadedRef.current = false;
@@ -213,6 +219,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     setReadingDraft(null);
     setMenuSlotsSaved(null);
     setMenuSlotsDraft(null);
+    setGlobalOptionsSaved(null);
+    setGlobalOptionsDraft(null);
     setThemeOptionsDraft(null);
     setThemeOptionsDirty(false);
     setThemeOptionsVersion(null);
@@ -253,7 +261,11 @@ export const StudioWorkspace: React.FC<Props> = ({
       !sameJson(templateDoc, templateSavedDoc)
     ),
   );
-  const mode1Dirty = generalDirty || readingDirty || menuSlotsDirty || themeOptionsDirty || templateDirty;
+  const globalOptionsDirty = Boolean(
+    globalOptionsSaved && globalOptionsDraft &&
+    !sameJson(globalOptionsSaved.values, globalOptionsDraft),
+  );
+  const mode1Dirty = generalDirty || readingDirty || menuSlotsDirty || globalOptionsDirty || themeOptionsDirty || templateDirty;
   const entryDirty = Boolean(entryVersion !== null && !sameJson(entryDoc, entrySavedDoc));
   const totalDirty = isMode2 ? entryDirty : mode1Dirty;
 
@@ -292,7 +304,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setTemplateSavedVersion(existing.version);
       setTemplateSavedDoc(existing.ast_json);
       setTemplateDoc(existing.ast_json);
-      setTemplateSelectedNodeId(allNodes(existing.ast_json)[0]?.node.id ?? null);
+      setTemplateSelectedNodeId(visibleNodesInTree(existing.ast_json)[0]?.node.id ?? null);
     } else {
       const targetInfo = items.find(t => t.canonical_target_key === targetKey);
       const starter = createStarterTemplateDocument(Boolean(targetInfo?.requires_content_slot));
@@ -300,7 +312,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setTemplateSavedVersion(null);
       setTemplateSavedDoc(starter);
       setTemplateDoc(starter);
-      setTemplateSelectedNodeId(allNodes(starter)[0]?.node.id ?? null);
+      setTemplateSelectedNodeId(visibleNodesInTree(starter)[0]?.node.id ?? null);
     }
   };
 
@@ -336,7 +348,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       }
       let alive = true;
       setLoading(true);
-      setStatus('Đang tải không gian OpenDash Studio...');
+      setStatus('Đang tải không gian Tùy chỉnh giao diện...');
       Promise.all([
         getStudioTargets(),
         getGeneralSettings(),
@@ -347,6 +359,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         listMenus(100, 0),
         api.getRegistry(),
         listPatterns().catch(() => ({ items: [] as PatternRecord[], total: 0, limit: 50, offset: 0 })),
+        getGlobalSiteOptions(),
       ])
         .then(async ([
           targetsRes,
@@ -358,6 +371,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           menusRes,
           regRes,
           patRes,
+          globalOptsRes,
         ]) => {
           if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
           let slotsRes: MenuSlotsSnapshot | null = null;
@@ -395,6 +409,9 @@ export const StudioWorkspace: React.FC<Props> = ({
           setMenuSlotsSaved(slotsRes);
           setMenuSlotsDraft(prev => (!forceReload && menuSlotsDirty && prev ? prev : (slotsRes ? buildSlotAssignmentsMap(slotsRes) : null)));
 
+          setGlobalOptionsSaved(globalOptsRes);
+          setGlobalOptionsDraft(prev => (!forceReload && globalOptionsDirty && prev ? prev : globalOptsRes.values));
+
           if (forceReload) {
             setThemeOptionsDraft(null);
             setThemeOptionsDirty(false);
@@ -415,8 +432,8 @@ export const StudioWorkspace: React.FC<Props> = ({
         })
         .catch(cause => {
           if (alive && seq === loadSeqRef.current && authorityRef.current === reqAuthority) {
-            setStatus('Không thể tải dữ liệu OpenDash Studio.', true);
-            onApiError(cause, 'Không thể mở OpenDash Studio.');
+            setStatus('Không thể tải dữ liệu Tùy chỉnh giao diện.', true);
+            onApiError(cause, 'Không thể mở Tùy chỉnh giao diện.');
           }
         })
         .finally(() => {
@@ -454,7 +471,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         if (!retainingEntryDraft) {
           setEntryVersion(opened.version);
           setEntryDoc(serverDoc);
-          setEntrySelectedNodeId(allNodes(serverDoc)[0]?.node.id ?? null);
+          setEntrySelectedNodeId(visibleNodesInTree(serverDoc)[0]?.node.id ?? null);
           resetHistory();
           setConflict(false);
           setStatus(`Đang sửa ${entryRec.title} (v${opened.version}).`);
@@ -594,6 +611,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       if (!previewTargetCandidate) return;
       const transient: TransientStudioOverrides = {};
       if (generalDirty && generalDraft) transient.general = generalDraft;
+      if (globalOptionsDirty && globalOptionsDraft) transient.global_options = globalOptionsDraft;
       if (themeOptionsDirty && themeOptionsDraft) transient.theme_options = themeOptionsDraft;
       if (menuSlotsDirty && menuSlotsDraft) transient.menu_slots = menuSlotsDraft;
 
@@ -617,7 +635,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           if (cause instanceof api.ApiClientError && cause.status === 412) {
             setConflict(true);
           } else {
-            onApiError(cause, 'Không thể xem trước OpenDash Studio.');
+            onApiError(cause, 'Không thể xem trước Tùy chỉnh giao diện.');
           }
         });
     }, 250);
@@ -640,10 +658,13 @@ export const StudioWorkspace: React.FC<Props> = ({
     templateDoc,
     generalDirty,
     generalDraft,
+    globalOptionsDirty,
+    globalOptionsDraft,
     themeOptionsDirty,
     themeOptionsDraft,
     menuSlotsDirty,
     menuSlotsDraft,
+    menuPreviewSeq,
   ]);
 
   const handleSelectTarget = (nextKey: string | null) => {
@@ -719,6 +740,12 @@ export const StudioWorkspace: React.FC<Props> = ({
         setMenuSlotsDraft(buildSlotAssignmentsMap(res));
         savedNames.push('Vị trí Menu');
       }
+      if (globalOptionsDirty && globalOptionsSaved && globalOptionsDraft) {
+        const res = await saveGlobalSiteOptions(globalOptionsDraft, globalOptionsSaved.version, csrfToken);
+        setGlobalOptionsSaved(res);
+        setGlobalOptionsDraft(res.values);
+        savedNames.push('Tùy chọn toàn trang');
+      }
       if (themeOptionsDirty && activeThemeId && themeOptionsDraft && themeOptionsVersion !== null) {
         const res = await saveThemeOptions(activeThemeId, themeOptionsDraft, themeOptionsVersion, csrfToken);
         setThemeOptionsVersion(res.version);
@@ -758,7 +785,7 @@ export const StudioWorkspace: React.FC<Props> = ({
             : 'Lưu thay đổi thất bại; nháp vẫn được giữ.',
           true,
         );
-        onApiError(cause, 'Không thể lưu OpenDash Studio.');
+        onApiError(cause, 'Không thể lưu Tùy chỉnh giao diện.');
       }
     } finally {
       savingRef.current = false;
@@ -866,37 +893,6 @@ export const StudioWorkspace: React.FC<Props> = ({
     }
   };
 
-  const handleResetMode2 = async () => {
-    if (!active || !csrfToken || !isMode2 || entryId === null || entryVersion === null || !entryHadExistingDoc || savingRef.current) return;
-    if (!window.confirm('Chuyển nội dung về văn bản thuần (rút gọn comment blocks)?')) return;
-    savingRef.current = true;
-    setSaving(true);
-    try {
-      const res = await builderApi.resetEntryBuilder(entryTypeKey, entryId, entryVersion, csrfToken);
-      editorDraftStore.clearDraft(entryTypeKey, entryId);
-      const nextDoc = res.document ?? EMPTY_DOCUMENT;
-      setEntryVersion(res.version);
-      setEntrySavedDoc(nextDoc);
-      setEntryDoc(nextDoc);
-      setEntrySelectedNodeId(allNodes(nextDoc)[0]?.node.id ?? null);
-      setEntryDiagnostics(res.diagnostics ?? []);
-      setEntryHadFreeformWrap(res.had_freeform_wrap);
-      setEntryHadRecovery(res.had_recovery);
-      resetHistory();
-      setBuilderView('tree');
-      setAddTargetParentId(null);
-      setClipboard(null);
-      setMenuRequest(null);
-      setStatus(`Đã đưa nội dung về văn bản thuần (v${res.version}).`);
-    } catch (cause) {
-      if (cause instanceof api.ApiClientError && cause.status === 412) setConflict(true);
-      onApiError(cause, 'Không thể reset nội dung Trình dựng trang.');
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
-
   const handleReloadMode2 = () => {
     if (!isMode2 || !entryTypeKey || entryId === null) return;
     if (entryDirty && !window.confirm('Tải lại bản trên server sẽ bỏ nháp Trình dựng trang hiện tại. Tiếp tục?')) return;
@@ -912,7 +908,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setEntryPublicationPolicy(opened.publication_policy);
       setEntrySavedDoc(doc);
       setEntryDoc(doc);
-      setEntrySelectedNodeId(allNodes(doc)[0]?.node.id ?? null);
+      setEntrySelectedNodeId(visibleNodesInTree(doc)[0]?.node.id ?? null);
       setEntryDiagnostics(opened.diagnostics ?? []);
       setEntryHadFreeformWrap(opened.had_freeform_wrap);
       setEntryHadRecovery(opened.had_recovery);
@@ -946,6 +942,16 @@ export const StudioWorkspace: React.FC<Props> = ({
       .catch(cause => onApiError(cause, 'Không thể tải lại danh sách Pattern.'));
   };
 
+  const handleMenusMutated = async () => {
+    try {
+      const res = await listMenus(100, 0);
+      setMenusList(res.items);
+      setMenuPreviewSeq(v => v + 1);
+    } catch (cause) {
+      onApiError(cause, 'Không thể tải lại danh sách Menu.');
+    }
+  };
+
   const availablePartKeys = targets
     .filter(t => t.target.kind === 'part' && t.target.part_key)
     .map(t => t.target.part_key as string);
@@ -959,13 +965,25 @@ export const StudioWorkspace: React.FC<Props> = ({
     (entryPublicationPolicy === 'draft_publish' && entryPublicationStatus === 'draft');
 
   const builderActive = isMode2 || Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled);
-  const handleCanvasMenu = (id: string, mode: StudioMenuRequest['mode']) => {
+  const handleCanvasMenu = (
+    id: string,
+    mode: StudioMenuRequest['mode'],
+    anchor?: { x: number; y: number } | null,
+  ) => {
     if (loading || saving || !csrfToken || !builderActive || !locate(activeDoc, id)) return;
     if (isMode2) setEntrySelectedNodeId(id);
     else setTemplateSelectedNodeId(id);
     setAddTargetParentId(null);
     setBuilderView('tree');
-    setMenuRequest({ nodeId: id, mode, seq: ++menuRequestSeqRef.current });
+    setMenuRequest({ nodeId: id, mode, seq: ++menuRequestSeqRef.current, anchor });
+  };
+  const handleCanvasEdit = (id: string) => {
+    if (loading || saving || !csrfToken || !builderActive || !locate(activeDoc, id)) return;
+    if (isMode2) setEntrySelectedNodeId(id);
+    else setTemplateSelectedNodeId(id);
+    setAddTargetParentId(null);
+    setMenuRequest(null);
+    setBuilderView('properties');
   };
   const handleCanvasPick = (id: string) => {
     setCanvasPickSeq(seq => seq + 1);
@@ -973,39 +991,42 @@ export const StudioWorkspace: React.FC<Props> = ({
     if (isMode2) setEntrySelectedNodeId(id);
     else if (panel === 'templates' && templateEditingEnabled) setTemplateSelectedNodeId(id);
   };
-  const contextualNode = locate(activeDoc, activeSelectedId);
-  const addParent = locate(activeDoc, addTargetParentId);
-  const contextualSubView = builderActive && builderView !== 'tree';
-  const contextTitle = contextualSubView
-    ? builderView === 'properties' && contextualNode
-      ? nodeTitle(contextualNode)
-      : addParent ? `Thêm vào ${nodeTitle(addParent)}` : 'Thêm Section'
-    : isMode2 ? entryTitle || `${entryTypeKey} #${entryId}`
-      : selectedTarget && panel === 'templates' ? selectedTarget.label
-        : ({ root: activeThemeName ?? activeThemeId ?? 'Theme mặc định',
-            identity: 'Nhận diện Site', 'theme-options': 'Tùy chọn Giao diện',
-            menus: 'Vị trí Menu', reading: 'Trang chủ & Đọc', templates: 'Dựng Template' } as Record<string, string>)[panel];
-  const contextBadge = contextualSubView ? undefined : isMode2
-    ? entryTypeKey === 'page' ? 'Page' : entryTypeKey === 'post' ? 'Post' : entryTypeKey
+  const contextTitle = isMode2
+    ? entryTitle || `${entryTypeKey} #${entryId}`
+    : selectedTarget && panel === 'templates'
+      ? selectedTarget.label
+      : ({ root: activeThemeName ?? activeThemeId ?? 'Theme mặc định',
+          identity: 'Nhận diện Site', 'theme-options': 'Tùy chọn Giao diện',
+          menus: 'Menu & Vị trí', reading: 'Trang chủ & Đọc', templates: 'Dựng Template' } as Record<string, string>)[panel];
+  const contextBadge = isMode2
+    ? (entryTypeKey === 'page' ? 'Page' : entryTypeKey === 'post' ? 'Post' : entryTypeKey)
     : selectedTarget && panel === 'templates' ? 'Template' : panel === 'root' ? 'Theme' : undefined;
-  const contextBack = contextualSubView ? 'Cấu trúc trang' : isMode2
-    ? entryTypeKey === 'page' ? 'Về danh sách trang'
-      : entryTypeKey === 'post' ? 'Về danh sách bài viết' : `Về danh sách ${entryTypeKey}`
-    : panel === 'root' ? undefined : panel === 'templates' && selectedTarget
-      ? 'Danh sách Template' : 'Tùy biến';
+  const contextBack = isMode2
+    ? undefined
+    : panel === 'root'
+      ? undefined
+      : panel === 'templates' && selectedTarget ? 'Danh sách Template' : 'Tùy biến';
   const handleContextBack = () => {
-    if (contextualSubView) {
-      setBuilderView('tree');
-      setAddTargetParentId(null);
-    } else if (isMode2) {
-      onNavigateHash(entryTypeKey === 'page' ? '#/pages'
-        : entryTypeKey === 'post' ? '#/posts' : `#/cpt/${encodeURIComponent(entryTypeKey)}`);
-    } else if (panel === 'templates' && selectedTarget) handleSelectTarget(null);
+    if (panel === 'templates' && selectedTarget) handleSelectTarget(null);
     else handlePanelChange('root');
   };
+  const handleReloadConflict = () => {
+    if (isMode2) {
+      handleReloadMode2();
+      return;
+    }
+    if (mode1Dirty && !window.confirm('Tải lại từ server sẽ bỏ các thay đổi chưa lưu trong Studio. Tiếp tục?')) {
+      return;
+    }
+    mode1ForceReloadRef.current = true;
+    mode1LoadedRef.current = false;
+    setConflict(false);
+    setMode1ReloadSeq(v => v + 1);
+  };
   const canResetStudio = isMode2
-    ? entryHadExistingDoc && (entryVersion ?? 0) > 0
+    ? false
     : Boolean(panel === 'templates' && selectedTarget?.override_id && (templateSavedVersion ?? 0) > 0);
+  const templateCanShowPattern = Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-zinc-100 text-zinc-900" data-testid="studio-workspace">
@@ -1023,13 +1044,35 @@ export const StudioWorkspace: React.FC<Props> = ({
             onExit={handleExit}
             backLabel={contextBack}
             onBack={contextBack ? handleContextBack : undefined}
-            canReset={canResetStudio && builderView === 'tree' && builderActive}
-            resetLabel={isMode2 ? 'Về văn bản thuần' : 'Reset mặc định'}
-            onReset={isMode2 ? () => void handleResetMode2() : () => void handleResetTemplate()}
+            canReset={canResetStudio && builderActive}
+            resetLabel="Khôi phục mặc định Theme"
+            onReset={() => void handleResetTemplate()}
+            conflict={conflict}
+            onReloadConflict={handleReloadConflict}
           />
+          {(error || conflict) && (
+            <div
+              role="alert"
+              data-testid="studio-sidebar-alert"
+              className="flex items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800"
+            >
+              <span className="min-w-0 flex-1 truncate" title={notice || 'Xung đột phiên bản dữ liệu.'}>
+                {error && notice ? notice : 'Dữ liệu đã thay đổi trên server (412).'}
+              </span>
+              {conflict && (
+                <button
+                  type="button"
+                  onClick={handleReloadConflict}
+                  className="shrink-0 rounded border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100"
+                >
+                  Tải lại
+                </button>
+              )}
+            </div>
+          )}
           <div className="min-h-0 flex-1 overflow-y-auto">
           {isMode2 ? (
-            <div className="p-3.5" data-testid="studio-mode2-sidebar">
+            <div className="px-1.5 py-2" data-testid="studio-mode2-sidebar">
               <BuilderEditorCore
                 key={`${entryTypeKey}:${entryId}`}
                 builderView={builderView}
@@ -1041,6 +1084,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                 menuRequest={menuRequest}
                 onMenuRequestHandled={() => setMenuRequest(null)}
                 canvasPickSeq={canvasPickSeq}
+                openPatternSeq={patternRequestSeq}
                 document={entryDoc}
                 selectedId={entrySelectedNodeId}
                 onSelect={setEntrySelectedNodeId}
@@ -1077,6 +1121,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               menuRequest={menuRequest}
               onMenuRequestHandled={() => setMenuRequest(null)}
               canvasPickSeq={canvasPickSeq}
+              openPatternSeq={patternRequestSeq}
               panel={panel}
               onPanelChange={handlePanelChange}
               activeThemeId={activeThemeId}
@@ -1085,6 +1130,10 @@ export const StudioWorkspace: React.FC<Props> = ({
               timezones={timezones}
               onGeneralChange={next => setGeneralDraft(next)}
               csrfToken={csrfToken}
+              globalOptionsSnapshot={globalOptionsSaved}
+              globalOptionsDraft={globalOptionsDraft}
+              globalOptionsDirty={globalOptionsDirty}
+              onGlobalOptionsChange={next => setGlobalOptionsDraft(next)}
               themeOptionsDraft={themeOptionsDraft}
               themeOptionsDirty={themeOptionsDirty}
               themeOptionsReloadToken={themeOptionsReloadToken}
@@ -1100,7 +1149,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               onMenuSlotChange={(slot, menuId) =>
                 setMenuSlotsDraft(prev => ({ ...(prev ?? {}), [slot]: menuId }))
               }
-              onNavigateHash={onNavigateHash}
+              onMenusMutated={handleMenusMutated}
               readingDraft={readingDraft}
               readingDirty={readingDirty}
               readingSettings={readingSaved}
@@ -1148,50 +1197,14 @@ export const StudioWorkspace: React.FC<Props> = ({
             canSave={isMode2 ? canSaveMode2 : mode1Dirty}
             onSaveCustomizer={() => void handleSaveMode1()}
             onSaveEntry={intent => void handleSaveMode2(intent)}
+            showPatternButton={isMode2 || templateCanShowPattern}
+            onOpenPatternLibrary={() => setPatternRequestSeq(s => s + 1)}
+            patternDisabled={!csrfToken}
           />
         </aside>
 
-        <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-zinc-200/70">
-          {(notice || error || conflict || previewSkipped > 0) && (
-            <div
-              role={error ? 'alert' : 'status'}
-              data-testid="studio-status-bar"
-              className={
-                'flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-xs ' +
-                (error
-                  ? 'border-rose-200 bg-rose-50 text-rose-800'
-                  : 'border-zinc-200 bg-white/90 text-zinc-700')
-              }
-            >
-              <span>
-                {loading ? 'Đang tải… ' : ''}
-                {notice}
-                {previewSkipped > 0 && ` (${previewSkipped} ảnh riêng tư bỏ qua trong preview)`}
-              </span>
-              {conflict && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (isMode2) handleReloadMode2();
-                    else {
-                      if (mode1Dirty && !window.confirm('Tải lại từ server sẽ bỏ các thay đổi chưa lưu trong Studio. Tiếp tục?')) {
-                        return;
-                      }
-                      mode1ForceReloadRef.current = true;
-                      mode1LoadedRef.current = false;
-                      setConflict(false);
-                      setMode1ReloadSeq(v => v + 1);
-                    }
-                  }}
-                  className="rounded border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
-                >
-                  Tải lại từ server
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="min-h-0 flex-1 overflow-auto p-3 sm:p-5">
+        <main className={'flex min-w-0 flex-1 flex-col overflow-hidden ' + (viewport === 'desktop' ? 'bg-white' : 'bg-zinc-200/70')}>
+          <div className={'min-h-0 flex-1 overflow-auto ' + (viewport === 'desktop' ? 'p-0' : 'p-4')}>
             {previewHtml ? (
               <BuilderPreviewFrame
                 html={previewHtml}
@@ -1200,15 +1213,19 @@ export const StudioWorkspace: React.FC<Props> = ({
                 selectedId={activeSelectedId}
                 document={activeDoc}
                 onSelectNode={handleCanvasPick}
+                onEditNode={handleCanvasEdit}
                 onOpenNodeMenu={handleCanvasMenu}
                 onApiError={onApiError}
-                title={isMode2 ? 'Xem trước nội dung OpenDash Studio' : 'Xem trước Website OpenDash Studio'}
-                className="h-full"
-                frameClassName="h-full min-h-[540px] !border border-zinc-300 rounded-lg"
-                onPrepared={({ skipped }) => setPreviewSkipped(skipped)}
+                title={isMode2 ? 'Xem trước nội dung Tùy chỉnh giao diện' : 'Xem trước Website Tùy chỉnh giao diện'}
+                className="h-full w-full"
+                frameClassName={
+                  viewport === 'desktop'
+                    ? '!h-full !w-full !border-0 !rounded-none !shadow-none'
+                    : '!h-full min-h-[540px] !border border-zinc-300 rounded-lg shadow-sm'
+                }
               />
             ) : (
-              <div className="flex h-full min-h-[360px] items-center justify-center rounded-xl border border-dashed border-zinc-300 bg-white/70 p-8 text-center text-sm text-zinc-500">
+              <div className="flex h-full min-h-[360px] items-center justify-center bg-white p-8 text-center text-sm text-zinc-500">
                 {loading ? 'Đang chuẩn bị bản xem trước trực tiếp…' : 'Chưa có nội dung xem trước cho target này.'}
               </div>
             )}

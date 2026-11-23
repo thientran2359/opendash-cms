@@ -20,15 +20,31 @@ interface Props {
   canSave: boolean;
   onSaveCustomizer?: () => void;
   onSaveEntry?: (intent?: 'draft' | 'published') => void;
+  showPatternButton?: boolean;
+  onOpenPatternLibrary?: () => void;
+  patternDisabled?: boolean;
 }
 
 export const StudioSidebarFooter: React.FC<Props> = ({
   saving, busy = false, viewport, onViewportChange, canShowUndo,
   canUndo, canRedo, onUndo, onRedo, savePolicy, canSave, onSaveCustomizer, onSaveEntry,
+  showPatternButton = false, onOpenPatternLibrary, patternDisabled = false,
 }) => {
   const disabled = saving || busy;
   return (
     <footer className="shrink-0 space-y-2 border-t border-zinc-200 bg-white p-3" data-testid="studio-sidebar-footer">
+      {showPatternButton && onOpenPatternLibrary && (
+        <button
+          type="button"
+          data-testid="studio-open-pattern-library"
+          disabled={disabled || patternDisabled}
+          onClick={onOpenPatternLibrary}
+          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50/80 px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-50"
+        >
+          <span aria-hidden="true">▦</span>
+          <span>Thư viện Pattern</span>
+        </button>
+      )}
       <div className="flex items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-1" role="group" aria-label="Chọn viewport">
         {(['desktop', 'tablet', 'mobile'] as const).map(value => (
           <button key={value} type="button" aria-pressed={viewport === value}

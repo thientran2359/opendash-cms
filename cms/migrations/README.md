@@ -1,6 +1,6 @@
-# SQLite migrations (`0001`–`0046`)
+# SQLite migrations (`0001`–`0047`)
 
-Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (45 file, đánh số từ `0001` đến `0046`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
+Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (46 file, đánh số từ `0001` đến `0047`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
 
 | Nhóm / Mốc | Migrations | Nội dung chính |
 | --- | --- | --- |
@@ -16,3 +16,4 @@ Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (45 file,
 | **Theme v3, CPT Builder & Patterns** | `0042_theme_v3_resolver_and_reading_settings.sql` – `0044_pattern_cpt_and_refs.sql` | `site_reading_settings`, `page_layout_key`/`custom_template_key`, `content_mode` Builder cho CPT và `pattern` CPT + `pattern_entry_refs`. |
 | **WordPress Permalinks (Phase 1)** | `0045_wordpress_permalinks.sql` | Chuẩn hóa URL mặc định WordPress (`/{slug}`, `/{cpt}/{slug}`, `/{tax}/{slug}`, `/posts`), `primary_category_term_id`, `has_been_published` + 2 triggers đơn điệu và tái dựng `permalink_route_claims`. |
 | **Declarative Block Engine (`block.json` v1)** | `0046_declarative_block_engine.sql` | Bảng `builder_block_definitions` (`block.json` v1 registry cho core/theme/plugin) và `plugin_revisions.blocks_json`. |
+| **Unified Studio & Global Site Options** | `0047_global_site_options.sql` | Bảng `site_global_option_version`, `site_global_option_values`, `site_global_option_media_refs` lưu tùy chọn dùng chung toàn site bền vững qua đổi theme. |

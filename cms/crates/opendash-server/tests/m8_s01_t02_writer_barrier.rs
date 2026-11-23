@@ -160,6 +160,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "general_put",
                 "public_put",
                 "reading_put",
+                "site_options_put",
                 "theme_options_put",
             ],
         ),

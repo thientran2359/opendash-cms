@@ -78,7 +78,8 @@ const BRIDGE_SCRIPT = [
   'var gearId=gear.getAttribute("data-od-gear");',
   'if(gearId){',
   'applyAttr("data-od-selected",gearId,false);',
-  'window.parent.postMessage({type:"od-studio-menu",nonce:nonce,nodeId:gearId,mode:"toggle"},"*");',
+  'var gr=gear.getBoundingClientRect();',
+  'window.parent.postMessage({type:"od-studio-menu",nonce:nonce,nodeId:gearId,mode:"toggle",rect:{left:Math.round(gr.right),top:Math.round(gr.top)}},"*");',
   '}',
   'return;',
   '}',
@@ -98,7 +99,16 @@ const BRIDGE_SCRIPT = [
   'e.preventDefault();e.stopPropagation();',
   'var nodeId=el.getAttribute("data-node-id");if(!nodeId)return;',
   'applyAttr("data-od-selected",nodeId,false);',
-  'window.parent.postMessage({type:"od-studio-menu",nonce:nonce,nodeId:nodeId,mode:"open"},"*");',
+  'window.parent.postMessage({type:"od-studio-edit",nonce:nonce,nodeId:nodeId},"*");',
+  '},true);',
+  'document.addEventListener("contextmenu",function(e){',
+  'var gear=e.target&&e.target.closest?e.target.closest("[data-od-gear]"):null;',
+  'var el=gear?null:(e.target&&e.target.closest?e.target.closest("[data-od-editable=\\"1\\"][data-node-id]"):null);',
+  'var nodeId=gear?gear.getAttribute("data-od-gear"):(el?el.getAttribute("data-node-id"):null);',
+  'if(!nodeId)return;',
+  'e.preventDefault();e.stopPropagation();',
+  'applyAttr("data-od-selected",nodeId,false);',
+  'window.parent.postMessage({type:"od-studio-menu",nonce:nonce,nodeId:nodeId,mode:"open",rect:{left:Math.round(e.clientX||0),top:Math.round(e.clientY||0)}},"*");',
   '},true);',
   'document.addEventListener("submit",function(e){e.preventDefault();e.stopPropagation();},true);',
   'var st=null;',
@@ -118,7 +128,7 @@ const BRIDGE_SCRIPT = [
   '})();',
 ].join('\n');
 
-const BRIDGE_SCRIPT_SHA256 = 'mrcvszcJC+rCtyJuehShjmjJC8jZWUtDlQJ2k0TPZuE=';
+const BRIDGE_SCRIPT_SHA256 = 'nzPczuMVqg+QdOmrKjWUN+X5syrEZGTU7QeepWyHY68=';
 
 function generateStudioNonce(): string {
   const bytes = new Uint8Array(16);
@@ -173,7 +183,7 @@ export async function preparePreviewMarkup(
     ...Array.from(parsed.querySelectorAll('img[src]')).map(el => ({ el, attr: 'src' })),
     ...Array.from(parsed.querySelectorAll('video[poster]')).map(el => ({ el, attr: 'poster' })),
   ];
-  const scopedStyles = Array.from(parsed.querySelectorAll<HTMLStyleElement>('style[data-od-block-styles]'));
+  const scopedStyles = Array.from(parsed.querySelectorAll<HTMLStyleElement>('style[data-od-block-styles], style[data-builder-responsive]'));
   const cssPrivatePaths = scopedStyles.flatMap(style =>
     Array.from((style.textContent ?? '').matchAll(CSS_MEDIA_URL))
       .map(match => match[2])
@@ -331,7 +341,8 @@ export interface BuilderPreviewFrameProps {
   selectedId?: string | null;
   document?: BuilderDocument;
   onSelectNode?: (id: string) => void;
-  onOpenNodeMenu?: (id: string, mode: 'open' | 'toggle') => void;
+  onEditNode?: (id: string) => void;
+  onOpenNodeMenu?: (id: string, mode: 'open' | 'toggle', anchor?: { x: number; y: number } | null) => void;
   onHoverNode?: (id: string | null) => void;
   onApiError?: (error: unknown, fallback: string) => void;
   title?: string;
@@ -347,6 +358,7 @@ export function BuilderPreviewFrame({
   selectedId = null,
   document: builderDocument,
   onSelectNode,
+  onEditNode,
   onOpenNodeMenu,
   onHoverNode,
   onApiError,
@@ -369,6 +381,8 @@ export function BuilderPreviewFrame({
   const seqRef = useRef(0);
   const onSelectNodeRef = useRef(onSelectNode);
   onSelectNodeRef.current = onSelectNode;
+  const onEditNodeRef = useRef(onEditNode);
+  onEditNodeRef.current = onEditNode;
   const onOpenNodeMenuRef = useRef(onOpenNodeMenu);
   onOpenNodeMenuRef.current = onOpenNodeMenu;
   const onHoverNodeRef = useRef(onHoverNode);
@@ -440,13 +454,31 @@ export function BuilderPreviewFrame({
         return;
       }
 
+      if (data.type === 'od-studio-edit') {
+        const nodeId = typeof data.nodeId === 'string' ? data.nodeId : null;
+        const doc = documentRef.current;
+        if (!nodeId || !doc || !locate(doc, nodeId)) return;
+        lastPickedFromIframeRef.current = nodeId;
+        onEditNodeRef.current?.(nodeId);
+        return;
+      }
+
       if (data.type === 'od-studio-menu') {
         const nodeId = typeof data.nodeId === 'string' ? data.nodeId : null;
         const mode = data.mode === 'open' || data.mode === 'toggle' ? data.mode : null;
         const doc = documentRef.current;
         if (!nodeId || !mode || !doc || !locate(doc, nodeId)) return;
         lastPickedFromIframeRef.current = nodeId;
-        onOpenNodeMenuRef.current?.(nodeId, mode);
+        let anchor: { x: number; y: number } | null = null;
+        const frameRect = iframeRef.current?.getBoundingClientRect();
+        const rectObj = data.rect && typeof data.rect === 'object' ? (data.rect as Record<string, unknown>) : null;
+        if (frameRect && rectObj && typeof rectObj.left === 'number' && typeof rectObj.top === 'number') {
+          anchor = {
+            x: Math.round(frameRect.left + rectObj.left),
+            y: Math.round(frameRect.top + rectObj.top),
+          };
+        }
+        onOpenNodeMenuRef.current?.(nodeId, mode, anchor);
         return;
       }
 
@@ -513,7 +545,7 @@ export function BuilderPreviewFrame({
           style={{
             width: viewport === 'desktop' ? '100%' : width,
             minWidth: viewport === 'desktop' ? undefined : width,
-            maxWidth: viewport === 'desktop' ? width : 'none',
+            maxWidth: 'none',
             display: 'block',
           }}
           srcDoc={preparedHtml}
@@ -524,7 +556,7 @@ export function BuilderPreviewFrame({
           style={{
             width: viewport === 'desktop' ? '100%' : width,
             minWidth: viewport === 'desktop' ? undefined : width,
-            maxWidth: viewport === 'desktop' ? width : 'none',
+            maxWidth: 'none',
           }}
           data-testid="builder-preview-preparing"
         >

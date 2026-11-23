@@ -1,0 +1,170 @@
+{
+  "schema_version": 1,
+  "id": "core/showcase",
+  "title": "Block Thử nghiệm Đầy đủ Field",
+  "category": "content",
+  "icon": "sparkles",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "group",
+      "key": "content_group",
+      "label": "1. Nội dung & Soạn thảo",
+      "fields": [
+        {
+          "type": "text",
+          "key": "heading",
+          "label": "Tiêu đề chính (text)",
+          "required": true,
+          "default": "Trải nghiệm Đầy đủ 15 Kiểu Field"
+        },
+        {
+          "type": "textarea",
+          "key": "summary",
+          "label": "Mô tả ngắn (textarea)",
+          "default": "Khối mẫu tập hợp toàn bộ control của OpenDash Studio trong một nơi duy nhất."
+        },
+        {
+          "type": "richtext",
+          "key": "rich_body",
+          "label": "Nội dung phong phú (richtext)",
+          "default": "<p>Bấm <strong>Mở Text Editor</strong> để chỉnh sửa định dạng văn bản phong phú.</p>"
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "key": "choice_group",
+      "label": "2. Lựa chọn, Ẩn/Hiện & Căn lề",
+      "fields": [
+        {
+          "type": "radio_buttons",
+          "key": "text_align",
+          "label": "Căn lề (radio_buttons · responsive)",
+          "options": [
+            { "value": "left", "label": "Trái", "icon": "align-left" },
+            { "value": "center", "label": "Giữa", "icon": "align-center" },
+            { "value": "right", "label": "Phải", "icon": "align-right" }
+          ],
+          "default": "left",
+          "responsive": true,
+          "css_var": "--od-showcase-align"
+        },
+        {
+          "type": "select",
+          "key": "theme_variant",
+          "label": "Kiểu thẻ (select dropdown)",
+          "display": "dropdown",
+          "options": [
+            { "value": "surface", "label": "Nền sáng mặc định" },
+            { "value": "tinted", "label": "Nền xám dịu" },
+            { "value": "dark", "label": "Nền tối tương phản" },
+            { "value": "bordered", "label": "Viền mảnh sắc nét" },
+            { "value": "elevated", "label": "Đổ bóng nổi bật" }
+          ],
+          "default": "surface"
+        },
+        {
+          "type": "boolean",
+          "key": "show_cta",
+          "label": "Hiện cụm liên kết CTA (boolean · bật/tắt show_if)",
+          "default": true
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "key": "link_media_group",
+      "label": "3. Media & Liên kết",
+      "fields": [
+        {
+          "type": "media",
+          "key": "cover_image",
+          "label": "Ảnh minh họa (media)",
+          "media_kind": "image"
+        },
+        {
+          "type": "link",
+          "key": "primary_link",
+          "label": "Nút liên kết chính (link)",
+          "show_if": { "field": "show_cta", "equals": true },
+          "default": { "url": "/gioi-thieu", "new_tab": false, "nofollow": false }
+        },
+        {
+          "type": "url",
+          "key": "reference_url",
+          "label": "Liên kết tham khảo phụ (url)",
+          "show_if": { "field": "show_cta", "equals": true },
+          "default": "https://example.com"
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "key": "style_spacing_group",
+      "label": "4. Màu sắc, Số & Thang Tailwind",
+      "fields": [
+        {
+          "type": "color",
+          "key": "accent_color",
+          "label": "Màu nhấn (color)",
+          "default": "#0284c7",
+          "css_var": "--od-showcase-accent"
+        },
+        {
+          "type": "number",
+          "key": "badge_count",
+          "label": "Con số nổi bật (number)",
+          "min": 0,
+          "max": 9999,
+          "step": 1,
+          "default": 15
+        },
+        {
+          "type": "range",
+          "key": "radius_px",
+          "label": "Bo góc (range · responsive)",
+          "min": 0,
+          "max": 32,
+          "step": 4,
+          "unit": "px",
+          "responsive": true,
+          "default": 16,
+          "css_var": "--od-showcase-radius"
+        },
+        {
+          "type": "spacing",
+          "key": "box_padding",
+          "label": "Khoảng cách đệm (spacing · Tailwind + px)",
+          "min": 0,
+          "max": 256,
+          "unit": "px",
+          "responsive": true,
+          "default": { "top": 32, "right": 24, "bottom": 32, "left": 24 }
+        }
+      ]
+    },
+    {
+      "type": "repeater",
+      "key": "highlights",
+      "label": "5. Danh sách Điểm nhấn (repeater)",
+      "item_label_field": "title",
+      "min_items": 1,
+      "max_items": 8,
+      "fields": [
+        {
+          "type": "text",
+          "key": "title",
+          "label": "Tiêu đề mục",
+          "default": "Điểm nhấn"
+        },
+        {
+          "type": "text",
+          "key": "detail",
+          "label": "Chi tiết ngắn",
+          "default": "Mô tả ngắn"
+        }
+      ]
+    }
+  ]
+}

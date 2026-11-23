@@ -2,10 +2,23 @@ import type { BlockCatalogItemDto, BlockPropValue, BlockSchemaV1 } from '../type
 
 /** Homepage AST v1. The server validates every Save; this client preserves
  * unknown JSON properties so the Editor never strips historical/bound data. */
+export interface NodeVisibility {
+  hide_desktop?: boolean;
+  hide_tablet?: boolean;
+  hide_mobile?: boolean;
+}
+export interface NodeMeta {
+  name?: string;
+  html_id?: string;
+  class_name?: string;
+  visibility?: NodeVisibility;
+  synthetic?: boolean;
+}
 export interface BuilderElement {
   id: string;
   type: string;
   props: Record<string, unknown>;
+  meta?: NodeMeta;
 }
 /** ADR-0009: one typed source reference per eligible core element. */
 export type BindingTarget = 'text' | 'media_id' | 'alt' | 'label' | 'url';
@@ -33,18 +46,32 @@ export interface ListProps {
 }
 export type BuilderViewport = 'desktop' | 'tablet' | 'mobile';
 export type ResponsiveField = 'padding_px' | 'gap_px' | 'columns_per_row' | 'text_align';
-export type ResponsiveAlign = 'start' | 'center' | 'end';
+export type ResponsiveAlign = 'start' | 'center' | 'end' | 'justify';
+export interface BoxSpacing {
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
+}
 export interface ResponsiveStyle {
   padding_px?: number;
+  padding?: BoxSpacing;
+  margin?: BoxSpacing;
   gap_px?: number;
   columns_per_row?: number;
   text_align?: ResponsiveAlign;
 }
 export type BuilderResponsive = Partial<Record<BuilderViewport, ResponsiveStyle>>;
-export interface ResponsiveContainer { responsive?: BuilderResponsive }
+export type SectionWidth = 'full' | 'boxed' | 'wide';
+export interface SectionStyle {
+  background_color?: string;
+  background_media_id?: string;
+  content_width?: SectionWidth;
+}
+export interface ResponsiveContainer { responsive?: BuilderResponsive; meta?: NodeMeta }
 export interface BuilderColumn extends ResponsiveContainer { id: string; children: BuilderElement[] }
 export interface BuilderRow extends ResponsiveContainer { id: string; children: BuilderColumn[] }
-export interface BuilderSection extends ResponsiveContainer { id: string; children: BuilderRow[] }
+export interface BuilderSection extends ResponsiveContainer { id: string; style?: SectionStyle; children: BuilderRow[] }
 export interface BuilderDocument { schema_version: number; sections: BuilderSection[] }
 export type BuilderNode = BuilderSection | BuilderRow | BuilderColumn | BuilderElement;
 export type NodeKind = 'section' | 'row' | 'column' | 'element';
@@ -83,7 +110,10 @@ export interface StudioBuilderClipboard {
   elementType?: string;
   blockId?: string;
   responsive?: BuilderResponsive;
+  sectionStyle?: SectionStyle;
   props?: Record<string, unknown>;
+  class_name?: string;
+  visibility?: NodeVisibility;
 }
 
 export function allNodes(document: BuilderDocument): NodeLocation[] {
@@ -151,7 +181,7 @@ export function setResponsiveField(
       || !RESPONSIVE_FIELDS[location.kind].includes(field)) return null;
   if (value !== null) {
     if (field === 'text_align') {
-      if (!['start', 'center', 'end'].includes(String(value))) return null;
+      if (!['start', 'center', 'end', 'justify'].includes(String(value))) return null;
     } else if (typeof value !== 'number' || !Number.isInteger(value)
         || value < (field === 'columns_per_row' ? 1 : 0)
         || value > (field === 'columns_per_row' ? 6 : 64)) return null;
@@ -163,6 +193,97 @@ export function setResponsiveField(
   else (style as Record<string, number | string>)[field] = value;
   if (Object.keys(style).length === 0) delete responsive[viewport];
   else responsive[viewport] = style;
+  if (Object.keys(responsive).length === 0) delete node.responsive;
+  else node.responsive = responsive;
+  return next;
+}
+
+function normalizeBoxSpacing(
+  raw: BoxSpacing | null, min: number, max: number,
+): BoxSpacing | undefined | null {
+  if (raw === null) return undefined;
+  const out: BoxSpacing = {};
+  for (const side of ['top', 'right', 'bottom', 'left'] as const) {
+    const val = raw[side];
+    if (val === undefined || val === null) continue;
+    if (typeof val !== 'number' || !Number.isInteger(val) || val < min || val > max) return null;
+    out[side] = val;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function setContainerBoxSpacing(
+  document: BuilderDocument, id: string, viewport: BuilderViewport,
+  kind: 'padding' | 'margin', spacing: BoxSpacing | null,
+): BuilderDocument | null {
+  const min = kind === 'padding' ? 0 : -128;
+  const normalized = normalizeBoxSpacing(spacing, min, 256);
+  if (normalized === null) return null;
+  const next = clone(document);
+  const location = locate(next, id);
+  if (!location || location.kind === 'element' || isSyntheticNode(location.node)) return null;
+  const node = location.node as ResponsiveContainer;
+  const responsive: BuilderResponsive = { ...node.responsive };
+  const style: ResponsiveStyle = { ...responsive[viewport] };
+  if (normalized === undefined) {
+    delete style[kind];
+  } else {
+    style[kind] = normalized;
+    if (kind === 'padding') delete style.padding_px;
+  }
+  if (Object.keys(style).length === 0) delete responsive[viewport];
+  else responsive[viewport] = style;
+  if (Object.keys(responsive).length === 0) delete node.responsive;
+  else node.responsive = responsive;
+  return next;
+}
+
+export function setSectionStyle(
+  document: BuilderDocument, id: string, patch: Partial<SectionStyle>,
+): BuilderDocument | null {
+  const next = clone(document);
+  const location = locate(next, id);
+  if (!location || location.kind !== 'section' || isSyntheticNode(location.node)) return null;
+  const section = location.node as BuilderSection;
+  const merged: SectionStyle = { ...(section.style ?? {}) };
+  if ('background_color' in patch) {
+    const val = (patch.background_color ?? '').trim();
+    if (!val) delete merged.background_color;
+    else merged.background_color = val;
+  }
+  if ('background_media_id' in patch) {
+    const val = (patch.background_media_id ?? '').trim();
+    if (!val) delete merged.background_media_id;
+    else if (!/^[a-zA-Z0-9_-]{1,128}$/.test(val)) return null;
+    else merged.background_media_id = val;
+  }
+  if ('content_width' in patch) {
+    if (!patch.content_width) delete merged.content_width;
+    else merged.content_width = patch.content_width;
+  }
+  if (Object.keys(merged).length === 0) delete section.style;
+  else section.style = merged;
+  return next;
+}
+
+/** Drops tablet/mobile overrides for one responsive property so all 3 viewports match Desktop. */
+export function syncContainerResponsiveToDesktop(
+  document: BuilderDocument, id: string, property: ResponsiveField | 'padding' | 'margin',
+): BuilderDocument | null {
+  const next = clone(document);
+  const location = locate(next, id);
+  if (!location || location.kind === 'element' || isSyntheticNode(location.node)) return null;
+  const node = location.node as ResponsiveContainer;
+  if (!node.responsive) return next;
+  const responsive: BuilderResponsive = { ...node.responsive };
+  for (const bp of ['tablet', 'mobile'] as const) {
+    if (!responsive[bp]) continue;
+    const style: ResponsiveStyle = { ...responsive[bp] };
+    delete (style as Record<string, unknown>)[property];
+    if (property === 'padding') delete style.padding_px;
+    if (Object.keys(style).length === 0) delete responsive[bp];
+    else responsive[bp] = style;
+  }
   if (Object.keys(responsive).length === 0) delete node.responsive;
   else node.responsive = responsive;
   return next;
@@ -188,7 +309,46 @@ export function newNodeId(kind: NodeKind, document: BuilderDocument): string {
   return id;
 }
 
-export function nodeTitle(location: NodeLocation, blockCatalog: BlockCatalogItemDto[] = []): string {
+export function isSyntheticNode(node: BuilderNode): boolean {
+  return Boolean(node.meta?.synthetic);
+}
+
+export interface VisibleNodeLocation extends NodeLocation {
+  visualParentId: string | null;
+}
+
+/** Flatten document nodes while skipping transparent synthetic wrapper containers. */
+export function visibleNodesInTree(document: BuilderDocument): VisibleNodeLocation[] {
+  const entries = allNodes(document);
+  const byId = new Map(entries.map(entry => [entry.node.id, entry]));
+  const result: VisibleNodeLocation[] = [];
+  for (const entry of entries) {
+    if (isSyntheticNode(entry.node)) continue;
+    let p = entry.parentId;
+    while (p) {
+      const parentEntry = byId.get(p);
+      if (!parentEntry || !isSyntheticNode(parentEntry.node)) break;
+      p = parentEntry.parentId;
+    }
+    result.push({ ...entry, visualParentId: p });
+  }
+  return result;
+}
+
+/** Lift a node up through any single-child synthetic wrappers so delete/move/duplicate/reorder act cleanly on the full freeform block carrier. */
+export function carrierLocation(document: BuilderDocument, id: string): NodeLocation | undefined {
+  let loc = locate(document, id);
+  while (loc && loc.parentId) {
+    const parentLoc = locate(document, loc.parentId);
+    if (!parentLoc || isElement(parentLoc.node)
+        || !isSyntheticNode(parentLoc.node)
+        || parentLoc.node.children.length !== 1) break;
+    loc = parentLoc;
+  }
+  return loc;
+}
+
+export function nodeTypeTitle(location: NodeLocation, blockCatalog: BlockCatalogItemDto[] = []): string {
   if (location.kind !== 'element') {
     return ({ section: 'Section', row: 'Row', column: 'Column' } as Record<string, string>)[location.kind];
   }
@@ -212,6 +372,11 @@ export function nodeTitle(location: NodeLocation, blockCatalog: BlockCatalogItem
   } as Record<string, string>)[element.type] || 'Block chưa nhận diện';
 }
 
+export function nodeTitle(location: NodeLocation, blockCatalog: BlockCatalogItemDto[] = []): string {
+  const customName = location.node.meta?.name?.trim();
+  return customName || nodeTypeTitle(location, blockCatalog);
+}
+
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -221,10 +386,10 @@ function object(value: unknown): value is Record<string, unknown> {
  * is Unresolved on the server and must remain an immutable anchor. */
 const ELEMENT_PROP_KEYS: Record<string, readonly string[]> = {
   'core/heading': ['level', 'text', 'binding'],
-  'core/text': ['text', 'binding'],
+  'core/text': ['text', 'rich', 'binding'],
   'core/image': ['media_id', 'alt', 'binding'],
   'core/video': ['media_id', 'poster_image_id', 'controls', 'muted'],
-  'core/button': ['label', 'url', 'binding'],
+  'core/button': ['label', 'url', 'new_tab', 'nofollow', 'binding'],
   'core/list': ['type_key', 'category_id', 'tag_id', 'taxonomy_key', 'term_id',
     'include_descendants', 'sort', 'page_size'],
   'core/contact_form': ['form_id', 'submit_label'],
@@ -238,7 +403,7 @@ const ELEMENT_PROP_KEYS: Record<string, readonly string[]> = {
 function hasUnexpectedElementFields(element: BuilderElement): boolean {
   const allowed = ELEMENT_PROP_KEYS[element.type];
   return !allowed
-    || Object.keys(element).some(key => key !== 'id' && key !== 'type' && key !== 'props')
+    || Object.keys(element).some(key => key !== 'id' && key !== 'type' && key !== 'props' && key !== 'meta')
     || !object(element.props)
     || Object.keys(element.props).some(key => !allowed.includes(key));
 }
@@ -298,10 +463,13 @@ export function isLockedElement(
   switch (element.type) {
     case 'core/heading': return !Number.isInteger(props.level) || Number(props.level) < 1
       || Number(props.level) > 6 || typeof props.text !== 'string';
-    case 'core/text': return typeof props.text !== 'string';
+    case 'core/text': return typeof props.text !== 'string'
+      || (props.rich !== undefined && typeof props.rich !== 'boolean');
     case 'core/image': return typeof props.media_id !== 'string' || typeof props.alt !== 'string';
     case 'core/video': return typeof props.media_id !== 'string';
-    case 'core/button': return typeof props.label !== 'string' || typeof props.url !== 'string';
+    case 'core/button': return typeof props.label !== 'string' || typeof props.url !== 'string'
+      || (props.new_tab !== undefined && typeof props.new_tab !== 'boolean')
+      || (props.nofollow !== undefined && typeof props.nofollow !== 'boolean');
     case 'core/contact_form': return typeof props.form_id !== 'number' || props.form_id <= 0 || typeof props.submit_label !== 'string' || !props.submit_label.trim();
     case 'core/list': return typeof props.type_key !== 'string'
       || !/^[a-z][a-z0-9_]{0,63}$/.test(props.type_key)
@@ -470,15 +638,13 @@ export function duplicateNode(
   registry: Record<string, Record<string, string>>,
   blockCatalog: BlockCatalogItemDto[] = [],
 ): { document: BuilderDocument; id: string } | null {
-  const source = locate(document, id);
-  if (!source || isProtectedNode(document, id, registry, blockCatalog)
-      || countDescendantElementsByType(document, id, 'core/content_slot') > 0
+  const leafLoc = locate(document, id);
+  const source = carrierLocation(document, id);
+  if (!leafLoc || !source || isProtectedNode(document, source.node.id, registry, blockCatalog)
+      || countDescendantElementsByType(document, source.node.id, 'core/content_slot') > 0
       || countElementsByType(document, 'core/list')
-        + countDescendantElementsByType(document, id, 'core/list') > 8) return null;
+        + countDescendantElementsByType(document, source.node.id, 'core/list') > 8) return null;
 
-  // Server validation grants historical schema-upgrade exemptions only to
-  // the original (element.id, block_id). Every clone has a fresh ID, so all
-  // declarative blocks in the copied subtree must pass fresh-node checks.
   const sourcePath = source.path;
   for (const entry of allNodes(document)) {
     if (entry.kind !== 'element'
@@ -496,8 +662,6 @@ export function duplicateNode(
   if (!siblings) return null;
   const index = source.path[source.path.length - 1];
   siblings.splice(index + 1, 0, clone(siblings[index]));
-  // The duplicate is already in next, so every generated ID is unique even
-  // when the cloned subtree contains several nested nodes of the same kind.
   const duplicatePath = [...source.path.slice(0, -1), index + 1];
   const inserted = allNodes(next).filter(entry =>
     duplicatePath.every((step, depth) => entry.path[depth] === step));
@@ -505,15 +669,31 @@ export function duplicateNode(
 
   if (distinctPatternIdCount(next) > 16 || !withinBuilderLimits(next)
       || !preservesAnchors(document, next, registry, undefined, blockCatalog)) return null;
-  return { document: next, id: inserted[0].node.id };
+  const targetRelPath = [...duplicatePath, ...leafLoc.path.slice(source.path.length)];
+  const returnEntry = inserted.find(entry =>
+    entry.path.length === targetRelPath.length
+    && targetRelPath.every((step, idx) => entry.path[idx] === step)) ?? inserted[0];
+  return { document: next, id: returnEntry.node.id };
 }
 
-/** Creates one row with its columns as a single undoable document mutation. */
+/** Creates one row with its columns as a single undoable document mutation; when parentId is null, wraps in a transparent synthetic Section. */
 export function appendRowWithColumns(
-  document: BuilderDocument, sectionId: string, columnCount: 1 | 2 | 3,
+  document: BuilderDocument, parentId: string | null, columnCount: 1 | 2 | 3,
 ): { document: BuilderDocument; id: string } | null {
-  if (![1, 2, 3].includes(columnCount) || locate(document, sectionId)?.kind !== 'section') return null;
-  const row = appendNode(document, sectionId, 'row', 'core/heading');
+  if (![1, 2, 3].includes(columnCount)) return null;
+  let working = document;
+  let sectionId = parentId;
+  if (parentId === null) {
+    const sec = appendNode(working, null, 'section', 'core/heading');
+    if (!sec) return null;
+    working = sec.document;
+    const secLoc = locate(working, sec.id);
+    if (secLoc) secLoc.node.meta = { synthetic: true };
+    sectionId = sec.id;
+  } else if (locate(working, parentId)?.kind !== 'section') {
+    return null;
+  }
+  const row = appendNode(working, sectionId, 'row', 'core/heading');
   if (!row) return null;
   let next = row.document;
   for (let index = 0; index < columnCount; index += 1) {
@@ -525,6 +705,49 @@ export function appendRowWithColumns(
   if (!addedRow || isElement(addedRow)) return null;
   if (columnCount > 1) addedRow.responsive = { desktop: { columns_per_row: columnCount } };
   return withinBuilderLimits(next) ? { document: next, id: row.id } : null;
+}
+
+/** Inserts an element at root (null), directly inside a Section, or inside a Column, creating transparent synthetic wrappers where needed. */
+export function appendFreeformElement(
+  document: BuilderDocument,
+  parentId: string | null,
+  elementType: InsertableElementType,
+  options?: { blockSchema?: BlockSchemaV1 },
+): { document: BuilderDocument; id: string } | null {
+  const parentLoc = locate(document, parentId);
+  if (parentId === null) {
+    const sec = appendNode(document, null, 'section', 'core/heading');
+    if (!sec) return null;
+    const secLoc = locate(sec.document, sec.id);
+    if (secLoc) secLoc.node.meta = { synthetic: true };
+    const row = appendNode(sec.document, sec.id, 'row', 'core/heading');
+    if (!row) return null;
+    const rowLoc = locate(row.document, row.id);
+    if (rowLoc) rowLoc.node.meta = { synthetic: true };
+    const col = appendNode(row.document, row.id, 'column', 'core/heading');
+    if (!col) return null;
+    const colLoc = locate(col.document, col.id);
+    if (colLoc) colLoc.node.meta = { synthetic: true };
+    const el = appendNode(col.document, col.id, 'element', elementType, options);
+    return el && withinBuilderLimits(el.document) ? el : null;
+  }
+  if (parentLoc?.kind === 'section') {
+    const row = appendNode(document, parentId, 'row', 'core/heading');
+    if (!row) return null;
+    const rowLoc = locate(row.document, row.id);
+    if (rowLoc) rowLoc.node.meta = { synthetic: true };
+    const col = appendNode(row.document, row.id, 'column', 'core/heading');
+    if (!col) return null;
+    const colLoc = locate(col.document, col.id);
+    if (colLoc) colLoc.node.meta = { synthetic: true };
+    const el = appendNode(col.document, col.id, 'element', elementType, options);
+    return el && withinBuilderLimits(el.document) ? el : null;
+  }
+  if (parentLoc?.kind === 'column') {
+    const el = appendNode(document, parentId, 'element', elementType, options);
+    return el && withinBuilderLimits(el.document) ? el : null;
+  }
+  return null;
 }
 
 /** Group fields are flattened in PluginBlockProps.values; repeater values
@@ -574,8 +797,21 @@ function pluginValuesReadyForFreshNode(
         && (field.max === undefined || field.max === null || value <= field.max);
     }
     if (field.type === 'boolean') return typeof value === 'boolean';
-    if (field.type === 'select') return typeof value === 'string'
+    if (field.type === 'select' || field.type === 'radio_buttons') return typeof value === 'string'
       && field.options.some(option => option.value === value);
+    if (field.type === 'spacing') {
+      if (!object(value)) return false;
+      const lo = field.min ?? 0;
+      const hi = field.max ?? 256;
+      return Object.entries(value).every(([k, v]) =>
+        ['top', 'right', 'bottom', 'left'].includes(k)
+        && (v === null || v === undefined || (typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi)));
+    }
+    if (field.type === 'link') {
+      if (typeof value === 'string') return !required || !field.required || value.trim().length > 0;
+      if (!object(value) || typeof value.url !== 'string') return false;
+      return !required || !field.required || value.url.trim().length > 0;
+    }
     return typeof value === 'string'
       && (!required || !('required' in field && field.required) || value.trim().length > 0);
   };
@@ -610,15 +846,36 @@ export function copyNodeOptions(
 ): StudioBuilderClipboard | null {
   const item = locate(document, id);
   if (!item) return null;
+  const attachSharedStyle = (target: StudioBuilderClipboard): StudioBuilderClipboard => {
+    const className = item.node.meta?.class_name?.trim();
+    if (className) target.class_name = className;
+    const vis = item.node.meta?.visibility;
+    if (vis && (vis.hide_desktop || vis.hide_tablet || vis.hide_mobile)) {
+      target.visibility = clone(vis);
+    }
+    return target;
+  };
   if (!isElement(item.node)) {
     const responsive = item.node.responsive;
-    return { kind: item.kind, responsive: responsive && Object.keys(responsive).length
-      ? clone(responsive) : undefined };
+    const base: StudioBuilderClipboard = {
+      kind: item.kind,
+      responsive: responsive && Object.keys(responsive).length ? clone(responsive) : undefined,
+    };
+    if (item.kind === 'section') {
+      const style = (item.node as BuilderSection).style;
+      if (style && (style.background_color || style.background_media_id || style.content_width)) {
+        base.sectionStyle = clone(style);
+      }
+    }
+    return attachSharedStyle(base);
   }
 
   const element = item.node;
   if (element.type === 'core/content_slot' || isLockedElement(element, registry, blockCatalog)) return null;
-  const clipboard: StudioBuilderClipboard = { kind: 'element', elementType: element.type };
+  const clipboard: StudioBuilderClipboard = attachSharedStyle({
+    kind: 'element',
+    elementType: element.type,
+  });
   if (element.type === 'plugin/block' || element.type === 'legacy/block') {
     clipboard.blockId = element.props.block_id as string;
     const values = element.props.values as Record<string, unknown>;
@@ -671,6 +928,14 @@ export function pasteNodeOptions(
     } else {
       delete target.node.responsive;
     }
+    if (target.kind === 'section') {
+      const sec = target.node as BuilderSection;
+      if (clipboard.sectionStyle && Object.keys(clipboard.sectionStyle).length) {
+        sec.style = clone(clipboard.sectionStyle);
+      } else {
+        delete sec.style;
+      }
+    }
   } else if (target.node.type === 'plugin/block' || target.node.type === 'legacy/block') {
     if (!object(clipboard.props?.values) || !object(target.node.props.values)) return null;
     target.node.props.values = clone(clipboard.props.values);
@@ -681,27 +946,38 @@ export function pasteNodeOptions(
     if (target.node.props.binding !== undefined) props.binding = target.node.props.binding;
     target.node.props = props;
   }
+  const mergedMeta: NodeMeta = { ...(target.node.meta ?? {}) };
+  if (clipboard.class_name) mergedMeta.class_name = clipboard.class_name;
+  else delete mergedMeta.class_name;
+  if (clipboard.visibility && (clipboard.visibility.hide_desktop || clipboard.visibility.hide_tablet || clipboard.visibility.hide_mobile)) {
+    mergedMeta.visibility = clone(clipboard.visibility);
+  } else {
+    delete mergedMeta.visibility;
+  }
+  if (Object.keys(mergedMeta).length === 0) delete target.node.meta;
+  else target.node.meta = mergedMeta;
   return distinctPatternIdCount(next) <= 16 && withinBuilderLimits(next) ? next : null;
 }
 
 /** Drag/drop may reorder siblings only if preserved nodes retain their exact
- * index, ancestor IDs, and serialized element content. */
+ * index, ancestor IDs, and serialized element content. Supports transparent carriers across freeform blocks. */
 export function reorderSiblingNode(
   document: BuilderDocument, sourceId: string, targetId: string,
   position: 'before' | 'after', registry: Record<string, Record<string, string>>,
   blockCatalog: BlockCatalogItemDto[] = [],
 ): BuilderDocument | null {
   if (sourceId === targetId || (position !== 'before' && position !== 'after')) return null;
-  const source = locate(document, sourceId);
-  const target = locate(document, targetId);
-  if (!source || !target || source.kind !== target.kind || source.parentId !== target.parentId
-      || isProtectedNode(document, sourceId, registry, blockCatalog)) return null;
+  const source = carrierLocation(document, sourceId);
+  const target = carrierLocation(document, targetId);
+  if (!source || !target || source.node.id === target.node.id
+      || source.kind !== target.kind || source.parentId !== target.parentId
+      || isProtectedNode(document, source.node.id, registry, blockCatalog)) return null;
   const next = clone(document);
   const siblings = childrenAt(next, source.parentId ? locate(next, source.parentId) : undefined);
   if (!siblings) return null;
   const sourceIndex = source.path[source.path.length - 1];
   const [moving] = siblings.splice(sourceIndex, 1);
-  const targetIndex = siblings.findIndex(node => node.id === targetId);
+  const targetIndex = siblings.findIndex(node => node.id === target.node.id);
   if (!moving || targetIndex === -1) return null;
   const insertIndex = targetIndex + (position === 'after' ? 1 : 0);
   if (insertIndex === sourceIndex) return null;
@@ -775,7 +1051,7 @@ export function setListProps(document: BuilderDocument, id: string, props: ListP
 }
 
 export function removeNode(document: BuilderDocument, id: string): BuilderDocument | null {
-  const location = locate(document, id);
+  const location = carrierLocation(document, id);
   if (!location) return null;
   const next = clone(document);
   const siblings = childrenAt(next, location.parentId ? locate(next, location.parentId) : undefined);
@@ -785,7 +1061,7 @@ export function removeNode(document: BuilderDocument, id: string): BuilderDocume
 }
 
 export function moveNode(document: BuilderDocument, id: string, direction: -1 | 1): BuilderDocument | null {
-  const location = locate(document, id);
+  const location = carrierLocation(document, id);
   if (!location) return null;
   const next = clone(document);
   const siblings = childrenAt(next, location.parentId ? locate(next, location.parentId) : undefined);
@@ -797,33 +1073,78 @@ export function moveNode(document: BuilderDocument, id: string, direction: -1 | 
   return next;
 }
 
+export function setNodeMeta(
+  document: BuilderDocument, id: string, patch: Partial<NodeMeta>,
+): BuilderDocument | null {
+  const next = clone(document);
+  const location = locate(next, id);
+  if (!location || isSyntheticNode(location.node)) return null;
+  const current: NodeMeta = { ...(location.node.meta ?? {}) };
+  if ('name' in patch) {
+    const val = patch.name ?? '';
+    if (val.length > 80) return null;
+    if (!val.trim()) delete current.name;
+    else current.name = val;
+  }
+  if ('html_id' in patch) {
+    const val = (patch.html_id ?? '').trim();
+    if (!val) delete current.html_id;
+    else if (!/^[a-zA-Z0-9_-]{1,64}$/.test(val)) return null;
+    else current.html_id = val;
+  }
+  if ('class_name' in patch) {
+    const val = patch.class_name ?? '';
+    if (!val.trim()) delete current.class_name;
+    else if (val.length > 256 || !/^[a-zA-Z0-9 _:/.\[\]%#-]{1,256}$/.test(val)) return null;
+    else current.class_name = val;
+  }
+  if ('visibility' in patch) {
+    const v = patch.visibility ?? {};
+    const normalized: NodeVisibility = {};
+    if (v.hide_desktop) normalized.hide_desktop = true;
+    if (v.hide_tablet) normalized.hide_tablet = true;
+    if (v.hide_mobile) normalized.hide_mobile = true;
+    if (Object.keys(normalized).length === 0) delete current.visibility;
+    else current.visibility = normalized;
+  }
+  if (Object.keys(current).length === 0) delete location.node.meta;
+  else location.node.meta = current;
+  return next;
+}
+
 export function setNodeField(
   document: BuilderDocument, id: string, field: string, value: BlockPropValue | undefined,
+): BuilderDocument | null {
+  return patchNodeFields(document, id, { [field]: value });
+}
+
+export function patchNodeFields(
+  document: BuilderDocument, id: string, patch: Record<string, BlockPropValue | undefined>,
 ): BuilderDocument | null {
   const next = clone(document);
   const location = locate(next, id);
   if (!location || !isElement(location.node)) return null;
   const element = location.node;
-  if (element.type === 'plugin/block' && field === 'values') {
-    // The schema form supplies a complete values object. Replace it as one
-    // draft mutation so repeater reorder and responsive edits remain atomic.
+  if (element.type === 'plugin/block' && Object.hasOwn(patch, 'values')) {
+    const value = patch.values;
     if (!object(value) || !object(element.props.values)) return null;
     element.props = { ...element.props, values: { ...value } };
   } else if (element.type === 'legacy/block' || element.type === 'plugin/block') {
     const values = element.props.values;
     if (!object(values)) return null;
     const updated = { ...values };
-    if (value === undefined) delete updated[field];
-    else updated[field] = value;
+    for (const [field, value] of Object.entries(patch)) {
+      if (value === undefined) delete updated[field];
+      else updated[field] = value;
+    }
     element.props = { ...element.props, values: updated };
   } else {
-    if (value === undefined) {
-      const rest = { ...element.props };
-      delete rest[field];
-      element.props = rest;
-    } else {
-      element.props = { ...element.props, [field]: value };
+    const updated = { ...element.props };
+    for (const [field, value] of Object.entries(patch)) {
+      if (value === undefined) delete updated[field];
+      else updated[field] = value;
     }
+    element.props = updated;
   }
   return next;
 }

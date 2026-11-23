@@ -934,7 +934,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           Có thay đổi chưa lưu trong trình soạn thảo
         </h2>
         <p className="mt-2 text-sm text-zinc-600">
-          Bạn muốn lưu các chỉnh sửa hiện tại trước khi mở OpenDash Studio (Trình dựng trang) không?
+          Bạn muốn lưu các chỉnh sửa hiện tại trước khi mở Tùy chỉnh giao diện (Trình dựng trang) không?
         </p>
         <div className="mt-4 flex flex-wrap justify-end gap-2">
           {entryId !== null && (

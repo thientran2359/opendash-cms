@@ -263,6 +263,31 @@ pub async fn collect_pins_in_tx(
         }
     }
 
+    // 5b. Global site option values + global option media refs
+    let global_rows = sqlx::query("SELECT option_key, value_json FROM site_global_option_values")
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut seen_global_opts = std::collections::HashSet::new();
+    for row in global_rows {
+        let option_key: String = row.try_get("option_key")?;
+        let value_json: String = row.try_get("value_json")?;
+        if parse_json_and_check_pin(&value_json, media_id, "site_global_option_values")? {
+            seen_global_opts.insert(option_key.clone());
+            push_pin(&mut summary, "site_global_option", option_key);
+        }
+    }
+    let global_ref_rows =
+        sqlx::query("SELECT option_key FROM site_global_option_media_refs WHERE media_id = ?")
+            .bind(media_id)
+            .fetch_all(&mut *conn)
+            .await?;
+    for row in global_ref_rows {
+        let option_key: String = row.try_get("option_key")?;
+        if !seen_global_opts.contains(&option_key) {
+            push_pin(&mut summary, "site_global_option", option_key);
+        }
+    }
+
     // 6. Entry SEO + Home SEO
     let entry_seo_rows = sqlx::query("SELECT entry_id FROM entry_seo WHERE og_image_id = ?")
         .bind(media_id)

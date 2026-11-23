@@ -7,14 +7,15 @@ import type { AuthUser, BlockCatalogItemDto, BlockPropValue, BlockRegistry } fro
 import type { BuilderDiagnostic, HomepageOpen, OverrideRole, TemplateTargetInput } from '../api/builder.ts';
 import type { ParsedRoute } from '../shell/router.ts';
 import {
-  type BuilderDocument, type BuilderElement, type BuilderRow, type BuilderViewport, type ElementBinding, type ElementType,
-  type InsertableElementType, type ListProps, type NodeKind, type ResponsiveAlign, type ResponsiveField,
-  type StudioBuilderClipboard,
+  type BoxSpacing, type BuilderDocument, type BuilderElement, type BuilderViewport, type ElementBinding, type ElementType,
+  type InsertableElementType, type ListProps, type NodeKind, type NodeMeta, type ResponsiveAlign, type ResponsiveField,
+  type SectionStyle, type StudioBuilderClipboard,
   ELEMENT_TYPES, EMPTY_DOCUMENT, VIEWPORT_WIDTHS, VIEWPORT_LABELS,
-  allNodes, appendNode, appendRowWithColumns, canDeleteElement, canPasteOptions, cloneWithFreshNodeIds,
-  copyNodeOptions, countElementsByType, duplicateNode, isElement, isLockedElement, isProtectedNode, locate, moveNode,
-  pasteNodeOptions, preservesAnchors, reorderSiblingNode,
-  removeNode, setElementBinding, setListProps, setNodeField, setResponsiveField,
+  allNodes, appendFreeformElement, appendNode, appendRowWithColumns, canDeleteElement, canPasteOptions, cloneWithFreshNodeIds,
+  copyNodeOptions, countElementsByType, duplicateNode, isElement, isLockedElement, isProtectedNode, locate, moveNode, nodeTitle,
+  pasteNodeOptions, patchNodeFields, preservesAnchors, reorderSiblingNode,
+  removeNode, setContainerBoxSpacing, setElementBinding, setListProps, setNodeField, setNodeMeta, setResponsiveField, setSectionStyle,
+  syncContainerResponsiveToDesktop, visibleNodesInTree,
 } from './document.ts';
 import { BuilderTree } from './BuilderTree.tsx';
 import { BuilderCanvas } from './BuilderCanvas.tsx';
@@ -76,6 +77,7 @@ export interface BuilderEditorCoreProps {
   menuRequest?: StudioMenuRequest | null;
   onMenuRequestHandled?: () => void;
   canvasPickSeq?: number;
+  openPatternSeq?: number;
   addTargetParentId: string | null;
   onAddTargetParentIdChange: (id: string | null) => void;
   clipboard: StudioBuilderClipboard | null;
@@ -114,6 +116,7 @@ export function BuilderEditorCore({
   menuRequest,
   onMenuRequestHandled,
   canvasPickSeq,
+  openPatternSeq = 0,
   addTargetParentId,
   onAddTargetParentIdChange,
   clipboard,
@@ -143,11 +146,18 @@ export function BuilderEditorCore({
   onMessage,
   onApiError,
 }: BuilderEditorCoreProps) {
-  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
-  const [mediaTargetColumnId, setMediaTargetColumnId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [mediaTargetParentId, setMediaTargetParentId] = useState<string | null | undefined>(undefined);
   const [blockSchemas, setBlockSchemas] = useState<BlockCatalogItemDto[]>([]);
   const [showPatternLibrary, setShowPatternLibrary] = useState(false);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
+  const previousPatternSeqRef = useRef(openPatternSeq);
+
+  useEffect(() => {
+    if (previousPatternSeqRef.current === openPatternSeq) return;
+    previousPatternSeqRef.current = openPatternSeq;
+    if (openPatternSeq > 0) setShowPatternLibrary(true);
+  }, [openPatternSeq]);
 
   const insertableTypes = ELEMENT_TYPES.filter(type => {
     if (type === 'core/pattern_ref' && !allowPatternRef) return false;
@@ -192,19 +202,19 @@ export function BuilderEditorCore({
     onBuilderViewChange('add');
   };
 
-  const finishInsert = (next: BuilderDocument, id: string): boolean => {
+  const finishInsert = (next: BuilderDocument, id: string, openProperties = false): boolean => {
     if (!applyUpdate(next, id)) return false;
-    setCollapsedIds(previous => {
-      const expanded = new Set(previous);
-      const location = locate(next, id);
-      let parent = location?.parentId;
+    setExpandedIds(previous => {
+      const nextExpanded = new Set(previous);
+      const visibleById = new Map(visibleNodesInTree(next).map(item => [item.node.id, item]));
+      let parent = visibleById.get(id)?.visualParentId ?? null;
       while (parent) {
-        expanded.delete(parent);
-        parent = locate(next, parent)?.parentId ?? null;
+        nextExpanded.add(parent);
+        parent = visibleById.get(parent)?.visualParentId ?? null;
       }
-      return expanded;
+      return nextExpanded;
     });
-    onBuilderViewChange('tree');
+    onBuilderViewChange(openProperties ? 'properties' : 'tree');
     onAddTargetParentIdChange(null);
     return true;
   };
@@ -237,19 +247,29 @@ export function BuilderEditorCore({
     }
     const schema = blockSchemas.find(item => item.block_id === selectedType
       && item.status === 'active' && item.declaration_state === 'declared')?.schema;
+    const parentLoc = locate(draft, parentId);
+    if (kind === 'element' && (parentId === null || parentLoc?.kind === 'section' || parentLoc?.kind === 'column')) {
+      const next = appendFreeformElement(draft, parentId, selectedType, { blockSchema: schema });
+      if (!next) {
+        onMessage?.('Vị trí thêm node không hợp lệ.', true);
+        return;
+      }
+      finishInsert(next.document, next.id, true);
+      return;
+    }
     const next = appendNode(draft, parentId, kind, selectedType, { blockSchema: schema });
     if (!next) {
       onMessage?.('Vị trí thêm node không hợp lệ.', true);
       return;
     }
-    finishInsert(next.document, next.id);
+    finishInsert(next.document, next.id, kind === 'element');
   };
 
-  const addRow = (sectionId: string, count: 1 | 2 | 3) => {
+  const addRow = (parentId: string | null, count: 1 | 2 | 3) => {
     if (disabled) return;
-    const next = appendRowWithColumns(draft, sectionId, count);
+    const next = appendRowWithColumns(draft, parentId, count);
     if (next) finishInsert(next.document, next.id);
-    else onMessage?.('Không thể thêm Row vào Section này.', true);
+    else onMessage?.('Không thể thêm Row tại vị trí này.', true);
   };
 
   const duplicate = (id: string) => {
@@ -323,6 +343,35 @@ export function BuilderEditorCore({
     applyUpdate(setNodeField(draft, id, field, value), id);
   };
 
+  const patchProps = (id: string, patch: Record<string, BlockPropValue | undefined>) => {
+    if (disabled) return;
+    const entry = locate(draft, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registry, blockSchemas)) return;
+    applyUpdate(patchNodeFields(draft, id, patch), id);
+  };
+
+  const editBoxSpacing = (
+    id: string, target: BuilderViewport, kind: 'padding' | 'margin', spacing: BoxSpacing | null,
+  ) => {
+    if (disabled) return;
+    const next = setContainerBoxSpacing(draft, id, target, kind, spacing);
+    if (!next) {
+      onMessage?.('Thuộc tính khoảng cách (padding/margin) không hợp lệ.', true);
+      return;
+    }
+    applyUpdate(next, id);
+  };
+
+  const editSectionStyle = (id: string, patch: Partial<SectionStyle>) => {
+    if (disabled) return;
+    const next = setSectionStyle(draft, id, patch);
+    if (!next) {
+      onMessage?.('Thuộc tính Section không hợp lệ.', true);
+      return;
+    }
+    applyUpdate(next, id);
+  };
+
   const editBinding = (id: string, binding: ElementBinding | null) => {
     if (disabled) return;
     const entry = locate(draft, id);
@@ -347,6 +396,12 @@ export function BuilderEditorCore({
       return;
     }
     applyUpdate(next, id);
+  };
+
+  const syncResponsiveField = (id: string, property: ResponsiveField | 'padding' | 'margin') => {
+    if (disabled) return;
+    const next = syncContainerResponsiveToDesktop(draft, id, property);
+    if (next) applyUpdate(next, id);
   };
 
   const insertThemePattern = (sourceDocument: BuilderDocument, title: string, appendAtEnd = false): boolean => {
@@ -396,60 +451,58 @@ export function BuilderEditorCore({
     const mediaId = ids[0];
     if (!mediaId || !/^[a-zA-Z0-9_-]{1,128}$/.test(mediaId) || !csrfToken || disabled) return;
     const selected = locate(draft, selectedId);
-    if (!mediaTargetColumnId && selected?.kind === 'element' && isElement(selected.node)
+    if (mediaTargetParentId === undefined && selected?.kind === 'element' && isElement(selected.node)
         && selected.node.type === 'core/image' && !isLockedElement(selected.node, registry, blockSchemas)) {
       if (!applyUpdate(setNodeField(draft, selected.node.id, 'media_id', mediaId), selected.node.id)) return;
     } else {
-      let next = draft;
-      let columnId: string | undefined = mediaTargetColumnId ?? undefined;
-      if (!columnId && selected?.kind === 'element') columnId = selected.parentId ?? undefined;
-      else if (!columnId && selected?.kind === 'column') columnId = selected.node.id;
-      if (mediaTargetColumnId && locate(next, mediaTargetColumnId)?.kind !== 'column') return;
-      let sectionId = selected && selected.path.length > 0 ? next.sections[selected.path[0]]?.id : undefined;
-      let rowId = selected && selected.path.length > 1 ? next.sections[selected.path[0]]?.children[selected.path[1]]?.id : undefined;
-      if (!columnId) {
-        if (!sectionId) {
-          const section = appendNode(next, null, 'section', 'core/image');
-          if (!section) return;
-          next = section.document;
-          sectionId = section.id;
-        }
-        if (!rowId) {
-          const row = appendNode(next, sectionId, 'row', 'core/image');
-          if (!row) return;
-          next = row.document;
-          rowId = row.id;
-        }
-        const row = locate(next, rowId);
-        if (row?.kind === 'row' && !columnId) {
-          const rowNode = row.node as BuilderRow;
-          columnId = rowNode.children[rowNode.children.length - 1]?.id;
-        }
-        if (!columnId) {
-          const column = appendNode(next, rowId, 'column', 'core/image');
-          if (!column) return;
-          next = column.document;
-          columnId = column.id;
-        }
+      let targetParent: string | null = null;
+      if (mediaTargetParentId !== undefined) {
+        targetParent = mediaTargetParentId;
+      } else if (selected?.kind === 'column' || selected?.kind === 'section') {
+        targetParent = selected.node.id;
+      } else if (selected?.kind === 'element') {
+        targetParent = selected.parentId;
       }
-      const inserted = appendNode(next, columnId, 'element', 'core/image');
+      const inserted = appendFreeformElement(draft, targetParent, 'core/image');
       if (!inserted) return;
       const populated = setNodeField(inserted.document, inserted.id, 'media_id', mediaId);
-      if (!populated || !finishInsert(populated, inserted.id)) return;
+      if (!populated || !finishInsert(populated, inserted.id, true)) return;
     }
     setShowMediaPicker(false);
-    setMediaTargetColumnId(null);
+    setMediaTargetParentId(undefined);
     onMessage?.('Đã chèn ảnh từ Media Library vào bản nháp. Chưa lưu lên website.');
   };
 
-  const openMedia = (columnId: string | null = null) => {
-    setMediaTargetColumnId(columnId);
+  const openMedia = (parentId: string | null | undefined = undefined) => {
+    setMediaTargetParentId(parentId);
     setShowMediaPicker(true);
   };
+
+  const selectedLoc = locate(draft, selectedId);
+  const addParentLoc = locate(draft, addTargetParentId);
+  const inTreeHeaderTitle = builderView === 'properties'
+    ? (selectedLoc ? nodeTitle(selectedLoc, blockSchemas) : 'Chỉnh sửa Block')
+    : (addParentLoc ? `Thêm vào ${nodeTitle(addParentLoc, blockSchemas)}` : 'Thêm Block');
 
   return (
     <div className="od-studio-builder-core space-y-3" data-testid="studio-builder-core">
       <style>{'.od-studio-builder-core .btn-secondary{background:#fff;color:#27272a;border:1px solid #d4d4d8;border-radius:6px;padding:4px 8px;font-weight:500}.od-studio-builder-core .btn-danger{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;border-radius:6px;padding:4px 8px;font-weight:500}'}</style>
+
+      {builderView !== 'tree' && (
+        <div className="mb-2 flex items-center border-b border-zinc-200 pb-2">
+          <button
+            type="button"
+            onClick={() => { onBuilderViewChange('tree'); onAddTargetParentIdChange(null); }}
+            data-testid="studio-inline-back-btn"
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-xs font-semibold text-zinc-900 hover:bg-zinc-100"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-zinc-500">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+            <span className="truncate">{inTreeHeaderTitle}</span>
+          </button>
+        </div>
+      )}
 
       {(hadFreeformWrap || hadRecovery) && (
         <div role="status" className="rounded-lg border border-sky-200 bg-sky-50 p-2.5 text-xs text-sky-900" data-testid="studio-block-notice">
@@ -476,8 +529,8 @@ export function BuilderEditorCore({
           registry={registry}
           blockSchemas={blockSchemas}
           disabled={disabled}
-          collapsedIds={collapsedIds}
-          onCollapsedIdsChange={setCollapsedIds}
+          expandedIds={expandedIds}
+          onExpandedIdsChange={setExpandedIds}
           menuRequest={menuRequest}
           onMenuRequestHandled={onMenuRequestHandled}
           canvasPickSeq={canvasPickSeq}
@@ -516,9 +569,17 @@ export function BuilderEditorCore({
             hideHeader
             hideDeleteButton
             onChange={editField}
+            onPatchProps={patchProps}
+            onMetaChange={(id, patch: Partial<NodeMeta>) => {
+              const next = setNodeMeta(draft, id, patch);
+              if (next) applyUpdate(next, id);
+            }}
+            onBoxSpacingChange={editBoxSpacing}
+            onSectionStyleChange={editSectionStyle}
             onBindingChange={editBinding}
             onListChange={editList}
             onResponsiveChange={editResponsive}
+            onSyncResponsiveField={syncResponsiveField}
             onError={onApiError}
         />
       )}
@@ -553,7 +614,7 @@ export function BuilderEditorCore({
           csrfToken={csrfToken}
           selectedIds={[]}
           onApply={insertMediaImage}
-          onClose={() => { setShowMediaPicker(false); setMediaTargetColumnId(null); }}
+          onClose={() => { setShowMediaPicker(false); setMediaTargetParentId(undefined); }}
           onError={onApiError}
         />
       )}
@@ -1010,6 +1071,23 @@ export function BuilderWorkspace({
     if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current, blockSchemasRef.current)) return;
     changeDraft(setNodeField(draftRef.current, id, field, value), id);
   };
+  const patchProps = (id: string, patch: Record<string, BlockPropValue | undefined>) => {
+    const entry = locate(draftRef.current, id);
+    if (!entry || !isElement(entry.node) || isLockedElement(entry.node, registryRef.current, blockSchemasRef.current)) return;
+    changeDraft(patchNodeFields(draftRef.current, id, patch), id);
+  };
+  const editBoxSpacing = (
+    id: string, target: BuilderViewport, kind: 'padding' | 'margin', spacing: BoxSpacing | null,
+  ) => {
+    const next = setContainerBoxSpacing(draftRef.current, id, target, kind, spacing);
+    if (!next) return message('Thuộc tính khoảng cách không hợp lệ.', true);
+    changeDraft(next, id);
+  };
+  const editSectionStyle = (id: string, patch: Partial<SectionStyle>) => {
+    const next = setSectionStyle(draftRef.current, id, patch);
+    if (!next) return message('Thuộc tính Section không hợp lệ.', true);
+    changeDraft(next, id);
+  };
   // D1 (#104): typed binding objects cannot be passed through the static
   // string/number edit handler; reuse the same immutable draft/CAS pipeline.
   const editBinding = (id: string, binding: ElementBinding | null) => {
@@ -1031,6 +1109,10 @@ export function BuilderWorkspace({
     const next = setResponsiveField(draftRef.current, id, target, field, value);
     if (!next) return message('Thuộc tính responsive không hợp lệ.', true);
     changeDraft(next, id);
+  };
+  const syncResponsiveField = (id: string, property: ResponsiveField | 'padding' | 'margin') => {
+    const next = syncContainerResponsiveToDesktop(draftRef.current, id, property);
+    if (next) changeDraft(next, id);
   };
 
   const preview = async () => {
@@ -1437,8 +1519,16 @@ export function BuilderWorkspace({
             allowRouteContext={targetRole === 'single' || targetRole === 'page'}
 
             onChange={editField}
+            onPatchProps={patchProps}
+            onMetaChange={(id, patch: Partial<NodeMeta>) => {
+              const next = setNodeMeta(draftRef.current, id, patch);
+              if (next) changeDraft(next, id);
+            }}
+            onBoxSpacingChange={editBoxSpacing}
+            onSectionStyleChange={editSectionStyle}
             onBindingChange={editBinding} onListChange={editList}
-            onResponsiveChange={editResponsive} onError={onApiError} />
+            onResponsiveChange={editResponsive}
+            onSyncResponsiveField={syncResponsiveField} onError={onApiError} />
         </div>
       </div>
       {showPatternLibrary && <PatternLibraryModal key={themeRevision}

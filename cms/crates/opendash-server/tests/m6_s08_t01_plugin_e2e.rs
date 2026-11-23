@@ -490,15 +490,20 @@ async fn m6_s08_t01_plugin_zip_e2e_content_builder_egress_disable_restart_and_sn
         schema_version: 1,
         sections: vec![SectionNode {
             id: "sec-1".into(),
+            meta: None,
             responsive: None,
+            style: None,
             children: vec![RowNode {
                 id: "row-1".into(),
+                meta: None,
                 responsive: None,
                 children: vec![ColumnNode {
                     id: "col-1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ElementNode {
                         id: "el-1".into(),
+                        meta: None,
                         content: ElementContent::Known(KnownElement::PluginBlock(
                             PluginBlockProps {
                                 block_id: "e2e-suite/jobs-card".into(),

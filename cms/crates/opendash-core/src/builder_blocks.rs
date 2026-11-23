@@ -18,9 +18,10 @@ use crate::{
     builder::{
         BUILDER_SCHEMA_VERSION, BindingTarget, BuilderDocument, ButtonProps, ColumnNode,
         ContactFormProps, ContentSlotProps, ElementBinding, ElementContent, ElementNode,
-        HeadingProps, ImageProps, KnownElement, LegacyBlockProps, ListProps, PatternRefProps,
-        PluginBlockProps, Responsive, RowNode, SectionNode, TemplatePartProps, TextProps,
-        VideoProps,
+        HeadingProps, ImageProps, KnownElement, LegacyBlockProps, ListProps, NodeMeta,
+        PatternRefProps, PluginBlockProps, Responsive, RowNode, SectionNode, SectionStyle,
+        TemplatePartProps, TextProps, VideoProps, empty_node_meta_option,
+        empty_section_style_option,
     },
     id::valid_package_id,
     registry::{DeclarationState, ProviderStatus, RegistryCatalog},
@@ -103,11 +104,19 @@ pub fn encode_comment_json<T: Serialize>(value: &T) -> Result<String, BuilderBlo
     Ok(encoded)
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Serialize)]
 struct ContainerMetaRef<'a> {
     id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     responsive: Option<&'a Responsive>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    style: Option<&'a SectionStyle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<&'a NodeMeta>,
 }
 
 #[derive(Deserialize)]
@@ -116,11 +125,19 @@ struct ContainerMeta {
     id: String,
     #[serde(default)]
     responsive: Option<Responsive>,
+    #[serde(default)]
+    style: Option<SectionStyle>,
+    #[serde(default)]
+    meta: Option<NodeMeta>,
 }
 
 #[derive(Serialize)]
 struct PairedTextMetaRef<'a> {
     id: &'a str,
+    #[serde(default, skip_serializing_if = "is_false")]
+    rich: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<&'a NodeMeta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     binding: Option<&'a ElementBinding>,
 }
@@ -130,12 +147,18 @@ struct PairedTextMetaRef<'a> {
 struct PairedTextMeta {
     id: String,
     #[serde(default)]
+    rich: bool,
+    #[serde(default)]
+    meta: Option<NodeMeta>,
+    #[serde(default)]
     binding: Option<ElementBinding>,
 }
 
 #[derive(Serialize)]
 struct ElementWithIdRef<'a, P: Serialize> {
     id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<&'a NodeMeta>,
     #[serde(flatten)]
     props: &'a P,
 }
@@ -143,6 +166,8 @@ struct ElementWithIdRef<'a, P: Serialize> {
 #[derive(Serialize)]
 struct UnresolvedRef<'a> {
     id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<&'a NodeMeta>,
     raw: &'a BTreeMap<String, Value>,
 }
 
@@ -150,6 +175,8 @@ struct UnresolvedRef<'a> {
 #[serde(deny_unknown_fields)]
 struct UnresolvedPayload {
     id: String,
+    #[serde(default)]
+    meta: Option<NodeMeta>,
     raw: BTreeMap<String, Value>,
 }
 
@@ -164,9 +191,14 @@ fn serialize_self_closing<P: Serialize>(
     out: &mut String,
     tag: &str,
     id: &str,
+    meta: Option<&NodeMeta>,
     props: &P,
 ) -> Result<(), BuilderBlockError> {
-    let payload = encode_comment_json(&ElementWithIdRef { id, props })?;
+    let payload = encode_comment_json(&ElementWithIdRef {
+        id,
+        meta: meta.filter(|m| !m.is_empty()),
+        props,
+    })?;
     push_line(out, &format!("<!-- od:{tag} {payload} /-->"));
     Ok(())
 }
@@ -190,6 +222,14 @@ pub fn serialize_builder_document_to_blocks(
         let sec_meta = encode_comment_json(&ContainerMetaRef {
             id: &section.id,
             responsive: section.responsive.as_ref().filter(|r| !r.is_empty()),
+            style: section
+                .style
+                .as_ref()
+                .filter(|s| !empty_section_style_option(&Some((*s).clone()))),
+            meta: section
+                .meta
+                .as_ref()
+                .filter(|m| !empty_node_meta_option(&Some((*m).clone()))),
         })?;
         push_line(&mut out, &format!("<!-- od:section {sec_meta} -->"));
 
@@ -197,6 +237,8 @@ pub fn serialize_builder_document_to_blocks(
             let row_meta = encode_comment_json(&ContainerMetaRef {
                 id: &row.id,
                 responsive: row.responsive.as_ref().filter(|r| !r.is_empty()),
+                style: None,
+                meta: row.meta.as_ref().filter(|m| !m.is_empty()),
             })?;
             push_line(&mut out, &format!("<!-- od:row {row_meta} -->"));
 
@@ -204,21 +246,38 @@ pub fn serialize_builder_document_to_blocks(
                 let col_meta = encode_comment_json(&ContainerMetaRef {
                     id: &col.id,
                     responsive: col.responsive.as_ref().filter(|r| !r.is_empty()),
+                    style: None,
+                    meta: col.meta.as_ref().filter(|m| !m.is_empty()),
                 })?;
                 push_line(&mut out, &format!("<!-- od:column {col_meta} -->"));
 
                 for element in &col.children {
+                    let el_meta = element.meta.as_ref().filter(|m| !m.is_empty());
                     match &element.content {
                         ElementContent::Known(known) => match known {
                             KnownElement::Heading(props) => {
-                                serialize_self_closing(&mut out, "heading", &element.id, props)?;
+                                serialize_self_closing(
+                                    &mut out,
+                                    "heading",
+                                    &element.id,
+                                    el_meta,
+                                    props,
+                                )?;
                             }
                             KnownElement::Text(props) => {
                                 if text_has_comment_boundary(&props.text) {
-                                    serialize_self_closing(&mut out, "text", &element.id, props)?;
+                                    serialize_self_closing(
+                                        &mut out,
+                                        "text",
+                                        &element.id,
+                                        el_meta,
+                                        props,
+                                    )?;
                                 } else {
                                     let meta = encode_comment_json(&PairedTextMetaRef {
                                         id: &element.id,
+                                        rich: props.rich,
+                                        meta: el_meta,
                                         binding: props.binding.as_ref(),
                                     })?;
                                     push_line(&mut out, &format!("<!-- od:text {meta} -->"));
@@ -231,22 +290,47 @@ pub fn serialize_builder_document_to_blocks(
                                 }
                             }
                             KnownElement::Image(props) => {
-                                serialize_self_closing(&mut out, "image", &element.id, props)?;
+                                serialize_self_closing(
+                                    &mut out,
+                                    "image",
+                                    &element.id,
+                                    el_meta,
+                                    props,
+                                )?;
                             }
                             KnownElement::Video(props) => {
-                                serialize_self_closing(&mut out, "video", &element.id, props)?;
+                                serialize_self_closing(
+                                    &mut out,
+                                    "video",
+                                    &element.id,
+                                    el_meta,
+                                    props,
+                                )?;
                             }
                             KnownElement::Button(props) => {
-                                serialize_self_closing(&mut out, "button", &element.id, props)?;
+                                serialize_self_closing(
+                                    &mut out,
+                                    "button",
+                                    &element.id,
+                                    el_meta,
+                                    props,
+                                )?;
                             }
                             KnownElement::List(props) => {
-                                serialize_self_closing(&mut out, "list", &element.id, props)?;
+                                serialize_self_closing(
+                                    &mut out,
+                                    "list",
+                                    &element.id,
+                                    el_meta,
+                                    props,
+                                )?;
                             }
                             KnownElement::ContactForm(props) => {
                                 serialize_self_closing(
                                     &mut out,
                                     "contact_form",
                                     &element.id,
+                                    el_meta,
                                     props,
                                 )?;
                             }
@@ -255,6 +339,7 @@ pub fn serialize_builder_document_to_blocks(
                                     &mut out,
                                     "content_slot",
                                     &element.id,
+                                    el_meta,
                                     props,
                                 )?;
                             }
@@ -263,6 +348,7 @@ pub fn serialize_builder_document_to_blocks(
                                     &mut out,
                                     "pattern_ref",
                                     &element.id,
+                                    el_meta,
                                     props,
                                 )?;
                             }
@@ -271,6 +357,7 @@ pub fn serialize_builder_document_to_blocks(
                                     &mut out,
                                     "template_part",
                                     &element.id,
+                                    el_meta,
                                     props,
                                 )?;
                             }
@@ -279,16 +366,24 @@ pub fn serialize_builder_document_to_blocks(
                                     &mut out,
                                     "plugin_block",
                                     &element.id,
+                                    el_meta,
                                     props,
                                 )?;
                             }
                             KnownElement::Legacy(props) => {
-                                serialize_self_closing(&mut out, "legacy", &element.id, props)?;
+                                serialize_self_closing(
+                                    &mut out,
+                                    "legacy",
+                                    &element.id,
+                                    el_meta,
+                                    props,
+                                )?;
                             }
                         },
                         ElementContent::Unresolved(raw) => {
                             let payload = encode_comment_json(&UnresolvedRef {
                                 id: &element.id,
+                                meta: el_meta,
                                 raw,
                             })?;
                             push_line(&mut out, &format!("<!-- od:unresolved {payload} /-->"));
@@ -360,16 +455,20 @@ fn chunk_text_16k(text: &str) -> Vec<String> {
 
 fn decode_props_with_id<P: serde::de::DeserializeOwned>(
     json_str: &str,
-) -> Result<(String, P), &'static str> {
+) -> Result<(String, Option<NodeMeta>, P), &'static str> {
     let mut map: serde_json::Map<String, Value> =
         serde_json::from_str(json_str).map_err(|_| "Invalid block JSON payload")?;
     let id_val = map.remove("id").ok_or("Missing block node id")?;
     let Value::String(id) = id_val else {
         return Err("Block node id must be a string");
     };
+    let meta: Option<NodeMeta> = match map.remove("meta") {
+        Some(v) => serde_json::from_value(v).map_err(|_| "Invalid block meta payload")?,
+        None => None,
+    };
     let props: P =
         serde_json::from_value(Value::Object(map)).map_err(|_| "Invalid block props payload")?;
-    Ok((id, props))
+    Ok((id, meta, props))
 }
 
 fn find_next_block_marker(haystack: &str, from: usize) -> Option<(usize, bool)> {
@@ -451,6 +550,7 @@ impl ParserState {
                 let row_id = self.unique_prefixed(&format!("row-rec-{}", self.rec_seq));
                 let row = RowNode {
                     id: row_id,
+                    meta: None,
                     responsive: None,
                     children: vec![col],
                 };
@@ -461,7 +561,9 @@ impl ParserState {
                     let sec_id = self.unique_prefixed(&format!("sec-rec-{}", self.rec_seq));
                     self.sections.push(SectionNode {
                         id: sec_id,
+                        meta: None,
                         responsive: None,
+                        style: None,
                         children: vec![row],
                     });
                 }
@@ -479,7 +581,9 @@ impl ParserState {
                 let sec_id = self.unique_prefixed(&format!("sec-rec-{}", self.rec_seq));
                 self.sections.push(SectionNode {
                     id: sec_id,
+                    meta: None,
                     responsive: None,
+                    style: None,
                     children: vec![row],
                 });
             }
@@ -524,7 +628,9 @@ impl ParserState {
             let id = self.unique_prefixed(&format!("sec-rec-{n}"));
             self.cur_section = Some(SectionNode {
                 id,
+                meta: None,
                 responsive: None,
+                style: None,
                 children: Vec::new(),
             });
         }
@@ -534,6 +640,7 @@ impl ParserState {
             let id = self.unique_prefixed(&format!("row-rec-{n}"));
             self.cur_row = Some(RowNode {
                 id,
+                meta: None,
                 responsive: None,
                 children: Vec::new(),
             });
@@ -544,6 +651,7 @@ impl ParserState {
             let id = self.unique_prefixed(&format!("col-rec-{n}"));
             self.cur_col = Some(ColumnNode {
                 id,
+                meta: None,
                 responsive: None,
                 children: Vec::new(),
             });
@@ -573,9 +681,10 @@ impl ParserState {
                 let id = self.unique_prefixed(&format!("el-wrap-{wrap_idx}-{}", i + 1));
                 elements.push(ElementNode {
                     id,
+                    meta: None,
                     content: ElementContent::Known(KnownElement::Text(TextProps {
                         text: chunk,
-                        binding: None,
+                        ..Default::default()
                     })),
                 });
             }
@@ -588,14 +697,16 @@ impl ParserState {
             let id = self.unique_prefixed(&format!("el-wrap-{wrap_idx}-{}", i + 1));
             elements.push(ElementNode {
                 id,
+                meta: None,
                 content: ElementContent::Known(KnownElement::Text(TextProps {
                     text: chunk,
-                    binding: None,
+                    ..Default::default()
                 })),
             });
         }
         let col = ColumnNode {
             id: col_id,
+            meta: None,
             responsive: None,
             children: elements,
         };
@@ -605,6 +716,7 @@ impl ParserState {
         }
         let row = RowNode {
             id: row_id,
+            meta: None,
             responsive: None,
             children: vec![col],
         };
@@ -614,7 +726,9 @@ impl ParserState {
         }
         self.sections.push(SectionNode {
             id: sec_id,
+            meta: None,
             responsive: None,
+            style: None,
             children: vec![row],
         });
     }
@@ -639,9 +753,10 @@ impl ParserState {
             }
             elements.push(ElementNode {
                 id,
+                meta: None,
                 content: ElementContent::Known(KnownElement::Text(TextProps {
                     text: chunk,
-                    binding: None,
+                    ..Default::default()
                 })),
             });
         }
@@ -656,6 +771,7 @@ impl ParserState {
         let n = self.rec_seq;
         let col = ColumnNode {
             id: self.unique_prefixed(&format!("col-rec-{n}")),
+            meta: None,
             responsive: None,
             children: elements,
         };
@@ -665,6 +781,7 @@ impl ParserState {
         }
         let row = RowNode {
             id: self.unique_prefixed(&format!("row-rec-{n}")),
+            meta: None,
             responsive: None,
             children: vec![col],
         };
@@ -675,7 +792,9 @@ impl ParserState {
         let sec_id = self.unique_prefixed(&format!("sec-rec-{n}"));
         self.sections.push(SectionNode {
             id: sec_id,
+            meta: None,
             responsive: None,
+            style: None,
             children: vec![row],
         });
     }
@@ -753,86 +872,98 @@ impl ParserState {
 fn parse_leaf_content(tag: &str, json_str: &str) -> Result<ElementNode, &'static str> {
     match tag {
         "heading" => {
-            let (id, props) = decode_props_with_id::<HeadingProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<HeadingProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::Heading(props)),
             })
         }
         "text" => {
-            let (id, props) = decode_props_with_id::<TextProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<TextProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::Text(props)),
             })
         }
         "image" => {
-            let (id, props) = decode_props_with_id::<ImageProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<ImageProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::Image(props)),
             })
         }
         "video" => {
-            let (id, props) = decode_props_with_id::<VideoProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<VideoProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::Video(props)),
             })
         }
         "button" => {
-            let (id, props) = decode_props_with_id::<ButtonProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<ButtonProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::Button(props)),
             })
         }
         "list" => {
-            let (id, props) = decode_props_with_id::<ListProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<ListProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::List(props)),
             })
         }
         "contact_form" => {
-            let (id, props) = decode_props_with_id::<ContactFormProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<ContactFormProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::ContactForm(props)),
             })
         }
         "content_slot" => {
-            let (id, props) = decode_props_with_id::<ContentSlotProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<ContentSlotProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::ContentSlot(props)),
             })
         }
         "pattern_ref" => {
-            let (id, props) = decode_props_with_id::<PatternRefProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<PatternRefProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::PatternRef(props)),
             })
         }
         "template_part" => {
-            let (id, props) = decode_props_with_id::<TemplatePartProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<TemplatePartProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::TemplatePart(props)),
             })
         }
         "plugin_block" => {
-            let (id, props) = decode_props_with_id::<PluginBlockProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<PluginBlockProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::PluginBlock(props)),
             })
         }
         "legacy" => {
-            let (id, props) = decode_props_with_id::<LegacyBlockProps>(json_str)?;
+            let (id, meta, props) = decode_props_with_id::<LegacyBlockProps>(json_str)?;
             Ok(ElementNode {
                 id,
+                meta,
                 content: ElementContent::Known(KnownElement::Legacy(props)),
             })
         }
@@ -841,6 +972,7 @@ fn parse_leaf_content(tag: &str, json_str: &str) -> Result<ElementNode, &'static
                 serde_json::from_str(json_str).map_err(|_| "Invalid unresolved block JSON")?;
             Ok(ElementNode {
                 id: payload.id,
+                meta: payload.meta,
                 content: ElementContent::Unresolved(payload.raw),
             })
         }
@@ -1028,6 +1160,8 @@ fn parse_blocks_internal(
                 state.cur_section = Some(SectionNode {
                     id: meta.id,
                     responsive: meta.responsive,
+                    style: meta.style,
+                    meta: meta.meta,
                     children: Vec::new(),
                 });
                 cursor = comment_end;
@@ -1049,6 +1183,14 @@ fn parse_blocks_internal(
                     cursor = comment_end;
                     continue;
                 };
+                if meta.style.is_some() {
+                    if strict {
+                        return Err(BuilderBlockError::Invalid("od:row cannot carry style"));
+                    }
+                    state.push_recovered_region(comment_slice, "Invalid od:row style metadata");
+                    cursor = comment_end;
+                    continue;
+                }
                 if state.cur_section.is_none() {
                     if strict {
                         return Err(BuilderBlockError::Invalid(
@@ -1059,7 +1201,9 @@ fn parse_blocks_internal(
                     let sec_id = state.unique_prefixed(&format!("sec-rec-{}", state.rec_seq));
                     state.cur_section = Some(SectionNode {
                         id: sec_id,
+                        meta: None,
                         responsive: None,
+                        style: None,
                         children: Vec::new(),
                     });
                     state.record_recovery(&meta.id, "Created synthetic section for stray od:row");
@@ -1076,6 +1220,7 @@ fn parse_blocks_internal(
                 state.cur_row = Some(RowNode {
                     id: meta.id,
                     responsive: meta.responsive,
+                    meta: meta.meta,
                     children: Vec::new(),
                 });
                 cursor = comment_end;
@@ -1099,6 +1244,14 @@ fn parse_blocks_internal(
                     cursor = comment_end;
                     continue;
                 };
+                if meta.style.is_some() {
+                    if strict {
+                        return Err(BuilderBlockError::Invalid("od:column cannot carry style"));
+                    }
+                    state.push_recovered_region(comment_slice, "Invalid od:column style metadata");
+                    cursor = comment_end;
+                    continue;
+                }
                 if state.cur_row.is_none() {
                     if strict {
                         return Err(BuilderBlockError::Invalid("od:column found outside od:row"));
@@ -1108,7 +1261,9 @@ fn parse_blocks_internal(
                         let sec_id = state.unique_prefixed(&format!("sec-rec-{}", state.rec_seq));
                         state.cur_section = Some(SectionNode {
                             id: sec_id,
+                            meta: None,
                             responsive: None,
+                            style: None,
                             children: Vec::new(),
                         });
                     }
@@ -1116,6 +1271,7 @@ fn parse_blocks_internal(
                     let row_id = state.unique_prefixed(&format!("row-rec-{}", state.rec_seq));
                     state.cur_row = Some(RowNode {
                         id: row_id,
+                        meta: None,
                         responsive: None,
                         children: Vec::new(),
                     });
@@ -1136,6 +1292,7 @@ fn parse_blocks_internal(
                 state.cur_col = Some(ColumnNode {
                     id: meta.id,
                     responsive: meta.responsive,
+                    meta: meta.meta,
                     children: Vec::new(),
                 });
                 cursor = comment_end;
@@ -1162,8 +1319,10 @@ fn parse_blocks_internal(
                     if char_len <= MAX_TEXT_NODE_CHARS && !inner_text.contains('\0') {
                         let node = ElementNode {
                             id: meta.id,
+                            meta: meta.meta,
                             content: ElementContent::Known(KnownElement::Text(TextProps {
                                 text: inner_text.to_owned(),
+                                rich: meta.rich,
                                 binding: meta.binding,
                             })),
                         };
@@ -1189,8 +1348,10 @@ fn parse_blocks_internal(
                             }
                             state.push_element(ElementNode {
                                 id,
+                                meta: None,
                                 content: ElementContent::Known(KnownElement::Text(TextProps {
                                     text: chunk,
+                                    rich: meta.rich,
                                     binding: if i == 0 { meta.binding.clone() } else { None },
                                 })),
                             })?;
@@ -1341,8 +1502,19 @@ pub fn extract_block_refs_lenient_with_schemas(
 
         if let Ok((tag, json_str)) = split_tag_and_json(body_inner) {
             match tag {
+                "section" => {
+                    if let Ok(meta) = serde_json::from_str::<ContainerMeta>(json_str)
+                        && let Some(bg_media) = meta
+                            .style
+                            .as_ref()
+                            .and_then(|s| s.background_media_id.as_deref())
+                            .filter(|id| !id.is_empty())
+                    {
+                        refs.image_ids.insert(bg_media.to_owned());
+                    }
+                }
                 "image" => {
-                    if let Ok((_, props)) = decode_props_with_id::<ImageProps>(json_str)
+                    if let Ok((_, _, props)) = decode_props_with_id::<ImageProps>(json_str)
                         && !props.media_id.is_empty()
                         && !props
                             .binding
@@ -1353,7 +1525,7 @@ pub fn extract_block_refs_lenient_with_schemas(
                     }
                 }
                 "video" => {
-                    if let Ok((_, props)) = decode_props_with_id::<VideoProps>(json_str) {
+                    if let Ok((_, _, props)) = decode_props_with_id::<VideoProps>(json_str) {
                         if !props.media_id.is_empty() {
                             refs.video_ids.insert(props.media_id);
                         }
@@ -1365,12 +1537,12 @@ pub fn extract_block_refs_lenient_with_schemas(
                     }
                 }
                 "pattern_ref" => {
-                    if let Ok((_, props)) = decode_props_with_id::<PatternRefProps>(json_str) {
+                    if let Ok((_, _, props)) = decode_props_with_id::<PatternRefProps>(json_str) {
                         refs.pattern_ids.insert(props.pattern_id);
                     }
                 }
                 "plugin_block" => {
-                    if let Ok((_, props)) = decode_props_with_id::<PluginBlockProps>(json_str)
+                    if let Ok((_, _, props)) = decode_props_with_id::<PluginBlockProps>(json_str)
                         && let Some(entry) = schemas.get(&props.block_id)
                         && entry.status == ProviderStatus::Active
                         && entry.declaration_state == DeclarationState::Declared
@@ -1403,6 +1575,7 @@ mod tests {
     fn el(id: &str, content: KnownElement) -> ElementNode {
         ElementNode {
             id: id.into(),
+            meta: None,
             content: ElementContent::Known(content),
         }
     }
@@ -1417,6 +1590,8 @@ mod tests {
             schema_version: BUILDER_SCHEMA_VERSION,
             sections: vec![SectionNode {
                 id: "sec-1".into(),
+                meta: None,
+                style: None,
                 responsive: Some(Responsive {
                     desktop: Some(ResponsiveStyle {
                         padding_px: Some(24),
@@ -1430,6 +1605,7 @@ mod tests {
                 }),
                 children: vec![RowNode {
                     id: "row-1".into(),
+                    meta: None,
                     responsive: Some(Responsive {
                         desktop: Some(ResponsiveStyle {
                             gap_px: Some(16),
@@ -1440,6 +1616,7 @@ mod tests {
                     }),
                     children: vec![ColumnNode {
                         id: "col-1".into(),
+                        meta: None,
                         responsive: Some(Responsive {
                             mobile: Some(ResponsiveStyle {
                                 text_align: Some(TextAlign::Center),
@@ -1465,7 +1642,7 @@ mod tests {
                                 "el-text",
                                 KnownElement::Text(TextProps {
                                     text: "  Line 1\nLine 2  ".into(),
-                                    binding: None,
+                                    ..Default::default()
                                 }),
                             ),
                             el(
@@ -1490,7 +1667,7 @@ mod tests {
                                 KnownElement::Button(ButtonProps {
                                     label: "Click".into(),
                                     url: "/contact".into(),
-                                    binding: None,
+                                    ..Default::default()
                                 }),
                             ),
                             el(
@@ -1540,6 +1717,7 @@ mod tests {
                             ),
                             ElementNode {
                                 id: "el-unresolved".into(),
+                                meta: None,
                                 content: ElementContent::Unresolved(unresolved),
                             },
                         ],
@@ -1597,33 +1775,37 @@ mod tests {
             schema_version: BUILDER_SCHEMA_VERSION,
             sections: vec![SectionNode {
                 id: "sec-1".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "row-1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "col-1".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![
                             el(
                                 "el-empty",
                                 KnownElement::Text(TextProps {
                                     text: String::new(),
-                                    binding: None,
+                                    ..Default::default()
                                 }),
                             ),
                             el(
                                 "el-spaces",
                                 KnownElement::Text(TextProps {
                                     text: "\n  leading and trailing \n".into(),
-                                    binding: None,
+                                    ..Default::default()
                                 }),
                             ),
                             el(
                                 "el-comment-break",
                                 KnownElement::Text(TextProps {
                                     text: "Try <!-- and --> and --!> and --->".into(),
-                                    binding: None,
+                                    ..Default::default()
                                 }),
                             ),
                         ],
@@ -1714,12 +1896,16 @@ mod tests {
             schema_version: BUILDER_SCHEMA_VERSION,
             sections: vec![SectionNode {
                 id: "s1".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "r1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "c1".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![
                             el(
@@ -1734,7 +1920,7 @@ mod tests {
                                 "t1",
                                 KnownElement::Text(TextProps {
                                     text: "Paragraph One".into(),
-                                    binding: None,
+                                    ..Default::default()
                                 }),
                             ),
                             el(
@@ -1742,7 +1928,7 @@ mod tests {
                                 KnownElement::Button(ButtonProps {
                                     label: "Read More".into(),
                                     url: "/more".into(),
-                                    binding: None,
+                                    ..Default::default()
                                 }),
                             ),
                         ],
@@ -1795,12 +1981,16 @@ mod tests {
             schema_version: BUILDER_SCHEMA_VERSION,
             sections: vec![SectionNode {
                 id: "s1".into(),
+                meta: None,
                 responsive: None,
+                style: None,
                 children: vec![RowNode {
                     id: "r1".into(),
+                    meta: None,
                     responsive: None,
                     children: vec![ColumnNode {
                         id: "c1".into(),
+                        meta: None,
                         responsive: None,
                         children: vec![el(
                             "p1",
@@ -1884,5 +2074,112 @@ mod tests {
             extract_block_refs_lenient_with_schemas(&body, &withdrawn_catalog),
             ExtractedBlockRefs::default()
         );
+    }
+
+    #[test]
+    fn node_meta_and_synthetic_wrappers_roundtrip() {
+        use crate::builder::{NodeMeta, NodeVisibility, SectionStyle, SectionWidth};
+
+        let bg_media = "e".repeat(64);
+        let doc = BuilderDocument {
+            schema_version: BUILDER_SCHEMA_VERSION,
+            sections: vec![
+                SectionNode {
+                    id: "sec-syn-1".into(),
+                    meta: Some(NodeMeta {
+                        synthetic: true,
+                        ..Default::default()
+                    }),
+                    responsive: None,
+                    style: None,
+                    children: vec![RowNode {
+                        id: "row-syn-1".into(),
+                        meta: Some(NodeMeta {
+                            synthetic: true,
+                            ..Default::default()
+                        }),
+                        responsive: None,
+                        children: vec![ColumnNode {
+                            id: "col-syn-1".into(),
+                            meta: Some(NodeMeta {
+                                synthetic: true,
+                                ..Default::default()
+                            }),
+                            responsive: None,
+                            children: vec![ElementNode {
+                                id: "el-head-1".into(),
+                                meta: Some(NodeMeta {
+                                    name: Some("Hero Heading".into()),
+                                    html_id: Some("hero-title".into()),
+                                    class_name: Some("text-4xl font-bold".into()),
+                                    visibility: Some(NodeVisibility {
+                                        hide_desktop: false,
+                                        hide_tablet: false,
+                                        hide_mobile: true,
+                                    }),
+                                    synthetic: false,
+                                }),
+                                content: ElementContent::Known(KnownElement::Heading(
+                                    HeadingProps {
+                                        level: 1,
+                                        text: "Welcome".into(),
+                                        binding: None,
+                                    },
+                                )),
+                            }],
+                        }],
+                    }],
+                },
+                SectionNode {
+                    id: "sec-styled-1".into(),
+                    meta: None,
+                    responsive: None,
+                    style: Some(SectionStyle {
+                        background_color: Some("#0f172a".into()),
+                        background_media_id: Some(bg_media.clone()),
+                        content_width: Some(SectionWidth::Wide),
+                    }),
+                    children: vec![RowNode {
+                        id: "row-styled-1".into(),
+                        meta: None,
+                        responsive: None,
+                        children: vec![ColumnNode {
+                            id: "col-styled-1".into(),
+                            meta: None,
+                            responsive: None,
+                            children: vec![
+                                el(
+                                    "el-rich-1",
+                                    KnownElement::Text(TextProps {
+                                        text: "<p><strong>Rich</strong> copy</p>".into(),
+                                        rich: true,
+                                        binding: None,
+                                    }),
+                                ),
+                                el(
+                                    "el-btn-1",
+                                    KnownElement::Button(ButtonProps {
+                                        label: "CTA".into(),
+                                        url: "https://opendash.vn".into(),
+                                        new_tab: true,
+                                        nofollow: true,
+                                        binding: None,
+                                    }),
+                                ),
+                            ],
+                        }],
+                    }],
+                },
+            ],
+        };
+
+        let catalog = RegistryCatalog::new();
+        doc.validate_for_save_with_schemas(&catalog, None)
+            .expect("synthetic carrier + styled section + rich text must pass validation");
+        let serialized = serialize_builder_document_to_blocks(&doc).unwrap();
+        let reparsed = parse_blocks_to_builder_document(&serialized).unwrap();
+        assert_eq!(reparsed.document, doc);
+        let refs = extract_block_refs_lenient(&serialized);
+        assert!(refs.image_ids.contains(&bg_media));
     }
 }

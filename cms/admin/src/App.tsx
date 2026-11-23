@@ -233,7 +233,7 @@ export const App: React.FC = () => {
     const approved = window.confirm(switchingBuilderTarget
         ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
         : leavingStudio
-          ? 'OpenDash Studio có thay đổi chưa lưu. Bỏ thay đổi và rời Studio?'
+          ? 'Tùy chỉnh giao diện có thay đổi chưa lưu. Bỏ thay đổi và thoát?'
         : leavingTerm
           ? 'Taxonomy có thay đổi chưa lưu. Rời màn hình sẽ bỏ bản nhập. Tiếp tục?'
           : leavingSchema || leavingPattern || leavingPermalinks || leavingReading

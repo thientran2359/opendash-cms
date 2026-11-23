@@ -28,9 +28,7 @@ use crate::{
             resolve_lists_in_tx,
         },
         builder_binding::{self, BindingResults},
-        content, entries,
-        media::valid_media_id,
-        menu, settings, theme,
+        content, entries, menu, settings, theme,
         theme::ActiveThemeV3,
     },
     template_sec::{self, PreviewCompositionBudget},
@@ -1138,7 +1136,7 @@ fn active_theme_url_policy(
     match active {
         Some(active) => settings::theme_url_policy(&serde_json::to_string(&active.manifest)?)
             .map_err(ApiError::internal),
-        None => Ok(template_sec::ThemeUrlPolicy::default()),
+        None => Ok(settings::global_theme_url_policy()),
     }
 }
 
@@ -1508,7 +1506,7 @@ pub async fn preview_typed_override_with_cache(
     if expected_version.is_some_and(|v| existing.as_ref().is_none_or(|r| r.version != v)) {
         return Err(ApiError::precondition_failed("Template override changed."));
     }
-    let state = validate_typed_document_in_tx(
+    let mut state = validate_typed_document_in_tx(
         &mut tx,
         target,
         document,
@@ -1525,18 +1523,23 @@ pub async fn preview_typed_override_with_cache(
         title: &general.site_title,
         tagline: &general.tagline,
     };
-    let (options, menus) = if let Some(active) = &active {
-        (
-            settings::get_public_theme_options_in_conn(
-                &mut tx,
-                &active.manifest.theme_id,
-                &serde_json::to_string(&active.manifest)?,
-            )
-            .await?,
-            menu::resolve_slot_menus_in_tx(&mut tx, &active.manifest.theme_id).await?,
-        )
+    let manifest_json = active
+        .as_ref()
+        .map(|a| serde_json::to_string(&a.manifest))
+        .transpose()?;
+    let active_ref = active
+        .as_ref()
+        .zip(manifest_json.as_deref())
+        .map(|(a, m)| (a.manifest.theme_id.as_str(), m));
+    let options = settings::resolve_merged_public_options_with_overrides_in_conn(
+        &mut tx, active_ref, None, None, true,
+    )
+    .await?;
+    state.site_options = options.clone();
+    let menus = if let Some(active) = &active {
+        menu::resolve_slot_menus_in_tx(&mut tx, &active.manifest.theme_id).await?
     } else {
-        (BTreeMap::new(), BTreeMap::new())
+        BTreeMap::new()
     };
     let mut theme_context = serde_json::json!({ "site": site, "options": options, "theme_options": options, "menus": menus });
     let mut body_diagnostics = Vec::new();
@@ -1556,11 +1559,12 @@ pub async fn preview_typed_override_with_cache(
             && record.content_type_key != "pattern"
         {
             let mut rb = budget.as_render_budget();
-            let res = builder::preview_saved_page_body_in_tx_with_budget(
+            let res = builder::preview_saved_page_body_in_tx_with_options_and_budget(
                 &mut tx,
                 actor,
                 &record.content_type_key,
                 record.id,
+                Some(&options),
                 &mut rb,
                 cache,
             )
@@ -2012,6 +2016,8 @@ pub struct TransientStudioOverrides {
     #[serde(default)]
     pub general: Option<settings::GeneralSettingsInput>,
     #[serde(default)]
+    pub global_options: Option<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
     pub theme_options: Option<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     pub menu_slots: Option<BTreeMap<String, Option<i64>>>,
@@ -2284,82 +2290,30 @@ async fn build_preview_context_in_tx(
         general.timezone = valid.timezone;
     }
 
-    let mut options = BTreeMap::new();
+    let manifest_json = active
+        .as_ref()
+        .map(|a| serde_json::to_string(&a.manifest))
+        .transpose()?;
+    let active_ref = active
+        .as_ref()
+        .zip(manifest_json.as_deref())
+        .map(|(a, m)| (a.manifest.theme_id.as_str(), m));
+    let options = settings::resolve_merged_public_options_with_overrides_in_conn(
+        &mut **tx,
+        active_ref,
+        transient.and_then(|t| t.global_options.as_ref()),
+        transient.and_then(|t| t.theme_options.as_ref()),
+        true,
+    )
+    .await?;
+
     let mut menus = BTreeMap::new();
     if let Some(active) = active {
-        let manifest_json = serde_json::to_string(&active.manifest)?;
-        let schema = settings::parse_theme_options_schema(&manifest_json).unwrap_or_default();
-        let saved_rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?",
-        )
-        .bind(&active.manifest.theme_id)
-        .fetch_all(&mut **tx)
-        .await?;
-        let mut effective_raw = BTreeMap::new();
-        for (k, v_json) in saved_rows {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
-                effective_raw.insert(k, v);
-            }
-        }
-        if let Some(ov) = transient.and_then(|t| t.theme_options.as_ref()) {
-            let schema_map: BTreeMap<&str, &settings::ThemeOptionDef> =
-                schema.iter().map(|d| (d.key.as_str(), d)).collect();
-            for (k, v) in ov {
-                let Some(def) = schema_map.get(k.as_str()) else {
-                    return Err(ApiError::unprocessable(
-                        "Option key không tồn tại trong schema của theme.",
-                    ));
-                };
-                settings::validate_option_value(def, v).map_err(ApiError::unprocessable)?;
-                if def.option_type == settings::ThemeOptionType::ImageRef
-                    && let Some(media_id) = v.as_str()
-                {
-                    let exists: Option<i64> = sqlx::query_scalar(
-                        "SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
-                    )
-                    .bind(media_id)
-                    .fetch_optional(&mut **tx)
-                    .await?;
-                    if exists.is_none() {
-                        return Err(ApiError::unprocessable(
-                            "media_id của image_ref không tồn tại.",
-                        ));
-                    }
-                }
-                effective_raw.insert(k.clone(), v.clone());
-            }
-        }
-        for def in schema {
-            if !def.public {
-                continue;
-            }
-            let val = match def.option_type {
-                settings::ThemeOptionType::ImageRef => {
-                    match effective_raw
-                        .get(&def.key)
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        Some(media_id) if valid_media_id(media_id) => {
-                            serde_json::Value::String(format!("/api/admin/media/{media_id}/file"))
-                        }
-                        _ => serde_json::Value::Null,
-                    }
-                }
-                settings::ThemeOptionType::Url => match effective_raw.get(&def.key) {
-                    Some(saved) if settings::validate_option_value(&def, saved).is_ok() => {
-                        saved.clone()
-                    }
-                    _ => def.default.clone(),
-                },
-                _ => effective_raw.get(&def.key).cloned().unwrap_or(def.default),
-            };
-            options.insert(def.key, val);
-        }
-
+        let manifest_json = manifest_json.as_deref().unwrap_or("{}");
         let mut assignments =
             menu::list_slot_assignments_in_tx(tx, &active.manifest.theme_id).await?;
         if let Some(slot_ov) = transient.and_then(|t| t.menu_slots.as_ref()) {
-            let declared = menu::extract_declared_menu_slots(&manifest_json);
+            let declared = menu::extract_declared_menu_slots(manifest_json);
             for (slot_key, maybe_id) in slot_ov {
                 if !declared.iter().any(|s| s == slot_key) {
                     return Err(ApiError::unprocessable(
@@ -2384,23 +2338,13 @@ async fn build_preview_context_in_tx(
                 menus.insert(slot_key, view);
             }
         }
-    } else {
-        if transient
-            .and_then(|t| t.theme_options.as_ref())
-            .is_some_and(|m| !m.is_empty())
-        {
-            return Err(ApiError::unprocessable(
-                "Không có theme v3 đang kích hoạt để xem trước theme_options.",
-            ));
-        }
-        if transient
-            .and_then(|t| t.menu_slots.as_ref())
-            .is_some_and(|m| !m.is_empty())
-        {
-            return Err(ApiError::unprocessable(
-                "Không có theme v3 đang kích hoạt để xem trước menu_slots.",
-            ));
-        }
+    } else if transient
+        .and_then(|t| t.menu_slots.as_ref())
+        .is_some_and(|m| !m.is_empty())
+    {
+        return Err(ApiError::unprocessable(
+            "Không có theme v3 đang kích hoạt để xem trước menu_slots.",
+        ));
     }
     Ok((general, options, menus))
 }
@@ -2559,9 +2503,10 @@ pub async fn preview_studio_with_cache(
     validate_typed_target_in_tx(&mut tx, target).await?;
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
-    let state = builder::read_home_tx(&mut tx).await?;
+    let mut state = builder::read_home_tx(&mut tx).await?;
     let (general, options, menus) =
         build_preview_context_in_tx(&mut tx, active.as_ref(), transient).await?;
+    state.site_options = options.clone();
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
@@ -2615,15 +2560,17 @@ pub async fn preview_studio_with_cache(
             && definition.settings.supports(ContentSupport::Builder)
             && record.content_type_key != "pattern"
         {
-            if let Some(mut rendered) = builder::preview_saved_page_body_in_tx_with_budget(
-                &mut tx,
-                actor,
-                &record.content_type_key,
-                record.id,
-                &mut shared_rb,
-                cache,
-            )
-            .await?
+            if let Some(mut rendered) =
+                builder::preview_saved_page_body_in_tx_with_options_and_budget(
+                    &mut tx,
+                    actor,
+                    &record.content_type_key,
+                    record.id,
+                    Some(&options),
+                    &mut shared_rb,
+                    cache,
+                )
+                .await?
             {
                 diagnostics.append(&mut rendered.diagnostics);
                 Some(rendered.html)
@@ -2882,8 +2829,9 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     let definition = &schema.base.descriptor;
     let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
-    let state = builder::read_home_tx(tx).await?;
+    let mut state = builder::read_home_tx(tx).await?;
     let (general, options, menus) = build_preview_context_in_tx(tx, active.as_ref(), None).await?;
+    state.site_options = options.clone();
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
