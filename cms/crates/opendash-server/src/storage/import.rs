@@ -13,7 +13,10 @@ use sqlx::SqlitePool;
 use crate::{
     error::{ApiError, ApiResult},
     package::validate_v2_relative_path,
-    storage::theme::{ThemeSourceFormat, find_revision_by_id, get_active_selection},
+    storage::{
+        settings::{self, ThemeOptionDef, ThemeOptionType},
+        theme::{ThemeSourceFormat, find_revision_by_id, get_active_selection},
+    },
 };
 
 pub const MAX_SAMPLE_MEDIA: usize = 50;
@@ -187,9 +190,87 @@ fn valid_object_key(raw: &str) -> bool {
             .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'))
 }
 
+/// Pure, pinned-schema validation; use before any filesystem staging or DB
+/// mutation on install, dry-run and execute.
+pub(crate) fn validate_sample_option_values(
+    sample: &ThemeSampleManifest,
+    schema: &[ThemeOptionDef],
+) -> Result<(), &'static str> {
+    let definitions: BTreeMap<&str, &ThemeOptionDef> =
+        schema.iter().map(|def| (def.key.as_str(), def)).collect();
+    let image_keys: HashSet<&str> = sample
+        .media
+        .iter()
+        .map(|item| item.object_key.as_str())
+        .collect();
+    for setting in &sample.settings {
+        let def = definitions
+            .get(setting.option_key.as_str())
+            .ok_or("Sample setting có option_key ngoài schema revision.")?;
+        if let Some(media_ref) = setting.media_ref.as_deref() {
+            if def.option_type != ThemeOptionType::ImageRef
+                || !setting.value.is_null()
+                || !image_keys.contains(media_ref)
+            {
+                return Err("Sample media_ref chỉ dùng với image_ref, null và media có khai báo.");
+            }
+        } else {
+            settings::validate_option_value(def, &setting.value)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod url_sample_tests {
+    use super::*;
+
+    #[test]
+    fn pinned_schema_enforces_url_and_image_reference_separation() {
+        let schema = settings::parse_theme_options_schema(&serde_json::json!({
+            "options": [
+                {"key":"cta_url", "label":"CTA", "type":"url", "default":"/contact", "public":true},
+                {"key":"hero_image", "label":"Hero", "type":"image_ref", "default":null, "public":true}
+            ]
+        }).to_string()).unwrap();
+        let sample = |setting: serde_json::Value| -> ThemeSampleManifest {
+            serde_json::from_value(serde_json::json!({
+                "media":[{"object_key":"hero","path":"assets/hero.png"}],
+                "settings":[setting]
+            }))
+            .unwrap()
+        };
+        assert!(validate_sample_option_values(&sample(serde_json::json!({
+            "object_key":"image", "option_key":"hero_image", "media_ref":"hero", "value":null
+        })), &schema).is_ok());
+        assert!(
+            validate_sample_option_values(
+                &sample(serde_json::json!({
+                    "object_key":"url", "option_key":"cta_url", "value":"/contact?from=sample"
+                })),
+                &schema
+            )
+            .is_ok()
+        );
+        for invalid in [
+            serde_json::json!({"object_key":"bad", "option_key":"cta_url", "value":"javascript:alert(1)"}),
+            serde_json::json!({"object_key":"bad", "option_key":"cta_url", "value":null, "media_ref":"hero"}),
+            serde_json::json!({"object_key":"bad", "option_key":"hero_image", "value":"/foo", "media_ref":"hero"}),
+            serde_json::json!({"object_key":"bad", "option_key":"hero_image", "value":null, "media_ref":"missing"}),
+            serde_json::json!({"object_key":"bad", "option_key":"undefined", "value":"/contact"}),
+        ] {
+            assert!(
+                validate_sample_option_values(&sample(invalid.clone()), &schema).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+}
+
 fn validate_sample_manifest(
     sample: &ThemeSampleManifest,
     file_digests: &BTreeMap<String, String>,
+    schema: &[ThemeOptionDef],
 ) -> ApiResult<()> {
     if !valid_object_key(&sample.sample_key) || sample.sample_key.len() > 64 {
         return Err(ApiError(
@@ -324,6 +405,7 @@ fn validate_sample_manifest(
         }
     }
 
+    validate_sample_option_values(sample, schema).map_err(ApiError::unprocessable)?;
     Ok(())
 }
 
@@ -404,6 +486,8 @@ pub async fn plan_sample_import(
         ));
     }
 
+    let option_schema = settings::parse_theme_options_schema(&rev.manifest_json)
+        .map_err(ApiError::unprocessable)?;
     let manifest: ThemeV3Manifest = serde_json::from_str(&rev.manifest_json)
         .map_err(|_| ApiError::internal("Manifest theme v3 không hợp lệ."))?;
     manifest.validate().map_err(ApiError::internal)?;
@@ -418,7 +502,7 @@ pub async fn plan_sample_import(
             "Khai báo sample trong theme.json không đúng định dạng.".into(),
         )
     })?;
-    validate_sample_manifest(&sample, &rev.file_digests)?;
+    validate_sample_manifest(&sample, &rev.file_digests, &option_schema)?;
 
     let mut items = Vec::new();
     let mut unselected_dependencies = Vec::new();
@@ -972,6 +1056,8 @@ pub async fn execute_sample_import_with_cutpoint(
     if rev.source_format != ThemeSourceFormat::V3 {
         return Err(ApiError::not_found("Revision theme v3 không tồn tại."));
     }
+    let option_schema = settings::parse_theme_options_schema(&rev.manifest_json)
+        .map_err(ApiError::unprocessable)?;
     let manifest: ThemeV3Manifest = serde_json::from_str(&rev.manifest_json)?;
     manifest.validate().map_err(ApiError::bad_request)?;
     let sample: ThemeSampleManifest = serde_json::from_value(
@@ -979,6 +1065,7 @@ pub async fn execute_sample_import_with_cutpoint(
             .sample
             .ok_or_else(|| ApiError::not_found("Theme không có dữ liệu mẫu."))?,
     )?;
+    validate_sample_manifest(&sample, &rev.file_digests, &option_schema)?;
 
     // Phase 1: staged
     {
@@ -1319,6 +1406,10 @@ pub async fn execute_sample_import_with_cutpoint(
                     let mid = media_id_by_object
                         .get(mref)
                         .ok_or_else(|| ApiError::internal("Thiếu media_id cho sample setting."))?;
+                    let resolved = serde_json::Value::String(mid.clone());
+                    let def = option_schema.iter().find(|def| def.key == s.option_key)
+                        .ok_or_else(|| ApiError::unprocessable("Sample option key không tồn tại."))?;
+                    settings::validate_option_value(def, &resolved).map_err(ApiError::unprocessable)?;
                     sqlx::query(
                         "INSERT INTO theme_option_media_refs (theme_id, option_key, media_id)
                          VALUES (?, ?, ?)
@@ -1329,10 +1420,13 @@ pub async fn execute_sample_import_with_cutpoint(
                     .bind(mid)
                     .execute(&mut *conn)
                     .await?;
-                    serde_json::Value::String(mid.clone())
+                    resolved
                 } else {
                     s.value.clone()
                 };
+                let def = option_schema.iter().find(|def| def.key == s.option_key)
+                    .ok_or_else(|| ApiError::unprocessable("Sample option key không tồn tại."))?;
+                settings::validate_option_value(def, &val).map_err(ApiError::unprocessable)?;
                 let val_json = serde_json::to_string(&val)?;
                 sqlx::query(
                     "INSERT INTO theme_option_values (theme_id, option_key, value_json)

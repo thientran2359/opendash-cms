@@ -19,6 +19,28 @@ pub const TEMPLATE_RECURSION_LIMIT: usize = 16;
 const MAX_COMPOSITION_PART_DEPTH: usize = 3;
 const MAX_COMPOSITION_EXPANSIONS: usize = 32;
 
+/// Explicit, manifest-derived theme anchor permissions. The private set only
+/// contains exact `options.<key>` expressions declared as public URL options.
+#[derive(Debug, Clone, Default)]
+pub struct ThemeUrlPolicy {
+    permitted_href_expressions: BTreeSet<String>,
+}
+
+impl ThemeUrlPolicy {
+    pub(crate) fn from_option_keys(keys: impl IntoIterator<Item = String>) -> Self {
+        Self {
+            permitted_href_expressions: keys
+                .into_iter()
+                .map(|key| format!("options.{key}"))
+                .collect(),
+        }
+    }
+
+    fn allows_anchor_href(&self, expr: &str) -> bool {
+        self.permitted_href_expressions.contains(expr)
+    }
+}
+
 /// The permitted number of content slots depends on the resolved template target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CsecContentKind {
@@ -221,7 +243,15 @@ pub(crate) fn preview_csec_part_keys(
     name: &str,
     source: &str,
 ) -> Result<Vec<String>, &'static str> {
-    preview_composition_sites(name, source)?
+    preview_csec_part_keys_with_theme_urls(name, source, &ThemeUrlPolicy::default())
+}
+
+pub(crate) fn preview_csec_part_keys_with_theme_urls(
+    name: &str,
+    source: &str,
+    policy: &ThemeUrlPolicy,
+) -> Result<Vec<String>, &'static str> {
+    preview_composition_sites(name, source, policy)?
         .into_iter()
         .map(|site| match site.call {
             CompositionCall::Part(key) => Ok(key),
@@ -233,7 +263,15 @@ pub(crate) fn preview_csec_part_keys(
 /// Literal part edges of a validated public Theme part. Unlike the preview
 /// compiler this does not change the accepted source format or marker rules.
 pub(crate) fn csec_part_keys(name: &str, source: &str) -> Result<Vec<String>, &'static str> {
-    composition_sites(name, source, true)?
+    csec_part_keys_with_theme_urls(name, source, &ThemeUrlPolicy::default())
+}
+
+pub(crate) fn csec_part_keys_with_theme_urls(
+    name: &str,
+    source: &str,
+    policy: &ThemeUrlPolicy,
+) -> Result<Vec<String>, &'static str> {
+    composition_sites(name, source, true, policy)?
         .into_iter()
         .map(|site| match site.call {
             CompositionCall::Part(key) => Ok(key),
@@ -245,6 +283,7 @@ pub(crate) fn csec_part_keys(name: &str, source: &str) -> Result<Vec<String>, &'
 fn preview_composition_sites(
     name: &str,
     source: &str,
+    policy: &ThemeUrlPolicy,
 ) -> Result<Vec<CompositionSite>, &'static str> {
     if source.len() > MAX_RENDERED_HTML_BYTES {
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
@@ -252,7 +291,7 @@ fn preview_composition_sites(
     if source.contains(PREVIEW_PART_NONCE_PREFIX) {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
-    composition_sites(name, source, true)
+    composition_sites(name, source, true, policy)
 }
 
 /// Private preview bridge. Theme descendants share their parent's lexical
@@ -266,6 +305,26 @@ pub(crate) fn render_preview_csec_fragment(
     trusted_builder_parts: &BTreeMap<String, String>,
     budget: &mut PreviewCompositionBudget,
 ) -> Result<String, &'static str> {
+    render_preview_csec_fragment_with_theme_urls(
+        name,
+        source,
+        context,
+        theme_sources,
+        trusted_builder_parts,
+        budget,
+        &ThemeUrlPolicy::default(),
+    )
+}
+
+pub(crate) fn render_preview_csec_fragment_with_theme_urls(
+    name: &str,
+    source: &str,
+    context: Value,
+    theme_sources: &BTreeMap<String, String>,
+    trusted_builder_parts: &BTreeMap<String, String>,
+    budget: &mut PreviewCompositionBudget,
+    policy: &ThemeUrlPolicy,
+) -> Result<String, &'static str> {
     if budget.fuel_remaining == 0 || budget.fuel_remaining > TEMPLATE_FUEL_LIMIT {
         return Err("Fuel preview không hợp lệ hoặc đã hết.");
     }
@@ -276,12 +335,13 @@ pub(crate) fn render_preview_csec_fragment(
         theme_sources,
         trusted_builder_parts,
         nonces: BTreeMap::new(),
+        policy,
     };
     let mut program = String::new();
     compiler.flatten(name, source, 0, &mut program)?;
     // Revalidate across source boundaries; the original source checks alone
     // cannot detect markup or syntax introduced by concatenation.
-    validate_template_csec(name, &program)?;
+    validate_template_csec_with_theme_urls(name, &program, policy)?;
     let mut env = restricted_environment();
     env.set_fuel(Some(budget.fuel_remaining));
     env.add_template(name, &program)
@@ -315,6 +375,7 @@ struct PreviewFragmentCompiler<'a> {
     theme_sources: &'a BTreeMap<String, String>,
     trusted_builder_parts: &'a BTreeMap<String, String>,
     nonces: BTreeMap<String, &'a str>,
+    policy: &'a ThemeUrlPolicy,
 }
 
 impl<'a> PreviewFragmentCompiler<'a> {
@@ -330,7 +391,7 @@ impl<'a> PreviewFragmentCompiler<'a> {
         if depth > MAX_COMPOSITION_PART_DEPTH {
             return Err("Độ sâu od_part vượt giới hạn 3.");
         }
-        let sites = preview_composition_sites(name, source)?;
+        let sites = preview_composition_sites(name, source, self.policy)?;
         let mut cursor = 0;
         for site in sites {
             append_preview_fragment(out, &source[cursor..site.start])?;
@@ -530,6 +591,14 @@ pub fn restricted_environment() -> Environment<'static> {
 
 /// Validates a template against the C-SEC MiniJinja AST allowlist and contextual HTML/URL/CSS rules.
 pub fn validate_template_csec(name: &str, source: &str) -> Result<(), &'static str> {
+    validate_template_csec_with_theme_urls(name, source, &ThemeUrlPolicy::default())
+}
+
+pub fn validate_template_csec_with_theme_urls(
+    name: &str,
+    source: &str,
+    policy: &ThemeUrlPolicy,
+) -> Result<(), &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
@@ -537,7 +606,10 @@ pub fn validate_template_csec(name: &str, source: &str) -> Result<(), &'static s
         .map_err(|_| "Cú pháp template MiniJinja không hợp lệ.")?;
 
     validate_stmt(&ast)?;
-    validate_html_and_css_context(source, false)?;
+    if !policy.permitted_href_expressions.is_empty() {
+        reject_options_rebinding(&ast)?;
+    }
+    validate_theme_html_context(source, false, policy)?;
 
     let mut env = restricted_environment();
     env.add_template(name, source)
@@ -577,6 +649,22 @@ pub fn validate_and_compile_csec_composition(
     parts: &BTreeMap<String, String>,
     kind: CsecContentKind,
 ) -> Result<CompiledCsecComposition, &'static str> {
+    validate_and_compile_csec_composition_with_theme_urls(
+        root_name,
+        root_source,
+        parts,
+        kind,
+        &ThemeUrlPolicy::default(),
+    )
+}
+
+pub fn validate_and_compile_csec_composition_with_theme_urls(
+    root_name: &str,
+    root_source: &str,
+    parts: &BTreeMap<String, String>,
+    kind: CsecContentKind,
+    policy: &ThemeUrlPolicy,
+) -> Result<CompiledCsecComposition, &'static str> {
     // Each resource is bounded independently. A theme can declare many safe
     // parts which are not all rendered in one request; the flattened reachable
     // program and rendered output have their own 512 KiB checks below.
@@ -587,13 +675,13 @@ pub fn validate_and_compile_csec_composition(
     {
         return Err("Template hoặc part vượt giới hạn 512 KiB.");
     }
-    let root_sites = composition_sites(root_name, root_source, false)?;
+    let root_sites = composition_sites(root_name, root_source, false, policy)?;
     let mut part_sites = BTreeMap::new();
     for (key, source) in parts {
         if !valid_part_key(key) {
             return Err("Part key không hợp lệ.");
         }
-        part_sites.insert(key.clone(), composition_sites(key, source, true)?);
+        part_sites.insert(key.clone(), composition_sites(key, source, true, policy)?);
     }
 
     // Check all declared parts, even unreachable ones: a dormant cycle must
@@ -633,7 +721,7 @@ pub fn validate_and_compile_csec_composition(
     }
     // This last check catches dangerous markup introduced across part boundaries,
     // in addition to the independent source checks before expansion.
-    validate_template_csec(root_name, &compiled_source)?;
+    validate_template_csec_with_theme_urls(root_name, &compiled_source, policy)?;
     Ok(CompiledCsecComposition {
         source: compiled_source,
         name: root_name.to_owned(),
@@ -745,6 +833,7 @@ fn composition_sites(
     name: &str,
     source: &str,
     is_part: bool,
+    policy: &ThemeUrlPolicy,
 ) -> Result<Vec<CompositionSite>, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
@@ -752,9 +841,12 @@ fn composition_sites(
     if source.contains(CONTENT_SLOT_TOKEN) {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
-    validate_html_and_css_context(source, false)?;
+    validate_theme_html_context(source, false, policy)?;
     let ast = parse(source, name, SyntaxConfig::default())
         .map_err(|_| "Cú pháp theme MiniJinja không hợp lệ.")?;
+    if !policy.permitted_href_expressions.is_empty() {
+        reject_options_rebinding(&ast)?;
+    }
     // Scan what each possible MiniJinja branch can actually emit. A linear
     // scan through the source can see a closing quote in the *other* branch
     // and mistake a real runtime attribute for an HTML body position.
@@ -1284,6 +1376,27 @@ pub fn validate_safe_href_url(raw: &str) -> Result<(), &'static str> {
     }
 }
 
+/// Validated navigation value for an explicitly typed theme option. Stored
+/// bytes are never trimmed or decoded; checking the decoded variant only
+/// prevents entity-based scheme and attribute bypasses.
+pub fn validate_theme_option_url(raw: &str) -> Result<(), &'static str> {
+    if raw.is_empty() || raw.chars().count() > 4096 {
+        return Err("Theme URL phải có 1–4096 ký tự Unicode.");
+    }
+    let decoded = decode_html_entities_for_url(raw);
+    for value in [raw, decoded.as_str()] {
+        if value.chars().any(|ch| {
+            ch.is_whitespace()
+                || ch.is_control()
+                || matches!(ch, '\\' | '<' | '>' | '\'' | '"' | '`')
+        }) {
+            return Err("Theme URL chứa ký tự không an toàn.");
+        }
+        validate_safe_href_url(value)?;
+    }
+    Ok(())
+}
+
 pub fn json_to_safe_value(value: &serde_json::Value) -> Value {
     match value {
         serde_json::Value::Null => Value::from(()),
@@ -1376,6 +1489,60 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
         | Stmt::Include(_)
         | Stmt::Block(_)
         | Stmt::Do(_) => Err("Template sử dụng câu lệnh MiniJinja bị C-SEC cấm."),
+    }
+}
+
+fn binds_options(expr: &Expr<'_>) -> bool {
+    match expr {
+        Expr::Var(var) => var.id == "options",
+        Expr::Tuple(tuple) => tuple.items.iter().any(binds_options),
+        Expr::List(list) => list.items.iter().any(binds_options),
+        // Attribute and subscript assignments are forbidden rather than
+        // allowing a mutable binding to masquerade as the manifest root.
+        Expr::GetAttr(attr) => binds_options(&attr.expr),
+        Expr::GetItem(item) => binds_options(&item.expr),
+        _ => false,
+    }
+}
+
+fn reject_options_rebinding(stmt: &Stmt<'_>) -> Result<(), &'static str> {
+    let forbidden = || Err("C-SEC cấm gán lại biến options trong theme.");
+    match stmt {
+        Stmt::Template(t) => t.children.iter().try_for_each(reject_options_rebinding),
+        Stmt::ForLoop(f) => {
+            if binds_options(&f.target) {
+                return forbidden();
+            }
+            f.body
+                .iter()
+                .chain(&f.else_body)
+                .try_for_each(reject_options_rebinding)
+        }
+        Stmt::WithBlock(w) => {
+            if w.assignments.iter().any(|(key, _)| binds_options(key)) {
+                return forbidden();
+            }
+            w.body.iter().try_for_each(reject_options_rebinding)
+        }
+        Stmt::Set(s) => {
+            if binds_options(&s.target) {
+                forbidden()
+            } else {
+                Ok(())
+            }
+        }
+        Stmt::SetBlock(sb) => {
+            if binds_options(&sb.target) {
+                return forbidden();
+            }
+            sb.body.iter().try_for_each(reject_options_rebinding)
+        }
+        Stmt::IfCond(i) => i
+            .true_body
+            .iter()
+            .chain(&i.false_body)
+            .try_for_each(reject_options_rebinding),
+        _ => Ok(()),
     }
 }
 
@@ -1498,7 +1665,15 @@ fn find_html5_comment_end_in_template(bytes: &[u8], start: usize) -> Option<usiz
 }
 
 fn validate_html_and_css_context(src: &str, post_render: bool) -> Result<(), &'static str> {
-    validate_html_and_css_context_with_url_vars(src, post_render, None)
+    validate_html_and_css_context_with_url_vars(src, post_render, None, None)
+}
+
+fn validate_theme_html_context(
+    src: &str,
+    post_render: bool,
+    policy: &ThemeUrlPolicy,
+) -> Result<(), &'static str> {
+    validate_html_and_css_context_with_url_vars(src, post_render, None, Some(policy))
 }
 
 struct BlockUrlVarAllowlist {
@@ -1544,6 +1719,7 @@ fn validate_html_and_css_context_with_url_vars(
     src: &str,
     post_render: bool,
     block_url_vars: Option<&BlockUrlVarAllowlist>,
+    theme_policy: Option<&ThemeUrlPolicy>,
 ) -> Result<(), &'static str> {
     let lower = src.to_ascii_lowercase();
     let is_full_doctype_doc =
@@ -1636,7 +1812,13 @@ fn validate_html_and_css_context_with_url_vars(
             }
 
             let attr_slice = &src[j..k];
-            validate_tag_attributes(&tag_name, attr_slice, post_render, block_url_vars)?;
+            validate_tag_attributes(
+                &tag_name,
+                attr_slice,
+                post_render,
+                block_url_vars,
+                theme_policy,
+            )?;
             i = k + 1;
         } else {
             i += 1;
@@ -1651,6 +1833,7 @@ fn validate_tag_attributes(
     attr_slice: &str,
     post_render: bool,
     block_url_vars: Option<&BlockUrlVarAllowlist>,
+    theme_policy: Option<&ThemeUrlPolicy>,
 ) -> Result<(), &'static str> {
     let attrs = parse_attributes(attr_slice)?;
 
@@ -1720,7 +1903,11 @@ fn validate_tag_attributes(
                             "URL động trong template block phải khớp đúng biến kiểu url (href) hoặc <media_key>_url (src/poster).",
                         );
                     }
-                } else if !ALLOWED_DYNAMIC_URL_VARS.contains(&expr_inner) {
+                } else if !ALLOWED_DYNAMIC_URL_VARS.contains(&expr_inner)
+                    && !(tag_name == "a"
+                        && name == "href"
+                        && theme_policy.is_some_and(|policy| policy.allows_anchor_href(expr_inner)))
+                {
                     return Err("URL động trong thuộc tính không nằm trong whitelist typed URL.");
                 }
             } else {
@@ -2439,7 +2626,7 @@ pub fn validate_block_template_csec(
 
     let ctx = BlockSchemaTemplateContext::from_schema(schema);
     let url_allowlist = ctx.url_allowlist();
-    validate_html_and_css_context_with_url_vars(source, false, Some(&url_allowlist))?;
+    validate_html_and_css_context_with_url_vars(source, false, Some(&url_allowlist), None)?;
 
     let ast = parse(source, block_id, SyntaxConfig::default())
         .map_err(|_| "Cú pháp MiniJinja của template block không hợp lệ.")?;
@@ -2714,6 +2901,127 @@ pub fn render_block_csec_with_budget(
 #[cfg(test)]
 mod composition_tests {
     use super::*;
+
+    #[test]
+    fn theme_url_option_validation_covers_scalar_boundaries_and_entity_bypasses() {
+        for allowed in [
+            "/lien-he?from=header#form",
+            "https://example.test/path?q=1&x=2",
+            "#form",
+            "mailto:hello@example.test",
+            "tel:+842812345678",
+            &format!("/{}", "🦀".repeat(4095)),
+        ] {
+            assert!(validate_theme_option_url(allowed).is_ok(), "{allowed}");
+        }
+        for rejected in [
+            "",
+            " ",
+            " /a",
+            "/a ",
+            "/a b",
+            "/a\n",
+            "//evil.test",
+            "/a\\b",
+            "https://user:pass@example.test/",
+            "javascript:alert(1)",
+            "data:text/html,bad",
+            "file:///etc/passwd",
+            "vbscript:bad",
+            "/a&#10;bad",
+            "/a&quot;onmouseover",
+            "/a&#x27;bad",
+            "/a`bad",
+            "http://evil.test@other.test/",
+            &format!("/{}", "🦀".repeat(4096)),
+        ] {
+            assert!(validate_theme_option_url(rejected).is_err(), "{rejected}");
+        }
+    }
+
+    #[test]
+    fn theme_url_capability_is_exact_anchor_only_and_never_inherited_by_blocks() {
+        let policy = ThemeUrlPolicy::from_option_keys(["cta_url".to_owned()]);
+        let src = r#"<a href="{{ options.cta_url }}">Visit</a>"#;
+        assert!(validate_template_csec_with_theme_urls("a", src, &policy).is_ok());
+        assert!(validate_template_csec("a", src).is_err());
+        let compiled = validate_and_compile_csec_composition_with_theme_urls(
+            "root",
+            src,
+            &BTreeMap::new(),
+            CsecContentKind::NonEntry,
+            &policy,
+        )
+        .unwrap();
+        let rendered = compiled
+            .render(
+                json_to_safe_value(&serde_json::json!({
+                    "options": {"cta_url":"/lien-he?from=header&x=2"}
+                })),
+                None,
+            )
+            .unwrap();
+        let rendered_href = rendered
+            .split("href=\"")
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        assert_eq!(
+            decode_html_entities_for_url(rendered_href),
+            "/lien-he?from=header&x=2"
+        );
+        // Even a syntactically permitted anchor must fail the post-render
+        // URL boundary when supplied an unsafe runtime/context value.
+        assert!(
+            compiled
+                .render(
+                    json_to_safe_value(&serde_json::json!({
+                        "options": {"cta_url": "javascript:alert(1)"}
+                    })),
+                    None,
+                )
+                .is_err()
+        );
+        for forbidden in [
+            r#"<a href="{{ options.other_url }}">bad</a>"#,
+            r#"<a href="{{ theme_options.cta_url }}">bad</a>"#,
+            r#"<a href="{{ options.cta_url | upper }}">bad</a>"#,
+            r#"<a href="{{ options['cta_url'] }}">bad</a>"#,
+            r#"<a href="/prefix{{ options.cta_url }}">bad</a>"#,
+            r#"<img src="{{ options.cta_url }}">"#,
+            r#"<video poster="{{ options.cta_url }}"></video>"#,
+            r#"<cite cite="{{ options.cta_url }}">bad</cite>"#,
+            r#"<a ping="{{ options.cta_url }}">bad</a>"#,
+            r#"<img srcset="{{ options.cta_url }} 1x">"#,
+            r#"<div style="background:{{ options.cta_url }}">bad</div>"#,
+            r#"{% set options = {'cta_url':'/evil'} %}<a href="{{ options.cta_url }}">bad</a>"#,
+            r#"{% with options = {'cta_url':'/evil'} %}<a href="{{ options.cta_url }}">bad</a>{% endwith %}"#,
+            r#"{% for options, n in items %}<a href="{{ options.cta_url }}">bad</a>{% endfor %}"#,
+            r#"{% set options %}bad{% endset %}<a href="{{ options.cta_url }}">bad</a>"#,
+        ] {
+            assert!(
+                validate_template_csec_with_theme_urls("root", forbidden, &policy).is_err(),
+                "{forbidden}"
+            );
+        }
+        // A nested, dormant part is checked even if the public root never visits it.
+        let parts = BTreeMap::from([(
+            "dormant".into(),
+            r#"<a href="{{ options.not_declared }}">bad</a>"#.into(),
+        )]);
+        assert!(
+            validate_and_compile_csec_composition_with_theme_urls(
+                "root",
+                "<main>Good</main>",
+                &parts,
+                CsecContentKind::NonEntry,
+                &policy,
+            )
+            .is_err()
+        );
+    }
 
     fn parts(items: &[(&str, &str)]) -> BTreeMap<String, String> {
         items

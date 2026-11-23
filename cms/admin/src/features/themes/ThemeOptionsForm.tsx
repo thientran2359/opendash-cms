@@ -175,6 +175,26 @@ export const ThemeOptionsForm: React.FC<Props> = ({
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
           />
         );
+      case 'url': {
+        const value = typeof val === 'string' ? val : '';
+        const scalarCount = Array.from(value).length;
+        return (
+          <div className="space-y-1">
+            <input
+              type="text"
+              inputMode="url"
+              maxLength={8192}
+              value={value}
+              onChange={e => setField(def.key, e.target.value)}
+              disabled={saving}
+              aria-invalid={scalarCount > 4096}
+              className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+            />
+            <p className="text-xs text-zinc-500">Đường dẫn /…, liên kết https://…, #mục, mailto: hoặc tel:; tối đa 4.096 ký tự Unicode. ({scalarCount}/4096)</p>
+            {scalarCount > 4096 && <p role="alert" className="text-xs text-red-700">URL vượt giới hạn 4.096 ký tự Unicode. Giá trị nháp được giữ để sửa.</p>}
+          </div>
+        );
+      }
       default:
         return (
           <input

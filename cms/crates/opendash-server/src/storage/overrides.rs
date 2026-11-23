@@ -1130,6 +1130,18 @@ enum PreviewPartSource {
     Missing,
 }
 
+/// Only the manifest captured for this request can authorize theme anchor
+/// expressions; no caller-provided preview values contribute permissions.
+fn active_theme_url_policy(
+    active: Option<&ActiveThemeV3>,
+) -> ApiResult<template_sec::ThemeUrlPolicy> {
+    match active {
+        Some(active) => settings::theme_url_policy(&serde_json::to_string(&active.manifest)?)
+            .map_err(ApiError::internal),
+        None => Ok(template_sec::ThemeUrlPolicy::default()),
+    }
+}
+
 async fn preview_part_graph_from_edges(
     tx: &mut Transaction<'_, Sqlite>,
     root_key: &str,
@@ -1137,6 +1149,7 @@ async fn preview_part_graph_from_edges(
     active: Option<&ActiveThemeV3>,
     budget: &mut PreviewCompositionBudget,
 ) -> ApiResult<BTreeMap<String, PreviewPartSource>> {
+    let url_policy = active_theme_url_policy(active)?;
     let mut pending = vec![(edges, 0_usize, vec![root_key.to_owned()])];
     let mut graph = BTreeMap::new();
     while let Some((edges, depth, path)) = pending.pop() {
@@ -1171,8 +1184,12 @@ async fn preview_part_graph_from_edges(
             let children = match &graph[&part_key] {
                 PreviewPartSource::Builder(doc) => document_parts_and_slot_count(doc)?.0,
                 PreviewPartSource::Theme(source) => {
-                    template_sec::preview_csec_part_keys(&part_key, source)
-                        .map_err(ApiError::bad_request)?
+                    template_sec::preview_csec_part_keys_with_theme_urls(
+                        &part_key,
+                        source,
+                        &url_policy,
+                    )
+                    .map_err(ApiError::bad_request)?
                 }
                 PreviewPartSource::Missing => Vec::new(),
             };
@@ -1228,6 +1245,7 @@ struct PreviewRenderContext<'a> {
     theme_context: &'a serde_json::Value,
     route: Option<(&'a str, &'a str)>,
     cache: &'a page::BlockTemplateCache,
+    url_policy: &'a template_sec::ThemeUrlPolicy,
 }
 
 async fn render_preview_builder(
@@ -1306,14 +1324,19 @@ async fn render_preview_part(
             let mut theme_sources = BTreeMap::new();
             let mut boundaries = BTreeSet::new();
             let mut todo =
-                template_sec::preview_csec_part_keys(key, source).map_err(ApiError::bad_request)?;
+                template_sec::preview_csec_part_keys_with_theme_urls(key, source, ctx.url_policy)
+                    .map_err(ApiError::bad_request)?;
             while let Some(child) = todo.pop() {
                 match ctx.graph.get(&child) {
                     Some(PreviewPartSource::Theme(child_source)) => {
                         if !theme_sources.contains_key(&child) {
                             todo.extend(
-                                template_sec::preview_csec_part_keys(&child, child_source)
-                                    .map_err(ApiError::bad_request)?,
+                                template_sec::preview_csec_part_keys_with_theme_urls(
+                                    &child,
+                                    child_source,
+                                    ctx.url_policy,
+                                )
+                                .map_err(ApiError::bad_request)?,
                             );
                             theme_sources.insert(child, child_source.clone());
                         }
@@ -1339,13 +1362,14 @@ async fn render_preview_part(
                     trusted.insert(child, String::new());
                 }
             }
-            let html = template_sec::render_preview_csec_fragment(
+            let html = template_sec::render_preview_csec_fragment_with_theme_urls(
                 key,
                 source,
                 template_sec::json_to_safe_value(ctx.theme_context),
                 &theme_sources,
                 &trusted,
                 budget,
+                ctx.url_policy,
             )
             .map_err(ApiError::bad_request)?;
             Ok(Some(RenderedLayout {
@@ -1492,6 +1516,7 @@ pub async fn preview_typed_override_with_cache(
     )
     .await?;
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut budget = PreviewCompositionBudget::new();
     let graph = preview_part_graph(&mut tx, target, document, active.as_ref(), &mut budget).await?;
     let entry = resolve_preview_entry(&mut tx, target, preview_entry, active.as_ref()).await?;
@@ -1571,6 +1596,7 @@ pub async fn preview_typed_override_with_cache(
         theme_context: &theme_context,
         route,
         cache,
+        url_policy: &url_policy,
     };
     let root_scope = if target.kind == TemplateCandidateKind::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -1732,6 +1758,7 @@ struct PublicBuilderContext<'a> {
     theme_context: &'a serde_json::Value,
     route_entry: Option<(&'a str, &'a str)>,
     cache: &'a page::BlockTemplateCache,
+    url_policy: &'a template_sec::ThemeUrlPolicy,
 }
 
 /// Check the full depth of a contiguous theme graph at its actual Builder
@@ -1740,6 +1767,7 @@ fn check_theme_part_depth(
     key: &str,
     sources: &BTreeMap<String, String>,
     depth: usize,
+    url_policy: &template_sec::ThemeUrlPolicy,
 ) -> ApiResult<()> {
     if depth > 3 {
         return Err(ApiError::internal("Template part depth exceeds 3."));
@@ -1747,8 +1775,10 @@ fn check_theme_part_depth(
     let source = sources
         .get(key)
         .ok_or_else(|| ApiError::internal("Theme part missing."))?;
-    for child in template_sec::csec_part_keys(key, source).map_err(ApiError::internal)? {
-        check_theme_part_depth(&child, sources, depth + 1)?;
+    for child in template_sec::csec_part_keys_with_theme_urls(key, source, url_policy)
+        .map_err(ApiError::internal)?
+    {
+        check_theme_part_depth(&child, sources, depth + 1, url_policy)?;
     }
     Ok(())
 }
@@ -1795,14 +1825,15 @@ async fn render_public_part(
     let Some(source) = active.parts.get(key) else {
         return Ok(None);
     };
-    let compiled = template_sec::validate_and_compile_csec_composition(
+    let compiled = template_sec::validate_and_compile_csec_composition_with_theme_urls(
         &canonical,
         source,
         &active.parts,
         template_sec::CsecContentKind::NonEntry,
+        ctx.url_policy,
     )
     .map_err(ApiError::internal)?;
-    check_theme_part_depth(key, &active.parts, depth)?;
+    check_theme_part_depth(key, &active.parts, depth, ctx.url_policy)?;
     let html = budget.render_theme(&compiled, ctx.theme_context, None)?;
     Ok(Some(RenderedLayout {
         html,
@@ -1901,12 +1932,14 @@ pub async fn render_resolved_public_builder_with_cache(
 ) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
     let state = builder::read_home_tx(&mut tx).await?;
+    let url_policy = active_theme_url_policy(active)?;
     let context = PublicBuilderContext {
         state: &state,
         active,
         theme_context,
         route_entry,
         cache,
+        url_policy: &url_policy,
     };
     let stack = vec![record.canonical_target_key.clone()];
     let rendered = render_public_builder(
@@ -1956,12 +1989,14 @@ pub async fn resolve_and_render_header_footer_with_cache(
     });
     let mut tx = db.begin().await?;
     let state = builder::read_home_tx(&mut tx).await?;
+    let url_policy = active_theme_url_policy(active_v3)?;
     let context = PublicBuilderContext {
         state: &state,
         active: active_v3,
         theme_context: &part_context,
         route_entry: None,
         cache,
+        url_policy: &url_policy,
     };
     let header = render_public_part(&mut tx, "header", 0, &[], &context, budget).await?;
     let footer = render_public_part(&mut tx, "footer", 0, &[], &context, budget).await?;
@@ -2310,6 +2345,12 @@ async fn build_preview_context_in_tx(
                         _ => serde_json::Value::Null,
                     }
                 }
+                settings::ThemeOptionType::Url => match effective_raw.get(&def.key) {
+                    Some(saved) if settings::validate_option_value(&def, saved).is_ok() => {
+                        saved.clone()
+                    }
+                    _ => def.default.clone(),
+                },
                 _ => effective_raw.get(&def.key).cloned().unwrap_or(def.default),
             };
             options.insert(def.key, val);
@@ -2375,6 +2416,7 @@ async fn render_preview_named_part_in_tx(
     budget: &mut PreviewCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
+    let url_policy = active_theme_url_policy(active)?;
     let part_target = TemplateCandidate {
         part_key: Some(key.to_owned()),
         ..candidate(TemplateCandidateKind::Part)
@@ -2389,6 +2431,7 @@ async fn render_preview_named_part_in_tx(
             theme_context,
             route,
             cache,
+            url_policy: &url_policy,
         };
         let scope = part_scope_prefix(key, budget.expansions);
         let rendered = render_preview_builder(
@@ -2404,8 +2447,8 @@ async fn render_preview_named_part_in_tx(
         return Ok(Some(rendered));
     }
     if let Some(source) = active.and_then(|a| a.parts.get(key)) {
-        let edges =
-            template_sec::preview_csec_part_keys(key, source).map_err(ApiError::bad_request)?;
+        let edges = template_sec::preview_csec_part_keys_with_theme_urls(key, source, &url_policy)
+            .map_err(ApiError::bad_request)?;
         let mut graph =
             preview_part_graph_from_edges(tx, &canonical, edges, active, budget).await?;
         graph.insert(key.to_owned(), PreviewPartSource::Theme(source.clone()));
@@ -2415,6 +2458,7 @@ async fn render_preview_named_part_in_tx(
             theme_context,
             route,
             cache,
+            url_policy: &url_policy,
         };
         return render_preview_part(tx, key, &ctx, budget).await;
     }
@@ -2429,7 +2473,9 @@ fn render_csec_template_for_preview(
     slot_html: Option<&str>,
     budget: &mut PublicCompositionBudget,
 ) -> ApiResult<String> {
-    use crate::template_sec::{CsecContentKind, validate_and_compile_csec_composition};
+    use crate::template_sec::{
+        CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
+    };
     let kind = if target_key == "index" {
         CsecContentKind::Index
     } else if matches!(target_key, "home" | "page" | "singular" | "single")
@@ -2443,8 +2489,15 @@ fn render_csec_template_for_preview(
     };
     let empty_parts = BTreeMap::new();
     let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
-    let composition = validate_and_compile_csec_composition(target_key, html, parts, kind)
-        .map_err(ApiError::bad_request)?;
+    let url_policy = active_theme_url_policy(active)?;
+    let composition = validate_and_compile_csec_composition_with_theme_urls(
+        target_key,
+        html,
+        parts,
+        kind,
+        &url_policy,
+    )
+    .map_err(ApiError::bad_request)?;
     budget.render_theme(&composition, theme_context, slot_html)
 }
 
@@ -2505,6 +2558,7 @@ pub async fn preview_studio_with_cache(
     let mut tx = db.begin().await?;
     validate_typed_target_in_tx(&mut tx, target).await?;
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
+    let url_policy = active_theme_url_policy(active.as_ref())?;
     let state = builder::read_home_tx(&mut tx).await?;
     let (general, options, menus) =
         build_preview_context_in_tx(&mut tx, active.as_ref(), transient).await?;
@@ -2661,6 +2715,7 @@ pub async fn preview_studio_with_cache(
             theme_context: &theme_context,
             route,
             cache,
+            url_policy: &url_policy,
         };
         let mut rendered = render_preview_builder(
             &mut tx,
@@ -2702,6 +2757,7 @@ pub async fn preview_studio_with_cache(
                     theme_context: &theme_context,
                     route,
                     cache,
+                    url_policy: &url_policy,
                 };
                 let slot = if target.kind == K::Part {
                     None
@@ -2825,6 +2881,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     entries::filter_entry_values_for_role(&mut record, schema, actor_role);
     let definition = &schema.base.descriptor;
     let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
+    let url_policy = active_theme_url_policy(active.as_ref())?;
     let state = builder::read_home_tx(tx).await?;
     let (general, options, menus) = build_preview_context_in_tx(tx, active.as_ref(), None).await?;
     let site = SiteContext {
@@ -2894,6 +2951,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
                 theme_context: &theme_context,
                 route,
                 cache,
+                url_policy: &url_policy,
             };
             let mut tpl_rendered = render_preview_builder(
                 tx,

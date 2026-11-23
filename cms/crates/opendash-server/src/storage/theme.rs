@@ -664,28 +664,20 @@ pub async fn stage_and_commit_v3_revision(
 /// Embed/install the OpenDash Starter only at exclusive server startup. A
 /// repaired revision is reconstructed from the signed-in-binary file set;
 /// existing site content and any explicitly selected theme are untouched.
-pub async fn ensure_default_starter_theme(
-    db: &SqlitePool,
+fn repair_builtin_starter_revision_dir_if_needed(
     themes_root: &Path,
-) -> ApiResult<ThemeRevisionRecord> {
-    use crate::builtin_themes::{
-        STARTER_THEME_ID, STARTER_THEME_NAME, STARTER_THEME_VERSION, builtin_starter_theme_files,
-    };
-    let files = builtin_starter_theme_files();
-    let pkg = crate::theme::validate_theme_v3_files(files.clone()).map_err(|error| {
-        eprintln!("Built-in Starter Theme validation: {error:?}");
-        ApiError::internal("Built-in Starter Theme v3 không hợp lệ.")
-    })?;
-    let (digest, file_digests) = compute_canonical_file_map_digest(&files);
-    let revision_dir = themes_root.join("revisions").join(&digest);
+    digest: &str,
+    file_digests: &BTreeMap<String, String>,
+) -> ApiResult<()> {
+    let revision_dir = themes_root.join("revisions").join(digest);
     if let Ok(metadata) = fs::symlink_metadata(&revision_dir) {
-        // Never follow a symlink while repairing a theme directory.
+        // Never follow a symlink or replace an unknown object while repairing.
         if metadata.file_type().is_symlink() {
             return Err(ApiError::internal(
                 "Starter revision path là symlink; không thể tự phục hồi.",
             ));
         }
-        if !dir_matches_revision(&revision_dir, &digest, &file_digests) {
+        if !dir_matches_revision(&revision_dir, digest, file_digests) {
             if !metadata.is_dir() {
                 return Err(ApiError::internal(
                     "Starter revision path không phải thư mục.",
@@ -695,6 +687,58 @@ pub async fn ensure_default_starter_theme(
                 .map_err(|_| ApiError::internal("Không thể phục hồi thư mục Starter revision."))?;
         }
     }
+    Ok(())
+}
+
+pub async fn ensure_default_starter_theme(
+    db: &SqlitePool,
+    themes_root: &Path,
+) -> ApiResult<ThemeRevisionRecord> {
+    use crate::builtin_themes::{
+        STARTER_THEME_ID, STARTER_THEME_NAME, STARTER_THEME_VERSION, builtin_starter_theme_files,
+        builtin_starter_theme_v100_files,
+    };
+    // A pre-existing canonical v1.0.0 record is eligible for exact-byte
+    // repair. Fresh sites must never receive a fabricated legacy revision.
+    let v100_files = builtin_starter_theme_v100_files();
+    let (v100_digest, v100_file_digests) = compute_canonical_file_map_digest(&v100_files);
+    let installed_v100 = {
+        let mut conn = db.acquire().await?;
+        find_revision_by_digest(&mut conn, &v100_digest).await?
+    };
+    if let Some(old) = installed_v100 {
+        if old.theme_id == STARTER_THEME_ID
+            && old.version == "1.0.0"
+            && old.source_format == ThemeSourceFormat::V3
+        {
+            repair_builtin_starter_revision_dir_if_needed(
+                themes_root,
+                &v100_digest,
+                &v100_file_digests,
+            )?;
+            let old_pkg = crate::theme::validate_theme_v3_files(v100_files.clone())
+                .map_err(|_| ApiError::internal("Frozen Starter v1.0.0 không hợp lệ."))?;
+            stage_and_commit_v3_revision(
+                db,
+                themes_root,
+                "bootstrap-starter-v100-repair",
+                STARTER_THEME_ID,
+                STARTER_THEME_NAME,
+                "1.0.0",
+                &old_pkg.manifest_json,
+                r#"{"source":"builtin_starter"}"#,
+                &v100_files,
+            )
+            .await?;
+        }
+    }
+    let files = builtin_starter_theme_files();
+    let pkg = crate::theme::validate_theme_v3_files(files.clone()).map_err(|error| {
+        eprintln!("Built-in Starter Theme validation: {error:?}");
+        ApiError::internal("Built-in Starter Theme v3 không hợp lệ.")
+    })?;
+    let (digest, file_digests) = compute_canonical_file_map_digest(&files);
+    repair_builtin_starter_revision_dir_if_needed(themes_root, &digest, &file_digests)?;
 
     let starter = match stage_and_commit_v3_revision(
         db,

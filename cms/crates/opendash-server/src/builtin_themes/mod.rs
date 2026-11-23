@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 
 pub const STARTER_THEME_ID: &str = "opendash-starter";
 pub const STARTER_THEME_NAME: &str = "OpenDash Starter";
-pub const STARTER_THEME_VERSION: &str = "1.0.0";
+pub const STARTER_THEME_VERSION: &str = "1.0.1";
 
 /// Immutable embedded Starter theme resources, validated using the same v3
 /// boundary as uploaded packages before publishing an on-disk revision.
-pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
+pub fn builtin_starter_theme_v100_files() -> BTreeMap<String, Vec<u8>> {
     BTreeMap::from([
         (
             "404.html".to_owned(),
@@ -121,4 +121,31 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
             include_bytes!("opendash-starter/theme.json").to_vec(),
         ),
     ])
+}
+
+/// v1.0.1 shares immutable assets, layouts, patterns and blocks with the
+/// frozen v1.0.0 snapshot, changing only the four explicitly overlaid files.
+pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
+    let mut files = builtin_starter_theme_v100_files();
+    for (path, bytes) in [
+        (
+            "theme.json",
+            include_bytes!("opendash-starter-1.0.1/theme.json").as_slice(),
+        ),
+        (
+            "header.html",
+            include_bytes!("opendash-starter-1.0.1/header.html").as_slice(),
+        ),
+        (
+            "home.html",
+            include_bytes!("opendash-starter-1.0.1/home.html").as_slice(),
+        ),
+        (
+            "single-post.html",
+            include_bytes!("opendash-starter-1.0.1/single-post.html").as_slice(),
+        ),
+    ] {
+        files.insert(path.to_owned(), bytes.to_vec());
+    }
+    files
 }
