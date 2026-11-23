@@ -83,6 +83,7 @@ export function StudioBlockTree({
   const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const menuRefs = useRef(new Map<string, HTMLDivElement>());
   const handledMenuSeq = useRef<number | null>(null);
+  const previousSelectedId = useRef(selectedId);
 
   const isVisible = (item: NodeLocation): boolean => {
     let parent = item.parentId;
@@ -99,6 +100,14 @@ export function StudioBlockTree({
   useEffect(() => {
     if (selectedId && byId.has(selectedId)) setFocusedId(selectedId);
   }, [selectedId, byId]);
+  // Canvas picks occur inside an iframe, so document pointerdown cannot close
+  // a stale menu. Only react to actual selection transitions: opening a gear
+  // menu selects that same node and must remain open.
+  useEffect(() => {
+    if (previousSelectedId.current === selectedId) return;
+    previousSelectedId.current = selectedId;
+    if (openMenuId && openMenuId !== selectedId) setOpenMenuId(null);
+  }, [selectedId, openMenuId]);
   useEffect(() => {
     if (focusedId && !byId.has(focusedId)) setFocusedId(firstVisibleId);
     if (openMenuId && !byId.has(openMenuId)) setOpenMenuId(null);
@@ -166,6 +175,11 @@ export function StudioBlockTree({
     return !!neighbor && canReorder(item.node.id, neighbor.node.id, direction < 0 ? 'before' : 'after');
   };
   const handleRowKey = (event: KeyboardEvent<HTMLButtonElement>, item: NodeLocation) => {
+    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+      event.preventDefault();
+      toggleMenu(item.node.id);
+      return;
+    }
     if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
       event.preventDefault();
       const direction = event.key === 'ArrowUp' ? -1 : 1;
@@ -255,6 +269,16 @@ export function StudioBlockTree({
     setDragId(null);
     setDrop(null);
   };
+  const leftBounds = (event: DragEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientX < rect.left || event.clientX > rect.right
+      || event.clientY < rect.top || event.clientY > rect.bottom;
+  };
+  const handleDragLeave = (event: DragEvent<HTMLDivElement>, targetId: string) => {
+    event.stopPropagation();
+    // Ignore dragleave from nested buttons/menu: the pointer is still in the row.
+    if (leftBounds(event)) setDrop(current => current?.id === targetId ? null : current);
+  };
 
   const renderLevel = (parentId: string | null, depth: number): ReactNode => (
     <ul role={parentId ? 'group' : 'tree'} aria-label={parentId ? undefined : 'Cấu trúc trang'}
@@ -290,6 +314,7 @@ export function StudioBlockTree({
             draggable={canOperate}
             onDragStart={event => { event.stopPropagation(); handleDragStart(event, id); }}
             onDragOver={event => handleDragOver(event, id)}
+            onDragLeave={event => handleDragLeave(event, id)}
             onDrop={event => handleDrop(event, id)}
             onDragEnd={() => { setDragId(null); setDrop(null); }}
             className={'rounded-lg border border-transparent ' + dropClass
@@ -300,19 +325,21 @@ export function StudioBlockTree({
                 if (element) triggerRefs.current.set(id, element);
                 else triggerRefs.current.delete(id);
               }} aria-label={'Mở thao tác ' + label} aria-haspopup="menu" aria-expanded={openMenuId === id}
+                tabIndex={-1}
                 title={'Thao tác ' + label}
                 className="rounded p-1 text-slate-500 hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-sky-600"
                 onClick={() => toggleMenu(id)}>
                 <TreeIcon name="settings" />
               </button>
               {isContainer && <button type="button" aria-label={(expanded ? 'Thu gọn ' : 'Mở rộng ') + label}
-                aria-expanded={expanded} onClick={toggleCollapse}
+                aria-expanded={expanded} tabIndex={-1} onClick={toggleCollapse}
                 className="rounded p-1 text-slate-500 hover:bg-slate-200">
                 <TreeIcon name={expanded ? 'chevron-down' : 'chevron-right'} />
               </button>}
               {locked && <span title="Block được bảo toàn, chỉ có thể xóa" className="text-amber-700">
                 <TreeIcon name="lock" /></span>}
               <button type="button" role="treeitem" aria-level={depth + 1} aria-selected={selectedId === id}
+                aria-keyshortcuts="Shift+F10"
                 aria-expanded={isContainer ? expanded : undefined} aria-label={label}
                 ref={element => {
                   if (element) rowRefs.current.set(id, element);
@@ -360,7 +387,8 @@ export function StudioBlockTree({
       })}
     </ul>
   );
-  return <section aria-label="Cấu trúc trang" className="min-w-0 space-y-3 p-2">
+  return <section aria-label="Cấu trúc trang" className="min-w-0 space-y-3 p-2"
+    onDragLeave={event => { if (leftBounds(event)) setDrop(null); }}>
     {document.sections.length ? renderLevel(null, 0) : (
       <p className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
         Trang chưa có Section. Thêm Section để bắt đầu bố cục.</p>
@@ -379,6 +407,6 @@ export function StudioBlockTree({
         Media
       </button>
     </div>
-    <p className="text-[11px] text-slate-500">Dùng ↑/↓ để chọn, ←/→ thu gọn/mở rộng, Alt+↑/↓ để đổi thứ tự.</p>
+    <p className="text-[11px] text-slate-500">↑/↓ chọn node, ←/→ thu gọn/mở rộng, Shift+F10 mở thao tác, Alt+↑/↓ đổi thứ tự.</p>
   </section>;
 }
