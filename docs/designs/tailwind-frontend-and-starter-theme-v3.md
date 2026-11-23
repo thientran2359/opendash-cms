@@ -1,12 +1,13 @@
 # Tailwind-First Public Frontend, Built-in `opendash-starter` Default Theme v3, 6 Starter Patterns & 1-Click Sample Content
 
 - **Author:** Orion (Elephant)
-- **Status:** Approved
+- **Status:** Implemented
 - **Date:** 2026-11-22
 - **Baseline:** `main@cb97b2d`
 - **Approved By:** Orion (delegated) / Owner
 - **Approval Evidence:** Owner chat 2026-11-22 ("duyệt cổng 1", "duyệt cổng 2", "duyệt cổng 3, 4" — Tailwind v4 public frontend & always-active `opendash-starter` default Theme v3)
 - **Goldfish Review:** Round 1 independent review (`egm-design`, `egm-codebase-details`, `egm-implementation-readiness`) · 2026-11-23 · reviewed `main@cb97b2d` (2 Majors, 1 Minor, 3 Nits resolved)
+- **Implementation Evidence:** S01 #491 / PR #493 (`a251b3a1`), S02 #492 / PR #494 (`091310c2`). Coordinator drift review: [2026-11-23 report](../../.agents/research/2026-11-23_TAILWIND_STARTER_DRIFT_REPORT.md); [verification record](../verification/2026-11-23-tailwind-starter-closure.md). Remains Implemented pending [#495](https://github.com/thientran2359/opendash-cms/issues/495) and closure evidence.
 - **Related:** [`docs/product/PRODUCT_REQUIREMENTS.md`](../product/PRODUCT_REQUIREMENTS.md), [`docs/contracts/CORE_FOUNDATION.md`](../contracts/CORE_FOUNDATION.md), [`docs/contracts/PLUGIN_ABI.md`](../contracts/PLUGIN_ABI.md), [`docs/contracts/M8_WRITER_INVENTORY.md`](../contracts/M8_WRITER_INVENTORY.md), [`docs/designs/theme-format-and-template-resolver.md`](theme-format-and-template-resolver.md), [`docs/designs/opendash-studio-customizer-and-ux-builder.md`](opendash-studio-customizer-and-ux-builder.md), [`docs/designs/declarative-block-json-engine.md`](declarative-block-json-engine.md), [`docs/designs/wordpress-style-permalinks.md`](wordpress-style-permalinks.md)
 
 ---
