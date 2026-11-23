@@ -17,7 +17,7 @@ import {
 } from '../api/settings.ts';
 import { getStudioTargets, postStudioPreview, type StudioTargetItem, type TransientStudioOverrides } from '../api/studio.ts';
 import { saveThemeOptions } from '../api/themes.ts';
-import { BuilderWorkspace, BuilderEditorCore } from '../builder/BuilderWorkspace.tsx';
+import { BuilderWorkspace, BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderWorkspace.tsx';
 import { BuilderPreviewFrame } from '../builder/BuilderPreviewFrame.tsx';
 import {
   EMPTY_DOCUMENT,
@@ -27,15 +27,19 @@ import {
   countElementsByType,
   createStarterTemplateDocument,
   isElement,
+  locate,
+  nodeTitle,
   type BuilderDocument,
   type BuilderElement,
   type BuilderViewport,
+  type StudioBuilderClipboard,
 } from '../builder/document.ts';
 import { editorDraftStore } from '../features/editor/EditorDraftStore.ts';
 import type { ParsedRoute, StudioPanelId } from '../shell/router.ts';
 import type { AuthUser, BlockRegistry } from '../types.ts';
 import { StudioCustomizerNav } from './StudioCustomizerNav.tsx';
-import { StudioTopBar } from './StudioTopBar.tsx';
+import { StudioSidebarHeader } from './StudioSidebarHeader.tsx';
+import { StudioSidebarFooter } from './StudioSidebarFooter.tsx';
 
 interface Props {
   route: ParsedRoute;
@@ -105,6 +109,9 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [registry, setRegistry] = useState<BlockRegistry>({});
   const [patterns, setPatterns] = useState<PatternRecord[]>([]);
   const [patternsLoaded, setPatternsLoaded] = useState(false);
+  const [builderView, setBuilderView] = useState<StudioBuilderView>('tree');
+  const [addTargetParentId, setAddTargetParentId] = useState<string | null>(null);
+  const [clipboard, setClipboard] = useState<StudioBuilderClipboard | null>(null);
 
   // Mode 1 state
   const [panel, setPanel] = useState<StudioPanelId>(route.studioPanel ?? 'root');
@@ -183,6 +190,9 @@ export const StudioWorkspace: React.FC<Props> = ({
   };
 
   const clearAllDrafts = () => {
+    setBuilderView('tree');
+    setAddTargetParentId(null);
+    setClipboard(null);
     loadSeqRef.current += 1;
     previewAbortRef.current?.abort();
     previewAbortRef.current = null;
@@ -259,6 +269,8 @@ export const StudioWorkspace: React.FC<Props> = ({
     items: StudioTargetItem[],
     overridesByKey: Record<string, builderApi.TypedTemplateOverride>,
   ) => {
+    setBuilderView('tree');
+    setAddTargetParentId(null);
     resetHistory();
     if (!targetKey) {
       setTemplateEditingEnabled(false);
@@ -461,6 +473,14 @@ export const StudioWorkspace: React.FC<Props> = ({
   const activeDoc = isMode2 ? entryDoc : templateDoc;
   const activeSelectedId = isMode2 ? entrySelectedNodeId : templateSelectedNodeId;
 
+  useEffect(() => {
+    if ((builderView === 'properties' && !locate(activeDoc, activeSelectedId))
+        || (builderView === 'add' && addTargetParentId !== null && !locate(activeDoc, addTargetParentId))) {
+      setBuilderView('tree');
+      setAddTargetParentId(null);
+    }
+  }, [builderView, activeDoc, activeSelectedId, addTargetParentId]);
+
   const setActiveDocAndSelection = (nextDoc: BuilderDocument, nextSel?: string | null) => {
     if (isMode2) {
       setEntryDoc(nextDoc);
@@ -631,6 +651,8 @@ export const StudioWorkspace: React.FC<Props> = ({
   };
 
   const handlePanelChange = (nextPanel: StudioPanelId) => {
+    setBuilderView('tree');
+    setAddTargetParentId(null);
     setPanel(nextPanel);
     if (nextPanel !== 'templates' && templateDirty) {
       setStatus('Các thay đổi Template chưa lưu vẫn được giữ trong phiên hiện tại.');
@@ -751,6 +773,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setTargets(freshTargets.items);
       setOverrideDocs(byKey);
       hydrateTemplateTarget(selectedTarget.canonical_target_key, freshTargets.items, byKey);
+      setClipboard(null);
       onSavedSettingsOrTheme?.();
       setStatus(`Đã reset template. Nguồn hiện tại: ${res.next_effective_source.label}`);
     } catch (cause) {
@@ -853,6 +876,9 @@ export const StudioWorkspace: React.FC<Props> = ({
       setEntryHadFreeformWrap(res.had_freeform_wrap);
       setEntryHadRecovery(res.had_recovery);
       resetHistory();
+      setBuilderView('tree');
+      setAddTargetParentId(null);
+      setClipboard(null);
       setStatus(`Đã đưa nội dung về văn bản thuần (v${res.version}).`);
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) setConflict(true);
@@ -883,6 +909,9 @@ export const StudioWorkspace: React.FC<Props> = ({
       setEntryHadFreeformWrap(opened.had_freeform_wrap);
       setEntryHadRecovery(opened.had_recovery);
       resetHistory();
+      setBuilderView('tree');
+      setAddTargetParentId(null);
+      setClipboard(null);
       setStatus(`Đã tải bản mới nhất v${opened.version}.`);
     }).catch(cause => onApiError(cause, 'Không thể tải lại Trình dựng trang.'))
       .finally(() => { if (seq === loadSeqRef.current) setLoading(false); });
@@ -920,50 +949,72 @@ export const StudioWorkspace: React.FC<Props> = ({
     entryDirty ||
     (entryPublicationPolicy === 'draft_publish' && entryPublicationStatus === 'draft');
 
-  return (
-    <div className="flex h-full w-full flex-col bg-zinc-100 text-zinc-900" data-testid="studio-workspace">
-      <StudioTopBar
-        title={isMode2 ? `Trình dựng trang · ${entryTitle || `${entryTypeKey} #${entryId}`}` : 'OpenDash Studio'}
-        subtitle={isMode2 ? `${entryTypeKey} #${entryId} · ${entryPublicationStatus}` : (activeThemeName ?? activeThemeId ?? undefined)}
-        dirty={totalDirty}
-        saving={saving}
-        busy={loading}
-        viewport={viewport}
-        onViewportChange={setViewport}
-        onExit={handleExit}
-        canUndo={canShowUndo && historyCounts.undo > 0}
-        canRedo={canShowUndo && historyCounts.redo > 0}
-        onUndo={canShowUndo ? handleUndo : undefined}
-        onRedo={canShowUndo ? handleRedo : undefined}
-        canReset={
-          isMode2
-            ? entryHadExistingDoc && (entryVersion ?? 0) > 0
-            : Boolean(panel === 'templates' && selectedTarget?.override_id && (templateSavedVersion ?? 0) > 0)
-        }
-        resetLabel={isMode2 ? 'Về văn bản thuần' : 'Reset mặc định'}
-        onReset={isMode2 ? () => void handleResetMode2() : () => void handleResetTemplate()}
-        savePolicy={
-          isMode2
-            ? {
-                mode: 'entry',
-                publicationPolicy: entryPublicationPolicy,
-                publicationStatus: entryPublicationStatus,
-              }
-            : { mode: 'customizer' }
-        }
-        canSave={isMode2 ? canSaveMode2 : mode1Dirty}
-        onSaveCustomizer={() => void handleSaveMode1()}
-        onSaveEntry={intent => void handleSaveMode2(intent)}
-      />
+  const builderActive = isMode2 || Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled);
+  const contextualNode = locate(activeDoc, activeSelectedId);
+  const addParent = locate(activeDoc, addTargetParentId);
+  const contextualSubView = builderActive && builderView !== 'tree';
+  const contextTitle = contextualSubView
+    ? builderView === 'properties' && contextualNode
+      ? nodeTitle(contextualNode)
+      : addParent ? `Thêm vào ${nodeTitle(addParent)}` : 'Thêm Section'
+    : isMode2 ? entryTitle || `${entryTypeKey} #${entryId}`
+      : selectedTarget && panel === 'templates' ? selectedTarget.label
+        : ({ root: activeThemeName ?? activeThemeId ?? 'Theme mặc định',
+            identity: 'Nhận diện Site', 'theme-options': 'Tùy chọn Giao diện',
+            menus: 'Vị trí Menu', reading: 'Trang chủ & Đọc', templates: 'Dựng Template' } as Record<string, string>)[panel];
+  const contextBadge = contextualSubView ? undefined : isMode2
+    ? entryTypeKey === 'page' ? 'Page' : entryTypeKey === 'post' ? 'Post' : entryTypeKey
+    : selectedTarget && panel === 'templates' ? 'Template' : panel === 'root' ? 'Theme' : undefined;
+  const contextBack = contextualSubView ? 'Cấu trúc trang' : isMode2
+    ? entryTypeKey === 'page' ? 'Về danh sách trang'
+      : entryTypeKey === 'post' ? 'Về danh sách bài viết' : `Về danh sách ${entryTypeKey}`
+    : panel === 'root' ? undefined : panel === 'templates' && selectedTarget
+      ? 'Danh sách Template' : 'Tùy biến';
+  const handleContextBack = () => {
+    if (contextualSubView) {
+      setBuilderView('tree');
+      setAddTargetParentId(null);
+    } else if (isMode2) {
+      onNavigateHash(entryTypeKey === 'page' ? '#/pages'
+        : entryTypeKey === 'post' ? '#/posts' : `#/cpt/${encodeURIComponent(entryTypeKey)}`);
+    } else if (panel === 'templates' && selectedTarget) handleSelectTarget(null);
+    else handlePanelChange('root');
+  };
+  const canResetStudio = isMode2
+    ? entryHadExistingDoc && (entryVersion ?? 0) > 0
+    : Boolean(panel === 'templates' && selectedTarget?.override_id && (templateSavedVersion ?? 0) > 0);
 
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col bg-zinc-100 text-zinc-900" data-testid="studio-workspace">
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside
-          className="h-72 w-full shrink-0 overflow-hidden border-b border-zinc-200 bg-white md:h-auto md:w-[340px] md:border-r md:border-b-0"
+          className="flex max-h-[50vh] w-full shrink-0 flex-col overflow-hidden border-b border-zinc-200 bg-white md:max-h-none md:h-full md:w-[320px] md:border-r md:border-b-0"
           aria-label={isMode2 ? 'Bảng dựng nội dung Trình dựng trang' : 'Bảng tùy biến Studio'}
         >
+          <StudioSidebarHeader
+            mode={isMode2 ? 'entry' : 'customizer'}
+            title={contextTitle}
+            badge={contextBadge}
+            dirty={totalDirty}
+            saving={saving}
+            onExit={handleExit}
+            backLabel={contextBack}
+            onBack={contextBack ? handleContextBack : undefined}
+            canReset={canResetStudio && builderView === 'tree' && builderActive}
+            resetLabel={isMode2 ? 'Về văn bản thuần' : 'Reset mặc định'}
+            onReset={isMode2 ? () => void handleResetMode2() : () => void handleResetTemplate()}
+          />
+          <div className="min-h-0 flex-1 overflow-y-auto">
           {isMode2 ? (
-            <div className="h-full overflow-y-auto p-3.5" data-testid="studio-mode2-sidebar">
+            <div className="p-3.5" data-testid="studio-mode2-sidebar">
               <BuilderEditorCore
+                key={`${entryTypeKey}:${entryId}`}
+                builderView={builderView}
+                onBuilderViewChange={setBuilderView}
+                addTargetParentId={addTargetParentId}
+                onAddTargetParentIdChange={setAddTargetParentId}
+                clipboard={clipboard}
+                onClipboardChange={setClipboard}
                 document={entryDoc}
                 selectedId={entrySelectedNodeId}
                 onSelect={setEntrySelectedNodeId}
@@ -991,10 +1042,15 @@ export const StudioWorkspace: React.FC<Props> = ({
             </div>
           ) : (
             <StudioCustomizerNav
+              builderView={builderView}
+              onBuilderViewChange={setBuilderView}
+              addTargetParentId={addTargetParentId}
+              onAddTargetParentIdChange={setAddTargetParentId}
+              clipboard={clipboard}
+              onClipboardChange={setClipboard}
               panel={panel}
               onPanelChange={handlePanelChange}
               activeThemeId={activeThemeId}
-              activeThemeName={activeThemeName}
               generalDraft={generalDraft}
               generalDirty={generalDirty}
               timezones={timezones}
@@ -1043,9 +1099,27 @@ export const StudioWorkspace: React.FC<Props> = ({
               availablePartKeys={availablePartKeys}
               onBuilderMessage={(msg, failed) => setStatus(msg, Boolean(failed))}
               onApiError={onApiError}
-              disabled={loading || saving}
+              disabled={loading || saving || !csrfToken}
             />
           )}
+          </div>
+          <StudioSidebarFooter
+            saving={saving}
+            busy={loading}
+            viewport={viewport}
+            onViewportChange={setViewport}
+            canShowUndo={canShowUndo}
+            canUndo={historyCounts.undo > 0}
+            canRedo={historyCounts.redo > 0}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            savePolicy={isMode2
+              ? { mode: 'entry', publicationPolicy: entryPublicationPolicy, publicationStatus: entryPublicationStatus }
+              : { mode: 'customizer' }}
+            canSave={isMode2 ? canSaveMode2 : mode1Dirty}
+            onSaveCustomizer={() => void handleSaveMode1()}
+            onSaveEntry={intent => void handleSaveMode2(intent)}
+          />
         </aside>
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-zinc-200/70">
@@ -1103,7 +1177,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                 onApiError={onApiError}
                 title={isMode2 ? 'Xem trước nội dung OpenDash Studio' : 'Xem trước Website OpenDash Studio'}
                 className="h-full"
-                frameClassName="!h-[calc(100vh-120px)] min-h-[540px] !border border-zinc-300 rounded-lg"
+                frameClassName="h-full min-h-[540px] !border border-zinc-300 rounded-lg"
                 onPrepared={({ skipped }) => setPreviewSkipped(skipped)}
               />
             ) : (
