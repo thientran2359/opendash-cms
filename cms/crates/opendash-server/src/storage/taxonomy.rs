@@ -800,9 +800,13 @@ pub async fn create_term(
     if taxonomy.hierarchical {
         check_taxonomy_parent(&mut tx, kind, parent_id, None, 1).await?;
     }
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
+    let group_id = crate::storage::settings::generate_translation_group_id("tg");
     let id =
-        sqlx::query("INSERT INTO taxonomy_terms(kind, name, slug, parent_id) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO taxonomy_terms(kind, locale, translation_group_id, name, slug, parent_id) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(kind)
+            .bind(&default_locale)
+            .bind(&group_id)
             .bind(name)
             .bind(slug)
             .bind(parent_id)
@@ -1014,7 +1018,7 @@ mod tests {
         // Many unrelated terms must never appear in a table-row projection.
         for i in 0..250 {
             let kind = if i % 2 == 0 { "category" } else { "tag" };
-            let id = sqlx::query("INSERT INTO taxonomy_terms(kind, name, slug) VALUES(?, ?, ?)")
+            let id = sqlx::query("INSERT INTO taxonomy_terms(kind, name, slug, locale, translation_group_id) VALUES(?, ?, ?, 'vi', 'tg-' || lower(hex(randomblob(8))))")
                 .bind(kind)
                 .bind(format!("Term {i}"))
                 .bind(format!("bulk-resolve-{i}"))
@@ -1173,8 +1177,8 @@ mod tests {
         );
 
         let entry_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status)
-             VALUES ('post', 'sample-post', 'Sample', '{}', 'draft')",
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
+             VALUES ('post', 'sample-post', 'Sample', '{}', 'draft', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await

@@ -88,6 +88,8 @@ pub struct HomeSeoSnapshot {
     pub og_image_id: Option<String>,
     pub canonical_url: Option<String>,
     pub noindex: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
 }
 
 #[derive(Debug, Clone)]

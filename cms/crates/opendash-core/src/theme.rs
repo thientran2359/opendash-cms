@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use crate::id::{
-    valid_kebab_segment_with_limit, valid_namespaced_block_id, valid_namespaced_snake_key,
-    valid_snake_key, valid_snake_key_with_limit, validate_package_id, validate_semver,
+    valid_kebab_segment_with_limit, valid_lowercase_locale_code, valid_namespaced_block_id,
+    valid_namespaced_snake_key, valid_snake_key, valid_snake_key_with_limit, validate_package_id,
+    validate_semver,
 };
 
 pub type Fields = BTreeMap<String, String>;
@@ -353,6 +354,8 @@ pub struct ThemeV3Manifest {
     pub theme_id: String,
     pub name: String,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_locale: Option<String>,
     #[serde(default)]
     pub templates: Vec<ThemeTemplateDecl>,
     #[serde(default)]
@@ -386,6 +389,11 @@ impl ThemeV3Manifest {
         validate_package_id(&self.theme_id)?;
         if !valid_label(&self.name, 128) || !validate_semver(&self.version) {
             return Err("Invalid theme name or SemVer version");
+        }
+        if let Some(locale) = self.default_locale.as_deref() {
+            if !valid_lowercase_locale_code(locale) {
+                return Err("Invalid theme default_locale");
+            }
         }
         let mut targets = BTreeSet::new();
         for template in &self.templates {
@@ -543,6 +551,7 @@ mod tests {
             theme_id: "ocean-theme".into(),
             name: "Ocean Theme".into(),
             version: "1.2.3-beta.1".into(),
+            default_locale: None,
             templates: vec![
                 template(TemplateCandidateKind::Index, "index.html"),
                 template(TemplateCandidateKind::Page, "page.html"),

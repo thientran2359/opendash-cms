@@ -695,8 +695,9 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
              AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
          ) OR EXISTS (
            SELECT 1
-           FROM seo_public_media_refs AS sm
-           WHERE sm.source_kind = 'home_seo' AND sm.source_id = 1 AND sm.media_id = ?
+           FROM site_home_seo AS h
+           JOIN site_locales AS sl ON sl.code = h.locale
+           WHERE h.og_image_id = ? AND sl.enabled = 1
          ) OR EXISTS (
            SELECT 1 FROM builder_homepage_video_refs AS bv
            JOIN builder_homepage AS b ON b.id = 1
@@ -710,8 +711,10 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                ov.target_kind IN ('index', 'not_found', 'singular', 'part')
                OR (ov.target_kind = 'home' AND EXISTS (
                  SELECT 1 FROM site_reading_settings AS reading
+                 JOIN site_locales AS sl ON sl.code = reading.locale AND sl.enabled = 1
                  JOIN content_entries AS e ON e.id = reading.homepage_page_id
-                 WHERE reading.id = 1 AND e.content_type_key = 'page'
+                 WHERE e.content_type_key = 'page'
+                   AND e.locale = reading.locale
                    AND e.publication_status = 'published'
                ))
                OR (ov.target_kind = 'page' AND EXISTS (
@@ -848,8 +851,8 @@ mod m5_public_context_tests {
         terms: &[i64],
     ) -> i64 {
         let result = sqlx::query(
-            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-             VALUES(?, ?, ?, '{}', 'draft')",
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+             VALUES(?, ?, ?, '{}', 'draft', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .bind(type_key)
         .bind(slug)
@@ -896,7 +899,7 @@ mod m5_public_context_tests {
             ("tag", "c2-root-tag"),
             ("brand", "c2-extra-brand"),
         ] {
-            let id = sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES(?, ?, ?)")
+            let id = sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES(?, ?, ?, 'vi', 'tg-' || lower(hex(randomblob(8))))")
                 .bind(kind)
                 .bind(slug)
                 .bind(slug)
@@ -1056,15 +1059,15 @@ mod m5_public_context_tests {
         .unwrap();
 
         let root = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Sea','sea')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Sea','sea','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let child = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id)
-             VALUES('category','Reefs','reefs',?)",
+            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id,locale,translation_group_id)
+             VALUES('category','Reefs','reefs',?,'vi','tg-' || lower(hex(randomblob(8))))",
         )
         .bind(root)
         .execute(&db)
@@ -1072,13 +1075,13 @@ mod m5_public_context_tests {
         .unwrap()
         .last_insert_rowid();
         let tag =
-            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Fish','fish')")
+            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','Fish','fish','vi','tg-' || lower(hex(randomblob(8))))")
                 .execute(&db)
                 .await
                 .unwrap()
                 .last_insert_rowid();
         let other_tag =
-            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Other','other')")
+            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','Other','other','vi','tg-' || lower(hex(randomblob(8))))")
                 .execute(&db)
                 .await
                 .unwrap()
@@ -1245,13 +1248,13 @@ mod m5_public_context_tests {
             .unwrap();
         sqlx::migrate!("../../migrations").run(&db).await.unwrap();
         let root =
-            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','A','a')")
+            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','A','a','vi','tg-' || lower(hex(randomblob(8))))")
                 .execute(&db)
                 .await
                 .unwrap()
                 .last_insert_rowid();
         let child = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id) VALUES('category','B','b',?)",
+            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id,locale,translation_group_id) VALUES('category','B','b',?,'vi','tg-' || lower(hex(randomblob(8))))",
         )
         .bind(root)
         .execute(&db)
@@ -1336,15 +1339,15 @@ mod m5_public_context_tests {
             .unwrap();
         }
         let term_id = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Visibility','visibility')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','Visibility','visibility','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let entry_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-             VALUES('news','hidden-news','Hidden', json_object('hero', ?), 'published')",
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+             VALUES('news','hidden-news','Hidden', json_object('hero', ?), 'published', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .bind(&hero_id)
         .execute(&db)
@@ -1357,11 +1360,13 @@ mod m5_public_context_tests {
             .execute(&db)
             .await
             .unwrap();
-        sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?, '/hidden-news')")
-            .bind(entry_id)
-            .execute(&db)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO entry_public_paths(entry_id,locale,path) VALUES(?, 'vi', '/hidden-news')",
+        )
+        .bind(entry_id)
+        .execute(&db)
+        .await
+        .unwrap();
         sqlx::query(
             "INSERT INTO seo_public_media_refs(source_kind,source_id,media_id)
              VALUES('entry_seo', ?, ?)",
@@ -1557,8 +1562,8 @@ mod m5_public_context_tests {
             opendash_core::builder_blocks::serialize_builder_document_to_blocks(&document).unwrap();
         let values_json = serde_json::json!({ "body": blocks }).to_string();
         let entry_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
-             VALUES('project', 's01-builder', 'Builder project', ?, 'published', 'builder')",
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode, locale, translation_group_id)
+             VALUES('project', 's01-builder', 'Builder project', ?, 'published', 'builder', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .bind(&values_json)
         .execute(&db)
@@ -1684,8 +1689,8 @@ mod m5_public_context_tests {
         .unwrap();
 
         let pattern_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
-             VALUES('pattern', 'hero-pat', 'Hero Pattern', '{}', 'draft', 'builder')",
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode, locale, translation_group_id)
+             VALUES('pattern', 'hero-pat', 'Hero Pattern', '{}', 'draft', 'builder', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -1724,8 +1729,8 @@ mod m5_public_context_tests {
              <!-- /od:section -->"
         );
         let parent_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
-             VALUES('service', 'svc-a', 'Service A', ?, 'draft', 'editor')",
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode, locale, translation_group_id)
+             VALUES('service', 'svc-a', 'Service A', ?, 'draft', 'editor', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .bind(serde_json::json!({ "body": blocks }).to_string())
         .execute(&db)

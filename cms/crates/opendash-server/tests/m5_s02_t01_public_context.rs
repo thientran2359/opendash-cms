@@ -246,27 +246,27 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         .await
         .unwrap();
     let category =
-        sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Sea','sea')")
+        sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Sea','sea','vi','tg-' || lower(hex(randomblob(8))))")
             .execute(&db)
             .await
             .unwrap()
             .last_insert_rowid();
     let child_category = sqlx::query(
-        "INSERT INTO taxonomy_terms(kind,name,slug,parent_id) VALUES('category','Coral','coral',?)",
+        "INSERT INTO taxonomy_terms(kind,name,slug,parent_id,locale,translation_group_id) VALUES('category','Coral','coral',?,'vi','tg-' || lower(hex(randomblob(8))))",
     )
     .bind(category)
     .execute(&db)
     .await
     .unwrap()
     .last_insert_rowid();
-    let tag = sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Fish','fish')")
+    let tag = sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','Fish','fish','vi','tg-' || lower(hex(randomblob(8))))")
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
     let posted = sqlx::query(
-        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-         VALUES('post','public-article','Visible Article','{}','draft')",
+        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+         VALUES('post','public-article','Visible Article','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
     )
     .execute(&db)
     .await
@@ -278,8 +278,8 @@ async fn public_http_routes_reject_ambiguous_paths_and_filter_private_content() 
         .await
         .unwrap();
     let draft = sqlx::query(
-        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-         VALUES('page','secret-page','Private Draft','{}','draft')",
+        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+         VALUES('page','secret-page','Private Draft','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
     )
     .execute(&db)
     .await

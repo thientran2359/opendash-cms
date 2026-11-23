@@ -1,7 +1,7 @@
 //! M7-S03-T01 admin entry route handlers and public custom-path / redirect fallback.
 use axum::{
     Json,
-    extract::{Extension, OriginalUri, Path, State},
+    extract::{Extension, OriginalUri, Path, Query, State},
     http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -239,9 +239,10 @@ pub async fn put_entry_seo(
 pub async fn get_home_seo(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
+    Query(query): Query<crate::storage::settings::LocaleQuery>,
 ) -> ApiResult<impl IntoResponse> {
     require_admin(&headers, &db).await?;
-    let snapshot = seo::get_home_seo(&db).await?;
+    let snapshot = seo::get_home_seo_for_locale(&db, query.locale.as_deref()).await?;
     Ok((no_store_headers(Some(snapshot.version)), Json(snapshot)))
 }
 
@@ -249,10 +250,12 @@ pub async fn put_home_seo(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
+    Query(query): Query<crate::storage::settings::LocaleQuery>,
     Json(input): Json<crate::seo::SeoMetadataInput>,
 ) -> ApiResult<impl IntoResponse> {
     require_admin_with_csrf(&headers, &db).await?;
     let expected_version = parse_if_match(&headers)?;
-    let snapshot = seo::put_home_seo(&db, expected_version, input).await?;
+    let snapshot =
+        seo::put_home_seo_for_locale(&db, query.locale.as_deref(), expected_version, input).await?;
     Ok((no_store_headers(Some(snapshot.version)), Json(snapshot)))
 }

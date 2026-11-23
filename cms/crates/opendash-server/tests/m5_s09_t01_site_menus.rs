@@ -238,8 +238,8 @@ async fn site_menus_ssr_slug_update_draft_hide_and_theme_switch_restart() {
     .unwrap();
 
     sqlx::query(
-        "INSERT INTO site_menu_slot_assignments (theme_id, slot_key, menu_id)
-         VALUES ('theme-a', 'primary', ?)",
+        "INSERT INTO site_menu_slot_assignments (theme_id, locale, slot_key, menu_id)
+         VALUES ('theme-a', 'vi', 'primary', ?)",
     )
     .bind(menu_id)
     .execute(&pool)

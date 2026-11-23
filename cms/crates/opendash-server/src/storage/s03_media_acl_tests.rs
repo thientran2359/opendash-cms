@@ -155,8 +155,8 @@ async fn plugin_media_respects_catalog_kind_repeater_and_provider_state() {
 async fn plugin_media_public_read_rechecks_body_policy_with_stale_pattern_references() {
     let (db, _document, _image_id, video_id) = fixture().await;
     let parent_id = sqlx::query(
-        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-         VALUES('page','stale-parent','Parent','{}','draft')",
+        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+         VALUES('page','stale-parent','Parent','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
     )
     .execute(&db)
     .await
@@ -168,8 +168,8 @@ async fn plugin_media_public_read_rechecks_body_policy_with_stale_pattern_refere
         .await
         .unwrap();
     let pattern_id = sqlx::query(
-        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-         VALUES('pattern','stale-pattern','Pattern','{}','draft')",
+        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+         VALUES('pattern','stale-pattern','Pattern','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
     )
     .execute(&db)
     .await
@@ -259,8 +259,8 @@ async fn plugin_media_projects_to_home_entry_and_template_acl_with_privacy_guard
         opendash_core::builder_blocks::serialize_builder_document_to_blocks(&document).unwrap();
     let entry_id = sqlx::query(
         "INSERT INTO content_entries
-          (content_type_key, slug, title, values_json, publication_status, content_mode)
-         VALUES ('page', 'reef-test', 'Reef', '{}', 'draft', 'builder')",
+          (content_type_key, slug, title, values_json, publication_status, content_mode, locale, translation_group_id)
+         VALUES ('page', 'reef-test', 'Reef', '{}', 'draft', 'builder', 'vi', 'eg-' || lower(hex(randomblob(8))))",
     )
     .execute(&db)
     .await

@@ -876,8 +876,8 @@ async fn migration_0034_normalization_roundtrip_and_compat_rules() {
         .await
         .unwrap();
         sqlx::query(
-            "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, version)
-             VALUES ('page', 'about-us', 'About Us', ?, 'draft', 1)",
+            "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, version, locale, translation_group_id)
+             VALUES ('page', 'about-us', 'About Us', ?, 'draft', 1, 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .bind(format!("{{\"hero_photo\":\"{fake_media_id}\"}}"))
         .execute(&pool)

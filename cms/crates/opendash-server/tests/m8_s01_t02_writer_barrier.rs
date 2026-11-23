@@ -161,6 +161,9 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "public_put",
                 "reading_put",
                 "theme_options_put",
+                "locales_create",
+                "locales_update",
+                "locales_set_default",
             ],
         ),
         (

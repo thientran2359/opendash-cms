@@ -951,6 +951,8 @@ pub async fn create_entry_with_fence(
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
     }
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
+    let group_id = crate::storage::settings::generate_translation_group_id("eg");
     let json = serde_json::to_string(&input.values)?;
     let status = if settings.publication == ContentPublication::DraftPublish {
         "draft"
@@ -958,10 +960,12 @@ pub async fn create_entry_with_fence(
         "published"
     };
     let result = sqlx::query(
-        "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(type_key)
+    .bind(&default_locale)
+    .bind(&group_id)
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
@@ -1153,6 +1157,8 @@ pub async fn create_entry_with_schema_fence(
     if let Some(ids) = &input.term_ids {
         validate_term_ids(&mut tx, type_key, ids).await?;
     }
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
+    let group_id = crate::storage::settings::generate_translation_group_id("eg");
     let json = serde_json::to_string(&input.values)?;
     let status = if settings.publication == ContentPublication::DraftPublish {
         "draft"
@@ -1160,10 +1166,12 @@ pub async fn create_entry_with_schema_fence(
         "published"
     };
     let result = sqlx::query(
-        "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status)
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(type_key)
+    .bind(&default_locale)
+    .bind(&group_id)
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
@@ -1803,10 +1811,15 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
         )
         .fetch_one(&mut *conn)
         .await?;
-    let posts_page_id: Option<i64> =
-        sqlx::query_scalar("SELECT posts_page_id FROM site_reading_settings WHERE id = 1")
-            .fetch_one(&mut *conn)
-            .await?;
+    let posts_page_id: Option<i64> = sqlx::query_scalar(
+        "SELECT r.posts_page_id
+           FROM site_reading_settings r
+           JOIN site_locales sl ON sl.code = r.locale
+          WHERE sl.is_default = 1",
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
     let cpt_bases: BTreeMap<String, Option<String>> =
         serde_json::from_str(&cpt_bases_json).unwrap_or_default();
     let tax_bases: BTreeMap<String, Option<String>> =
@@ -2104,16 +2117,21 @@ pub async fn commit_composite_entry_save(
             // for the built-in types. Keep that security trigger intact and
             // transition to published *within this same writer transaction*.
             // No intermediate draft can be observed or committed.
+            let default_locale =
+                crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
+            let group_id = crate::storage::settings::generate_translation_group_id("eg");
             let status_clause = if is_draft_capable {
                 "draft"
             } else {
                 "published"
             };
             let res = sqlx::query(
-                "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
+                "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
             )
             .bind(type_key)
+            .bind(&default_locale)
+            .bind(&group_id)
             .bind(&resolved_slug)
             .bind(&plan.merged_input.title)
             .bind(&values_json)
@@ -2237,6 +2255,7 @@ pub async fn commit_composite_entry_save(
         &input.seo,
     )
     .await?;
+    crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, saved_id).await?;
 
     if !was_ever_published {
         sqlx::query(
@@ -2361,8 +2380,8 @@ mod tests {
         term_ids: &[i64],
     ) -> i64 {
         let id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-             VALUES(?,?,'Safe','{}','draft')",
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+             VALUES(?,?,'Safe','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
         )
         .bind(type_key)
         .bind(slug)
@@ -2423,15 +2442,15 @@ mod tests {
         .await
         .unwrap();
         let root = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Root','list-root')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Root','list-root','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let child = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id)
-             VALUES('category','Child','list-child',?)",
+            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id,locale,translation_group_id)
+             VALUES('category','Child','list-child',?,'vi','tg-' || lower(hex(randomblob(8))))",
         )
         .bind(root)
         .execute(&db)
@@ -2439,14 +2458,14 @@ mod tests {
         .unwrap()
         .last_insert_rowid();
         let tag = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Tag','list-tag')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','Tag','list-tag','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let other_tag = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Other','other-tag')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','Other','other-tag','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -2576,14 +2595,14 @@ mod tests {
             .await
             .unwrap();
         let category = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','List','list-category')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','List','list-category','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let tag = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','List','list-tag')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','List','list-tag','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -2745,15 +2764,15 @@ mod tests {
         .await
         .unwrap();
         let root = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('genre','Root','genre-root')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('genre','Root','genre-root','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let child = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id)
-             VALUES('genre','Child','genre-child',?)",
+            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id,locale,translation_group_id)
+             VALUES('genre','Child','genre-child',?,'vi','tg-' || lower(hex(randomblob(8))))",
         )
         .bind(root)
         .execute(&db)
@@ -2926,14 +2945,14 @@ mod tests {
             .unwrap();
         sqlx::migrate!("../../migrations").run(&db).await.unwrap();
         let root = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Root','root')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Root','root','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let child = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id) VALUES('category','Child','child',?)",
+            "INSERT INTO taxonomy_terms(kind,name,slug,parent_id,locale,translation_group_id) VALUES('category','Child','child',?,'vi','tg-' || lower(hex(randomblob(8))))",
         )
         .bind(root)
         .execute(&db)
@@ -2941,7 +2960,7 @@ mod tests {
         .unwrap()
         .last_insert_rowid();
         let tag =
-            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Tag','tag')")
+            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','Tag','tag','vi','tg-' || lower(hex(randomblob(8))))")
                 .execute(&db)
                 .await
                 .unwrap()
@@ -2954,8 +2973,8 @@ mod tests {
             ("published-last", true),
         ] {
             let id = sqlx::query(
-                "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-                 VALUES('post',?,'Safe','{}','draft')",
+                "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+                 VALUES('post',?,'Safe','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
             )
             .bind(slug)
             .execute(&db)
@@ -3012,7 +3031,7 @@ mod tests {
         // Reparented category links retain stable IDs and public filters must
         // follow the current tree, not stale slug/path snapshots.
         let other = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Other','other')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Other','other','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -3256,7 +3275,7 @@ mod tests {
         .await
         .unwrap();
         let cat_news = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','News','news')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','News','news','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -3285,7 +3304,7 @@ mod tests {
         // Synthetically inject a colliding category term to exercise the immediate 409 pre-check
         // in resolve_auto_unique_slug_in_tx when post_structure starts with /%category%/.
         let cat_project = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Project','project')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Project','project','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -3325,21 +3344,21 @@ mod tests {
         .unwrap();
 
         let cat_a = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Alpha','alpha')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Alpha','alpha','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let cat_b = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Beta','beta')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Beta','beta','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let tag_id =
-            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','T1','t1')")
+            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','T1','t1','vi','tg-' || lower(hex(randomblob(8))))")
                 .execute(&db)
                 .await
                 .unwrap()

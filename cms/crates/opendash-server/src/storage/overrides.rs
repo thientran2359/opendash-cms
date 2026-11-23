@@ -286,8 +286,9 @@ pub(super) async fn build_reset_candidate_chain_in_conn(
         K::Home => {
             let layout: Option<String> = sqlx::query_scalar(
                 "SELECT e.page_layout_key FROM site_reading_settings AS reading
+                   JOIN site_locales AS sl ON sl.code = reading.locale AND sl.is_default = 1
                    JOIN content_entries AS e ON e.id = reading.homepage_page_id
-                  WHERE reading.id=1 AND e.content_type_key='page'
+                  WHERE e.content_type_key='page'
                     AND e.publication_status='published'",
             )
             .fetch_optional(&mut *conn)

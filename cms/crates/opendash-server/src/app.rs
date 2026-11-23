@@ -51,8 +51,9 @@ use crate::{
         public::public_page,
         public_content::{media_file, media_thumb},
         settings::{
-            general_get, general_put, permalinks_get, permalinks_put, public_get, public_put,
-            reading_get, reading_put, theme_options_get, theme_options_put, timezones_get,
+            general_get, general_put, locales_create, locales_get, locales_set_default,
+            locales_update, permalinks_get, permalinks_put, public_get, public_put, reading_get,
+            reading_put, theme_options_get, theme_options_put, timezones_get,
         },
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_definitions_create,
@@ -294,6 +295,20 @@ pub fn build_router_with_themes_root(
             get(reading_get)
                 .put(reading_put)
                 .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/locales",
+            get(locales_get)
+                .post(locales_create)
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/locales/{code}",
+            put(locales_update).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
+            "/api/admin/locales/{code}/set-default",
+            post(locales_set_default).layer(DefaultBodyLimit::max(4096)),
         )
         .route("/api/admin/settings/timezones", get(timezones_get))
         .route(

@@ -174,13 +174,13 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
     let db = site.database().await;
     let mut tx = db.begin().await.unwrap();
     let parent: i64 = sqlx::query_scalar(
-        "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Root','table-root') RETURNING id"
+        "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Root','table-root','vi','tg-' || lower(hex(randomblob(8)))) RETURNING id"
     ).fetch_one(&mut *tx).await.unwrap();
     let child: i64 = sqlx::query_scalar(
-        "INSERT INTO taxonomy_terms(kind,name,slug,parent_id) VALUES('category','Child','table-child',?) RETURNING id"
+        "INSERT INTO taxonomy_terms(kind,name,slug,parent_id,locale,translation_group_id) VALUES('category','Child','table-child',?,'vi','tg-' || lower(hex(randomblob(8)))) RETURNING id"
     ).bind(parent).fetch_one(&mut *tx).await.unwrap();
     let tag: i64 = sqlx::query_scalar(
-        "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('tag','Tag','table-tag') RETURNING id",
+        "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('tag','Tag','table-tag','vi','tg-' || lower(hex(randomblob(8)))) RETURNING id",
     )
     .fetch_one(&mut *tx)
     .await
@@ -197,8 +197,8 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
         let when = format!("{month}-04 08:00:00");
         let id: i64 = sqlx::query_scalar(
             "INSERT INTO content_entries
-                (content_type_key,slug,title,values_json,publication_status,created_at,updated_at)
-             VALUES('post',?,?,?,'draft',?,?) RETURNING id",
+                (content_type_key,slug,title,values_json,publication_status,created_at,updated_at,locale,translation_group_id)
+             VALUES('post',?,?,?,'draft',?,?,'vi','eg-' || lower(hex(randomblob(8)))) RETURNING id",
         )
         .bind(format!("entry-{i:03}"))
         .bind(title)
@@ -217,7 +217,7 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
             published += 1;
         }
         if i == 0 {
-            sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?,?)")
+            sqlx::query("INSERT INTO entry_public_paths(entry_id,locale,path) VALUES(?,'vi',?)")
                 .bind(id)
                 .bind("/stories/table-custom")
                 .execute(&mut *tx)
@@ -263,8 +263,8 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
     .unwrap();
     sqlx::query(
         "INSERT INTO content_entries
-        (content_type_key,slug,title,values_json,publication_status)
-        VALUES('table_acl','acl-entry','ACL Row',?,'published')",
+        (content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+        VALUES('table_acl','acl-entry','ACL Row',?,'published','vi','eg-' || lower(hex(randomblob(8))))",
     )
     .bind(
         json!({"public_note":"visible","admin_secret":"secret","private_note":"private"})
@@ -552,8 +552,8 @@ async fn table_filters_counts_acl_custom_routes_stable_pages_and_legacy_array() 
     // Concurrent writers yield a fresh subsequent snapshot, never a claim
     // of cross-request cursor isolation. Old deserialized JSON stays stable.
     sqlx::query(
-        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-      VALUES('post','new-after-snapshot','new snapshot','{}','draft')",
+        "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+      VALUES('post','new-after-snapshot','new snapshot','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
     )
     .execute(&db)
     .await

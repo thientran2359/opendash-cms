@@ -276,7 +276,7 @@ async fn composite_published_create_is_atomic_v1_and_draft_stays_private() {
             StatusCode::NOT_FOUND
         );
         let forbidden = sqlx::query(
-            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status) VALUES (?, ?, 'Bypass', '{}', 'published')",
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id) VALUES (?, ?, 'Bypass', '{}', 'published', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .bind(kind)
         .bind(format!("bypass-{kind}"))
