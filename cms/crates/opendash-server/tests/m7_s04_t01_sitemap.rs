@@ -596,8 +596,8 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
     let mut tx = pool.begin().await.unwrap();
     for i in 1..=4998 {
         sqlx::query(
-            "INSERT INTO content_entries (content_type_key, slug, title, publication_status, values_json, version)
-             VALUES ('post', ?1, ?2, 'draft', '{}', 1)",
+            "INSERT INTO content_entries (content_type_key, slug, title, publication_status, values_json, version, locale, translation_group_id)
+             VALUES ('post', ?1, ?2, 'draft', '{}', 1, 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .bind(format!("bulk-item-{i}"))
         .bind(format!("Bulk {i}"))
@@ -635,8 +635,8 @@ async fn dynamic_robots_and_sitemap_respect_privacy_origin_and_pagination() {
 
     // Insert 1 more -> 5001 routes -> 2 parts.
     sqlx::query(
-        "INSERT INTO content_entries (content_type_key, slug, title, publication_status, values_json, version)
-         VALUES ('post', 'bulk-item-4999', 'Bulk 4999', 'draft', '{}', 1)",
+        "INSERT INTO content_entries (content_type_key, slug, title, publication_status, values_json, version, locale, translation_group_id)
+         VALUES ('post', 'bulk-item-4999', 'Bulk 4999', 'draft', '{}', 1, 'vi', 'eg-' || lower(hex(randomblob(8))))",
     )
     .execute(&pool)
     .await

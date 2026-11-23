@@ -55,7 +55,9 @@ pub async fn reading_page_state(db: &SqlitePool, homepage: bool) -> ApiResult<Re
                     WHERE e.id=r.homepage_page_id AND e.content_type_key='page'
                     AND e.publication_status='published' AND t.provider_status='active'
                     AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
-           FROM site_reading_settings r WHERE r.id=1"
+           FROM site_reading_settings r
+           JOIN site_locales sl ON sl.code = r.locale
+          WHERE sl.is_default = 1"
     } else {
         "SELECT r.posts_page_id,
                 EXISTS(SELECT 1 FROM content_entries e
@@ -63,9 +65,14 @@ pub async fn reading_page_state(db: &SqlitePool, homepage: bool) -> ApiResult<Re
                     WHERE e.id=r.posts_page_id AND e.content_type_key='page'
                     AND e.publication_status='published' AND t.provider_status='active'
                     AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
-           FROM site_reading_settings r WHERE r.id=1"
+           FROM site_reading_settings r
+           JOIN site_locales sl ON sl.code = r.locale
+          WHERE sl.is_default = 1"
     };
-    let (page_id, published): (Option<i64>, i64) = sqlx::query_as(sql).fetch_one(db).await?;
+    let row: Option<(Option<i64>, i64)> = sqlx::query_as(sql).fetch_optional(db).await?;
+    let Some((page_id, published)) = row else {
+        return Ok(ReadingPageState::Unconfigured);
+    };
     Ok(match page_id {
         None => ReadingPageState::Unconfigured,
         Some(id) if published != 0 => ReadingPageState::Published(id),
@@ -177,13 +184,27 @@ pub async fn validate_route_claim_in_tx(
         ));
     }
 
+    let entry_locale = if let Some(eid) = owner_entry_id {
+        sqlx::query_scalar::<_, String>("SELECT locale FROM content_entries WHERE id = ?")
+            .bind(eid)
+            .fetch_optional(&mut *conn)
+            .await?
+    } else {
+        None
+    };
+    let entry_locale = match entry_locale {
+        Some(loc) => loc,
+        None => crate::storage::settings::get_default_locale_code_in_conn(conn).await?,
+    };
+
     if path == "/posts" {
-        let default_posts_active: i64 = sqlx::query_scalar(
-            "SELECT posts_page_id IS NULL FROM site_reading_settings WHERE id = 1",
-        )
-        .fetch_one(&mut *conn)
-        .await?;
-        if default_posts_active != 0 {
+        let posts_page_id: Option<i64> =
+            sqlx::query_scalar("SELECT posts_page_id FROM site_reading_settings WHERE locale = ?")
+                .bind(&entry_locale)
+                .fetch_optional(&mut *conn)
+                .await?
+                .flatten();
+        if posts_page_id.is_none() {
             return Err(ApiError::conflict(
                 "Đường dẫn /posts đang dành cho trang lưu trữ bài viết mặc định.",
             ));
@@ -191,7 +212,8 @@ pub async fn validate_route_claim_in_tx(
     }
 
     let existing_owner: Option<i64> =
-        sqlx::query_scalar("SELECT entry_id FROM entry_public_paths WHERE path = ?")
+        sqlx::query_scalar("SELECT entry_id FROM entry_public_paths WHERE locale = ? AND path = ?")
+            .bind(&entry_locale)
             .bind(&path)
             .fetch_optional(&mut *conn)
             .await?;
@@ -203,11 +225,13 @@ pub async fn validate_route_claim_in_tx(
         ));
     }
 
-    let redirect_owner: Option<i64> =
-        sqlx::query_scalar("SELECT entry_id FROM entry_redirects WHERE source_path = ?")
-            .bind(&path)
-            .fetch_optional(&mut *conn)
-            .await?;
+    let redirect_owner: Option<i64> = sqlx::query_scalar(
+        "SELECT entry_id FROM entry_redirects WHERE locale = ? AND source_path = ?",
+    )
+    .bind(&entry_locale)
+    .bind(&path)
+    .fetch_optional(&mut *conn)
+    .await?;
     if let Some(eid) = redirect_owner
         && Some(eid) != owner_entry_id
     {
@@ -322,12 +346,13 @@ async fn set_entry_route_in_tx(
     expected_entry_version: i64,
     custom_path: Option<&str>,
 ) -> ApiResult<EntryRouteSnapshot> {
-    let row: Option<(i64, i64)> =
-        sqlx::query_as("SELECT version, has_been_published FROM content_entries WHERE id = ?")
-            .bind(entry_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    let Some((current_ver, has_been_published)) = row else {
+    let row: Option<(i64, i64, String)> = sqlx::query_as(
+        "SELECT version, has_been_published, locale FROM content_entries WHERE id = ?",
+    )
+    .bind(entry_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((current_ver, has_been_published, entry_locale)) = row else {
         return Err(ApiError::not_found("Không tìm thấy nội dung."));
     };
     if current_ver != expected_entry_version {
@@ -373,26 +398,35 @@ async fn set_entry_route_in_tx(
     if has_been_published != 0
         && let Some(old_path) = old_custom
     {
-        sqlx::query("INSERT OR IGNORE INTO entry_redirects (source_path, entry_id) VALUES (?, ?)")
-            .bind(&old_path)
-            .bind(entry_id)
-            .execute(&mut *conn)
-            .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO entry_redirects (locale, source_path, entry_id) VALUES (?, ?, ?)",
+        )
+        .bind(&entry_locale)
+        .bind(&old_path)
+        .bind(entry_id)
+        .execute(&mut *conn)
+        .await?;
     }
 
     match &normalized_new {
         Some(new_path) => {
-            sqlx::query("DELETE FROM entry_redirects WHERE source_path = ? AND entry_id = ?")
-                .bind(new_path)
-                .bind(entry_id)
-                .execute(&mut *conn)
-                .await?;
             sqlx::query(
-                "INSERT INTO entry_public_paths (entry_id, path)
-                 VALUES (?, ?)
-                 ON CONFLICT(entry_id) DO UPDATE SET path = excluded.path",
+                "DELETE FROM entry_redirects WHERE locale = ? AND source_path = ? AND entry_id = ?",
+            )
+            .bind(&entry_locale)
+            .bind(new_path)
+            .bind(entry_id)
+            .execute(&mut *conn)
+            .await?;
+            sqlx::query(
+                "INSERT INTO entry_public_paths (entry_id, locale, path)
+                 VALUES (?, ?, ?)
+                 ON CONFLICT(entry_id) DO UPDATE SET
+                     locale = excluded.locale,
+                     path = excluded.path",
             )
             .bind(entry_id)
+            .bind(&entry_locale)
             .bind(new_path)
             .execute(&mut *conn)
             .await?;
@@ -755,32 +789,49 @@ pub async fn put_entry_seo(
     }
 }
 
-pub async fn get_home_seo(db: &SqlitePool) -> ApiResult<HomeSeoSnapshot> {
-    let row: (
+pub async fn get_home_seo_for_locale(
+    db: &SqlitePool,
+    requested_locale: Option<&str>,
+) -> ApiResult<HomeSeoSnapshot> {
+    let mut tx = db.begin().await?;
+    let resolved_locale =
+        crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, requested_locale)
+            .await?;
+    let row: Option<(
         i64,
         Option<String>,
         Option<String>,
         Option<String>,
         Option<String>,
         i64,
-    ) = sqlx::query_as(
+    )> = sqlx::query_as(
         "SELECT version, title, description, og_image_id, canonical_url, noindex
-               FROM site_home_seo WHERE id = 1",
+               FROM site_home_seo WHERE locale = ?",
     )
-    .fetch_one(db)
+    .bind(&resolved_locale)
+    .fetch_optional(&mut *tx)
     .await?;
+    tx.commit().await?;
+    let (version, title, description, og_image_id, canonical_url, noindex) =
+        row.unwrap_or((1, None, None, None, None, 0));
     Ok(HomeSeoSnapshot {
-        version: row.0,
-        title: row.1,
-        description: row.2,
-        og_image_id: row.3,
-        canonical_url: row.4,
-        noindex: row.5 != 0,
+        version,
+        title,
+        description,
+        og_image_id,
+        canonical_url,
+        noindex: noindex != 0,
+        locale: requested_locale.map(|_| resolved_locale),
     })
 }
 
-pub async fn put_home_seo(
+pub async fn get_home_seo(db: &SqlitePool) -> ApiResult<HomeSeoSnapshot> {
+    get_home_seo_for_locale(db, None).await
+}
+
+pub async fn put_home_seo_for_locale(
     db: &SqlitePool,
+    requested_locale: Option<&str>,
     expected_version: i64,
     input: SeoMetadataInput,
 ) -> ApiResult<HomeSeoSnapshot> {
@@ -788,49 +839,75 @@ pub async fn put_home_seo(
     let mut conn = db.acquire().await?;
     sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
     let res = async {
+        let resolved_locale =
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut conn, requested_locale)
+                .await?;
         verify_og_media_exists_in_tx(&mut conn, clean.og_image_id.as_deref()).await?;
-        let updated = sqlx::query(
-            "UPDATE site_home_seo
-                SET title = ?, description = ?, og_image_id = ?, canonical_url = ?, noindex = ?,
-                    version = version + 1
-              WHERE id = 1 AND version = ?",
-        )
-        .bind(&clean.title)
-        .bind(&clean.description)
-        .bind(&clean.og_image_id)
-        .bind(&clean.canonical_url)
-        .bind(i64::from(clean.noindex))
-        .bind(expected_version)
-        .execute(&mut *conn)
-        .await?;
-        if updated.rows_affected() == 0 {
-            return Err(ApiError::precondition_failed(
-                "Phiên bản SEO trang chủ đã thay đổi. Hãy tải lại trước khi lưu.",
-            ));
-        }
-
-        sqlx::query(
-            "DELETE FROM seo_public_media_refs WHERE source_kind = 'home_seo' AND source_id = 1",
-        )
-        .execute(&mut *conn)
-        .await?;
-        if let Some(ref mid) = clean.og_image_id {
-            sqlx::query(
-                "INSERT OR IGNORE INTO seo_public_media_refs (source_kind, source_id, media_id)
-                 VALUES ('home_seo', 1, ?)",
-            )
-            .bind(mid)
-            .execute(&mut *conn)
-            .await?;
-        }
+        let current_ver: Option<i64> =
+            sqlx::query_scalar("SELECT version FROM site_home_seo WHERE locale = ?")
+                .bind(&resolved_locale)
+                .fetch_optional(&mut *conn)
+                .await?;
+        let new_version = match current_ver {
+            None => {
+                if expected_version != 1 {
+                    return Err(ApiError::precondition_failed(
+                        "Phiên bản SEO trang chủ đã thay đổi. Hãy tải lại trước khi lưu.",
+                    ));
+                }
+                sqlx::query(
+                    "INSERT INTO site_home_seo
+                        (locale, title, description, og_image_id, canonical_url, noindex, version)
+                     VALUES (?, ?, ?, ?, ?, ?, 2)",
+                )
+                .bind(&resolved_locale)
+                .bind(&clean.title)
+                .bind(&clean.description)
+                .bind(&clean.og_image_id)
+                .bind(&clean.canonical_url)
+                .bind(i64::from(clean.noindex))
+                .execute(&mut *conn)
+                .await?;
+                2
+            }
+            Some(ver) => {
+                if ver != expected_version {
+                    return Err(ApiError::precondition_failed(
+                        "Phiên bản SEO trang chủ đã thay đổi. Hãy tải lại trước khi lưu.",
+                    ));
+                }
+                let updated = sqlx::query(
+                    "UPDATE site_home_seo
+                        SET title = ?, description = ?, og_image_id = ?, canonical_url = ?, noindex = ?,
+                            version = version + 1
+                      WHERE locale = ? AND version = ?",
+                )
+                .bind(&clean.title)
+                .bind(&clean.description)
+                .bind(&clean.og_image_id)
+                .bind(&clean.canonical_url)
+                .bind(i64::from(clean.noindex))
+                .bind(&resolved_locale)
+                .bind(expected_version)
+                .execute(&mut *conn)
+                .await?;
+                if updated.rows_affected() == 0 {
+                    return Err(ApiError::precondition_failed(
+                        "Phiên bản SEO trang chủ đã thay đổi. Hãy tải lại trước khi lưu.",
+                    ));
+                }
+                expected_version + 1
+            }
+        };
 
         Ok(HomeSeoSnapshot {
-            version: expected_version + 1,
+            version: new_version,
             title: clean.title,
             description: clean.description,
             og_image_id: clean.og_image_id,
             canonical_url: clean.canonical_url,
             noindex: clean.noindex,
+            locale: requested_locale.map(|_| resolved_locale),
         })
     }
     .await;
@@ -844,6 +921,14 @@ pub async fn put_home_seo(
             Err(err)
         }
     }
+}
+
+pub async fn put_home_seo(
+    db: &SqlitePool,
+    expected_version: i64,
+    input: SeoMetadataInput,
+) -> ApiResult<HomeSeoSnapshot> {
+    put_home_seo_for_locale(db, None, expected_version, input).await
 }
 
 fn project_og_image_url(
@@ -1037,37 +1122,58 @@ pub(crate) async fn apply_entry_route_patch_in_tx(
         return Ok(old_custom);
     }
 
-    if record_old_redirect && let Some(old_path) = old_custom {
-        sqlx::query("INSERT OR IGNORE INTO entry_redirects (source_path, entry_id) VALUES (?, ?)")
+    if record_old_redirect || normalized_new.is_some() {
+        let entry_locale: String =
+            sqlx::query_scalar("SELECT locale FROM content_entries WHERE id = ?")
+                .bind(entry_id)
+                .fetch_one(&mut *conn)
+                .await?;
+        if record_old_redirect && let Some(old_path) = old_custom {
+            sqlx::query(
+                "INSERT OR IGNORE INTO entry_redirects (locale, source_path, entry_id) VALUES (?, ?, ?)",
+            )
+            .bind(&entry_locale)
             .bind(&old_path)
             .bind(entry_id)
             .execute(&mut *conn)
             .await?;
-    }
+        }
 
-    match &normalized_new {
-        Some(new_path) => {
-            sqlx::query("DELETE FROM entry_redirects WHERE source_path = ? AND entry_id = ?")
+        match &normalized_new {
+            Some(new_path) => {
+                sqlx::query(
+                    "DELETE FROM entry_redirects WHERE locale = ? AND source_path = ? AND entry_id = ?",
+                )
+                .bind(&entry_locale)
                 .bind(new_path)
                 .bind(entry_id)
                 .execute(&mut *conn)
                 .await?;
-            sqlx::query(
-                "INSERT INTO entry_public_paths (entry_id, path)
-                 VALUES (?, ?)
-                 ON CONFLICT(entry_id) DO UPDATE SET path = excluded.path",
-            )
-            .bind(entry_id)
-            .bind(new_path)
-            .execute(&mut *conn)
-            .await?;
-        }
-        None => {
-            sqlx::query("DELETE FROM entry_public_paths WHERE entry_id = ?")
+                sqlx::query(
+                    "INSERT INTO entry_public_paths (entry_id, locale, path)
+                     VALUES (?, ?, ?)
+                     ON CONFLICT(entry_id) DO UPDATE SET
+                         locale = excluded.locale,
+                         path = excluded.path",
+                )
                 .bind(entry_id)
+                .bind(&entry_locale)
+                .bind(new_path)
                 .execute(&mut *conn)
                 .await?;
+            }
+            None => {
+                sqlx::query("DELETE FROM entry_public_paths WHERE entry_id = ?")
+                    .bind(entry_id)
+                    .execute(&mut *conn)
+                    .await?;
+            }
         }
+    } else {
+        sqlx::query("DELETE FROM entry_public_paths WHERE entry_id = ?")
+            .bind(entry_id)
+            .execute(&mut *conn)
+            .await?;
     }
 
     Ok(normalized_new)

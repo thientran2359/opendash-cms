@@ -1,7 +1,8 @@
 //! Admin-only SITE-01/C3 API, with ETag/CAS and no-store responses.
 use axum::{
     Json,
-    extract::{Path, State, rejection::JsonRejection},
+    body::Bytes,
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -11,14 +12,15 @@ use sqlx::SqlitePool;
 use std::collections::BTreeMap;
 
 use crate::{
-    auth::{require_admin, require_admin_with_csrf},
+    auth::{require_admin, require_admin_with_csrf, require_session},
     error::{ApiError, ApiResult},
     storage::permalinks::{self, PermalinkPutError, PermalinkSettings, PermalinkSettingsInput},
     storage::settings::{
-        self, GeneralSettings, GeneralSettingsInput, GlobalSiteOptionsOutcome,
-        GlobalSiteOptionsSnapshot, PublicSaveOutcome, PublicSiteSettings, PublicSiteSettingsInput,
-        ReadingSettings, ReadingSettingsInput, SaveOutcome, ThemeOptionsOutcome,
-        ThemeOptionsSnapshot,
+        self, CreateLocaleInput, GeneralSettings, GeneralSettingsInput, GlobalSiteOptionsOutcome,
+        GlobalSiteOptionsSnapshot, LocaleMutationError, LocaleQuery, PublicSaveOutcome,
+        PublicSiteSettings, PublicSiteSettingsInput, ReadingSettings, ReadingSettingsInput,
+        SaveOutcome, SiteLocalesSnapshot, ThemeOptionsOutcome, ThemeOptionsSnapshot,
+        UpdateLocaleInput,
     },
 };
 
@@ -63,9 +65,13 @@ fn map_storage_error(error: sqlx::Error) -> ApiError {
     error.into()
 }
 
-pub async fn general_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
+pub async fn general_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Query(query): Query<LocaleQuery>,
+) -> ApiResult<Response> {
     require_admin(&headers, &db).await?;
-    let current = settings::get_general(&db).await?;
+    let current = settings::get_general_for_locale(&db, query.locale.as_deref()).await?;
     Ok(settings_response(current))
 }
 
@@ -85,13 +91,14 @@ pub async fn general_put(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
+    Query(query): Query<LocaleQuery>,
     input: Result<Json<GeneralSettingsInput>, JsonRejection>,
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     let version = parse_if_match(&headers)?;
     let Json(input) = input.map_err(|_| ApiError::bad_request("Dữ liệu Settings không hợp lệ."))?;
     let input = input.validate().map_err(ApiError::bad_request)?;
-    match settings::save_general(&db, input, version)
+    match settings::save_general_for_locale(&db, query.locale.as_deref(), input, version)
         .await
         .map_err(map_storage_error)?
     {
@@ -102,6 +109,94 @@ pub async fn general_put(
         SaveOutcome::InvalidTimezone => Err(ApiError::bad_request(
             "Múi giờ không có trong danh mục IANA tzdb 2026f.",
         )),
+        SaveOutcome::SecondaryTimezoneLocked => Err(ApiError::bad_request(
+            "Múi giờ là cấu hình toàn cục và chỉ được thay đổi ở ngôn ngữ mặc định.",
+        )),
+        SaveOutcome::InvalidLocale(msg) => Err(ApiError::bad_request(msg)),
+    }
+}
+
+fn locales_response(status: StatusCode, snapshot: SiteLocalesSnapshot) -> Response {
+    (
+        status,
+        no_store_headers(Some(snapshot.version)),
+        Json(snapshot),
+    )
+        .into_response()
+}
+
+fn map_locale_mutation_error(err: LocaleMutationError) -> ApiResult<Response> {
+    match err {
+        LocaleMutationError::Conflicts(payload) => Ok((
+            StatusCode::CONFLICT,
+            [(header::CACHE_CONTROL, "no-store")],
+            Json(payload),
+        )
+            .into_response()),
+        LocaleMutationError::Api(api_err) => Err(api_err),
+    }
+}
+
+pub async fn locales_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
+    require_session(&headers, &db).await?;
+    let snapshot = settings::list_locales(&db).await?;
+    Ok(locales_response(StatusCode::OK, snapshot))
+}
+
+pub async fn locales_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    input: Result<Json<CreateLocaleInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) =
+        input.map_err(|_| ApiError::bad_request("Dữ liệu tạo ngôn ngữ không hợp lệ."))?;
+    match settings::create_locale(&db, version, input).await {
+        Ok(snapshot) => Ok(locales_response(StatusCode::CREATED, snapshot)),
+        Err(err) => map_locale_mutation_error(err),
+    }
+}
+
+pub async fn locales_update(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(code): Path<String>,
+    input: Result<Json<UpdateLocaleInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) =
+        input.map_err(|_| ApiError::bad_request("Dữ liệu cập nhật ngôn ngữ không hợp lệ."))?;
+    match settings::update_locale(&db, &code, version, input).await {
+        Ok(snapshot) => Ok(locales_response(StatusCode::OK, snapshot)),
+        Err(err) => map_locale_mutation_error(err),
+    }
+}
+
+pub async fn locales_set_default(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(code): Path<String>,
+    body: Bytes,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    if !body.is_empty() {
+        let parsed: serde_json::Value = serde_json::from_slice(&body)
+            .map_err(|_| ApiError::bad_request("Body của set-default phải rỗng hoặc {}."))?;
+        if !parsed.as_object().is_some_and(serde_json::Map::is_empty) {
+            return Err(ApiError::bad_request(
+                "Body của set-default phải rỗng hoặc {}.",
+            ));
+        }
+    }
+    match settings::set_default_locale(&db, &code, version).await {
+        Ok(snapshot) => Ok(locales_response(StatusCode::OK, snapshot)),
+        Err(err) => map_locale_mutation_error(err),
     }
 }
 
@@ -144,6 +239,13 @@ pub async fn public_put(
         PublicSaveOutcome::Stale => Err(ApiError::precondition_failed(
             "Cài đặt công khai đã thay đổi ở một tab khác. Form chưa lưu vẫn được giữ lại.",
         )),
+        PublicSaveOutcome::ReservedLanguage(msg) => {
+            Err(ApiError(StatusCode::UNPROCESSABLE_ENTITY, msg.into()))
+        }
+        PublicSaveOutcome::MultiLocaleConflict => Err(ApiError::conflict(
+            "Website đang bật nhiều ngôn ngữ; hãy quản lý ngôn ngữ mặc định tại phần Ngôn ngữ nội dung.",
+        )),
+        PublicSaveOutcome::SyncFailed(err) => Err(err),
     }
 }
 
@@ -197,21 +299,29 @@ fn reading_settings_response(settings: ReadingSettings) -> Response {
     (no_store_headers(Some(settings.version)), Json(settings)).into_response()
 }
 
-pub async fn reading_get(State(db): State<SqlitePool>, headers: HeaderMap) -> ApiResult<Response> {
+pub async fn reading_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Query(query): Query<LocaleQuery>,
+) -> ApiResult<Response> {
     require_admin(&headers, &db).await?;
-    Ok(reading_settings_response(settings::get_reading(&db).await?))
+    Ok(reading_settings_response(
+        settings::get_reading_for_locale(&db, query.locale.as_deref()).await?,
+    ))
 }
 
 pub async fn reading_put(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     headers: HeaderMap,
+    Query(query): Query<LocaleQuery>,
     input: Result<Json<ReadingSettingsInput>, JsonRejection>,
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     let expected = parse_if_match(&headers)?;
     let Json(input) = input.map_err(|_| ApiError::bad_request("Reading Settings không hợp lệ."))?;
-    let saved = settings::save_reading(&db, input, expected).await?;
+    let saved =
+        settings::save_reading_for_locale(&db, query.locale.as_deref(), input, expected).await?;
     Ok(reading_settings_response(saved))
 }
 
@@ -229,9 +339,12 @@ pub async fn theme_options_get(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(theme_id): Path<String>,
+    Query(query): Query<LocaleQuery>,
 ) -> ApiResult<Response> {
     require_admin(&headers, &db).await?;
-    let Some(snapshot) = settings::get_theme_options(&db, &theme_id).await? else {
+    let Some(snapshot) =
+        settings::get_theme_options_for_locale(&db, &theme_id, query.locale.as_deref()).await?
+    else {
         return Err(ApiError::not_found("Không tìm thấy theme."));
     };
     Ok(theme_options_response(snapshot))
@@ -242,13 +355,22 @@ pub async fn theme_options_put(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(theme_id): Path<String>,
+    Query(query): Query<LocaleQuery>,
     input: Result<Json<ThemeOptionsPutInput>, JsonRejection>,
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     let version = parse_if_match(&headers)?;
     let Json(input) =
         input.map_err(|_| ApiError::bad_request("Dữ liệu theme options không hợp lệ."))?;
-    match settings::put_theme_options(&db, &theme_id, version, input.values).await? {
+    match settings::put_theme_options_for_locale(
+        &db,
+        &theme_id,
+        version,
+        input.values,
+        query.locale.as_deref(),
+    )
+    .await?
+    {
         ThemeOptionsOutcome::Saved(saved) => Ok(theme_options_response(saved)),
         ThemeOptionsOutcome::NotFound => Err(ApiError::not_found("Không tìm thấy theme.")),
         ThemeOptionsOutcome::Stale => Err(ApiError::precondition_failed(

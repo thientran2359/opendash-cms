@@ -27,6 +27,29 @@ pub fn valid_kebab_segment_with_limit(value: &str, max_len: usize) -> bool {
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
 }
 
+pub const MAX_BCP47_TAG_BYTES: usize = 35;
+
+/// Validates an ASCII BCP47 language tag (`primary` 2–8 ASCII letters, optional
+/// 1–8 ASCII alphanumeric subtags separated by `-`, up to 35 bytes).
+pub fn valid_bcp47_tag(value: &str) -> bool {
+    if value.is_empty() || value.len() > MAX_BCP47_TAG_BYTES {
+        return false;
+    }
+    let mut parts = value.split('-');
+    let Some(primary) = parts.next() else {
+        return false;
+    };
+    if !(2..=8).contains(&primary.len()) || !primary.bytes().all(|b| b.is_ascii_alphabetic()) {
+        return false;
+    }
+    parts.all(|sub| (1..=8).contains(&sub.len()) && sub.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// Validates a lowercase canonical locale code derived from a BCP47 language tag.
+pub fn valid_lowercase_locale_code(value: &str) -> bool {
+    valid_bcp47_tag(value) && !value.bytes().any(|b| b.is_ascii_uppercase())
+}
+
 /// Validates a namespaced block identifier (`<namespace>/<name>`) where each
 /// segment is a `kebab-case` identifier up to 32 characters (e.g. `sample-theme/hero-banner`).
 pub fn valid_namespaced_block_id(value: &str) -> bool {

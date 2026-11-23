@@ -284,8 +284,9 @@ pub(super) async fn build_reset_candidate_chain_in_conn(
         K::Home => {
             let layout: Option<String> = sqlx::query_scalar(
                 "SELECT e.page_layout_key FROM site_reading_settings AS reading
+                   JOIN site_locales AS sl ON sl.code = reading.locale AND sl.is_default = 1
                    JOIN content_entries AS e ON e.id = reading.homepage_page_id
-                  WHERE reading.id=1 AND e.content_type_key='page'
+                  WHERE e.content_type_key='page'
                     AND e.publication_status='published'",
             )
             .fetch_optional(&mut *conn)
@@ -1532,7 +1533,7 @@ pub async fn preview_typed_override_with_cache(
         .zip(manifest_json.as_deref())
         .map(|(a, m)| (a.manifest.theme_id.as_str(), m));
     let options = settings::resolve_merged_public_options_with_overrides_in_conn(
-        &mut tx, active_ref, None, None, true,
+        &mut tx, active_ref, None, None, true, None,
     )
     .await?;
     state.site_options = options.clone();
@@ -2304,6 +2305,7 @@ async fn build_preview_context_in_tx(
         transient.and_then(|t| t.global_options.as_ref()),
         transient.and_then(|t| t.theme_options.as_ref()),
         true,
+        None,
     )
     .await?;
 

@@ -958,8 +958,8 @@ mod s02_block_registry_tests {
         // while the plugin itself remains active.
         let body = serialize_builder_document_to_blocks(&document).unwrap();
         sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status)
-             VALUES ('page', 'private-media-test', 'Media test', ?, 'draft')",
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
+             VALUES ('page', 'private-media-test', 'Media test', ?, 'draft', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .bind(json!({ "body": body }).to_string())
         .execute(&mut *conn)

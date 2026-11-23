@@ -964,8 +964,8 @@ mod tests {
         let doc_json = String::from_utf8(doc.to_json().unwrap()).unwrap();
 
         let page_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
-             VALUES('page', 'demo-page', 'Demo Page', '{}', 'draft', 'builder')",
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode, locale, translation_group_id)
+             VALUES('page', 'demo-page', 'Demo Page', '{}', 'draft', 'builder', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -986,8 +986,8 @@ mod tests {
         .unwrap();
 
         let pattern_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode)
-             VALUES('pattern', 'demo-pat', 'Demo Pattern', '{}', 'draft', 'builder')",
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, content_mode, locale, translation_group_id)
+             VALUES('pattern', 'demo-pat', 'Demo Pattern', '{}', 'draft', 'builder', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -1128,8 +1128,8 @@ mod tests {
         .await
         .unwrap();
         let entry_id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status)
-             VALUES('secret_doc', 'sec-1', 'Secret 1', '{}', 'published')",
+            "INSERT INTO content_entries(content_type_key, slug, title, values_json, publication_status, locale, translation_group_id)
+             VALUES('secret_doc', 'sec-1', 'Secret 1', '{}', 'published', 'vi', 'eg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await

@@ -311,8 +311,8 @@ async fn migrations_acl_token_cas_and_values_are_atomic_with_core_update() {
          VALUES('private_cpt',?,'user','active','declared',1)",
     ).bind(private_schema.to_string()).execute(&db).await.unwrap();
     sqlx::query(
-        r#"INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-         VALUES('private_cpt','private-entry','Private entry','{"admin_note":"NO-LEAK"}','draft')"#,
+        r#"INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+         VALUES('private_cpt','private-entry','Private entry','{"admin_note":"NO-LEAK"}','draft','vi','eg-' || lower(hex(randomblob(8))))"#,
     )
     .execute(&db)
     .await

@@ -1187,6 +1187,8 @@ pub async fn execute_sample_import_with_cutpoint(
             ));
         }
 
+        let default_locale =
+            crate::storage::settings::get_default_locale_code_in_conn(&mut conn).await?;
         let mut created = Vec::new();
         let mut skipped = Vec::new();
         let mut page_id_by_object = HashMap::<String, i64>::new();
@@ -1259,11 +1261,14 @@ pub async fn execute_sample_import_with_cutpoint(
                 } else {
                     "{}".to_string()
                 };
+                let group_id = crate::storage::settings::generate_translation_group_id("eg");
                 let entry_id: i64 = sqlx::query_scalar(
-                    "INSERT INTO content_entries (content_type_key, slug, title, values_json, publication_status, version)
-                     VALUES (?, ?, ?, ?, 'draft', 1) RETURNING id",
+                    "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, version)
+                     VALUES (?, ?, ?, ?, ?, ?, 'draft', 1) RETURNING id",
                 )
                 .bind(&p.content_type)
+                .bind(&default_locale)
+                .bind(&group_id)
                 .bind(&p.slug)
                 .bind(&p.title)
                 .bind(&values_json)
@@ -1357,15 +1362,21 @@ pub async fn execute_sample_import_with_cutpoint(
                 }
                 if let Some(slot_key) = menu.slot_key.as_deref() {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO site_menu_slot_assignments (theme_id, slot_key, menu_id)
-                         VALUES (?, ?, ?)",
+                        "INSERT OR IGNORE INTO site_menu_slot_assignments (theme_id, locale, slot_key, menu_id)
+                         VALUES (?, ?, ?, ?)",
                     )
                     .bind(theme_id)
+                    .bind(&default_locale)
                     .bind(slot_key)
                     .bind(menu_id)
                     .execute(&mut *conn)
                     .await?;
-                    crate::storage::menu::bump_slot_version_in_tx(&mut conn, theme_id).await?;
+                    crate::storage::menu::bump_slot_version_for_locale_in_tx(
+                        &mut conn,
+                        theme_id,
+                        &default_locale,
+                    )
+                    .await?;
                 }
                 let target_hash = sha256_hex(menu.menu_key.as_bytes());
                 sqlx::query(

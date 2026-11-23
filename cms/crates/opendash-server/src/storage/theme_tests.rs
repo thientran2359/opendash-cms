@@ -152,7 +152,7 @@ async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_ref
     }
     let db = init_db(&path).await.unwrap();
     let settings: (Option<i64>, Option<i64>, i64) = sqlx::query_as(
-        "SELECT homepage_page_id,posts_page_id,version FROM site_reading_settings WHERE id = 1",
+        "SELECT homepage_page_id,posts_page_id,version FROM site_reading_settings WHERE locale = 'vi'",
     )
     .fetch_one(&db)
     .await
@@ -202,16 +202,17 @@ async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_ref
     // No foreign-key cascade: deleting a Page preserves the historical ID and
     // increments the reading CAS independently at the entries writer layer.
     sqlx::query(
-        "UPDATE site_reading_settings SET homepage_page_id=12345,version=version+1 WHERE id=1",
+        "UPDATE site_reading_settings SET homepage_page_id=12345,version=version+1 WHERE locale='vi'",
     )
     .execute(&db)
     .await
     .unwrap();
-    let stale: (Option<i64>, i64) =
-        sqlx::query_as("SELECT homepage_page_id,version FROM site_reading_settings WHERE id=1")
-            .fetch_one(&db)
-            .await
-            .unwrap();
+    let stale: (Option<i64>, i64) = sqlx::query_as(
+        "SELECT homepage_page_id,version FROM site_reading_settings WHERE locale='vi'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
     assert_eq!(stale, (Some(12345), 2));
     for column in ["page_layout_key", "custom_template_key"] {
         let cols: Vec<(i64, String, String, i64, Option<String>, i64)> =
@@ -223,10 +224,11 @@ async fn migration_0042_upgrades_legacy_schema_and_preserves_deleted_reading_ref
     }
     db.close().await;
     let reopened = connect_file_pool(&path).await;
-    let version: i64 = sqlx::query_scalar("SELECT version FROM site_reading_settings WHERE id=1")
-        .fetch_one(&reopened)
-        .await
-        .unwrap();
+    let version: i64 =
+        sqlx::query_scalar("SELECT version FROM site_reading_settings WHERE locale='vi'")
+            .fetch_one(&reopened)
+            .await
+            .unwrap();
     assert_eq!(version, 2);
 }
 
@@ -475,8 +477,8 @@ async fn unpublished_id_specific_override_is_pinned_but_not_publicly_readable() 
          VALUES (?, 'asset.png','image/png','png',12,1,1,1,1)",
     ).bind(&media_id).execute(&db).await.unwrap();
     let inserted = sqlx::query(
-        "INSERT INTO content_entries (content_type_key,slug,title,values_json,publication_status)
-         VALUES ('post','unpublished-selector','Draft','{}','draft')",
+        "INSERT INTO content_entries (content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+         VALUES ('post','unpublished-selector','Draft','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
     )
     .execute(&db)
     .await

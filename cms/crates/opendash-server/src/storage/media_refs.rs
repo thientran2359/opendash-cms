@@ -297,13 +297,25 @@ pub async fn collect_pins_in_tx(
         let entry_id: i64 = row.try_get("entry_id")?;
         push_pin(&mut summary, "entry_seo", entry_id.to_string());
     }
-    let home_seo_count: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM site_home_seo WHERE og_image_id = ?")
+    let home_seo_rows: Vec<(String,)> =
+        sqlx::query_as("SELECT locale FROM site_home_seo WHERE og_image_id = ?")
             .bind(media_id)
-            .fetch_one(&mut *conn)
+            .fetch_all(&mut *conn)
             .await?;
-    if home_seo_count > 0 {
-        push_pin(&mut summary, "home_seo", "1".to_string());
+    let default_locale: Option<String> = if !home_seo_rows.is_empty() {
+        sqlx::query_scalar("SELECT code FROM site_locales WHERE is_default = 1 LIMIT 1")
+            .fetch_optional(&mut *conn)
+            .await?
+    } else {
+        None
+    };
+    for (loc,) in home_seo_rows {
+        let entity_id = if default_locale.as_deref() == Some(loc.as_str()) {
+            "1".to_string()
+        } else {
+            loc
+        };
+        push_pin(&mut summary, "home_seo", entity_id);
     }
 
     // 7. Import runs (recovery journals / sample manifests)
