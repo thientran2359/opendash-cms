@@ -134,7 +134,22 @@ async fn local_library_catalog_is_authenticated_and_pattern_scoped() {
     assert_eq!(patterns["items"].as_array().unwrap().len(), 1);
     assert_eq!(patterns["items"][0]["id"], created["id"]);
     assert_eq!(patterns["items"][0]["title"], "Private local banner");
-    assert_eq!(data["theme_templates"], json!([]));
+    // S02 always bootstraps the built-in Starter revision on fresh sites.
+    // Library descriptors are read-only; private Pattern CPT documents are
+    // still scoped to the separate, authenticated Pattern API.
+    let templates = data["theme_templates"].as_array().unwrap();
+    assert_eq!(templates.len(), 15, "9 templates, 3 parts, 3 page layouts");
+    assert!(templates.iter().all(|row| {
+        row["theme_id"] == "opendash-starter"
+            && row["can_apply"] == false
+            && row.get("document").is_none()
+    }));
+    assert!(templates.iter().any(|row| row["role"] == "home"));
+    assert!(
+        templates
+            .iter()
+            .any(|row| row["role"] == "page_layout:canvas")
+    );
     assert!(
         patterns["items"][0].get("document").is_none(),
         "catalog must not leak private AST"

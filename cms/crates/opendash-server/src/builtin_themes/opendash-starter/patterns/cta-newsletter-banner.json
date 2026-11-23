@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "cta-sec-1",
+      "children": [
+        {
+          "id": "cta-row-1",
+          "children": [
+            {
+              "id": "cta-col-1-1",
+              "children": [
+                {
+                  "id": "cta-banner",
+                  "type": "plugin/block",
+                  "props": {
+                    "block_id": "core/banner",
+                    "values": {
+                      "heading": "Cùng xây dựng điều tuyệt vời",
+                      "body": "<p>Liên hệ để bắt đầu câu chuyện của bạn.</p>",
+                      "show_cta": true,
+                      "cta_label": "Liên hệ",
+                      "cta_url": "/lien-he"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

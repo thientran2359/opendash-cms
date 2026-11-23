@@ -504,11 +504,21 @@ pub async fn stage_and_commit_v3_revision(
                 && existing.version == version
                 && existing.source_format == ThemeSourceFormat::V3
             {
-                return Ok(RevisionInstallOutcome::AlreadyExists(existing));
+                // An immutable revision can lose its on-disk files after a
+                // partial restore or operator accident. Re-publish those
+                // exact validated bytes without replacing its DB identity.
+                if dir_matches_revision(
+                    &themes_root.join("revisions").join(&revision_digest),
+                    &revision_digest,
+                    &file_digests,
+                ) {
+                    return Ok(RevisionInstallOutcome::AlreadyExists(existing));
+                }
+            } else {
+                return Err(ApiError::conflict(
+                    "Digest revision đã tồn tại cho một theme/version khác.",
+                ));
             }
-            return Err(ApiError::conflict(
-                "Digest revision đã tồn tại cho một theme/version khác.",
-            ));
         }
         let version_conflict: Option<String> = sqlx::query_scalar(
             "SELECT revision_digest FROM theme_revisions WHERE theme_id = ? AND version = ?",
@@ -649,6 +659,94 @@ pub async fn stage_and_commit_v3_revision(
             Err(err)
         }
     }
+}
+
+/// Embed/install the OpenDash Starter only at exclusive server startup. A
+/// repaired revision is reconstructed from the signed-in-binary file set;
+/// existing site content and any explicitly selected theme are untouched.
+pub async fn ensure_default_starter_theme(
+    db: &SqlitePool,
+    themes_root: &Path,
+) -> ApiResult<ThemeRevisionRecord> {
+    use crate::builtin_themes::{
+        STARTER_THEME_ID, STARTER_THEME_NAME, STARTER_THEME_VERSION, builtin_starter_theme_files,
+    };
+    let files = builtin_starter_theme_files();
+    let pkg = crate::theme::validate_theme_v3_files(files.clone()).map_err(|error| {
+        eprintln!("Built-in Starter Theme validation: {error:?}");
+        ApiError::internal("Built-in Starter Theme v3 không hợp lệ.")
+    })?;
+    let (digest, file_digests) = compute_canonical_file_map_digest(&files);
+    let revision_dir = themes_root.join("revisions").join(&digest);
+    if let Ok(metadata) = fs::symlink_metadata(&revision_dir) {
+        // Never follow a symlink while repairing a theme directory.
+        if metadata.file_type().is_symlink() {
+            return Err(ApiError::internal(
+                "Starter revision path là symlink; không thể tự phục hồi.",
+            ));
+        }
+        if !dir_matches_revision(&revision_dir, &digest, &file_digests) {
+            if !metadata.is_dir() {
+                return Err(ApiError::internal(
+                    "Starter revision path không phải thư mục.",
+                ));
+            }
+            fs::remove_dir_all(&revision_dir)
+                .map_err(|_| ApiError::internal("Không thể phục hồi thư mục Starter revision."))?;
+        }
+    }
+
+    let starter = match stage_and_commit_v3_revision(
+        db,
+        themes_root,
+        "bootstrap-starter-v3",
+        STARTER_THEME_ID,
+        STARTER_THEME_NAME,
+        STARTER_THEME_VERSION,
+        &pkg.manifest_json,
+        r#"{"source":"builtin_starter"}"#,
+        &files,
+    )
+    .await?
+    {
+        RevisionInstallOutcome::Installed(starter)
+        | RevisionInstallOutcome::AlreadyExists(starter) => starter,
+    };
+
+    let selection = get_active_selection(db).await?;
+    if selection.revision_id.is_none() {
+        match activate_revision(
+            db,
+            themes_root,
+            &starter.revision_id,
+            Some(selection.version),
+        )
+        .await?
+        {
+            RevisionActivationOutcome::Activated(_) => {}
+            other => {
+                eprintln!("Starter activation error: {other:?}");
+                return Err(ApiError::internal(
+                    "Không thể kích hoạt Starter theme mặc định.",
+                ));
+            }
+        }
+        if selection.version == 1 {
+            // Fresh install: preserve historical CAS/ETag v1 while the
+            // activation transaction still synced blocks and media ACL.
+            let done = sqlx::query(
+                "UPDATE theme_active_selection SET version = 1
+                 WHERE id = 1 AND revision_id = ? AND version = 2",
+            )
+            .bind(&starter.revision_id)
+            .execute(db)
+            .await?;
+            if done.rows_affected() != 1 {
+                return Err(ApiError::internal("Không thể giữ ETag v1 mặc định."));
+            }
+        }
+    }
+    Ok(starter)
 }
 
 pub async fn get_active_selection(db: &SqlitePool) -> ApiResult<ActiveThemeSelection> {

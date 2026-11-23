@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "story-sec-1",
+      "children": [
+        {
+          "id": "story-row-1",
+          "children": [
+            {
+              "id": "story-col-1-1",
+              "children": [
+                {
+                  "id": "story-card",
+                  "type": "plugin/block",
+                  "props": {
+                    "block_id": "core/card",
+                    "values": {
+                      "title": "Câu chuyện thương hiệu",
+                      "body": "<p>Chúng tôi tạo ra công cụ cho những ý tưởng lớn.</p>"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "story-col-1-2",
+              "children": [
+                {
+                  "id": "story-quote",
+                  "type": "plugin/block",
+                  "props": {
+                    "block_id": "opendash-starter/quote-box",
+                    "values": {
+                      "quote": "Sự đơn giản là nền tảng của trải nghiệm đáng nhớ.",
+                      "author": "Đội ngũ OpenDash",
+                      "role": "Sản phẩm"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -146,8 +146,9 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     let (admin, csrf) = login(&client, &srv.base, "admin", "AdminPassword123!").await;
     let initial = list(&client, &srv.base, &admin).await;
     assert_eq!(initial["items"].as_array().unwrap().len(), 0);
-    assert_eq!(initial["revisions"].as_array().unwrap().len(), 0);
-    assert_eq!(initial["selection"]["revision_id"], Value::Null);
+    assert_eq!(initial["revisions"].as_array().unwrap().len(), 1);
+    assert_eq!(initial["selection"]["theme_id"], "opendash-starter");
+    assert!(initial["selection"]["revision_id"].as_str().is_some());
     assert_eq!(initial["selection"]["version"], 1);
 
     // Editor has no Admin revision list/activate rights.
@@ -252,15 +253,14 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     }
     assert_eq!(ids[0], ids[1], "idempotent re-upload retains revision ID");
     assert_ne!(ids[0], ids[2]);
-    let unselected = list(&client, &srv.base, &admin).await;
-    assert_eq!(unselected["items"].as_array().unwrap().len(), 0);
-    assert_eq!(unselected["active_id"], Value::Null);
-    assert_eq!(unselected["homepage_compatible"], Value::Null);
-    let rows = unselected["revisions"].as_array().unwrap();
+    let starter_selected = list(&client, &srv.base, &admin).await;
+    assert_eq!(starter_selected["items"].as_array().unwrap().len(), 0);
+    assert_eq!(starter_selected["active_id"], Value::Null);
+    let rows = starter_selected["revisions"].as_array().unwrap();
     assert_eq!(
         rows.len(),
-        2,
-        "rejected v1/v2 packages cannot create revisions"
+        3,
+        "only the embedded Starter and two installed v3 revisions can exist"
     );
     let keys = [
         "revision_id",
@@ -284,12 +284,19 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
             "no manifest/path/provenance may be exposed"
         );
     }
-    assert_eq!(rows[0]["theme_id"], "f02-editorial");
-    assert_eq!(rows[0]["version"], "1.0.0");
-    assert_eq!(rows[1]["version"], "2.0.0");
-    assert_eq!(rows[0]["source_format"], "v3");
-    assert_eq!(rows[1]["source_format"], "v3");
-    assert_eq!(unselected["selection"]["revision_id"], Value::Null);
+    let f02_rows = rows
+        .iter()
+        .filter(|row| row["theme_id"] == "f02-editorial")
+        .collect::<Vec<_>>();
+    assert_eq!(f02_rows.len(), 2);
+    assert_eq!(f02_rows[0]["version"], "1.0.0");
+    assert_eq!(f02_rows[1]["version"], "2.0.0");
+    assert_eq!(f02_rows[0]["source_format"], "v3");
+    assert_eq!(f02_rows[1]["source_format"], "v3");
+    assert_eq!(
+        starter_selected["selection"]["theme_id"],
+        "opendash-starter"
+    );
 
     // v3 revision activation requires the typed revision_id; legacy IDs are rejected.
     let denied = client
@@ -384,7 +391,7 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     );
 
     // Invalid on-disk revision must be visible as metadata but must not activate.
-    let digest = rows[1]["revision_digest"].as_str().unwrap();
+    let digest = f02_rows[1]["revision_digest"].as_str().unwrap();
     let marker = root
         .join("themes")
         .join("revisions")
@@ -428,7 +435,7 @@ async fn native_v3_revision_projection_and_activation_guards_survive_restart() {
     let after = list(&client, &srv2.base, &admin2).await;
     assert_eq!(after["selection"]["revision_id"], ids[2]);
     assert_eq!(after["version"], 3);
-    assert_eq!(after["revisions"].as_array().unwrap().len(), 2);
+    assert_eq!(after["revisions"].as_array().unwrap().len(), 3);
     drop(srv2);
     fs::remove_dir_all(&root).unwrap();
 }

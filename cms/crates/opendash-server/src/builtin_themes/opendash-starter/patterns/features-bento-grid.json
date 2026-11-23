@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "feature-sec-1",
+      "children": [
+        {
+          "id": "feature-row-1",
+          "children": [
+            {
+              "id": "feature-col-1-1",
+              "children": [
+                {
+                  "id": "feature-card-1",
+                  "type": "plugin/block",
+                  "props": {
+                    "block_id": "core/card",
+                    "values": {
+                      "title": "Hiệu năng cao",
+                      "body": "<p>Rust mang đến khả năng phục vụ nhanh và ổn định.</p>",
+                      "layout": "vertical"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "feature-col-1-2",
+              "children": [
+                {
+                  "id": "feature-card-2",
+                  "type": "plugin/block",
+                  "props": {
+                    "block_id": "core/card",
+                    "values": {
+                      "title": "Thiết kế linh hoạt",
+                      "body": "<p>Builder trực quan thích ứng mọi màn hình.</p>",
+                      "layout": "vertical"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "id": "feature-col-1-3",
+              "children": [
+                {
+                  "id": "feature-card-3",
+                  "type": "plugin/block",
+                  "props": {
+                    "block_id": "core/card",
+                    "values": {
+                      "title": "Dữ liệu chủ động",
+                      "body": "<p>SQLite gọn nhẹ, sao lưu và khôi phục dễ dàng.</p>",
+                      "layout": "vertical"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,8 +1,8 @@
-<main class="ms-main">
+<main class="ms-main mx-auto max-w-5xl px-4 py-10 md:px-8">
   <nav><a href="{{ archive_url }}">← {{ content_type.label }}</a></nav>
-  <article class="builder-section">
+  <article class="builder-section rounded-xl border border-od-border bg-od-surface p-6">
     <h1>{{ entry.title }}</h1>
-    <div class="ms-content">{{ od_content() }}</div>
+    <div class="ms-content od-prose">{{ od_content() }}</div>
     <dl class="ms-meta-dl">
       {% for field in entry.fields %}
         {% if field.text or field.image_url or field.gallery_urls %}

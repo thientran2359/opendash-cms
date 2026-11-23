@@ -1,5 +1,5 @@
-<footer class="ms-footer">
-  <div class="ms-footer-inner">
+<footer class="ms-footer mt-12 bg-slate-900 py-12 text-white">
+  <div class="ms-footer-inner mx-auto grid max-w-7xl gap-8 px-4 md:grid-cols-2">
     <div>
       <strong>{{ site.title }}</strong>
       {% if site.tagline %}<p>{{ site.tagline }}</p>{% endif %}
@@ -14,10 +14,10 @@
             <li><a href="{{ item.url }}">{{ item.label }}</a></li>
           {% endfor %}
         {% else %}
-          <li><a href="/content/dich_vu">Dịch vụ thiết kế</a></li>
-          <li><a href="/content/du_an">Hồ sơ dự án</a></li>
-          <li><a href="/content/post">Nhật ký kiến trúc</a></li>
-          <li><a href="/content/page/lien-he">Đặt lịch tư vấn</a></li>
+          <li><a href="/dich-vu">Dịch vụ thiết kế</a></li>
+          <li><a href="/du-an">Hồ sơ dự án</a></li>
+          <li><a href="/posts">Nhật ký kiến trúc</a></li>
+          <li><a href="/lien-he">Đặt lịch tư vấn</a></li>
         {% endif %}
       </ul>
     </div>

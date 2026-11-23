@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "faq-sec-1",
+      "children": [
+        {
+          "id": "faq-row-1",
+          "children": [
+            {
+              "id": "faq-col-1-1",
+              "children": [
+                {
+                  "id": "faq-main",
+                  "type": "plugin/block",
+                  "props": {
+                    "block_id": "core/accordion",
+                    "values": {
+                      "style": "bordered",
+                      "open_first": true,
+                      "items": [
+                        {
+                          "title": "OpenDash là gì?",
+                          "content": "<p>OpenDash là CMS một binary Rust + SQLite.</p>",
+                          "open": true
+                        },
+                        {
+                          "title": "Có thể tùy chỉnh giao diện không?",
+                          "content": "<p>Có, qua Studio và các Pattern.</p>",
+                          "open": false
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
