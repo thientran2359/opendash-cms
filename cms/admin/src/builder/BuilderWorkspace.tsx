@@ -22,7 +22,7 @@ import { BuilderInspector } from './BuilderInspector.tsx';
 import { BuilderPreviewFrame } from './BuilderPreviewFrame.tsx';
 import { PatternLibraryModal } from './PatternLibraryModal.tsx';
 import { MediaPicker } from '../features/media/MediaPicker.tsx';
-import { StudioBlockTree } from '../studio/StudioBlockTree.tsx';
+import { StudioBlockTree, type StudioMenuRequest } from '../studio/StudioBlockTree.tsx';
 import { StudioBlockCatalog } from '../studio/StudioBlockCatalog.tsx';
 
 const BLOCK_CATEGORY_ORDER = ['layout', 'media', 'interactive', 'content', 'marketing', 'plugin'] as const;
@@ -73,6 +73,9 @@ interface Props {
 export interface BuilderEditorCoreProps {
   builderView: StudioBuilderView;
   onBuilderViewChange: (view: StudioBuilderView) => void;
+  menuRequest?: StudioMenuRequest | null;
+  onMenuRequestHandled?: () => void;
+  canvasPickSeq?: number;
   addTargetParentId: string | null;
   onAddTargetParentIdChange: (id: string | null) => void;
   clipboard: StudioBuilderClipboard | null;
@@ -108,6 +111,9 @@ export type StudioBuilderView = 'tree' | 'properties' | 'add';
 export function BuilderEditorCore({
   builderView,
   onBuilderViewChange,
+  menuRequest,
+  onMenuRequestHandled,
+  canvasPickSeq,
   addTargetParentId,
   onAddTargetParentIdChange,
   clipboard,
@@ -472,6 +478,9 @@ export function BuilderEditorCore({
           disabled={disabled}
           collapsedIds={collapsedIds}
           onCollapsedIdsChange={setCollapsedIds}
+          menuRequest={menuRequest}
+          onMenuRequestHandled={onMenuRequestHandled}
+          canvasPickSeq={canvasPickSeq}
           onSelect={onSelect}
           onEdit={id => { onSelect(id); onBuilderViewChange('properties'); }}
           onAdd={openAdd}

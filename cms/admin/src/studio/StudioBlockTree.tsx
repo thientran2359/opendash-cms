@@ -19,6 +19,7 @@ export interface StudioBlockTreeProps {
   onCollapsedIdsChange: (next: Set<string>) => void;
   menuRequest?: StudioMenuRequest | null;
   onMenuRequestHandled?: () => void;
+  canvasPickSeq?: number;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
   onAdd: (parentId: string | null) => void;
@@ -69,6 +70,7 @@ const CONTAINER_LABEL: Record<'section' | 'row' | 'column', string> = {
 export function StudioBlockTree({
   document, selectedId, registry = {}, blockSchemas = [], disabled = false,
   collapsedIds, onCollapsedIdsChange, menuRequest, onMenuRequestHandled,
+  canvasPickSeq = 0,
   onSelect, onEdit, onAdd, onMove, onReorder, canReorder,
   onDuplicate, onCopy, onPaste, canPaste, onDelete, canDelete,
   onOpenPatternLibrary, onOpenMediaPicker,
@@ -83,6 +85,7 @@ export function StudioBlockTree({
   const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const menuRefs = useRef(new Map<string, HTMLDivElement>());
   const handledMenuSeq = useRef<number | null>(null);
+  const previousCanvasPickSeq = useRef(canvasPickSeq);
   const previousSelectedId = useRef(selectedId);
 
   const isVisible = (item: NodeLocation): boolean => {
@@ -108,6 +111,13 @@ export function StudioBlockTree({
     previousSelectedId.current = selectedId;
     if (openMenuId && openMenuId !== selectedId) setOpenMenuId(null);
   }, [selectedId, openMenuId]);
+  // Picking the already-selected node inside the iframe must dismiss its menu too.
+  // Iframe pointer events do not bubble into the parent document.
+  useEffect(() => {
+    if (previousCanvasPickSeq.current === canvasPickSeq) return;
+    previousCanvasPickSeq.current = canvasPickSeq;
+    setOpenMenuId(null);
+  }, [canvasPickSeq]);
   useEffect(() => {
     if (focusedId && !byId.has(focusedId)) setFocusedId(firstVisibleId);
     if (openMenuId && !byId.has(openMenuId)) setOpenMenuId(null);

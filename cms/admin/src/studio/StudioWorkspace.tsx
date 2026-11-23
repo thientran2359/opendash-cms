@@ -40,6 +40,7 @@ import type { AuthUser, BlockRegistry } from '../types.ts';
 import { StudioCustomizerNav } from './StudioCustomizerNav.tsx';
 import { StudioSidebarHeader } from './StudioSidebarHeader.tsx';
 import { StudioSidebarFooter } from './StudioSidebarFooter.tsx';
+import type { StudioMenuRequest } from './StudioBlockTree.tsx';
 
 interface Props {
   route: ParsedRoute;
@@ -112,6 +113,9 @@ export const StudioWorkspace: React.FC<Props> = ({
   const [builderView, setBuilderView] = useState<StudioBuilderView>('tree');
   const [addTargetParentId, setAddTargetParentId] = useState<string | null>(null);
   const [clipboard, setClipboard] = useState<StudioBuilderClipboard | null>(null);
+  const [menuRequest, setMenuRequest] = useState<StudioMenuRequest | null>(null);
+  const menuRequestSeqRef = useRef(0);
+  const [canvasPickSeq, setCanvasPickSeq] = useState(0);
 
   // Mode 1 state
   const [panel, setPanel] = useState<StudioPanelId>(route.studioPanel ?? 'root');
@@ -193,6 +197,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setBuilderView('tree');
     setAddTargetParentId(null);
     setClipboard(null);
+    setMenuRequest(null);
     loadSeqRef.current += 1;
     previewAbortRef.current?.abort();
     previewAbortRef.current = null;
@@ -271,6 +276,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   ) => {
     setBuilderView('tree');
     setAddTargetParentId(null);
+    setMenuRequest(null);
     resetHistory();
     if (!targetKey) {
       setTemplateEditingEnabled(false);
@@ -653,6 +659,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   const handlePanelChange = (nextPanel: StudioPanelId) => {
     setBuilderView('tree');
     setAddTargetParentId(null);
+    setMenuRequest(null);
     setPanel(nextPanel);
     if (nextPanel !== 'templates' && templateDirty) {
       setStatus('Các thay đổi Template chưa lưu vẫn được giữ trong phiên hiện tại.');
@@ -879,6 +886,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setBuilderView('tree');
       setAddTargetParentId(null);
       setClipboard(null);
+      setMenuRequest(null);
       setStatus(`Đã đưa nội dung về văn bản thuần (v${res.version}).`);
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) setConflict(true);
@@ -912,6 +920,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setBuilderView('tree');
       setAddTargetParentId(null);
       setClipboard(null);
+      setMenuRequest(null);
       setStatus(`Đã tải bản mới nhất v${opened.version}.`);
     }).catch(cause => onApiError(cause, 'Không thể tải lại Trình dựng trang.'))
       .finally(() => { if (seq === loadSeqRef.current) setLoading(false); });
@@ -950,6 +959,20 @@ export const StudioWorkspace: React.FC<Props> = ({
     (entryPublicationPolicy === 'draft_publish' && entryPublicationStatus === 'draft');
 
   const builderActive = isMode2 || Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled);
+  const handleCanvasMenu = (id: string, mode: StudioMenuRequest['mode']) => {
+    if (!builderActive || !locate(activeDoc, id)) return;
+    if (isMode2) setEntrySelectedNodeId(id);
+    else setTemplateSelectedNodeId(id);
+    setAddTargetParentId(null);
+    setBuilderView('tree');
+    setMenuRequest({ nodeId: id, mode, seq: ++menuRequestSeqRef.current });
+  };
+  const handleCanvasPick = (id: string) => {
+    setCanvasPickSeq(seq => seq + 1);
+    setMenuRequest(null);
+    if (isMode2) setEntrySelectedNodeId(id);
+    else if (panel === 'templates' && templateEditingEnabled) setTemplateSelectedNodeId(id);
+  };
   const contextualNode = locate(activeDoc, activeSelectedId);
   const addParent = locate(activeDoc, addTargetParentId);
   const contextualSubView = builderActive && builderView !== 'tree';
@@ -1015,6 +1038,9 @@ export const StudioWorkspace: React.FC<Props> = ({
                 onAddTargetParentIdChange={setAddTargetParentId}
                 clipboard={clipboard}
                 onClipboardChange={setClipboard}
+                menuRequest={menuRequest}
+                onMenuRequestHandled={() => setMenuRequest(null)}
+                canvasPickSeq={canvasPickSeq}
                 document={entryDoc}
                 selectedId={entrySelectedNodeId}
                 onSelect={setEntrySelectedNodeId}
@@ -1048,6 +1074,9 @@ export const StudioWorkspace: React.FC<Props> = ({
               onAddTargetParentIdChange={setAddTargetParentId}
               clipboard={clipboard}
               onClipboardChange={setClipboard}
+              menuRequest={menuRequest}
+              onMenuRequestHandled={() => setMenuRequest(null)}
+              canvasPickSeq={canvasPickSeq}
               panel={panel}
               onPanelChange={handlePanelChange}
               activeThemeId={activeThemeId}
@@ -1170,10 +1199,8 @@ export const StudioWorkspace: React.FC<Props> = ({
                 interactive={isMode2 || Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled)}
                 selectedId={activeSelectedId}
                 document={activeDoc}
-                onSelectNode={id => {
-                  if (isMode2) setEntrySelectedNodeId(id);
-                  else if (panel === 'templates' && templateEditingEnabled) setTemplateSelectedNodeId(id);
-                }}
+                onSelectNode={handleCanvasPick}
+                onOpenNodeMenu={handleCanvasMenu}
                 onApiError={onApiError}
                 title={isMode2 ? 'Xem trước nội dung OpenDash Studio' : 'Xem trước Website OpenDash Studio'}
                 className="h-full"

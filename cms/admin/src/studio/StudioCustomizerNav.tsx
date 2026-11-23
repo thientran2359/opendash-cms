@@ -5,6 +5,7 @@ import type { GeneralSettingsDraft, ReadingSettings, ReadingSettingsDraft } from
 import type { StudioTargetGroup, StudioTargetItem } from '../api/studio.ts';
 import type { ThemeOptionDef } from '../api/themes.ts';
 import { BuilderEditorCore, type StudioBuilderView } from '../builder/BuilderWorkspace.tsx';
+import type { StudioMenuRequest } from './StudioBlockTree.tsx';
 import type { BuilderDocument, BuilderViewport, StudioBuilderClipboard } from '../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../components/AdminPrimitives.tsx';
 import { ThemeOptionsForm } from '../features/themes/ThemeOptionsForm.tsx';
@@ -64,6 +65,9 @@ interface Props {
   onAddTargetParentIdChange: (id: string | null) => void;
   clipboard: StudioBuilderClipboard | null;
   onClipboardChange: (value: StudioBuilderClipboard | null) => void;
+  menuRequest?: StudioMenuRequest | null;
+  onMenuRequestHandled?: () => void;
+  canvasPickSeq?: number;
 }
 
 const INPUT_CLASS =
@@ -154,6 +158,9 @@ export const StudioCustomizerNav: React.FC<Props> = ({
   onAddTargetParentIdChange,
   clipboard,
   onClipboardChange,
+  menuRequest,
+  onMenuRequestHandled,
+  canvasPickSeq,
 }) => {
   const selectedTarget = selectedTargetKey
     ? targets.find(item => item.canonical_target_key === selectedTargetKey) ?? null
@@ -479,6 +486,9 @@ export const StudioCustomizerNav: React.FC<Props> = ({
               onAddTargetParentIdChange={onAddTargetParentIdChange}
               clipboard={clipboard}
               onClipboardChange={onClipboardChange}
+              menuRequest={menuRequest}
+              onMenuRequestHandled={onMenuRequestHandled}
+              canvasPickSeq={canvasPickSeq}
               document={templateDoc}
               selectedId={templateSelectedNodeId}
               onSelect={onSelectTemplateNode}
