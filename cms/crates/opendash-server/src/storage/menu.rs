@@ -926,6 +926,13 @@ pub async fn resolve_menu_view_in_tx(
 pub async fn resolve_active_slot_menus(
     db: &SqlitePool,
 ) -> ApiResult<BTreeMap<String, MenuViewModel>> {
+    resolve_active_slot_menus_for_locale(db, None).await
+}
+
+pub async fn resolve_active_slot_menus_for_locale(
+    db: &SqlitePool,
+    locale: Option<&str>,
+) -> ApiResult<BTreeMap<String, MenuViewModel>> {
     let mut tx = db.begin().await?;
     let active_theme_id: Option<String> = sqlx::query_scalar(
         "SELECT r.theme_id
@@ -939,7 +946,10 @@ pub async fn resolve_active_slot_menus(
         tx.commit().await?;
         return Ok(BTreeMap::new());
     };
-    let out = resolve_slot_menus_in_tx(&mut tx, &theme_id).await?;
+    let out = match locale {
+        Some(loc) => resolve_slot_menus_for_locale_in_tx(&mut tx, &theme_id, loc).await?,
+        None => resolve_slot_menus_in_tx(&mut tx, &theme_id).await?,
+    };
     tx.commit().await?;
     Ok(out)
 }

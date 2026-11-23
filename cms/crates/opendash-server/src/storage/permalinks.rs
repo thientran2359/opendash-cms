@@ -9,8 +9,8 @@ use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::error::{ApiError, ApiResult};
 
-const MAX_CLAIMS: usize = 50_000;
-pub const MAX_REDIRECTS: usize = 100_000;
+const MAX_CLAIMS: usize = 200_000;
+pub const MAX_REDIRECTS: usize = 200_000;
 const MAX_CONFLICT_ITEMS: usize = 20;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -87,12 +87,24 @@ impl PermalinkSettings {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PublicRouteTarget {
-    Home,
-    Entry(i64),
-    Term(i64),
-    Archive(String),
+    Home {
+        locale: String,
+    },
+    Entry {
+        id: i64,
+        locale: String,
+        is_home: bool,
+    },
+    Term {
+        id: i64,
+        locale: String,
+    },
+    Archive {
+        type_key: String,
+        locale: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -102,7 +114,44 @@ pub struct ResolvedPublicRoute {
     pub redirect: bool,
 }
 
-type Claim = (String, String); // (stable target kind, stable target ID)
+type Claim = (String, String, String); // (stable target kind, stable target ID, locale)
+
+/// Build the public route path for `locale`, hiding prefix on `default_locale`
+/// and prepending `/<locale>` for active secondary locales.
+pub(crate) fn prefix_for_locale(locale: &str, default_locale: &str, relative_path: &str) -> String {
+    if locale == default_locale {
+        if relative_path.is_empty() {
+            "/".to_owned()
+        } else if relative_path.starts_with('/') {
+            relative_path.to_owned()
+        } else {
+            format!("/{relative_path}")
+        }
+    } else if relative_path.is_empty() || relative_path == "/" {
+        format!("/{locale}")
+    } else if relative_path.starts_with('/') {
+        format!("/{locale}{relative_path}")
+    } else {
+        format!("/{locale}/{relative_path}")
+    }
+}
+
+/// Check whether root path segment `seg` collides with an active secondary locale code.
+pub(crate) fn is_secondary_locale_root(seg: &str, secondary_roots: &HashSet<String>) -> bool {
+    secondary_roots.contains(seg)
+}
+
+/// Load enabled non-default locale codes reserved at the URL root for `default_locale`.
+pub(crate) async fn load_secondary_locale_roots_in_conn(
+    conn: &mut SqliteConnection,
+) -> ApiResult<HashSet<String>> {
+    let rows: Vec<String> = sqlx::query_scalar(
+        "SELECT code FROM site_locales WHERE enabled = 1 AND is_default = 0 ORDER BY code ASC",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows.into_iter().collect())
+}
 
 async fn read_settings(conn: &mut SqliteConnection) -> ApiResult<PermalinkSettings> {
     let row: (i64, String, String, String) = sqlx::query_as(
@@ -534,6 +583,8 @@ pub async fn canonical_entry_path_in_tx(
     sqlx::query_scalar(
         "SELECT c.path FROM permalink_route_claims c
            JOIN content_entries e ON c.target_kind='entry' AND c.target_id=CAST(e.id AS TEXT)
+            AND c.locale = e.locale
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
            JOIN content_types t ON t.key=e.content_type_key
           WHERE e.id=? AND e.content_type_key NOT IN ('pattern', 'section')
             AND t.provider_status='active'
@@ -552,6 +603,8 @@ pub async fn canonical_term_path_in_tx(
     sqlx::query_scalar(
         "SELECT c.path FROM permalink_route_claims c
            JOIN taxonomy_terms t ON c.target_kind='term' AND c.target_id=CAST(t.id AS TEXT)
+            AND c.locale = t.locale
+           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
            JOIN taxonomy_definitions d ON d.key=t.kind
           WHERE t.id=? AND d.public=1 AND d.provider_status='active'
             AND d.declaration_state='declared'",
@@ -565,16 +618,19 @@ pub async fn canonical_term_path_in_tx(
 pub async fn canonical_archive_path_in_tx(
     conn: &mut SqliteConnection,
     key: &str,
+    locale: &str,
 ) -> ApiResult<Option<String>> {
     sqlx::query_scalar(
         "SELECT c.path FROM permalink_route_claims c
            JOIN content_types t ON c.target_kind='archive' AND c.target_id=t.key
-          WHERE t.key=? AND t.key NOT IN ('pattern', 'section', 'page')
+           JOIN site_locales sl ON sl.code = c.locale AND sl.enabled = 1
+          WHERE t.key=? AND c.locale=? AND t.key NOT IN ('pattern', 'section', 'page')
             AND t.provider_status='active'
             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1
             AND COALESCE(json_extract(t.definition_json,'$.settings.has_archive'),1)=1",
     )
     .bind(key)
+    .bind(locale)
     .fetch_optional(&mut *conn)
     .await
     .map_err(Into::into)
@@ -584,6 +640,7 @@ pub async fn canonical_archive_path_in_tx(
 struct ProposedClaim {
     kind: String,
     id: String,
+    locale: String,
     family: Option<String>,
     generated: bool,
 }
@@ -594,6 +651,7 @@ struct DynamicPattern {
     seg_count: usize,
     kind: String,
     family: String,
+    locale: String,
 }
 
 impl DynamicPattern {
@@ -616,7 +674,24 @@ impl DynamicPattern {
     }
 }
 
-fn pattern_for(template: &str, kind: &str, family: &str) -> Option<DynamicPattern> {
+fn pattern_for_locale(
+    relative_template: &str,
+    locale: &str,
+    default_locale: &str,
+    kind: &str,
+    family: &str,
+) -> Option<DynamicPattern> {
+    // Evaluate literal prefix on the unprefixed template first so wildcard
+    // roots like /%postname% do not turn /<locale> into a catch-all pattern.
+    let rel_prefix_has_literal = relative_template
+        .trim_start_matches('/')
+        .split('/')
+        .next()
+        .is_some_and(|seg| !seg.is_empty() && !seg.starts_with('%'));
+    if !rel_prefix_has_literal {
+        return None;
+    }
+    let template = prefix_for_locale(locale, default_locale, relative_template);
     let segments: Vec<&str> = template.trim_start_matches('/').split('/').collect();
     let seg_count = segments.len();
     let prefix: Vec<String> = segments
@@ -632,12 +707,50 @@ fn pattern_for(template: &str, kind: &str, family: &str) -> Option<DynamicPatter
         seg_count,
         kind: kind.to_owned(),
         family: family.to_owned(),
+        locale: locale.to_owned(),
     })
 }
 
 fn patterns_collide(lhs: &DynamicPattern, rhs: &DynamicPattern) -> bool {
     lhs.seg_count == rhs.seg_count
         && (lhs.prefix.starts_with(&rhs.prefix) || rhs.prefix.starts_with(&lhs.prefix))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HistoricalOwner {
+    claim: Claim,
+    origin: String,
+}
+
+fn strip_locale_prefix<'a>(path: &'a str, locale: &str) -> &'a str {
+    let prefix = format!("/{locale}");
+    if path == prefix {
+        "/"
+    } else if path
+        .strip_prefix(&prefix)
+        .is_some_and(|rest| rest.starts_with('/'))
+    {
+        &path[prefix.len()..]
+    } else {
+        path
+    }
+}
+
+fn rebase_path_for_swap(
+    path: &str,
+    locale: &str,
+    old_default: Option<&str>,
+    new_default: &str,
+) -> String {
+    if let Some(old_def) = old_default {
+        if locale == old_def && locale != new_default {
+            return prefix_for_locale(locale, new_default, path);
+        }
+        if locale == new_default && locale != old_def {
+            return strip_locale_prefix(path, new_default).to_owned();
+        }
+    }
+    path.to_owned()
 }
 
 struct ConflictCollector {
@@ -696,11 +809,13 @@ impl ConflictCollector {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_claim(
     all: &mut BTreeMap<String, ProposedClaim>,
     path: String,
     kind: &str,
     id: String,
+    locale: &str,
     family: Option<String>,
     generated: bool,
     collector: &mut ConflictCollector,
@@ -713,17 +828,17 @@ fn add_claim(
         || path.contains("//")
     {
         return Err(PermalinkPutError::Api(ApiError::conflict(format!(
-            "permalink_invalid_claim:path={path} target={kind}:{id}"
+            "permalink_invalid_claim:path={path} target={kind}:{id}:{locale}"
         ))));
     }
     if let Some(previous) = all.get(&path) {
         collector.record(
             &path,
-            format!("{kind}:{id}"),
-            format!("{}:{}", previous.kind, previous.id),
+            format!("{kind}:{id}:{locale}"),
+            format!("{}:{}:{}", previous.kind, previous.id, previous.locale),
             format!(
-                "permalink_collision:path={path} new={kind}:{id} existing={}:{}",
-                previous.kind, previous.id,
+                "permalink_collision:path={path} new={kind}:{id}({locale}) existing={}:{}({})",
+                previous.kind, previous.id, previous.locale,
             ),
         )?;
         return Ok(());
@@ -733,13 +848,14 @@ fn add_claim(
         ProposedClaim {
             kind: kind.to_owned(),
             id,
+            locale: locale.to_owned(),
             family,
             generated,
         },
     );
     if all.len() > MAX_CLAIMS {
         return Err(PermalinkPutError::Api(ApiError::conflict(
-            "permalink_claim_limit: tối đa 50000 canonical claims.",
+            "permalink_claim_limit: tối đa 200000 canonical claims.",
         )));
     }
     Ok(())
@@ -752,10 +868,16 @@ fn add_claim(
 fn reading_page_owner_transfer(
     old: &Claim,
     new: &Claim,
-    posts_page_id: Option<i64>,
+    reading_by_locale: &BTreeMap<String, (Option<i64>, Option<i64>)>,
     target_families: &BTreeMap<Claim, String>,
 ) -> bool {
-    let archive = ("archive".to_owned(), "post".to_owned());
+    if old.2 != new.2 {
+        return false;
+    }
+    let posts_page_id = reading_by_locale
+        .get(&old.2)
+        .and_then(|(_, posts_id)| *posts_id);
+    let archive = ("archive".to_owned(), "post".to_owned(), old.2.clone());
     (old == &archive
         && new.0 == "entry"
         && target_families.get(new).is_some_and(|kind| kind == "page"))
@@ -801,12 +923,14 @@ async fn load_post_category_slugs(conn: &mut SqliteConnection) -> ApiResult<BTre
                        JOIN taxonomy_terms pc ON pc.id = et.term_id
                       WHERE et.entry_id = e.id
                         AND et.term_id = e.primary_category_term_id
-                        AND pc.kind = 'category'),
+                        AND pc.kind = 'category'
+                        AND pc.locale = e.locale),
                     (SELECT t.slug
                        FROM entry_terms et
                        JOIN taxonomy_terms t ON t.id = et.term_id
                       WHERE et.entry_id = e.id
                         AND t.kind = 'category'
+                        AND t.locale = e.locale
                       ORDER BY t.id ASC
                       LIMIT 1),
                     'uncategorized'
@@ -832,40 +956,82 @@ pub(crate) async fn sync_claims_with_options(
     conn: &mut SqliteConnection,
     collect_conflicts: bool,
 ) -> Result<(), PermalinkPutError> {
+    sync_claims_with_options_and_swap(conn, collect_conflicts, None).await
+}
+
+pub(crate) async fn sync_claims_with_options_and_swap(
+    conn: &mut SqliteConnection,
+    collect_conflicts: bool,
+    swapped_from: Option<&str>,
+) -> Result<(), PermalinkPutError> {
     let settings = read_effective_settings(conn).await?;
-    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
-    let (homepage_id, posts_page_id): (Option<i64>, Option<i64>) = sqlx::query_as(
-        "SELECT homepage_page_id, posts_page_id FROM site_reading_settings WHERE locale = ?",
+    let enabled_locales: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT code, is_default
+           FROM site_locales
+          WHERE enabled = 1
+          ORDER BY is_default DESC, position ASC, code ASC",
     )
-    .bind(&default_locale)
-    .fetch_optional(&mut *conn)
+    .fetch_all(&mut *conn)
     .await
-    .map_err(ApiError::from)?
-    .unwrap_or((None, None));
+    .map_err(ApiError::from)?;
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
+    let enabled_set: HashSet<String> = enabled_locales.iter().map(|(c, _)| c.clone()).collect();
+    let secondary_roots: HashSet<String> = enabled_locales
+        .iter()
+        .filter(|(c, is_def)| *is_def == 0 && c != &default_locale)
+        .map(|(c, _)| c.clone())
+        .collect();
+
+    let reading_rows: Vec<(String, Option<i64>, Option<i64>)> =
+        sqlx::query_as("SELECT locale, homepage_page_id, posts_page_id FROM site_reading_settings")
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(ApiError::from)?;
+    let reading_by_locale: BTreeMap<String, (Option<i64>, Option<i64>)> = reading_rows
+        .into_iter()
+        .map(|(loc, home, posts)| (loc, (home, posts)))
+        .collect();
+
+    let previous_root_locale: Option<String> =
+        sqlx::query_scalar("SELECT locale FROM permalink_route_claims WHERE path = '/'")
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(ApiError::from)?;
+    let swap_old_default: Option<String> = swapped_from
+        .filter(|old| *old != default_locale)
+        .map(str::to_owned)
+        .or_else(|| previous_root_locale.filter(|prev| prev != &default_locale));
+
     let mut collector = ConflictCollector::new(collect_conflicts);
     let mut proposed = BTreeMap::<String, ProposedClaim>::new();
     let mut target_families = BTreeMap::<Claim, String>::new();
 
-    // A deleted/draft assigned Homepage keeps / reserved as a tombstone ('entry', id).
-    match homepage_id {
-        Some(id) => add_claim(
-            &mut proposed,
-            "/".into(),
-            "entry",
-            id.to_string(),
-            Some("page".into()),
-            true,
-            &mut collector,
-        )?,
-        None => add_claim(
-            &mut proposed,
-            "/".into(),
-            "home",
-            "site".into(),
-            None,
-            true,
-            &mut collector,
-        )?,
+    // A deleted/draft assigned Homepage keeps its locale root reserved as a tombstone ('entry', id, locale).
+    for (loc, _) in &enabled_locales {
+        let homepage_id = reading_by_locale.get(loc).and_then(|(home, _)| *home);
+        let home_path = prefix_for_locale(loc, &default_locale, "/");
+        match homepage_id {
+            Some(id) => add_claim(
+                &mut proposed,
+                home_path,
+                "entry",
+                id.to_string(),
+                loc,
+                Some("page".into()),
+                true,
+                &mut collector,
+            )?,
+            None => add_claim(
+                &mut proposed,
+                home_path,
+                "home",
+                "site".into(),
+                loc,
+                None,
+                true,
+                &mut collector,
+            )?,
+        }
     }
 
     let cpts: Vec<(String, i64)> = sqlx::query_as(
@@ -888,26 +1054,53 @@ pub(crate) async fn sync_claims_with_options(
     .await
     .map_err(ApiError::from)?;
 
-    // Build dynamic patterns only for namespaces with at least 1 literal prefix segment.
+    // Build dynamic patterns per enabled locale for templates with a relative literal prefix.
     let mut patterns = Vec::<DynamicPattern>::new();
-    if let Some(p) = pattern_for(&settings.post_structure, "entry", "post") {
-        patterns.push(p);
-    }
-    for (key, _) in &cpts {
-        if key != "post" {
-            let generated = format!("{}/%postname%", archive_path(&settings, key));
-            if let Some(p) = pattern_for(&generated, "entry", key) {
+    for (loc, _) in &enabled_locales {
+        if let Some(p) = pattern_for_locale(
+            &settings.post_structure,
+            loc,
+            &default_locale,
+            "entry",
+            "post",
+        ) {
+            patterns.push(p);
+        }
+        for (key, _) in &cpts {
+            if key != "post" {
+                let generated = format!("{}/%postname%", archive_path(&settings, key));
+                if let Some(p) = pattern_for_locale(&generated, loc, &default_locale, "entry", key)
+                {
+                    patterns.push(p);
+                }
+            }
+        }
+        for (key,) in &taxonomies {
+            let template = match settings.taxonomy_bases.get(key) {
+                Some(Some(base)) => format!("/{base}/%term%"),
+                _ => format!("/{key}/%term%"),
+            };
+            if let Some(p) = pattern_for_locale(&template, loc, &default_locale, "term", key) {
                 patterns.push(p);
             }
         }
     }
-    for (key,) in &taxonomies {
-        let template = match settings.taxonomy_bases.get(key) {
-            Some(Some(base)) => format!("/{base}/%term%"),
-            _ => format!("/{key}/%term%"),
-        };
-        if let Some(p) = pattern_for(&template, "term", key) {
-            patterns.push(p);
+    for pattern in &patterns {
+        if pattern.locale == default_locale
+            && let Some(first) = pattern.prefix.first()
+            && is_secondary_locale_root(first, &secondary_roots)
+        {
+            collector.record(
+                pattern.describe(),
+                format!("{}:{}", pattern.kind, pattern.family),
+                format!("locale:{first}"),
+                format!(
+                    "permalink_reserved_collision:path={} target={}:{}",
+                    pattern.describe(),
+                    pattern.kind,
+                    pattern.family,
+                ),
+            )?;
         }
     }
     for (i, lhs) in patterns.iter().enumerate() {
@@ -931,128 +1124,162 @@ pub(crate) async fn sync_claims_with_options(
     }
 
     // When %category% leads post_structure (segment 0), guard against reserved roots,
-    // /posts (default archive), and active public CPT / Taxonomy leading bases.
+    // /posts (default archive), active secondary locale roots (on default_locale),
+    // and active public CPT / Taxonomy leading bases.
     if settings.post_structure.starts_with("/%category%/") {
-        let mut forbidden_cat_first_segs = BTreeMap::<String, String>::new();
-        if posts_page_id.is_none() {
-            forbidden_cat_first_segs.insert("posts".into(), "archive:post".into());
-        }
-        for (key, _) in &cpts {
-            if key != "post" {
-                let first = first_literal_segment(&archive_path(&settings, key)).to_owned();
+        let mut forbidden_by_locale = BTreeMap::<String, BTreeMap<String, String>>::new();
+        for (loc, _) in &enabled_locales {
+            let posts_page_id = reading_by_locale.get(loc).and_then(|(_, posts)| *posts);
+            let mut forbidden_cat_first_segs = BTreeMap::<String, String>::new();
+            if posts_page_id.is_none() {
+                forbidden_cat_first_segs.insert("posts".into(), "archive:post".into());
+            }
+            for (key, _) in &cpts {
+                if key != "post" {
+                    let first = first_literal_segment(&archive_path(&settings, key)).to_owned();
+                    if !first.is_empty() {
+                        forbidden_cat_first_segs
+                            .entry(first)
+                            .or_insert_with(|| format!("cpt:{key}"));
+                    }
+                }
+            }
+            for (key,) in &taxonomies {
+                let base_path = match settings.taxonomy_bases.get(key) {
+                    Some(Some(base)) => format!("/{base}"),
+                    _ => format!("/{key}"),
+                };
+                let first = first_literal_segment(&base_path).to_owned();
                 if !first.is_empty() {
                     forbidden_cat_first_segs
                         .entry(first)
-                        .or_insert_with(|| format!("cpt:{key}"));
+                        .or_insert_with(|| format!("taxonomy:{key}"));
                 }
             }
+            forbidden_by_locale.insert(loc.clone(), forbidden_cat_first_segs);
         }
-        for (key,) in &taxonomies {
-            let base_path = match settings.taxonomy_bases.get(key) {
-                Some(Some(base)) => format!("/{base}"),
-                _ => format!("/{key}"),
-            };
-            let first = first_literal_segment(&base_path).to_owned();
-            if !first.is_empty() {
-                forbidden_cat_first_segs
-                    .entry(first)
-                    .or_insert_with(|| format!("taxonomy:{key}"));
-            }
-        }
-        let mut category_slugs: Vec<String> = sqlx::query_scalar(
-            "SELECT slug FROM taxonomy_terms WHERE kind = 'category' ORDER BY id",
+        let category_rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT t.slug, t.locale
+               FROM taxonomy_terms t
+               JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+              WHERE t.kind = 'category'
+              ORDER BY t.id",
         )
         .fetch_all(&mut *conn)
         .await
         .map_err(ApiError::from)?;
-        category_slugs.push("uncategorized".to_owned());
-        for slug in category_slugs {
+        let mut category_slugs = category_rows;
+        for (loc, _) in &enabled_locales {
+            category_slugs.push(("uncategorized".to_owned(), loc.clone()));
+        }
+        for (slug, loc) in category_slugs {
+            let cat_path = prefix_for_locale(&loc, &default_locale, &format!("/{slug}"));
             if crate::storage::seo::is_reserved_route_root(&slug) {
                 collector.record(
-                    format!("/{slug}"),
+                    cat_path.clone(),
                     "post_structure:%category%",
                     format!("reserved:{slug}"),
                     format!(
-                        "permalink_category_root_collision:path=/{slug} existing=reserved:{slug}"
+                        "permalink_category_root_collision:path={cat_path} existing=reserved:{slug}"
                     ),
                 )?;
-            } else if let Some(existing) = forbidden_cat_first_segs.get(&slug) {
+            } else if loc == default_locale && is_secondary_locale_root(&slug, &secondary_roots) {
                 collector.record(
-                    format!("/{slug}"),
+                    cat_path.clone(),
+                    "post_structure:%category%",
+                    format!("locale:{slug}"),
+                    format!(
+                        "permalink_category_root_collision:path={cat_path} existing=locale:{slug}"
+                    ),
+                )?;
+            } else if let Some(existing) =
+                forbidden_by_locale.get(&loc).and_then(|map| map.get(&slug))
+            {
+                collector.record(
+                    cat_path.clone(),
                     "post_structure:%category%",
                     existing,
-                    format!("permalink_category_root_collision:path=/{slug} existing={existing}"),
+                    format!(
+                        "permalink_category_root_collision:path={cat_path} existing={existing}"
+                    ),
                 )?;
             }
         }
     }
 
-    // Resolve Posts Page custom/slug path before inserting Archives ahead of Entries.
-    let mut posts_page_path = None::<String>;
-    if let Some(page_id) = posts_page_id {
-        let row: Option<(String, Option<String>)> = sqlx::query_as(
-            "SELECT e.slug, p.path
-               FROM content_entries e
-               LEFT JOIN entry_public_paths p ON p.entry_id = e.id
-              WHERE e.id = ? AND e.content_type_key = 'page'",
-        )
-        .bind(page_id)
-        .fetch_optional(&mut *conn)
-        .await
-        .map_err(ApiError::from)?;
-        if let Some((slug, custom)) = row {
-            if let Some(c) = &custom {
-                crate::storage::seo::validate_c3_custom_entry_path(c).map_err(|e| {
-                    ApiError::conflict(format!("invalid_custom_path:entry:{page_id}: {e}"))
-                })?;
-            }
-            posts_page_path = Some(entry_path(
-                &settings,
-                page_id,
-                "page",
-                &slug,
-                custom.as_deref(),
-                None,
-            ));
-        }
-    }
-    let prior_post_archive_path: Option<String> = sqlx::query_scalar(
-        "SELECT path FROM permalink_route_claims WHERE target_kind='archive' AND target_id='post'",
+    // Resolve Posts Page custom/slug path per enabled locale before inserting Archives ahead of Entries.
+    let prior_post_archives: Vec<(String, String)> = sqlx::query_as(
+        "SELECT locale, path FROM permalink_route_claims
+          WHERE target_kind='archive' AND target_id='post'",
     )
-    .fetch_optional(&mut *conn)
+    .fetch_all(&mut *conn)
     .await
     .map_err(ApiError::from)?;
-    let posts_archive_path = if posts_page_id.is_some() {
-        posts_page_path.or(prior_post_archive_path)
-    } else {
-        None
-    };
+    let prior_post_archive_map: BTreeMap<String, String> =
+        prior_post_archives.into_iter().collect();
 
-    // Archives & Terms are claimed before Entries so drafts cannot squat /posts or /category/{slug}.
-    for (key, archive_enabled) in &cpts {
-        if *archive_enabled != 0 {
-            let current_path = if key == "post" {
-                posts_archive_path
-                    .clone()
-                    .unwrap_or_else(|| archive_path(&settings, key))
-            } else {
-                archive_path(&settings, key)
-            };
-            add_claim(
-                &mut proposed,
-                current_path,
-                "archive",
-                key.clone(),
-                None,
-                true,
-                &mut collector,
-            )?;
+    for (loc, _) in &enabled_locales {
+        let posts_page_id = reading_by_locale.get(loc).and_then(|(_, posts)| *posts);
+        let mut posts_page_path = None::<String>;
+        if let Some(page_id) = posts_page_id {
+            let row: Option<(String, Option<String>)> = sqlx::query_as(
+                "SELECT e.slug, p.path
+                   FROM content_entries e
+                   LEFT JOIN entry_public_paths p ON p.entry_id = e.id
+                  WHERE e.id = ? AND e.content_type_key = 'page' AND e.locale = ?",
+            )
+            .bind(page_id)
+            .bind(loc)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(ApiError::from)?;
+            if let Some((slug, custom)) = row {
+                if let Some(c) = &custom {
+                    crate::storage::seo::validate_c3_custom_entry_path(c).map_err(|e| {
+                        ApiError::conflict(format!("invalid_custom_path:entry:{page_id}: {e}"))
+                    })?;
+                }
+                let rel = entry_path(&settings, page_id, "page", &slug, custom.as_deref(), None);
+                posts_page_path = Some(prefix_for_locale(loc, &default_locale, &rel));
+            }
+        }
+        let prior_post_archive_path = prior_post_archive_map
+            .get(loc)
+            .map(|p| rebase_path_for_swap(p, loc, swap_old_default.as_deref(), &default_locale));
+        let posts_archive_path = if posts_page_id.is_some() {
+            posts_page_path.or(prior_post_archive_path)
+        } else {
+            None
+        };
+
+        // Archives & Terms are claimed before Entries so drafts cannot squat /posts or /category/{slug}.
+        for (key, archive_enabled) in &cpts {
+            if *archive_enabled != 0 {
+                let current_path = if key == "post" {
+                    posts_archive_path.clone().unwrap_or_else(|| {
+                        prefix_for_locale(loc, &default_locale, &archive_path(&settings, key))
+                    })
+                } else {
+                    prefix_for_locale(loc, &default_locale, &archive_path(&settings, key))
+                };
+                add_claim(
+                    &mut proposed,
+                    current_path,
+                    "archive",
+                    key.clone(),
+                    loc,
+                    None,
+                    true,
+                    &mut collector,
+                )?;
+            }
         }
     }
 
-    let terms: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT t.id, t.kind, t.slug
+    let terms: Vec<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT t.id, t.kind, t.slug, t.locale
            FROM taxonomy_terms t
+           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
            JOIN taxonomy_definitions d ON d.key = t.kind
           WHERE d.public = 1 AND d.provider_status = 'active' AND d.declaration_state = 'declared'
           ORDER BY t.id",
@@ -1060,14 +1287,19 @@ pub(crate) async fn sync_claims_with_options(
     .fetch_all(&mut *conn)
     .await
     .map_err(ApiError::from)?;
-    for (id, kind, slug) in terms {
-        target_families.insert(("term".to_owned(), id.to_string()), kind.clone());
-        let current_path = term_path(&settings, id, &kind, &slug);
+    for (id, kind, slug, loc) in terms {
+        target_families.insert(
+            ("term".to_owned(), id.to_string(), loc.clone()),
+            kind.clone(),
+        );
+        let rel = term_path(&settings, id, &kind, &slug);
+        let current_path = prefix_for_locale(&loc, &default_locale, &rel);
         add_claim(
             &mut proposed,
             current_path,
             "term",
             id.to_string(),
+            &loc,
             Some(kind),
             true,
             &mut collector,
@@ -1082,9 +1314,10 @@ pub(crate) async fn sync_claims_with_options(
         BTreeMap::new()
     };
 
-    let entries: Vec<(i64, String, String, Option<String>, i64)> = sqlx::query_as(
-        "SELECT e.id, e.content_type_key, e.slug, p.path, e.has_been_published
+    let entries: Vec<(i64, String, String, Option<String>, i64, String)> = sqlx::query_as(
+        "SELECT e.id, e.content_type_key, e.slug, p.path, e.has_been_published, e.locale
            FROM content_entries e
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
            JOIN content_types t ON t.key = e.content_type_key
            LEFT JOIN entry_public_paths p ON p.entry_id = e.id
           WHERE e.content_type_key NOT IN ('pattern', 'section')
@@ -1098,12 +1331,17 @@ pub(crate) async fn sync_claims_with_options(
 
     let mut homepage_redirects = Vec::<(String, Claim)>::new();
     let mut reclaimable_page_aliases = Vec::<(String, Claim)>::new();
-    for (id, key, slug, custom, has_been_published) in entries {
-        target_families.insert(("entry".to_owned(), id.to_string()), key.clone());
+    for (id, key, slug, custom, has_been_published, loc) in entries {
+        target_families.insert(
+            ("entry".to_owned(), id.to_string(), loc.clone()),
+            key.clone(),
+        );
         if let Some(custom) = &custom {
             crate::storage::seo::validate_c3_custom_entry_path(custom)
                 .map_err(|e| ApiError::conflict(format!("invalid_custom_path:entry:{id}: {e}")))?;
         }
+        let (homepage_id, posts_page_id) =
+            reading_by_locale.get(&loc).copied().unwrap_or((None, None));
         if key == "page" && Some(id) == posts_page_id {
             continue;
         }
@@ -1117,28 +1355,35 @@ pub(crate) async fn sync_claims_with_options(
         } else {
             None
         };
-        let current_path = entry_path(&settings, id, &key, &slug, custom.as_deref(), cat_slug);
+        let rel_current = entry_path(&settings, id, &key, &slug, custom.as_deref(), cat_slug);
+        let current_path = prefix_for_locale(&loc, &default_locale, &rel_current);
+        let home_path = prefix_for_locale(&loc, &default_locale, "/");
         if key == "page" && Some(id) == homepage_id {
-            if has_been_published != 0 && current_path != "/" {
-                homepage_redirects.push((current_path, ("entry".into(), id.to_string())));
+            if has_been_published != 0 && current_path != home_path {
+                homepage_redirects.push((current_path, ("entry".into(), id.to_string(), loc)));
             }
             continue;
         }
-        let generated_path = entry_path(&settings, id, &key, &slug, None, cat_slug);
-        let generated = custom.as_ref().is_none_or(|p| p == &generated_path);
+        let rel_generated = entry_path(&settings, id, &key, &slug, None, cat_slug);
+        let generated_path = prefix_for_locale(&loc, &default_locale, &rel_generated);
+        let generated = custom.as_ref().is_none_or(|p| p == &rel_generated);
         if key == "page"
             && Some(id) != posts_page_id
             && Some(id) != homepage_id
             && has_been_published != 0
             && !generated
         {
-            reclaimable_page_aliases.push((generated_path, ("entry".to_owned(), id.to_string())));
+            reclaimable_page_aliases.push((
+                generated_path,
+                ("entry".to_owned(), id.to_string(), loc.clone()),
+            ));
         }
         add_claim(
             &mut proposed,
             current_path,
             "entry",
             id.to_string(),
+            &loc,
             Some(key),
             generated,
             &mut collector,
@@ -1146,26 +1391,62 @@ pub(crate) async fn sync_claims_with_options(
     }
 
     for (path, proposed_claim) in &proposed {
-        if path == "/"
+        let (homepage_id, posts_page_id) = reading_by_locale
+            .get(&proposed_claim.locale)
+            .copied()
+            .unwrap_or((None, None));
+        let locale_home_path = prefix_for_locale(&proposed_claim.locale, &default_locale, "/");
+        if path == &locale_home_path
             && (proposed_claim.kind == "home"
                 || (proposed_claim.kind == "entry"
                     && homepage_id.is_some_and(|id| proposed_claim.id == id.to_string())))
         {
             continue;
         }
-        let root = first_literal_segment(path);
-        if crate::storage::seo::is_reserved_route_root(root) {
-            collector.record(
-                path,
-                format!("{}:{}", proposed_claim.kind, proposed_claim.id),
-                format!("reserved:{root}"),
-                format!(
-                    "permalink_reserved_collision:path={path} target={}:{}",
-                    proposed_claim.kind, proposed_claim.id,
-                ),
-            )?;
+        if proposed_claim.locale == default_locale {
+            let root = first_literal_segment(path);
+            if crate::storage::seo::is_reserved_route_root(root) {
+                collector.record(
+                    path,
+                    format!("{}:{}", proposed_claim.kind, proposed_claim.id),
+                    format!("reserved:{root}"),
+                    format!(
+                        "permalink_reserved_collision:path={path} target={}:{}",
+                        proposed_claim.kind, proposed_claim.id,
+                    ),
+                )?;
+            } else if is_secondary_locale_root(root, &secondary_roots) {
+                collector.record(
+                    path,
+                    format!("{}:{}", proposed_claim.kind, proposed_claim.id),
+                    format!("locale:{root}"),
+                    format!(
+                        "permalink_reserved_collision:path={path} target={}:{} locale={root}",
+                        proposed_claim.kind, proposed_claim.id,
+                    ),
+                )?;
+            }
+        } else {
+            let rel = strip_locale_prefix(path, &proposed_claim.locale);
+            let rel_root = first_literal_segment(rel);
+            if rel != "/" && crate::storage::seo::is_reserved_route_root(rel_root) {
+                collector.record(
+                    path,
+                    format!("{}:{}", proposed_claim.kind, proposed_claim.id),
+                    format!("reserved:{rel_root}"),
+                    format!(
+                        "permalink_reserved_collision:path={path} target={}:{}",
+                        proposed_claim.kind, proposed_claim.id,
+                    ),
+                )?;
+            }
         }
-        if proposed_claim.kind != "archive" && path == "/posts" && posts_page_id.is_none() {
+        let default_posts_path =
+            prefix_for_locale(&proposed_claim.locale, &default_locale, "/posts");
+        if proposed_claim.kind != "archive"
+            && path == &default_posts_path
+            && posts_page_id.is_none()
+        {
             collector.record(
                 path,
                 format!("{}:{}", proposed_claim.kind, proposed_claim.id),
@@ -1180,6 +1461,7 @@ pub(crate) async fn sync_claims_with_options(
             if pattern.matches(path)
                 && !(proposed_claim.generated
                     && proposed_claim.kind == pattern.kind
+                    && proposed_claim.locale == pattern.locale
                     && proposed_claim.family.as_deref() == Some(&pattern.family))
             {
                 collector.record(
@@ -1202,158 +1484,328 @@ pub(crate) async fn sync_claims_with_options(
             .map_err(ApiError::from)?;
     let unpublished_ids: HashSet<i64> = unpublished_rows.into_iter().collect();
 
-    let previous: Vec<(String, String, String)> =
-        sqlx::query_as("SELECT path,target_kind,target_id FROM permalink_route_claims")
+    let previous: Vec<(String, String, String, String)> =
+        sqlx::query_as("SELECT path,target_kind,target_id,locale FROM permalink_route_claims")
             .fetch_all(&mut *conn)
             .await
             .map_err(ApiError::from)?;
-    let old_redirects: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT source_path,target_kind,target_id
+    let old_redirects: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT source_path,target_kind,target_id,locale,origin
            FROM permalink_route_redirects
           ORDER BY created_at ASC, source_path ASC",
     )
     .fetch_all(&mut *conn)
     .await
     .map_err(ApiError::from)?;
-    let old_redirect_order: Vec<String> = old_redirects.iter().map(|(p, _, _)| p.clone()).collect();
-    let previous_history: BTreeMap<String, Claim> = old_redirects
+    let old_redirect_order: Vec<String> = old_redirects
         .iter()
-        .map(|(path, kind, id)| (path.clone(), (kind.clone(), id.clone())))
+        .map(|(p, _, _, _, _)| p.clone())
         .collect();
-    let mut historical = BTreeMap::<String, Claim>::new();
-    for (path, kind, id) in old_redirects {
+    let previous_history: BTreeMap<String, HistoricalOwner> = old_redirects
+        .iter()
+        .map(|(path, kind, id, loc, origin)| {
+            (
+                path.clone(),
+                HistoricalOwner {
+                    claim: (kind.clone(), id.clone(), loc.clone()),
+                    origin: origin.clone(),
+                },
+            )
+        })
+        .collect();
+    let mut historical = BTreeMap::<String, HistoricalOwner>::new();
+    for (path, kind, id, loc, origin) in old_redirects {
         if path == "/" || is_unpublished_entry(&kind, &id, &unpublished_ids) {
             continue;
         }
-        let owner = if kind == "entry" && posts_page_id.is_some_and(|page| id == page.to_string()) {
-            ("archive".into(), "post".into())
+        let posts_page_id = reading_by_locale.get(&loc).and_then(|(_, posts)| *posts);
+        let claim = if kind == "entry" && posts_page_id.is_some_and(|page| id == page.to_string()) {
+            ("archive".into(), "post".into(), loc)
         } else {
-            (kind, id)
+            (kind, id, loc)
         };
-        historical.insert(path, owner);
+        historical.insert(path, HistoricalOwner { claim, origin });
     }
 
-    let old_entry_redirects: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT source_path,entry_id FROM entry_redirects ORDER BY created_at ASC, source_path ASC",
+    let old_entry_redirects: Vec<(String, String, i64)> = sqlx::query_as(
+        "SELECT locale,source_path,entry_id FROM entry_redirects ORDER BY created_at ASC, source_path ASC",
     )
     .fetch_all(&mut *conn)
     .await
     .map_err(ApiError::from)?;
-    for (path, id) in old_entry_redirects {
-        if path == "/" || unpublished_ids.contains(&id) {
+    for (loc, rel_path, id) in old_entry_redirects {
+        if !enabled_set.contains(&loc) || unpublished_ids.contains(&id) {
             continue;
         }
-        let owner = if Some(id) == posts_page_id {
-            ("archive".into(), "post".into())
+        let path = prefix_for_locale(&loc, &default_locale, &rel_path);
+        if path == "/" || path == prefix_for_locale(&loc, &default_locale, "/") {
+            continue;
+        }
+        let posts_page_id = reading_by_locale.get(&loc).and_then(|(_, posts)| *posts);
+        let owner: Claim = if Some(id) == posts_page_id {
+            ("archive".into(), "post".into(), loc.clone())
         } else {
-            ("entry".to_owned(), id.to_string())
+            ("entry".to_owned(), id.to_string(), loc.clone())
         };
+        let prefixed_variant = format!("/{loc}{rel_path}");
+        let already_recorded_for_owner = [&rel_path, &prefixed_variant].iter().any(|candidate| {
+            historical
+                .get(*candidate)
+                .is_some_and(|existing| existing.claim == owner && existing.origin == "canonical")
+        });
+        if already_recorded_for_owner {
+            continue;
+        }
         if let Some(other) = historical.get(&path).cloned() {
-            if other != owner {
-                if reading_page_owner_transfer(&other, &owner, posts_page_id, &target_families) {
-                    historical.insert(path, owner);
+            if other.claim != owner {
+                if other.origin == "locale_swap"
+                    || reading_page_owner_transfer(
+                        &other.claim,
+                        &owner,
+                        &reading_by_locale,
+                        &target_families,
+                    )
+                {
+                    historical.insert(
+                        path,
+                        HistoricalOwner {
+                            claim: owner,
+                            origin: "canonical".into(),
+                        },
+                    );
                 } else {
                     collector.record(
                         &path,
                         format!("entry:{id}"),
-                        format!("{}:{}", other.0, other.1),
+                        format!("{}:{}", other.claim.0, other.claim.1),
                         format!(
                             "permalink_redirect_collision:path={path} legacy=entry:{id} owner={}:{}",
-                            other.0, other.1,
+                            other.claim.0, other.claim.1,
                         ),
                     )?;
                 }
+            } else if other.origin != "canonical" {
+                historical.insert(
+                    path,
+                    HistoricalOwner {
+                        claim: owner,
+                        origin: "canonical".into(),
+                    },
+                );
             }
         } else {
-            historical.insert(path, owner);
+            historical.insert(
+                path,
+                HistoricalOwner {
+                    claim: owner,
+                    origin: "canonical".into(),
+                },
+            );
         }
     }
     for (path, owner) in homepage_redirects {
+        if proposed
+            .get(&path)
+            .is_some_and(|cand| cand.locale != owner.2)
+        {
+            continue;
+        }
         if let Some(other) = historical.get(&path).cloned() {
-            if other != owner {
-                if reading_page_owner_transfer(&other, &owner, posts_page_id, &target_families) {
-                    historical.insert(path, owner);
+            if other.claim != owner {
+                if other.claim.2 != owner.2 && other.origin == "canonical" {
+                    // Preserve pre-swap canonical history from another locale rather than
+                    // letting a synthetic homepage slug alias collide across swaps.
+                    continue;
+                }
+                if other.origin == "locale_swap"
+                    || reading_page_owner_transfer(
+                        &other.claim,
+                        &owner,
+                        &reading_by_locale,
+                        &target_families,
+                    )
+                {
+                    historical.insert(
+                        path,
+                        HistoricalOwner {
+                            claim: owner,
+                            origin: "canonical".into(),
+                        },
+                    );
                 } else {
                     collector.record(
                         &path,
                         format!("{}:{}", owner.0, owner.1),
-                        format!("{}:{}", other.0, other.1),
+                        format!("{}:{}", other.claim.0, other.claim.1),
                         format!(
                             "permalink_redirect_collision:path={path} new={}:{} owner={}:{}",
-                            owner.0, owner.1, other.0, other.1,
+                            owner.0, owner.1, other.claim.0, other.claim.1,
                         ),
                     )?;
                 }
             }
         } else {
-            historical.insert(path, owner);
+            historical.insert(
+                path,
+                HistoricalOwner {
+                    claim: owner,
+                    origin: "canonical".into(),
+                },
+            );
         }
     }
-    for (path, kind, id) in &previous {
+    for (path, kind, id, loc) in &previous {
+        // Disabled locales are hidden without turning their claims into redirects.
+        if !enabled_set.contains(loc) {
+            continue;
+        }
         if path == "/" || is_unpublished_entry(kind, id, &unpublished_ids) {
             continue;
         }
-        let owner = if kind == "entry" && posts_page_id.is_some_and(|page| id == &page.to_string())
-        {
-            ("archive".into(), "post".into())
-        } else {
-            (kind.clone(), id.clone())
-        };
-        if kind != "home"
-            && !proposed
-                .get(path)
-                .is_some_and(|p| p.kind == *kind && p.id == *id)
-        {
+        let posts_page_id = reading_by_locale.get(loc).and_then(|(_, posts)| *posts);
+        let owner: Claim =
+            if kind == "entry" && posts_page_id.is_some_and(|page| id == &page.to_string()) {
+                ("archive".into(), "post".into(), loc.clone())
+            } else {
+                (kind.clone(), id.clone(), loc.clone())
+            };
+        let is_unchanged_claim = proposed
+            .get(path)
+            .is_some_and(|p| p.kind == *kind && p.id == *id && p.locale == *loc);
+        if is_unchanged_claim {
+            continue;
+        }
+        let is_swap_move = swap_old_default
+            .as_deref()
+            .is_some_and(|old_def| loc == old_def || loc == &default_locale);
+        if is_swap_move {
+            if proposed.contains_key(path) {
+                continue;
+            }
+            let owner_family = target_families.get(&owner);
+            let hits_foreign_pattern = patterns.iter().any(|pattern| {
+                pattern.matches(path)
+                    && !(owner.0 == pattern.kind
+                        && owner.2 == pattern.locale
+                        && owner_family.is_some_and(|fam| fam == &pattern.family))
+            });
+            if hits_foreign_pattern {
+                continue;
+            }
+            if let Some(existing) = historical.get(path)
+                && existing.origin == "canonical"
+                && existing.claim != owner
+            {
+                continue;
+            }
+            historical.insert(
+                path.clone(),
+                HistoricalOwner {
+                    claim: owner,
+                    origin: "locale_swap".into(),
+                },
+            );
+            continue;
+        }
+        if kind != "home" {
             if let Some(other) = historical.get(path).cloned() {
-                if other != owner
-                    && !reading_page_owner_transfer(&other, &owner, posts_page_id, &target_families)
-                    && !reading_page_owner_transfer(&owner, &other, posts_page_id, &target_families)
+                if other.claim != owner
+                    && other.origin != "locale_swap"
+                    && !reading_page_owner_transfer(
+                        &other.claim,
+                        &owner,
+                        &reading_by_locale,
+                        &target_families,
+                    )
+                    && !reading_page_owner_transfer(
+                        &owner,
+                        &other.claim,
+                        &reading_by_locale,
+                        &target_families,
+                    )
                 {
                     collector.record(
                         path,
                         format!("{kind}:{id}"),
-                        format!("{}:{}", other.0, other.1),
+                        format!("{}:{}", other.claim.0, other.claim.1),
                         format!(
                             "permalink_redirect_collision:path={path} old={kind}:{id} owner={}:{}",
-                            other.0, other.1,
+                            other.claim.0, other.claim.1,
                         ),
                     )?;
                 }
-                if reading_page_owner_transfer(&owner, &other, posts_page_id, &target_families) {
+                if reading_page_owner_transfer(
+                    &owner,
+                    &other.claim,
+                    &reading_by_locale,
+                    &target_families,
+                ) {
                     historical.insert(path.clone(), other);
+                } else if other.origin == "locale_swap" {
+                    historical.insert(
+                        path.clone(),
+                        HistoricalOwner {
+                            claim: owner,
+                            origin: "canonical".into(),
+                        },
+                    );
                 }
             } else {
-                historical.insert(path.clone(), owner);
+                historical.insert(
+                    path.clone(),
+                    HistoricalOwner {
+                        claim: owner,
+                        origin: "canonical".into(),
+                    },
+                );
             }
         }
     }
     for (path, owner) in reclaimable_page_aliases {
         if let Some(other) = historical.get(&path).cloned()
-            && other != owner
-            && reading_page_owner_transfer(&other, &owner, posts_page_id, &target_families)
+            && other.claim != owner
+            && (other.origin == "locale_swap"
+                || reading_page_owner_transfer(
+                    &other.claim,
+                    &owner,
+                    &reading_by_locale,
+                    &target_families,
+                ))
         {
-            historical.insert(path, owner);
+            historical.insert(
+                path,
+                HistoricalOwner {
+                    claim: owner,
+                    origin: "canonical".into(),
+                },
+            );
         }
     }
     for (path, candidate) in &proposed {
-        if let Some(owner) = historical.get(path).cloned() {
-            if owner.0 == candidate.kind && owner.1 == candidate.id {
-                historical.remove(path);
-            } else if reading_page_owner_transfer(
-                &owner,
-                &(candidate.kind.clone(), candidate.id.clone()),
-                posts_page_id,
-                &target_families,
-            ) {
+        let cand_claim: Claim = (
+            candidate.kind.clone(),
+            candidate.id.clone(),
+            candidate.locale.clone(),
+        );
+        if let Some(existing) = historical.get(path).cloned() {
+            if existing.claim == cand_claim
+                || existing.origin == "locale_swap"
+                || reading_page_owner_transfer(
+                    &existing.claim,
+                    &cand_claim,
+                    &reading_by_locale,
+                    &target_families,
+                )
+            {
                 historical.remove(path);
             } else {
                 collector.record(
                     path,
                     format!("{}:{}", candidate.kind, candidate.id),
-                    format!("{}:{}", owner.0, owner.1),
+                    format!("{}:{}", existing.claim.0, existing.claim.1),
                     format!(
                         "permalink_collision:path={path} new={}:{} redirect_owner={}:{}",
-                        candidate.kind, candidate.id, owner.0, owner.1,
+                        candidate.kind, candidate.id, existing.claim.0, existing.claim.1,
                     ),
                 )?;
             }
@@ -1362,14 +1814,23 @@ pub(crate) async fn sync_claims_with_options(
 
     // Active historical routes must stay inside their own dynamic family; orphan redirects whose
     // target was deleted remain exact-path redirects and never deadlock new CPT/taxonomy prefixes.
-    for (path, owner) in &historical {
+    // Reclaimable locale_swap redirects that overlap a new foreign DynamicPattern are dropped safely.
+    let mut dropped_swap_patterns = Vec::<String>::new();
+    for (path, entry) in &historical {
+        let owner = &entry.claim;
         let Some(owner_family) = target_families.get(owner) else {
             continue;
         };
         for pattern in &patterns {
             if pattern.matches(path)
-                && !(owner.0 == pattern.kind && owner_family == &pattern.family)
+                && !(owner.0 == pattern.kind
+                    && owner.2 == pattern.locale
+                    && owner_family == &pattern.family)
             {
+                if entry.origin == "locale_swap" {
+                    dropped_swap_patterns.push(path.clone());
+                    break;
+                }
                 collector.record(
                     path,
                     format!("{}:{}", pattern.kind, pattern.family),
@@ -1381,6 +1842,9 @@ pub(crate) async fn sync_claims_with_options(
                 )?;
             }
         }
+    }
+    for path in dropped_swap_patterns {
+        historical.remove(&path);
     }
 
     // Prune oldest deleted-target orphan redirects directly against DB tables when exceeding MAX_REDIRECTS.
@@ -1399,9 +1863,9 @@ pub(crate) async fn sync_claims_with_options(
                 .map_err(ApiError::from)?
                 .into_iter()
                 .collect();
-        let is_orphan = |owner: &Claim| match owner.0.as_str() {
-            "entry" => !live_entries.contains(&owner.1),
-            "term" => !live_terms.contains(&owner.1),
+        let is_orphan = |entry: &HistoricalOwner| match entry.claim.0.as_str() {
+            "entry" => !live_entries.contains(&entry.claim.1),
+            "term" => !live_terms.contains(&entry.claim.1),
             _ => false,
         };
         for path in old_redirect_order {
@@ -1415,7 +1879,7 @@ pub(crate) async fn sync_claims_with_options(
         if historical.len() > MAX_REDIRECTS {
             let extra_orphans: Vec<String> = historical
                 .iter()
-                .filter(|(_, owner)| is_orphan(owner))
+                .filter(|(_, entry)| is_orphan(entry))
                 .map(|(path, _)| path.clone())
                 .collect();
             for path in extra_orphans {
@@ -1430,7 +1894,7 @@ pub(crate) async fn sync_claims_with_options(
                 "/redirects",
                 "permalink_redirect_limit",
                 "max_redirects",
-                "permalink_redirect_limit: tối đa 100000 redirects đang hoạt động.".to_owned(),
+                "permalink_redirect_limit: tối đa 200000 redirects đang hoạt động.".to_owned(),
             )?;
         }
     }
@@ -1441,12 +1905,12 @@ pub(crate) async fn sync_claims_with_options(
     // are written, avoiding a full database rewrite for every content save.
     let previous_map: BTreeMap<_, _> = previous
         .into_iter()
-        .map(|(path, kind, id)| (path, (kind, id)))
+        .map(|(path, kind, id, loc)| (path, (kind, id, loc)))
         .collect();
     for (path, owner) in &previous_map {
         if !proposed
             .get(path)
-            .is_some_and(|now| now.kind == owner.0 && now.id == owner.1)
+            .is_some_and(|now| now.kind == owner.0 && now.id == owner.1 && now.locale == owner.2)
         {
             sqlx::query("DELETE FROM permalink_route_claims WHERE path=?")
                 .bind(path)
@@ -1458,7 +1922,7 @@ pub(crate) async fn sync_claims_with_options(
     for (path, now) in &proposed {
         if !previous_map
             .get(path)
-            .is_some_and(|old| old.0 == now.kind && old.1 == now.id)
+            .is_some_and(|old| old.0 == now.kind && old.1 == now.id && old.2 == now.locale)
         {
             sqlx::query(
                 "INSERT INTO permalink_route_claims(path,target_kind,target_id,locale) VALUES (?,?,?,?)",
@@ -1466,14 +1930,14 @@ pub(crate) async fn sync_claims_with_options(
             .bind(path)
             .bind(&now.kind)
             .bind(&now.id)
-            .bind(&default_locale)
+            .bind(&now.locale)
             .execute(&mut *conn)
             .await
             .map_err(ApiError::from)?;
         }
     }
-    for (path, owner) in &previous_history {
-        if historical.get(path) != Some(owner) {
+    for (path, entry) in &previous_history {
+        if historical.get(path) != Some(entry) {
             sqlx::query("DELETE FROM permalink_route_redirects WHERE source_path=?")
                 .bind(path)
                 .execute(&mut *conn)
@@ -1481,15 +1945,16 @@ pub(crate) async fn sync_claims_with_options(
                 .map_err(ApiError::from)?;
         }
     }
-    for (path, (kind, id)) in historical {
-        if previous_history.get(&path) != Some(&(kind.clone(), id.clone())) {
+    for (path, entry) in historical {
+        if previous_history.get(&path) != Some(&entry) {
             sqlx::query(
-                "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id,locale,origin) VALUES (?,?,?,?,'canonical')",
+                "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id,locale,origin) VALUES (?,?,?,?,?)",
             )
             .bind(path)
-            .bind(kind)
-            .bind(id)
-            .bind(&default_locale)
+            .bind(entry.claim.0)
+            .bind(entry.claim.1)
+            .bind(entry.claim.2)
+            .bind(entry.origin)
             .execute(&mut *conn)
             .await
             .map_err(ApiError::from)?;
@@ -1508,40 +1973,59 @@ pub async fn resolve_public_path(
         return Ok(None);
     }
     let mut tx = db.begin().await?;
-    let current: Option<(String, String)> =
-        sqlx::query_as("SELECT target_kind,target_id FROM permalink_route_claims WHERE path=?")
+    let current: Option<(String, String, String)> = sqlx::query_as(
+        "SELECT c.target_kind, c.target_id, c.locale
+           FROM permalink_route_claims c
+           JOIN site_locales sl ON sl.code = c.locale AND sl.enabled = 1
+          WHERE c.path = ?",
+    )
+    .bind(path)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let (kind, id, locale, redirect) = match current {
+        Some((kind, id, loc)) => (kind, id, loc, false),
+        None => {
+            let old: Option<(String, String, String)> = sqlx::query_as(
+                "SELECT r.target_kind, r.target_id, r.locale
+                   FROM permalink_route_redirects r
+                   JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1
+                  WHERE r.source_path = ?",
+            )
             .bind(path)
             .fetch_optional(&mut *tx)
             .await?;
-    let (kind, id, redirect) =
-        match current {
-            Some((kind, id)) => (kind, id, false),
-            None => {
-                let old: Option<(String, String)> = sqlx::query_as(
-                "SELECT target_kind,target_id FROM permalink_route_redirects WHERE source_path=?",
-            ).bind(path).fetch_optional(&mut *tx).await?;
-                match old {
-                    Some((kind, id)) => (kind, id, true),
-                    None => return Ok(None),
-                }
+            match old {
+                Some((kind, id, loc)) => (kind, id, loc, true),
+                None => return Ok(None),
             }
-        };
+        }
+    };
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
     let (target, canonical_path) = match kind.as_str() {
-        "home" if !redirect && path == "/" => (PublicRouteTarget::Home, "/".to_owned()),
+        "home" => {
+            let canonical = prefix_for_locale(&locale, &default_locale, "/");
+            if !redirect && path != canonical {
+                return Ok(None);
+            }
+            (PublicRouteTarget::Home { locale }, canonical)
+        }
         "entry" => {
             let Ok(entry_id) = id.parse::<i64>() else {
                 return Ok(None);
             };
             let visible: i64 = sqlx::query_scalar(
                 "SELECT EXISTS(
-                   SELECT 1 FROM content_entries e JOIN content_types t ON t.key=e.content_type_key
-                   WHERE e.id=? AND e.publication_status='published'
+                   SELECT 1 FROM content_entries e
+                   JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+                   JOIN content_types t ON t.key=e.content_type_key
+                   WHERE e.id=? AND e.locale=? AND e.publication_status='published'
                      AND e.content_type_key NOT IN ('pattern', 'section')
                      AND t.provider_status='active'
                      AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1
                  )",
             )
             .bind(entry_id)
+            .bind(&locale)
             .fetch_one(&mut *tx)
             .await?;
             if visible == 0 {
@@ -1550,7 +2034,24 @@ pub async fn resolve_public_path(
             let Some(canonical) = canonical_entry_path_in_tx(&mut tx, entry_id).await? else {
                 return Ok(None);
             };
-            (PublicRouteTarget::Entry(entry_id), canonical)
+            let is_home: i64 = sqlx::query_scalar(
+                "SELECT EXISTS(
+                   SELECT 1 FROM site_reading_settings
+                    WHERE locale = ? AND homepage_page_id = ?
+                 )",
+            )
+            .bind(&locale)
+            .bind(entry_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            (
+                PublicRouteTarget::Entry {
+                    id: entry_id,
+                    locale,
+                    is_home: is_home != 0,
+                },
+                canonical,
+            )
         }
         "term" => {
             let Ok(term_id) = id.parse::<i64>() else {
@@ -1559,7 +2060,13 @@ pub async fn resolve_public_path(
             let Some(canonical) = canonical_term_path_in_tx(&mut tx, term_id).await? else {
                 return Ok(None);
             };
-            (PublicRouteTarget::Term(term_id), canonical)
+            (
+                PublicRouteTarget::Term {
+                    id: term_id,
+                    locale,
+                },
+                canonical,
+            )
         }
         "archive" => {
             if id == "post" {
@@ -1568,9 +2075,10 @@ pub async fn resolve_public_path(
                 let posts_page_id: Option<i64> = sqlx::query_scalar(
                     "SELECT r.posts_page_id
                        FROM site_reading_settings r
-                       JOIN site_locales sl ON sl.code = r.locale
-                      WHERE sl.is_default = 1",
+                       JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1
+                      WHERE r.locale = ?",
                 )
+                .bind(&locale)
                 .fetch_optional(&mut *tx)
                 .await?
                 .flatten();
@@ -1579,13 +2087,14 @@ pub async fn resolve_public_path(
                         "SELECT EXISTS(
                            SELECT 1 FROM content_entries e
                            JOIN content_types t ON t.key = e.content_type_key
-                          WHERE e.id = ? AND e.content_type_key = 'page'
+                          WHERE e.id = ? AND e.locale = ? AND e.content_type_key = 'page'
                             AND e.publication_status = 'published'
                             AND t.provider_status = 'active'
                             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1
                          )",
                     )
                     .bind(page_id)
+                    .bind(&locale)
                     .fetch_one(&mut *tx)
                     .await?;
                     if published == 0 {
@@ -1593,10 +2102,16 @@ pub async fn resolve_public_path(
                     }
                 }
             }
-            let Some(canonical) = canonical_archive_path_in_tx(&mut tx, &id).await? else {
+            let Some(canonical) = canonical_archive_path_in_tx(&mut tx, &id, &locale).await? else {
                 return Ok(None);
             };
-            (PublicRouteTarget::Archive(id), canonical)
+            (
+                PublicRouteTarget::Archive {
+                    type_key: id,
+                    locale,
+                },
+                canonical,
+            )
         }
         _ => return Ok(None),
     };
@@ -1624,6 +2139,42 @@ mod tests {
             .unwrap();
         sqlx::migrate!("../../migrations").run(&db).await.unwrap();
         db
+    }
+
+    fn vi_home() -> PublicRouteTarget {
+        PublicRouteTarget::Home {
+            locale: "vi".to_owned(),
+        }
+    }
+
+    fn vi_entry(id: i64) -> PublicRouteTarget {
+        PublicRouteTarget::Entry {
+            id,
+            locale: "vi".to_owned(),
+            is_home: false,
+        }
+    }
+
+    fn vi_home_entry(id: i64) -> PublicRouteTarget {
+        PublicRouteTarget::Entry {
+            id,
+            locale: "vi".to_owned(),
+            is_home: true,
+        }
+    }
+
+    fn vi_term(id: i64) -> PublicRouteTarget {
+        PublicRouteTarget::Term {
+            id,
+            locale: "vi".to_owned(),
+        }
+    }
+
+    fn vi_archive(type_key: &str) -> PublicRouteTarget {
+        PublicRouteTarget::Archive {
+            type_key: type_key.to_owned(),
+            locale: "vi".to_owned(),
+        }
     }
 
     async fn reading_page(db: &SqlitePool, slug: &str, published: bool) -> i64 {
@@ -1667,13 +2218,13 @@ mod tests {
         assert_eq!(first.version, 2);
         assert_eq!(
             resolve_public_path(&db, "/").await.unwrap().unwrap().target,
-            PublicRouteTarget::Entry(front)
+            vi_home_entry(front)
         );
         let home_alias = resolve_public_path(&db, "/front").await.unwrap().unwrap();
         assert!(home_alias.redirect);
         assert_eq!(home_alias.canonical_path, "/");
         let blog_route = resolve_public_path(&db, "/blog").await.unwrap().unwrap();
-        assert_eq!(blog_route.target, PublicRouteTarget::Archive("post".into()));
+        assert_eq!(blog_route.target, vi_archive("post"));
         assert!(!blog_route.redirect);
         let old_archive = resolve_public_path(&db, "/posts").await.unwrap().unwrap();
         assert_eq!(old_archive.canonical_path, "/blog");
@@ -1703,7 +2254,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(blog),
+            vi_entry(blog),
             "Former Posts Page regains its Page claim"
         );
         assert_eq!(
@@ -1712,7 +2263,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Archive("post".into())
+            vi_archive("post")
         );
         let unset = save_reading(
             &db,
@@ -1727,7 +2278,7 @@ mod tests {
         assert_eq!(unset.version, 4);
         assert_eq!(
             resolve_public_path(&db, "/").await.unwrap().unwrap().target,
-            PublicRouteTarget::Home
+            vi_home()
         );
         assert_eq!(
             resolve_public_path(&db, "/front")
@@ -1735,7 +2286,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(front)
+            vi_entry(front)
         );
         assert_eq!(
             resolve_public_path(&db, "/updates")
@@ -1743,7 +2294,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(updates)
+            vi_entry(updates)
         );
         assert_eq!(
             resolve_public_path(&db, "/posts")
@@ -1751,7 +2302,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Archive("post".into())
+            vi_archive("post")
         );
         save_reading(
             &db,
@@ -1864,7 +2415,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Archive("post".into())
+            vi_archive("post")
         );
         let alias = resolve_public_path(&db, "/blog").await.unwrap().unwrap();
         assert_eq!(alias.canonical_path, "/news");
@@ -1886,10 +2437,10 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(blog)
+            vi_entry(blog)
         );
         let page_alias = resolve_public_path(&db, "/blog").await.unwrap().unwrap();
-        assert_eq!(page_alias.target, PublicRouteTarget::Entry(blog));
+        assert_eq!(page_alias.target, vi_entry(blog));
         assert_eq!(page_alias.canonical_path, "/news");
 
         save_reading(
@@ -1908,7 +2459,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Archive("post".into())
+            vi_archive("post")
         );
     }
 
@@ -2205,34 +2756,34 @@ mod tests {
             .unwrap();
 
         migrator.run_to(40, &db).await.unwrap();
+        let redirect_row: (String, String, String) = sqlx::query_as(
+            "SELECT target_kind, target_id, source_path FROM permalink_route_redirects WHERE source_path='/content/page/upgrade-page'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
         assert_eq!(
-            resolve_public_path(&db, "/content/page/upgrade-page")
-                .await
-                .unwrap(),
-            Some(ResolvedPublicRoute {
-                target: PublicRouteTarget::Entry(page_id),
-                canonical_path: "/old-page-custom".to_owned(),
-                redirect: true,
-            }),
+            redirect_row,
+            (
+                "entry".to_owned(),
+                page_id.to_string(),
+                "/content/page/upgrade-page".to_owned(),
+            ),
         );
-        assert_eq!(
-            resolve_public_path(&db, "/old-page-custom").await.unwrap(),
-            Some(ResolvedPublicRoute {
-                target: PublicRouteTarget::Entry(page_id),
-                canonical_path: "/old-page-custom".to_owned(),
-                redirect: false,
-            }),
-        );
-        assert_eq!(
-            resolve_public_path(&db, "/content/post/untouched-post")
-                .await
-                .unwrap(),
-            Some(ResolvedPublicRoute {
-                target: PublicRouteTarget::Entry(untouched),
-                canonical_path: "/content/post/untouched-post".to_owned(),
-                redirect: false,
-            }),
-        );
+        let claim_page: (String, String) = sqlx::query_as(
+            "SELECT target_kind, target_id FROM permalink_route_claims WHERE path='/old-page-custom'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(claim_page, ("entry".to_owned(), page_id.to_string()));
+        let claim_post: (String, String) = sqlx::query_as(
+            "SELECT target_kind, target_id FROM permalink_route_claims WHERE path='/content/post/untouched-post'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(claim_post, ("entry".to_owned(), untouched.to_string()));
         let redirect_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM permalink_route_redirects WHERE target_kind='entry'",
         )
@@ -2242,6 +2793,33 @@ mod tests {
         assert_eq!(
             redirect_count, 1,
             "no blanket aliases for untouched entries"
+        );
+        migrator.run(&db).await.unwrap();
+        assert_eq!(
+            resolve_public_path(&db, "/content/page/upgrade-page")
+                .await
+                .unwrap(),
+            Some(ResolvedPublicRoute {
+                target: vi_entry(page_id),
+                canonical_path: "/old-page-custom".to_owned(),
+                redirect: true,
+            }),
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/old-page-custom").await.unwrap(),
+            Some(ResolvedPublicRoute {
+                target: vi_entry(page_id),
+                canonical_path: "/old-page-custom".to_owned(),
+                redirect: false,
+            }),
+        );
+        assert_eq!(
+            resolve_public_path(&db, "/untouched-post").await.unwrap(),
+            Some(ResolvedPublicRoute {
+                target: vi_entry(untouched),
+                canonical_path: "/untouched-post".to_owned(),
+                redirect: false,
+            }),
         );
     }
 
@@ -2394,7 +2972,7 @@ mod tests {
         assert_eq!(
             resolve_public_path(&db, "/blog/first").await.unwrap(),
             Some(ResolvedPublicRoute {
-                target: PublicRouteTarget::Entry(id),
+                target: vi_entry(id),
                 canonical_path: "/blog/first".into(),
                 redirect: false,
             }),
@@ -2415,7 +2993,7 @@ mod tests {
         assert_eq!(
             resolve_public_path(&db, "/blog/first").await.unwrap(),
             Some(ResolvedPublicRoute {
-                target: PublicRouteTarget::Entry(id),
+                target: vi_entry(id),
                 canonical_path: "/news/first".into(),
                 redirect: true,
             }),
@@ -2513,7 +3091,7 @@ mod tests {
                 .unwrap()
                 .unwrap(),
             ResolvedPublicRoute {
-                target: PublicRouteTarget::Term(id),
+                target: vi_term(id),
                 canonical_path: "/genres/sea".into(),
                 redirect: true,
             },
@@ -2580,7 +3158,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(id),
+            vi_entry(id),
         );
         assert_eq!(resolve_public_path(&db, "/admin").await.unwrap(), None);
     }
@@ -2601,7 +3179,7 @@ mod tests {
         assert_eq!(
             resolve_public_path(&db, "/blog/alpha").await.unwrap(),
             Some(ResolvedPublicRoute {
-                target: PublicRouteTarget::Entry(post_id),
+                target: vi_entry(post_id),
                 canonical_path: "/news/alpha".into(),
                 redirect: true,
             })
@@ -2626,7 +3204,7 @@ mod tests {
         assert_eq!(
             resolve_public_path(&db, "/blog/alpha").await.unwrap(),
             Some(ResolvedPublicRoute {
-                target: PublicRouteTarget::Entry(post_id),
+                target: vi_entry(post_id),
                 canonical_path: "/news/alpha".into(),
                 redirect: true,
             })
@@ -2640,7 +3218,7 @@ mod tests {
         assert_eq!(
             resolve_public_path(&db, "/blog/alpha").await.unwrap(),
             Some(ResolvedPublicRoute {
-                target: PublicRouteTarget::Entry(post_id),
+                target: vi_entry(post_id),
                 canonical_path: "/blog/alpha".into(),
                 redirect: false,
             })
@@ -2693,7 +3271,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(post_id)
+            vi_entry(post_id)
         );
         assert_eq!(resolve_public_path(&db, "/books").await.unwrap(), None);
     }
@@ -2763,7 +3341,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(post_id),
+            vi_entry(post_id),
         );
 
         let mut tx = db.begin().await.unwrap();
@@ -2803,7 +3381,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Term(term_id),
+            vi_term(term_id),
         );
 
         let mut tx = db.begin().await.unwrap();
@@ -2913,6 +3491,7 @@ mod tests {
                 format!("/claim-{id}"),
                 "entry",
                 id.to_string(),
+                "vi",
                 Some("post".to_owned()),
                 true,
                 &mut collector,
@@ -2923,7 +3502,8 @@ mod tests {
             &mut claims,
             "/claim-overflow".into(),
             "entry",
-            "50001".into(),
+            "200001".into(),
+            "vi",
             Some("post".to_owned()),
             true,
             &mut collector,
@@ -3022,7 +3602,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(page_about)
+            vi_entry(page_about)
         );
         let disambiguated_slug: String =
             sqlx::query_scalar("SELECT slug FROM content_entries WHERE id=?")
@@ -3037,7 +3617,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(post_about)
+            vi_entry(post_about)
         );
         // Explicit null keeps system default /books instead of provider 'library'.
         assert_eq!(
@@ -3046,7 +3626,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Archive("books".into())
+            vi_archive("books")
         );
         // Reserved /studio custom path & draft redirects cleaned up.
         let custom_count: i64 = sqlx::query_scalar(
@@ -3149,7 +3729,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(root_page)
+            vi_entry(root_page)
         );
         assert_eq!(
             resolve_public_path(&db, "/alpha/story")
@@ -3157,7 +3737,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(post_primary)
+            vi_entry(post_primary)
         );
         assert_eq!(
             resolve_public_path(&db, "/uncategorized/plain")
@@ -3165,7 +3745,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(post_none)
+            vi_entry(post_none)
         );
 
         // Selecting cat_b as primary switches route to /beta/story with 301 at /alpha/story.
@@ -3184,7 +3764,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .target,
-            PublicRouteTarget::Entry(post_primary)
+            vi_entry(post_primary)
         );
         assert!(
             resolve_public_path(&db, "/alpha/story")
@@ -3280,7 +3860,7 @@ mod tests {
     async fn max_redirects_prunes_oldest_orphans_fifo_before_rejecting() {
         let db = site().await;
         sqlx::query(
-            "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x <= 100001)
+            "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x <= 200001)
              INSERT INTO permalink_route_redirects(source_path, target_kind, target_id, locale, origin, created_at)
              SELECT '/old-orphan-' || x, 'entry', CAST(1000000 + x AS TEXT), 'vi', 'canonical',
                     strftime('%Y-%m-%dT%H:%M:%fZ', 1700000000 + x, 'unixepoch')

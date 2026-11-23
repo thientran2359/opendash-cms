@@ -343,7 +343,7 @@ async fn seo_metadata_head_projection_og_media_acl_and_rbac() {
         .text()
         .await
         .unwrap();
-    assert!(post_html.contains("<html lang=\"en-US\">"));
+    assert!(post_html.contains("<html lang=\"en-US\" dir=\"ltr\">"));
     assert!(
         post_html.contains("<link rel=\"canonical\" href=\"https://cms.example.com/seo-post\">")
     );

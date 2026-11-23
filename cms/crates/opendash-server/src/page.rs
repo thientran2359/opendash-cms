@@ -652,6 +652,41 @@ pub fn render_builder_with_budget(
     budget: &mut RenderBudget,
     cache: &BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
+    render_builder_with_budget_and_base_path(
+        state,
+        document,
+        is_preview,
+        bindings,
+        lists,
+        forms,
+        context,
+        patterns,
+        pattern_document,
+        annotation_scope,
+        scope,
+        "/",
+        budget,
+        cache,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_builder_with_budget_and_base_path(
+    state: &HomeState,
+    document: &BuilderDocument,
+    is_preview: bool,
+    bindings: &BindingResults,
+    lists: &ListResults,
+    forms: &ContactFormResults,
+    context: Option<&BuilderTemplateContext<'_>>,
+    patterns: &PatternResults,
+    pattern_document: bool,
+    annotation_scope: RenderAnnotationScope,
+    scope: &str,
+    list_base_path: &str,
+    budget: &mut RenderBudget,
+    cache: &BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     // Keep the original v1 main/section child structure intact; the optional
     // stylesheet precedes the root and every selector is scoped to that root.
     let mut html = builder_responsive_css(document);
@@ -810,7 +845,7 @@ pub fn render_builder_with_budget(
                                         list_html.push_str("<p>Trang này không có nội dung.</p>");
                                         list_html.push_str(&format!(
                                             "<a class=\"builder-list-first\" href=\"{}\">Về trang đầu</a>",
-                                            escape_html(&list_page_href(lists, &element.id, 1)),
+                                            escape_html(&list_page_href(list_base_path, lists, &element.id, 1)),
                                         ));
                                     } else if items.is_empty() {
                                         list_html.push_str(
@@ -838,13 +873,13 @@ pub fn render_builder_with_budget(
                                         if !is_preview && *page > 1 {
                                             list_html.push_str(&format!(
                                                 "<a class=\"builder-list-prev\" href=\"{}\">Trang trước</a>",
-                                                escape_html(&list_page_href(lists, &element.id, page - 1)),
+                                                escape_html(&list_page_href(list_base_path, lists, &element.id, page - 1)),
                                             ));
                                         }
                                         if !is_preview && *has_next && *page < 100 {
                                             list_html.push_str(&format!(
                                                 "<a class=\"builder-list-next\" href=\"{}\">Trang sau</a>",
-                                                escape_html(&list_page_href(lists, &element.id, page + 1)),
+                                                escape_html(&list_page_href(list_base_path, lists, &element.id, page + 1)),
                                             ));
                                         }
                                     }
@@ -1240,7 +1275,7 @@ fn render_contact_form_html(
 
 /// Canonical link: only currently resolved node IDs with valid nondefault pages
 /// survive. Unknown query parameters, duplicates and invalid values are dropped.
-fn list_page_href(lists: &ListResults, node_id: &str, target: i64) -> String {
+fn list_page_href(base_path: &str, lists: &ListResults, node_id: &str, target: i64) -> String {
     let mut pages = std::collections::BTreeMap::new();
     for (id, current) in lists {
         let ResolvedList::Page {
@@ -1260,7 +1295,7 @@ fn list_page_href(lists: &ListResults, node_id: &str, target: i64) -> String {
             pages.insert(id.clone(), effective);
         }
     }
-    CanonicalUrlBuilder::home_list_pages(&pages)
+    CanonicalUrlBuilder::list_pages(base_path, &pages)
 }
 
 pub fn render_legacy_state(state: &HomeState) -> ApiResult<Option<RenderedBlock>> {

@@ -92,12 +92,20 @@ pub struct HomeSeoSnapshot {
     pub locale: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HreflangAlternate {
+    pub hreflang: String,
+    pub href: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct SeoView {
     pub lang: String,
+    pub dir: String,
     pub title: String,
     pub description: Option<String>,
     pub canonical_url: Option<String>,
+    pub alternates: Vec<HreflangAlternate>,
     pub robots: String,
     pub og_title: String,
     pub og_description: Option<String>,
@@ -107,15 +115,25 @@ pub struct SeoView {
 
 impl SeoView {
     pub fn for_noindex_page(lang: &str, title: &str) -> Self {
+        Self::for_noindex_page_with_dir(lang, "ltr", title)
+    }
+
+    pub fn for_noindex_page_with_dir(lang: &str, dir: &str, title: &str) -> Self {
         Self {
             lang: if lang.trim().is_empty() {
                 "vi".to_string()
             } else {
                 lang.trim().to_string()
             },
+            dir: if dir == "rtl" {
+                "rtl".to_string()
+            } else {
+                "ltr".to_string()
+            },
             title: title.to_string(),
             description: None,
             canonical_url: None,
+            alternates: Vec::new(),
             robots: "noindex,nofollow".to_string(),
             og_title: title.to_string(),
             og_description: None,
@@ -294,9 +312,12 @@ pub fn render_sitemap_part(
                 "Chưa cấu hình public_origin để tạo sitemap.",
             )
         })?;
-    let mut out = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
-    );
+    let has_alternates = routes.routes.iter().any(|r| !r.alternates.is_empty());
+    let mut out = String::from(if has_alternates {
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" xmlns:xhtml=\"http://www.w3.org/1999/xhtml\">\n"
+    } else {
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n"
+    });
     for route in &routes.routes {
         let path = if route.path.starts_with('/') {
             route.path.as_str()
@@ -321,6 +342,13 @@ pub fn render_sitemap_part(
             out.push_str("<lastmod>");
             out.push_str(&escape_xml(&lastmod));
             out.push_str("</lastmod>");
+        }
+        for alt in &route.alternates {
+            out.push_str("<xhtml:link rel=\"alternate\" hreflang=\"");
+            out.push_str(&escape_xml(&alt.hreflang));
+            out.push_str("\" href=\"");
+            out.push_str(&escape_xml(&alt.href));
+            out.push_str("\"/>");
         }
         out.push_str("</url>\n");
     }

@@ -142,6 +142,7 @@ pub async fn resolve_lists_in_tx(
                         taxonomy_key: props.taxonomy_key.clone(),
                         term_id: props.term_id,
                         include_descendants: props.include_descendants,
+                        locale: None,
                     };
                     let sort = match props.sort {
                         opendash_core::builder::ListSort::IdDesc => PublishedListSort::IdDesc,

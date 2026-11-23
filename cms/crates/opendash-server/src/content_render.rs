@@ -313,6 +313,13 @@ pub fn compose_document_with_seo(
             escape_html_attr(canonical)
         ));
     }
+    for alt in &seo.alternates {
+        head.push_str(&format!(
+            "<link rel=\"alternate\" hreflang=\"{}\" href=\"{}\">",
+            escape_html_attr(&alt.hreflang),
+            escape_html_attr(&alt.href)
+        ));
+    }
     head.push_str(&format!(
         "<meta property=\"og:title\" content=\"{}\">",
         escape_html_attr(&seo.og_title)
@@ -344,9 +351,11 @@ pub fn compose_document_with_seo(
     for style in styles {
         head.push_str(&style);
     }
+    let dir = if seo.dir == "rtl" { "rtl" } else { "ltr" };
     Ok(format!(
-        "<!doctype html><html lang=\"{}\"><head>{head}</head><body{body_attrs_str}>{header}{body_fragment}{footer}</body></html>",
-        escape_html_attr(&seo.lang)
+        "<!doctype html><html lang=\"{}\" dir=\"{}\"><head>{head}</head><body{body_attrs_str}>{header}{body_fragment}{footer}</body></html>",
+        escape_html_attr(&seo.lang),
+        dir
     ))
 }
 

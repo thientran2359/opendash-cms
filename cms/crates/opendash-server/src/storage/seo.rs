@@ -48,28 +48,54 @@ pub enum ReadingPageState {
 }
 
 pub async fn reading_page_state(db: &SqlitePool, homepage: bool) -> ApiResult<ReadingPageState> {
-    let sql = if homepage {
-        "SELECT r.homepage_page_id,
-                EXISTS(SELECT 1 FROM content_entries e
-                    JOIN content_types t ON t.key=e.content_type_key
-                    WHERE e.id=r.homepage_page_id AND e.content_type_key='page'
-                    AND e.publication_status='published' AND t.provider_status='active'
-                    AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
-           FROM site_reading_settings r
-           JOIN site_locales sl ON sl.code = r.locale
-          WHERE sl.is_default = 1"
+    reading_page_state_for_locale(db, None, homepage).await
+}
+
+pub async fn reading_page_state_for_locale(
+    db: &SqlitePool,
+    locale: Option<&str>,
+    homepage: bool,
+) -> ApiResult<ReadingPageState> {
+    let col = if homepage {
+        "homepage_page_id"
     } else {
-        "SELECT r.posts_page_id,
-                EXISTS(SELECT 1 FROM content_entries e
-                    JOIN content_types t ON t.key=e.content_type_key
-                    WHERE e.id=r.posts_page_id AND e.content_type_key='page'
-                    AND e.publication_status='published' AND t.provider_status='active'
-                    AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
-           FROM site_reading_settings r
-           JOIN site_locales sl ON sl.code = r.locale
-          WHERE sl.is_default = 1"
+        "posts_page_id"
     };
-    let row: Option<(Option<i64>, i64)> = sqlx::query_as(sql).fetch_optional(db).await?;
+    let row: Option<(Option<i64>, i64)> = match locale {
+        Some(loc) => {
+            let sql = format!(
+                "SELECT r.{col},
+                        EXISTS(SELECT 1 FROM content_entries e
+                            JOIN content_types t ON t.key=e.content_type_key
+                            WHERE e.id=r.{col} AND e.locale=r.locale AND e.content_type_key='page'
+                            AND e.publication_status='published' AND t.provider_status='active'
+                            AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
+                   FROM site_reading_settings r
+                   JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1
+                  WHERE r.locale = ?",
+            );
+            sqlx::query_as(sqlx::AssertSqlSafe(sql))
+                .bind(loc)
+                .fetch_optional(db)
+                .await?
+        }
+        None => {
+            let sql = format!(
+                "SELECT r.{col},
+                        EXISTS(SELECT 1 FROM content_entries e
+                            JOIN content_types t ON t.key=e.content_type_key
+                            WHERE e.id=r.{col} AND e.locale=r.locale AND e.content_type_key='page'
+                            AND e.publication_status='published' AND t.provider_status='active'
+                            AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
+                   FROM site_reading_settings r
+                   JOIN site_locales sl ON sl.code = r.locale
+                  WHERE sl.is_default = 1",
+            );
+            sqlx::query_as(sqlx::AssertSqlSafe(sql))
+                .fetch_optional(db)
+                .await?
+        }
+    };
     let Some((page_id, published)) = row else {
         return Ok(ReadingPageState::Unconfigured);
     };
@@ -196,6 +222,16 @@ pub async fn validate_route_claim_in_tx(
         Some(loc) => loc,
         None => crate::storage::settings::get_default_locale_code_in_conn(conn).await?,
     };
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
+    let secondary_roots =
+        crate::storage::permalinks::load_secondary_locale_roots_in_conn(conn).await?;
+    if entry_locale == default_locale
+        && crate::storage::permalinks::is_secondary_locale_root(first_seg, &secondary_roots)
+    {
+        return Err(ApiError::conflict(
+            "Đường dẫn trùng với tiền tố ngôn ngữ đang hoạt động.",
+        ));
+    }
 
     if path == "/posts" {
         let posts_page_id: Option<i64> =
@@ -240,29 +276,33 @@ pub async fn validate_route_claim_in_tx(
         ));
     }
 
+    let effective_path =
+        crate::storage::permalinks::prefix_for_locale(&entry_locale, &default_locale, &path);
     let claim_owner: Option<(String, String)> =
         sqlx::query_as("SELECT target_kind,target_id FROM permalink_route_claims WHERE path=?")
-            .bind(&path)
+            .bind(&effective_path)
             .fetch_optional(&mut *conn)
             .await?;
     if let Some((kind, id)) = claim_owner
         && (kind != "entry" || id.parse::<i64>().ok() != owner_entry_id)
     {
         return Err(ApiError::conflict(format!(
-            "permalink_collision:path={path} existing={kind}:{id}",
+            "permalink_collision:path={effective_path} existing={kind}:{id}",
         )));
     }
     let historical_owner: Option<(String, String)> = sqlx::query_as(
-        "SELECT target_kind,target_id FROM permalink_route_redirects WHERE source_path=?",
+        "SELECT target_kind,target_id
+           FROM permalink_route_redirects
+          WHERE source_path=? AND origin != 'locale_swap'",
     )
-    .bind(&path)
+    .bind(&effective_path)
     .fetch_optional(&mut *conn)
     .await?;
     if let Some((kind, id)) = historical_owner
         && (kind != "entry" || id.parse::<i64>().ok() != owner_entry_id)
     {
         return Err(ApiError::conflict(format!(
-            "permalink_collision:path={path} redirect_owner={kind}:{id}",
+            "permalink_collision:path={effective_path} redirect_owner={kind}:{id}",
         )));
     }
 
@@ -274,6 +314,17 @@ pub async fn check_cpt_root_claim_in_tx(
     conn: &mut SqliteConnection,
     type_key: &str,
 ) -> ApiResult<()> {
+    let locale_conflict: Option<String> = sqlx::query_scalar(
+        "SELECT code FROM site_locales WHERE code = ? AND enabled = 1 AND is_default = 0 LIMIT 1",
+    )
+    .bind(type_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if locale_conflict.is_some() {
+        return Err(ApiError::conflict(
+            "Khóa loại nội dung trùng với tiền tố ngôn ngữ đang hoạt động.",
+        ));
+    }
     let exact = format!("/{type_key}");
     let prefix = format!("/{type_key}/%");
     let custom_hit: Option<i64> = sqlx::query_scalar(
@@ -319,6 +370,7 @@ pub async fn check_cpt_root_claim_in_tx(
     let route_redirect_hit: Option<String> = sqlx::query_scalar(
         "SELECT r.target_id FROM permalink_route_redirects r
           WHERE (r.source_path = ? OR r.source_path LIKE ?)
+            AND r.origin != 'locale_swap'
             AND (
                 (r.target_kind = 'entry' AND EXISTS (SELECT 1 FROM content_entries e WHERE CAST(e.id AS TEXT) = r.target_id))
                 OR (r.target_kind = 'term' AND EXISTS (SELECT 1 FROM taxonomy_terms t WHERE CAST(t.id AS TEXT) = r.target_id))
@@ -517,7 +569,7 @@ pub async fn put_entry_route(
     }
 }
 
-/// Checks if a published entry has a custom path (used by `/content/{type}/{slug}` to emit 301).
+/// Checks if a published default-locale entry has a custom path (used by `/content/{type}/{slug}` to emit 301).
 pub async fn custom_path_for_published_slug(
     db: &SqlitePool,
     type_key: &str,
@@ -526,6 +578,7 @@ pub async fn custom_path_for_published_slug(
     let custom: Option<String> = sqlx::query_scalar(
         "SELECT p.path
            FROM content_entries e
+           JOIN site_locales sl ON sl.code = e.locale AND sl.is_default = 1
            JOIN content_types t ON t.key = e.content_type_key
            JOIN entry_public_paths p ON p.entry_id = e.id
           WHERE e.content_type_key = ?
@@ -542,51 +595,84 @@ pub async fn custom_path_for_published_slug(
     Ok(custom)
 }
 
-/// Resolves an arbitrary public fallback path against `entry_public_paths` and `entry_redirects`.
-/// Never returns draft/unpublished/deleted entries or redirects to them.
+/// Resolves an arbitrary public fallback path against `entry_public_paths` and `entry_redirects`
+/// (scoped by active locale prefix). Never returns draft/unpublished/disabled-locale entries.
 pub async fn resolve_custom_or_redirect_path(
     db: &SqlitePool,
     path: &str,
 ) -> ApiResult<PublicRouteResolution> {
-    if validate_custom_entry_path(path).is_ok() {
+    let mut tx = db.begin().await?;
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
+    let secondary_roots =
+        crate::storage::permalinks::load_secondary_locale_roots_in_conn(&mut tx).await?;
+    let first_seg = path.trim_start_matches('/').split('/').next().unwrap_or("");
+    let (lookup_locale, relative_path) = if secondary_roots.contains(first_seg) {
+        let prefix = format!("/{first_seg}");
+        if path == prefix {
+            (first_seg.to_owned(), "/")
+        } else if let Some(rest) = path.strip_prefix(&prefix)
+            && rest.starts_with('/')
+        {
+            (first_seg.to_owned(), rest)
+        } else {
+            (default_locale.clone(), path)
+        }
+    } else {
+        (default_locale.clone(), path)
+    };
+
+    if validate_custom_entry_path(relative_path).is_ok() {
         let direct_id: Option<i64> = sqlx::query_scalar(
             "SELECT e.id
                FROM entry_public_paths p
                JOIN content_entries e ON e.id = p.entry_id
+               JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
                JOIN content_types t ON t.key = e.content_type_key
-              WHERE p.path = ?
+              WHERE p.locale = ?
+                AND p.path = ?
                 AND e.publication_status = 'published'
                 AND e.content_type_key != 'pattern'
                 AND t.provider_status = 'active'
                 AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
         )
-        .bind(path)
-        .fetch_optional(db)
+        .bind(&lookup_locale)
+        .bind(relative_path)
+        .fetch_optional(&mut *tx)
         .await?;
-        if let Some(eid) = direct_id
-            && let Some(record) =
+        if let Some(eid) = direct_id {
+            tx.commit().await?;
+            if let Some(record) =
                 crate::storage::public_content::get_published_by_id(db, eid).await?
-        {
-            return Ok(PublicRouteResolution::Entry {
-                record,
-                canonical_path: path.to_owned(),
-            });
+            {
+                let canonical = crate::storage::permalinks::prefix_for_locale(
+                    &lookup_locale,
+                    &default_locale,
+                    relative_path,
+                );
+                return Ok(PublicRouteResolution::Entry {
+                    record,
+                    canonical_path: canonical,
+                });
+            }
+            return Ok(PublicRouteResolution::NotFound);
         }
     }
 
-    let mut tx = db.begin().await?;
     let redirect_eid: Option<i64> = sqlx::query_scalar(
         "SELECT r.entry_id
            FROM entry_redirects r
            JOIN content_entries e ON e.id = r.entry_id
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
            JOIN content_types t ON t.key = e.content_type_key
-          WHERE r.source_path = ?
+          WHERE r.locale = ?
+            AND r.source_path = ?
             AND e.publication_status = 'published'
             AND e.content_type_key != 'pattern'
             AND t.provider_status = 'active'
             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
-    .bind(path)
+    .bind(&lookup_locale)
+    .bind(relative_path)
     .fetch_optional(&mut *tx)
     .await?;
     if let Some(eid) = redirect_eid
@@ -600,8 +686,10 @@ pub async fn resolve_custom_or_redirect_path(
     Ok(PublicRouteResolution::NotFound)
 }
 
+use crate::public_context::{PublicFilters, PublicQuery};
 use crate::seo::{
-    EntrySeoSnapshot, HomeSeoSnapshot, SeoMetadataInput, SeoView, validate_seo_input,
+    EntrySeoSnapshot, HomeSeoSnapshot, HreflangAlternate, SeoMetadataInput, SeoView,
+    validate_seo_input,
 };
 use crate::storage::settings::{self, absolute_public_url};
 
@@ -940,14 +1028,99 @@ fn project_og_image_url(
     Some(absolute_public_url(pub_settings, &rel).unwrap_or(rel))
 }
 
+pub(crate) fn join_origin_and_path(origin: &str, path: &str) -> String {
+    let base = origin.trim_end_matches('/');
+    if path.is_empty() || path == "/" {
+        format!("{base}/")
+    } else if path.starts_with('/') {
+        format!("{base}{path}")
+    } else {
+        format!("{base}/{path}")
+    }
+}
+
+pub(crate) fn is_self_canonical_for_origin(
+    custom_canonical: Option<&str>,
+    origin: &str,
+    path: &str,
+) -> bool {
+    match custom_canonical {
+        None => true,
+        Some(c) => {
+            let expected = join_origin_and_path(origin, path);
+            c == expected || (path == "/" && c == origin.trim_end_matches('/'))
+        }
+    }
+}
+
+pub(crate) fn finalize_alternates_for_origin(
+    origin: &str,
+    members: &[(String, bool, String)],
+) -> Vec<HreflangAlternate> {
+    if members.len() < 2 {
+        return Vec::new();
+    }
+    let mut out: Vec<HreflangAlternate> = members
+        .iter()
+        .map(|(bcp47, _, path)| HreflangAlternate {
+            hreflang: bcp47.clone(),
+            href: join_origin_and_path(origin, path),
+        })
+        .collect();
+    if let Some((_, _, default_path)) = members.iter().find(|(_, is_def, _)| *is_def) {
+        out.push(HreflangAlternate {
+            hreflang: "x-default".to_owned(),
+            href: join_origin_and_path(origin, default_path),
+        });
+    }
+    out
+}
+
+async fn has_multilingual_alternates_prereq(
+    conn: &mut SqliteConnection,
+    pub_settings: &settings::PublicSiteSettings,
+    noindex: bool,
+) -> ApiResult<Option<String>> {
+    if noindex || !pub_settings.indexing_enabled {
+        return Ok(None);
+    }
+    let Some(origin) = pub_settings.public_origin.as_deref() else {
+        return Ok(None);
+    };
+    let enabled = settings::list_enabled_locales_in_conn(conn).await?;
+    if enabled.len() < 2 {
+        return Ok(None);
+    }
+    Ok(Some(origin.to_owned()))
+}
+
 pub async fn build_entry_seo_view(
     db: &SqlitePool,
     entry_id: i64,
     entry_title: &str,
     canonical_path: &str,
 ) -> ApiResult<SeoView> {
-    let general = settings::get_general(db).await?;
+    let mut conn = db.acquire().await?;
+    let locale: Option<String> =
+        sqlx::query_scalar("SELECT locale FROM content_entries WHERE id = ?")
+            .bind(entry_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    drop(conn);
+    build_entry_seo_view_for_locale(db, entry_id, entry_title, locale.as_deref(), canonical_path)
+        .await
+}
+
+pub async fn build_entry_seo_view_for_locale(
+    db: &SqlitePool,
+    entry_id: i64,
+    entry_title: &str,
+    locale: Option<&str>,
+    canonical_path: &str,
+) -> ApiResult<SeoView> {
+    let general = settings::get_general_for_locale(db, locale).await?;
     let pub_settings = settings::get_public(db).await?;
+    let (resolved_locale, lang, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
     let row: Option<(
         Option<String>,
         Option<String>,
@@ -964,8 +1137,9 @@ pub async fn build_entry_seo_view(
     let (custom_title, description, og_image_id, custom_canonical, entry_noindex) =
         row.unwrap_or((None, None, None, None, 0));
     let title = custom_title.unwrap_or_else(|| format!("{entry_title} — {}", general.site_title));
-    let canonical_url =
-        custom_canonical.or_else(|| absolute_public_url(&pub_settings, canonical_path));
+    let canonical_url = custom_canonical
+        .clone()
+        .or_else(|| absolute_public_url(&pub_settings, canonical_path));
     let og_image_url = if og_image_id.is_some() {
         let public_mid: Option<String> = sqlx::query_scalar(
             "SELECT media_id FROM seo_public_media_refs
@@ -978,16 +1152,69 @@ pub async fn build_entry_seo_view(
     } else {
         None
     };
-    let robots = if !pub_settings.indexing_enabled || entry_noindex != 0 {
+    let noindex = entry_noindex != 0;
+    let robots = if !pub_settings.indexing_enabled || noindex {
         "noindex,nofollow".to_string()
     } else {
         "index,follow".to_string()
     };
+
+    let mut alternates = Vec::new();
+    let mut tx = db.begin().await?;
+    if let Some(origin) =
+        has_multilingual_alternates_prereq(&mut tx, &pub_settings, noindex).await?
+        && is_self_canonical_for_origin(custom_canonical.as_deref(), &origin, canonical_path)
+    {
+        let sibs: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
+            "SELECT sib_sl.bcp47_tag, sib_sl.is_default, claims.path, s.canonical_url
+               FROM content_entries cur
+               JOIN site_locales cur_sl ON cur_sl.code = cur.locale AND cur_sl.enabled = 1
+               JOIN content_entries sib
+                 ON sib.content_type_key = cur.content_type_key
+                AND sib.translation_group_id = cur.translation_group_id
+               JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1
+               JOIN content_types t ON t.key = sib.content_type_key
+               JOIN permalink_route_claims claims
+                 ON claims.target_kind = 'entry'
+                AND claims.target_id = CAST(sib.id AS TEXT)
+                AND claims.locale = sib.locale
+               LEFT JOIN entry_seo s ON s.entry_id = sib.id
+              WHERE cur.id = ? AND cur.locale = ?
+                AND cur.publication_status = 'published'
+                AND sib.publication_status = 'published'
+                AND sib.content_type_key NOT IN ('pattern', 'section')
+                AND NOT EXISTS (
+                    SELECT 1 FROM site_reading_settings reading
+                     WHERE reading.locale = sib.locale
+                       AND (reading.homepage_page_id = sib.id OR reading.posts_page_id = sib.id)
+                )
+                AND t.provider_status = 'active'
+                AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+                AND COALESCE(s.noindex, 0) = 0
+              ORDER BY sib_sl.is_default DESC, sib_sl.position ASC, sib_sl.code ASC",
+        )
+        .bind(entry_id)
+        .bind(&resolved_locale)
+        .fetch_all(&mut *tx)
+        .await?;
+        let members: Vec<(String, bool, String)> = sibs
+            .into_iter()
+            .filter(|(_, _, path, sib_canonical)| {
+                is_self_canonical_for_origin(sib_canonical.as_deref(), &origin, path)
+            })
+            .map(|(bcp47, is_def, path, _)| (bcp47, is_def != 0, path))
+            .collect();
+        alternates = finalize_alternates_for_origin(&origin, &members);
+    }
+    tx.commit().await?;
+
     Ok(SeoView {
-        lang: pub_settings.content_language.clone(),
+        lang,
+        dir,
         title: title.clone(),
         description: description.clone(),
         canonical_url: canonical_url.clone(),
+        alternates,
         robots,
         og_title: title,
         og_description: description,
@@ -997,9 +1224,19 @@ pub async fn build_entry_seo_view(
 }
 
 pub async fn build_home_seo_view(db: &SqlitePool) -> ApiResult<SeoView> {
-    let general = settings::get_general(db).await?;
+    build_home_seo_view_for_locale(db, None, "/", true).await
+}
+
+pub async fn build_home_seo_view_for_locale(
+    db: &SqlitePool,
+    locale: Option<&str>,
+    canonical_path: &str,
+    allow_alternates: bool,
+) -> ApiResult<SeoView> {
+    let general = settings::get_general_for_locale(db, locale).await?;
     let pub_settings = settings::get_public(db).await?;
-    let home = get_home_seo(db).await?;
+    let (_resolved_locale, lang, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
+    let home = get_home_seo_for_locale(db, locale).await?;
     let mut title = home.title.unwrap_or_else(|| {
         if general.tagline.trim().is_empty() {
             general.site_title.clone()
@@ -1008,10 +1245,11 @@ pub async fn build_home_seo_view(db: &SqlitePool) -> ApiResult<SeoView> {
         }
     });
     let mut description = home.description;
-    let mut canonical_url = home.canonical_url;
+    let mut custom_canonical = home.canonical_url;
     let mut og_image_url = project_og_image_url(&pub_settings, home.og_image_id);
     let mut noindex = home.noindex;
-    if let ReadingPageState::Published(id) = reading_page_state(db, true).await? {
+    let page_state = reading_page_state_for_locale(db, locale, true).await?;
+    if let ReadingPageState::Published(id) = page_state {
         let entry_meta: Option<(
             Option<String>,
             Option<String>,
@@ -1032,7 +1270,7 @@ pub async fn build_home_seo_view(db: &SqlitePool) -> ApiResult<SeoView> {
                 title = entry_title;
             }
             description = entry_description.or(description);
-            canonical_url = entry_canonical.or(canonical_url);
+            custom_canonical = entry_canonical.or(custom_canonical);
             if entry_image.is_some() {
                 let media_id: Option<String> = sqlx::query_scalar(
                     "SELECT media_id FROM seo_public_media_refs
@@ -1046,17 +1284,63 @@ pub async fn build_home_seo_view(db: &SqlitePool) -> ApiResult<SeoView> {
             noindex = entry_noindex != 0;
         }
     }
-    let canonical_url = canonical_url.or_else(|| absolute_public_url(&pub_settings, "/"));
+    let canonical_url = custom_canonical
+        .clone()
+        .or_else(|| absolute_public_url(&pub_settings, canonical_path));
     let robots = if !pub_settings.indexing_enabled || noindex {
         "noindex,nofollow".to_string()
     } else {
         "index,follow".to_string()
     };
+
+    let mut alternates = Vec::new();
+    let mut tx = db.begin().await?;
+    if allow_alternates
+        && matches!(page_state, ReadingPageState::Published(_))
+        && let Some(origin) =
+            has_multilingual_alternates_prereq(&mut tx, &pub_settings, noindex).await?
+        && is_self_canonical_for_origin(custom_canonical.as_deref(), &origin, canonical_path)
+    {
+        let homes: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
+            "SELECT sl.bcp47_tag, sl.is_default, claims.path, COALESCE(s.canonical_url, h.canonical_url)
+               FROM site_reading_settings reading
+               JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1
+               JOIN content_entries e ON e.id = reading.homepage_page_id
+               JOIN content_types t ON t.key = e.content_type_key
+               JOIN permalink_route_claims claims
+                 ON claims.target_kind = 'entry'
+                AND claims.target_id = CAST(e.id AS TEXT)
+                AND claims.locale = reading.locale
+               LEFT JOIN entry_seo s ON s.entry_id = e.id
+               LEFT JOIN site_home_seo h ON h.locale = reading.locale
+              WHERE e.content_type_key = 'page'
+                AND e.locale = reading.locale
+                AND e.publication_status = 'published'
+                AND t.provider_status = 'active'
+                AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+                AND COALESCE(s.noindex, h.noindex, 0) = 0
+              ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        let members: Vec<(String, bool, String)> = homes
+            .into_iter()
+            .filter(|(_, _, path, home_canonical)| {
+                is_self_canonical_for_origin(home_canonical.as_deref(), &origin, path)
+            })
+            .map(|(bcp47, is_def, path, _)| (bcp47, is_def != 0, path))
+            .collect();
+        alternates = finalize_alternates_for_origin(&origin, &members);
+    }
+    tx.commit().await?;
+
     Ok(SeoView {
-        lang: pub_settings.content_language.clone(),
+        lang,
+        dir,
         title: title.clone(),
         description: description.clone(),
         canonical_url: canonical_url.clone(),
+        alternates,
         robots,
         og_title: title,
         og_description: description,
@@ -1065,14 +1349,186 @@ pub async fn build_home_seo_view(db: &SqlitePool) -> ApiResult<SeoView> {
     })
 }
 
+pub async fn build_archive_seo_view_for_locale(
+    db: &SqlitePool,
+    type_key: &str,
+    locale: &str,
+    page_title: &str,
+    canonical_path: &str,
+    query: &PublicQuery,
+) -> ApiResult<SeoView> {
+    let mut view =
+        build_simple_seo_view_for_locale(db, Some(locale), page_title, Some(canonical_path), false)
+            .await?;
+    if query.page > 1 || query.filters != PublicFilters::default() {
+        return Ok(view);
+    }
+    let pub_settings = settings::get_public(db).await?;
+    let mut tx = db.begin().await?;
+    let Some(origin) = has_multilingual_alternates_prereq(&mut tx, &pub_settings, false).await?
+    else {
+        return Ok(view);
+    };
+    let rows: Vec<(String, i64, String)> = sqlx::query_as(
+        "SELECT sl.bcp47_tag, sl.is_default, claims.path
+           FROM content_types t
+           JOIN site_locales sl ON sl.enabled = 1
+           JOIN permalink_route_claims claims
+             ON claims.target_kind = 'archive'
+            AND claims.target_id = t.key
+            AND claims.locale = sl.code
+          WHERE t.key = ?
+            AND t.provider_status = 'active'
+            AND t.key != 'pattern'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+            AND COALESCE(json_extract(t.definition_json, '$.settings.has_archive'), 1) = 1
+            AND NOT (t.key = 'post' AND EXISTS (
+              SELECT 1 FROM site_reading_settings reading
+                LEFT JOIN content_entries blog ON blog.id = reading.posts_page_id AND blog.locale = reading.locale
+                LEFT JOIN content_types blog_type ON blog_type.key = blog.content_type_key
+               WHERE reading.locale = sl.code
+                 AND reading.posts_page_id IS NOT NULL
+                 AND (blog.id IS NULL OR blog.content_type_key != 'page'
+                   OR blog.publication_status != 'published'
+                   OR blog_type.provider_status IS NULL OR blog_type.provider_status != 'active'
+                   OR COALESCE(json_extract(blog_type.definition_json, '$.settings.public'), 1) != 1)
+            ))
+            AND EXISTS (
+                SELECT 1 FROM content_entries e
+                 WHERE e.content_type_key = t.key
+                   AND e.locale = sl.code
+                   AND e.publication_status = 'published'
+            )
+          ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
+    )
+    .bind(type_key)
+    .fetch_all(&mut *tx)
+    .await?;
+    let current_is_indexable: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+           SELECT 1 FROM content_entries e
+            WHERE e.content_type_key = ? AND e.locale = ? AND e.publication_status = 'published'
+         )",
+    )
+    .bind(type_key)
+    .bind(locale)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    if current_is_indexable != 0 {
+        let members: Vec<(String, bool, String)> = rows
+            .into_iter()
+            .map(|(bcp47, is_def, path)| (bcp47, is_def != 0, path))
+            .collect();
+        view.alternates = finalize_alternates_for_origin(&origin, &members);
+    }
+    Ok(view)
+}
+
+pub async fn build_term_seo_view_for_locale(
+    db: &SqlitePool,
+    term_id: i64,
+    locale: &str,
+    page_title: &str,
+    canonical_path: &str,
+    query: &PublicQuery,
+) -> ApiResult<SeoView> {
+    let mut view =
+        build_simple_seo_view_for_locale(db, Some(locale), page_title, Some(canonical_path), false)
+            .await?;
+    if query.page > 1 || query.filters != PublicFilters::default() {
+        return Ok(view);
+    }
+    let pub_settings = settings::get_public(db).await?;
+    let mut tx = db.begin().await?;
+    let Some(origin) = has_multilingual_alternates_prereq(&mut tx, &pub_settings, false).await?
+    else {
+        return Ok(view);
+    };
+    let rows: Vec<(String, String, i64, String)> = sqlx::query_as(
+        "SELECT sib.locale, sib_sl.bcp47_tag, sib_sl.is_default, claims.path
+           FROM taxonomy_terms cur
+           JOIN taxonomy_terms sib
+             ON sib.kind = cur.kind
+            AND sib.translation_group_id = cur.translation_group_id
+           JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1
+           JOIN taxonomy_definitions td ON td.key = sib.kind
+           JOIN permalink_route_claims claims
+             ON claims.target_kind = 'term'
+            AND claims.target_id = CAST(sib.id AS TEXT)
+            AND claims.locale = sib.locale
+          WHERE cur.id = ?
+            AND td.public = 1
+            AND td.provider_status = 'active'
+            AND td.declaration_state = 'declared'
+            AND EXISTS (
+              SELECT 1
+                FROM entry_terms et
+                JOIN content_entries e ON e.id = et.entry_id
+                JOIN content_types ct ON ct.key = e.content_type_key
+               WHERE et.term_id = sib.id
+                 AND e.locale = sib.locale
+                 AND e.publication_status = 'published'
+                 AND ct.provider_status = 'active'
+                 AND e.content_type_key != 'pattern'
+                 AND COALESCE(json_extract(ct.definition_json, '$.settings.public'), 1) = 1
+                 AND (
+                   EXISTS (
+                     SELECT 1 FROM content_type_taxonomy_overrides ov
+                     JOIN json_each(ov.taxonomies_json) selected
+                       ON selected.value = sib.kind
+                    WHERE ov.content_type_key = e.content_type_key
+                   )
+                   OR (
+                     NOT EXISTS (
+                       SELECT 1 FROM content_type_taxonomy_overrides ov
+                        WHERE ov.content_type_key = e.content_type_key
+                     )
+                     AND EXISTS (
+                       SELECT 1 FROM content_type_taxonomy_eligibility eligible
+                        WHERE eligible.content_type_key = e.content_type_key
+                          AND eligible.taxonomy_kind = sib.kind
+                          AND eligible.provider_status = 'active'
+                          AND eligible.declaration_state = 'declared'
+                     )
+                   )
+                 )
+            )
+          ORDER BY sib_sl.is_default DESC, sib_sl.position ASC, sib_sl.code ASC",
+    )
+    .bind(term_id)
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    if rows.iter().any(|(loc, _, _, _)| loc == locale) {
+        let members: Vec<(String, bool, String)> = rows
+            .into_iter()
+            .map(|(_, bcp47, is_def, path)| (bcp47, is_def != 0, path))
+            .collect();
+        view.alternates = finalize_alternates_for_origin(&origin, &members);
+    }
+    Ok(view)
+}
+
 pub async fn build_simple_seo_view(
     db: &SqlitePool,
     page_title: &str,
     canonical_path: Option<&str>,
     noindex_override: bool,
 ) -> ApiResult<SeoView> {
-    let general = settings::get_general(db).await?;
+    build_simple_seo_view_for_locale(db, None, page_title, canonical_path, noindex_override).await
+}
+
+pub async fn build_simple_seo_view_for_locale(
+    db: &SqlitePool,
+    locale: Option<&str>,
+    page_title: &str,
+    canonical_path: Option<&str>,
+    noindex_override: bool,
+) -> ApiResult<SeoView> {
+    let general = settings::get_general_for_locale(db, locale).await?;
     let pub_settings = settings::get_public(db).await?;
+    let (_resolved_locale, lang, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
     let title = format!("{page_title} — {}", general.site_title);
     let canonical_url = canonical_path.and_then(|p| absolute_public_url(&pub_settings, p));
     let robots = if noindex_override || !pub_settings.indexing_enabled {
@@ -1081,10 +1537,12 @@ pub async fn build_simple_seo_view(
         "index,follow".to_string()
     };
     Ok(SeoView {
-        lang: pub_settings.content_language.clone(),
+        lang,
+        dir,
         title: title.clone(),
         description: None,
         canonical_url: canonical_url.clone(),
+        alternates: Vec::new(),
         robots,
         og_title: title,
         og_description: None,

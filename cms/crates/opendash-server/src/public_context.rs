@@ -191,6 +191,24 @@ pub fn validate_single_query(raw: Option<&str>) -> Result<(), &'static str> {
     parse_query(raw, QueryScope::Single).map(|_| ())
 }
 
+/// Extract typed `list_page_<node_id>=<page>` parameters (1..=100) for Builder list pagination.
+pub fn parse_list_pages(raw: Option<&str>) -> BTreeMap<String, i64> {
+    let mut pages = BTreeMap::new();
+    let Some(raw) = raw else {
+        return pages;
+    };
+    for (key, value) in url::form_urlencoded::parse(raw.as_bytes()) {
+        if let Some(id) = key.strip_prefix("list_page_")
+            && valid_package_id(id)
+            && let Ok(page) = value.parse::<i64>()
+            && (1..=100).contains(&page)
+        {
+            pages.insert(id.to_owned(), page);
+        }
+    }
+    pages
+}
+
 /// Validate the original HTTP request path *before* matching any history
 /// claim. A decoded/normalized alternate spelling must never alias a route.
 /// Canonical path segments in C3 are unescaped and slash-separated.
@@ -338,6 +356,15 @@ impl CanonicalUrlBuilder {
     /// Builder list pagination has its own M4 contract (1..100, not the
     /// content archive's 1..10,000). Never copy unknown request query keys.
     pub fn home_list_pages(pages: &BTreeMap<String, i64>) -> String {
+        Self::list_pages(Self::home(), pages)
+    }
+
+    pub fn list_pages(base_path: &str, pages: &BTreeMap<String, i64>) -> String {
+        let base = if base_path.is_empty() || base_path == "/" {
+            "/"
+        } else {
+            base_path
+        };
         let mut pairs = url::form_urlencoded::Serializer::new(String::new());
         for (id, page) in pages {
             if valid_package_id(id) && (2..=100).contains(page) {
@@ -346,9 +373,11 @@ impl CanonicalUrlBuilder {
         }
         let query = pairs.finish();
         if query.is_empty() {
-            Self::home().into()
-        } else {
+            base.to_owned()
+        } else if base == "/" {
             format!("/?{query}")
+        } else {
+            format!("{base}?{query}")
         }
     }
 
