@@ -41,12 +41,14 @@ struct ResolvedPublicHtml {
     canvas_layout: bool,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn resolve_public_template_html(
     db: &SqlitePool,
     candidates: &[opendash_core::theme::TemplateCandidate],
     active: Option<&theme_storage::ActiveThemeV3>,
     site_ctx: &SiteContext<'_>,
     theme_opts: &BTreeMap<String, serde_json::Value>,
+    locale: Option<&str>,
     fallback_html: &str,
     route_entry: Option<(&str, &str)>,
     route_context: serde_json::Value,
@@ -66,6 +68,7 @@ async fn resolve_public_template_html(
         active,
         site_ctx,
         theme_opts,
+        locale,
         fallback_html,
         route_entry,
         route_context,
@@ -74,12 +77,14 @@ async fn resolve_public_template_html(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn render_resolved_public_template_html(
     db: &SqlitePool,
     resolution: TemplateResolution,
     active: Option<&theme_storage::ActiveThemeV3>,
     site_ctx: &SiteContext<'_>,
     theme_opts: &BTreeMap<String, serde_json::Value>,
+    locale: Option<&str>,
     fallback_html: &str,
     route_entry: Option<(&str, &str)>,
     route_context: serde_json::Value,
@@ -88,7 +93,7 @@ async fn render_resolved_public_template_html(
     let context = if matches!(&resolution, TemplateResolution::CoreFallback) {
         serde_json::Value::Null
     } else {
-        let menus = crate::storage::menu::resolve_active_slot_menus(db).await?;
+        let menus = crate::storage::menu::resolve_active_slot_menus_for_locale(db, locale).await?;
         let mut context = serde_json::json!({
             "site": site_ctx,
             "options": theme_opts,
@@ -210,16 +215,26 @@ fn permanent_redirect(location: String) -> Response {
 /// A missing or withdrawn Reading Page renders only a non-entry context. The
 /// status and robots header remain authoritative even if an Index template
 /// supplies the visual shell.
+#[allow(dead_code)]
 pub(crate) async fn render_not_found_response(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
+) -> ApiResult<Response> {
+    render_not_found_response_for_locale(db, themes_root, None).await
+}
+
+pub(crate) async fn render_not_found_response_for_locale(
+    db: &SqlitePool,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
+    locale: Option<&str>,
 ) -> ApiResult<Response> {
     let active = match themes_root {
         Some(Extension(root)) => theme_storage::load_active_theme_v3(db, &root.0).await?,
         None => None,
     };
-    let site = settings::get_general(db).await?;
-    let opts = settings::get_active_public_theme_options(db).await?;
+    let site = settings::get_general_for_locale(db, locale).await?;
+    let opts = settings::get_active_public_theme_options_for_locale(db, locale).await?;
+    let (_, bcp47_tag, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
@@ -231,21 +246,28 @@ pub(crate) async fn render_not_found_response(
         active.as_ref(),
         &site_ctx,
         &opts,
+        locale,
         "<main><h1>404 — Không tìm thấy trang</h1></main>",
         None,
         serde_json::json!({ "route": { "kind": "not_found" } }),
         &mut budget,
     )
     .await?;
-    let (header_html, footer_html, shell_has_form) = overrides::resolve_and_render_header_footer(
-        db,
-        active.as_ref(),
-        &site_ctx,
-        &opts,
-        &mut budget,
-    )
-    .await?;
-    let view = crate::seo::SeoView::for_noindex_page("vi", "404 — Không tìm thấy trang");
+    let (header_html, footer_html, shell_has_form) =
+        overrides::resolve_and_render_header_footer_for_locale(
+            db,
+            active.as_ref(),
+            &site_ctx,
+            &opts,
+            locale,
+            &mut budget,
+        )
+        .await?;
+    let view = crate::seo::SeoView::for_noindex_page_with_dir(
+        &bcp47_tag,
+        &dir,
+        "404 — Không tìm thấy trang",
+    );
     let html = content_render::compose_document_with_seo(
         header_html.as_deref(),
         &body.html,
@@ -269,16 +291,17 @@ pub(crate) async fn render_canonical_archive(
     db: SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     type_key: String,
+    locale: String,
     canonical_base: String,
     raw: Option<String>,
 ) -> ApiResult<Response> {
     if type_key == "post"
         && matches!(
-            seo::reading_page_state(&db, false).await?,
+            seo::reading_page_state_for_locale(&db, Some(&locale), false).await?,
             ReadingPageState::Missing
         )
     {
-        return render_not_found_response(&db, themes_root).await;
+        return render_not_found_response_for_locale(&db, themes_root, Some(&locale)).await;
     }
     // Enforce the CPT's public/archive settings before loading or rendering
     // content. The storage archive query independently checks this policy.
@@ -301,6 +324,7 @@ pub(crate) async fn render_canonical_archive(
         taxonomy_key: query.filters.taxonomy_key.clone(),
         term_id: query.filters.term_id,
         include_descendants: query.filters.descendants,
+        locale: Some(locale.clone()),
     };
     let schema = load_content_type_definition(&db, &type_key)
         .await?
@@ -347,8 +371,9 @@ pub(crate) async fn render_canonical_archive(
         None => None,
     };
     let (list_template, _) = active_content_templates(&db).await?;
-    let site = settings::get_general(&db).await?;
-    let theme_opts = settings::get_active_public_theme_options(&db).await?;
+    let site = settings::get_general_for_locale(&db, Some(&locale)).await?;
+    let theme_opts =
+        settings::get_active_public_theme_options_for_locale(&db, Some(&locale)).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
@@ -371,6 +396,7 @@ pub(crate) async fn render_canonical_archive(
         active_v3.as_ref(),
         &site_ctx,
         &theme_opts,
+        Some(&locale),
         &fallback_html,
         None,
         serde_json::json!({
@@ -386,19 +412,22 @@ pub(crate) async fn render_canonical_archive(
         &mut budget,
     )
     .await?;
-    let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer(
+    let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer_for_locale(
         &db,
         active_v3.as_ref(),
         &site_ctx,
         &theme_opts,
+        Some(&locale),
         &mut budget,
     )
     .await?;
-    let seo_view = crate::storage::seo::build_simple_seo_view(
+    let seo_view = seo::build_archive_seo_view_for_locale(
         &db,
+        &type_key,
+        &locale,
         &schema.label,
-        Some(&canonical_base),
-        false,
+        &canonical_base,
+        &query,
     )
     .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
@@ -412,11 +441,23 @@ pub(crate) async fn render_canonical_archive(
     ))
 }
 
+#[allow(dead_code)]
 pub(crate) async fn render_single_entry_response(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     entry: crate::storage::entries::ContentEntryRecord,
     canonical_path_override: Option<String>,
+) -> ApiResult<Response> {
+    render_single_entry_response_with_query(db, themes_root, entry, canonical_path_override, None)
+        .await
+}
+
+pub(crate) async fn render_single_entry_response_with_query(
+    db: &SqlitePool,
+    themes_root: Option<Extension<ThemeStoreRoot>>,
+    entry: crate::storage::entries::ContentEntryRecord,
+    canonical_path_override: Option<String>,
+    raw_query: Option<&str>,
 ) -> ApiResult<Response> {
     render_entry_response_with_cache(
         db,
@@ -424,25 +465,29 @@ pub(crate) async fn render_single_entry_response(
         entry,
         canonical_path_override,
         false,
+        raw_query,
         crate::page::BlockTemplateCache::global(),
     )
     .await
 }
 
-pub(crate) async fn render_homepage_entry_response(
+pub(crate) async fn render_homepage_entry_response_for_locale(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
     entry: crate::storage::entries::ContentEntryRecord,
+    canonical_path: String,
+    raw_query: Option<&str>,
 ) -> ApiResult<Response> {
     if entry.content_type_key != "page" {
-        return render_not_found_response(db, themes_root).await;
+        return render_not_found_response_for_locale(db, themes_root, None).await;
     }
     render_entry_response_with_cache(
         db,
         themes_root,
         entry,
-        Some("/".to_owned()),
+        Some(canonical_path),
         true,
+        raw_query,
         crate::page::BlockTemplateCache::global(),
     )
     .await
@@ -454,21 +499,27 @@ async fn render_entry_response_with_cache(
     entry: crate::storage::entries::ContentEntryRecord,
     canonical_path_override: Option<String>,
     is_home: bool,
+    raw_query: Option<&str>,
     cache: &crate::page::BlockTemplateCache,
 ) -> ApiResult<Response> {
     let db = db.clone();
-    let snapshot = public_content::load_entry_render_snapshot_with_cache(
+    let list_pages = crate::public_context::parse_list_pages(raw_query);
+    let list_base_path = canonical_path_override.as_deref().unwrap_or("/");
+    let snapshot = public_content::load_entry_render_snapshot_with_options(
         &db,
         entry.id,
         themes_root.as_ref().map(|Extension(root)| root.0.as_path()),
         cache,
+        list_base_path,
+        &list_pages,
     )
     .await?;
     let Some(snapshot) = snapshot else {
-        return render_not_found_response(&db, themes_root).await;
+        return render_not_found_response_for_locale(&db, themes_root, None).await;
     };
     let public_content::PublicEntryRenderSnapshot {
         entry,
+        locale: entry_locale,
         schema,
         active: active_v3,
         mut resolution,
@@ -521,15 +572,16 @@ async fn render_entry_response_with_cache(
         }
     };
     let (_, single_template) = active_content_templates(&db).await?;
-    let site = settings::get_general(&db).await?;
-    let theme_opts = settings::get_active_public_theme_options(&db).await?;
+    let site = settings::get_general_for_locale(&db, Some(&entry_locale)).await?;
+    let theme_opts =
+        settings::get_active_public_theme_options_for_locale(&db, Some(&entry_locale)).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
     };
     let archive_path = {
         let mut conn = db.acquire().await?;
-        permalinks::canonical_archive_path_in_tx(&mut conn, &type_key).await?
+        permalinks::canonical_archive_path_in_tx(&mut conn, &type_key, &entry_locale).await?
     };
     let entry_has_form = entry_body
         .as_ref()
@@ -546,8 +598,14 @@ async fn render_entry_response_with_cache(
     };
     let mut budget = overrides::PublicCompositionBudget::with_render_budget(entry_render_budget);
     let body = render_resolved_public_template_html(
-        &db, resolution, active_v3.as_ref(), &site_ctx, &theme_opts,
-        &fallback_html, Some((&type_key, &entry.slug)),
+        &db,
+        resolution,
+        active_v3.as_ref(),
+        &site_ctx,
+        &theme_opts,
+        Some(&entry_locale),
+        &fallback_html,
+        Some((&type_key, &entry.slug)),
         serde_json::json!({
             "content_type": {"key": schema.key, "label": schema.label},
             "entry": entry_view_with_url(entry.clone(), &schema, Some(canonical_path_for_seo.clone())),
@@ -555,27 +613,31 @@ async fn render_entry_response_with_cache(
             "route": {"kind":if is_home { "home" } else { "single" }, "path":canonical_path_for_seo},
         }),
         &mut budget,
-    ).await?;
+    )
+    .await?;
     let (header, footer, shell_has_form) = if body.canvas_layout {
         (None, None, false)
     } else {
-        overrides::resolve_and_render_header_footer_with_cache(
+        overrides::resolve_and_render_header_footer_with_cache_for_locale(
             &db,
             active_v3.as_ref(),
             &site_ctx,
             &theme_opts,
+            Some(&entry_locale),
             &mut budget,
             cache,
         )
         .await?
     };
     let seo_view = if is_home {
-        seo::build_home_seo_view(&db).await?
+        seo::build_home_seo_view_for_locale(&db, Some(&entry_locale), &canonical_path_for_seo, true)
+            .await?
     } else {
-        seo::build_entry_seo_view(
+        seo::build_entry_seo_view_for_locale(
             &db,
             entry_id_for_seo,
             &entry_title_for_seo,
+            Some(&entry_locale),
             &canonical_path_for_seo,
         )
         .await?
@@ -643,6 +705,7 @@ pub(crate) async fn render_canonical_taxonomy(
     db: &SqlitePool,
     themes_root: Option<ThemeStoreRoot>,
     term_id: i64,
+    locale: String,
     canonical_base: String,
     raw_query: Option<&str>,
     expected_kind: Option<TaxonomyKind>,
@@ -732,8 +795,9 @@ pub(crate) async fn render_canonical_taxonomy(
             ))
         })
         .flatten();
-    let site = settings::get_general(db).await?;
-    let theme_opts = settings::get_active_public_theme_options(db).await?;
+    let site = settings::get_general_for_locale(db, Some(&locale)).await?;
+    let theme_opts =
+        settings::get_active_public_theme_options_for_locale(db, Some(&locale)).await?;
     // Until S03 role composition, use the core archive template for mixed CPTs.
     // Site-owned content is resolved by its own actual schema above.
     let schema = ContentTypeDefinition {
@@ -770,6 +834,7 @@ pub(crate) async fn render_canonical_taxonomy(
         active_v3.as_ref(),
         &site_ctx,
         &theme_opts,
+        Some(&locale),
         &fallback_html,
         None,
         serde_json::json!({
@@ -783,17 +848,24 @@ pub(crate) async fn render_canonical_taxonomy(
         &mut budget,
     )
     .await?;
-    let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer(
+    let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer_for_locale(
         db,
         active_v3.as_ref(),
         &site_ctx,
         &theme_opts,
+        Some(&locale),
         &mut budget,
     )
     .await?;
-    let seo_view =
-        crate::storage::seo::build_simple_seo_view(db, &schema.label, Some(&canonical_base), false)
-            .await?;
+    let seo_view = seo::build_term_seo_view_for_locale(
+        db,
+        term_id,
+        &locale,
+        &schema.label,
+        &canonical_base,
+        &query,
+    )
+    .await?;
     Ok(crate::routes::public::rendered_layout_with_form_csp(
         content_render::compose_document_with_seo(
             header.as_deref(),

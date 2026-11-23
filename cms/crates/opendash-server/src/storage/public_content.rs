@@ -56,6 +56,7 @@ async fn get_published_by_id_in_tx(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at
          FROM content_entries e
+         JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
          JOIN content_types t ON t.key = e.content_type_key
          WHERE e.id = ? AND e.publication_status = 'published'
            AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
@@ -72,6 +73,7 @@ async fn get_published_by_id_in_tx(
 
 pub struct PublicEntryRenderSnapshot {
     pub entry: ContentEntryRecord,
+    pub locale: String,
     pub schema: opendash_core::content::ContentTypeDefinition,
     pub active: Option<super::theme::ActiveThemeV3>,
     pub resolution: super::overrides::TemplateResolution,
@@ -102,6 +104,25 @@ pub async fn load_entry_render_snapshot_with_cache(
     themes_root: Option<&std::path::Path>,
     cache: &crate::page::BlockTemplateCache,
 ) -> ApiResult<Option<PublicEntryRenderSnapshot>> {
+    load_entry_render_snapshot_with_options(
+        db,
+        id,
+        themes_root,
+        cache,
+        "/",
+        &std::collections::BTreeMap::new(),
+    )
+    .await
+}
+
+pub async fn load_entry_render_snapshot_with_options(
+    db: &SqlitePool,
+    id: i64,
+    themes_root: Option<&std::path::Path>,
+    cache: &crate::page::BlockTemplateCache,
+    list_base_path: &str,
+    list_pages: &std::collections::BTreeMap<String, i64>,
+) -> ApiResult<Option<PublicEntryRenderSnapshot>> {
     use super::{builder, builder_binding, content, overrides, theme};
     use crate::error::ApiError;
     use opendash_core::{
@@ -113,6 +134,11 @@ pub async fn load_entry_render_snapshot_with_cache(
     let Some(entry) = get_published_by_id_in_tx(&mut tx, id).await? else {
         return Ok(None);
     };
+    let entry_locale: String =
+        sqlx::query_scalar("SELECT locale FROM content_entries WHERE id = ?")
+            .bind(entry.id)
+            .fetch_one(&mut *tx)
+            .await?;
     let mut schema =
         content::load_content_type_definition_in_conn(&mut tx, &entry.content_type_key)
             .await?
@@ -204,8 +230,7 @@ pub async fn load_entry_render_snapshot_with_cache(
             Some((&entry.content_type_key, &entry.slug)),
         )
         .await?;
-        let lists =
-            builder::resolve_lists_in_tx(&mut tx, &doc, &std::collections::BTreeMap::new()).await?;
+        let lists = builder::resolve_lists_in_tx(&mut tx, &doc, list_pages).await?;
         let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
         let patterns = builder::resolve_patterns_in_tx_with_budget(
             &mut tx,
@@ -216,7 +241,7 @@ pub async fn load_entry_render_snapshot_with_cache(
             cache,
         )
         .await?;
-        Some(crate::page::render_builder_with_budget(
+        Some(crate::page::render_builder_with_budget_and_base_path(
             &state,
             &doc,
             false,
@@ -228,6 +253,7 @@ pub async fn load_entry_render_snapshot_with_cache(
             false,
             crate::page::RenderAnnotationScope::None,
             "entry",
+            list_base_path,
             &mut render_budget,
             cache,
         )?)
@@ -237,6 +263,7 @@ pub async fn load_entry_render_snapshot_with_cache(
     tx.commit().await?;
     Ok(Some(PublicEntryRenderSnapshot {
         entry,
+        locale: entry_locale,
         schema,
         active,
         resolution,
@@ -302,30 +329,30 @@ pub struct PublicTerm {
     pub slug: String,
 }
 
-pub async fn taxonomy_public_page(
-    db: &SqlitePool,
-    kind: TaxonomyKind,
-    slug: &str,
-    filters: PublicFilters,
-    limit: i64,
-    offset: i64,
-) -> ApiResult<Option<(PublicTerm, TaxonomyPublishedPage)>> {
-    let mut tx = db.begin().await?;
-    let row: Option<(i64, String, String)> = sqlx::query_as(
-        "SELECT t.id, t.name, t.slug FROM taxonomy_terms t
-         JOIN taxonomy_definitions d ON d.key=t.kind
-         WHERE t.kind=? AND t.slug=? AND d.public=1
-           AND d.provider_status='active' AND d.declaration_state='declared'",
-    )
-    .bind(kind.as_str())
-    .bind(slug)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some((id, name, slug)) = row else {
-        return Ok(None);
-    };
-    // Check filter existence/kind within the same read snapshot as term and
-    // page; malformed recognized query values are handled by the parser.
+/// Validate category/tag/generic filters for a builtin (`category`/`tag`) or
+/// custom taxonomy archive within one read snapshot.
+async fn validate_taxonomy_page_filters_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    kind: &str,
+    hierarchical: i64,
+    filters: &PublicFilters,
+) -> ApiResult<()> {
+    if !matches!(kind, "category" | "tag") {
+        // C3 introduces custom taxonomy archives without inheriting another
+        // taxonomy's query language. Its own root term is the only generic filter;
+        // rejecting extra recognized filters avoids silently dropping constraints.
+        if filters.category_id.is_some()
+            || filters.tag_id.is_some()
+            || filters.taxonomy_key.is_some()
+            || filters.term_id.is_some()
+            || (filters.descendants && hierarchical == 0)
+        {
+            return Err(crate::error::ApiError::bad_request(
+                "Bộ lọc trang taxonomy tùy chỉnh không hợp lệ.",
+            ));
+        }
+        return Ok(());
+    }
     for (filter_id, filter_kind) in [
         (filters.category_id, TaxonomyKind::Category),
         (filters.tag_id, TaxonomyKind::Tag),
@@ -338,7 +365,7 @@ pub async fn taxonomy_public_page(
             )
             .bind(filter_id)
             .bind(filter_kind.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await?;
             if exists.is_none() {
                 return Err(crate::error::ApiError::bad_request(
@@ -364,28 +391,63 @@ pub async fn taxonomy_public_page(
         )
         .bind(id)
         .bind(key)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?;
-        let Some((hierarchical, public)) = record else {
+        let Some((generic_hierarchical, public)) = record else {
             return Err(crate::error::ApiError::bad_request(
                 "Generic taxonomy filter không hợp lệ.",
             ));
         };
-        if public == 0 || (filters.descendants && hierarchical == 0) {
+        if public == 0 || (filters.descendants && generic_hierarchical == 0) {
             return Err(crate::error::ApiError::bad_request(
                 "Taxonomy private hoặc không phân cấp.",
             ));
         }
     }
-    let page =
-        list_taxonomy_published_in_tx(&mut tx, kind.as_str(), id, filters, limit, offset).await?;
+    Ok(())
+}
+
+pub async fn taxonomy_public_page(
+    db: &SqlitePool,
+    kind: TaxonomyKind,
+    slug: &str,
+    filters: PublicFilters,
+    limit: i64,
+    offset: i64,
+) -> ApiResult<Option<(PublicTerm, TaxonomyPublishedPage)>> {
+    let mut tx = db.begin().await?;
+    let row: Option<(i64, String, String, String, i64)> = sqlx::query_as(
+        "SELECT t.id, t.name, t.slug, t.locale, d.hierarchical
+           FROM taxonomy_terms t
+           JOIN site_locales sl ON sl.code = t.locale AND sl.is_default = 1
+           JOIN taxonomy_definitions d ON d.key = t.kind
+          WHERE t.kind = ? AND t.slug = ? AND d.public = 1
+            AND d.provider_status = 'active' AND d.declaration_state = 'declared'",
+    )
+    .bind(kind.as_str())
+    .bind(slug)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((id, name, slug, term_locale, hierarchical)) = row else {
+        return Ok(None);
+    };
+    validate_taxonomy_page_filters_in_tx(&mut tx, kind.as_str(), hierarchical, &filters).await?;
+    let page = list_taxonomy_published_in_tx(
+        &mut tx,
+        kind.as_str(),
+        id,
+        &term_locale,
+        filters,
+        limit,
+        offset,
+    )
+    .await?;
     tx.commit().await?;
     Ok(Some((PublicTerm { id, name, slug }, page)))
 }
 
-/// Resolve a term archive by its stable ID, including site-defined taxonomies.
-/// The permission guard is inside the same snapshot used by the list query.
-/// Legacy category/tag routes keep their existing filter behavior.
+/// Resolve a term archive by its stable ID, including site-defined taxonomies
+/// across any enabled locale. Never re-queries by slug to avoid cross-locale aliasing.
 pub async fn taxonomy_public_page_by_id(
     db: &SqlitePool,
     term_id: i64,
@@ -394,50 +456,31 @@ pub async fn taxonomy_public_page_by_id(
     offset: i64,
 ) -> ApiResult<Option<(String, PublicTerm, TaxonomyPublishedPage)>> {
     let mut tx = db.begin().await?;
-    let row: Option<(String, String, String, i64)> = sqlx::query_as(
-        "SELECT t.kind, t.name, t.slug, d.hierarchical
+    let row: Option<(String, String, String, String, i64)> = sqlx::query_as(
+        "SELECT t.kind, t.name, t.slug, t.locale, d.hierarchical
            FROM taxonomy_terms t
-           JOIN taxonomy_definitions d ON d.key=t.kind
-          WHERE t.id=? AND d.public=1 AND d.provider_status='active'
-            AND d.declaration_state='declared'",
+           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+           JOIN taxonomy_definitions d ON d.key = t.kind
+          WHERE t.id = ? AND d.public = 1 AND d.provider_status = 'active'
+            AND d.declaration_state = 'declared'",
     )
     .bind(term_id)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some((kind, name, slug, hierarchical)) = row else {
+    let Some((kind, name, slug, term_locale, hierarchical)) = row else {
         return Ok(None);
     };
-    if kind == "category" || kind == "tag" {
-        tx.commit().await?;
-        let builtin_kind = if kind == "category" {
-            TaxonomyKind::Category
-        } else {
-            TaxonomyKind::Tag
-        };
-        // The legacy reader matches by slug. If another writer renames this
-        // term and reuses its old slug between snapshots, never render the
-        // replacement under the original stable-ID route claim.
-        let result = taxonomy_public_page(db, builtin_kind, &slug, filters, limit, offset).await?;
-        return Ok(match result {
-            Some((term, page)) if term.id == term_id => Some((kind, term, page)),
-            _ => None,
-        });
-    }
-    // C3 introduces custom taxonomy archives without inheriting another
-    // taxonomy's query language. Its own root term is the only generic filter;
-    // rejecting extra recognized filters avoids silently dropping constraints.
-    if filters.category_id.is_some()
-        || filters.tag_id.is_some()
-        || filters.taxonomy_key.is_some()
-        || filters.term_id.is_some()
-        || (filters.descendants && hierarchical == 0)
-    {
-        return Err(crate::error::ApiError::bad_request(
-            "Bộ lọc trang taxonomy tùy chỉnh không hợp lệ.",
-        ));
-    }
-    let page =
-        list_taxonomy_published_in_tx(&mut tx, &kind, term_id, filters, limit, offset).await?;
+    validate_taxonomy_page_filters_in_tx(&mut tx, &kind, hierarchical, &filters).await?;
+    let page = list_taxonomy_published_in_tx(
+        &mut tx,
+        &kind,
+        term_id,
+        &term_locale,
+        filters,
+        limit,
+        offset,
+    )
+    .await?;
     tx.commit().await?;
     Ok(Some((
         kind,
@@ -463,6 +506,7 @@ async fn list_taxonomy_published_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     kind: &str,
     term_id: i64,
+    term_locale: &str,
     filters: PublicFilters,
     limit: i64,
     offset: i64,
@@ -507,6 +551,7 @@ async fn list_taxonomy_published_in_tx(
           LEFT JOIN content_type_taxonomy_overrides override
             ON override.content_type_key=e.content_type_key
          WHERE e.publication_status = 'published'
+           AND e.locale = ?
            AND e.content_type_key != 'pattern'
            AND t.provider_status = 'active'
            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
@@ -552,6 +597,7 @@ async fn list_taxonomy_published_in_tx(
         .bind(generic_term_id)
         .bind(&generic_kind)
         .bind(i64::from(filters.descendants))
+        .bind(term_locale)
         .bind(root_category)
         .bind(root_tag)
         .bind(root_tag)
@@ -583,6 +629,7 @@ async fn list_taxonomy_published_in_tx(
         .bind(generic_term_id)
         .bind(&generic_kind)
         .bind(i64::from(filters.descendants))
+        .bind(term_locale)
         .bind(root_category)
         .bind(root_tag)
         .bind(root_tag)
@@ -614,6 +661,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
         r#"SELECT EXISTS (
            SELECT 1
            FROM content_entries AS e
+           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN json_each(t.definition_json, '$.fields') AS f
            WHERE e.publication_status = 'published' AND e.content_type_key != 'pattern'
@@ -638,6 +686,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
          ) OR EXISTS (
            SELECT 1
            FROM content_entries AS e
+           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN content_field_group_targets AS gt
              ON gt.type_key = e.content_type_key
@@ -691,6 +740,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            SELECT 1
            FROM seo_public_media_refs AS sm
            JOIN content_entries AS e ON sm.source_kind = 'entry_seo' AND e.id = sm.source_id
+           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
            JOIN content_types AS t ON t.key = e.content_type_key
            WHERE sm.media_id = ?
              AND e.publication_status = 'published'
@@ -723,15 +773,18 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                ))
                OR (ov.target_kind = 'page' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
+                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
                  WHERE e.content_type_key = 'page' AND e.publication_status = 'published'
                ))
                OR (ov.target_kind = 'page_layout' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
+                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
                  WHERE e.content_type_key = 'page' AND e.publication_status = 'published'
                    AND e.page_layout_key = json_extract(ov.target_json, '$.layout_key')
                ))
                OR (ov.target_kind = 'single_custom' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
+                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
                  JOIN content_types AS t ON t.key = e.content_type_key
                  WHERE e.custom_template_key = json_extract(ov.target_json, '$.custom_key')
                    AND e.publication_status = 'published'
@@ -740,6 +793,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                ))
                OR (ov.target_kind = 'single' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
+                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
                  JOIN content_types AS t ON t.key = e.content_type_key
                  WHERE e.publication_status = 'published'
                    AND t.provider_status = 'active' AND t.key NOT IN ('pattern', 'page')
@@ -762,14 +816,15 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                OR (ov.target_kind = 'taxonomy' AND EXISTS (
                  SELECT 1 FROM taxonomy_definitions AS d
                  LEFT JOIN taxonomy_terms AS term ON term.kind = d.key
+                 LEFT JOIN site_locales AS sl ON sl.code = term.locale AND sl.enabled = 1
                  WHERE d.public = 1 AND d.provider_status = 'active'
                    AND d.declaration_state = 'declared'
                    AND (json_extract(ov.target_json, '$.taxonomy') IS NULL
                      OR d.key = json_extract(ov.target_json, '$.taxonomy'))
                    AND (json_extract(ov.target_json, '$.term_id') IS NULL
-                     OR term.id = json_extract(ov.target_json, '$.term_id'))
+                     OR (term.id = json_extract(ov.target_json, '$.term_id') AND sl.code IS NOT NULL))
                    AND (json_extract(ov.target_json, '$.selector_slug') IS NULL
-                     OR term.slug = json_extract(ov.target_json, '$.selector_slug'))
+                     OR (term.slug = json_extract(ov.target_json, '$.selector_slug') AND sl.code IS NOT NULL))
                ))
              )
          )"#,
@@ -798,6 +853,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     // projections cannot serve a private body or an inactive provider.
     let builder_type_keys: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT e.content_type_key FROM content_entries AS e
+         JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
          WHERE e.publication_status = 'published'
            AND e.content_type_key NOT IN ('pattern', 'section')
            AND (

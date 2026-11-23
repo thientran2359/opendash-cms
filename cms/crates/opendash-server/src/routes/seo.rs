@@ -21,7 +21,7 @@ use crate::{
     routes::{
         public_content::{
             redirect_canonical_taxonomy, render_canonical_archive, render_canonical_taxonomy,
-            render_single_entry_response,
+            render_single_entry_response_with_query,
         },
         settings::{no_store_headers, parse_if_match},
         themes::ThemeStoreRoot,
@@ -110,7 +110,7 @@ pub async fn public_fallback(
     }
     let first_seg = path[1..].split('/').next().unwrap_or("");
     if !first_seg.is_empty() && crate::seo::is_reserved_system_root(first_seg) {
-        return missing_public_page(&db, themes_root).await;
+        return missing_public_page(&db, themes_root, None).await;
     }
     let had_trailing_slash = path.len() > 1 && path.ends_with('/');
     let lookup_path = if had_trailing_slash {
@@ -121,31 +121,52 @@ pub async fn public_fallback(
     validate_public_request_path(lookup_path).map_err(ApiError::bad_request)?;
     let resolved = permalinks::resolve_public_path(&db, lookup_path).await?;
     let Some(resolved) = resolved else {
-        return missing_public_page(&db, themes_root).await;
+        return missing_public_page(&db, themes_root, None).await;
     };
     let raw = uri.query();
     match resolved.target {
-        PublicRouteTarget::Entry(id) => {
+        PublicRouteTarget::Entry {
+            id,
+            locale,
+            is_home,
+        } => {
             validate_single_query(raw).map_err(ApiError::bad_request)?;
             let Some(record) = public_content::get_published_by_id(&db, id).await? else {
-                return missing_public_page(&db, themes_root).await;
+                return missing_public_page(&db, themes_root, Some(&locale)).await;
             };
             if resolved.redirect || had_trailing_slash {
                 return Ok(permanent_public_redirect(resolved.canonical_path));
             }
-            render_single_entry_response(&db, themes_root, record, Some(resolved.canonical_path))
+            if is_home {
+                crate::routes::public::render_home_for_locale(
+                    &db,
+                    themes_root,
+                    &locale,
+                    resolved.canonical_path,
+                    raw,
+                )
                 .await
+            } else {
+                render_single_entry_response_with_query(
+                    &db,
+                    themes_root,
+                    record,
+                    Some(resolved.canonical_path),
+                    raw,
+                )
+                .await
+            }
         }
-        PublicRouteTarget::Archive(type_key) => {
+        PublicRouteTarget::Archive { type_key, locale } => {
             let query =
                 parse_query(raw, QueryScope::ContentArchive).map_err(ApiError::bad_request)?;
             if type_key == "post"
                 && matches!(
-                    seo::reading_page_state(&db, false).await?,
+                    seo::reading_page_state_for_locale(&db, Some(&locale), false).await?,
                     ReadingPageState::Missing
                 )
             {
-                return missing_public_page(&db, themes_root).await;
+                return missing_public_page(&db, themes_root, Some(&locale)).await;
             }
             public_content::require_public_archive(&db, &type_key).await?;
             if resolved.redirect || had_trailing_slash {
@@ -159,12 +180,16 @@ pub async fn public_fallback(
                 db,
                 themes_root,
                 type_key,
+                locale,
                 resolved.canonical_path,
                 raw.map(str::to_owned),
             )
             .await
         }
-        PublicRouteTarget::Term(term_id) => {
+        PublicRouteTarget::Term {
+            id: term_id,
+            locale,
+        } => {
             if resolved.redirect || had_trailing_slash {
                 return redirect_canonical_taxonomy(&db, term_id, resolved.canonical_path, raw)
                     .await;
@@ -173,13 +198,27 @@ pub async fn public_fallback(
                 &db,
                 themes_root.map(|Extension(root)| root),
                 term_id,
+                locale,
                 resolved.canonical_path,
                 raw,
                 None,
             )
             .await
         }
-        PublicRouteTarget::Home => missing_public_page(&db, themes_root).await,
+        PublicRouteTarget::Home { locale } => {
+            validate_single_query(raw).map_err(ApiError::bad_request)?;
+            if resolved.redirect || had_trailing_slash {
+                return Ok(permanent_public_redirect(resolved.canonical_path));
+            }
+            crate::routes::public::render_home_for_locale(
+                &db,
+                themes_root,
+                &locale,
+                resolved.canonical_path,
+                raw,
+            )
+            .await
+        }
     }
 }
 
@@ -195,8 +234,10 @@ fn permanent_public_redirect(location: String) -> Response {
 async fn missing_public_page(
     db: &SqlitePool,
     themes_root: Option<Extension<ThemeStoreRoot>>,
+    locale: Option<&str>,
 ) -> ApiResult<Response> {
-    crate::routes::public_content::render_not_found_response(db, themes_root).await
+    crate::routes::public_content::render_not_found_response_for_locale(db, themes_root, locale)
+        .await
 }
 
 pub async fn get_entry_seo(

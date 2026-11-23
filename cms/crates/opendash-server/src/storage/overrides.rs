@@ -287,6 +287,7 @@ pub(super) async fn build_reset_candidate_chain_in_conn(
                    JOIN site_locales AS sl ON sl.code = reading.locale AND sl.is_default = 1
                    JOIN content_entries AS e ON e.id = reading.homepage_page_id
                   WHERE e.content_type_key='page'
+                    AND e.locale = reading.locale
                     AND e.publication_status='published'",
             )
             .fetch_optional(&mut *conn)
@@ -1969,11 +1970,24 @@ pub async fn resolve_and_render_header_footer(
     theme_opts: &BTreeMap<String, serde_json::Value>,
     budget: &mut PublicCompositionBudget,
 ) -> ApiResult<(Option<String>, Option<String>, bool)> {
-    resolve_and_render_header_footer_with_cache(
+    resolve_and_render_header_footer_for_locale(db, active_v3, site_ctx, theme_opts, None, budget)
+        .await
+}
+
+pub async fn resolve_and_render_header_footer_for_locale(
+    db: &SqlitePool,
+    active_v3: Option<&ActiveThemeV3>,
+    site_ctx: &SiteContext<'_>,
+    theme_opts: &BTreeMap<String, serde_json::Value>,
+    locale: Option<&str>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
+    resolve_and_render_header_footer_with_cache_for_locale(
         db,
         active_v3,
         site_ctx,
         theme_opts,
+        locale,
         budget,
         page::BlockTemplateCache::global(),
     )
@@ -1988,7 +2002,22 @@ pub async fn resolve_and_render_header_footer_with_cache(
     budget: &mut PublicCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<(Option<String>, Option<String>, bool)> {
-    let menus = crate::storage::menu::resolve_active_slot_menus(db).await?;
+    resolve_and_render_header_footer_with_cache_for_locale(
+        db, active_v3, site_ctx, theme_opts, None, budget, cache,
+    )
+    .await
+}
+
+pub async fn resolve_and_render_header_footer_with_cache_for_locale(
+    db: &SqlitePool,
+    active_v3: Option<&ActiveThemeV3>,
+    site_ctx: &SiteContext<'_>,
+    theme_opts: &BTreeMap<String, serde_json::Value>,
+    locale: Option<&str>,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
+    let menus = crate::storage::menu::resolve_active_slot_menus_for_locale(db, locale).await?;
     let part_context = serde_json::json!({
         "site": site_ctx, "options": theme_opts, "theme_options": theme_opts, "menus": menus,
     });

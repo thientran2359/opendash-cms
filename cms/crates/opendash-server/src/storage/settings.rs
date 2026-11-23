@@ -147,6 +147,68 @@ pub(crate) async fn get_default_locale_code(db: &SqlitePool) -> ApiResult<String
     get_default_locale_code_in_conn(&mut conn).await
 }
 
+/// Resolve `(code, bcp47_tag, direction)` for `locale` (or the default locale when `None`).
+pub(crate) async fn get_locale_bcp47_and_dir_in_conn(
+    conn: &mut SqliteConnection,
+    locale: Option<&str>,
+) -> ApiResult<(String, String, String)> {
+    let row: Option<(String, String, String)> =
+        match locale {
+            Some(code) => {
+                sqlx::query_as(
+                    "SELECT code, bcp47_tag, direction FROM site_locales WHERE code = ? LIMIT 1",
+                )
+                .bind(code)
+                .fetch_optional(&mut *conn)
+                .await?
+            }
+            None => sqlx::query_as(
+                "SELECT code, bcp47_tag, direction FROM site_locales WHERE is_default = 1 LIMIT 1",
+            )
+            .fetch_optional(&mut *conn)
+            .await?,
+        };
+    row.ok_or_else(|| ApiError::internal("Không tìm thấy cấu hình ngôn ngữ trong site_locales."))
+}
+
+pub(crate) async fn get_locale_bcp47_and_dir(
+    db: &SqlitePool,
+    locale: Option<&str>,
+) -> ApiResult<(String, String, String)> {
+    let mut conn = db.acquire().await?;
+    get_locale_bcp47_and_dir_in_conn(&mut conn, locale).await
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EnabledLocaleInfo {
+    pub code: String,
+    pub bcp47_tag: String,
+    pub direction: String,
+    pub is_default: bool,
+}
+
+pub(crate) async fn list_enabled_locales_in_conn(
+    conn: &mut SqliteConnection,
+) -> ApiResult<Vec<EnabledLocaleInfo>> {
+    let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
+        "SELECT code, bcp47_tag, direction, is_default
+           FROM site_locales
+          WHERE enabled = 1
+          ORDER BY is_default DESC, position ASC, code ASC",
+    )
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(code, bcp47_tag, direction, is_def)| EnabledLocaleInfo {
+            code,
+            bcp47_tag,
+            direction,
+            is_default: is_def != 0,
+        })
+        .collect())
+}
+
 pub(crate) async fn resolve_requested_locale_in_conn(
     conn: &mut SqliteConnection,
     requested: Option<&str>,
@@ -396,6 +458,7 @@ pub async fn set_default_locale(
             .into());
         }
         if is_default == 0 {
+            let old_default = get_default_locale_code_in_conn(&mut conn).await?;
             sqlx::query("UPDATE site_locales SET is_default = 0 WHERE is_default = 1")
                 .execute(&mut *conn)
                 .await?;
@@ -411,11 +474,21 @@ pub async fn set_default_locale(
             .bind(&bcp47_tag)
             .execute(&mut *conn)
             .await?;
-        }
-        sqlx::query("UPDATE site_locales_state SET version = version + 1 WHERE id = 1")
-            .execute(&mut *conn)
+            sqlx::query("UPDATE site_locales_state SET version = version + 1 WHERE id = 1")
+                .execute(&mut *conn)
+                .await?;
+            crate::storage::permalinks::sync_claims_with_options_and_swap(
+                &mut conn,
+                true,
+                Some(&old_default),
+            )
             .await?;
-        crate::storage::permalinks::sync_claims_with_options(&mut conn, true).await?;
+        } else {
+            sqlx::query("UPDATE site_locales_state SET version = version + 1 WHERE id = 1")
+                .execute(&mut *conn)
+                .await?;
+            crate::storage::permalinks::sync_claims_with_options(&mut conn, true).await?;
+        }
         Ok(list_locales_in_conn(&mut conn).await?)
     }
     .await;

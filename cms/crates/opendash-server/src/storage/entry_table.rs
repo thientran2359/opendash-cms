@@ -153,6 +153,7 @@ async fn validate_terms(
             taxonomy_key: filter.taxonomy_key.clone(),
             term_id: filter.term_id,
             include_descendants: filter.include_descendants,
+            locale: None,
         },
         false,
     )

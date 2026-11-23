@@ -305,7 +305,7 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
     })
 }
 
-/// Category/tag query predicates. Missing IDs mean no restriction.
+/// Category/tag/locale query predicates. Missing values mean no restriction.
 #[derive(Debug, Clone, Default)]
 pub struct EntryFilters {
     pub category_id: Option<i64>,
@@ -313,6 +313,7 @@ pub struct EntryFilters {
     pub taxonomy_key: Option<String>,
     pub term_id: Option<i64>,
     pub include_descendants: bool,
+    pub locale: Option<String>,
 }
 
 /// The only allowed SQL orderings for a published Builder list.
@@ -893,6 +894,7 @@ async fn query_entries_filtered(
                 SELECT 1 FROM entry_terms et WHERE et.entry_id=e.id
                   AND et.term_id IN (SELECT id FROM generic_scope)
             ))
+            AND (? IS NULL OR e.locale = ?)
           ORDER BY e.id {direction} LIMIT ? OFFSET ?"
     );
     let rows: Vec<EntryRow> = sqlx::query_as(sqlx::AssertSqlSafe(statement))
@@ -907,6 +909,8 @@ async fn query_entries_filtered(
         .bind(filters.tag_id)
         .bind(filters.tag_id)
         .bind(filters.term_id)
+        .bind(&filters.locale)
+        .bind(&filters.locale)
         .bind(limit)
         .bind(offset)
         .fetch_all(&mut **tx)
@@ -1801,9 +1805,37 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
     primary_category_term_id: Option<i64>,
     has_custom_path: bool,
 ) -> ApiResult<String> {
+    resolve_auto_unique_slug_for_locale_in_tx(
+        conn,
+        type_key,
+        base_slug,
+        term_ids,
+        primary_category_term_id,
+        has_custom_path,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn resolve_auto_unique_slug_for_locale_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    type_key: &str,
+    base_slug: &str,
+    term_ids: Option<&[i64]>,
+    primary_category_term_id: Option<i64>,
+    has_custom_path: bool,
+    locale: Option<&str>,
+) -> ApiResult<String> {
     if !opendash_core::id::valid_kebab_segment_with_limit(base_slug, 64) {
         return Err(ApiError::unprocessable("Slug không hợp lệ."));
     }
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
+    let target_locale = match locale {
+        Some(loc) => loc.to_owned(),
+        None => default_locale.clone(),
+    };
+    let secondary_roots =
+        crate::storage::permalinks::load_secondary_locale_roots_in_conn(conn).await?;
     let (post_structure, cpt_bases_json, tax_bases_json): (String, String, String) =
         sqlx::query_as(
             "SELECT post_structure, content_type_bases_json, taxonomy_bases_json
@@ -1814,9 +1846,9 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
     let posts_page_id: Option<i64> = sqlx::query_scalar(
         "SELECT r.posts_page_id
            FROM site_reading_settings r
-           JOIN site_locales sl ON sl.code = r.locale
-          WHERE sl.is_default = 1",
+          WHERE r.locale = ?",
     )
+    .bind(&target_locale)
     .fetch_optional(&mut *conn)
     .await?
     .flatten();
@@ -1862,9 +1894,10 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
             let primary_slug: Option<String> = match primary_category_term_id {
                 Some(pid) => {
                     sqlx::query_scalar(
-                        "SELECT slug FROM taxonomy_terms WHERE id = ? AND kind = 'category'",
+                        "SELECT slug FROM taxonomy_terms WHERE id = ? AND kind = 'category' AND locale = ?",
                     )
                     .bind(pid)
+                    .bind(&target_locale)
                     .fetch_optional(&mut *conn)
                     .await?
                 }
@@ -1878,9 +1911,11 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
                         let min_slug: Option<String> = sqlx::query_scalar(
                             "SELECT slug FROM taxonomy_terms
                               WHERE kind = 'category'
+                                AND locale = ?
                                 AND id IN (SELECT value FROM json_each(?))
                               ORDER BY id ASC LIMIT 1",
                         )
+                        .bind(&target_locale)
                         .bind(ids_json)
                         .fetch_optional(&mut *conn)
                         .await?;
@@ -1891,7 +1926,13 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
             }
         };
         if post_structure.starts_with("/%category%/") {
-            if crate::seo::is_reserved_system_root(&resolved_cat) {
+            if crate::seo::is_reserved_system_root(&resolved_cat)
+                || (target_locale == default_locale
+                    && crate::storage::permalinks::is_secondary_locale_root(
+                        &resolved_cat,
+                        &secondary_roots,
+                    ))
+            {
                 return Err(ApiError::conflict(format!(
                     "permalink_category_root_collision: slug '{resolved_cat}' trùng gốc hệ thống."
                 )));
@@ -1971,9 +2012,10 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
             format!("{prefix}{suffix}")
         };
         let slug_taken: i64 = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND slug = ?)",
+            "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND locale = ? AND slug = ?)",
         )
         .bind(type_key)
+        .bind(&target_locale)
         .bind(&candidate)
         .fetch_one(&mut *conn)
         .await?;
@@ -1981,7 +2023,14 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
             continue;
         }
         if check_public_path {
-            if check_root_reserved && crate::seo::is_reserved_system_root(&candidate) {
+            if check_root_reserved
+                && (crate::seo::is_reserved_system_root(&candidate)
+                    || (target_locale == default_locale
+                        && crate::storage::permalinks::is_secondary_locale_root(
+                            &candidate,
+                            &secondary_roots,
+                        )))
+            {
                 continue;
             }
             let candidate_path = match type_key {
@@ -1991,13 +2040,19 @@ pub(super) async fn resolve_auto_unique_slug_in_tx(
                     .replace("%postname%", &candidate),
                 _ => format!("/{}/{candidate}", cpt_base.as_deref().unwrap_or(type_key)),
             };
+            let effective_path = crate::storage::permalinks::prefix_for_locale(
+                &target_locale,
+                &default_locale,
+                &candidate_path,
+            );
             let path_taken: i64 = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM permalink_route_claims WHERE path = ?)
-                     OR EXISTS(SELECT 1 FROM permalink_route_redirects WHERE source_path = ?)
-                     OR EXISTS(SELECT 1 FROM entry_redirects WHERE source_path = ?)",
+                     OR EXISTS(SELECT 1 FROM permalink_route_redirects WHERE source_path = ? AND origin != 'locale_swap')
+                     OR EXISTS(SELECT 1 FROM entry_redirects WHERE locale = ? AND source_path = ?)",
             )
-            .bind(&candidate_path)
-            .bind(&candidate_path)
+            .bind(&effective_path)
+            .bind(&effective_path)
+            .bind(&target_locale)
             .bind(&candidate_path)
             .fetch_one(&mut *conn)
             .await?;
