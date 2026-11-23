@@ -51,6 +51,17 @@ pub async fn builder() -> Response {
 
 pub async fn serve_asset(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
     let clean_path = path.trim_start_matches('/');
+    if clean_path == "opendash-tailwind.css" {
+        return (
+            [
+                (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                (header::CACHE_CONTROL, "public, max-age=3600"),
+            ],
+            crate::builtin_themes::PUBLIC_TAILWIND_CSS,
+        )
+            .into_response();
+    }
     let asset_path = format!("assets/{clean_path}");
     match AdminAssets::get(&asset_path) {
         Some(file) => {
@@ -70,6 +81,41 @@ pub async fn serve_asset(axum::extract::Path(path): axum::extract::Path<String>)
             "Asset không tồn tại.",
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod public_tailwind_asset_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn embedded_stylesheet_is_served_as_same_origin_css() {
+        let response = serve_asset(Path("opendash-tailwind.css".into())).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CONTENT_TYPE],
+            "text/css; charset=utf-8"
+        );
+        assert_eq!(
+            response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+            "nosniff"
+        );
+        assert_eq!(
+            response.headers()[header::CACHE_CONTROL],
+            "public, max-age=3600"
+        );
+        let css = axum::body::to_bytes(response.into_body(), 120 * 1024)
+            .await
+            .unwrap();
+        let css = std::str::from_utf8(&css).unwrap();
+        for required in [
+            ".bg-od-primary",
+            ".text-od-text",
+            ".border-od-border",
+            ".od-prose",
+        ] {
+            assert!(css.contains(required), "Missing {required}");
+        }
     }
 }
 

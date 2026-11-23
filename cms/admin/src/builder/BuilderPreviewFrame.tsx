@@ -87,7 +87,7 @@ function generateStudioNonce(): string {
 
 function rewriteRootRelativeUrl(raw: string | null, origin: string): string | null {
   if (!raw || !origin) return null;
-  if (raw.startsWith('/theme/') || raw.startsWith('/media/')) {
+  if (raw.startsWith('/theme/') || raw.startsWith('/media/') || raw === '/assets/opendash-tailwind.css') {
     return `${origin}${raw}`;
   }
   return null;
@@ -106,7 +106,7 @@ export interface PreparePreviewOptions {
  * - Resolves authenticated private `/api/admin/media/{id}/file` images as data URLs
  *   (because opaque origins do not transmit SameSite session cookies).
  * - Strips any scripts/CSP tags from parsed HTML as defense-in-depth.
- * - Rewrites `/theme/...` and `/media/...` URLs to explicit `origin` URLs so CSS,
+ * - Rewrites `/theme/...`, `/media/...` and the built-in public Tailwind asset to explicit `origin` URLs so CSS,
  *   fonts, and media load cleanly in `sandbox="allow-scripts"` (without allow-same-origin).
  * - Prepends a static SHA-256 script-src CSP and injects the nonced canvas bridge.
  */
