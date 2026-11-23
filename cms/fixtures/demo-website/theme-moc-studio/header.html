@@ -39,26 +39,26 @@ form.builder-contact-form input[type="checkbox"]{width:auto;display:inline-block
 form.builder-contact-form button{justify-self:start;background:var(--ms-accent);color:#fff;border:0;padding:.65rem 1.25rem;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
 @media(max-width:640px){.ms-meta-dl{grid-template-columns:1fr}.builder-section{padding:1rem}}
 </style>
-<header class="ms-header">
-  <div class="ms-header-inner">
+<header class="ms-header border-b border-od-border bg-od-surface">
+  <div class="ms-header-inner mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-5 md:px-8">
     <div class="ms-brand">
       {% if options.studio_eyebrow %}<span class="ms-eyebrow">{{ options.studio_eyebrow }}</span>{% endif %}
-      <a class="ms-site-title" href="/">{{ site.title }}</a>
+      <a class="ms-site-title font-od-heading text-xl font-bold" href="/">{{ site.title }}</a>
       {% if options.show_tagline and site.tagline %}<p class="ms-tagline">{{ site.tagline }}</p>{% endif %}
     </div>
     <nav aria-label="Điều hướng chính">
-      <ul class="ms-nav-list">
+      <ul class="ms-nav-list flex flex-wrap gap-5">
         {% if menus.primary %}
           {% for item in menus.primary.items %}
             <li><a href="{{ item.url }}">{{ item.label }}</a></li>
           {% endfor %}
         {% else %}
           <li><a href="/">Trang chủ</a></li>
-          <li><a href="/content/dich_vu">Dịch vụ</a></li>
-          <li><a href="/content/du_an">Dự án</a></li>
-          <li><a href="/content/post">Bài viết</a></li>
-          <li><a href="/content/page/gioi-thieu">Giới thiệu</a></li>
-          <li><a href="/content/page/lien-he">Liên hệ</a></li>
+          <li><a href="/dich-vu">Dịch vụ</a></li>
+          <li><a href="/du-an">Dự án</a></li>
+          <li><a href="/posts">Bài viết</a></li>
+          <li><a href="/gioi-thieu">Giới thiệu</a></li>
+          <li><a href="/lien-he">Liên hệ</a></li>
         {% endif %}
       </ul>
     </nav>

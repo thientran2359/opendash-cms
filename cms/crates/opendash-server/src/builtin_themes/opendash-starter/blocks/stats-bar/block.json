@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "opendash-starter/stats-bar",
+  "title": "Thanh chỉ số",
+  "category": "content",
+  "icon": "chart-no-axes-column",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "text",
+      "key": "stat_1_value",
+      "label": "Chỉ số 1",
+      "required": true,
+      "default": "100+"
+    },
+    {
+      "type": "text",
+      "key": "stat_1_label",
+      "label": "Nhãn chỉ số 1",
+      "required": true,
+      "default": "Khách hàng"
+    },
+    {
+      "type": "text",
+      "key": "stat_2_value",
+      "label": "Chỉ số 2",
+      "required": true,
+      "default": "99%"
+    },
+    {
+      "type": "text",
+      "key": "stat_2_label",
+      "label": "Nhãn chỉ số 2",
+      "required": true,
+      "default": "Hài lòng"
+    },
+    {
+      "type": "text",
+      "key": "stat_3_value",
+      "label": "Chỉ số 3",
+      "required": true,
+      "default": "24/7"
+    },
+    {
+      "type": "text",
+      "key": "stat_3_label",
+      "label": "Nhãn chỉ số 3",
+      "required": true,
+      "default": "Hỗ trợ"
+    }
+  ]
+}

@@ -8,7 +8,8 @@ use std::{
     net::TcpListener,
     path::PathBuf,
     process::{Child, Command, Stdio},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use reqwest::{Client, Response, StatusCode, header, redirect::Policy};
@@ -21,6 +22,10 @@ struct Site {
     child: Child,
     base: String,
 }
+
+// The macOS wall clock may return the same sub-millisecond timestamp to
+// concurrent test threads; monotonic sequence prevents test-site collisions.
+static NEXT_SITE_SEQ: AtomicU64 = AtomicU64::new(1);
 
 impl Drop for Site {
     fn drop(&mut self) {
@@ -43,20 +48,33 @@ impl Site {
         let root = fs::canonicalize(std::env::temp_dir())
             .unwrap()
             .join(format!(
-                "opendash-wp-permalink-{}-{nanos}",
-                std::process::id()
+                "opendash-wp-permalink-{}-{nanos}-{}",
+                std::process::id(),
+                NEXT_SITE_SEQ.fetch_add(1, Ordering::Relaxed)
             ));
         fs::create_dir_all(&root).unwrap();
-        let child = Command::new(env!("CARGO_BIN_EXE_opendash"))
+        let stderr = fs::File::create(root.join("startup.log")).unwrap();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_opendash"))
             .env("OPENDASH_SITE_ROOT", &root)
             .env("OPENDASH_PORT", port.to_string())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr))
             .spawn()
             .unwrap();
         let base = format!("http://127.0.0.1:{port}");
         let http = Client::new();
-        for _ in 0..160 {
+        // A new site now installs the embedded Starter revision before bind;
+        // concurrent native integration processes can contend on macOS Intel.
+        // Preserve diagnostics rather than misreporting a slow startup as a
+        // permalink behavioral failure.
+        let deadline = Instant::now() + Duration::from_secs(45);
+        loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                panic!(
+                    "temporary permalink server exited {status}: {}",
+                    fs::read_to_string(root.join("startup.log")).unwrap_or_default()
+                );
+            }
             if http
                 .get(format!("{base}/api/health"))
                 .send()
@@ -65,9 +83,14 @@ impl Site {
             {
                 return Self { root, child, base };
             }
+            if Instant::now() >= deadline {
+                panic!(
+                    "temporary permalink server was not ready: {}",
+                    fs::read_to_string(root.join("startup.log")).unwrap_or_default()
+                );
+            }
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
-        panic!("temporary permalink server was not ready");
     }
 
     async fn db(&self) -> SqlitePool {

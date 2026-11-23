@@ -166,9 +166,11 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
         assert_eq!(resp.status(), 400);
     }
     let rev_dir = srv.site_root.join("themes").join("revisions");
-    if rev_dir.exists() {
-        assert_eq!(fs::read_dir(&rev_dir).unwrap().count(), 0);
-    }
+    assert_eq!(
+        fs::read_dir(&rev_dir).unwrap().count(),
+        1,
+        "invalid ZIPs cannot create a revision beyond the embedded Starter"
+    );
 
     // 4. S02 rejects legacy v1 and v2 uploads instead of creating new
     // revisions. Both paths remain covered as explicit compatibility guards.
@@ -375,7 +377,7 @@ async fn m5_s01_t02_zip_v2_install_activate_rollback_and_asset_route() {
         .await
         .unwrap();
     assert_eq!(after_rejection["selection"]["version"], 3);
-    assert_eq!(after_rejection["revisions"].as_array().unwrap().len(), 2);
+    assert_eq!(after_rejection["revisions"].as_array().unwrap().len(), 3);
 
     // Rollback to rev_a still works with "v3" (invalid ZIP never advanced CAS).
     let rollback_a = client

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "opendash-starter/quote-box",
+  "title": "Trích dẫn nổi bật",
+  "category": "content",
+  "icon": "quote",
+  "render": "render.html",
+  "fields": [
+    {
+      "type": "textarea",
+      "key": "quote",
+      "label": "Trích dẫn",
+      "required": true,
+      "default": "Một website tốt giúp thương hiệu kết nối với khách hàng."
+    },
+    {
+      "type": "text",
+      "key": "author",
+      "label": "Tác giả",
+      "required": true,
+      "default": "Khách hàng"
+    },
+    {
+      "type": "text",
+      "key": "role",
+      "label": "Vai trò",
+      "default": "Đối tác"
+    }
+  ]
+}
