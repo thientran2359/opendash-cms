@@ -960,7 +960,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   const builderActive = isMode2 || Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled);
   const handleCanvasMenu = (id: string, mode: StudioMenuRequest['mode']) => {
-    if (!builderActive || !locate(activeDoc, id)) return;
+    if (loading || saving || !csrfToken || !builderActive || !locate(activeDoc, id)) return;
     if (isMode2) setEntrySelectedNodeId(id);
     else setTemplateSelectedNodeId(id);
     setAddTargetParentId(null);
