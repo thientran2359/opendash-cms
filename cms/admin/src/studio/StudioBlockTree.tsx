@@ -19,6 +19,7 @@ export interface StudioBlockTreeProps {
   onCollapsedIdsChange: (next: Set<string>) => void;
   menuRequest?: StudioMenuRequest | null;
   onMenuRequestHandled?: () => void;
+  canvasPickSeq?: number;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
   onAdd: (parentId: string | null) => void;
@@ -69,6 +70,7 @@ const CONTAINER_LABEL: Record<'section' | 'row' | 'column', string> = {
 export function StudioBlockTree({
   document, selectedId, registry = {}, blockSchemas = [], disabled = false,
   collapsedIds, onCollapsedIdsChange, menuRequest, onMenuRequestHandled,
+  canvasPickSeq = 0,
   onSelect, onEdit, onAdd, onMove, onReorder, canReorder,
   onDuplicate, onCopy, onPaste, canPaste, onDelete, canDelete,
   onOpenPatternLibrary, onOpenMediaPicker,
@@ -83,6 +85,7 @@ export function StudioBlockTree({
   const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
   const menuRefs = useRef(new Map<string, HTMLDivElement>());
   const handledMenuSeq = useRef<number | null>(null);
+  const previousCanvasPickSeq = useRef(canvasPickSeq);
   const previousSelectedId = useRef(selectedId);
 
   const isVisible = (item: NodeLocation): boolean => {
@@ -108,17 +111,27 @@ export function StudioBlockTree({
     previousSelectedId.current = selectedId;
     if (openMenuId && openMenuId !== selectedId) setOpenMenuId(null);
   }, [selectedId, openMenuId]);
+  // Picking the already-selected node inside the iframe must dismiss its menu too.
+  // Iframe pointer events do not bubble into the parent document.
+  useEffect(() => {
+    if (previousCanvasPickSeq.current === canvasPickSeq) return;
+    previousCanvasPickSeq.current = canvasPickSeq;
+    setOpenMenuId(null);
+  }, [canvasPickSeq]);
   useEffect(() => {
     if (focusedId && !byId.has(focusedId)) setFocusedId(firstVisibleId);
     if (openMenuId && !byId.has(openMenuId)) setOpenMenuId(null);
   }, [byId, firstVisibleId, focusedId, openMenuId]);
+  useEffect(() => {
+    if (disabled && openMenuId) setOpenMenuId(null);
+  }, [disabled, openMenuId]);
 
   // Canvas double-click/gear requests bring hidden descendants into view before opening the menu.
   useEffect(() => {
     if (!menuRequest || handledMenuSeq.current === menuRequest.seq) return;
     handledMenuSeq.current = menuRequest.seq;
     const target = byId.get(menuRequest.nodeId);
-    if (target) {
+    if (target && !disabled) {
       onSelect(menuRequest.nodeId);
       const next = new Set(collapsedIds);
       let parent = target.parentId;
@@ -133,7 +146,7 @@ export function StudioBlockTree({
       rowRefs.current.get(menuRequest.nodeId)?.scrollIntoView({ block: 'nearest' });
     }
     onMenuRequestHandled?.();
-  }, [menuRequest, byId, collapsedIds, onSelect, onCollapsedIdsChange, onMenuRequestHandled]);
+  }, [menuRequest, byId, collapsedIds, disabled, onSelect, onCollapsedIdsChange, onMenuRequestHandled]);
 
   useEffect(() => {
     if (!openMenuId) return;
@@ -148,8 +161,10 @@ export function StudioBlockTree({
   useEffect(() => {
     if (!openMenuId) return;
     rowRefs.current.get(openMenuId)?.scrollIntoView({ block: 'nearest' });
-    menuRefs.current.get(openMenuId)
-      ?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    const menu = menuRefs.current.get(openMenuId);
+    const firstEnabledItem = menu?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)');
+    if (firstEnabledItem) firstEnabledItem.focus();
+    else menu?.focus();
   }, [openMenuId, collapsedIds]);
 
   const focusRow = (id: string) => {
@@ -163,6 +178,7 @@ export function StudioBlockTree({
     if (restoreFocus && id) triggerRefs.current.get(id)?.focus();
   };
   const toggleMenu = (id: string) => {
+    if (disabled) return;
     onSelect(id);
     setFocusedId(id);
     setOpenMenuId(current => current === id ? null : id);
@@ -221,7 +237,7 @@ export function StudioBlockTree({
     if (event.key === 'Escape') {
       event.preventDefault();
       closeMenu(true);
-    } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+    } else if (items.length && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
       const index = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
         : event.key === 'ArrowDown' ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
@@ -358,7 +374,7 @@ export function StudioBlockTree({
               {canOperate && <span className="cursor-grab text-slate-400" title="Kéo để đổi thứ tự cùng tầng">
                 <TreeIcon name="grip" /></span>}
             </div>
-            {openMenuId === id && <div role="menu" aria-label={'Thao tác ' + label}
+            {openMenuId === id && <div role="menu" tabIndex={-1} aria-label={'Thao tác ' + label}
               ref={element => {
                 if (element) menuRefs.current.set(id, element);
                 else menuRefs.current.delete(id);

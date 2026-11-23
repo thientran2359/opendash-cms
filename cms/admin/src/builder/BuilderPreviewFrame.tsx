@@ -36,6 +36,28 @@ const BRIDGE_SCRIPT = [
   'window.addEventListener("load",restoreScroll,{once:true});',
   'var mSel=document.querySelector(\'meta[name="od-studio-selected"]\');',
   'if(mSel){var initId=mSel.getAttribute("content");if(initId)applyAttr("data-od-selected",initId,false);}',
+  'var gearHosts=document.querySelectorAll("[data-od-editable=\\"1\\"][data-node-id]");',
+  'var replaced={IMG:1,HR:1,BR:1,INPUT:1,VIDEO:1,AUDIO:1,IFRAME:1,EMBED:1,SOURCE:1};',
+  'for(var g=0;g<gearHosts.length;g++){',
+  'var host=gearHosts[g];var kind=host.getAttribute("data-od-kind");',
+  'if((kind!=="section"&&kind!=="element")||replaced[host.tagName])continue;',
+  'var nodeId=host.getAttribute("data-node-id");if(!nodeId)continue;',
+  'var gear=document.createElement("button");',
+  'gear.type="button";gear.className="od-canvas-gear";',
+  'gear.setAttribute("data-od-gear",nodeId);',
+  'gear.setAttribute("aria-label","Thao tác "+(kind==="section"?"Section":"Element"));',
+  'gear.setAttribute("title","Thao tác với block");',
+  'var icon=document.createElementNS("http://www.w3.org/2000/svg","svg");',
+  'icon.setAttribute("viewBox","0 0 24 24");',
+  'icon.setAttribute("width","16");icon.setAttribute("height","16");',
+  'icon.setAttribute("fill","none");icon.setAttribute("stroke","currentColor");',
+  'icon.setAttribute("stroke-width","1.8");icon.setAttribute("aria-hidden","true");',
+  'var outline=document.createElementNS("http://www.w3.org/2000/svg","path");',
+  'outline.setAttribute("d","M10 2h4l.5 2.3 1.8.8 2-1.3 2.8 2.8-1.3 2 .8 1.8L23 10v4l-2.4.5-.8 1.8 1.3 2-2.8 2.8-2-1.3-1.8.8L14 23h-4l-.5-2.4-1.8-.8-2 1.3-2.8-2.8 1.3-2-.8-1.8L1 14v-4l2.4-.5.8-1.8-1.3-2 2.8-2.8 2 1.3 1.8-.8L10 2Z");',
+  'var circle=document.createElementNS("http://www.w3.org/2000/svg","circle");',
+  'circle.setAttribute("cx","12");circle.setAttribute("cy","12");circle.setAttribute("r","3");',
+  'icon.appendChild(outline);icon.appendChild(circle);gear.appendChild(icon);host.appendChild(gear);',
+  '}',
   'document.addEventListener("mouseover",function(e){',
   'var t=e.target&&e.target.closest?e.target.closest("[data-od-editable=\\"1\\"][data-node-id]"):null;',
   'var id=t?t.getAttribute("data-node-id"):null;',
@@ -50,6 +72,16 @@ const BRIDGE_SCRIPT = [
   '}',
   '},true);',
   'document.addEventListener("click",function(e){',
+  'var gear=e.target&&e.target.closest?e.target.closest("[data-od-gear]"):null;',
+  'if(gear){',
+  'e.preventDefault();e.stopPropagation();',
+  'var gearId=gear.getAttribute("data-od-gear");',
+  'if(gearId){',
+  'applyAttr("data-od-selected",gearId,false);',
+  'window.parent.postMessage({type:"od-studio-menu",nonce:nonce,nodeId:gearId,mode:"toggle"},"*");',
+  '}',
+  'return;',
+  '}',
   'var el=e.target&&e.target.closest?e.target.closest("[data-od-editable=\\"1\\"][data-node-id]"):null;',
   'var ctl=e.target&&e.target.closest?e.target.closest("a,button,input,select,textarea,form"):null;',
   'if(el||ctl){e.preventDefault();e.stopPropagation();}',
@@ -58,6 +90,15 @@ const BRIDGE_SCRIPT = [
   'if(!nodeId)return;',
   'applyAttr("data-od-selected",nodeId,false);',
   'window.parent.postMessage({type:"od-studio-pick",nonce:nonce,nodeId:nodeId,kind:el.getAttribute("data-od-kind")||""},"*");',
+  '},true);',
+  'document.addEventListener("dblclick",function(e){',
+  'if(e.target&&e.target.closest&&e.target.closest("[data-od-gear]"))return;',
+  'var el=e.target&&e.target.closest?e.target.closest("[data-od-editable=\\"1\\"][data-node-id]"):null;',
+  'if(!el)return;',
+  'e.preventDefault();e.stopPropagation();',
+  'var nodeId=el.getAttribute("data-node-id");if(!nodeId)return;',
+  'applyAttr("data-od-selected",nodeId,false);',
+  'window.parent.postMessage({type:"od-studio-menu",nonce:nonce,nodeId:nodeId,mode:"open"},"*");',
   '},true);',
   'document.addEventListener("submit",function(e){e.preventDefault();e.stopPropagation();},true);',
   'var st=null;',
@@ -77,7 +118,7 @@ const BRIDGE_SCRIPT = [
   '})();',
 ].join('\n');
 
-const BRIDGE_SCRIPT_SHA256 = 'UiM/eIdicljiszHJtbLUkiT/TvTl34+g3v9/B6oYKjA=';
+const BRIDGE_SCRIPT_SHA256 = 'mrcvszcJC+rCtyJuehShjmjJC8jZWUtDlQJ2k0TPZuE=';
 
 function generateStudioNonce(): string {
   const bytes = new Uint8Array(16);
@@ -266,9 +307,12 @@ export async function preparePreviewMarkup(
 
     const highlightStyle = parsed.createElement('style');
     highlightStyle.textContent = [
-      '[data-od-editable="1"]{cursor:pointer;transition:outline-color .1s ease;}',
-      '[data-od-editable="1"][data-od-hover="1"]{outline:2px dashed #3b82f6;outline-offset:2px;}',
-      '[data-od-editable="1"][data-od-selected="1"]{outline:2px solid #1d4ed8;outline-offset:2px;box-shadow:0 0 0 2px rgba(37,99,235,0.18);}',
+      ':where([data-od-editable="1"]){position:relative;cursor:pointer;transition:outline-color .1s ease;}',
+      '[data-od-editable="1"][data-od-hover="1"]{outline:1px dashed #2563eb;outline-offset:-1px;}',
+      '[data-od-editable="1"][data-od-selected="1"]{outline:2px solid #2563eb;outline-offset:-1px;}',
+      '.od-canvas-gear{position:absolute;top:4px;right:4px;z-index:20;display:flex;align-items:center;justify-content:center;width:24px;height:24px;box-sizing:border-box;margin:0 !important;padding:0;border:1px solid #cbd5e1;border-radius:5px;background:#fff;color:#334155;opacity:.8;cursor:pointer;line-height:1;}',
+      ':where([data-od-kind="section"]) > .od-canvas-gear{left:4px;right:auto;z-index:15;}',
+      ':where([data-od-selected="1"]) > .od-canvas-gear{background:#2563eb;border-color:#2563eb;color:#fff;opacity:1;}',
     ].join('\n');
     head.appendChild(highlightStyle);
 
@@ -287,6 +331,7 @@ export interface BuilderPreviewFrameProps {
   selectedId?: string | null;
   document?: BuilderDocument;
   onSelectNode?: (id: string) => void;
+  onOpenNodeMenu?: (id: string, mode: 'open' | 'toggle') => void;
   onHoverNode?: (id: string | null) => void;
   onApiError?: (error: unknown, fallback: string) => void;
   title?: string;
@@ -302,6 +347,7 @@ export function BuilderPreviewFrame({
   selectedId = null,
   document: builderDocument,
   onSelectNode,
+  onOpenNodeMenu,
   onHoverNode,
   onApiError,
   title = 'Preview Builder (sandbox opaque)',
@@ -323,6 +369,8 @@ export function BuilderPreviewFrame({
   const seqRef = useRef(0);
   const onSelectNodeRef = useRef(onSelectNode);
   onSelectNodeRef.current = onSelectNode;
+  const onOpenNodeMenuRef = useRef(onOpenNodeMenu);
+  onOpenNodeMenuRef.current = onOpenNodeMenu;
   const onHoverNodeRef = useRef(onHoverNode);
   onHoverNodeRef.current = onHoverNode;
   const onApiErrorRef = useRef(onApiError);
@@ -389,6 +437,16 @@ export function BuilderPreviewFrame({
         if (doc && !locate(doc, nodeId)) return;
         lastPickedFromIframeRef.current = nodeId;
         onSelectNodeRef.current?.(nodeId);
+        return;
+      }
+
+      if (data.type === 'od-studio-menu') {
+        const nodeId = typeof data.nodeId === 'string' ? data.nodeId : null;
+        const mode = data.mode === 'open' || data.mode === 'toggle' ? data.mode : null;
+        const doc = documentRef.current;
+        if (!nodeId || !mode || !doc || !locate(doc, nodeId)) return;
+        lastPickedFromIframeRef.current = nodeId;
+        onOpenNodeMenuRef.current?.(nodeId, mode);
         return;
       }
 
