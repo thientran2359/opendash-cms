@@ -1,7 +1,9 @@
 /** Node-only Studio AST regressions. esbuild is already installed by Vite. */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { transform } from 'esbuild';
 
 const source = await readFile(new URL('../src/builder/document.ts', import.meta.url), 'utf8');
@@ -27,6 +29,129 @@ const schema = {
 const activeBlock = { block_id: 'plugin/hero', owner_kind: 'plugin', owner_id: 'hero',
   status: 'active', declaration_state: 'declared', schema };
 const catalog = [activeBlock];
+
+// Compile the actual TS bridge literal to JS so the regression hashes the exact
+// bytes that preparePreviewMarkup injects into the CSP-protected iframe.
+const frameSource = await readFile(new URL('../src/builder/BuilderPreviewFrame.tsx', import.meta.url), 'utf8');
+const bridgeLiteral = frameSource.match(/const BRIDGE_SCRIPT = (\[[\s\S]*?\])\.join\('\\n'\);/);
+assert.ok(bridgeLiteral, 'BRIDGE_SCRIPT array must remain statically extractable');
+const { code: bridgeEvaluator } = await transform(
+  "globalThis.bridgeScript = " + bridgeLiteral[1] + ".join('\\n');",
+  { loader: 'ts', format: 'iife', target: 'es2022' },
+);
+const bridgeScope = {};
+runInNewContext(bridgeEvaluator, bridgeScope);
+const bridgeScript = bridgeScope.bridgeScript;
+
+test('iframe script SHA-256 matches CSP and its DOM creation never uses innerHTML', () => {
+  const shaLiteral = frameSource.match(/const BRIDGE_SCRIPT_SHA256 = '([^']+)'/);
+  assert.ok(shaLiteral, 'CSP hash must be present');
+  assert.equal(createHash('sha256').update(bridgeScript, 'utf8').digest('base64'), shaLiteral[1]);
+  assert.doesNotMatch(bridgeScript, /\binnerHTML\b|\binsertAdjacentHTML\b/);
+  assert.match(frameSource, /sandbox=\{interactive \? 'allow-scripts' : ''\}/);
+});
+
+test('canvas bridge mounts only Section/non-replaced Element gear; gear click and dblclick have separate menu modes', () => {
+  class Node {
+    constructor(tag, id, kind) {
+      this.tagName = tag.toUpperCase();
+      this.attributes = new Map();
+      this.children = [];
+      this.parentNode = null;
+      if (id) {
+        this.setAttribute('data-od-editable', '1');
+        this.setAttribute('data-node-id', id);
+        this.setAttribute('data-od-kind', kind);
+      }
+    }
+    getAttribute(key) { return this.attributes.get(key) ?? null; }
+    setAttribute(key, value) { this.attributes.set(key, String(value)); }
+    removeAttribute(key) { this.attributes.delete(key); }
+    appendChild(node) { node.parentNode = this; this.children.push(node); return node; }
+    closest(selector) {
+      for (let current = this; current; current = current.parentNode) {
+        if (selector === '[data-od-gear]' && current.getAttribute('data-od-gear') !== null) return current;
+        if (selector.includes('[data-od-editable=') && current.getAttribute('data-od-editable') === '1'
+          && current.getAttribute('data-node-id')) return current;
+        if (selector === 'a,button,input,select,textarea,form'
+          && ['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'FORM'].includes(current.tagName)) return current;
+      }
+      return null;
+    }
+  }
+  const section = new Node('section', 'section-id', 'section');
+  const row = new Node('div', 'row-id', 'row');
+  const column = new Node('div', 'column-id', 'column');
+  const element = new Node('div', 'element-id', 'element');
+  const image = new Node('img', 'image-id', 'element');
+  const video = new Node('video', 'video-id', 'element');
+  const nodes = [section, row, column, element, image, video];
+  const listeners = new Map();
+  const messages = [];
+  const document = {
+    querySelector(selector) {
+      if (selector === 'meta[name="od-studio-nonce"]') return { getAttribute: () => 'test-nonce' };
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (selector.includes('[data-node-id]')) return nodes;
+      if (selector.includes('[data-od-selected]')) return nodes.filter(n => n.getAttribute('data-od-selected') === '1');
+      if (selector.includes('[data-od-hover]')) return nodes.filter(n => n.getAttribute('data-od-hover') === '1');
+      return [];
+    },
+    createElement: tag => new Node(tag),
+    createElementNS: (_namespace, tag) => new Node(tag),
+    addEventListener: (type, callback) => { listeners.set(type, callback); },
+  };
+  const window = {
+    parent: { postMessage: message => messages.push(message) },
+    addEventListener() {},
+    scrollTo() {},
+    scrollX: 0,
+    scrollY: 0,
+  };
+  runInNewContext(bridgeScript, { document, window, setTimeout, clearTimeout });
+
+  assert.equal(section.children.length, 1);
+  assert.equal(element.children.length, 1);
+  assert.equal(section.children[0].getAttribute('data-od-gear'), 'section-id');
+  assert.equal(element.children[0].getAttribute('data-od-gear'), 'element-id');
+  assert.equal(section.children[0].tagName, 'BUTTON');
+  assert.equal(element.children[0].children[0].tagName, 'SVG');
+  for (const node of [row, column, image, video]) assert.equal(node.children.length, 0);
+  assert.deepEqual(nodes.flatMap(node => node.children.map(child => child.getAttribute('data-od-gear'))),
+    ['section-id', 'element-id'], 'bridge must only add the two gear controls');
+
+  function dispatch(type, target) {
+    const state = { prevented: false, stopped: false };
+    listeners.get(type)({
+      target,
+      preventDefault() { state.prevented = true; },
+      stopPropagation() { state.stopped = true; },
+    });
+    return state;
+  }
+  // The click may start on the gear's nested SVG path rather than the button.
+  const gearPath = element.children[0].children[0].children[0];
+  assert.deepEqual(dispatch('click', gearPath), { prevented: true, stopped: true });
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [{
+    type: 'od-studio-menu', nonce: 'test-nonce', nodeId: 'element-id', mode: 'toggle',
+  }]);
+  assert.equal(element.getAttribute('data-od-selected'), '1');
+  messages.length = 0;
+  dispatch('dblclick', gearPath);
+  assert.equal(messages.length, 0, 'double-click on gear must not dispatch an open after toggle');
+  assert.deepEqual(dispatch('dblclick', section), { prevented: true, stopped: true });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].mode, 'open');
+  assert.equal(messages[0].nodeId, 'section-id');
+  assert.equal(section.getAttribute('data-od-selected'), '1');
+  assert.equal(element.getAttribute('data-od-selected'), null);
+  messages.length = 0;
+  dispatch('click', row);
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].type, 'od-studio-pick', 'ordinary canvas selection must remain intact');
+});
 
 function element(id, type = 'core/text', props = { text: id }) {
   return { id, type, props };
