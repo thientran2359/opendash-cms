@@ -112,11 +112,15 @@ pub async fn create(db: &SqlitePool, input: &PatternInput) -> ApiResult<PatternR
     validate(input)?;
     let mut tx = db.begin().await?;
     reserve_writer(&mut tx).await?;
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
+    let group_id = crate::storage::settings::generate_translation_group_id("eg");
     let result = sqlx::query(
         "INSERT INTO content_entries
-            (content_type_key,slug,title,values_json,publication_status,content_mode)
-         VALUES('pattern', ?, ?, '{}', 'draft', 'builder')",
+            (content_type_key,locale,translation_group_id,slug,title,values_json,publication_status,content_mode)
+         VALUES('pattern', ?, ?, ?, ?, '{}', 'draft', 'builder')",
     )
+    .bind(&default_locale)
+    .bind(&group_id)
     .bind(&input.slug)
     .bind(&input.title)
     .execute(&mut *tx)

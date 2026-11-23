@@ -315,8 +315,8 @@ mod c1_public_url_tests {
         .await
         .unwrap();
         let id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-             VALUES('news','hidden-article','Hidden Article','{}','published')",
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+             VALUES('news','hidden-article','Hidden Article','{}','published','vi','eg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await

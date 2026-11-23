@@ -33,6 +33,8 @@ pub const RESERVED_ENTRY_KEYS: &[&str] = &[
     "term_ids",
     "custom_path",
     "seo",
+    "locale",
+    "translation_group_id",
 ];
 
 /// Role hierarchy for field and panel access control (`Editor < Admin`).

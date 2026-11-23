@@ -368,7 +368,7 @@ async fn theme_switch_missing_provider_editor_crud_restart_and_a2_preservation()
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        sqlx::query("INSERT INTO site_menu_slot_assignments (theme_id, slot_key, menu_id) VALUES ('theme-a', 'header', ?)")
+        sqlx::query("INSERT INTO site_menu_slot_assignments (theme_id, locale, slot_key, menu_id) VALUES ('theme-a', 'vi', 'header', ?)")
             .bind(menu_id)
             .execute(&pool)
             .await

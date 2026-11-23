@@ -158,9 +158,10 @@ pub async fn menu_slots_get(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(theme_id): Path<String>,
+    Query(query): Query<crate::storage::settings::LocaleQuery>,
 ) -> ApiResult<Response> {
     require_admin(&headers, &db).await?;
-    let snapshot = menu::get_menu_slots(&db, &theme_id)
+    let snapshot = menu::get_menu_slots_for_locale(&db, &theme_id, query.locale.as_deref())
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy theme."))?;
     Ok(slots_response(snapshot))
@@ -171,12 +172,20 @@ pub async fn menu_slots_put(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(theme_id): Path<String>,
+    Query(query): Query<crate::storage::settings::LocaleQuery>,
     input: Result<Json<PutMenuSlotsBody>, JsonRejection>,
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     let version = parse_if_match(&headers)?;
     let Json(body) =
         input.map_err(|e| map_json_rejection(e, "Dữ liệu gắn slot menu không hợp lệ."))?;
-    let updated = menu::put_menu_slots(&db, &theme_id, version, &body.assignments).await?;
+    let updated = menu::put_menu_slots_for_locale(
+        &db,
+        &theme_id,
+        query.locale.as_deref(),
+        version,
+        &body.assignments,
+    )
+    .await?;
     Ok(slots_response(updated))
 }

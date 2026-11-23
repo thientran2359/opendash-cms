@@ -833,12 +833,15 @@ pub(crate) async fn sync_claims_with_options(
     collect_conflicts: bool,
 ) -> Result<(), PermalinkPutError> {
     let settings = read_effective_settings(conn).await?;
+    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(conn).await?;
     let (homepage_id, posts_page_id): (Option<i64>, Option<i64>) = sqlx::query_as(
-        "SELECT homepage_page_id, posts_page_id FROM site_reading_settings WHERE id = 1",
+        "SELECT homepage_page_id, posts_page_id FROM site_reading_settings WHERE locale = ?",
     )
-    .fetch_one(&mut *conn)
+    .bind(&default_locale)
+    .fetch_optional(&mut *conn)
     .await
-    .map_err(ApiError::from)?;
+    .map_err(ApiError::from)?
+    .unwrap_or((None, None));
     let mut collector = ConflictCollector::new(collect_conflicts);
     let mut proposed = BTreeMap::<String, ProposedClaim>::new();
     let mut target_families = BTreeMap::<Claim, String>::new();
@@ -1458,11 +1461,12 @@ pub(crate) async fn sync_claims_with_options(
             .is_some_and(|old| old.0 == now.kind && old.1 == now.id)
         {
             sqlx::query(
-                "INSERT INTO permalink_route_claims(path,target_kind,target_id) VALUES (?,?,?)",
+                "INSERT INTO permalink_route_claims(path,target_kind,target_id,locale) VALUES (?,?,?,?)",
             )
             .bind(path)
             .bind(&now.kind)
             .bind(&now.id)
+            .bind(&default_locale)
             .execute(&mut *conn)
             .await
             .map_err(ApiError::from)?;
@@ -1480,11 +1484,12 @@ pub(crate) async fn sync_claims_with_options(
     for (path, (kind, id)) in historical {
         if previous_history.get(&path) != Some(&(kind.clone(), id.clone())) {
             sqlx::query(
-                "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id) VALUES (?,?,?)",
+                "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id,locale,origin) VALUES (?,?,?,?,'canonical')",
             )
             .bind(path)
             .bind(kind)
             .bind(id)
+            .bind(&default_locale)
             .execute(&mut *conn)
             .await
             .map_err(ApiError::from)?;
@@ -1561,10 +1566,14 @@ pub async fn resolve_public_path(
                 // An assigned Blog Page which later becomes draft/deleted is a
                 // dead route, not an implicit fallback to the default archive.
                 let posts_page_id: Option<i64> = sqlx::query_scalar(
-                    "SELECT posts_page_id FROM site_reading_settings WHERE id = 1",
+                    "SELECT r.posts_page_id
+                       FROM site_reading_settings r
+                       JOIN site_locales sl ON sl.code = r.locale
+                      WHERE sl.is_default = 1",
                 )
-                .fetch_one(&mut *tx)
-                .await?;
+                .fetch_optional(&mut *tx)
+                .await?
+                .flatten();
                 if let Some(page_id) = posts_page_id {
                     let published: i64 = sqlx::query_scalar(
                         "SELECT EXISTS(
@@ -1619,8 +1628,8 @@ mod tests {
 
     async fn reading_page(db: &SqlitePool, slug: &str, published: bool) -> i64 {
         let id = sqlx::query(
-            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-             VALUES('page',?,'Page','{}','draft')",
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+             VALUES('page',?,'Page','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
         )
         .bind(slug)
         .execute(db)
@@ -1763,8 +1772,8 @@ mod tests {
         let draft = reading_page(&db, "draft-page", false).await;
         let published = reading_page(&db, "published-page", true).await;
         let post = sqlx::query(
-            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-             VALUES('post','article','Article','{}','draft')",
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+             VALUES('post','article','Article','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -1831,11 +1840,13 @@ mod tests {
         let mut tx = db.begin().await.unwrap();
         sync_claims_in_tx(&mut tx).await.unwrap();
         tx.commit().await.unwrap();
-        sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?, '/news')")
-            .bind(blog)
-            .execute(&db)
-            .await
-            .unwrap();
+        sqlx::query(
+            "INSERT INTO entry_public_paths(entry_id,locale,path) VALUES(?, 'vi', '/news')",
+        )
+        .bind(blog)
+        .execute(&db)
+        .await
+        .unwrap();
 
         let selected = save_reading(
             &db,
@@ -1971,8 +1982,8 @@ mod tests {
     async fn add_post(db: &SqlitePool, slug: &str, published: bool) -> i64 {
         let id = sqlx::query(
             "INSERT INTO content_entries
-             (content_type_key,slug,title,values_json,publication_status)
-             VALUES('post',?,'Example','{}','draft')",
+             (content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+             VALUES('post',?,'Example','{}','draft','vi','eg-' || lower(hex(randomblob(8))))",
         )
         .bind(slug)
         .execute(db)
@@ -2411,7 +2422,7 @@ mod tests {
         );
         // Reclaimed custom URL that equals the generated route is unambiguous.
         let mut tx = db.begin().await.unwrap();
-        sqlx::query("INSERT INTO entry_public_paths(entry_id,path) VALUES(?,?)")
+        sqlx::query("INSERT INTO entry_public_paths(entry_id,locale,path) VALUES(?,'vi',?)")
             .bind(id)
             .bind("/news/first")
             .execute(&mut *tx)
@@ -2481,7 +2492,7 @@ mod tests {
     async fn term_history_follows_rewrite_and_slug_updates_and_hides_private_terms() {
         let db = site().await;
         let id = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Sea','sea')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Sea','sea','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -2653,7 +2664,9 @@ mod tests {
         news.post_structure = "/news/%postname%".into();
         config = put_settings(&db, config.version, &news).await.unwrap();
 
-        sqlx::query("INSERT INTO entry_redirects(source_path,entry_id) VALUES('/books/alpha', ?)")
+        sqlx::query(
+            "INSERT INTO entry_redirects(locale,source_path,entry_id) VALUES('vi','/books/alpha', ?)",
+        )
             .bind(post_id)
             .execute(&db)
             .await
@@ -2689,7 +2702,7 @@ mod tests {
     async fn deleted_term_legacy_alias_remains_404_without_blocking_atomic_delete() {
         let db = site().await;
         let term_id = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Parent','parent')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Parent','parent','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -2775,7 +2788,7 @@ mod tests {
             .insert("category".to_owned(), Some("genres".to_owned()));
         put_settings(&db, original.version, &genres).await.unwrap();
         let term_id = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Gone','gone')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Gone','gone','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -2857,8 +2870,8 @@ mod tests {
     async fn orphan_redirect_never_deadlocks_new_cpt_rewrite_while_exact_slug_stays_protected() {
         let db = site().await;
         sqlx::query(
-            "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id)
-             VALUES('/books/orphan','entry','999999')",
+            "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id,locale,origin)
+             VALUES('/books/orphan','entry','999999','vi','canonical')",
         )
         .execute(&db)
         .await
@@ -3054,8 +3067,8 @@ mod tests {
 
         // Monotonic triggers keep has_been_published = 1 on publish and revert to draft.
         let inserted_pub = sqlx::query(
-            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status)
-             VALUES('books','trigger-ins','Trigger','{}','published')",
+            "INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id)
+             VALUES('books','trigger-ins','Trigger','{}','published','vi','eg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -3093,14 +3106,14 @@ mod tests {
         let db = site().await;
         let root_page = reading_page(&db, "about", true).await;
         let cat_a = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Alpha','alpha')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Alpha','alpha','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
         .unwrap()
         .last_insert_rowid();
         let cat_b = sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Beta','beta')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Beta','beta','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -3183,7 +3196,7 @@ mod tests {
 
         // Switching to a reserved category slug is rejected under /%category%/%postname%.
         sqlx::query(
-            "INSERT INTO taxonomy_terms(kind,name,slug) VALUES('category','Media','media')",
+            "INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Media','media','vi','tg-' || lower(hex(randomblob(8))))",
         )
         .execute(&db)
         .await
@@ -3268,8 +3281,8 @@ mod tests {
         let db = site().await;
         sqlx::query(
             "WITH RECURSIVE cnt(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x <= 100001)
-             INSERT INTO permalink_route_redirects(source_path, target_kind, target_id, created_at)
-             SELECT '/old-orphan-' || x, 'entry', CAST(1000000 + x AS TEXT),
+             INSERT INTO permalink_route_redirects(source_path, target_kind, target_id, locale, origin, created_at)
+             SELECT '/old-orphan-' || x, 'entry', CAST(1000000 + x AS TEXT), 'vi', 'canonical',
                     strftime('%Y-%m-%dT%H:%M:%fZ', 1700000000 + x, 'unixepoch')
                FROM cnt",
         )

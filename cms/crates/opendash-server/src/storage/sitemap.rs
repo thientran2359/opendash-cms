@@ -25,11 +25,12 @@ WITH indexable AS (
            '/' AS path,
            e.updated_at AS lastmod
       FROM site_reading_settings reading
+      JOIN site_locales sl ON sl.code = reading.locale AND sl.is_default = 1
       JOIN content_entries e ON e.id = reading.homepage_page_id
       JOIN content_types t ON t.key = e.content_type_key
       LEFT JOIN entry_seo s ON s.entry_id = e.id
-      LEFT JOIN site_home_seo h ON h.id = 1
-     WHERE reading.id = 1 AND e.content_type_key = 'page'
+      LEFT JOIN site_home_seo h ON h.locale = reading.locale
+     WHERE e.content_type_key = 'page'
        AND e.publication_status = 'published'
        AND t.provider_status = 'active'
        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
@@ -51,8 +52,8 @@ WITH indexable AS (
        AND e.content_type_key != 'pattern'
        AND NOT EXISTS (
            SELECT 1 FROM site_reading_settings reading
-            WHERE reading.id = 1
-              AND (reading.homepage_page_id = e.id OR reading.posts_page_id = e.id)
+           JOIN site_locales sl ON sl.code = reading.locale AND sl.is_default = 1
+            WHERE (reading.homepage_page_id = e.id OR reading.posts_page_id = e.id)
        )
        AND t.provider_status = 'active'
        AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
@@ -74,9 +75,10 @@ WITH indexable AS (
        -- its assigned Page was withdrawn/deleted. That URL serves 404 noindex.
        AND NOT (t.key = 'post' AND EXISTS (
          SELECT 1 FROM site_reading_settings reading
+         JOIN site_locales sl ON sl.code = reading.locale AND sl.is_default = 1
            LEFT JOIN content_entries blog ON blog.id = reading.posts_page_id
            LEFT JOIN content_types blog_type ON blog_type.key = blog.content_type_key
-          WHERE reading.id = 1 AND reading.posts_page_id IS NOT NULL
+          WHERE reading.posts_page_id IS NOT NULL
             AND (blog.id IS NULL OR blog.content_type_key != 'page'
               OR blog.publication_status != 'published'
               OR blog_type.provider_status IS NULL OR blog_type.provider_status != 'active'

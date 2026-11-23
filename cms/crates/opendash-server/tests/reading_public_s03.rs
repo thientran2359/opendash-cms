@@ -324,7 +324,7 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
 
     let db = site.db().await;
     let version_before: i64 =
-        sqlx::query_scalar("SELECT version FROM site_reading_settings WHERE id=1")
+        sqlx::query_scalar("SELECT version FROM site_reading_settings WHERE locale='vi'")
             .fetch_one(&db)
             .await
             .unwrap();
@@ -341,7 +341,7 @@ async fn home_and_posts_page_use_distinct_templates_and_preserve_deleted_ids() {
         .unwrap();
     assert!(deleted.status().is_success(), "{}", deleted.status());
     let (saved_home, saved_blog, version_after): (Option<i64>, Option<i64>, i64) = sqlx::query_as(
-        "SELECT homepage_page_id,posts_page_id,version FROM site_reading_settings WHERE id=1",
+        "SELECT homepage_page_id,posts_page_id,version FROM site_reading_settings WHERE locale='vi'",
     )
     .fetch_one(&db)
     .await
