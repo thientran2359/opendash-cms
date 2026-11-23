@@ -155,7 +155,9 @@ async fn render_resolved_public_template_html(
             })
         }
         TemplateResolution::ActiveTheme { target_key, html } => {
-            use crate::template_sec::{CsecContentKind, validate_and_compile_csec_composition};
+            use crate::template_sec::{
+                CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
+            };
             // The last candidate can be `index` even for a Single/Archive
             // route. Validate the selected template's own slot contract, not
             // the request's most-specific (and possibly absent) candidate.
@@ -171,9 +173,21 @@ async fn render_resolved_public_template_html(
                 CsecContentKind::NonEntry
             };
             let parts = active.map(|v| &v.parts).cloned().unwrap_or_default();
-            let composition =
-                validate_and_compile_csec_composition(&target_key, &html, &parts, kind)
-                    .map_err(ApiError::internal)?;
+            let url_policy = if let Some(active) = active {
+                let manifest_json = serde_json::to_string(&active.manifest)?;
+                crate::storage::settings::theme_url_policy(&manifest_json)
+                    .map_err(ApiError::internal)?
+            } else {
+                crate::template_sec::ThemeUrlPolicy::default()
+            };
+            let composition = validate_and_compile_csec_composition_with_theme_urls(
+                &target_key,
+                &html,
+                &parts,
+                kind,
+                &url_policy,
+            )
+            .map_err(ApiError::internal)?;
             let html = budget.render_theme(&composition, &context, Some(&slot_html))?;
             Ok(ResolvedPublicHtml {
                 html,

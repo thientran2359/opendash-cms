@@ -354,6 +354,19 @@ pub(crate) fn validate_theme_v3_files(
     let manifest: ThemeV3Manifest = serde_json::from_str(&manifest_json)
         .map_err(|_| V2ZipError::BadRequest("theme.json không đúng schema theme v3."))?;
     manifest.validate().map_err(V2ZipError::BadRequest)?;
+    // Validate schema even for packages declaring no HTML templates; defaults
+    // and sample option values must agree before any revision is installed.
+    let option_schema = crate::storage::settings::parse_theme_options_schema(&manifest_json)
+        .map_err(V2ZipError::BadRequest)?;
+    if let Some(raw_sample) = manifest.sample.as_ref() {
+        let sample: crate::storage::import::ThemeSampleManifest =
+            serde_json::from_value(raw_sample.clone())
+                .map_err(|_| V2ZipError::BadRequest("Theme sample có cấu trúc không hợp lệ."))?;
+        crate::storage::import::validate_sample_option_values(&sample, &option_schema)
+            .map_err(V2ZipError::BadRequest)?;
+    }
+    let url_policy = crate::storage::settings::theme_url_policy(&manifest_json)
+        .map_err(V2ZipError::BadRequest)?;
     let blocks =
         collect_package_blocks(&files, &manifest.theme_id).map_err(V2ZipError::BadRequest)?;
     parse_theme_declarations(&manifest_json).map_err(V2ZipError::BadRequest)?;
@@ -423,7 +436,9 @@ pub(crate) fn validate_theme_v3_files(
         parts.insert(key.clone(), source.to_string());
     }
 
-    use crate::template_sec::{CsecContentKind, validate_and_compile_csec_composition};
+    use crate::template_sec::{
+        CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
+    };
     for declaration in &manifest.templates {
         let source = required_v3_utf8(&files, &declaration.file)?;
         declared.insert(declaration.file.clone());
@@ -437,18 +452,36 @@ pub(crate) fn validate_theme_v3_files(
             TemplateCandidateKind::Index => CsecContentKind::Index,
             _ => CsecContentKind::NonEntry,
         };
-        validate_and_compile_csec_composition(&declaration.file, source, &parts, kind)
-            .map_err(V2ZipError::BadRequest)?;
+        validate_and_compile_csec_composition_with_theme_urls(
+            &declaration.file,
+            source,
+            &parts,
+            kind,
+            &url_policy,
+        )
+        .map_err(V2ZipError::BadRequest)?;
     }
     for layout in &manifest.page_layouts {
         let source = required_v3_utf8(&files, &layout.file)?;
         declared.insert(layout.file.clone());
-        validate_and_compile_csec_composition(&layout.file, source, &parts, CsecContentKind::Entry)
-            .map_err(V2ZipError::BadRequest)?;
+        validate_and_compile_csec_composition_with_theme_urls(
+            &layout.file,
+            source,
+            &parts,
+            CsecContentKind::Entry,
+            &url_policy,
+        )
+        .map_err(V2ZipError::BadRequest)?;
     }
     for (key, source) in &parts {
-        validate_and_compile_csec_composition(key, source, &parts, CsecContentKind::NonEntry)
-            .map_err(V2ZipError::BadRequest)?;
+        validate_and_compile_csec_composition_with_theme_urls(
+            key,
+            source,
+            &parts,
+            CsecContentKind::NonEntry,
+            &url_policy,
+        )
+        .map_err(V2ZipError::BadRequest)?;
     }
     for pattern in &manifest.patterns {
         let source = required_v3_utf8(&files, &pattern.file)?;

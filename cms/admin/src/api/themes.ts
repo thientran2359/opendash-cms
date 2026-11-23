@@ -45,7 +45,7 @@ export function isV3ThemeInstall(response: ThemeInstallResponse): response is Th
   return 'revision_id' in response;
 }
 
-export type ThemeOptionType = 'string' | 'number' | 'boolean' | 'select' | 'image_ref';
+export type ThemeOptionType = 'string' | 'url' | 'number' | 'boolean' | 'select' | 'image_ref';
 
 export interface ThemeOptionChoice {
   value: string;

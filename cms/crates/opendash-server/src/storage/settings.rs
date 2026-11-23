@@ -296,6 +296,7 @@ pub const MAX_THEME_OPTION_CHOICES: usize = 64;
 #[serde(rename_all = "snake_case")]
 pub enum ThemeOptionType {
     String,
+    Url,
     Number,
     Boolean,
     Select,
@@ -360,6 +361,12 @@ pub fn validate_option_value(
                 return Err("Option string vượt quá 4,096 ký tự hoặc chứa ký tự điều khiển.");
             }
             Ok(())
+        }
+        ThemeOptionType::Url => {
+            let s = value
+                .as_str()
+                .ok_or("Giá trị option kiểu url phải là chuỗi.")?;
+            crate::template_sec::validate_theme_option_url(s)
         }
         ThemeOptionType::Number => {
             let n = value
@@ -464,6 +471,20 @@ pub fn parse_theme_options_schema(
         validate_option_value(def, &def.default)?;
     }
     Ok(defs)
+}
+
+/// Derive anchor-only permissions from the selected revision's validated
+/// manifest; request values and mutable context cannot add capabilities.
+pub fn theme_url_policy(
+    manifest_json: &str,
+) -> Result<crate::template_sec::ThemeUrlPolicy, &'static str> {
+    let schema = parse_theme_options_schema(manifest_json)?;
+    Ok(crate::template_sec::ThemeUrlPolicy::from_option_keys(
+        schema
+            .iter()
+            .filter(|def| def.public && def.option_type == ThemeOptionType::Url)
+            .map(|def| def.key.clone()),
+    ))
 }
 
 async fn latest_revision_manifest_in_conn(
@@ -770,6 +791,10 @@ pub(super) async fn get_public_theme_options_in_conn(
                     _ => serde_json::Value::Null,
                 }
             }
+            ThemeOptionType::Url => match saved_map.get(&def.key) {
+                Some(saved) if validate_option_value(&def, saved).is_ok() => saved.clone(),
+                _ => def.default.clone(),
+            },
             _ => saved_map.get(&def.key).cloned().unwrap_or(def.default),
         };
         out.insert(def.key, val);
@@ -780,6 +805,42 @@ pub(super) async fn get_public_theme_options_in_conn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_url_policy_requires_public_url_schema_and_valid_defaults() {
+        let schema = serde_json::json!({"options": [
+            {"key":"cta_url","label":"CTA","type":"url","default":"/lien-he","public":true},
+            {"key":"private_url","label":"Private","type":"url","default":"#secret","public":false},
+            {"key":"legacy_string","label":"Legacy","type":"string","default":"/old","public":true}
+        ]});
+        let raw = schema.to_string();
+        let policy = theme_url_policy(&raw).unwrap();
+        let src = r#"<a href="{{ options.cta_url }}">Link</a>"#;
+        assert!(
+            crate::template_sec::validate_template_csec_with_theme_urls("x", src, &policy).is_ok()
+        );
+        for key in ["private_url", "legacy_string", "unknown_url"] {
+            assert!(
+                crate::template_sec::validate_template_csec_with_theme_urls(
+                    "x",
+                    &format!(r#"<a href="{{{{ options.{key} }}}}">Link</a>"#),
+                    &policy,
+                )
+                .is_err()
+            );
+        }
+        let invalid = serde_json::json!({"options": [{
+            "key":"cta_url", "label":"CTA", "type":"url", "default":"javascript:alert(1)", "public":true
+        }]});
+        assert!(parse_theme_options_schema(&invalid.to_string()).is_err());
+        assert!(
+            validate_option_value(
+                &parse_theme_options_schema(&raw).unwrap()[0],
+                &serde_json::json!("/changed?from=header#form"),
+            )
+            .is_ok()
+        );
+    }
 
     #[test]
     fn catalog_is_pinned_sorted_and_restricts_aliases() {
