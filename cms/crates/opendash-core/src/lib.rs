@@ -6,6 +6,7 @@ pub mod builder_blocks;
 pub mod contact;
 pub mod content;
 pub mod hooks;
+pub mod i18n;
 pub mod id;
 pub mod plugin;
 pub mod registry;

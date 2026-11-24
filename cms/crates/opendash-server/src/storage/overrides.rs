@@ -3156,6 +3156,8 @@ async fn build_preview_context_in_tx(
             site_title: g.site_title.clone(),
             tagline: g.tagline.clone(),
             timezone: g.timezone.clone(),
+            // CMS language is not a public preview override.
+            cms_locale: None,
         }
         .validate()
         .map_err(ApiError::unprocessable)?;

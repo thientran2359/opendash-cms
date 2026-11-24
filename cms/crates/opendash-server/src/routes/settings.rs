@@ -9,9 +9,10 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqlitePool;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::atomic::Ordering};
 
 use crate::{
+    app::AppState,
     auth::{require_admin, require_admin_with_csrf, require_session},
     error::{ApiError, ApiResult},
     storage::permalinks::{self, PermalinkPutError, PermalinkSettings, PermalinkSettingsInput},
@@ -87,21 +88,52 @@ pub async fn timezones_get(
         .into_response())
 }
 
+/// Serialize saves through the post-commit cache store so concurrent requests
+/// cannot publish an older CMS language after a newer transaction commits.
+/// One process serves exactly one site.
+static GENERAL_SAVE_CACHE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+pub async fn admin_i18n_bootstrap(State(db): State<SqlitePool>) -> ApiResult<Response> {
+    let bootstrap = settings::get_admin_i18n_bootstrap(&db).await?;
+    Ok((no_store_headers(None), Json(bootstrap)).into_response())
+}
+
 pub async fn general_put(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
-    State(db): State<SqlitePool>,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
+    State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<LocaleQuery>,
     input: Result<Json<GeneralSettingsInput>, JsonRejection>,
 ) -> ApiResult<Response> {
-    require_admin_with_csrf(&headers, &db).await?;
+    require_admin_with_csrf(&headers, &state.db).await?;
     let version = parse_if_match(&headers)?;
     let Json(input) = input.map_err(|_| ApiError::bad_request("Dữ liệu Settings không hợp lệ."))?;
     let input = input.validate().map_err(ApiError::bad_request)?;
-    match settings::save_general_for_locale(&db, query.locale.as_deref(), input, version)
-        .await
-        .map_err(map_storage_error)?
-    {
+    let cache_guard = GENERAL_SAVE_CACHE_LOCK.lock().await;
+    // Once admitted and started, a disconnect must not cancel the handler
+    // between SQLite COMMIT and cache publication. Keep both the admission
+    // lease and the serialization guard alive until the commit is published.
+    let outcome = tokio::spawn(async move {
+        let _lease = lease;
+        let _cache_guard = cache_guard;
+        let outcome =
+            settings::save_general_for_locale(&state.db, query.locale.as_deref(), input, version)
+                .await
+                .map_err(map_storage_error)?;
+        if let SaveOutcome::Saved(ref saved) = outcome {
+            state.ui_locale.store(
+                crate::i18n::encode_ui_locale(&saved.cms_locale),
+                Ordering::Release,
+            );
+        }
+        Ok::<_, ApiError>(outcome)
+    })
+    .await
+    .map_err(|error| {
+        eprintln!("General settings save task: {error}");
+        ApiError::internal("Không truy cập được dữ liệu.")
+    })??;
+    match outcome {
         SaveOutcome::Saved(saved) => Ok(settings_response(saved)),
         SaveOutcome::Stale => Err(ApiError::precondition_failed(
             "Dữ liệu đã thay đổi ở một tab khác. Form chưa lưu vẫn được giữ lại.",
@@ -111,6 +143,12 @@ pub async fn general_put(
         )),
         SaveOutcome::SecondaryTimezoneLocked => Err(ApiError::bad_request(
             "Múi giờ là cấu hình toàn cục và chỉ được thay đổi ở ngôn ngữ mặc định.",
+        )),
+        SaveOutcome::InvalidCmsLocale => Err(ApiError::bad_request(
+            "Ngôn ngữ CMS không có trong danh mục hỗ trợ.",
+        )),
+        SaveOutcome::SecondaryCmsLocaleLocked => Err(ApiError::bad_request(
+            "Ngôn ngữ CMS là cấu hình toàn cục và chỉ được thay đổi ở ngôn ngữ mặc định.",
         )),
         SaveOutcome::InvalidLocale(msg) => Err(ApiError::bad_request(msg)),
     }

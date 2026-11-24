@@ -8,6 +8,10 @@ use opendash_core::{
         BlockFieldSpec, MediaFieldKind, SelectOption, flattened_field_specs, validate_field_specs,
         validate_field_values, validate_single_field_value,
     },
+    i18n::{
+        CMS_CATALOG_VERSION, CMS_LANGUAGE_CATALOG, CmsLocaleOption, find_cms_locale,
+        resolve_effective_ui_locale,
+    },
     id::valid_snake_key_with_limit,
 };
 use serde::{Deserialize, Serialize};
@@ -782,18 +786,21 @@ pub struct GeneralSettings {
     pub site_title: String,
     pub tagline: String,
     pub timezone: String,
+    pub cms_locale: String,
     pub version: i64,
     pub has_override: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub locale: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeneralSettingsInput {
     pub site_title: String,
     pub tagline: String,
     pub timezone: String,
+    #[serde(default)]
+    pub cms_locale: Option<String>,
 }
 
 impl GeneralSettingsInput {
@@ -820,6 +827,42 @@ impl GeneralSettingsInput {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AdminI18nBootstrap {
+    pub configured_locale: String,
+    pub effective_locale: &'static str,
+    pub effective_bcp47: &'static str,
+    pub effective_direction: &'static str,
+    pub configured_installed: bool,
+    pub catalog_version: &'static str,
+    pub available_locales: &'static [CmsLocaleOption],
+}
+
+pub async fn get_cms_locale_in_conn(conn: &mut SqliteConnection) -> ApiResult<String> {
+    Ok(
+        sqlx::query_scalar("SELECT cms_locale FROM site_general_settings WHERE id = 1")
+            .fetch_one(&mut *conn)
+            .await?,
+    )
+}
+
+pub async fn get_admin_i18n_bootstrap(db: &SqlitePool) -> ApiResult<AdminI18nBootstrap> {
+    let mut conn = db.acquire().await?;
+    let configured_locale = get_cms_locale_in_conn(&mut conn).await?;
+    let effective = resolve_effective_ui_locale(&configured_locale);
+    let configured_installed =
+        find_cms_locale(&configured_locale).is_some_and(|option| option.installed);
+    Ok(AdminI18nBootstrap {
+        configured_locale,
+        effective_locale: effective.code,
+        effective_bcp47: effective.bcp47,
+        effective_direction: effective.direction,
+        configured_installed,
+        catalog_version: CMS_CATALOG_VERSION,
+        available_locales: CMS_LANGUAGE_CATALOG,
+    })
+}
+
 pub async fn get_general_for_locale(
     db: &SqlitePool,
     requested_locale: Option<&str>,
@@ -840,8 +883,8 @@ pub(crate) async fn get_general_in_conn_for_locale(
 ) -> ApiResult<GeneralSettings> {
     let default_locale = get_default_locale_code_in_conn(conn).await?;
     let target_locale = resolve_requested_locale_in_conn(conn, requested_locale).await?;
-    let timezone: String =
-        sqlx::query_scalar("SELECT timezone FROM site_general_settings WHERE id = 1")
+    let (timezone, cms_locale): (String, String) =
+        sqlx::query_as("SELECT timezone, cms_locale FROM site_general_settings WHERE id = 1")
             .fetch_one(&mut *conn)
             .await?;
     let exact: Option<(String, String, i64)> = sqlx::query_as(
@@ -880,6 +923,7 @@ pub(crate) async fn get_general_in_conn_for_locale(
         site_title,
         tagline,
         timezone,
+        cms_locale,
         version,
         has_override,
         locale: requested_locale.map(|_| target_locale),
@@ -895,11 +939,13 @@ pub enum SaveOutcome {
     Stale,
     InvalidTimezone,
     SecondaryTimezoneLocked,
+    InvalidCmsLocale,
+    SecondaryCmsLocaleLocked,
     InvalidLocale(String),
 }
 
 /// Runs inside `BEGIN IMMEDIATE` so reads and version/timezone validation share
-/// a single SQLite write lock. Secondary locales cannot alter global timezone.
+/// a single SQLite write lock. Secondary locales cannot alter global timezone or CMS language.
 pub async fn save_general_for_locale(
     db: &SqlitePool,
     requested_locale: Option<&str>,
@@ -918,11 +964,22 @@ pub async fn save_general_for_locale(
             Ok(code) => code,
             Err(ApiError(_, msg)) => return Ok(SaveOutcome::InvalidLocale(msg.into_owned())),
         };
-        let global_tz: String =
-            sqlx::query_scalar("SELECT timezone FROM site_general_settings WHERE id = 1")
+        let (global_tz, global_cms_locale): (String, String) =
+            sqlx::query_as("SELECT timezone, cms_locale FROM site_general_settings WHERE id = 1")
                 .fetch_one(&mut *conn)
                 .await?;
+        let normalized_cms = match input.cms_locale.as_deref() {
+            Some(raw) => match find_cms_locale(raw) {
+                Some(option) => Some(option.code.to_owned()),
+                None => return Ok(SaveOutcome::InvalidCmsLocale),
+            },
+            None => None,
+        };
         let is_default_locale = target_locale == default_locale;
+        if !is_default_locale && normalized_cms.as_ref().is_some_and(|locale| locale != &global_cms_locale) {
+            return Ok(SaveOutcome::SecondaryCmsLocaleLocked);
+        }
+        let next_cms_locale = normalized_cms.unwrap_or(global_cms_locale);
         if is_default_locale {
             if !is_current_timezone(&input.timezone) && input.timezone != global_tz {
                 return Ok(SaveOutcome::InvalidTimezone);
@@ -979,12 +1036,13 @@ pub async fn save_general_for_locale(
         if is_default_locale {
             sqlx::query(
                 "UPDATE site_general_settings
-                    SET site_title = ?, tagline = ?, timezone = ?, version = ?
+                    SET site_title = ?, tagline = ?, timezone = ?, cms_locale = ?, version = ?
                   WHERE id = 1",
             )
             .bind(&input.site_title)
             .bind(&input.tagline)
             .bind(&input.timezone)
+            .bind(&next_cms_locale)
             .bind(new_version)
             .execute(&mut *conn)
             .await?;
@@ -994,6 +1052,7 @@ pub async fn save_general_for_locale(
             site_title: input.site_title,
             tagline: input.tagline,
             timezone: input.timezone,
+            cms_locale: next_cms_locale,
             version: new_version,
             has_override: true,
             locale: requested_locale.map(|_| target_locale),
@@ -2668,6 +2727,7 @@ mod tests {
             site_title,
             tagline: tagline.into(),
             timezone: "UTC".into(),
+            cms_locale: None,
         };
         assert!(make(" Xin chào ".into(), "").validate().is_ok());
         assert!(make("🦀".repeat(120), "").validate().is_ok());
@@ -2675,6 +2735,99 @@ mod tests {
         assert!(make(" \t ".into(), "").validate().is_err());
         assert!(make("\tAccepted?".into(), "").validate().is_err());
         assert!(make("ok".into(), "bad\nvalue").validate().is_err());
+    }
+
+    #[tokio::test]
+    async fn cms_locale_is_global_canonical_and_backward_compatible() {
+        let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        crate::storage::content::preflight_builtin_key_collisions(&db)
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+        let initial = get_general(&db).await.unwrap();
+        assert_eq!(initial.cms_locale, "en");
+        let input = |cms_locale: Option<&str>| GeneralSettingsInput {
+            site_title: initial.site_title.clone(),
+            tagline: initial.tagline.clone(),
+            timezone: initial.timezone.clone(),
+            cms_locale: cms_locale.map(str::to_owned),
+        };
+        assert!(matches!(
+            save_general(&db, input(Some("unknown")), initial.version)
+                .await
+                .unwrap(),
+            SaveOutcome::InvalidCmsLocale
+        ));
+        let SaveOutcome::Saved(saved) = save_general(&db, input(Some(" Vi-VN ")), initial.version)
+            .await
+            .unwrap()
+        else {
+            panic!("canonical CMS locale save failed");
+        };
+        assert_eq!(saved.cms_locale, "vi");
+        assert_eq!(
+            get_admin_i18n_bootstrap(&db)
+                .await
+                .unwrap()
+                .effective_locale,
+            "vi"
+        );
+        assert!(matches!(
+            save_general(&db, input(Some("en")), initial.version)
+                .await
+                .unwrap(),
+            SaveOutcome::Stale
+        ));
+        let legacy: GeneralSettingsInput = serde_json::from_value(serde_json::json!({
+            "site_title": initial.site_title,
+            "tagline": initial.tagline,
+            "timezone": initial.timezone,
+        }))
+        .unwrap();
+        let SaveOutcome::Saved(saved) = save_general(&db, legacy, saved.version).await.unwrap()
+        else {
+            panic!("legacy payload save failed");
+        };
+        assert_eq!(saved.cms_locale, "vi");
+        sqlx::query(
+            "INSERT INTO site_locales (code, bcp47_tag, label, direction, is_default, enabled, position)
+             VALUES ('en', 'en', 'English', 'ltr', 0, 1, 1)",
+        ).execute(&db).await.unwrap();
+        let secondary = get_general_for_locale(&db, Some("en")).await.unwrap();
+        assert_eq!(secondary.cms_locale, "vi");
+        assert!(matches!(
+            save_general_for_locale(&db, Some("en"), input(Some("en")), secondary.version)
+                .await
+                .unwrap(),
+            SaveOutcome::SecondaryCmsLocaleLocked
+        ));
+        let SaveOutcome::Saved(secondary_saved) =
+            save_general_for_locale(&db, Some("en"), input(Some(" VI ")), secondary.version)
+                .await
+                .unwrap()
+        else {
+            panic!("secondary save preserving CMS locale failed");
+        };
+        assert_eq!(secondary_saved.cms_locale, "vi");
+        let SaveOutcome::Saved(saved) = save_general(&db, input(Some("ar")), saved.version)
+            .await
+            .unwrap()
+        else {
+            panic!("uninstalled CMS locale save failed");
+        };
+        assert_eq!(saved.cms_locale, "ar");
+        let boot = get_admin_i18n_bootstrap(&db).await.unwrap();
+        assert_eq!(boot.configured_locale, "ar");
+        assert!(!boot.configured_installed);
+        assert_eq!(
+            (
+                boot.effective_locale,
+                boot.effective_bcp47,
+                boot.effective_direction
+            ),
+            ("en", "en-US", "ltr")
+        );
+        assert_eq!(boot.available_locales.len(), 32);
     }
 
     #[tokio::test]

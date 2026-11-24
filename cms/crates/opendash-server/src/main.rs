@@ -10,6 +10,7 @@ mod content_render;
 mod document;
 mod error;
 mod hooks;
+mod i18n;
 mod media;
 mod media_lifecycle;
 mod media_video;
@@ -192,8 +193,17 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
             .await
             .map_err(|e| format!("{}: {}", e.0, e.1))?,
     ));
+    let configured_ui_locale = {
+        let mut conn = db.acquire().await?;
+        storage::settings::get_cms_locale_in_conn(&mut conn)
+            .await
+            .map_err(|e| format!("{}: {}", e.0, e.1))?
+    };
     let state = AppState {
         db: db.clone(),
+        ui_locale: Arc::new(std::sync::atomic::AtomicU8::new(i18n::encode_ui_locale(
+            &configured_ui_locale,
+        ))),
         plugin_manager,
         hooks,
         media_store: {
