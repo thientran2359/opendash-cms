@@ -30,28 +30,91 @@ mod storage;
 mod template_sec;
 mod theme;
 
-use std::{env, sync::Arc};
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    path::Path,
+    sync::Arc,
+};
 
 use app::{AppState, build_router};
 use hooks::HookDispatcher;
 use media::MediaStore;
 use plugin::PluginManager;
 
+fn strip_os_prefix(arg: &OsStr, prefix: &str) -> Option<OsString> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+        arg.as_bytes()
+            .strip_prefix(prefix.as_bytes())
+            .map(|rest| OsString::from_vec(rest.to_vec()))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        let prefix_units: Vec<u16> = prefix.encode_utf16().collect();
+        let arg_units: Vec<u16> = arg.encode_wide().collect();
+        arg_units
+            .strip_prefix(prefix_units.as_slice())
+            .map(OsString::from_wide)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        arg.to_str()
+            .and_then(|s| s.strip_prefix(prefix))
+            .map(OsString::from)
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if std::env::args().any(|a| a == "--check-config") {
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+
+    if args
+        .iter()
+        .any(|a| a == "--check-theme" || strip_os_prefix(a, "--check-theme=").is_some())
+    {
+        let path_arg: Result<OsString, &'static str> = if args.len() == 1 {
+            match strip_os_prefix(&args[0], "--check-theme=") {
+                Some(p) if !p.is_empty() => Ok(p),
+                Some(_) => Err("Thiếu đường dẫn sau '--check-theme='."),
+                None => Err("Thiếu đối số đường dẫn cho '--check-theme'."),
+            }
+        } else if args.len() == 2 && args[0] == "--check-theme" && !args[1].is_empty() {
+            Ok(args[1].clone())
+        } else {
+            Err("Cú pháp đúng: opendash --check-theme <path> hoặc --check-theme=<path>")
+        };
+
+        match path_arg
+            .map_err(str::to_owned)
+            .and_then(|p| theme::check_theme_path(Path::new(&p)))
+        {
+            Ok(summary) => {
+                println!("{}", serde_json::to_string(&summary)?);
+                std::process::exit(0);
+            }
+            Err(err) => {
+                println!("{}", serde_json::json!({ "ok": false, "error": err }));
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if args.iter().any(|a| a == "--check-config") {
         let paths = paths::SitePaths::from_env()?;
         let cfg = config::RuntimeConfigV1::load(&paths).map_err(|e| format!("{}: {}", e.0, e.1))?;
         println!("{}", cfg.redacted_summary_json());
         return Ok(());
     }
 
-    if std::env::args().any(|a| a == "--operations-worker") {
+    if args.iter().any(|a| a == "--operations-worker") {
         let code = crate::backup_worker::run_operations_worker_from_stdio();
         std::process::exit(code);
     }
 
-    if std::env::args().any(|a| a == "--plugin-worker")
-        || std::env::var("OPENDASH_WORKER_CHILD").is_ok()
+    if args.iter().any(|a| a == "--plugin-worker")
+        || std::env::var_os("OPENDASH_WORKER_CHILD").is_some()
     {
         let _ = std::thread::spawn(crate::plugin::worker::run_worker_from_stdio).join();
         return Ok(());

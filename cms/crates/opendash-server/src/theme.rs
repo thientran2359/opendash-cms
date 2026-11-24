@@ -1,4 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    io::Read as _,
+    path::Path,
+};
 
 pub use opendash_core::theme::{Block, BlockDescriptor, Fields};
 use opendash_core::{
@@ -10,12 +14,12 @@ use opendash_core::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::package::{
-    V2_MAX_DECODED_BYTES, V2_MAX_FILES, V2_MAX_RASTER_BYTES, V2_MAX_TEXT_BYTES, V2ZipError,
-    read_v2_zip_entries, validate_v2_relative_path,
-};
 #[cfg(test)]
-use crate::package::{V2_MAX_ZIP_BYTES, open_bounded_zip};
+use crate::package::open_bounded_zip;
+use crate::package::{
+    V2_MAX_DECODED_BYTES, V2_MAX_FILES, V2_MAX_RASTER_BYTES, V2_MAX_TEXT_BYTES, V2_MAX_ZIP_BYTES,
+    V2ZipError, read_v2_zip_entries, validate_v2_relative_path,
+};
 #[cfg(test)]
 use crate::storage::theme::valid_v2_theme_id;
 
@@ -630,6 +634,229 @@ pub(crate) fn validate_theme_v3_files(
         manifest_json,
         files,
     })
+}
+
+pub const MAX_THEME_DIR_DEPTH: usize = 16;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ThemeCheckSummary {
+    pub ok: bool,
+    pub theme_id: String,
+    pub version: String,
+    pub templates: Vec<String>,
+    pub parts: Vec<String>,
+    pub page_layouts: Vec<String>,
+    pub patterns: Vec<String>,
+    pub blocks: Vec<String>,
+    pub assets: Vec<String>,
+    pub options_count: usize,
+}
+
+fn zip_err_msg(err: V2ZipError) -> String {
+    match err {
+        V2ZipError::PayloadTooLarge(msg) | V2ZipError::BadRequest(msg) => msg.to_owned(),
+    }
+}
+
+fn walk_v3_dir(
+    dir: &Path,
+    rel_prefix: &str,
+    depth: usize,
+    files: &mut BTreeMap<String, Vec<u8>>,
+    seen_lower: &mut BTreeSet<String>,
+    decoded_total: &mut usize,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| format!("Không thể đọc thư mục '{}': {e}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Lỗi đọc mục thư mục theme: {e}"))?;
+        let file_name = entry.file_name();
+        let name = file_name.to_str().ok_or_else(|| {
+            "Tên file hoặc thư mục trong theme không phải UTF-8 hợp lệ.".to_owned()
+        })?;
+        if name.starts_with('.') {
+            return Err(format!("Không cho phép entry ẩn trong theme: {name}"));
+        }
+        let rel_path = if rel_prefix.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{rel_prefix}/{name}")
+        };
+        let entry_path = entry.path();
+        let meta = std::fs::symlink_metadata(&entry_path)
+            .map_err(|e| format!("Không thể kiểm tra metadata '{rel_path}': {e}"))?;
+        let ft = meta.file_type();
+        if ft.is_symlink() {
+            return Err(format!(
+                "Không cho phép symlink bên trong theme: {rel_path}"
+            ));
+        }
+        if ft.is_dir() {
+            if depth >= MAX_THEME_DIR_DEPTH {
+                return Err(format!(
+                    "Thư mục theme vượt quá giới hạn độ sâu tối đa ({MAX_THEME_DIR_DEPTH}): {rel_path}"
+                ));
+            }
+            if !seen_lower.insert(rel_path.to_ascii_lowercase()) {
+                return Err(format!(
+                    "Đường dẫn theme bị trùng lặp không phân biệt hoa thường: {rel_path}"
+                ));
+            }
+            walk_v3_dir(
+                &entry_path,
+                &rel_path,
+                depth + 1,
+                files,
+                seen_lower,
+                decoded_total,
+            )?;
+        } else if ft.is_file() {
+            if files.len() >= V2_MAX_FILES {
+                return Err("Theme v3 vượt quá giới hạn số lượng file.".to_owned());
+            }
+            if !seen_lower.insert(rel_path.to_ascii_lowercase()) {
+                return Err(format!(
+                    "Đường dẫn theme bị trùng lặp không phân biệt hoa thường: {rel_path}"
+                ));
+            }
+            validate_v2_relative_path(&rel_path).map_err(str::to_owned)?;
+            let cap = v3_entry_cap_and_allowlist(&rel_path).map_err(str::to_owned)?;
+            if meta.len() > cap as u64 {
+                return Err(format!(
+                    "File '{rel_path}' vượt quá giới hạn kích thước ({cap} bytes)."
+                ));
+            }
+            let file = std::fs::File::open(&entry_path)
+                .map_err(|e| format!("Không thể mở file '{rel_path}': {e}"))?;
+            let mut data = Vec::with_capacity((meta.len() as usize).min(cap));
+            file.take((cap + 1) as u64)
+                .read_to_end(&mut data)
+                .map_err(|e| format!("Không thể đọc file '{rel_path}': {e}"))?;
+            if data.len() > cap {
+                return Err(format!(
+                    "File '{rel_path}' vượt quá giới hạn kích thước ({cap} bytes)."
+                ));
+            }
+            *decoded_total = decoded_total.saturating_add(data.len());
+            if *decoded_total > V2_MAX_DECODED_BYTES {
+                return Err("Theme v3 vượt quá giới hạn tổng kích thước giải mã 32 MiB.".to_owned());
+            }
+            files.insert(rel_path, data);
+        } else {
+            return Err(format!(
+                "Không cho phép entry không phải file thường trong theme: {rel_path}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn load_v3_files_from_dir(root: &Path) -> Result<BTreeMap<String, Vec<u8>>, String> {
+    let meta = std::fs::metadata(root)
+        .map_err(|e| format!("Không thể truy cập thư mục theme '{}': {e}", root.display()))?;
+    if !meta.is_dir() {
+        return Err(format!(
+            "Đường dẫn '{}' không phải thư mục.",
+            root.display()
+        ));
+    }
+    let mut files = BTreeMap::new();
+    let mut seen_lower = BTreeSet::new();
+    let mut decoded_total = 0usize;
+    walk_v3_dir(root, "", 0, &mut files, &mut seen_lower, &mut decoded_total)?;
+    Ok(files)
+}
+
+fn build_theme_check_summary(pkg: &ThemeV3Package) -> Result<ThemeCheckSummary, String> {
+    let mut templates: Vec<String> = pkg
+        .manifest
+        .templates
+        .iter()
+        .map(|t| t.canonical_key().unwrap_or_else(|_| t.file.clone()))
+        .collect();
+    templates.sort();
+
+    let parts: Vec<String> = pkg.manifest.parts.keys().cloned().collect();
+
+    let mut page_layouts: Vec<String> = pkg
+        .manifest
+        .page_layouts
+        .iter()
+        .map(|l| l.key.clone())
+        .collect();
+    page_layouts.sort();
+
+    let mut patterns: Vec<String> = pkg
+        .manifest
+        .patterns
+        .iter()
+        .map(|p| p.key.clone())
+        .collect();
+    patterns.sort();
+
+    let mut blocks: Vec<String> = collect_package_blocks(&pkg.files, &pkg.manifest.theme_id)
+        .map_err(str::to_owned)?
+        .into_iter()
+        .map(|(schema, _)| schema.id)
+        .collect();
+    blocks.sort();
+
+    let mut assets = pkg.manifest.assets.clone();
+    assets.sort();
+
+    let options_count = crate::storage::settings::parse_theme_options_schema(&pkg.manifest_json)
+        .map_err(str::to_owned)?
+        .len();
+
+    Ok(ThemeCheckSummary {
+        ok: true,
+        theme_id: pkg.manifest.theme_id.clone(),
+        version: pkg.manifest.version.clone(),
+        templates,
+        parts,
+        page_layouts,
+        patterns,
+        blocks,
+        assets,
+        options_count,
+    })
+}
+
+pub fn check_theme_path(path: &Path) -> Result<ThemeCheckSummary, String> {
+    let meta = std::fs::metadata(path).map_err(|e| {
+        format!(
+            "Không thể truy cập đường dẫn theme '{}': {e}",
+            path.display()
+        )
+    })?;
+    let pkg = if meta.is_file() {
+        if meta.len() > V2_MAX_ZIP_BYTES as u64 {
+            return Err(format!(
+                "File ZIP theme vượt quá giới hạn {V2_MAX_ZIP_BYTES} bytes."
+            ));
+        }
+        let file = std::fs::File::open(path)
+            .map_err(|e| format!("Không thể mở file ZIP '{}': {e}", path.display()))?;
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        file.take((V2_MAX_ZIP_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("Không thể đọc file ZIP '{}': {e}", path.display()))?;
+        if bytes.len() > V2_MAX_ZIP_BYTES {
+            return Err(format!(
+                "File ZIP theme vượt quá giới hạn {V2_MAX_ZIP_BYTES} bytes."
+            ));
+        }
+        parse_theme_zip_v3(&bytes).map_err(zip_err_msg)?
+    } else if meta.is_dir() {
+        let files = load_v3_files_from_dir(path)?;
+        validate_theme_v3_files(files).map_err(zip_err_msg)?
+    } else {
+        return Err(format!(
+            "Đường dẫn '{}' không phải file hoặc thư mục hợp lệ.",
+            path.display()
+        ));
+    };
+    build_theme_check_summary(&pkg)
 }
 
 /// Retained only for historical ZIP-parser unit tests during the v3 cutover.
@@ -1389,5 +1616,119 @@ mod tests {
             parse_theme_zip_v2(&bomb),
             Err(V2ZipError::BadRequest(_))
         ));
+    }
+
+    #[test]
+    fn check_theme_path_validates_dir_zip_and_security_boundaries() {
+        use std::io::Write as _;
+        use zip::write::SimpleFileOptions;
+
+        let starter_dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/builtin_themes/opendash-starter");
+        let summary = check_theme_path(&starter_dir).expect("opendash-starter must pass");
+        assert!(summary.ok);
+        assert_eq!(summary.theme_id, "opendash-starter");
+        assert!(!summary.templates.is_empty());
+        assert!(summary.parts.windows(2).all(|w| w[0] <= w[1]));
+        assert!(summary.templates.windows(2).all(|w| w[0] <= w[1]));
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let tmp_root = std::env::temp_dir().join(format!(
+            "opendash-check-theme-{}-{nanos}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&tmp_root).unwrap();
+
+        // Build minimal valid theme dir + test binary zip with non-.zip extension.
+        let valid_dir = tmp_root.join("valid-theme");
+        std::fs::create_dir_all(valid_dir.join("assets")).unwrap();
+        let manifest_bytes = br#"{"manifest_version":3,"theme_id":"cli-sample","name":"CLI Sample","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}],"assets":["assets/main.css"],"options":[{"key":"cta","label":"CTA","type":"text","default":"Hi"}]}"#;
+        let index_bytes = b"<main><h1>{{ site.title }}</h1>{% for e in entries %}<a href=\"{{ e.url }}\">{{ e.title }}</a>{% endfor %}</main>";
+        let css_bytes = b"body { color: #111; }";
+        std::fs::write(valid_dir.join("theme.json"), manifest_bytes).unwrap();
+        std::fs::write(valid_dir.join("index.html"), index_bytes).unwrap();
+        std::fs::write(valid_dir.join("assets/main.css"), css_bytes).unwrap();
+
+        let dir_summary = check_theme_path(&valid_dir).expect("valid dir passes");
+        assert_eq!(dir_summary.theme_id, "cli-sample");
+        assert_eq!(dir_summary.options_count, 1);
+        assert_eq!(dir_summary.assets, vec!["assets/main.css"]);
+
+        // ZIP package without `.zip` extension must still validate via magic/file read.
+        let bin_zip_path = tmp_root.join("cli-sample.bundle");
+        {
+            let f = std::fs::File::create(&bin_zip_path).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = SimpleFileOptions::default();
+            zw.start_file("theme.json", opts).unwrap();
+            zw.write_all(manifest_bytes).unwrap();
+            zw.start_file("index.html", opts).unwrap();
+            zw.write_all(index_bytes).unwrap();
+            zw.start_file("assets/main.css", opts).unwrap();
+            zw.write_all(css_bytes).unwrap();
+            zw.finish().unwrap();
+        }
+        let zip_summary = check_theme_path(&bin_zip_path).expect("non-.zip zip passes");
+        assert_eq!(zip_summary.theme_id, "cli-sample");
+
+        // Hidden file rejection.
+        let hidden_dir = tmp_root.join("hidden-theme");
+        std::fs::create_dir_all(&hidden_dir).unwrap();
+        std::fs::write(hidden_dir.join("theme.json"), manifest_bytes).unwrap();
+        std::fs::write(hidden_dir.join(".env"), b"SECRET=1").unwrap();
+        assert!(check_theme_path(&hidden_dir).is_err());
+
+        // Depth > MAX_THEME_DIR_DEPTH (16) rejection.
+        let deep_dir = tmp_root.join("deep-theme");
+        let mut nested = deep_dir.clone();
+        for i in 0..=16 {
+            nested = nested.join(format!("d{i}"));
+        }
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(deep_dir.join("theme.json"), manifest_bytes).unwrap();
+        assert!(check_theme_path(&deep_dir).is_err());
+
+        // Oversized text file rejection.
+        let big_dir = tmp_root.join("big-theme");
+        std::fs::create_dir_all(&big_dir).unwrap();
+        std::fs::write(big_dir.join("theme.json"), manifest_bytes).unwrap();
+        std::fs::write(
+            big_dir.join("index.html"),
+            vec![b'x'; V2_MAX_TEXT_BYTES + 1],
+        )
+        .unwrap();
+        assert!(check_theme_path(&big_dir).is_err());
+
+        // Oversized ZIP rejection.
+        let big_zip = tmp_root.join("big.zip");
+        std::fs::write(&big_zip, vec![0u8; V2_MAX_ZIP_BYTES + 1]).unwrap();
+        assert!(check_theme_path(&big_zip).is_err());
+
+        // Internal symlink rejection (Unix).
+        #[cfg(unix)]
+        {
+            let sym_dir = tmp_root.join("sym-theme");
+            std::fs::create_dir_all(&sym_dir).unwrap();
+            std::fs::write(sym_dir.join("theme.json"), manifest_bytes).unwrap();
+            std::os::unix::fs::symlink(valid_dir.join("index.html"), sym_dir.join("index.html"))
+                .unwrap();
+            assert!(check_theme_path(&sym_dir).is_err());
+        }
+
+        // Unsafe C-SEC template rejection.
+        let bad_csec = tmp_root.join("bad-csec");
+        std::fs::create_dir_all(&bad_csec).unwrap();
+        std::fs::write(
+            bad_csec.join("theme.json"),
+            br#"{"manifest_version":3,"theme_id":"bad-csec","name":"Bad","version":"1.0.0","templates":[{"kind":"index","file":"index.html"}]}"#,
+        )
+        .unwrap();
+        std::fs::write(bad_csec.join("index.html"), b"<script>alert(1)</script>").unwrap();
+        assert!(check_theme_path(&bad_csec).is_err());
+
+        let _ = std::fs::remove_dir_all(&tmp_root);
     }
 }
