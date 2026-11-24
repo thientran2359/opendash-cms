@@ -180,7 +180,7 @@ async fn typed_url_fresh_public_saved_and_unsaved_preview() {
     let (cookie, csrf) = login(&http, &srv).await;
     let themes = get_admin(&http, &srv, &cookie, "/api/admin/themes").await;
     assert_eq!(themes["revisions"].as_array().unwrap().len(), 1);
-    assert_eq!(themes["revisions"][0]["version"], "1.0.1");
+    assert_eq!(themes["revisions"][0]["version"], "1.1.0");
     assert_eq!(themes["selection"]["version"], 1);
 
     let options = get_admin(&http, &srv, &cookie, "/api/themes/opendash-starter/options").await;
@@ -474,13 +474,13 @@ async fn actual_old_new_old_binary_roundtrip_preserves_data_and_cas() {
     );
     assert!(v100_marker.is_file(), "frozen legacy revision must repair");
     assert_eq!(upgrades["revisions"].as_array().unwrap().len(), 2);
-    let v101 = upgrades["revisions"]
+    let v110 = upgrades["revisions"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|rev| rev["version"] == "1.0.1")
+        .find(|rev| rev["version"] == "1.1.0")
         .unwrap();
-    let v101_id = v101["revision_id"].as_str().unwrap().to_owned();
+    let v101_id = v110["revision_id"].as_str().unwrap().to_owned();
     let option_upgrade = get_admin(
         &http,
         &new_srv,

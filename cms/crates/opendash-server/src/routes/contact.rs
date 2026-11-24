@@ -350,6 +350,11 @@ pub async fn public_submit(
         )
             .into_response()),
         SubmitOutcome::ValidationFailed(errs) => {
+            let (locale_code, bcp47_tag, _dir) =
+                crate::storage::settings::get_locale_bcp47_and_dir(&db, None)
+                    .await
+                    .unwrap_or_else(|_| ("vi".to_owned(), "vi".to_owned(), "ltr".to_owned()));
+            let l10n = crate::content_render::core_l10n(&locale_code);
             let mut items = String::new();
             for err in &errs {
                 items.push_str(&format!(
@@ -359,7 +364,10 @@ pub async fn public_submit(
                 ));
             }
             let html = format!(
-                "<!DOCTYPE html><html lang=\"vi\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>Lỗi gửi biểu mẫu</title></head><body><main role=\"alert\"><h1>Không thể gửi biểu mẫu</h1><ul>{items}</ul></main></body></html>"
+                "<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>{}</title></head><body><main role=\"alert\"><h1>{}</h1><ul>{items}</ul></main></body></html>",
+                escape_html(&bcp47_tag),
+                escape_html(l10n.contact_error_title),
+                escape_html(l10n.contact_error_heading),
             );
             Ok((
                 StatusCode::UNPROCESSABLE_ENTITY,
@@ -375,8 +383,19 @@ pub async fn public_submit(
     }
 }
 
-pub async fn public_received() -> Response {
-    let html = "<!DOCTYPE html><html lang=\"vi\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>Đã nhận liên hệ</title></head><body><main><h1>Cảm ơn bạn đã liên hệ</h1><p>Thông tin của bạn đã được tiếp nhận.</p></main></body></html>";
+pub async fn public_received(State(db): State<SqlitePool>) -> Response {
+    let (locale_code, bcp47_tag, _dir) =
+        crate::storage::settings::get_locale_bcp47_and_dir(&db, None)
+            .await
+            .unwrap_or_else(|_| ("vi".to_owned(), "vi".to_owned(), "ltr".to_owned()));
+    let l10n = crate::content_render::core_l10n(&locale_code);
+    let html = format!(
+        "<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>{}</title></head><body><main><h1>{}</h1><p>{}</p></main></body></html>",
+        escape_html(&bcp47_tag),
+        escape_html(l10n.contact_received_title),
+        escape_html(l10n.contact_received_heading),
+        escape_html(l10n.contact_received_body),
+    );
     (
         StatusCode::OK,
         [

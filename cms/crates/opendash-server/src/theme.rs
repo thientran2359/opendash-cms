@@ -235,7 +235,7 @@ fn v3_entry_cap_and_allowlist(rel_path: &str) -> Result<usize, &'static str> {
     }
     match parent {
         "" | "template-part" | "page-layouts" if is_html => Ok(V2_MAX_TEXT_BYTES),
-        "patterns" if is_json => Ok(V2_MAX_TEXT_BYTES),
+        "patterns" | "locales" if is_json => Ok(V2_MAX_TEXT_BYTES),
         _ if rel_path.starts_with("assets/") => {
             if !valid_asset_path(rel_path) {
                 return Err("Đường dẫn assets theme v3 không đúng schema D01.");
@@ -320,6 +320,42 @@ fn required_v3_utf8<'a>(
         ));
     }
     Ok(source)
+}
+
+pub(crate) const MAX_THEME_LOCALE_FILES: usize = 32;
+pub(crate) const MAX_THEME_LOCALE_KEYS: usize = 512;
+pub(crate) const MAX_THEME_LOCALE_VALUE_CHARS: usize = 500;
+
+/// Parses and validates a flat theme dictionary `locales/<code>.json`.
+pub(crate) fn parse_theme_locale_json(
+    raw: &[u8],
+) -> Result<BTreeMap<String, String>, &'static str> {
+    let text = std::str::from_utf8(raw).map_err(|_| "File từ điển locale phải là UTF-8 hợp lệ.")?;
+    let value: serde_json::Value =
+        serde_json::from_str(text).map_err(|_| "File từ điển locale không phải JSON hợp lệ.")?;
+    let obj = value
+        .as_object()
+        .ok_or("File từ điển locale phải là JSON object phẳng.")?;
+    if obj.len() > MAX_THEME_LOCALE_KEYS {
+        return Err("File từ điển locale vượt quá giới hạn 512 khóa.");
+    }
+    let mut dict = BTreeMap::new();
+    for (key, val) in obj {
+        if !opendash_core::id::valid_snake_key_with_limit(key, 64) {
+            return Err("Khóa trong từ điển locale phải là snake_case tối đa 64 ký tự.");
+        }
+        let s = val
+            .as_str()
+            .ok_or("Giá trị trong từ điển locale phải là chuỗi phẳng.")?;
+        if s.chars().count() > MAX_THEME_LOCALE_VALUE_CHARS {
+            return Err("Chuỗi dịch trong từ điển locale vượt quá 500 ký tự.");
+        }
+        if s.chars().any(|ch| ch.is_control()) {
+            return Err("Chuỗi dịch trong từ điển locale không được chứa ký tự điều khiển.");
+        }
+        dict.insert(key.clone(), s.to_owned());
+    }
+    Ok(dict)
 }
 
 /// Read a v3 ZIP through the shared bounded, symlink-safe package reader,
@@ -437,8 +473,10 @@ pub(crate) fn validate_theme_v3_files(
     }
 
     use crate::template_sec::{
-        CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
+        CsecContentKind, collect_theme_translation_keys,
+        validate_and_compile_csec_composition_with_theme_urls,
     };
+    let mut used_t_keys = BTreeSet::new();
     for declaration in &manifest.templates {
         let source = required_v3_utf8(&files, &declaration.file)?;
         declared.insert(declaration.file.clone());
@@ -460,6 +498,7 @@ pub(crate) fn validate_theme_v3_files(
             &url_policy,
         )
         .map_err(V2ZipError::BadRequest)?;
+        used_t_keys.extend(collect_theme_translation_keys(source).map_err(V2ZipError::BadRequest)?);
     }
     for layout in &manifest.page_layouts {
         let source = required_v3_utf8(&files, &layout.file)?;
@@ -472,6 +511,7 @@ pub(crate) fn validate_theme_v3_files(
             &url_policy,
         )
         .map_err(V2ZipError::BadRequest)?;
+        used_t_keys.extend(collect_theme_translation_keys(source).map_err(V2ZipError::BadRequest)?);
     }
     for (key, source) in &parts {
         validate_and_compile_csec_composition_with_theme_urls(
@@ -482,6 +522,60 @@ pub(crate) fn validate_theme_v3_files(
             &url_policy,
         )
         .map_err(V2ZipError::BadRequest)?;
+        used_t_keys.extend(collect_theme_translation_keys(source).map_err(V2ZipError::BadRequest)?);
+    }
+
+    let mut locale_dicts = BTreeMap::new();
+    let mut seen_lower_locale_paths = BTreeSet::new();
+    for (path, raw) in &files {
+        if let Some(rest) = path.strip_prefix("locales/") {
+            let Some(code) = rest.strip_suffix(".json") else {
+                return Err(V2ZipError::BadRequest(
+                    "File trong locales/ của theme v3 phải có đuôi .json.",
+                ));
+            };
+            if !seen_lower_locale_paths.insert(path.to_ascii_lowercase()) {
+                return Err(V2ZipError::BadRequest(
+                    "Theme v3 có file locales/*.json trùng tên hoa/thường.",
+                ));
+            }
+            if code != code.to_ascii_lowercase()
+                || !crate::storage::settings::valid_content_language(code)
+            {
+                return Err(V2ZipError::BadRequest(
+                    "Mã ngôn ngữ trong locales/<code>.json không hợp lệ.",
+                ));
+            }
+            if locale_dicts.len() >= MAX_THEME_LOCALE_FILES {
+                return Err(V2ZipError::BadRequest(
+                    "Theme v3 vượt quá giới hạn 32 file locales/*.json.",
+                ));
+            }
+            let dict = parse_theme_locale_json(raw).map_err(V2ZipError::BadRequest)?;
+            locale_dicts.insert(code.to_owned(), dict);
+            declared.insert(path.clone());
+        }
+    }
+
+    if !used_t_keys.is_empty() {
+        let Some(def_locale) = manifest.default_locale.as_deref() else {
+            return Err(V2ZipError::BadRequest(
+                "Theme sử dụng khóa dịch t.<key> bắt buộc khai báo default_locale trong theme.json.",
+            ));
+        };
+        let def_code = def_locale.to_ascii_lowercase();
+        let Some(def_dict) = locale_dicts.get(&def_code) else {
+            return Err(V2ZipError::BadRequest(
+                "Theme thiếu file từ điển locales/<default_locale>.json.",
+            ));
+        };
+        for key in &used_t_keys {
+            if !def_dict.contains_key(key) {
+                return Err(V2ZipError::BadRequest(
+                    "Theme thiếu khóa dịch t.<key> trong từ điển default_locale.",
+                ));
+            }
+        }
     }
     for pattern in &manifest.patterns {
         let source = required_v3_utf8(&files, &pattern.file)?;

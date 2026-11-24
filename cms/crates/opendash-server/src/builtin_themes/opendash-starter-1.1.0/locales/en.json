@@ -1,0 +1,19 @@
+{
+  "nav_primary_label": "Primary navigation",
+  "footer_links_heading": "Links",
+  "footer_nav_label": "Footer links",
+  "posts_kicker": "News and insights",
+  "posts_heading": "Latest posts",
+  "posts_empty": "No posts yet.",
+  "back_to_posts": "← Posts",
+  "empty_content": "No content yet.",
+  "previous_page": "← Previous",
+  "next_page": "Next →",
+  "pagination_label": "Pagination",
+  "topic_label": "Topic",
+  "image_alt_prefix": "Illustration ",
+  "not_found_heading": "404 — Page not found",
+  "not_found_body": "This page does not exist or has been moved.",
+  "back_to_home": "Back to Home",
+  "language_switcher_label": "Language"
+}

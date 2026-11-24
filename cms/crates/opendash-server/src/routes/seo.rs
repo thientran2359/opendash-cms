@@ -121,7 +121,9 @@ pub async fn public_fallback(
     validate_public_request_path(lookup_path).map_err(ApiError::bad_request)?;
     let resolved = permalinks::resolve_public_path(&db, lookup_path).await?;
     let Some(resolved) = resolved else {
-        return missing_public_page(&db, themes_root, None).await;
+        let inferred_locale =
+            crate::storage::settings::enabled_secondary_locale_for_segment(&db, first_seg).await?;
+        return missing_public_page(&db, themes_root, inferred_locale.as_deref()).await;
     };
     let raw = uri.query();
     match resolved.target {

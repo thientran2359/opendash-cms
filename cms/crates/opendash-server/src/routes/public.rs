@@ -70,9 +70,10 @@ pub(crate) async fn render_home_for_locale(
                     .await?;
             view.robots = "noindex,nofollow".to_owned();
             view.alternates.clear();
+            let l10n = content_render::core_l10n(locale);
             let html = content_render::compose_document_with_seo(
                 None,
-                "<main><p>Chưa cấu hình trang chủ.</p></main>",
+                &format!("<main><p>{}</p></main>", l10n.home_unconfigured),
                 None,
                 &view,
             )?;

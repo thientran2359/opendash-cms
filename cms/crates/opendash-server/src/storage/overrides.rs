@@ -1781,6 +1781,8 @@ pub async fn render_override_for_public_with_context(
 pub struct PublicCompositionBudget {
     pub render_budget: page::RenderBudget,
     expansions: usize,
+    shared_t: Option<minijinja::Value>,
+    shared_locale: Option<minijinja::Value>,
 }
 
 impl Default for PublicCompositionBudget {
@@ -1788,6 +1790,8 @@ impl Default for PublicCompositionBudget {
         Self {
             render_budget: page::RenderBudget::new(),
             expansions: 0,
+            shared_t: None,
+            shared_locale: None,
         }
     }
 }
@@ -1797,7 +1801,28 @@ impl PublicCompositionBudget {
         Self {
             render_budget,
             expansions: 0,
+            shared_t: None,
+            shared_locale: None,
         }
+    }
+
+    /// Pre-computes and shares `Arc`-backed `t` and `locale` MiniJinja values
+    /// once per request across header, body and footer segments.
+    pub fn set_locale_context(
+        &mut self,
+        active: Option<&ActiveThemeV3>,
+        locale_code: &str,
+        locale_ctx: serde_json::Value,
+    ) {
+        let t_map = active
+            .map(|v| v.merged_translations(locale_code))
+            .unwrap_or_default();
+        self.shared_t = Some(minijinja::Value::from_pairs(
+            t_map
+                .into_iter()
+                .map(|(k, v)| (k, minijinja::Value::from(v))),
+        ));
+        self.shared_locale = Some(template_sec::json_to_safe_value(&locale_ctx));
     }
 
     fn charge(&mut self, count: usize) -> ApiResult<()> {
@@ -1818,7 +1843,11 @@ impl PublicCompositionBudget {
         self.charge(compiled.part_expansions())?;
         let html = compiled
             .render_with_remaining_fuel(
-                template_sec::json_to_safe_value(context),
+                template_sec::json_context_with_shared_locale(
+                    context,
+                    self.shared_t.as_ref(),
+                    self.shared_locale.as_ref(),
+                ),
                 slot,
                 &mut self.render_budget.fuel_remaining,
             )
@@ -2860,6 +2889,24 @@ pub async fn preview_studio_with_cache_and_locale(
     };
     let mut preview_budget = PreviewCompositionBudget::with_render_budget(shared_rb.clone());
     let mut public_budget = PublicCompositionBudget::with_render_budget(shared_rb);
+    let preview_locale_ctx = crate::storage::seo::build_theme_locale_context_in_conn(
+        &mut tx,
+        Some(&effective_locale),
+        crate::storage::seo::ThemeLocaleTarget::None,
+    )
+    .await?;
+    let preview_t_map = active
+        .as_ref()
+        .map(|a| a.merged_translations(&effective_locale))
+        .unwrap_or_default();
+    if let Some(obj) = theme_context.as_object_mut() {
+        obj.insert(
+            "t".to_owned(),
+            serde_json::to_value(&preview_t_map).unwrap_or_else(|_| serde_json::json!({})),
+        );
+        obj.insert("locale".to_owned(), preview_locale_ctx.clone());
+    }
+    public_budget.set_locale_context(active.as_ref(), &effective_locale, preview_locale_ctx);
     let mut canvas_layout = target.kind == K::PageLayout;
     let main_scope = if target.kind == K::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -3066,7 +3113,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
         tagline: &general.tagline,
     };
     let view = content_render::authenticated_preview_view(record.clone(), definition);
-    let theme_context = serde_json::json!({
+    let mut theme_context = serde_json::json!({
         "site": site,
         "options": options,
         "theme_options": options,
@@ -3106,6 +3153,26 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     let mut preview_budget =
         PreviewCompositionBudget::with_render_budget(entry_render_budget.clone());
     let mut public_budget = PublicCompositionBudget::with_render_budget(entry_render_budget);
+    let preview_locale_ctx = crate::storage::seo::build_theme_locale_context_in_conn(
+        &mut **tx,
+        Some(&record.locale),
+        crate::storage::seo::ThemeLocaleTarget::Entry {
+            entry_id: record.id,
+        },
+    )
+    .await?;
+    let preview_t_map = active
+        .as_ref()
+        .map(|a| a.merged_translations(&record.locale))
+        .unwrap_or_default();
+    if let Some(obj) = theme_context.as_object_mut() {
+        obj.insert(
+            "t".to_owned(),
+            serde_json::to_value(&preview_t_map).unwrap_or_else(|_| serde_json::json!({})),
+        );
+        obj.insert("locale".to_owned(), preview_locale_ctx.clone());
+    }
+    public_budget.set_locale_context(active.as_ref(), &record.locale, preview_locale_ctx);
     let route = Some((record.content_type_key.as_str(), record.slug.as_str()));
     let mut diagnostics = entry_rendered.diagnostics;
     let mut has_active_contact_form = entry_rendered.has_active_contact_form;

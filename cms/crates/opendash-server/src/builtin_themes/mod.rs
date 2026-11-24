@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 pub const STARTER_THEME_ID: &str = "opendash-starter";
 pub const STARTER_THEME_NAME: &str = "OpenDash Starter";
-pub const STARTER_THEME_VERSION: &str = "1.0.1";
+pub const STARTER_THEME_VERSION: &str = "1.1.0";
 
 /// Immutable embedded Starter theme resources, validated using the same v3
 /// boundary as uploaded packages before publishing an on-disk revision.
@@ -125,7 +125,7 @@ pub fn builtin_starter_theme_v100_files() -> BTreeMap<String, Vec<u8>> {
 
 /// v1.0.1 shares immutable assets, layouts, patterns and blocks with the
 /// frozen v1.0.0 snapshot, changing only the four explicitly overlaid files.
-pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
+pub fn builtin_starter_theme_v101_files() -> BTreeMap<String, Vec<u8>> {
     let mut files = builtin_starter_theme_v100_files();
     for (path, bytes) in [
         (
@@ -143,6 +143,66 @@ pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
         (
             "single-post.html",
             include_bytes!("opendash-starter-1.0.1/single-post.html").as_slice(),
+        ),
+    ] {
+        files.insert(path.to_owned(), bytes.to_vec());
+    }
+    files
+}
+
+/// v1.1.0 builds on the v1.0.1 snapshot with Theme v3 L10n dictionaries,
+/// `language-switcher` template part, and localized starter templates.
+pub fn builtin_starter_theme_files() -> BTreeMap<String, Vec<u8>> {
+    let mut files = builtin_starter_theme_v101_files();
+    for (path, bytes) in [
+        (
+            "theme.json",
+            include_bytes!("opendash-starter-1.1.0/theme.json").as_slice(),
+        ),
+        (
+            "locales/vi.json",
+            include_bytes!("opendash-starter-1.1.0/locales/vi.json").as_slice(),
+        ),
+        (
+            "locales/en.json",
+            include_bytes!("opendash-starter-1.1.0/locales/en.json").as_slice(),
+        ),
+        (
+            "template-part/language-switcher.html",
+            include_bytes!("opendash-starter-1.1.0/template-part/language-switcher.html")
+                .as_slice(),
+        ),
+        (
+            "header.html",
+            include_bytes!("opendash-starter-1.1.0/header.html").as_slice(),
+        ),
+        (
+            "footer.html",
+            include_bytes!("opendash-starter-1.1.0/footer.html").as_slice(),
+        ),
+        (
+            "archive-post.html",
+            include_bytes!("opendash-starter-1.1.0/archive-post.html").as_slice(),
+        ),
+        (
+            "archive.html",
+            include_bytes!("opendash-starter-1.1.0/archive.html").as_slice(),
+        ),
+        (
+            "single-post.html",
+            include_bytes!("opendash-starter-1.1.0/single-post.html").as_slice(),
+        ),
+        (
+            "taxonomy.html",
+            include_bytes!("opendash-starter-1.1.0/taxonomy.html").as_slice(),
+        ),
+        (
+            "index.html",
+            include_bytes!("opendash-starter-1.1.0/index.html").as_slice(),
+        ),
+        (
+            "404.html",
+            include_bytes!("opendash-starter-1.1.0/404.html").as_slice(),
         ),
     ] {
         files.insert(path.to_owned(), bytes.to_vec());
