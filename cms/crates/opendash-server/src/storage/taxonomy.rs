@@ -18,14 +18,25 @@ use crate::{
 
 const MAX_CATEGORY_DEPTH: i64 = 8;
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TermTranslationSummary {
+    pub id: i64,
+    pub locale: String,
+    pub name: String,
+    pub slug: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TaxonomyTerm {
     pub id: i64,
     pub kind: String,
+    pub locale: String,
+    pub translation_group_id: String,
     pub name: String,
     pub slug: String,
     pub parent_id: Option<i64>,
     pub version: i64,
+    pub translations: Vec<TermTranslationSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions: Option<BTreeMap<String, BTreeMap<String, Value>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,22 +55,67 @@ pub struct TaxonomyPage {
 pub struct TaxonomyTermLabel {
     pub id: i64,
     pub kind: String,
+    pub locale: String,
     pub name: String,
 }
 
-type TermRow = (i64, String, String, String, Option<i64>, i64);
+type TermRow = (
+    i64,
+    String,
+    String,
+    String,
+    Option<i64>,
+    i64,
+    String,
+    String,
+);
 
 fn term(row: TermRow) -> TaxonomyTerm {
     TaxonomyTerm {
         id: row.0,
         kind: row.1,
+        locale: row.6,
+        translation_group_id: row.7,
         name: row.2,
         slug: row.3,
         parent_id: row.4,
         version: row.5,
+        translations: Vec::new(),
         extensions: None,
         schema_token: None,
     }
+}
+
+async fn batch_term_translations_in_conn(
+    conn: &mut SqliteConnection,
+    group_ids: &[String],
+) -> ApiResult<BTreeMap<(String, String), Vec<TermTranslationSummary>>> {
+    let mut out = BTreeMap::<(String, String), Vec<TermTranslationSummary>>::new();
+    if group_ids.is_empty() {
+        return Ok(out);
+    }
+    let ids_json = serde_json::to_string(group_ids)?;
+    let rows: Vec<(String, String, i64, String, String, String)> = sqlx::query_as(
+        "SELECT t.kind, t.translation_group_id, t.id, t.locale, t.name, t.slug
+           FROM taxonomy_terms t
+           JOIN site_locales sl ON sl.code = t.locale
+          WHERE t.translation_group_id IN (SELECT value FROM json_each(?))
+          ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
+    )
+    .bind(ids_json)
+    .fetch_all(conn)
+    .await?;
+    for (kind, group_id, id, locale, name, slug) in rows {
+        out.entry((kind, group_id))
+            .or_default()
+            .push(TermTranslationSummary {
+                id,
+                locale,
+                name,
+                slug,
+            });
+    }
+    Ok(out)
 }
 
 type DefinitionRow = (
@@ -567,14 +623,23 @@ async fn term_in_write(
     id: i64,
 ) -> ApiResult<Option<TaxonomyTerm>> {
     let row: Option<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id
          FROM taxonomy_terms WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(&mut **tx)
     .await
     .map_err(mutation_error)?;
-    Ok(row.map(term))
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let mut rec = term(row);
+    let mut map =
+        batch_term_translations_in_conn(&mut **tx, &[rec.translation_group_id.clone()]).await?;
+    rec.translations = map
+        .remove(&(rec.kind.clone(), rec.translation_group_id.clone()))
+        .unwrap_or_default();
+    Ok(Some(rec))
 }
 
 async fn current_term(
@@ -621,6 +686,7 @@ async fn check_taxonomy_parent(
     parent_id: Option<i64>,
     moving_id: Option<i64>,
     moving_height: i64,
+    target_locale: &str,
 ) -> ApiResult<()> {
     let Some(parent_id) = parent_id else {
         if moving_height > MAX_CATEGORY_DEPTH {
@@ -633,13 +699,19 @@ async fn check_taxonomy_parent(
             "ID category cha phải là số nguyên dương.",
         ));
     }
-    let parent: Option<(String,)> = sqlx::query_as("SELECT kind FROM taxonomy_terms WHERE id = ?")
-        .bind(parent_id)
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(mutation_error)?;
+    let parent: Option<(String, String)> =
+        sqlx::query_as("SELECT kind, locale FROM taxonomy_terms WHERE id = ?")
+            .bind(parent_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(mutation_error)?;
     match parent {
-        Some((kind,)) if kind == taxonomy_key => {}
+        Some((kind, locale)) if kind == taxonomy_key && locale == target_locale => {}
+        Some((kind, _)) if kind == taxonomy_key => {
+            return Err(ApiError::bad_request(
+                "Term cha thuộc ngôn ngữ khác với term hiện tại.",
+            ));
+        }
         _ => {
             return Err(ApiError::bad_request(
                 "Term cha không tồn tại hoặc thuộc taxonomy khác.",
@@ -688,31 +760,70 @@ pub async fn list_terms(
     limit: i64,
     offset: i64,
 ) -> ApiResult<TaxonomyPage> {
+    list_terms_for_locale(db, kind, None, limit, offset).await
+}
+
+pub async fn list_terms_for_locale(
+    db: &SqlitePool,
+    kind: Option<&str>,
+    locale: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> ApiResult<TaxonomyPage> {
     let mut tx = db.begin().await?;
-    let total: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM taxonomy_terms WHERE (? IS NULL OR kind = ?)")
-            .bind(kind)
-            .bind(kind)
-            .fetch_one(&mut *tx)
-            .await?;
+    let resolved_locale = match locale {
+        Some(raw) => Some(
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, Some(raw)).await?,
+        ),
+        None => None,
+    };
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM taxonomy_terms
+          WHERE (? IS NULL OR kind = ?)
+            AND (? IS NULL OR locale = ?)",
+    )
+    .bind(kind)
+    .bind(kind)
+    .bind(resolved_locale.as_deref())
+    .bind(resolved_locale.as_deref())
+    .fetch_one(&mut *tx)
+    .await?;
     let rows: Vec<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id
            FROM taxonomy_terms
           WHERE (? IS NULL OR kind = ?)
+            AND (? IS NULL OR locale = ?)
           ORDER BY name COLLATE BINARY ASC, id ASC
           LIMIT ? OFFSET ?",
     )
     .bind(kind)
     .bind(kind)
+    .bind(resolved_locale.as_deref())
+    .bind(resolved_locale.as_deref())
     .bind(limit)
     .bind(offset)
     .fetch_all(&mut *tx)
     .await?;
+    let group_ids: Vec<String> = rows
+        .iter()
+        .map(|row| row.7.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let translations = batch_term_translations_in_conn(&mut tx, &group_ids).await?;
     tx.commit().await?;
-    Ok(TaxonomyPage {
-        items: rows.into_iter().map(term).collect(),
-        total,
-    })
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            let mut rec = term(row);
+            rec.translations = translations
+                .get(&(rec.kind.clone(), rec.translation_group_id.clone()))
+                .cloned()
+                .unwrap_or_default();
+            rec
+        })
+        .collect();
+    Ok(TaxonomyPage { items, total })
 }
 
 /// The route enforces at most 100 distinct IDs. JSON array binding keeps the
@@ -725,8 +836,8 @@ pub async fn resolve_term_labels(
         return Err(ApiError::bad_request("Danh sách ID term không hợp lệ."));
     }
     let raw = serde_json::to_string(ids)?;
-    let rows: Vec<(i64, String, String)> = sqlx::query_as(
-        "SELECT t.id, t.kind, t.name
+    let rows: Vec<(i64, String, String, String)> = sqlx::query_as(
+        "SELECT t.id, t.kind, t.locale, t.name
          FROM taxonomy_terms t JOIN json_each(?) ids ON ids.value = t.id
          ORDER BY t.id",
     )
@@ -735,21 +846,41 @@ pub async fn resolve_term_labels(
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, kind, name)| TaxonomyTermLabel { id, kind, name })
+        .map(|(id, kind, locale, name)| TaxonomyTermLabel {
+            id,
+            kind,
+            locale,
+            name,
+        })
         .collect())
 }
 
 /// Read one stable term ID for a dedicated editor route. Authorization belongs
 /// to the route; this projection is identical to the paged list DTO.
 pub async fn get_term(db: &SqlitePool, id: i64) -> ApiResult<Option<TaxonomyTerm>> {
+    let mut tx = db.begin().await?;
     let row: Option<TermRow> = sqlx::query_as(
-        "SELECT id, kind, name, slug, parent_id, version
+        "SELECT id, kind, name, slug, parent_id, version, locale, translation_group_id
            FROM taxonomy_terms WHERE id = ?",
     )
     .bind(id)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
-    Ok(row.map(term))
+    let rec = match row {
+        Some(row) => {
+            let mut rec = term(row);
+            let mut map =
+                batch_term_translations_in_conn(&mut tx, &[rec.translation_group_id.clone()])
+                    .await?;
+            rec.translations = map
+                .remove(&(rec.kind.clone(), rec.translation_group_id.clone()))
+                .unwrap_or_default();
+            Some(rec)
+        }
+        None => None,
+    };
+    tx.commit().await?;
+    Ok(rec)
 }
 
 /// Add only role-readable effective declarations/values to the authenticated
@@ -774,6 +905,20 @@ pub async fn create_term(
     slug: &str,
     parent_id: Option<i64>,
 ) -> ApiResult<TaxonomyTerm> {
+    create_term_with_locale(db, actor, kind, name, slug, parent_id, None, None).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn create_term_with_locale(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    kind: &str,
+    name: &str,
+    slug: &str,
+    parent_id: Option<i64>,
+    locale: Option<&str>,
+    source_term_id: Option<i64>,
+) -> ApiResult<TaxonomyTerm> {
     if !opendash_core::content::valid_content_type_key(kind) {
         return Err(ApiError::bad_request("Khóa taxonomy không hợp lệ."));
     }
@@ -782,6 +927,9 @@ pub async fn create_term(
         return Err(ApiError::bad_request(
             "Slug phải là kebab-case, tối đa 64 ký tự.",
         ));
+    }
+    if source_term_id.is_some_and(|sid| sid <= 0) {
+        return Err(ApiError::bad_request("source_term_id không hợp lệ."));
     }
     let mut tx = begin_admin_write(db, actor, false).await?;
     let taxonomy = definition_in_write(&mut tx, kind)
@@ -797,19 +945,83 @@ pub async fn create_term(
             "Taxonomy không phân cấp không nhận parent.",
         ));
     }
+    let target_locale =
+        crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, locale).await?;
+
+    let mut effective_parent_id = parent_id;
+    let group_id = if let Some(src_id) = source_term_id {
+        let src: Option<(String, String, String, Option<i64>)> = sqlx::query_as(
+            "SELECT kind, locale, translation_group_id, parent_id
+               FROM taxonomy_terms WHERE id = ?",
+        )
+        .bind(src_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(mutation_error)?;
+        let (src_kind, src_locale, src_group, src_parent_id) =
+            src.ok_or_else(|| ApiError::not_found("Không tìm thấy term nguồn để dịch."))?;
+        if src_kind != kind {
+            return Err(ApiError::bad_request(
+                "Term nguồn không thuộc cùng loại taxonomy.",
+            ));
+        }
+        if src_locale == target_locale {
+            return Err(ApiError::unprocessable(
+                "Ngôn ngữ đích phải khác ngôn ngữ của term nguồn.",
+            ));
+        }
+        let dup_group: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(
+               SELECT 1 FROM taxonomy_terms
+                WHERE kind = ? AND translation_group_id = ? AND locale = ?
+             )",
+        )
+        .bind(kind)
+        .bind(&src_group)
+        .bind(&target_locale)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(mutation_error)?;
+        if dup_group != 0 {
+            return Err(ApiError::conflict(
+                "Nhóm dịch đã có bản dịch ở ngôn ngữ đích.",
+            ));
+        }
+        if effective_parent_id.is_none()
+            && taxonomy.hierarchical
+            && let Some(sp_id) = src_parent_id
+        {
+            effective_parent_id = sqlx::query_scalar(
+                "SELECT dst.id
+                   FROM taxonomy_terms src
+                   JOIN taxonomy_terms dst
+                     ON dst.kind = src.kind
+                    AND dst.translation_group_id = src.translation_group_id
+                    AND dst.locale = ?
+                  WHERE src.id = ?",
+            )
+            .bind(&target_locale)
+            .bind(sp_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(mutation_error)?;
+        }
+        src_group
+    } else {
+        crate::storage::settings::generate_translation_group_id("tg")
+    };
+
     if taxonomy.hierarchical {
-        check_taxonomy_parent(&mut tx, kind, parent_id, None, 1).await?;
+        check_taxonomy_parent(&mut tx, kind, effective_parent_id, None, 1, &target_locale).await?;
     }
-    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
-    let group_id = crate::storage::settings::generate_translation_group_id("tg");
     let id =
         sqlx::query("INSERT INTO taxonomy_terms(kind, locale, translation_group_id, name, slug, parent_id) VALUES (?, ?, ?, ?, ?, ?)")
             .bind(kind)
-            .bind(&default_locale)
+            .bind(&target_locale)
             .bind(&group_id)
             .bind(name)
             .bind(slug)
-            .bind(parent_id)
+            .bind(effective_parent_id)
             .execute(&mut *tx)
             .await
             .map_err(mutation_error)?
@@ -862,7 +1074,15 @@ pub async fn patch_term(
     }
     if definition.hierarchical && parent_id.is_some() {
         let height = subtree_height(&mut tx, id).await?;
-        check_taxonomy_parent(&mut tx, &existing.kind, next_parent, Some(id), height).await?;
+        check_taxonomy_parent(
+            &mut tx,
+            &existing.kind,
+            next_parent,
+            Some(id),
+            height,
+            &existing.locale,
+        )
+        .await?;
     }
     if let Some(patch) = extensions {
         let token = schema_token

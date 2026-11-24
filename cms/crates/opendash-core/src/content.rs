@@ -1542,6 +1542,8 @@ pub fn valid_label(value: &str) -> bool {
 pub struct ContentEntryInput {
     pub title: String,
     pub slug: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     #[serde(default)]
     pub values: BTreeMap<String, Value>,
     /// Omitted on update: preserve existing membership (legacy client).
@@ -3171,6 +3173,7 @@ mod tests {
         ContentEntryInput {
             title: "Dự án đầu tiên".into(),
             slug: "du-an-dau-tien".into(),
+            locale: None,
             values: BTreeMap::from([
                 ("summary".into(), json!("Nội dung")),
                 ("status".into(), json!("planned")),

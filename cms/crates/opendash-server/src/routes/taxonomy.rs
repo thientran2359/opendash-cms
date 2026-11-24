@@ -26,6 +26,7 @@ pub const MAX_TAXONOMY_JSON_BYTES: usize = 16 * 1024;
 #[serde(deny_unknown_fields)]
 pub struct TaxonomyPagination {
     kind: Option<String>,
+    locale: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
 }
@@ -72,6 +73,10 @@ pub struct NewTaxonomyTerm {
     name: String,
     slug: String,
     parent_id: Option<i64>,
+    #[serde(default)]
+    locale: Option<String>,
+    #[serde(default)]
+    source_term_id: Option<i64>,
 }
 
 // Missing parent_id means "keep current parent"; explicit null means root.
@@ -246,7 +251,28 @@ pub async fn taxonomy_list(
     if !(1..=100).contains(&limit) || offset < 0 {
         return Err(ApiError::bad_request("Phân trang taxonomy không hợp lệ."));
     }
-    let page = taxonomy::list_terms(&db, query.kind.as_deref(), limit, offset).await?;
+    let locale_filter = match query.locale.as_deref() {
+        Some(raw) => {
+            let trimmed = raw.trim().to_ascii_lowercase();
+            if trimmed.is_empty() || trimmed.len() > 35 || trimmed.chars().any(char::is_control) {
+                return Err(ApiError::bad_request("Tham số locale không hợp lệ."));
+            }
+            if trimmed == "all" {
+                None
+            } else {
+                Some(trimmed)
+            }
+        }
+        None => None,
+    };
+    let page = taxonomy::list_terms_for_locale(
+        &db,
+        query.kind.as_deref(),
+        locale_filter.as_deref(),
+        limit,
+        offset,
+    )
+    .await?;
     Ok(([(header::CACHE_CONTROL, "no-store")], Json(page)).into_response())
 }
 
@@ -294,13 +320,15 @@ pub async fn taxonomy_create(
 ) -> ApiResult<Response> {
     let actor = require_admin_with_csrf(&headers, &db).await?;
     let input = parse_body(payload)?;
-    let created = taxonomy::create_term(
+    let created = taxonomy::create_term_with_locale(
         &db,
         &actor,
         &input.kind,
         &input.name,
         &input.slug,
         input.parent_id,
+        input.locale.as_deref(),
+        input.source_term_id,
     )
     .await?;
     let created = taxonomy::term_with_effective_extensions(&db, created, "admin").await?;
@@ -502,6 +530,7 @@ mod tests {
         let child: PatchTaxonomyTerm = serde_json::from_str(r#"{"parent_id":42}"#).unwrap();
         assert_eq!(child.parent_id, Some(Some(42)));
         assert!(serde_json::from_str::<PatchTaxonomyTerm>(r#"{"kind":"tag"}"#).is_err());
+        assert!(serde_json::from_str::<PatchTaxonomyTerm>(r#"{"locale":"en"}"#).is_err());
     }
 
     #[test]

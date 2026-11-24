@@ -1633,6 +1633,7 @@ mod tests {
                                     binding: Some(ElementBinding {
                                         type_key: "post".into(),
                                         entry_slug: "hello".into(),
+                                        entry_locale: None,
                                         source: BindingSource::Title,
                                         target: BindingTarget::Text,
                                     }),

@@ -240,10 +240,21 @@ async fn current_settings_in_tx(
     Ok(schema.base.descriptor.settings)
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TranslationLinkSummary {
+    pub id: i64,
+    pub locale: String,
+    pub slug: String,
+    pub title: String,
+    pub publication_status: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ContentEntryRecord {
     pub id: i64,
     pub content_type_key: String,
+    pub locale: String,
+    pub translation_group_id: String,
     pub slug: String,
     pub title: String,
     pub values: BTreeMap<String, Value>,
@@ -259,6 +270,7 @@ pub struct ContentEntryRecord {
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
+    pub translations: Vec<TranslationLinkSummary>,
 }
 
 pub(super) type EntryRow = (
@@ -290,6 +302,8 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
     Ok(ContentEntryRecord {
         id,
         content_type_key,
+        locale: String::new(),
+        translation_group_id: String::new(),
         slug,
         title,
         values,
@@ -302,6 +316,7 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
         version,
         created_at,
         updated_at,
+        translations: Vec::new(),
     })
 }
 
@@ -363,18 +378,35 @@ pub(super) async fn decoded_with_terms(
 ) -> ApiResult<ContentEntryRecord> {
     let mut record = decode_row(row)?;
     record.term_ids = read_term_ids(tx, record.id).await?;
-    let (layout, custom, mode, primary_category_term_id): (
+    let (locale, translation_group_id, layout, custom, mode, primary_category_term_id): (
+        String,
+        String,
         Option<String>,
         Option<String>,
         String,
         Option<i64>,
     ) = sqlx::query_as(
-        "SELECT page_layout_key, custom_template_key, content_mode, primary_category_term_id
+        "SELECT locale, translation_group_id, page_layout_key, custom_template_key,
+                content_mode, primary_category_term_id
            FROM content_entries WHERE id = ?",
     )
     .bind(record.id)
     .fetch_one(&mut **tx)
     .await?;
+    let sibling_rows: Vec<(i64, String, String, String, String)> = sqlx::query_as(
+        "SELECT e.id, e.locale, e.slug, e.title, e.publication_status
+           FROM content_entries e
+           JOIN site_locales sl ON sl.code = e.locale
+          WHERE e.content_type_key = ?
+            AND e.translation_group_id = ?
+          ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
+    )
+    .bind(&record.content_type_key)
+    .bind(&translation_group_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    record.locale = locale;
+    record.translation_group_id = translation_group_id;
     record.page_layout_key = layout;
     record.custom_template_key = custom;
     record.primary_category_term_id = primary_category_term_id;
@@ -383,7 +415,55 @@ pub(super) async fn decoded_with_terms(
         "builder" => ContentMode::Builder,
         _ => return Err(ApiError::internal("Chế độ nội dung không hợp lệ.")),
     };
+    record.translations = sibling_rows
+        .into_iter()
+        .map(
+            |(id, locale, slug, title, publication_status)| TranslationLinkSummary {
+                id,
+                locale,
+                slug,
+                title,
+                publication_status,
+            },
+        )
+        .collect();
     Ok(record)
+}
+
+pub(crate) async fn batch_translations_by_group_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    type_key: &str,
+    group_ids: &[String],
+) -> ApiResult<BTreeMap<String, Vec<TranslationLinkSummary>>> {
+    let mut out = BTreeMap::<String, Vec<TranslationLinkSummary>>::new();
+    if group_ids.is_empty() {
+        return Ok(out);
+    }
+    let ids_json = serde_json::to_string(group_ids)?;
+    let rows: Vec<(String, i64, String, String, String, String)> = sqlx::query_as(
+        "SELECT e.translation_group_id, e.id, e.locale, e.slug, e.title, e.publication_status
+           FROM content_entries e
+           JOIN site_locales sl ON sl.code = e.locale
+          WHERE e.content_type_key = ?
+            AND e.translation_group_id IN (SELECT value FROM json_each(?))
+          ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
+    )
+    .bind(type_key)
+    .bind(ids_json)
+    .fetch_all(conn)
+    .await?;
+    for (group_id, id, locale, slug, title, publication_status) in rows {
+        out.entry(group_id)
+            .or_default()
+            .push(TranslationLinkSummary {
+                id,
+                locale,
+                slug,
+                title,
+                publication_status,
+            });
+    }
+    Ok(out)
 }
 
 /// Acquire a writer before checking a term's existence or entry CAS. The same
@@ -449,10 +529,11 @@ pub(super) async fn begin_entry_write<'a>(
     }
 }
 
-async fn validate_term_ids(
+async fn validate_term_ids_for_locale(
     tx: &mut Transaction<'_, Sqlite>,
     type_key: &str,
     ids: &[i64],
+    entry_locale: &str,
 ) -> ApiResult<()> {
     if ids.len() > 96 || ids.iter().any(|id| *id <= 0) {
         return Err(ApiError::bad_request("term_ids không hợp lệ."));
@@ -465,8 +546,8 @@ async fn validate_term_ids(
         if !unique.insert(id) {
             return Err(ApiError::bad_request("term_ids không được trùng lặp."));
         }
-        let kind: Option<String> = sqlx::query_scalar(
-            "SELECT t.kind FROM taxonomy_terms t
+        let found: Option<(String, String)> = sqlx::query_as(
+            "SELECT t.kind, t.locale FROM taxonomy_terms t
                JOIN taxonomy_definitions d ON d.key=t.kind
               WHERE t.id=? AND d.provider_status='active'
                 AND d.declaration_state='declared'",
@@ -474,8 +555,13 @@ async fn validate_term_ids(
         .bind(id)
         .fetch_optional(&mut **tx)
         .await?;
-        let kind =
-            kind.ok_or_else(|| ApiError::bad_request("Term ID không tồn tại hoặc inactive."))?;
+        let (kind, term_locale) =
+            found.ok_or_else(|| ApiError::bad_request("Term ID không tồn tại hoặc inactive."))?;
+        if term_locale != entry_locale {
+            return Err(ApiError::unprocessable(
+                "Term thuộc ngôn ngữ khác với nội dung.",
+            ));
+        }
         if !eligible.contains(&kind) {
             return Err(ApiError::bad_request(
                 "Taxonomy của term không được phép dùng cho CPT.",
@@ -488,6 +574,42 @@ async fn validate_term_ids(
         }
     }
     Ok(())
+}
+
+async fn resolve_entry_write_locale_in_tx(
+    conn: &mut sqlx::SqliteConnection,
+    requested: Option<&str>,
+    existing_locale: Option<&str>,
+) -> ApiResult<String> {
+    match existing_locale {
+        Some(cur) => {
+            if let Some(raw) = requested {
+                let norm = raw.trim().to_ascii_lowercase();
+                if norm.is_empty() || norm != cur {
+                    return Err(ApiError::bad_request(
+                        "Không thể đổi ngôn ngữ của nội dung đã tạo.",
+                    ));
+                }
+            }
+            Ok(cur.to_owned())
+        }
+        None => crate::storage::settings::resolve_requested_locale_in_conn(conn, requested).await,
+    }
+}
+
+pub async fn get_entry_locale_and_group(
+    db: &SqlitePool,
+    type_key: &str,
+    id: i64,
+) -> ApiResult<Option<(String, String)>> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT locale, translation_group_id FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row)
 }
 
 async fn replace_term_ids(tx: &mut Transaction<'_, Sqlite>, id: i64, ids: &[i64]) -> ApiResult<()> {
@@ -951,11 +1073,12 @@ pub async fn create_entry_with_fence(
     if let Some(f) = fence {
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
+    let entry_locale =
+        resolve_entry_write_locale_in_tx(&mut tx, input.locale.as_deref(), None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
-        validate_term_ids(&mut tx, type_key, ids).await?;
+        validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
-    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
     let group_id = crate::storage::settings::generate_translation_group_id("eg");
     let json = serde_json::to_string(&input.values)?;
     let status = if settings.publication == ContentPublication::DraftPublish {
@@ -968,7 +1091,7 @@ pub async fn create_entry_with_fence(
          VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(type_key)
-    .bind(&default_locale)
+    .bind(&entry_locale)
     .bind(&group_id)
     .bind(&input.slug)
     .bind(&input.title)
@@ -1045,17 +1168,20 @@ pub async fn update_entry_with_fence(
         verify_plugin_action_fence(&mut tx, actor, f).await?;
     }
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let old_values_json: String = sqlx::query_scalar(
-        "SELECT values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let (old_values_json, existing_locale): (String, String) = sqlx::query_as(
+        "SELECT values_json, locale FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
+    let entry_locale =
+        resolve_entry_write_locale_in_tx(&mut tx, input.locale.as_deref(), Some(&existing_locale))
+            .await?;
     let previous_body = extract_body_from_values_json(&old_values_json);
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
-        validate_term_ids(&mut tx, type_key, ids).await?;
+        validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
     let json = serde_json::to_string(&input.values)?;
     let result = sqlx::query(
@@ -1157,11 +1283,12 @@ pub async fn create_entry_with_schema_fence(
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     let settings = &effective.base.descriptor.settings;
     verify_supported_values(type_key, &input.values, settings)?;
+    let entry_locale =
+        resolve_entry_write_locale_in_tx(&mut tx, input.locale.as_deref(), None).await?;
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
-        validate_term_ids(&mut tx, type_key, ids).await?;
+        validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
-    let default_locale = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
     let group_id = crate::storage::settings::generate_translation_group_id("eg");
     let json = serde_json::to_string(&input.values)?;
     let status = if settings.publication == ContentPublication::DraftPublish {
@@ -1174,7 +1301,7 @@ pub async fn create_entry_with_schema_fence(
          VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(type_key)
-    .bind(&default_locale)
+    .bind(&entry_locale)
     .bind(&group_id)
     .bind(&input.slug)
     .bind(&input.title)
@@ -1221,17 +1348,20 @@ pub async fn update_entry_with_schema_fence(
     let effective = verify_schema_token_in_tx(&mut tx, type_key, preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
     current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
-    let old_values_json: String = sqlx::query_scalar(
-        "SELECT values_json FROM content_entries WHERE content_type_key = ? AND id = ?",
+    let (old_values_json, existing_locale): (String, String) = sqlx::query_as(
+        "SELECT values_json, locale FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
+    let entry_locale =
+        resolve_entry_write_locale_in_tx(&mut tx, input.locale.as_deref(), Some(&existing_locale))
+            .await?;
     let previous_body = extract_body_from_values_json(&old_values_json);
     crate::storage::media::require_existing_references_in_tx(&mut tx, schema, input).await?;
     if let Some(ids) = &input.term_ids {
-        validate_term_ids(&mut tx, type_key, ids).await?;
+        validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
     let json = serde_json::to_string(&input.values)?;
     let result = sqlx::query(
@@ -1292,6 +1422,8 @@ pub struct CompositeEntrySaveInput {
     pub expected_version: Option<i64>,
     #[serde(default)]
     pub expected_schema_token: Option<String>,
+    #[serde(default)]
+    pub locale: Option<String>,
     pub title: String,
     pub slug: String,
     #[serde(default)]
@@ -1400,6 +1532,8 @@ pub struct CompositeEntrySaveResult {
 
 pub struct CompositePreflightPlan {
     pub preflight_schema_token: String,
+    pub locale: String,
+    pub translation_group_id: Option<String>,
     pub effective: EffectiveContentSchema,
     pub effective_ct_def: ContentTypeDefinition,
     pub merged_input: ContentEntryInput,
@@ -1646,8 +1780,11 @@ pub async fn prepare_composite_entry_save(
         }
     }
 
-    let merged_values = match entry_id {
+    let (plan_locale, plan_group_id, merged_values) = match entry_id {
         None => {
+            let mut conn = db.acquire().await?;
+            let loc =
+                resolve_entry_write_locale_in_tx(&mut conn, input.locale.as_deref(), None).await?;
             let mut out = BTreeMap::new();
             for (k, fe) in &effective.effective_fields {
                 if !input.values.contains_key(k)
@@ -1662,7 +1799,7 @@ pub async fn prepare_composite_entry_save(
                     out.insert(k.clone(), v.clone());
                 }
             }
-            out
+            (loc, None, out)
         }
         Some(id) => {
             let expected_ver = input.expected_version.unwrap();
@@ -1674,6 +1811,13 @@ pub async fn prepare_composite_entry_save(
                     "Phi?n b?n n?i dung ?? thay ??i. H?y t?i l?i tr??c khi l?u.",
                 ));
             }
+            let mut conn = db.acquire().await?;
+            let loc = resolve_entry_write_locale_in_tx(
+                &mut conn,
+                input.locale.as_deref(),
+                Some(&existing.locale),
+            )
+            .await?;
             let mut out = existing.values;
             for (k, v) in &input.values {
                 if v.is_null() {
@@ -1682,13 +1826,14 @@ pub async fn prepare_composite_entry_save(
                     out.insert(k.clone(), v.clone());
                 }
             }
-            out
+            (loc, Some(existing.translation_group_id), out)
         }
     };
 
     let merged_input = ContentEntryInput {
         title: input.title.clone(),
         slug: input.slug.clone(),
+        locale: Some(plan_locale.clone()),
         values: merged_values,
         term_ids: input.term_ids.clone(),
     };
@@ -1711,6 +1856,8 @@ pub async fn prepare_composite_entry_save(
 
     Ok(CompositePreflightPlan {
         preflight_schema_token: effective.schema_token.clone(),
+        locale: plan_locale,
+        translation_group_id: plan_group_id,
         effective,
         effective_ct_def,
         merged_input,
@@ -2080,12 +2227,28 @@ pub async fn commit_composite_entry_save(
     let effective =
         verify_schema_token_in_tx(&mut tx, type_key, &plan.preflight_schema_token).await?;
     verify_supported_values(type_key, &input.values, &effective.base.descriptor.settings)?;
-    if let Some(id) = entry_id {
+    let existing_locale: Option<String> = if let Some(id) = entry_id {
         let expected_ver = input
             .expected_version
             .ok_or_else(|| ApiError::bad_request("Thiếu phiên bản nội dung."))?;
         current_entry_in_write(&mut tx, type_key, id, expected_ver).await?;
-    }
+        let loc: String = sqlx::query_scalar(
+            "SELECT locale FROM content_entries WHERE content_type_key = ? AND id = ?",
+        )
+        .bind(type_key)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        Some(loc)
+    } else {
+        None
+    };
+    let entry_locale = resolve_entry_write_locale_in_tx(
+        &mut tx,
+        input.locale.as_deref(),
+        existing_locale.as_deref(),
+    )
+    .await?;
     let requested_mode = match &input.content_mode {
         PatchField::Omitted => None,
         PatchField::Clear => return Err(ApiError::bad_request("content_mode không được null.")),
@@ -2119,7 +2282,7 @@ pub async fn commit_composite_entry_save(
     )
     .await?;
     if let Some(ids) = &plan.merged_input.term_ids {
-        validate_term_ids(&mut tx, type_key, ids).await?;
+        validate_term_ids_for_locale(&mut tx, type_key, ids, &entry_locale).await?;
     }
     let effective_term_ids: Vec<i64> = match &plan.merged_input.term_ids {
         Some(ids) => ids.clone(),
@@ -2141,13 +2304,14 @@ pub async fn commit_composite_entry_save(
     let resolved_slug = if entry_id.is_none() && input.auto_unique_slug {
         let has_custom_path =
             matches!(&input.custom_path, PatchField::Set(raw) if !raw.trim().is_empty());
-        resolve_auto_unique_slug_in_tx(
+        resolve_auto_unique_slug_for_locale_in_tx(
             &mut tx,
             type_key,
             &plan.merged_input.slug,
             plan.merged_input.term_ids.as_deref(),
             next_primary_category,
             has_custom_path,
+            Some(&entry_locale),
         )
         .await?
     } else {
@@ -2172,8 +2336,6 @@ pub async fn commit_composite_entry_save(
             // for the built-in types. Keep that security trigger intact and
             // transition to published *within this same writer transaction*.
             // No intermediate draft can be observed or committed.
-            let default_locale =
-                crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
             let group_id = crate::storage::settings::generate_translation_group_id("eg");
             let status_clause = if is_draft_capable {
                 "draft"
@@ -2185,7 +2347,7 @@ pub async fn commit_composite_entry_save(
                  VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
             )
             .bind(type_key)
-            .bind(&default_locale)
+            .bind(&entry_locale)
             .bind(&group_id)
             .bind(&resolved_slug)
             .bind(&plan.merged_input.title)
@@ -2330,6 +2492,498 @@ pub async fn commit_composite_entry_save(
         seo,
         schema_token: effective.schema_token,
     })
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateEntryTranslationInput {
+    pub target_locale: String,
+    pub slug: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub auto_unique_slug: bool,
+}
+
+pub struct EntryTranslationPlan {
+    pub target_locale: String,
+    pub translation_group_id: String,
+    pub slug: String,
+    pub title: String,
+    pub values: BTreeMap<String, Value>,
+    pub term_ids: Vec<i64>,
+    pub primary_category_term_id: Option<i64>,
+    pub page_layout_key: Option<String>,
+    pub custom_template_key: Option<String>,
+    pub content_mode: ContentMode,
+}
+
+async fn remap_term_ids_to_locale_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    type_key: &str,
+    ids: &[i64],
+    target_locale: &str,
+) -> ApiResult<BTreeMap<i64, i64>> {
+    let mut map = BTreeMap::new();
+    if ids.is_empty() {
+        return Ok(map);
+    }
+    let eligible = crate::storage::content::load_effective_taxonomies_in_tx(conn, type_key).await?;
+    let ids_json = serde_json::to_string(ids)?;
+    let rows: Vec<(i64, i64, String)> = sqlx::query_as(
+        "SELECT src.id, dst.id, dst.kind
+           FROM taxonomy_terms src
+           JOIN taxonomy_terms dst
+             ON dst.kind = src.kind
+            AND dst.translation_group_id = src.translation_group_id
+            AND dst.locale = ?2
+           JOIN taxonomy_definitions d ON d.key = dst.kind
+          WHERE src.id IN (SELECT value FROM json_each(?1))
+            AND d.provider_status = 'active'
+            AND d.declaration_state = 'declared'",
+    )
+    .bind(ids_json)
+    .bind(target_locale)
+    .fetch_all(conn)
+    .await?;
+    for (src_id, dst_id, kind) in rows {
+        if eligible.contains(&kind) {
+            map.insert(src_id, dst_id);
+        }
+    }
+    Ok(map)
+}
+
+async fn remap_list_term_ids_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    ids: &[i64],
+    target_locale: &str,
+) -> ApiResult<BTreeMap<i64, i64>> {
+    let mut map = BTreeMap::new();
+    if ids.is_empty() {
+        return Ok(map);
+    }
+    let ids_json = serde_json::to_string(ids)?;
+    let rows: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT src.id, dst.id
+           FROM taxonomy_terms src
+           JOIN taxonomy_terms dst
+             ON dst.kind = src.kind
+            AND dst.translation_group_id = src.translation_group_id
+            AND dst.locale = ?2
+           JOIN taxonomy_definitions d ON d.key = dst.kind
+          WHERE src.id IN (SELECT value FROM json_each(?1))
+            AND d.public = 1
+            AND d.provider_status = 'active'
+            AND d.declaration_state = 'declared'",
+    )
+    .bind(ids_json)
+    .bind(target_locale)
+    .fetch_all(conn)
+    .await?;
+    for (src_id, dst_id) in rows {
+        map.insert(src_id, dst_id);
+    }
+    Ok(map)
+}
+
+fn collect_builder_list_term_ids(doc: &opendash_core::builder::BuilderDocument) -> Vec<i64> {
+    let mut out = Vec::new();
+    for section in &doc.sections {
+        for row in &section.children {
+            for col in &row.children {
+                for el in &col.children {
+                    if let opendash_core::builder::ElementContent::Known(
+                        opendash_core::builder::KnownElement::List(props),
+                    ) = &el.content
+                    {
+                        if let Some(id) = props.category_id {
+                            out.push(id);
+                        }
+                        if let Some(id) = props.tag_id {
+                            out.push(id);
+                        }
+                        if let Some(id) = props.term_id {
+                            out.push(id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+fn apply_builder_list_term_remap(
+    doc: &mut opendash_core::builder::BuilderDocument,
+    remap: &BTreeMap<i64, i64>,
+) -> bool {
+    let mut changed = false;
+    for section in &mut doc.sections {
+        for row in &mut section.children {
+            for col in &mut row.children {
+                for el in &mut col.children {
+                    if let opendash_core::builder::ElementContent::Known(
+                        opendash_core::builder::KnownElement::List(props),
+                    ) = &mut el.content
+                    {
+                        if let Some(old) = props.category_id {
+                            let next = remap.get(&old).copied();
+                            if next != props.category_id {
+                                props.category_id = next;
+                                changed = true;
+                            }
+                        }
+                        if let Some(old) = props.tag_id {
+                            let next = remap.get(&old).copied();
+                            if next != props.tag_id {
+                                props.tag_id = next;
+                                changed = true;
+                            }
+                        }
+                        if let Some(old) = props.term_id {
+                            let next = remap.get(&old).copied();
+                            if next != props.term_id {
+                                props.term_id = next;
+                                if next.is_none() {
+                                    props.taxonomy_key = None;
+                                }
+                                changed = true;
+                            }
+                        }
+                        if props.include_descendants
+                            && props.category_id.is_none()
+                            && props.taxonomy_key.is_none()
+                        {
+                            props.include_descendants = false;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    changed
+}
+
+pub async fn prepare_entry_translation(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    source_id: i64,
+    expected_source_version: i64,
+    input: &CreateEntryTranslationInput,
+) -> ApiResult<EntryTranslationPlan> {
+    if matches!(type_key, "pattern" | "section") {
+        return Err(ApiError::forbidden(
+            "Không hỗ trợ tạo bản dịch trực tiếp cho Pattern/Section.",
+        ));
+    }
+    let source = get_entry(db, type_key, source_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy bài gốc để dịch."))?;
+    if source.version != expected_source_version {
+        return Err(ApiError::precondition_failed(
+            "Phiên bản nội dung gốc đã thay đổi. Hãy tải lại trước khi tạo bản dịch.",
+        ));
+    }
+    let target_locale = input.target_locale.trim().to_ascii_lowercase();
+    if target_locale.is_empty() || !opendash_core::id::valid_lowercase_locale_code(&target_locale) {
+        return Err(ApiError::unprocessable("Mã ngôn ngữ đích không hợp lệ."));
+    }
+    if target_locale == source.locale {
+        return Err(ApiError::unprocessable(
+            "Ngôn ngữ đích phải khác ngôn ngữ của bài gốc.",
+        ));
+    }
+    let mut conn = db.acquire().await?;
+    let locale_exists: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM site_locales WHERE code = ?)")
+            .bind(&target_locale)
+            .fetch_one(&mut *conn)
+            .await?;
+    if locale_exists == 0 {
+        return Err(ApiError::unprocessable(
+            "Ngôn ngữ đích không tồn tại trong site_locales.",
+        ));
+    }
+    let dup_group: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+           SELECT 1 FROM content_entries
+            WHERE content_type_key = ? AND translation_group_id = ? AND locale = ?
+         )",
+    )
+    .bind(type_key)
+    .bind(&source.translation_group_id)
+    .bind(&target_locale)
+    .fetch_one(&mut *conn)
+    .await?;
+    if dup_group != 0 {
+        return Err(ApiError::conflict(
+            "Nhóm dịch đã có bản dịch ở ngôn ngữ đích.",
+        ));
+    }
+    if !opendash_core::id::valid_kebab_segment_with_limit(&input.slug, 64) {
+        return Err(ApiError::bad_request(
+            "Slug bản dịch phải là kebab-case, tối đa 64 ký tự.",
+        ));
+    }
+    if !input.auto_unique_slug {
+        let slug_taken: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(
+               SELECT 1 FROM content_entries
+                WHERE content_type_key = ? AND locale = ? AND slug = ?
+             )",
+        )
+        .bind(type_key)
+        .bind(&target_locale)
+        .bind(&input.slug)
+        .fetch_one(&mut *conn)
+        .await?;
+        if slug_taken != 0 {
+            return Err(ApiError::conflict("Slug đã tồn tại ở ngôn ngữ đích."));
+        }
+    }
+
+    let effective =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut *conn, type_key)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let caller_role = actor_field_role(actor.user.role);
+    let mut copied_values = BTreeMap::new();
+    for (k, v) in &source.values {
+        if let Some(fe) = effective.effective_fields.get(k)
+            && (caller_role < fe.definition.min_view_role
+                || caller_role < fe.definition.min_edit_role)
+        {
+            continue;
+        }
+        copied_values.insert(k.clone(), v.clone());
+    }
+    for (k, fe) in &effective.effective_fields {
+        if fe.effective_status != EffectiveFieldStatus::Withdrawn
+            && fe.definition.required
+            && (caller_role < fe.definition.min_view_role
+                || caller_role < fe.definition.min_edit_role)
+        {
+            if let Some(def) = &fe.definition.default_value {
+                copied_values
+                    .entry(k.clone())
+                    .or_insert_with(|| def.clone());
+            } else {
+                return Err(ApiError::forbidden(format!(
+                    "field_copy_forbidden: Vai trò hiện tại không có quyền sao chép trường bắt buộc '{k}'."
+                )));
+            }
+        }
+    }
+
+    if let Some(raw_body) = copied_values
+        .get("body")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        && opendash_core::builder_blocks::contains_blocks(&raw_body)
+    {
+        let mut parsed = opendash_core::builder_blocks::parse_blocks_lenient_or_recover(&raw_body);
+        let list_ids = collect_builder_list_term_ids(&parsed.document);
+        let list_remap = remap_list_term_ids_in_conn(&mut *conn, &list_ids, &target_locale).await?;
+        if apply_builder_list_term_remap(&mut parsed.document, &list_remap) {
+            let serialized = opendash_core::builder_blocks::serialize_builder_document_to_blocks(
+                &parsed.document,
+            )
+            .map_err(|_| {
+                ApiError::internal("Không thể đóng gói lại Builder block sau ánh xạ term.")
+            })?;
+            copied_values.insert("body".to_owned(), Value::String(serialized));
+        }
+    }
+
+    let term_map =
+        remap_term_ids_to_locale_in_conn(&mut *conn, type_key, &source.term_ids, &target_locale)
+            .await?;
+    let mut remapped_term_ids = Vec::new();
+    let mut seen_terms = std::collections::HashSet::new();
+    for old_id in &source.term_ids {
+        if let Some(&new_id) = term_map.get(old_id)
+            && seen_terms.insert(new_id)
+        {
+            remapped_term_ids.push(new_id);
+        }
+    }
+    let remapped_primary = source
+        .primary_category_term_id
+        .and_then(|old_id| term_map.get(&old_id).copied())
+        .filter(|id| remapped_term_ids.contains(id));
+
+    let title = match input
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(t) => t.to_owned(),
+        None => source.title.clone(),
+    };
+    let check_input = ContentEntryInput {
+        title: title.clone(),
+        slug: input.slug.clone(),
+        locale: Some(target_locale.clone()),
+        values: copied_values.clone(),
+        term_ids: Some(remapped_term_ids.clone()),
+    };
+    check_input
+        .validate_against_effective(&effective)
+        .map_err(ApiError::unprocessable)?;
+
+    Ok(EntryTranslationPlan {
+        target_locale,
+        translation_group_id: source.translation_group_id,
+        slug: input.slug.clone(),
+        title,
+        values: copied_values,
+        term_ids: remapped_term_ids,
+        primary_category_term_id: remapped_primary,
+        page_layout_key: source.page_layout_key,
+        custom_template_key: source.custom_template_key,
+        content_mode: source.content_mode,
+    })
+}
+
+pub async fn commit_entry_translation(
+    db: &SqlitePool,
+    actor: &SessionContext,
+    type_key: &str,
+    source_id: i64,
+    expected_source_version: i64,
+    input: &CreateEntryTranslationInput,
+    plan: &EntryTranslationPlan,
+) -> ApiResult<ContentEntryRecord> {
+    if matches!(type_key, "pattern" | "section") {
+        return Err(ApiError::forbidden(
+            "Không hỗ trợ tạo bản dịch trực tiếp cho Pattern/Section.",
+        ));
+    }
+    let mut tx = begin_entry_write(db, actor).await?;
+    current_entry_in_write(&mut tx, type_key, source_id, expected_source_version).await?;
+    let effective =
+        crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
+            .await?
+            .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let locale_exists: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM site_locales WHERE code = ?)")
+            .bind(&plan.target_locale)
+            .fetch_one(&mut *tx)
+            .await?;
+    if locale_exists == 0 {
+        return Err(ApiError::unprocessable(
+            "Ngôn ngữ đích không tồn tại trong site_locales.",
+        ));
+    }
+    let dup_group: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(
+           SELECT 1 FROM content_entries
+            WHERE content_type_key = ? AND translation_group_id = ? AND locale = ?
+         )",
+    )
+    .bind(type_key)
+    .bind(&plan.translation_group_id)
+    .bind(&plan.target_locale)
+    .fetch_one(&mut *tx)
+    .await?;
+    if dup_group != 0 {
+        return Err(ApiError::conflict(
+            "Nhóm dịch đã có bản dịch ở ngôn ngữ đích.",
+        ));
+    }
+
+    let resolved_slug = if input.auto_unique_slug {
+        resolve_auto_unique_slug_for_locale_in_tx(
+            &mut tx,
+            type_key,
+            &plan.slug,
+            Some(&plan.term_ids),
+            plan.primary_category_term_id,
+            false,
+            Some(&plan.target_locale),
+        )
+        .await?
+    } else {
+        plan.slug.clone()
+    };
+
+    let status =
+        if effective.base.descriptor.settings.publication == ContentPublication::DraftPublish {
+            "draft"
+        } else {
+            "published"
+        };
+    let values_json = serde_json::to_string(&plan.values)?;
+    let res = sqlx::query(
+        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(type_key)
+    .bind(&plan.target_locale)
+    .bind(&plan.translation_group_id)
+    .bind(&resolved_slug)
+    .bind(&plan.title)
+    .bind(&values_json)
+    .bind(status)
+    .bind(plan.content_mode.as_str())
+    .bind(plan.page_layout_key.as_deref())
+    .bind(plan.custom_template_key.as_deref())
+    .bind(plan.primary_category_term_id)
+    .execute(&mut *tx)
+    .await;
+    let new_id = match res {
+        Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
+            return Err(ApiError::conflict("Slug đã tồn tại ở ngôn ngữ đích."));
+        }
+        other => other?.last_insert_rowid(),
+    };
+
+    if !plan.term_ids.is_empty() {
+        validate_term_ids_for_locale(&mut tx, type_key, &plan.term_ids, &plan.target_locale)
+            .await?;
+        replace_term_ids(&mut tx, new_id, &plan.term_ids).await?;
+    }
+
+    let source_seo: Option<(String, String, Option<String>, i64)> = sqlx::query_as(
+        "SELECT title, description, og_image_id, noindex FROM entry_seo WHERE entry_id = ?",
+    )
+    .bind(source_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    if let Some((seo_title, seo_desc, og_image_id, noindex)) = source_seo {
+        sqlx::query(
+            "INSERT INTO entry_seo (entry_id, title, description, og_image_id, canonical_url, noindex)
+             VALUES (?, ?, ?, ?, NULL, ?)",
+        )
+        .bind(new_id)
+        .bind(&seo_title)
+        .bind(&seo_desc)
+        .bind(og_image_id.as_deref())
+        .bind(noindex)
+        .execute(&mut *tx)
+        .await?;
+        crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, new_id).await?;
+    }
+
+    sync_entry_body_refs_in_conn(&mut *tx, new_id, &effective, &plan.values, None).await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+
+    let row: EntryRow = sqlx::query_as(
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+         FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(new_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    let mut record = decoded_with_terms(&mut tx, row).await?;
+    tx.commit().await?;
+    filter_entry_values_for_role(&mut record, &effective, actor_field_role(actor.user.role));
+    Ok(record)
 }
 
 pub async fn delete_entry(
@@ -3178,6 +3832,7 @@ mod tests {
         CompositeEntrySaveInput {
             expected_version,
             expected_schema_token: Some(schema_token.to_owned()),
+            locale: None,
             title: format!("Title {slug}"),
             slug: slug.to_owned(),
             publication_status: Some("published".to_owned()),
@@ -3307,6 +3962,7 @@ mod tests {
             &ContentEntryInput {
                 title: "Dup".into(),
                 slug: "foo".into(),
+                locale: None,
                 values: BTreeMap::new(),
                 term_ids: None,
             },
@@ -3574,6 +4230,7 @@ mod tests {
             &ContentEntryInput {
                 title: restored.entry.title.clone(),
                 slug: restored.entry.slug.clone(),
+                locale: None,
                 values: restored.entry.values.clone(),
                 term_ids: Some(vec![cat_a]),
             },

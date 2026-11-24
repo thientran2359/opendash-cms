@@ -551,6 +551,10 @@ pub async fn plan_sample_import(
     }
 
     if selected_set.contains(&SampleGroup::Pages) {
+        let mut conn = db.acquire().await?;
+        let default_locale =
+            crate::storage::settings::get_default_locale_code_in_conn(&mut conn).await?;
+        drop(conn);
         let mut sorted = sample.pages.clone();
         sorted.sort_by(|a, b| a.object_key.cmp(&b.object_key));
         for p in sorted {
@@ -567,9 +571,10 @@ pub async fn plan_sample_import(
                 }
             }
             let exists_site: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND slug = ?)",
+                "SELECT EXISTS(SELECT 1 FROM content_entries WHERE content_type_key = ? AND locale = ? AND slug = ?)",
             )
             .bind(&p.content_type)
+            .bind(&default_locale)
             .bind(&p.slug)
             .fetch_one(db)
             .await?;

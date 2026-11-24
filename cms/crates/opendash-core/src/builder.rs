@@ -780,6 +780,8 @@ pub struct ElementBinding {
     pub type_key: String,
     #[serde(default)]
     pub entry_slug: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entry_locale: Option<String>,
     pub source: BindingSource,
     pub target: BindingTarget,
 }
@@ -944,7 +946,11 @@ impl BuilderDocument {
                                     }
                                 }
                                 if let Some(binding) = known.binding() {
-                                    sources.insert((&binding.type_key, &binding.entry_slug));
+                                    sources.insert((
+                                        &binding.type_key,
+                                        &binding.entry_slug,
+                                        binding.entry_locale.as_deref(),
+                                    ));
                                     if sources.len() > 32 {
                                         return Err(BuilderError::Invalid(
                                             "Too many Builder binding sources",
@@ -1220,6 +1226,11 @@ fn validate_known_with_schemas(
 fn valid_binding(binding: Option<&ElementBinding>, targets: &[BindingTarget]) -> bool {
     let Some(binding) = binding else { return true };
     if !targets.contains(&binding.target) {
+        return false;
+    }
+    if let Some(locale) = &binding.entry_locale
+        && !crate::id::valid_lowercase_locale_code(locale)
+    {
         return false;
     }
     let fixed_entry_valid = || {
@@ -1729,6 +1740,7 @@ mod tests {
                     binding: Some(ElementBinding {
                         type_key: "post".into(),
                         entry_slug: format!("post-{index}"),
+                        entry_locale: None,
                         source: BindingSource::Title,
                         target: BindingTarget::Text,
                     }),
@@ -1771,6 +1783,7 @@ mod tests {
                     binding: Some(ElementBinding {
                         type_key: "post".into(),
                         entry_slug: "extra".into(),
+                        entry_locale: None,
                         source: BindingSource::Title,
                         target: BindingTarget::Text,
                     }),

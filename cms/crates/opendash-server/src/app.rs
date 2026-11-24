@@ -33,7 +33,8 @@ use crate::{
         dashboard::dashboard_get,
         entries::{
             MAX_CONTENT_ENTRY_JSON_BYTES, entry_composite_create, entry_composite_update,
-            entry_create, entry_delete, entry_get, entry_list, entry_table_get, entry_update,
+            entry_create, entry_delete, entry_get, entry_list, entry_table_get,
+            entry_translation_create, entry_update,
         },
         import::{import_dry_run, import_execute},
         media::{
@@ -558,6 +559,10 @@ pub fn build_router_with_themes_root(
             "/api/admin/content-types/{type_key}/entries/{id}/composite",
             put(entry_composite_update)
                 .layer(DefaultBodyLimit::max(MAX_CONTENT_ENTRY_JSON_BYTES)),
+        )
+        .route(
+            "/api/admin/content-types/{type_key}/entries/{id}/translations",
+            post(entry_translation_create).layer(DefaultBodyLimit::max(16 * 1024)),
         )
         .route(
             "/api/admin/profile",

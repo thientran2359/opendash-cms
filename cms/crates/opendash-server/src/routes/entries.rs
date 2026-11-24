@@ -38,12 +38,14 @@ fn is_builtin(key: &str) -> bool {
 }
 
 #[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct EntryPagination {
     limit: Option<i64>,
     offset: Option<i64>,
     category_id: Option<i64>,
     tag_id: Option<i64>,
     include_descendants: Option<bool>,
+    locale: Option<String>,
 }
 
 /// Unlike the legacy list extractor this intentionally rejects duplicate and
@@ -69,6 +71,15 @@ pub fn parse_table_query(raw: Option<&str>) -> ApiResult<entry_table::EntryTable
             }
             "status" if matches!(value, "all" | "draft" | "published") => {
                 filter.status = value.into();
+            }
+            "locale" => {
+                let norm = value.trim().to_ascii_lowercase();
+                if norm.is_empty() || norm.len() > 35 || norm.chars().any(char::is_control) {
+                    return Err(ApiError::bad_request("Tham số locale không hợp lệ."));
+                }
+                if norm != "all" {
+                    filter.locale = Some(norm);
+                }
             }
             "category_id" => {
                 filter.category_id = Some(
@@ -346,10 +357,22 @@ pub async fn entry_list(
             "include_descendants chỉ được dùng cùng category_id.",
         ));
     }
+    let locale_filter = match pagination.locale.as_deref() {
+        Some(raw) => {
+            let trimmed = raw.trim().to_ascii_lowercase();
+            if trimmed == "all" {
+                None
+            } else {
+                Some(crate::storage::settings::resolve_requested_locale(&db, Some(&trimmed)).await?)
+            }
+        }
+        None => None,
+    };
     let filters = entry_storage::EntryFilters {
         category_id: pagination.category_id,
         tag_id: pagination.tag_id,
         include_descendants: pagination.include_descendants.unwrap_or(false),
+        locale: locale_filter,
         ..entry_storage::EntryFilters::default()
     };
     let mut items = entry_storage::list_entries(&db, &type_key, limit, offset, filters).await?;
@@ -409,11 +432,15 @@ pub async fn entry_create(
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
     media_storage::require_existing_references(&db, &schema, &input).await?;
+    let candidate_locale =
+        crate::storage::settings::resolve_requested_locale(&db, input.locale.as_deref()).await?;
     let candidate = json!({
         "operation": "create",
         "type_key": &type_key,
         "entry_id": serde_json::Value::Null,
         "expected_version": serde_json::Value::Null,
+        "locale": &candidate_locale,
+        "translation_group_id": serde_json::Value::Null,
         "title": &input.title,
         "slug": &input.slug,
         "candidate_values": &input.values,
@@ -437,7 +464,14 @@ pub async fn entry_create(
     let _ = hooks
         .dispatch_content_after_save(
             &type_key,
-            json!({ "type_key": &type_key, "id": entry.id, "operation": "create", "version": entry.version }),
+            json!({
+                "type_key": &type_key,
+                "id": entry.id,
+                "operation": "create",
+                "version": entry.version,
+                "locale": &entry.locale,
+                "translation_group_id": &entry.translation_group_id,
+            }),
         )
         .await;
     Ok((
@@ -477,11 +511,21 @@ pub async fn entry_update(
         .validate_against(&schema)
         .map_err(ApiError::bad_request)?;
     media_storage::require_existing_references(&db, &schema, &input).await?;
+    let existing_meta = entry_storage::get_entry_locale_and_group(&db, &type_key, id).await?;
+    if let (Some(req_loc), Some((cur_loc, _))) = (&input.locale, &existing_meta)
+        && req_loc.trim().to_ascii_lowercase() != *cur_loc
+    {
+        return Err(ApiError::bad_request(
+            "Không thể đổi ngôn ngữ của nội dung đã tạo.",
+        ));
+    }
     let candidate = json!({
         "operation": "update",
         "type_key": &type_key,
         "entry_id": id,
         "expected_version": version,
+        "locale": existing_meta.as_ref().map(|(l, _)| l.as_str()),
+        "translation_group_id": existing_meta.as_ref().map(|(_, g)| g.as_str()),
         "title": &input.title,
         "slug": &input.slug,
         "candidate_values": &input.values,
@@ -508,7 +552,14 @@ pub async fn entry_update(
     let _ = hooks
         .dispatch_content_after_save(
             &type_key,
-            json!({ "type_key": &type_key, "id": entry.id, "operation": "update", "version": entry.version }),
+            json!({
+                "type_key": &type_key,
+                "id": entry.id,
+                "operation": "update",
+                "version": entry.version,
+                "locale": &entry.locale,
+                "translation_group_id": &entry.translation_group_id,
+            }),
         )
         .await;
     Ok(([(header::ETAG, etag(entry.version))], Json(entry)).into_response())
@@ -600,9 +651,9 @@ pub async fn entry_preview(
         .get("body")
         .and_then(serde_json::Value::as_str)
         .is_some_and(opendash_core::builder_blocks::contains_blocks);
-    let pub_settings = crate::storage::settings::get_public(&db).await?;
-    let seo_view =
-        crate::seo::SeoView::for_noindex_page(&pub_settings.content_language, &entry.title);
+    let (_, bcp47_tag, dir) =
+        crate::storage::settings::get_locale_bcp47_and_dir(&db, Some(&entry.locale)).await?;
+    let seo_view = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &entry.title);
     let raw_html = if supports_builder && body_view_allowed && has_blocks {
         if let Some(rendered) =
             crate::storage::builder::preview_saved_entry_body(&db, &actor, &type_key, id).await?
@@ -671,6 +722,8 @@ pub async fn entry_composite_create(
         "type_key": &type_key,
         "entry_id": serde_json::Value::Null,
         "expected_version": serde_json::Value::Null,
+        "locale": &plan.locale,
+        "translation_group_id": &plan.translation_group_id,
         "title": &plan.merged_input.title,
         "slug": &plan.merged_input.slug,
         "candidate_values": &plan.merged_input.values,
@@ -693,6 +746,8 @@ pub async fn entry_composite_create(
                 "id": result.entry.id,
                 "operation": "create",
                 "version": result.entry.version,
+                "locale": &result.entry.locale,
+                "translation_group_id": &result.entry.translation_group_id,
             }),
         )
         .await;
@@ -731,6 +786,8 @@ pub async fn entry_composite_update(
         "type_key": &type_key,
         "entry_id": id,
         "expected_version": input.expected_version,
+        "locale": &plan.locale,
+        "translation_group_id": &plan.translation_group_id,
         "title": &plan.merged_input.title,
         "slug": &plan.merged_input.slug,
         "candidate_values": &plan.merged_input.values,
@@ -753,8 +810,86 @@ pub async fn entry_composite_update(
                 "id": result.entry.id,
                 "operation": "update",
                 "version": result.entry.version,
+                "locale": &result.entry.locale,
+                "translation_group_id": &result.entry.translation_group_id,
             }),
         )
         .await;
     Ok(([(header::ETAG, etag(result.entry.version))], Json(result)).into_response())
+}
+
+pub async fn entry_translation_create(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    headers: HeaderMap,
+    Path((type_key, id)): Path<(String, i64)>,
+    Json(input): Json<entry_storage::CreateEntryTranslationInput>,
+) -> ApiResult<Response> {
+    let actor = require_session_with_csrf(&headers, &db).await?;
+    valid_type_key(&type_key)?;
+    let expected_source_version = expected_version(&headers)?;
+    let plan = entry_storage::prepare_entry_translation(
+        &db,
+        &actor,
+        &type_key,
+        id,
+        expected_source_version,
+        &input,
+    )
+    .await?;
+    let candidate = json!({
+        "operation": "create_translation",
+        "type_key": &type_key,
+        "source_entry_id": id,
+        "entry_id": serde_json::Value::Null,
+        "expected_source_version": expected_source_version,
+        "locale": &plan.target_locale,
+        "translation_group_id": &plan.translation_group_id,
+        "title": &plan.title,
+        "slug": &plan.slug,
+        "candidate_values": &plan.values,
+        "term_ids": &plan.term_ids,
+    });
+    if let Err(veto) = hooks
+        .dispatch_content_before_save(&type_key, candidate)
+        .await
+    {
+        return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
+    }
+    let created = entry_storage::commit_entry_translation(
+        &db,
+        &actor,
+        &type_key,
+        id,
+        expected_source_version,
+        &input,
+        &plan,
+    )
+    .await?;
+    let _ = hooks
+        .dispatch_content_after_save(
+            &type_key,
+            json!({
+                "type_key": &type_key,
+                "id": created.id,
+                "operation": "create_translation",
+                "version": created.version,
+                "locale": &created.locale,
+                "translation_group_id": &created.translation_group_id,
+            }),
+        )
+        .await;
+    Ok((
+        StatusCode::CREATED,
+        [
+            (header::ETAG, etag(created.version)),
+            (
+                header::LOCATION,
+                format!("/api/admin/content-types/{type_key}/entries/{}", created.id),
+            ),
+        ],
+        Json(created),
+    )
+        .into_response())
 }

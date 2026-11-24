@@ -467,6 +467,9 @@ mod tests {
         let record = ContentEntryRecord {
             id: 1,
             content_type_key: "post".into(),
+            locale: "vi".into(),
+            translation_group_id: "tg_test_1".into(),
+            translations: vec![],
             slug: "hello".into(),
             title: "<script>alert(1)</script>".into(),
             values: [(
@@ -531,6 +534,9 @@ mod tests {
         let entry = ContentEntryRecord {
             id: 17,
             content_type_key: "post".into(),
+            locale: "vi".into(),
+            translation_group_id: "tg_test_17".into(),
+            translations: vec![],
             slug: "old-slug".into(),
             title: "Safe title".into(),
             values: BTreeMap::new(),
