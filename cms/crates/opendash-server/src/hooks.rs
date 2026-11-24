@@ -43,7 +43,70 @@ async fn invoke_callback(callback: Callback, envelope: HookEnvelope) -> Result<(
 pub const CORE_HANDLER_TIMEOUT: Duration = Duration::from_millis(250);
 pub const DISPATCH_ADMISSION_BUDGET: Duration = Duration::from_secs(5);
 pub const MAX_HANDLERS: usize = 32;
+pub const ASYNC_HOOK_WORKERS: usize = 2;
+pub const ASYNC_HOOK_QUEUE_CAPACITY: usize = 64;
+pub const MAX_PREPARE_SAVE_PLUGINS: usize = 8;
+pub const PREPARE_SAVE_PHASE_BUDGET: Duration = Duration::from_secs(2);
+pub const MAX_CONTACT_FILTER_PLUGINS: usize = 4;
+pub const CONTACT_FILTER_PHASE_BUDGET: Duration = Duration::from_secs(2);
+pub const MAX_PROJECTION_FILTER_PLUGINS: usize = 8;
+pub const PROJECTION_FILTER_PHASE_BUDGET: Duration = Duration::from_secs(5);
 tokio::task_local! { static IN_DISPATCH: bool; }
+
+pub struct AsyncHookJob {
+    pub event: HookEvent,
+    pub principal: ExecutionPrincipal,
+    pub locale: Option<String>,
+    pub type_key: Option<String>,
+    pub payload: Value,
+    pub dispatch_depth: u8,
+    pub lease: crate::operations::MutationLease,
+}
+
+#[derive(Clone)]
+pub struct AsyncHookQueue {
+    tx: tokio::sync::mpsc::Sender<AsyncHookJob>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContactBeforeSubmitDecision {
+    Allow,
+    Reject { code: String, message: String },
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContentPrepareSavePatch {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub slug: Option<String>,
+    #[serde(default)]
+    pub values_patch: std::collections::BTreeMap<String, Value>,
+    #[serde(default)]
+    pub term_ids: Option<Vec<i64>>,
+}
+
+impl ContentPrepareSavePatch {
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none()
+            && self.slug.is_none()
+            && self.values_patch.is_empty()
+            && self.term_ids.is_none()
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case", deny_unknown_fields)]
+enum ContactBeforeSubmitRaw {
+    Allow,
+    Reject {
+        #[serde(default)]
+        code: String,
+        #[serde(default)]
+        message: String,
+    },
+}
 
 struct Handler {
     id: String,
@@ -74,6 +137,230 @@ pub struct HookDispatcher {
     plugin_manager: Arc<PluginManager>,
     handlers: Vec<Handler>,
     recent_events: Mutex<Vec<HookEnvelope>>,
+    async_queue: Option<AsyncHookQueue>,
+}
+
+fn field_role_for_principal(principal: ExecutionPrincipal) -> opendash_core::content::FieldRole {
+    match principal {
+        ExecutionPrincipal::Admin | ExecutionPrincipal::System => {
+            opendash_core::content::FieldRole::Admin
+        }
+        ExecutionPrincipal::Editor | ExecutionPrincipal::Public => {
+            opendash_core::content::FieldRole::Editor
+        }
+    }
+}
+
+async fn run_async_hook_job(plugin_manager: &PluginManager, job: AsyncHookJob) {
+    let AsyncHookJob {
+        event,
+        principal,
+        locale,
+        type_key,
+        payload,
+        dispatch_depth,
+        lease,
+    } = job;
+    let _lease = lease;
+    if dispatch_depth >= 2 {
+        return;
+    }
+
+    let subs: Vec<String> = match type_key.as_deref() {
+        Some(tk)
+            if matches!(
+                event,
+                HookEvent::ContentAfterSave
+                    | HookEvent::ContentAfterPublish
+                    | HookEvent::ContentAfterUnpublish
+                    | HookEvent::ContentAfterDelete
+            ) =>
+        {
+            match tokio::time::timeout(
+                Duration::from_secs(1),
+                plugin_manager.content_hook_subscriptions(event, tk),
+            )
+            .await
+            {
+                Ok(Ok(items)) => items.into_iter().map(|(_, id)| id).collect(),
+                _ => return,
+            }
+        }
+        _ => match tokio::time::timeout(
+            Duration::from_secs(1),
+            plugin_manager.hook_subscriptions(event),
+        )
+        .await
+        {
+            Ok(Ok(items)) => items,
+            _ => return,
+        },
+    };
+
+    if subs.is_empty() {
+        return;
+    }
+
+    let actor_role = field_role_for_principal(principal);
+    let mut base_env = HookEnvelope::new(
+        event,
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64,
+        format!("evt_{}", generate_random_token()),
+        payload,
+    );
+    if locale.is_some() {
+        base_env.locale = locale.clone();
+    }
+
+    let started = Instant::now();
+    for (idx, plugin_id) in subs.into_iter().enumerate() {
+        if idx >= MAX_HANDLERS || started.elapsed() >= DISPATCH_ADMISSION_BUDGET {
+            break;
+        }
+        let mut plugin_env = base_env.clone();
+        if let Some(tk) = type_key.as_deref() {
+            plugin_manager
+                .filter_content_payload_for_plugin(
+                    &plugin_id,
+                    tk,
+                    actor_role,
+                    &mut plugin_env.payload,
+                )
+                .await;
+        }
+        let legacy_env = serde_json::to_value(&plugin_env).unwrap_or(Value::Null);
+        let remaining = DISPATCH_ADMISSION_BUDGET.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        if let Err((_status, resp)) = plugin_manager
+            .run_plugin_dispatch(
+                &plugin_id,
+                EnvelopeKind::Hook,
+                legacy_env,
+                event.as_str(),
+                plugin_env.occurred_at_ms,
+                base_env.correlation_id.clone(),
+                plugin_env.locale.clone(),
+                principal,
+                dispatch_depth.saturating_add(1),
+                plugin_env.payload,
+                HookExecutionMode::AsyncPostCommit,
+                Some(remaining),
+            )
+            .await
+        {
+            let err_msg = opendash_core::hooks::sanitize_plain_text(
+                resp.error.as_deref().unwrap_or("Async plugin hook failed"),
+                256,
+            );
+            plugin_manager
+                .record_hook_failure(&plugin_id, &base_env.correlation_id, &err_msg)
+                .await;
+        }
+    }
+}
+
+pub(crate) async fn wait_watch_bool(rx: &mut tokio::sync::watch::Receiver<bool>, expected: bool) {
+    loop {
+        if *rx.borrow_and_update() == expected {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
+impl AsyncHookQueue {
+    pub fn spawn(
+        plugin_manager: Arc<PluginManager>,
+        maintenance_cancel_rx: tokio::sync::watch::Receiver<bool>,
+        shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> Self {
+        let (tx, rx) = tokio::sync::mpsc::channel::<AsyncHookJob>(ASYNC_HOOK_QUEUE_CAPACITY);
+        let shared_rx = Arc::new(tokio::sync::Mutex::new(rx));
+
+        for worker_idx in 0..ASYNC_HOOK_WORKERS {
+            let pm = Arc::clone(&plugin_manager);
+            let rx_ref = Arc::clone(&shared_rx);
+            let mut maint_rx = maintenance_cancel_rx.clone();
+            let mut shut_rx = shutdown_rx.clone();
+            tokio::spawn(async move {
+                loop {
+                    if *shut_rx.borrow() {
+                        break;
+                    }
+                    if *maint_rx.borrow() {
+                        {
+                            let mut guard = rx_ref.lock().await;
+                            while guard.try_recv().is_ok() {}
+                        }
+                        tokio::select! {
+                            biased;
+                            _ = wait_watch_bool(&mut shut_rx, true) => break,
+                            _ = wait_watch_bool(&mut maint_rx, false) => {},
+                        }
+                        continue;
+                    }
+
+                    let maybe_job = {
+                        let mut guard = rx_ref.lock().await;
+                        tokio::select! {
+                            biased;
+                            _ = wait_watch_bool(&mut shut_rx, true) => None,
+                            _ = wait_watch_bool(&mut maint_rx, true) => None,
+                            recv = guard.recv() => recv,
+                        }
+                    };
+
+                    let Some(job) = maybe_job else {
+                        if *shut_rx.borrow() {
+                            break;
+                        }
+                        if *maint_rx.borrow() {
+                            continue;
+                        }
+                        break;
+                    };
+
+                    let fut = run_async_hook_job(&pm, job);
+                    tokio::select! {
+                        biased;
+                        _ = wait_watch_bool(&mut shut_rx, true) => {
+                            let mut guard = rx_ref.lock().await;
+                            while guard.try_recv().is_ok() {}
+                            break;
+                        }
+                        _ = wait_watch_bool(&mut maint_rx, true) => {
+                            let mut guard = rx_ref.lock().await;
+                            while guard.try_recv().is_ok() {}
+                        }
+                        _ = fut => {}
+                    }
+                }
+                let _ = worker_idx;
+            });
+        }
+
+        Self { tx }
+    }
+
+    pub fn enqueue(&self, job: AsyncHookJob) {
+        if job.dispatch_depth >= 2 {
+            return;
+        }
+        if let Err(err) = self.tx.try_send(job) {
+            let event_name = match &err {
+                tokio::sync::mpsc::error::TrySendError::Full(j)
+                | tokio::sync::mpsc::error::TrySendError::Closed(j) => j.event.as_str(),
+            };
+            eprintln!("AsyncHookQueue drop {event_name}: queue full or closed");
+        }
+    }
 }
 
 impl HookDispatcher {
@@ -82,6 +369,7 @@ impl HookDispatcher {
             plugin_manager,
             handlers: Vec::new(),
             recent_events: Mutex::new(Vec::new()),
+            async_queue: None,
         };
         dispatcher
             .register_handler("core/page_saved", HookEvent::PageAfterSave, 0, |event| {
@@ -92,6 +380,31 @@ impl HookDispatcher {
             })
             .expect("unique built-in hook");
         dispatcher
+    }
+
+    pub fn with_async_queue(
+        plugin_manager: Arc<PluginManager>,
+        maintenance_cancel_rx: tokio::sync::watch::Receiver<bool>,
+        shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    ) -> Self {
+        let mut dispatcher = Self::new(Arc::clone(&plugin_manager));
+        dispatcher.async_queue = Some(AsyncHookQueue::spawn(
+            plugin_manager,
+            maintenance_cancel_rx,
+            shutdown_rx,
+        ));
+        dispatcher
+    }
+
+    pub fn enqueue_async(&self, job: AsyncHookJob) {
+        if let Some(ref queue) = self.async_queue {
+            queue.enqueue(job);
+        } else if job.dispatch_depth < 2 && tokio::runtime::Handle::try_current().is_ok() {
+            let pm = Arc::clone(&self.plugin_manager);
+            tokio::spawn(async move {
+                run_async_hook_job(&pm, job).await;
+            });
+        }
     }
 
     /// Trusted cooperative callbacks registered before AppState is shared.
@@ -540,6 +853,393 @@ impl HookDispatcher {
             )
             .await
     }
+
+    pub async fn dispatch_content_prepare_save(
+        &self,
+        type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
+        effective_schema: &opendash_core::content::EffectiveContentSchema,
+        payload: Value,
+    ) -> crate::error::ApiResult<ContentPrepareSavePatch> {
+        use crate::error::ApiError;
+
+        let subs = match tokio::time::timeout(
+            Duration::from_secs(1),
+            self.plugin_manager
+                .filter_subscriptions(HookEvent::FilterContentPrepareSave, Some(type_key)),
+        )
+        .await
+        {
+            Ok(Ok(s)) => s,
+            _ => {
+                return Err(ApiError::unprocessable(
+                    "Không thể tra cứu plugin filter:content/prepare_save.",
+                ));
+            }
+        };
+        if subs.is_empty() {
+            return Ok(ContentPrepareSavePatch::default());
+        }
+
+        let started = Instant::now();
+        let envelope = Self::envelope(HookEvent::FilterContentPrepareSave, payload);
+        let mut running_payload = envelope.payload.clone();
+        let mut merged = ContentPrepareSavePatch::default();
+
+        for (index, (_prio, plugin_id)) in subs.into_iter().enumerate() {
+            if index >= MAX_PREPARE_SAVE_PLUGINS || started.elapsed() >= PREPARE_SAVE_PHASE_BUDGET {
+                return Err(ApiError::unprocessable(
+                    "Vượt quá giới hạn xử lý filter:content/prepare_save.",
+                ));
+            }
+            let remaining = PREPARE_SAVE_PHASE_BUDGET.saturating_sub(started.elapsed());
+            let mut plugin_payload = running_payload.clone();
+            self.plugin_manager
+                .filter_content_payload_for_plugin(
+                    &plugin_id,
+                    type_key,
+                    actor_role,
+                    &mut plugin_payload,
+                )
+                .await;
+            let legacy_env = serde_json::json!({
+                "event": HookEvent::FilterContentPrepareSave.as_str(),
+                "occurred_at_ms": envelope.occurred_at_ms,
+                "correlation_id": &envelope.correlation_id,
+                "locale": &envelope.locale,
+                "payload": &plugin_payload,
+            });
+            let resp = match self
+                .plugin_manager
+                .run_plugin_dispatch(
+                    &plugin_id,
+                    EnvelopeKind::Filter,
+                    legacy_env,
+                    HookEvent::FilterContentPrepareSave.as_str(),
+                    envelope.occurred_at_ms,
+                    envelope.correlation_id.clone(),
+                    envelope.locale.clone(),
+                    principal_for_field_role(actor_role),
+                    0,
+                    plugin_payload,
+                    HookExecutionMode::FilterContentPrepareSave,
+                    Some(remaining),
+                )
+                .await
+            {
+                Ok(run_resp) => run_resp.data.unwrap_or(Value::Null),
+                Err((_status, resp)) => {
+                    let msg = opendash_core::hooks::sanitize_plain_text(
+                        resp.error
+                            .as_deref()
+                            .unwrap_or("filter:content/prepare_save thất bại."),
+                        256,
+                    );
+                    if matches!(
+                        resp.code.as_deref(),
+                        Some("concurrency_limit" | "safe_mode")
+                    ) {
+                        return Err(ApiError::service_unavailable(msg));
+                    }
+                    self.plugin_manager
+                        .record_hook_failure(&plugin_id, &envelope.correlation_id, &msg)
+                        .await;
+                    return Err(ApiError::unprocessable(msg));
+                }
+            };
+
+            let patch: ContentPrepareSavePatch = if resp.is_null() {
+                ContentPrepareSavePatch::default()
+            } else {
+                match serde_json::from_value(resp) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        let msg = "Đầu ra filter:content/prepare_save không hợp lệ.";
+                        self.plugin_manager
+                            .record_hook_failure(&plugin_id, &envelope.correlation_id, msg)
+                            .await;
+                        return Err(ApiError::unprocessable(msg));
+                    }
+                }
+            };
+
+            if patch.is_empty() {
+                continue;
+            }
+
+            let Some(manifest) = self.plugin_manager.cached_plugin_manifest(&plugin_id).await
+            else {
+                return Err(ApiError::unprocessable(
+                    "Không tìm thấy manifest plugin filter:content/prepare_save.",
+                ));
+            };
+            if !manifest.can_write_content_type(type_key) {
+                return Err(ApiError::unprocessable(
+                    "Plugin không có quyền ghi loại nội dung trong filter:content/prepare_save.",
+                ));
+            }
+            for field_key in patch.values_patch.keys() {
+                let Some(field_entry) = effective_schema.effective_fields.get(field_key) else {
+                    return Err(ApiError::unprocessable(format!(
+                        "Trường '{field_key}' trong values_patch không tồn tại ở '{type_key}'."
+                    )));
+                };
+                if !opendash_core::plugin::plugin_can_write_field(
+                    &manifest,
+                    None,
+                    actor_role,
+                    type_key,
+                    field_entry,
+                ) {
+                    return Err(ApiError::unprocessable(format!(
+                        "Plugin hoặc vai trò hiện tại không có quyền ghi trường '{field_key}' qua filter:content/prepare_save."
+                    )));
+                }
+            }
+
+            if let Some(t) = patch.title {
+                merged.title = Some(t.clone());
+                if let Some(obj) = running_payload.as_object_mut() {
+                    obj.insert("title".into(), Value::String(t));
+                }
+            }
+            if let Some(s) = patch.slug {
+                merged.slug = Some(s.clone());
+                if let Some(obj) = running_payload.as_object_mut() {
+                    obj.insert("slug".into(), Value::String(s));
+                }
+            }
+            if let Some(term_ids) = patch.term_ids {
+                if let Some(obj) = running_payload.as_object_mut() {
+                    obj.insert("term_ids".into(), serde_json::json!(term_ids));
+                }
+                merged.term_ids = Some(term_ids);
+            }
+            for (k, v) in patch.values_patch {
+                if let Some(Value::Object(vals)) = running_payload.get_mut("candidate_values") {
+                    if v.is_null() {
+                        vals.remove(&k);
+                    } else {
+                        vals.insert(k.clone(), v.clone());
+                    }
+                }
+                merged.values_patch.insert(k, v);
+            }
+        }
+
+        Ok(merged)
+    }
+
+    pub async fn dispatch_contact_before_submit(
+        &self,
+        _form_id: &str,
+        submission_payload: Value,
+    ) -> crate::error::ApiResult<ContactBeforeSubmitDecision> {
+        use crate::error::ApiError;
+
+        let subs = match tokio::time::timeout(
+            Duration::from_secs(1),
+            self.plugin_manager
+                .filter_subscriptions(HookEvent::FilterContactBeforeSubmit, None),
+        )
+        .await
+        {
+            Ok(Ok(s)) => s,
+            _ => {
+                return Err(ApiError::service_unavailable(
+                    "Không thể tra cứu plugin kiểm tra biểu mẫu liên hệ.",
+                ));
+            }
+        };
+        if subs.is_empty() {
+            return Ok(ContactBeforeSubmitDecision::Allow);
+        }
+
+        let started = Instant::now();
+        let envelope = Self::envelope(HookEvent::FilterContactBeforeSubmit, submission_payload);
+
+        for (index, (_prio, plugin_id)) in subs.into_iter().enumerate() {
+            if index >= MAX_CONTACT_FILTER_PLUGINS
+                || started.elapsed() >= CONTACT_FILTER_PHASE_BUDGET
+            {
+                return Err(ApiError::unprocessable(
+                    "Vượt quá giới hạn kiểm tra filter:contact/before_submit.",
+                ));
+            }
+            let remaining = CONTACT_FILTER_PHASE_BUDGET.saturating_sub(started.elapsed());
+            let legacy_env = serde_json::to_value(&envelope).unwrap_or(Value::Null);
+            let out = match self
+                .plugin_manager
+                .run_plugin_dispatch(
+                    &plugin_id,
+                    EnvelopeKind::Filter,
+                    legacy_env,
+                    HookEvent::FilterContactBeforeSubmit.as_str(),
+                    envelope.occurred_at_ms,
+                    envelope.correlation_id.clone(),
+                    envelope.locale.clone(),
+                    ExecutionPrincipal::Public,
+                    0,
+                    envelope.payload.clone(),
+                    HookExecutionMode::FilterContactBeforeSubmit,
+                    Some(remaining),
+                )
+                .await
+            {
+                Ok(run_resp) => run_resp.data.unwrap_or(Value::Null),
+                Err((_status, resp)) => {
+                    let msg = opendash_core::hooks::sanitize_plain_text(
+                        resp.error
+                            .as_deref()
+                            .unwrap_or("filter:contact/before_submit thất bại."),
+                        256,
+                    );
+                    if matches!(
+                        resp.code.as_deref(),
+                        Some("concurrency_limit" | "safe_mode")
+                    ) {
+                        return Err(ApiError::service_unavailable(msg));
+                    }
+                    self.plugin_manager
+                        .record_hook_failure(&plugin_id, &envelope.correlation_id, &msg)
+                        .await;
+                    return Err(ApiError::unprocessable(msg));
+                }
+            };
+
+            let decision: ContactBeforeSubmitRaw = if out.is_null() {
+                ContactBeforeSubmitRaw::Allow
+            } else {
+                match serde_json::from_value(out) {
+                    Ok(d) => d,
+                    Err(_) => {
+                        let msg = "Đầu ra filter:contact/before_submit không hợp lệ.";
+                        self.plugin_manager
+                            .record_hook_failure(&plugin_id, &envelope.correlation_id, msg)
+                            .await;
+                        return Err(ApiError::unprocessable(msg));
+                    }
+                }
+            };
+
+            match decision {
+                ContactBeforeSubmitRaw::Allow => {}
+                ContactBeforeSubmitRaw::Reject { code, message } => {
+                    let clean_code = opendash_core::hooks::sanitize_plain_text(&code, 64);
+                    let clean_msg = opendash_core::hooks::sanitize_plain_text(&message, 256);
+                    return Ok(ContactBeforeSubmitDecision::Reject {
+                        code: if clean_code.is_empty() {
+                            "rejected".into()
+                        } else {
+                            clean_code
+                        },
+                        message: if clean_msg.is_empty() {
+                            "Biểu mẫu liên hệ bị từ chối.".into()
+                        } else {
+                            clean_msg
+                        },
+                    });
+                }
+            }
+        }
+
+        Ok(ContactBeforeSubmitDecision::Allow)
+    }
+
+    pub async fn dispatch_projection_filters(
+        &self,
+        event: HookEvent,
+        plugin_id: Option<&str>,
+        entry_payload: Value,
+    ) -> crate::error::ApiResult<std::collections::BTreeMap<String, Value>> {
+        let mut results = std::collections::BTreeMap::new();
+        let type_key = entry_payload
+            .get("content_type_key")
+            .and_then(Value::as_str)
+            .or_else(|| entry_payload.get("type_key").and_then(Value::as_str))
+            .map(str::to_owned);
+
+        let subs = match tokio::time::timeout(
+            Duration::from_secs(1),
+            self.plugin_manager
+                .filter_subscriptions(event, type_key.as_deref()),
+        )
+        .await
+        {
+            Ok(Ok(s)) => s,
+            _ => return Ok(results),
+        };
+        if subs.is_empty() {
+            return Ok(results);
+        }
+
+        let started = Instant::now();
+        let envelope = Self::envelope(event, entry_payload);
+
+        for (index, (_prio, pid)) in subs.into_iter().enumerate() {
+            if let Some(target_pid) = plugin_id
+                && pid != target_pid
+            {
+                continue;
+            }
+            if index >= MAX_PROJECTION_FILTER_PLUGINS
+                || started.elapsed() >= PROJECTION_FILTER_PHASE_BUDGET
+            {
+                break;
+            }
+            let remaining = PROJECTION_FILTER_PHASE_BUDGET.saturating_sub(started.elapsed());
+            let mut plugin_payload = envelope.payload.clone();
+            if let Some(tk) = type_key.as_deref() {
+                self.plugin_manager
+                    .filter_public_content_payload_for_plugin(&pid, tk, &mut plugin_payload)
+                    .await;
+            }
+            let legacy_env = serde_json::json!({
+                "event": event.as_str(),
+                "occurred_at_ms": envelope.occurred_at_ms,
+                "correlation_id": &envelope.correlation_id,
+                "locale": &envelope.locale,
+                "payload": &plugin_payload,
+            });
+            match self
+                .plugin_manager
+                .run_plugin_dispatch(
+                    &pid,
+                    EnvelopeKind::Filter,
+                    legacy_env,
+                    event.as_str(),
+                    envelope.occurred_at_ms,
+                    envelope.correlation_id.clone(),
+                    envelope.locale.clone(),
+                    ExecutionPrincipal::Public,
+                    0,
+                    plugin_payload,
+                    HookExecutionMode::FilterProjection,
+                    Some(remaining),
+                )
+                .await
+            {
+                Ok(run_resp) => {
+                    if let Some(val) = run_resp.data
+                        && !val.is_null()
+                    {
+                        results.insert(pid, val);
+                    }
+                }
+                Err((_status, resp)) => {
+                    let msg = opendash_core::hooks::sanitize_plain_text(
+                        resp.error.as_deref().unwrap_or("Projection filter failed"),
+                        256,
+                    );
+                    self.plugin_manager
+                        .record_hook_failure(&pid, &envelope.correlation_id, &msg)
+                        .await;
+                }
+            }
+        }
+
+        Ok(results)
+    }
 }
 
 #[cfg(test)]
@@ -614,5 +1314,197 @@ mod tests {
             )
             .await;
         assert!(nested.outcomes[0].error.is_some());
+    }
+
+    #[tokio::test]
+    async fn async_hook_queue_drains_for_maintenance_and_survives_drop() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root =
+            std::env::temp_dir().join(format!("opendash-hooks-s03-{}-{nanos}", std::process::id()));
+        let site_dir = root.join("site");
+        let db_path = site_dir.join("database").join("opendash.sqlite");
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let plugins_root = site_dir.join("plugins");
+        let secrets_root = site_dir.join("database").join("secrets").join("plugins");
+        std::fs::create_dir_all(&plugins_root).unwrap();
+        std::fs::create_dir_all(&secrets_root).unwrap();
+
+        let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true);
+        let pool = sqlx::SqlitePool::connect_with(opts).await.unwrap();
+        sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+
+        let coord = Arc::new(
+            crate::operations::SiteCoordinator::acquire(crate::paths::SitePaths::from_parts(
+                site_dir.clone(),
+                db_path.clone(),
+            ))
+            .unwrap(),
+        );
+        let pm = Arc::new(PluginManager::with_roots(
+            pool.clone(),
+            false,
+            plugins_root,
+            secrets_root,
+        ));
+        let dispatcher = HookDispatcher::with_async_queue(
+            Arc::clone(&pm),
+            coord.maintenance_cancel_rx(),
+            coord.shutdown_rx(),
+        );
+
+        let build_zip = |manifest: &str, wasm: &[u8]| -> Vec<u8> {
+            use std::io::Write;
+            let mut buf = std::io::Cursor::new(Vec::new());
+            {
+                let mut zip = zip::ZipWriter::new(&mut buf);
+                let zip_opts = zip::write::SimpleFileOptions::default();
+                zip.start_file("manifest.json", zip_opts).unwrap();
+                zip.write_all(manifest.as_bytes()).unwrap();
+                zip.start_file("plugin.wasm", zip_opts).unwrap();
+                zip.write_all(wasm).unwrap();
+                zip.finish().unwrap();
+            }
+            buf.into_inner()
+        };
+
+        let spin_wasm = wat::parse_str(
+            r#"(module
+                (memory (export "memory") 1)
+                (func (export "opendash_run") (result i32)
+                    (loop $l
+                        br $l)
+                    i32.const 0)
+            )"#,
+        )
+        .unwrap();
+        let spin_manifest = serde_json::json!({
+            "id": "spin-after",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 3,
+            "name": "Spin After",
+            "hooks": ["content/after_save"],
+            "permissions": { "content_read": ["post"] }
+        })
+        .to_string();
+        pm.install_plugin_checked(&build_zip(&spin_manifest, &spin_wasm))
+            .await
+            .unwrap();
+
+        let lease = coord.admit_mutation().unwrap();
+        dispatcher.enqueue_async(AsyncHookJob {
+            event: HookEvent::ContentAfterSave,
+            principal: ExecutionPrincipal::Admin,
+            locale: Some("vi".to_owned()),
+            type_key: Some("post".to_owned()),
+            payload: serde_json::json!({ "id": 1, "values": {} }),
+            dispatch_depth: 0,
+            lease,
+        });
+
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let drain_started = Instant::now();
+        let exclusive = tokio::time::timeout(
+            Duration::from_secs(5),
+            coord.begin_maintenance(
+                crate::storage::operations::OperationKind::Backup,
+                Duration::from_secs(5),
+            ),
+        )
+        .await
+        .expect("begin_maintenance must drain AsyncHookQueue within <= 5s")
+        .expect("begin_maintenance succeeds");
+        assert!(drain_started.elapsed() < Duration::from_secs(5));
+        assert!(*coord.maintenance_cancel_rx().borrow());
+
+        // Drop maintenance guard -> workers must stay alive and clear maintenance_cancel_rx.
+        drop(exclusive);
+        assert!(!*coord.maintenance_cancel_rx().borrow());
+
+        pm.disable_plugin_cas("spin-after", None).await.unwrap();
+
+        let kv_req = r#"{"op":"kv_set","key":"revived","value":"ok"}"#;
+        let kv_out = "{}";
+        let kv_esc: String = kv_req
+            .as_bytes()
+            .iter()
+            .map(|b| format!("\\{b:02x}"))
+            .collect();
+        let out_esc: String = kv_out
+            .as_bytes()
+            .iter()
+            .map(|b| format!("\\{b:02x}"))
+            .collect();
+        let kv_wasm = wat::parse_str(&format!(
+            r#"(module
+                (import "opendash_v1" "host_call" (func $host_call (param i32 i32 i32 i32) (result i32)))
+                (import "opendash_v1" "host_write_output" (func $set_output (param i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 1024) "{kv_esc}")
+                (data (i32.const 1536) "{out_esc}")
+                (func (export "opendash_run") (result i32)
+                    (drop (call $host_call (i32.const 1024) (i32.const {rlen}) (i32.const 2048) (i32.const 512)))
+                    (drop (call $set_output (i32.const 1536) (i32.const {olen})))
+                    i32.const 0)
+            )"#,
+            rlen = kv_req.len(),
+            olen = kv_out.len()
+        ))
+        .unwrap();
+        let kv_manifest = serde_json::json!({
+            "id": "kv-revive-after",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 3,
+            "name": "KV Revive After",
+            "hooks": ["content/after_save"],
+            "permissions": { "content_read": ["post"], "sqlite": ["kv_write"] }
+        })
+        .to_string();
+        pm.install_plugin_checked(&build_zip(&kv_manifest, &kv_wasm))
+            .await
+            .unwrap();
+
+        let post_lease = coord.admit_mutation().unwrap();
+        dispatcher.enqueue_async(AsyncHookJob {
+            event: HookEvent::ContentAfterSave,
+            principal: ExecutionPrincipal::Admin,
+            locale: Some("vi".to_owned()),
+            type_key: Some("post".to_owned()),
+            payload: serde_json::json!({ "id": 2, "values": {} }),
+            dispatch_depth: 0,
+            lease: post_lease,
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(6);
+        let mut saw = None;
+        while Instant::now() < deadline {
+            if let Ok(Some(val)) =
+                crate::storage::plugin_kv::get(&pool, "kv-revive-after", "revived").await
+            {
+                saw = Some(val);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+        if saw.is_none() {
+            let logs: Vec<(String, String, String)> =
+                sqlx::query_as("SELECT plugin_id, level, message FROM plugin_logs ORDER BY id")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap_or_default();
+            panic!("timed out waiting for kv-revive-after/revived; logs = {logs:?}");
+        }
+        assert_eq!(saw.as_deref(), Some("\"ok\""));
+
+        coord.notify_shutdown();
+        pool.close().await;
+        drop(coord);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

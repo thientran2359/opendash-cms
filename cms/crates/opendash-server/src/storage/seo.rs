@@ -1168,7 +1168,26 @@ pub async fn build_entry_seo_view_for_locale(
     .await?;
     let (custom_title, description, og_image_id, custom_canonical, entry_noindex) =
         row.unwrap_or((None, None, None, None, 0));
-    let title = custom_title.unwrap_or_else(|| format!("{entry_title} — {}", general.site_title));
+    let mut proj = super::plugin_projections::batch_load_entry_projections(db, &[entry_id])
+        .await?
+        .remove(&entry_id)
+        .unwrap_or_default();
+    let (ov_title, ov_description, ov_og_image_id, ov_canonical, ov_noindex) =
+        match proj.seo_override.take() {
+            Some(ov) => (
+                ov.title,
+                ov.description,
+                ov.og_image_id,
+                ov.canonical_url,
+                ov.noindex,
+            ),
+            None => (None, None, None, None, false),
+        };
+    let title = custom_title
+        .or(ov_title)
+        .unwrap_or_else(|| format!("{entry_title} — {}", general.site_title));
+    let description = description.or(ov_description);
+    let custom_canonical = custom_canonical.or(ov_canonical);
     let canonical_url = custom_canonical
         .clone()
         .or_else(|| absolute_public_url(&pub_settings, canonical_path));
@@ -1181,10 +1200,16 @@ pub async fn build_entry_seo_view_for_locale(
         .fetch_optional(db)
         .await?;
         project_og_image_url(&pub_settings, public_mid)
+    } else if let Some(mid) = ov_og_image_id {
+        if super::public_content::media_is_referenced(db, &mid).await? {
+            project_og_image_url(&pub_settings, Some(mid))
+        } else {
+            None
+        }
     } else {
         None
     };
-    let noindex = entry_noindex != 0;
+    let noindex = (entry_noindex != 0) || ov_noindex;
     let robots = if !pub_settings.indexing_enabled || noindex {
         "noindex,nofollow".to_string()
     } else {
@@ -1252,6 +1277,7 @@ pub async fn build_entry_seo_view_for_locale(
         og_description: description,
         og_url: canonical_url,
         og_image_url,
+        json_ld: proj.json_ld,
     })
 }
 
@@ -1269,6 +1295,7 @@ pub async fn build_home_seo_view_for_locale(
     let pub_settings = settings::get_public(db).await?;
     let (_resolved_locale, lang, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
     let home = get_home_seo_for_locale(db, locale).await?;
+    let mut has_explicit_title = home.title.is_some();
     let mut title = home.title.unwrap_or_else(|| {
         if general.tagline.trim().is_empty() {
             general.site_title.clone()
@@ -1280,6 +1307,7 @@ pub async fn build_home_seo_view_for_locale(
     let mut custom_canonical = home.canonical_url;
     let mut og_image_url = project_og_image_url(&pub_settings, home.og_image_id);
     let mut noindex = home.noindex;
+    let mut home_json_ld = Vec::new();
     let page_state = reading_page_state_for_locale(db, locale, true).await?;
     if let ReadingPageState::Published(id) = page_state {
         let entry_meta: Option<(
@@ -1300,6 +1328,7 @@ pub async fn build_home_seo_view_for_locale(
         {
             if let Some(entry_title) = entry_title {
                 title = entry_title;
+                has_explicit_title = true;
             }
             description = entry_description.or(description);
             custom_canonical = entry_canonical.or(custom_canonical);
@@ -1313,8 +1342,27 @@ pub async fn build_home_seo_view_for_locale(
                 .await?;
                 og_image_url = project_og_image_url(&pub_settings, media_id);
             }
-            noindex = entry_noindex != 0;
+            noindex |= entry_noindex != 0;
         }
+        let mut home_proj = super::plugin_projections::batch_load_entry_projections(db, &[id])
+            .await?
+            .remove(&id)
+            .unwrap_or_default();
+        if let Some(ov) = home_proj.seo_override.take() {
+            if !has_explicit_title && let Some(ov_title) = ov.title {
+                title = ov_title;
+            }
+            description = description.or(ov.description);
+            custom_canonical = custom_canonical.or(ov.canonical_url);
+            if og_image_url.is_none()
+                && let Some(mid) = ov.og_image_id
+                && super::public_content::media_is_referenced(db, &mid).await?
+            {
+                og_image_url = project_og_image_url(&pub_settings, Some(mid));
+            }
+            noindex |= ov.noindex;
+        }
+        home_json_ld = home_proj.json_ld;
     }
     let canonical_url = custom_canonical
         .clone()
@@ -1378,6 +1426,7 @@ pub async fn build_home_seo_view_for_locale(
         og_description: description,
         og_url: canonical_url,
         og_image_url,
+        json_ld: home_json_ld,
     })
 }
 
@@ -1580,6 +1629,7 @@ pub async fn build_simple_seo_view_for_locale(
         og_description: None,
         og_url: canonical_url,
         og_image_url: None,
+        json_ld: Vec::new(),
     })
 }
 

@@ -3172,6 +3172,7 @@ pub async fn delete_entry(
     .bind(id)
     .execute(&mut *tx)
     .await?;
+    super::plugin_projections::delete_entry_projections_in_tx(&mut tx, id).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(())
@@ -3216,6 +3217,9 @@ pub async fn set_publication_status(
     .await?;
     if result.rows_affected() == 0 {
         return Err(missing_or_stale(db, type_key, id).await?);
+    }
+    if status == "draft" {
+        super::plugin_projections::delete_entry_projections_in_tx(&mut tx, id).await?;
     }
     crate::storage::seo::sync_entry_seo_media_ref_in_tx(&mut tx, id).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;

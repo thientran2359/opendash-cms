@@ -547,6 +547,9 @@ pub async fn install_plugin_revision(
     crate::storage::page::resync_plugin_block_acls_in_tx(&mut tx)
         .await
         .map_err(map_cnt_err)?;
+    super::plugin_projections::delete_plugin_projections_in_tx(&mut tx, &manifest.id)
+        .await
+        .map_err(|e| PluginStorageError::Internal(format!("Lỗi xóa plugin projections cũ: {e}")))?;
 
     tx.commit()
         .await
@@ -725,6 +728,10 @@ pub async fn set_plugin_enabled(
         crate::storage::admin_extensions::require_capacity_in_conn(&mut tx, "plugin", id, None)
             .await
             .map_err(|e| e.1.into_owned())?;
+    } else {
+        super::plugin_projections::delete_plugin_projections_in_tx(&mut tx, id)
+            .await
+            .map_err(|e| format!("Lỗi xóa plugin projections: {e}"))?;
     }
     tx.commit().await.map_err(|e| e.to_string())?;
     Ok(())
@@ -797,6 +804,12 @@ pub async fn set_plugin_enabled_cas(
         crate::storage::admin_extensions::require_capacity_in_conn(&mut tx, "plugin", id, None)
             .await
             .map_err(map_cnt_err)?;
+    } else {
+        super::plugin_projections::delete_plugin_projections_in_tx(&mut tx, id)
+            .await
+            .map_err(|e| {
+                PluginStorageError::Internal(format!("Lỗi xóa plugin projections: {e}"))
+            })?;
     }
 
     let next_cas: i64 = sqlx::query_scalar("SELECT cas_version FROM plugins WHERE id = ?")
@@ -1099,6 +1112,7 @@ pub async fn delete_entry_with_plugin_fence(
     .bind(entry_id)
     .execute(&mut *tx)
     .await?;
+    super::plugin_projections::delete_entry_projections_in_tx(&mut tx, entry_id).await?;
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
     tx.commit().await?;
     Ok(())

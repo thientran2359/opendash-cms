@@ -119,6 +119,8 @@ struct CoordinatorInner {
     _locks: Vec<File>,
     state: Mutex<AdmissionState>,
     notify: Notify,
+    maintenance_cancel_tx: tokio::sync::watch::Sender<bool>,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
 }
 
 /// Process-wide instance coordinator holding exclusive canonical site + DB locks
@@ -154,14 +156,32 @@ impl SiteCoordinator {
             }
         }
 
+        let (maintenance_cancel_tx, _) = tokio::sync::watch::channel(false);
+        let (shutdown_tx, _) = tokio::sync::watch::channel(false);
+
         Ok(Self {
             inner: Arc::new(CoordinatorInner {
                 paths: canonical,
                 _locks: acquired,
                 state: Mutex::new(AdmissionState::default()),
                 notify: Notify::new(),
+                maintenance_cancel_tx,
+                shutdown_tx,
             }),
         })
+    }
+
+    pub fn maintenance_cancel_rx(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.inner.maintenance_cancel_tx.subscribe()
+    }
+
+    pub fn shutdown_rx(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.inner.shutdown_tx.subscribe()
+    }
+
+    pub fn notify_shutdown(&self) {
+        let _ = self.inner.shutdown_tx.send(true);
+        let _ = self.inner.maintenance_cancel_tx.send(true);
     }
 
     #[allow(dead_code)]
@@ -232,6 +252,7 @@ impl SiteCoordinator {
                 kind,
                 draining: true,
             });
+            let _ = self.inner.maintenance_cancel_tx.send(true);
             if guard.active_writers == 0 {
                 guard.maintenance = Some(ActiveMaintenance {
                     kind,
@@ -287,6 +308,7 @@ impl SiteCoordinator {
                     });
                 }
                 guard.maintenance = None;
+                let _ = self.inner.maintenance_cancel_tx.send(false);
                 self.inner.notify.notify_waiters();
                 return Err(MaintenanceError::DrainTimeout {
                     active_writers: writers.max(remaining),
@@ -313,6 +335,7 @@ impl SiteCoordinator {
                     });
                 }
                 guard.maintenance = None;
+                let _ = self.inner.maintenance_cancel_tx.send(false);
                 self.inner.notify.notify_waiters();
                 return Err(MaintenanceError::DrainTimeout {
                     active_writers: writers,
@@ -334,6 +357,8 @@ impl SiteCoordinator {
                 .lock()
                 .expect("coordinator admission mutex poisoned");
             guard.shutting_down = true;
+            let _ = self.inner.shutdown_tx.send(true);
+            let _ = self.inner.maintenance_cancel_tx.send(true);
             if guard.active_writers == 0 {
                 return Ok(());
             }
@@ -370,6 +395,12 @@ impl SiteCoordinator {
 /// Active writer lease; releasing it notifies any draining maintenance window.
 pub struct MutationLease {
     inner: Arc<CoordinatorInner>,
+}
+
+impl std::fmt::Debug for MutationLease {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MutationLease").finish_non_exhaustive()
+    }
 }
 
 impl Clone for MutationLease {
@@ -442,6 +473,7 @@ impl Drop for ExclusiveOpsContext {
             .lock()
             .expect("coordinator admission mutex poisoned");
         guard.maintenance = None;
+        let _ = self.inner.maintenance_cancel_tx.send(false);
         self.inner.notify.notify_waiters();
     }
 }
