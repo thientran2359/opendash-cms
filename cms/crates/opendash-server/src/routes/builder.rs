@@ -352,8 +352,39 @@ pub async fn entry_builder_get(
     Ok(entry_builder_response(result))
 }
 
+fn enqueue_entry_builder_after_save(
+    hooks: &HookDispatcher,
+    actor: &crate::auth::SessionContext,
+    type_key: &str,
+    id: i64,
+    result: &Result<builder_storage::EntryBuilderOpen, builder_storage::EntryBuilderMutationError>,
+    lease: crate::operations::MutationLease,
+) {
+    if let Ok(opened) = result {
+        let principal = match actor.user.role {
+            crate::auth::Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
+            crate::auth::Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
+        };
+        hooks.enqueue_async(crate::hooks::AsyncHookJob {
+            event: opendash_core::hooks::HookEvent::ContentAfterSave,
+            principal,
+            locale: None,
+            type_key: Some(type_key.to_string()),
+            payload: serde_json::json!({
+                "type_key": type_key,
+                "id": id,
+                "entry_id": id,
+                "operation": "update",
+                "version": opened.version,
+            }),
+            dispatch_depth: 0,
+            lease,
+        });
+    }
+}
+
 pub async fn entry_builder_put(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -368,18 +399,18 @@ pub async fn entry_builder_put(
     validate_entry_builder_type(&type_key)?;
     let expected_version = parse_builder_if_match(&headers)?;
     let document = decode_document(&headers, &bytes)?;
-    entry_builder_mutation_response(
-        builder_storage::save_entry_builder(
-            &db,
-            &actor,
-            &hooks,
-            &type_key,
-            id,
-            expected_version,
-            &document,
-        )
-        .await,
+    let result = builder_storage::save_entry_builder(
+        &db,
+        &actor,
+        &hooks,
+        &type_key,
+        id,
+        expected_version,
+        &document,
     )
+    .await;
+    enqueue_entry_builder_after_save(&hooks, &actor, &type_key, id, &result, lease);
+    entry_builder_mutation_response(result)
 }
 
 pub async fn entry_builder_preview(
@@ -434,7 +465,7 @@ struct EntryBuilderReset {
 }
 
 pub async fn entry_builder_reset(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -451,18 +482,18 @@ pub async fn entry_builder_reset(
     require_builder_json(&headers, &bytes)?;
     let input: EntryBuilderReset =
         serde_json::from_slice(&bytes).map_err(|error| ApiError::bad_request(error.to_string()))?;
-    entry_builder_mutation_response(
-        builder_storage::reset_entry_builder(
-            &db,
-            &actor,
-            &hooks,
-            &type_key,
-            id,
-            expected_version,
-            input.confirm,
-        )
-        .await,
+    let result = builder_storage::reset_entry_builder(
+        &db,
+        &actor,
+        &hooks,
+        &type_key,
+        id,
+        expected_version,
+        input.confirm,
     )
+    .await;
+    enqueue_entry_builder_after_save(&hooks, &actor, &type_key, id, &result, lease);
+    entry_builder_mutation_response(result)
 }
 
 #[cfg(test)]
