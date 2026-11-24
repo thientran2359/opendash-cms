@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="{{ locale.code | default('vi') }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ entry.title }} | {{ site.title }}</title>
+  <link rel="stylesheet" href="{{ theme_assets['assets/app.css'] }}">
+</head>
+<body>
+  <main class="sample-container">
+    <nav class="sample-breadcrumbs" aria-label="Breadcrumb">
+      {% for crumb in breadcrumbs %}
+        {% if crumb.url and not crumb.is_current %}
+          <a href="{{ crumb.url }}">{{ crumb.name }}</a>
+        {% else %}
+          <span>{{ crumb.name }}</span>
+        {% endif %}
+      {% endfor %}
+    </nav>
+
+    <article>
+      <header class="sample-header">
+        {% set seo_ext = entry.ext["rust-seo-plugin"] | default({}) %}
+        {% if seo_ext.badge | default("") %}
+          <span class="sample-badge">{{ seo_ext.badge | default("") }}</span>
+        {% endif %}
+        <h1>{{ entry.title }}</h1>
+        <div class="sample-meta">
+          {% if entry.published_at %}
+            <time datetime="{{ entry.published_at }}">{{ entry.published_at | date_format("%d/%m/%Y") }}</time>
+          {% endif %}
+          <span>{{ entry.reading_time_minutes | format_number }} phút đọc</span>
+        </div>
+      </header>
+
+      <div class="sample-body">{{ od_content() }}</div>
+    </article>
+
+    {% if related_entries | length > 0 %}
+      <aside class="sample-related">
+        <h2>Bài viết liên quan</h2>
+        <ul>
+          {% for rel in related_entries %}
+            <li>
+              {% if rel.url %}
+                <a href="{{ rel.url }}">{{ rel.title }}</a>
+              {% else %}
+                <span>{{ rel.title }}</span>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </aside>
+    {% endif %}
+  </main>
+</body>
+</html>

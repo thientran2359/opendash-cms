@@ -719,6 +719,14 @@ fn walk_v3_dir(
                     "Đường dẫn theme bị trùng lặp không phân biệt hoa thường: {rel_path}"
                 ));
             }
+            if depth == 0 && name.eq_ignore_ascii_case("readme.md") {
+                if meta.len() > V2_MAX_TEXT_BYTES as u64 {
+                    return Err(format!(
+                        "File '{rel_path}' vượt quá giới hạn kích thước ({V2_MAX_TEXT_BYTES} bytes)."
+                    ));
+                }
+                continue;
+            }
             validate_v2_relative_path(&rel_path).map_err(str::to_owned)?;
             let cap = v3_entry_cap_and_allowlist(&rel_path).map_err(str::to_owned)?;
             if meta.len() > cap as u64 {
@@ -1651,11 +1659,21 @@ mod tests {
         std::fs::write(valid_dir.join("theme.json"), manifest_bytes).unwrap();
         std::fs::write(valid_dir.join("index.html"), index_bytes).unwrap();
         std::fs::write(valid_dir.join("assets/main.css"), css_bytes).unwrap();
+        std::fs::write(valid_dir.join("README.md"), b"# Sample Theme Docs\n").unwrap();
 
         let dir_summary = check_theme_path(&valid_dir).expect("valid dir passes");
         assert_eq!(dir_summary.theme_id, "cli-sample");
         assert_eq!(dir_summary.options_count, 1);
         assert_eq!(dir_summary.assets, vec!["assets/main.css"]);
+
+        // Subdirectory README.md must still be rejected by offline CLI check.
+        let sub_readme_dir = tmp_root.join("sub-readme-theme");
+        std::fs::create_dir_all(sub_readme_dir.join("assets")).unwrap();
+        std::fs::write(sub_readme_dir.join("theme.json"), manifest_bytes).unwrap();
+        std::fs::write(sub_readme_dir.join("index.html"), index_bytes).unwrap();
+        std::fs::write(sub_readme_dir.join("assets/main.css"), css_bytes).unwrap();
+        std::fs::write(sub_readme_dir.join("assets/README.md"), b"# Not Allowed\n").unwrap();
+        assert!(check_theme_path(&sub_readme_dir).is_err());
 
         // ZIP package without `.zip` extension must still validate via magic/file read.
         let bin_zip_path = tmp_root.join("cli-sample.bundle");

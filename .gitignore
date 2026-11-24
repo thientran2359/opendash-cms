@@ -66,3 +66,5 @@ __pycache__/
 
 /cms/examples/plugins/sample-plugin/node_modules/
 /cms/examples/plugins/sample-plugin/build/
+/cms/examples/plugins/rust-seo-plugin/target/
+/cms/examples/plugins/rust-seo-plugin/Cargo.lock
