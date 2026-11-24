@@ -364,7 +364,9 @@ async fn s03_async_hook_queue_runs_after_events_via_http() {
         .send()
         .await
         .unwrap();
-    assert_eq!(dis.status(), StatusCode::OK);
+    let dis_status = dis.status();
+    let dis_body = dis.text().await.unwrap();
+    assert_eq!(dis_status, StatusCode::OK, "disable failed: {dis_body}");
 
     let en = client
         .post(format!("{base_url}/api/admin/plugins/toggle-target/enable"))
@@ -374,7 +376,9 @@ async fn s03_async_hook_queue_runs_after_events_via_http() {
         .send()
         .await
         .unwrap();
-    assert_eq!(en.status(), StatusCode::OK);
+    let en_status = en.status();
+    let en_body = en.text().await.unwrap();
+    assert_eq!(en_status, StatusCode::OK, "enable failed: {en_body}");
 
     let cfg = client
         .put(format!(
@@ -388,7 +392,13 @@ async fn s03_async_hook_queue_runs_after_events_via_http() {
         .send()
         .await
         .unwrap();
-    assert_eq!(cfg.status(), StatusCode::OK);
+    let cfg_status = cfg.status();
+    let cfg_body = cfg.text().await.unwrap();
+    assert_eq!(
+        cfg_status,
+        StatusCode::OK,
+        "put settings failed: {cfg_body}"
+    );
 
     let create = client
         .post(format!("{base_url}/api/admin/content-types/post/entries"))

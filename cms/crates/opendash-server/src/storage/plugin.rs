@@ -747,6 +747,10 @@ pub async fn set_plugin_enabled_cas(
         .begin()
         .await
         .map_err(|e| PluginStorageError::Internal(format!("Lỗi mở transaction plugin: {e}")))?;
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| PluginStorageError::Internal(format!("Lỗi khóa ghi plugin: {e}")))?;
 
     let current: Option<i64> = sqlx::query_scalar("SELECT cas_version FROM plugins WHERE id = ?")
         .bind(id)
@@ -1071,6 +1075,9 @@ pub async fn delete_entry_with_plugin_fence(
         return Err(ApiError::bad_request("expected_version không hợp lệ."));
     }
     let mut tx = db.begin().await?;
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
     if !is_plugin_generation_active(&mut *tx, &fence.plugin_id, fence.expected_generation).await? {
         return Err(ApiError::conflict(
             "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",

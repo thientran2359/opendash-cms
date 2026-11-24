@@ -346,6 +346,9 @@ async fn write_entry_projections_in_tx(
     items: &[ComputedPluginProjection],
     plugin_filter: Option<&str>,
 ) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
     if let Some(pid) = plugin_filter {
         let enabled: Option<i64> = sqlx::query_scalar("SELECT enabled FROM plugins WHERE id = ?")
             .bind(pid)
