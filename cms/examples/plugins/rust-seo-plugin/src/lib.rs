@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use opendash_plugin_sdk::{
-    EntryViewOutput, Envelope, HttpRequestInput, LogLevel, SdkError, SeoHeadOutput, export_plugin,
-    http_request, kv_get, kv_set, log, plugin_secret_get, plugin_settings_get,
+    EntryViewOutput, Envelope, HttpRequestInput, LogLevel, SdkError, SeoHeadOutput, content_get,
+    export_plugin, http_request, kv_get, kv_set, log, plugin_secret_get, plugin_settings_get,
     serde_json::{self, Value, json},
     write_output,
 };
@@ -111,11 +111,26 @@ fn handle_after_publish(env: &Envelope) -> Result<(), SdkError> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        let slug = non_empty_payload_str(env.payload.get("slug")).unwrap_or("");
         let type_key = non_empty_payload_str(env.payload.get("type_key"))
             .or_else(|| non_empty_payload_str(env.payload.get("content_type_key")))
             .unwrap_or("post");
         let entry_id = env.payload.get("entry_id").and_then(Value::as_i64);
+        let slug_from_payload = non_empty_payload_str(env.payload.get("slug"));
+        let fetched_slug = match (slug_from_payload, entry_id) {
+            (None, Some(eid)) => content_get(type_key, eid, env.locale.as_deref())
+                .ok()
+                .flatten()
+                .map(|entry| entry.slug),
+            _ => None,
+        };
+        let slug = slug_from_payload
+            .or_else(|| {
+                fetched_slug
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or("");
         let body = serde_json::to_string(&json!({
             "event": env.event,
             "entry_id": entry_id,
@@ -134,7 +149,7 @@ fn handle_after_publish(env: &Envelope) -> Result<(), SdkError> {
                 ("content-type".to_owned(), "application/json".to_owned()),
             ]),
             body: Some(&body),
-            timeout_ms: Some(3000),
+            timeout_ms: Some(2000),
         })?;
         webhook_sent = (200..300).contains(&resp.status);
     }

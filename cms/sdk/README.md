@@ -37,9 +37,9 @@ Mọi phản hồi từ host hỗ trợ song song định dạng legacy top-leve
 | | `kvDelete(key)` | `kv_delete` | Trả `bool` (`ok == true && data.deleted == true`) |
 | | `kvList(prefix = null, limit = 50)` | `kv_list` | Chỉ dùng trong `action` hoặc `async post-commit hook` |
 | **HTTP Egress** | `httpRequest(method, url, headersJson = "{}", body = "")` | `http_request` | Tuân thủ DNS-pinned allowlist trong `permissions.network` |
-| **Content & Taxonomy** | `contentGet(typeKey, entryId, locale = null)` | `content_get` | Trả `data.entry` (hoặc `null` nếu không tồn tại/ẩn) |
+| **Content & Taxonomy** | `contentGet(typeKey, entryId, locale = null)` | `content_get` | Trả chuỗi JSON phản hồi đầy đủ `{"ok":true,"data":{"entry":{...}|null}}` từ `hostCall` |
 | | `contentList(typeKey, locale = null, limit = 20, offset = 0, publishedOnly = false)` | `content_list` | Phân trang có giới hạn; tự động readback `-2` nếu > 64 KiB |
-| | `contentSave(opObj)` | `content_save` | Action `content_write`; truyền `type_key`, `slug`, `title`, `values`, tùy chọn `entry_id`, `expected_version`, `locale`, `term_ids` |
+| | `contentSave(opObj)` | `content_save` | Action `content_write`; truyền `type_key`, `slug`, `title`, `values`, tùy chọn `entry_id`, `expected_version`, `status`, `locale`, `term_ids` |
 | | `contentDelete(typeKey, entryId, expectedVersion)` | `content_delete` | Action `content_delete`; kiểm CAS `expected_version` |
 | | `taxonomyList(kind, locale = null, limit = 50)` | `taxonomy_list` | Yêu cầu `permissions.taxonomy_read: true` |
 | **Media & Settings** | `mediaGet(mediaId)` | `media_get` | Yêu cầu `permissions.media_read: true` |

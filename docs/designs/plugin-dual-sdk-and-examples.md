@@ -1,9 +1,10 @@
 # Đặc tả Thiết kế EGM — Spec 3: Dual Guest SDK (`AssemblyScript` & `opendash-plugin-sdk`) & Reference Examples
 
-- **Status:** Approved
+- **Status:** Verified
 - **Approved By:** Owner
 - **Approval Evidence:** Owner chat decisions 1A-4A & directive 2026-11-24 (Issue từng Slice cho Nova)
 - **Goldfish Review:** 3-round zero-context Goldfish review (egm-design, egm-codebase-details, egm-implementation-readiness) · 2026-11-24 · 3/3 APPROVED
+- **Implementation & Closure Evidence:** S01 `#528` / PR `#538` (`9d5c003`), S02 `#529` / PR `#539` (`5e4c2fb`), S03 `#530` / PR `#545` (`6bcd3d5`), drift report & closure: [2026-11-24 drift report](../../.agents/research/2026-11-24_SPEC3_DUAL_SDK_DRIFT_REPORT.md) (`0 Blocker · 0 Major · 1 Minor · 1 Nit` sau vá drift) và [2026-11-24 closure](../verification/2026-11-24-spec3-dual-sdk-closure.md).
 - **Date:** 2026-11-24
 - **Author:** Orion (Elephant)
 - **Thuộc Lộ trình:** Giai đoạn 4 trong Tầm nhìn 6 Giai đoạn (`concepts_brief.md`: Decision `4A`)
@@ -95,7 +96,7 @@
   5. Các mã lỗi âm khác (`-1`, v.v.): trả `'{"ok":false,"error":"Host call returned error code"}'`.
 
 #### 1.2 Tương thích Dual Response Format (`HostOperationResponse` v1 top-level vs Spec 2 `data`)
-- Trong `cms/crates/opendash-server/src/plugin/host_ops.rs:95-110`, các op v1 (`kv_get`, `http_request`) trả field ở top-level (`{"ok":true,"found":true,"value":...}` và `{"ok":true,"status":200,"headers":{...},"body":"..."}`), trong khi Spec 2 định nghĩa 11 op mới trả trong `{"ok":true,"data":{...}}`.
+- Trong `cms/crates/opendash-server/src/plugin/host_ops.rs:243-260`, các op v1 (`kv_get`, `http_request`) trả field ở top-level (`{"ok":true,"found":true,"value":...}` và `{"ok":true,"status":200,"headers":{...},"body":"..."}`), trong khi Spec 2 định nghĩa 11 op mới trả trong `{"ok":true,"data":{...}}`.
 - Trong `cms/sdk/as/opendash.ts`:
   - `kvGet(key: string): string | null` kiểm tra cả `resObj.getValue("data")` (nếu op trả trong `data`) lẫn top-level `found`/`value` (giữ nguyên hành vi hiện tại với `host_ops.rs:95-110`).
   - `httpRequest(...)` giữ nguyên trả raw JSON string để tương thích 100% với code cũ.
@@ -125,7 +126,7 @@
   - `export function kvList(prefix: string | null = null, limit: i32 = 50): string` *(gửi `op: "kv_list"`, kèm `"prefix"` nếu non-null/non-empty và `"limit"`; trả raw JSON response)*
   - `export function contentGet(typeKey: string, entryId: i64, locale: string | null = null): string` *(gửi `{"op":"content_get","type_key":...,"entry_id":...}`, kèm `"locale"` nếu non-null/non-empty)*
   - `export function contentList(typeKey: string, locale: string | null = null, limit: i32 = 20, offset: i32 = 0, publishedOnly: bool = false): string` *(gửi `{"op":"content_list","type_key":...,"limit":...,"offset":...,"published_only":...}`, kèm `"locale"` nếu non-null/non-empty)*
-  - `export function contentSave(opObj: JSON.Obj): string` *(tự gán `opObj.set("op", "content_save")` nếu chưa có; caller truyền các key snake_case `type_key`, `slug`, `title`, `values`, tùy chọn `entry_id`, `expected_version`, `status`, `term_ids`)*
+  - `export function contentSave(opObj: JSON.Obj): string` *(tự gán `opObj.set("op", "content_save")` nếu chưa có; caller truyền các key snake_case `type_key`, `slug`, `title`, `values`, tùy chọn `entry_id`, `expected_version`, `status`, `locale`, `term_ids`)*
   - `export function contentDelete(typeKey: string, entryId: i64, expectedVersion: i64): string` *(gửi `{"op":"content_delete","type_key":...,"entry_id":...,"expected_version":...}`)*
   - `export function taxonomyList(kind: string, locale: string | null = null, limit: i32 = 50): string` *(gửi `{"op":"taxonomy_list","kind":...,"limit":...}`, kèm `"locale"` nếu non-null/non-empty)*
   - `export function mediaGet(mediaId: string): string` *(gửi `{"op":"media_get","media_id":...}`)*
@@ -184,7 +185,7 @@
   - `pub fn host_call_raw(req_json: &[u8]) -> Result<Vec<u8>, SdkError>`:
     1. Khởi tạo buffer đã zero-init `let mut buf = vec![0u8; INITIAL_RESP_BUF_CAP];` (tuyệt đối không dùng `Vec::with_capacity` chưa khởi tạo khi truyền raw pointer cho host) và thử `host_call`.
     2. Nếu trả `-2` (`BUFFER_TOO_SMALL`): gọi `host_last_resp_len()`, kiểm tra `1..=MAX_IPC_FRAME_BYTES`, cấp `let mut full_buf = vec![0u8; full_len as usize];` và gọi `host_read_last_resp(full_buf.as_mut_ptr() as i32, full_len)` rồi truncate về số byte copy được (không gọi lại `host_call`).
-    3. Trên `not(target_arch = "wasm32")`: đi qua cùng logic `MockHost::call_with_buf_cap` để kiểm chứng được cả nhánh `-2` readback trên native tests!
+    3. Trên `not(target_arch = "wasm32")`: đi qua cùng logic `MockHost::with_initial_resp_buf_cap` + `abi_host_call` để kiểm chứng được cả nhánh `-2` readback trên native tests!
 
 #### 2.3 Exact Types & Error Enum (`src/types.rs`)
 ```rust
@@ -247,7 +248,7 @@ pub struct HostResponse {
   - `KvItem { pub key: String, pub value: serde_json::Value }`
   - `HttpRequestInput<'a> { pub method: &'a str, pub url: &'a str, pub headers: BTreeMap<String, String>, pub body: Option<&'a str>, pub timeout_ms: Option<u64> }`
   - `HttpResponse { pub status: u16, pub headers: BTreeMap<String, String>, pub body: String }`
-  - `ContentSaveInput { pub type_key: String, pub entry_id: Option<i64>, pub expected_version: Option<i64>, pub title: Option<String>, pub slug: Option<String>, pub status: Option<String>, pub values: serde_json::Map<String, serde_json::Value>, pub term_ids: Option<Vec<i64>> }`
+  - `ContentSaveInput { pub type_key: String, pub entry_id: Option<i64>, pub expected_version: Option<i64>, pub locale: Option<String>, pub title: Option<String>, pub slug: Option<String>, pub status: Option<String>, pub values: serde_json::Map<String, serde_json::Value>, pub term_ids: Option<Vec<i64>> }`
   - `ContentEntry { pub id: i64, pub type_key: String, pub slug: String, pub title: String, pub status: String, pub version: i64, pub locale: String, pub values: serde_json::Map<String, serde_json::Value>, pub term_ids: Vec<i64> }`
   - `ContentListResult { pub items: Vec<ContentEntry>, pub total: u64 }`
   - `TaxonomyTerm { pub id: i64, pub kind: String, pub slug: String, pub name: String, pub parent_id: Option<i64> }`
@@ -363,7 +364,7 @@ macro_rules! export_plugin {
 - **`src/lib.rs`:**
   - `pub fn handle(env: Envelope) -> Result<(), SdkError>` xử lý:
     - `"filter:seo/head"`: đọc `brand_name` từ `plugin_settings_get()`, sinh `SeoHeadOutput` kèm `json_ld` (`Article`/`Product` schema với `@context`, `@type`, `headline` dạng `Value::Object` thuần — việc escape `\u003c` khi render `<script type="application/ld+json">` do Host `content_render.rs` đảm nhiệm theo Spec 2).
-    - `"filter:entry/view"`: đọc `default_badge` từ `plugin_settings_get()`, trả `EntryViewOutput` (`{"badge": ..., "seo_managed": true}`).
+    - `"filter:entry/view"`: đọc `default_badge` và `brand_name` từ `plugin_settings_get()`, trả `EntryViewOutput` (`{"badge": ..., "seo_managed": true, "brand_name": ...}`).
     - `"content/after_publish"`: tăng counter `kv_get`/`kv_set`, đọc `plugin_secret_get("webhook_token")` (nếu có thì gửi `http_request` kèm `Authorization: Bearer ...` — không bao giờ ghi token vào `log()`).
   - Gắn `opendash_plugin_sdk::export_plugin!(handle);` và bộ `#[cfg(test)] mod tests` kiểm thử cả 3 event bằng `run_in_mock_host`.
 - **`README.md`:** Hướng dẫn `cargo test`, `cargo build --target wasm32-unknown-unknown --release`, đóng gói `manifest.json` + `plugin.wasm` thành `.zip`, và kiểm tra bằng `./cms/target/release/opendash --check-plugin`.
@@ -381,7 +382,7 @@ macro_rules! export_plugin {
   }
   ```
 - **`assets/app.css` *(Create)*:** Stylesheet tối giản cho ví dụ `sample-theme-v3`.
-- **`single.html` *(Create)*:** Template chi tiết đặt tại root của theme (`valid_root_html`), tuân thủ 100% C-SEC (Spec 1), dùng `{{ theme_assets["assets/app.css"] }}`, `{% for crumb in breadcrumbs %}`, `{{ entry.published_at | date_format("%d/%m/%Y") }}`, `{{ entry.reading_time_minutes }}`, truy cập `entry.ext` an toàn 2 bước dưới `UndefinedBehavior::Strict`:
+- **`single.html` *(Create)*:** Template chi tiết đặt tại root của theme (`valid_root_html`), tuân thủ 100% C-SEC (Spec 1), dùng `{{ theme_assets["assets/app.css"] }}`, `{% for crumb in breadcrumbs %}`, `{{ entry.published_at | date_format("%d/%m/%Y") }}`, `{{ entry.reading_time_minutes | format_number }}`, truy cập `entry.ext` an toàn 2 bước dưới `UndefinedBehavior::Strict`:
   ```jinja
   {% set seo_ext = entry.ext["rust-seo-plugin"] | default({}) %}
   {% if seo_ext.badge | default("") %}
@@ -496,7 +497,7 @@ python3 cms/scripts/check-plans.py
 python3 cms/scripts/check-plans.py --self-test
 python3 .agents/scripts/check-agent-artifacts.py
 npm --prefix cms/examples/plugins/sample-plugin run asbuild # (S01+)
-npx --prefix cms/examples/plugins/sample-plugin asc cms/sdk/as/test_harness.ts --outFile cms/target/opendash_sdk_test.wasm --exportMemory --bindings raw # (S01+)
+./cms/examples/plugins/sample-plugin/node_modules/.bin/asc cms/sdk/as/test_harness.ts --outFile cms/target/opendash_sdk_test.wasm --bindings raw --optimize --lib cms/examples/plugins/sample-plugin/node_modules # (S01+; hoặc npx --prefix ...)
 node cms/sdk/as/test_sdk_v11.mjs cms/target/opendash_sdk_test.wasm # (S01+)
 cargo build --manifest-path cms/Cargo.toml --locked # (S02+)
 cargo test --manifest-path cms/Cargo.toml -p opendash-plugin-sdk --release --locked # (S02+)

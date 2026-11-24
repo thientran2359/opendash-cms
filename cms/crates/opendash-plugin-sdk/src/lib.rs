@@ -156,6 +156,7 @@ mod tests {
                 type_key: "post".to_owned(),
                 entry_id: None,
                 expected_version: None,
+                locale: Some("en".to_owned()),
                 title: Some("Created Entry".to_owned()),
                 slug: Some("created-entry".to_owned()),
                 status: Some("draft".to_owned()),
@@ -204,11 +205,20 @@ mod tests {
         assert_eq!(outcome.oversized_readbacks, 0);
         assert_eq!(outcome.staged_content_saves.len(), 1);
         assert_eq!(
+            outcome.staged_content_saves[0].locale.as_deref(),
+            Some("en")
+        );
+        assert_eq!(
             outcome.staged_content_deletes,
             vec![("post".to_owned(), 10, 2)]
         );
         assert!(!outcome.entries.contains_key(&("post".to_owned(), 10)));
-        assert!(outcome.entries.values().any(|e| e.slug == "created-entry"));
+        assert!(
+            outcome
+                .entries
+                .values()
+                .any(|e| e.slug == "created-entry" && e.locale == "en")
+        );
         assert_eq!(
             outcome.logs,
             vec![(LogLevel::Info, "sync completed".to_owned())]
