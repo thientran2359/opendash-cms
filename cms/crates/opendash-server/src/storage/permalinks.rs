@@ -146,7 +146,7 @@ pub(crate) async fn load_secondary_locale_roots_in_conn(
     conn: &mut SqliteConnection,
 ) -> ApiResult<HashSet<String>> {
     let rows: Vec<String> = sqlx::query_scalar(
-        "SELECT code FROM site_locales WHERE enabled = 1 AND is_default = 0 ORDER BY code ASC",
+        "SELECT code FROM site_locales WHERE enabled = 1 AND deleted_at IS NULL AND is_default = 0 AND (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1 ORDER BY code ASC",
     )
     .fetch_all(&mut *conn)
     .await?;
@@ -584,7 +584,7 @@ pub async fn canonical_entry_path_in_tx(
         "SELECT c.path FROM permalink_route_claims c
            JOIN content_entries e ON c.target_kind='entry' AND c.target_id=CAST(e.id AS TEXT)
             AND c.locale = e.locale
-           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types t ON t.key=e.content_type_key
           WHERE e.id=? AND e.content_type_key NOT IN ('pattern', 'section')
             AND t.provider_status='active'
@@ -604,7 +604,7 @@ pub async fn canonical_term_path_in_tx(
         "SELECT c.path FROM permalink_route_claims c
            JOIN taxonomy_terms t ON c.target_kind='term' AND c.target_id=CAST(t.id AS TEXT)
             AND c.locale = t.locale
-           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN taxonomy_definitions d ON d.key=t.kind
           WHERE t.id=? AND d.public=1 AND d.provider_status='active'
             AND d.declaration_state='declared'",
@@ -632,7 +632,7 @@ pub async fn batch_canonical_term_paths_in_tx(
                  ON c.target_kind = 'term'
                 AND c.target_id = CAST(t.id AS TEXT)
                 AND c.locale = t.locale
-               JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+               JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                JOIN taxonomy_definitions d ON d.key = t.kind
               WHERE t.id IN (SELECT value FROM json_each(?))
                 AND d.public = 1
@@ -657,7 +657,7 @@ pub async fn canonical_archive_path_in_tx(
     sqlx::query_scalar(
         "SELECT c.path FROM permalink_route_claims c
            JOIN content_types t ON c.target_kind='archive' AND c.target_id=t.key
-           JOIN site_locales sl ON sl.code = c.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = c.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
           WHERE t.key=? AND c.locale=? AND t.key NOT IN ('pattern', 'section', 'page')
             AND t.provider_status='active'
             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1
@@ -1002,7 +1002,8 @@ pub(crate) async fn sync_claims_with_options_and_swap(
     let enabled_locales: Vec<(String, i64)> = sqlx::query_as(
         "SELECT code, is_default
            FROM site_locales
-          WHERE enabled = 1
+          WHERE enabled = 1 AND deleted_at IS NULL
+            AND (is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
           ORDER BY is_default DESC, position ASC, code ASC",
     )
     .fetch_all(&mut *conn)
@@ -1195,7 +1196,7 @@ pub(crate) async fn sync_claims_with_options_and_swap(
         let category_rows: Vec<(String, String)> = sqlx::query_as(
             "SELECT t.slug, t.locale
                FROM taxonomy_terms t
-               JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+               JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
               WHERE t.kind = 'category'
               ORDER BY t.id",
         )
@@ -1313,7 +1314,7 @@ pub(crate) async fn sync_claims_with_options_and_swap(
     let terms: Vec<(i64, String, String, String)> = sqlx::query_as(
         "SELECT t.id, t.kind, t.slug, t.locale
            FROM taxonomy_terms t
-           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN taxonomy_definitions d ON d.key = t.kind
           WHERE d.public = 1 AND d.provider_status = 'active' AND d.declaration_state = 'declared'
           ORDER BY t.id",
@@ -1351,7 +1352,7 @@ pub(crate) async fn sync_claims_with_options_and_swap(
     let entries: Vec<(i64, String, String, Option<String>, i64, String)> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, p.path, e.has_been_published, e.locale
            FROM content_entries e
-           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types t ON t.key = e.content_type_key
            LEFT JOIN entry_public_paths p ON p.entry_id = e.id
           WHERE e.content_type_key NOT IN ('pattern', 'section')
@@ -1531,6 +1532,19 @@ pub(crate) async fn sync_claims_with_options_and_swap(
     .fetch_all(&mut *conn)
     .await
     .map_err(ApiError::from)?;
+    // Soft-deleted locale history is parked until revive/purge. It must
+    // neither participate in collision detection nor be deleted as stale.
+    let soft_deleted_codes: HashSet<String> =
+        sqlx::query_scalar("SELECT code FROM site_locales WHERE deleted_at IS NOT NULL")
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(ApiError::from)?
+            .into_iter()
+            .collect();
+    let old_redirects: Vec<_> = old_redirects
+        .into_iter()
+        .filter(|(_, _, _, locale, _)| !soft_deleted_codes.contains(locale))
+        .collect();
     let old_redirect_order: Vec<String> = old_redirects
         .iter()
         .map(|(p, _, _, _, _)| p.clone())
@@ -1982,7 +1996,13 @@ pub(crate) async fn sync_claims_with_options_and_swap(
     for (path, entry) in historical {
         if previous_history.get(&path) != Some(&entry) {
             sqlx::query(
-                "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id,locale,origin) VALUES (?,?,?,?,?)",
+                "INSERT INTO permalink_route_redirects(source_path,target_kind,target_id,locale,origin) VALUES (?,?,?,?,?)
+                 ON CONFLICT(source_path) DO UPDATE SET
+                    target_kind=excluded.target_kind, target_id=excluded.target_id,
+                    locale=excluded.locale, origin=excluded.origin,
+                    created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                 WHERE permalink_route_redirects.locale IN
+                    (SELECT code FROM site_locales WHERE deleted_at IS NOT NULL)",
             )
             .bind(path)
             .bind(entry.claim.0)
@@ -2010,7 +2030,7 @@ pub async fn resolve_public_path(
     let current: Option<(String, String, String)> = sqlx::query_as(
         "SELECT c.target_kind, c.target_id, c.locale
            FROM permalink_route_claims c
-           JOIN site_locales sl ON sl.code = c.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = c.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
           WHERE c.path = ?",
     )
     .bind(path)
@@ -2022,7 +2042,7 @@ pub async fn resolve_public_path(
             let old: Option<(String, String, String)> = sqlx::query_as(
                 "SELECT r.target_kind, r.target_id, r.locale
                    FROM permalink_route_redirects r
-                   JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1
+                   JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                   WHERE r.source_path = ?",
             )
             .bind(path)
@@ -2050,7 +2070,7 @@ pub async fn resolve_public_path(
             let visible: i64 = sqlx::query_scalar(
                 "SELECT EXISTS(
                    SELECT 1 FROM content_entries e
-                   JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+                   JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                    JOIN content_types t ON t.key=e.content_type_key
                    WHERE e.id=? AND e.locale=? AND e.publication_status='published'
                      AND e.content_type_key NOT IN ('pattern', 'section')
@@ -2109,7 +2129,7 @@ pub async fn resolve_public_path(
                 let posts_page_id: Option<i64> = sqlx::query_scalar(
                     "SELECT r.posts_page_id
                        FROM site_reading_settings r
-                       JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1
+                       JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                       WHERE r.locale = ?",
                 )
                 .bind(&locale)
@@ -3195,6 +3215,70 @@ mod tests {
             vi_entry(id),
         );
         assert_eq!(resolve_public_path(&db, "/admin").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn soft_deleted_redirect_is_preserved_until_active_history_reuses_path() {
+        let db = site().await;
+        sqlx::query(
+            "INSERT INTO site_locales(code,bcp47_tag,label,enabled,deleted_at)
+             VALUES('en','en','English',0,'2026-01-01')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO permalink_route_redirects
+             (source_path,target_kind,target_id,locale,origin,created_at)
+             VALUES('/alpha','entry','999','en','canonical','2026-01-01')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        assert!(resolve_public_path(&db, "/alpha").await.unwrap().is_none());
+        // An active canonical claim may coexist with parked history.
+        let id = add_post(&db, "alpha", true).await;
+        let parked: (String, String, String) = sqlx::query_as(
+            "SELECT target_id,locale,created_at FROM permalink_route_redirects WHERE source_path='/alpha'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(parked, ("999".into(), "en".into(), "2026-01-01".into()));
+        assert_eq!(
+            resolve_public_path(&db, "/alpha")
+                .await
+                .unwrap()
+                .unwrap()
+                .target,
+            vi_entry(id)
+        );
+
+        // Moving the live canonical path creates history at the same PK.
+        let mut tx = db.begin().await.unwrap();
+        sqlx::query("UPDATE content_entries SET slug='beta' WHERE id=?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sync_claims_in_tx(&mut tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let redirect: (String, String, String) = sqlx::query_as(
+            "SELECT target_id,locale,origin FROM permalink_route_redirects WHERE source_path='/alpha'",
+        )
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(redirect, (id.to_string(), "vi".into(), "canonical".into()));
+        assert_eq!(
+            resolve_public_path(&db, "/alpha").await.unwrap(),
+            Some(ResolvedPublicRoute {
+                target: vi_entry(id),
+                canonical_path: "/beta".into(),
+                redirect: true,
+            })
+        );
     }
 
     #[tokio::test]

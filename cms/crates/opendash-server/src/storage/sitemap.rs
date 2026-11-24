@@ -37,7 +37,7 @@ WITH indexable AS (
            ) AS canonical_path,
            e.updated_at AS lastmod
       FROM site_reading_settings reading
-      JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1
+      JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
       JOIN content_entries e ON e.id = reading.homepage_page_id
       JOIN content_types t ON t.key = e.content_type_key
       LEFT JOIN permalink_route_claims claims
@@ -72,7 +72,7 @@ WITH indexable AS (
            claims.path AS canonical_path,
            e.updated_at AS lastmod
       FROM content_entries e
-      JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+      JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
       JOIN content_types t ON t.key = e.content_type_key
       LEFT JOIN permalink_route_claims claims
         ON claims.target_kind = 'entry'
@@ -103,7 +103,7 @@ WITH indexable AS (
            claims.path AS canonical_path,
            NULL AS lastmod
       FROM content_types t
-      JOIN site_locales sl ON sl.enabled = 1
+      JOIN site_locales sl ON sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
       LEFT JOIN permalink_route_claims claims
         ON claims.target_kind = 'archive'
        AND claims.target_id = t.key
@@ -142,7 +142,7 @@ WITH indexable AS (
            claims.path AS canonical_path,
            NULL AS lastmod
       FROM taxonomy_terms tm
-      JOIN site_locales sl ON sl.code = tm.locale AND sl.enabled = 1
+      JOIN site_locales sl ON sl.code = tm.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
       JOIN taxonomy_definitions td ON td.key = tm.kind
       LEFT JOIN permalink_route_claims claims
         ON claims.target_kind = 'term'
@@ -244,7 +244,7 @@ pub async fn list_indexable_routes_in_tx(
             let homes: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
                 "SELECT sl.bcp47_tag, sl.is_default, claims.path, COALESCE(s.canonical_url, h.canonical_url)
                    FROM site_reading_settings reading
-                   JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1
+                   JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                    JOIN content_entries e ON e.id = reading.homepage_page_id
                    JOIN content_types t ON t.key = e.content_type_key
                    JOIN permalink_route_claims claims
@@ -285,7 +285,7 @@ pub async fn list_indexable_routes_in_tx(
                    JOIN content_entries sib
                      ON sib.content_type_key = cur.content_type_key
                     AND sib.translation_group_id = cur.translation_group_id
-                   JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1
+                   JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1 AND sib_sl.deleted_at IS NULL AND (sib_sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                    JOIN content_types t ON t.key = sib.content_type_key
                    JOIN permalink_route_claims claims
                      ON claims.target_kind = 'entry'
@@ -330,7 +330,7 @@ pub async fn list_indexable_routes_in_tx(
                 "{INDEXABLE_ROUTES_UNION}
                  SELECT ix.archive_key, sl.bcp47_tag, sl.is_default, ix.canonical_path
                    FROM indexable ix
-                   JOIN site_locales sl ON sl.code = ix.locale
+                   JOIN site_locales sl ON sl.code = ix.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                   WHERE ix.route_kind = 3
                     AND ix.canonical_path IS NOT NULL
                   ORDER BY ix.archive_key ASC, sl.is_default DESC, sl.position ASC, sl.code ASC"
@@ -363,7 +363,7 @@ pub async fn list_indexable_routes_in_tx(
                    JOIN taxonomy_terms sib
                      ON sib.kind = cur.kind
                     AND sib.translation_group_id = cur.translation_group_id
-                   JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1
+                   JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1 AND sib_sl.deleted_at IS NULL AND (sib_sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                    JOIN taxonomy_definitions td ON td.key = sib.kind
                    JOIN permalink_route_claims claims
                      ON claims.target_kind = 'term'
