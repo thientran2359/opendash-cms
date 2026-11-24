@@ -445,7 +445,6 @@ function FieldControl({ field, current, viewport, disabled, onSet, onPickMedia }
       );
 
     case 'text':
-    case 'url':
       return (
         <div className="space-y-1.5">
           <label htmlFor={id} className="block text-xs font-semibold text-zinc-800">{fieldLabel}</label>
@@ -454,13 +453,42 @@ function FieldControl({ field, current, viewport, disabled, onSet, onPickMedia }
             type="text"
             className={STUDIO_INPUT_CLASS}
             value={stringValue}
-            maxLength={field.type === 'text' ? field.max_chars ?? 256 : 2048}
+            maxLength={field.max_chars ?? 256}
             placeholder={field.placeholder ?? ''}
             disabled={disabled}
             onChange={event => setValue(event.target.value)}
           />
         </div>
       );
+
+    case 'url': {
+      const scalarCount = Array.from(stringValue).length;
+      return (
+        <div className="space-y-1.5">
+          <label htmlFor={id} className="block text-xs font-semibold text-zinc-800">{fieldLabel}</label>
+          <input
+            id={id}
+            type="text"
+            inputMode="url"
+            className={STUDIO_INPUT_CLASS}
+            value={stringValue}
+            maxLength={8192}
+            placeholder={field.placeholder ?? ''}
+            disabled={disabled}
+            aria-invalid={scalarCount > 4096}
+            onChange={event => setValue(event.target.value)}
+          />
+          <p className="text-xs text-zinc-500">
+            Đường dẫn /…, liên kết https://…, #mục, mailto: hoặc tel:; tối đa 4.096 ký tự Unicode. ({scalarCount}/4096)
+          </p>
+          {scalarCount > 4096 && (
+            <p role="alert" className="text-xs text-red-700">
+              URL vượt giới hạn 4.096 ký tự Unicode. Giá trị nháp được giữ để sửa.
+            </p>
+          )}
+        </div>
+      );
+    }
   }
 }
 

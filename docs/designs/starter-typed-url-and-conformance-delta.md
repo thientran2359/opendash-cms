@@ -1,12 +1,13 @@
 # Starter typed URL options and conformance delta
 
 - **Author:** Aster
-- **Status:** Approved
+- **Status:** Verified
 - **Date:** 2026-11-23
 - **Baseline:** `main@ea3c73d29a4972bc135a44192ff3b0ec83453f2b`
 - **Approved By:** Aster (delegated)
 - **Approval Evidence:** [Aster final decision / Owner directive 2026-11-23](https://github.com/thientran2359/opendash-cms/issues/495#issuecomment-7096429509).
 - **Goldfish Review:** Four rounds; R3 and R4 consecutive clean (design_critic, codebase_details, implementation_readiness), fresh-context fork_turns none, complete mandatory reads; [resolution report](../../.agents/research/2026-11-23-starter-url-delta/goldfish_review_report.md).
+- **Implementation & Closure Evidence:** [#498](https://github.com/thientran2359/opendash-cms/issues/498) / PR `#502` (`19e21f41`), [macOS native receipt](../verification/2026-11-23-starter-url-delta-macos.md), [2026-11-24 drift report](../../.agents/research/2026-11-24_STARTER_SPECS_DRIFT_REPORT.md) (`0 Blocker · 0 Major · 0 Minor · 2 Nit` sau fix `M-01`) và [2026-11-24 closure](../verification/2026-11-24-starter-specs-closure.md).
 - **Related:** [Original Starter spec](tailwind-frontend-and-starter-theme-v3.md), [drift report](../../.agents/research/2026-11-23_TAILWIND_STARTER_DRIFT_REPORT.md), [tracking #495](https://github.com/thientran2359/opendash-cms/issues/495)
 
 ## Overview
