@@ -67,39 +67,57 @@ fn strip_os_prefix(arg: &OsStr, prefix: &str) -> Option<OsString> {
     }
 }
 
+fn run_check_cli_flag<T: serde::Serialize>(
+    args: &[OsString],
+    flag: &str,
+    check_fn: impl FnOnce(&Path) -> Result<T, String>,
+) {
+    let eq_flag = format!("{flag}=");
+    if !args
+        .iter()
+        .any(|a| a == flag || strip_os_prefix(a, &eq_flag).is_some())
+    {
+        return;
+    }
+
+    let path_arg: Result<OsString, String> = if args.len() == 1 {
+        match strip_os_prefix(&args[0], &eq_flag) {
+            Some(p) if !p.is_empty() => Ok(p),
+            Some(_) => Err(format!("Thiếu đường dẫn sau '{eq_flag}'.")),
+            None => Err(format!("Thiếu đối số đường dẫn cho '{flag}'.")),
+        }
+    } else if args.len() == 2 && args[0] == flag && !args[1].is_empty() {
+        Ok(args[1].clone())
+    } else {
+        Err(format!(
+            "Cú pháp đúng: opendash {flag} <path> hoặc {eq_flag}<path>"
+        ))
+    };
+
+    match path_arg.and_then(|p| check_fn(Path::new(&p))) {
+        Ok(summary) => {
+            if let Ok(json) = serde_json::to_string(&summary) {
+                println!("{json}");
+                std::process::exit(0);
+            }
+            println!(
+                "{}",
+                serde_json::json!({ "ok": false, "error": "Không thể serialize kết quả JSON." })
+            );
+            std::process::exit(1);
+        }
+        Err(err) => {
+            println!("{}", serde_json::json!({ "ok": false, "error": err }));
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
 
-    if args
-        .iter()
-        .any(|a| a == "--check-theme" || strip_os_prefix(a, "--check-theme=").is_some())
-    {
-        let path_arg: Result<OsString, &'static str> = if args.len() == 1 {
-            match strip_os_prefix(&args[0], "--check-theme=") {
-                Some(p) if !p.is_empty() => Ok(p),
-                Some(_) => Err("Thiếu đường dẫn sau '--check-theme='."),
-                None => Err("Thiếu đối số đường dẫn cho '--check-theme'."),
-            }
-        } else if args.len() == 2 && args[0] == "--check-theme" && !args[1].is_empty() {
-            Ok(args[1].clone())
-        } else {
-            Err("Cú pháp đúng: opendash --check-theme <path> hoặc --check-theme=<path>")
-        };
-
-        match path_arg
-            .map_err(str::to_owned)
-            .and_then(|p| theme::check_theme_path(Path::new(&p)))
-        {
-            Ok(summary) => {
-                println!("{}", serde_json::to_string(&summary)?);
-                std::process::exit(0);
-            }
-            Err(err) => {
-                println!("{}", serde_json::json!({ "ok": false, "error": err }));
-                std::process::exit(1);
-            }
-        }
-    }
+    run_check_cli_flag(&args, "--check-theme", theme::check_theme_path);
+    run_check_cli_flag(&args, "--check-plugin", plugin::check_plugin_path);
 
     if args.iter().any(|a| a == "--check-config") {
         let paths = paths::SitePaths::from_env()?;
