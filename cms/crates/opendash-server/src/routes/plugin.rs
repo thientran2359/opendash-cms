@@ -143,7 +143,7 @@ pub async fn plugin_run(
 }
 
 pub async fn plugin_action(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
     State(content_registry): State<
@@ -200,7 +200,14 @@ pub async fn plugin_action(
         )
         .await
     {
-        Ok(resp) => Ok((StatusCode::OK, Json(resp)).into_response()),
+        Ok(resp) => {
+            let principal = match actor.user.role {
+                crate::auth::Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
+                crate::auth::Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
+            };
+            hooks.enqueue_plugin_action_hooks(principal, resp.data.as_ref(), lease);
+            Ok((StatusCode::OK, Json(resp)).into_response())
+        }
         Err((status, resp)) => Ok((status, Json(resp)).into_response()),
     }
 }
@@ -366,7 +373,9 @@ pub async fn plugin_put_settings(
         &input.values,
     )
     .await?;
-    maybe_spawn_projection_recompute(&db, &plugins, &hooks, &coordinator, &id).await;
+    if outcome.changed {
+        maybe_spawn_projection_recompute(&db, &plugins, &hooks, &coordinator, &id).await;
+    }
     hooks.enqueue_async(crate::hooks::AsyncHookJob {
         event: opendash_core::hooks::HookEvent::SettingsAfterSave,
         principal: opendash_core::hooks::ExecutionPrincipal::Admin,

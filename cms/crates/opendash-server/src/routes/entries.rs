@@ -267,7 +267,7 @@ pub async fn entry_table_effective_config(
 /// owner/action and actor-visible column, then creates the input itself.
 /// Client row JSON or arbitrary action payloads are not accepted.
 pub async fn entry_table_provider_action(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<crate::plugin::PluginManager>>,
     State(content_registry): State<
@@ -342,7 +342,14 @@ pub async fn entry_table_provider_action(
         )
         .await
     {
-        Ok(response) => Ok((StatusCode::OK, Json(response)).into_response()),
+        Ok(response) => {
+            hooks.enqueue_plugin_action_hooks(
+                execution_principal_for_actor(&actor),
+                response.data.as_ref(),
+                lease,
+            );
+            Ok((StatusCode::OK, Json(response)).into_response())
+        }
         Err((status, response)) => Ok((status, Json(response)).into_response()),
     }
 }
@@ -549,9 +556,29 @@ pub async fn entry_create(
         None => entry_storage::create_entry(&db, &actor, &type_key, &schema, &input).await?,
     };
     crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, entry.id).await?;
+    let principal = execution_principal_for_actor(&actor);
+    if entry.publication_status == "published" {
+        hooks.enqueue_async(crate::hooks::AsyncHookJob {
+            event: opendash_core::hooks::HookEvent::ContentAfterPublish,
+            principal,
+            locale: Some(entry.locale.clone()),
+            type_key: Some(type_key.clone()),
+            payload: json!({
+                "type_key": &type_key,
+                "id": entry.id,
+                "entry_id": entry.id,
+                "version": entry.version,
+                "locale": &entry.locale,
+                "publication_status": &entry.publication_status,
+                "translation_group_id": &entry.translation_group_id,
+            }),
+            dispatch_depth: 0,
+            lease: lease.clone(),
+        });
+    }
     hooks.enqueue_async(crate::hooks::AsyncHookJob {
         event: opendash_core::hooks::HookEvent::ContentAfterSave,
-        principal: execution_principal_for_actor(&actor),
+        principal,
         locale: Some(entry.locale.clone()),
         type_key: Some(type_key.clone()),
         payload: json!({
@@ -1215,9 +1242,29 @@ pub async fn entry_translation_create(
     .await?;
     crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, created.id)
         .await?;
+    let principal = execution_principal_for_actor(&actor);
+    if created.publication_status == "published" {
+        hooks.enqueue_async(crate::hooks::AsyncHookJob {
+            event: opendash_core::hooks::HookEvent::ContentAfterPublish,
+            principal,
+            locale: Some(created.locale.clone()),
+            type_key: Some(type_key.clone()),
+            payload: json!({
+                "type_key": &type_key,
+                "id": created.id,
+                "entry_id": created.id,
+                "version": created.version,
+                "locale": &created.locale,
+                "publication_status": &created.publication_status,
+                "translation_group_id": &created.translation_group_id,
+            }),
+            dispatch_depth: 0,
+            lease: lease.clone(),
+        });
+    }
     hooks.enqueue_async(crate::hooks::AsyncHookJob {
         event: opendash_core::hooks::HookEvent::ContentAfterSave,
-        principal: execution_principal_for_actor(&actor),
+        principal,
         locale: Some(created.locale.clone()),
         type_key: Some(type_key.clone()),
         payload: json!({

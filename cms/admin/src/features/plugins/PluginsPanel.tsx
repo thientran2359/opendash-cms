@@ -76,6 +76,8 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   const latestRequest = useRef(0);
   const pendingRef = useRef(false);
   const mounted = useRef(true);
+  const onUnauthorizedRef = useRef(onUnauthorized);
+  onUnauthorizedRef.current = onUnauthorized;
 
   useEffect(() => {
     mounted.current = true;
@@ -134,7 +136,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       .catch(cause => {
         if (!active || controller.signal.aborted) return;
         if (cause instanceof ApiClientError && cause.status === 401) {
-          onUnauthorized?.();
+          onUnauthorizedRef.current?.();
         }
         setSettingsSnapshot(null);
         setSettingsError(
@@ -148,7 +150,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
       active = false;
       controller.abort();
     };
-  }, [mode, effectiveSettingsPluginId, settingsReloadTick, onUnauthorized]);
+  }, [mode, effectiveSettingsPluginId, settingsReloadTick]);
 
   const refresh = async () => {
     const current = ++latestRequest.current;

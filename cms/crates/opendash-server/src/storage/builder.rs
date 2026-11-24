@@ -2212,6 +2212,7 @@ async fn mutate_entry_builder(
     }
     let saved = entry_builder_snapshot(&mut tx, type_key, id).await?;
     tx.commit().await?;
+    let _ = crate::storage::plugin_projections::recompute_entry_projections(db, hooks, id).await;
     hooks
         .dispatch_content_after_save_for_actor(
             type_key,

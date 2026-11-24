@@ -143,7 +143,7 @@ Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư m
 | `content_list` | `content_read` (+ private) | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ type_key, locale?, limit?, offset?, published_only? }`; `limit` clamp `1..=50`, `offset <= 10_000`; ở scope `Public` / `FilterProjection` ép `published_only = true`. |
 | `taxonomy_list` | `taxonomy_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ kind, locale?, limit? }`; `limit` clamp `1..=100`; từ chối taxonomy private nếu `principal != Admin`. |
 | `media_get` | `media_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ media_id }`; ở scope `Public` / `FilterProjection` yêu cầu `media_is_referenced` và trả URL public `/media/{id}/file`. |
-| `site_options_get` | `site_options_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ locale? }`; chỉ trả theme options có `public = true`. |
+| `site_options_get` | `site_options_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ locale? }`; trả global + theme options đã gộp với `public = true`. |
 | `plugin_settings_get` | `plugin_settings_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | Trả settings của chính plugin; mọi trường `secret` chỉ xuất `{"configured": bool}`. |
 | `plugin_secret_get` | `plugin_secrets_read` chứa `key` | `Standard`, `AsyncPostCommit`, `FilterContactBeforeSubmit` | Giải mã plaintext từ `SecretStore`; bị cấm trong `FilterProjection` và `ContentBeforeSave`. |
 | `log` | *(mọi plugin)* | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ level: "info"\|"warn"\|"error", message }`; tối đa `20` logs/invocation, sanitize `512` chars vào `plugin_logs`. |
