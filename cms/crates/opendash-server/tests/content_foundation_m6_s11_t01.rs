@@ -1952,9 +1952,10 @@ async fn c4_upgrade_0040_to_0041_keeps_published_routes_site_choices_and_history
     // EGM Spec 2 S02 adds migration 0044's private Pattern data conversion,
     // WordPress Permalinks adds 0045, Declarative Block Engine S02 adds 0046,
     // Multilingual Content & Theme L10n S01 adds 0047, Global Site Options
-    // adds 0048, and Theme Ergonomics adds 0049 (`published_at`);
+    // adds 0048, Theme Ergonomics adds 0049 (`published_at`), and Spec 2
+    // Plugin Extensibility S02 adds 0050 (owner PK fix + `plugin_entry_projections`);
     // the 0040→0041 permalink preservation assertions above must still hold.
-    assert_eq!(migration_version, 49);
+    assert_eq!(migration_version, 50);
     let defaults: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM provider_rewrite_defaults")
         .fetch_one(&db)
         .await

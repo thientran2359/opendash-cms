@@ -155,7 +155,13 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
     let plugin_manager = Arc::new(
-        PluginManager::new(db.clone(), allow_loopback).with_recovery_state(recovery.clone()),
+        PluginManager::with_roots(
+            db.clone(),
+            allow_loopback,
+            paths.plugins_dir(),
+            paths.secrets_dir(),
+        )
+        .with_recovery_state(recovery.clone()),
     );
     let hooks = Arc::new(HookDispatcher::new(plugin_manager.clone()));
     let content_registry = Arc::new(tokio::sync::RwLock::new(

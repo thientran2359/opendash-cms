@@ -1896,11 +1896,12 @@ pub async fn get_theme_options_in_conn_for_locale(
     };
     let (schema, fields) =
         parse_theme_options_with_fields(&manifest_json).map_err(ApiError::bad_request)?;
-    let global_rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
-            .bind(theme_id)
-            .fetch_all(&mut *conn)
-            .await?;
+    let global_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'theme' AND owner_id = ?",
+    )
+    .bind(theme_id)
+    .fetch_all(&mut *conn)
+    .await?;
     let mut global_map = BTreeMap::new();
     for (k, v_json) in global_rows {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
@@ -1909,12 +1910,13 @@ pub async fn get_theme_options_in_conn_for_locale(
     }
 
     let (version, locale_map) = if target_locale == default_locale {
-        let ver: i64 =
-            sqlx::query_scalar("SELECT version FROM theme_option_versions WHERE theme_id = ?")
-                .bind(theme_id)
-                .fetch_optional(&mut *conn)
-                .await?
-                .unwrap_or(1);
+        let ver: i64 = sqlx::query_scalar(
+            "SELECT version FROM theme_option_versions WHERE owner_kind = 'theme' AND owner_id = ?",
+        )
+        .bind(theme_id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .unwrap_or(1);
         (ver, BTreeMap::new())
     } else {
         let ver: i64 = sqlx::query_scalar(
@@ -2101,21 +2103,26 @@ pub async fn put_theme_options_in_conn_for_locale(
             .await?;
         }
     } else {
-        let current_ver: Option<i64> =
-            sqlx::query_scalar("SELECT version FROM theme_option_versions WHERE theme_id = ?")
-                .bind(theme_id)
-                .fetch_optional(&mut *conn)
-                .await?;
+        let current_ver: Option<i64> = sqlx::query_scalar(
+            "SELECT version FROM theme_option_versions WHERE owner_kind = 'theme' AND owner_id = ?",
+        )
+        .bind(theme_id)
+        .fetch_optional(&mut *conn)
+        .await?;
 
         match current_ver {
             None => {
                 if expected_version != 1 {
                     return Ok(ThemeOptionsOutcome::Stale);
                 }
-                sqlx::query("INSERT INTO theme_option_versions (theme_id, version) VALUES (?, 2)")
-                    .bind(theme_id)
-                    .execute(&mut *conn)
-                    .await?;
+                sqlx::query(
+                    "INSERT INTO theme_option_versions (theme_id, owner_kind, owner_id, version)
+                     VALUES (?, 'theme', ?, 2)",
+                )
+                .bind(theme_id)
+                .bind(theme_id)
+                .execute(&mut *conn)
+                .await?;
             }
             Some(ver) => {
                 if ver != expected_version {
@@ -2125,7 +2132,7 @@ pub async fn put_theme_options_in_conn_for_locale(
                     "UPDATE theme_option_versions
                      SET version = version + 1,
                          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-                     WHERE theme_id = ? AND version = ?",
+                     WHERE owner_kind = 'theme' AND owner_id = ? AND version = ?",
                 )
                 .bind(theme_id)
                 .bind(expected_version)
@@ -2140,12 +2147,13 @@ pub async fn put_theme_options_in_conn_for_locale(
         for (k, v) in &submitted {
             let v_json = serde_json::to_string(v)?;
             sqlx::query(
-                "INSERT INTO theme_option_values (theme_id, option_key, value_json, updated_at)
-                 VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-                 ON CONFLICT(theme_id, option_key) DO UPDATE SET
+                "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json, updated_at)
+                 VALUES (?, 'theme', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                 ON CONFLICT(owner_kind, owner_id, option_key) DO UPDATE SET
                      value_json = excluded.value_json,
                      updated_at = excluded.updated_at",
             )
+            .bind(theme_id)
             .bind(theme_id)
             .bind(k)
             .bind(v_json)
@@ -2155,24 +2163,23 @@ pub async fn put_theme_options_in_conn_for_locale(
             if let Some(def) = schema_map.get(k.as_str())
                 && is_media_option_type(def.option_type)
             {
+                sqlx::query(
+                    "DELETE FROM theme_option_media_refs
+                      WHERE owner_kind = 'theme' AND owner_id = ? AND option_key = ?",
+                )
+                .bind(theme_id)
+                .bind(k)
+                .execute(&mut *conn)
+                .await?;
                 if let Some(media_id) = v.as_str().filter(|id| !id.is_empty()) {
                     sqlx::query(
-                        "INSERT INTO theme_option_media_refs (theme_id, option_key, media_id)
-                         VALUES (?, ?, ?)
-                         ON CONFLICT(theme_id, option_key) DO UPDATE SET
-                             media_id = excluded.media_id",
+                        "INSERT INTO theme_option_media_refs (theme_id, owner_kind, owner_id, option_key, media_id)
+                         VALUES (?, 'theme', ?, ?, ?)",
                     )
+                    .bind(theme_id)
                     .bind(theme_id)
                     .bind(k)
                     .bind(media_id)
-                    .execute(&mut *conn)
-                    .await?;
-                } else {
-                    sqlx::query(
-                        "DELETE FROM theme_option_media_refs WHERE theme_id = ? AND option_key = ?",
-                    )
-                    .bind(theme_id)
-                    .bind(k)
                     .execute(&mut *conn)
                     .await?;
                 }
@@ -2247,11 +2254,12 @@ pub async fn check_theme_options_compatibility(
     let new_map: BTreeMap<&str, &ThemeOptionDef> =
         new_schema.iter().map(|d| (d.key.as_str(), d)).collect();
 
-    let saved_rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
-            .bind(theme_id)
-            .fetch_all(db)
-            .await?;
+    let saved_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'theme' AND owner_id = ?",
+    )
+    .bind(theme_id)
+    .fetch_all(db)
+    .await?;
 
     let locale_rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT option_key, value_json FROM theme_option_locale_values WHERE theme_id = ?",
@@ -2374,11 +2382,12 @@ pub(super) async fn get_public_theme_options_only_for_mode_in_conn(
     };
     let default_locale = get_default_locale_code_in_conn(conn).await?;
     let target_locale = resolve_requested_locale_in_conn(conn, requested_locale).await?;
-    let saved_rows: Vec<(String, String)> =
-        sqlx::query_as("SELECT option_key, value_json FROM theme_option_values WHERE theme_id = ?")
-            .bind(theme_id)
-            .fetch_all(&mut *conn)
-            .await?;
+    let saved_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'theme' AND owner_id = ?",
+    )
+    .bind(theme_id)
+    .fetch_all(&mut *conn)
+    .await?;
     let mut saved_map = BTreeMap::new();
     for (k, v_json) in saved_rows {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
@@ -3003,9 +3012,7 @@ pub async fn put_owner_settings_in_conn(
         sqlx::query(
             "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json, updated_at)
              VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-             ON CONFLICT(theme_id, option_key) DO UPDATE SET
-                 owner_kind = excluded.owner_kind,
-                 owner_id = excluded.owner_id,
+             ON CONFLICT(owner_kind, owner_id, option_key) DO UPDATE SET
                  value_json = excluded.value_json,
                  updated_at = excluded.updated_at",
         )
@@ -3020,6 +3027,654 @@ pub async fn put_owner_settings_in_conn(
 
     let snapshot = get_owner_settings_in_conn(conn, owner_kind, owner_id, schema).await?;
     Ok(ThemeOptionsOutcome::Saved(snapshot))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSettingsSnapshot {
+    pub plugin_id: String,
+    pub version: i64,
+    pub schema: Vec<opendash_core::plugin::PluginSettingField>,
+    pub values: serde_json::Map<String, serde_json::Value>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSettingsOutcome {
+    pub snapshot: PluginSettingsSnapshot,
+    pub changed: bool,
+    pub has_projection_filters: bool,
+}
+
+pub fn plugin_setting_to_block_field(
+    field: &opendash_core::plugin::PluginSettingField,
+) -> Option<BlockFieldSpec> {
+    use opendash_core::plugin::PluginSettingFieldType;
+    match field.field_type {
+        PluginSettingFieldType::Text => Some(BlockFieldSpec::Text {
+            key: field.key.clone(),
+            label: field.label.clone(),
+            max_chars: Some(MAX_THEME_OPTION_STRING_CHARS),
+            required: field.required,
+            default: field.default.as_str().map(ToOwned::to_owned),
+            placeholder: None,
+            show_if: None,
+        }),
+        PluginSettingFieldType::Textarea => Some(BlockFieldSpec::Textarea {
+            key: field.key.clone(),
+            label: field.label.clone(),
+            max_chars: Some(MAX_THEME_OPTION_STRING_CHARS),
+            required: field.required,
+            default: field.default.as_str().map(ToOwned::to_owned),
+            show_if: None,
+        }),
+        PluginSettingFieldType::Number => Some(BlockFieldSpec::Number {
+            key: field.key.clone(),
+            label: field.label.clone(),
+            min: field.min,
+            max: field.max,
+            step: None,
+            required: field.required,
+            default: field.default.as_f64(),
+            unit: None,
+            css_var: None,
+            responsive: false,
+            show_if: None,
+        }),
+        PluginSettingFieldType::Boolean => Some(BlockFieldSpec::Boolean {
+            key: field.key.clone(),
+            label: field.label.clone(),
+            default: field.default.as_bool(),
+            show_if: None,
+        }),
+        PluginSettingFieldType::Select => Some(BlockFieldSpec::Select {
+            key: field.key.clone(),
+            label: field.label.clone(),
+            options: field
+                .choices
+                .iter()
+                .map(|c| SelectOption {
+                    value: c.value.clone(),
+                    label: c.label.clone(),
+                    icon: None,
+                })
+                .collect(),
+            required: field.required,
+            default: field.default.as_str().map(ToOwned::to_owned),
+            display: None,
+            css_var: None,
+            responsive: false,
+            show_if: None,
+        }),
+        PluginSettingFieldType::Url => Some(BlockFieldSpec::Url {
+            key: field.key.clone(),
+            label: field.label.clone(),
+            required: field.required,
+            default: field.default.as_str().map(ToOwned::to_owned),
+            placeholder: None,
+            show_if: None,
+        }),
+        PluginSettingFieldType::Media => Some(BlockFieldSpec::Media {
+            key: field.key.clone(),
+            label: field.label.clone(),
+            media_kind: MediaFieldKind::Image,
+            required: field.required,
+            default: field.default.as_str().map(ToOwned::to_owned),
+            css_var: None,
+            show_if: None,
+        }),
+        PluginSettingFieldType::Secret => None,
+    }
+}
+
+pub async fn get_plugin_manifest_for_settings(
+    db: &SqlitePool,
+    plugin_id: &str,
+) -> ApiResult<Option<opendash_core::plugin::PluginManifest>> {
+    let manifest_json: Option<String> =
+        sqlx::query_scalar("SELECT manifest_json FROM plugins WHERE id = ?")
+            .bind(plugin_id)
+            .fetch_optional(db)
+            .await?;
+    let Some(raw) = manifest_json else {
+        return Ok(None);
+    };
+    let manifest =
+        opendash_core::plugin::PluginManifest::from_json_str(&raw).map_err(ApiError::internal)?;
+    Ok(Some(manifest))
+}
+
+async fn get_plugin_settings_redacted_in_conn(
+    conn: &mut SqliteConnection,
+    plugin_id: &str,
+    schema: &[opendash_core::plugin::PluginSettingField],
+) -> ApiResult<PluginSettingsSnapshot> {
+    use opendash_core::plugin::PluginSettingFieldType;
+
+    let ver_row: Option<(i64, String)> = sqlx::query_as(
+        "SELECT version, updated_at
+           FROM theme_option_versions
+          WHERE owner_kind = 'plugin' AND owner_id = ?",
+    )
+    .bind(plugin_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let (version, updated_at) = match ver_row {
+        Some((v, ts)) => (v, ts),
+        None => {
+            let fallback_ts: Option<String> =
+                sqlx::query_scalar("SELECT updated_at FROM plugins WHERE id = ?")
+                    .bind(plugin_id)
+                    .fetch_optional(&mut *conn)
+                    .await?;
+            (1, fallback_ts.unwrap_or_default())
+        }
+    };
+
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json
+           FROM theme_option_values
+          WHERE owner_kind = 'plugin' AND owner_id = ?",
+    )
+    .bind(plugin_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut saved_map = BTreeMap::new();
+    for (k, v_json) in rows {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
+            saved_map.insert(k, v);
+        }
+    }
+
+    let mut values = serde_json::Map::new();
+    for field in schema {
+        if field.field_type == PluginSettingFieldType::Secret {
+            let configured = saved_map
+                .get(&field.key)
+                .and_then(|v| v.get("secret_ref"))
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|raw| crate::secrets::SecretRef::parse(raw).is_ok());
+            values.insert(
+                field.key.clone(),
+                serde_json::json!({ "configured": configured }),
+            );
+        } else {
+            let v = saved_map
+                .get(&field.key)
+                .cloned()
+                .unwrap_or_else(|| field.default.clone());
+            values.insert(field.key.clone(), v);
+        }
+    }
+
+    Ok(PluginSettingsSnapshot {
+        plugin_id: plugin_id.to_owned(),
+        version,
+        schema: schema.to_vec(),
+        values,
+        updated_at,
+    })
+}
+
+pub async fn get_plugin_settings_redacted(
+    db: &SqlitePool,
+    plugin_id: &str,
+    schema: &[opendash_core::plugin::PluginSettingField],
+) -> ApiResult<PluginSettingsSnapshot> {
+    let mut conn = db.acquire().await?;
+    get_plugin_settings_redacted_in_conn(&mut conn, plugin_id, schema).await
+}
+
+pub async fn put_plugin_settings(
+    db: &SqlitePool,
+    secrets_dir: &std::path::Path,
+    plugin_id: &str,
+    expected_version: i64,
+    schema: &[opendash_core::plugin::PluginSettingField],
+    submitted: &serde_json::Map<String, serde_json::Value>,
+) -> ApiResult<PluginSettingsOutcome> {
+    use opendash_core::{hooks::HookEvent, plugin::PluginSettingFieldType};
+
+    let schema_map: BTreeMap<&str, &opendash_core::plugin::PluginSettingField> =
+        schema.iter().map(|f| (f.key.as_str(), f)).collect();
+    for key in submitted.keys() {
+        if !schema_map.contains_key(key.as_str()) {
+            return Err(ApiError::bad_request(
+                "Khóa cài đặt không tồn tại trong schema của plugin.",
+            ));
+        }
+    }
+
+    let mut conn = db.acquire().await?;
+    let manifest_json: Option<String> =
+        sqlx::query_scalar("SELECT manifest_json FROM plugins WHERE id = ?")
+            .bind(plugin_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    let has_projection_filters = manifest_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<opendash_core::plugin::PluginManifest>(raw).ok())
+        .is_some_and(|manifest| {
+            manifest
+                .filters
+                .iter()
+                .any(|f| matches!(f, HookEvent::FilterSeoHead | HookEvent::FilterEntryView))
+        });
+
+    let current_ver: Option<i64> = sqlx::query_scalar(
+        "SELECT version FROM theme_option_versions WHERE owner_kind = 'plugin' AND owner_id = ?",
+    )
+    .bind(plugin_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if current_ver.unwrap_or(1) != expected_version {
+        return Err(ApiError::precondition_failed(
+            "Cài đặt plugin đã thay đổi ở phiên khác. Tải lại trước khi lưu.",
+        ));
+    }
+
+    let existing_rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json
+           FROM theme_option_values
+          WHERE owner_kind = 'plugin' AND owner_id = ?",
+    )
+    .bind(plugin_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    drop(conn);
+
+    let mut existing_map: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    for (k, v_json) in existing_rows {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
+            existing_map.insert(k, v);
+        }
+    }
+
+    enum PlannedPluginWrite {
+        Upsert {
+            key: String,
+            value: serde_json::Value,
+            media_id: Option<String>,
+            sync_media_ref: bool,
+        },
+        Delete {
+            key: String,
+        },
+    }
+
+    let store =
+        crate::secrets::SecretStore::for_plugin_dir(secrets_dir.join("plugins").join(plugin_id));
+    let mut newly_created_refs: Vec<crate::secrets::SecretRef> = Vec::new();
+    let mut old_refs_to_remove: Vec<String> = Vec::new();
+    let mut planned: Vec<PlannedPluginWrite> = Vec::new();
+    let mut media_ids_to_verify: BTreeSet<String> = BTreeSet::new();
+    let mut changed = false;
+
+    for field in schema {
+        if field.field_type == PluginSettingFieldType::Secret {
+            let old_ref = existing_map
+                .get(&field.key)
+                .and_then(|v| v.get("secret_ref"))
+                .and_then(serde_json::Value::as_str)
+                .filter(|raw| crate::secrets::SecretRef::parse(raw).is_ok())
+                .map(str::to_owned);
+
+            match submitted.get(&field.key) {
+                None | Some(serde_json::Value::Null) => {
+                    if field.required && old_ref.is_none() {
+                        for r in &newly_created_refs {
+                            store.remove_plugin_secret(r.as_str());
+                        }
+                        return Err(ApiError::bad_request(format!(
+                            "Bí mật bắt buộc '{}' chưa được cấu hình.",
+                            field.key
+                        )));
+                    }
+                }
+                Some(serde_json::Value::Object(obj))
+                    if obj.len() == 1
+                        && obj.get("clear") == Some(&serde_json::Value::Bool(true)) =>
+                {
+                    if field.required {
+                        for r in &newly_created_refs {
+                            store.remove_plugin_secret(r.as_str());
+                        }
+                        return Err(ApiError::bad_request(format!(
+                            "Không thể xóa bí mật bắt buộc '{}'.",
+                            field.key
+                        )));
+                    }
+                    if let Some(old) = old_ref {
+                        old_refs_to_remove.push(old);
+                        changed = true;
+                    } else if existing_map.contains_key(&field.key) {
+                        changed = true;
+                    }
+                    planned.push(PlannedPluginWrite::Delete {
+                        key: field.key.clone(),
+                    });
+                }
+                Some(serde_json::Value::String(plaintext)) => {
+                    if plaintext.is_empty() {
+                        for r in &newly_created_refs {
+                            store.remove_plugin_secret(r.as_str());
+                        }
+                        return Err(ApiError::bad_request(format!(
+                            "Giá trị secret '{}' rỗng không hợp lệ; dùng null để giữ nguyên hoặc {{\"clear\": true}} để xóa.",
+                            field.key
+                        )));
+                    }
+                    let new_ref = match store.write_plugin_secret(plaintext) {
+                        Ok(r) => r,
+                        Err(err) => {
+                            for r in &newly_created_refs {
+                                store.remove_plugin_secret(r.as_str());
+                            }
+                            return Err(err);
+                        }
+                    };
+                    let stored_val = serde_json::json!({
+                        "secret_ref": new_ref.as_str(),
+                        "configured": true,
+                    });
+                    if let Some(old) = old_ref
+                        && old != new_ref.as_str()
+                    {
+                        old_refs_to_remove.push(old);
+                    }
+                    newly_created_refs.push(new_ref);
+                    planned.push(PlannedPluginWrite::Upsert {
+                        key: field.key.clone(),
+                        value: stored_val,
+                        media_id: None,
+                        sync_media_ref: false,
+                    });
+                    changed = true;
+                }
+                Some(_) => {
+                    for r in &newly_created_refs {
+                        store.remove_plugin_secret(r.as_str());
+                    }
+                    return Err(ApiError::bad_request(format!(
+                        "Giá trị secret '{}' phải là chuỗi, null hoặc {{\"clear\": true}}.",
+                        field.key
+                    )));
+                }
+            }
+            continue;
+        }
+
+        let Some(spec) = plugin_setting_to_block_field(field) else {
+            continue;
+        };
+
+        if let Some(raw_val) = submitted.get(&field.key) {
+            let clean_val = if field.field_type == PluginSettingFieldType::Media {
+                match raw_val {
+                    serde_json::Value::Null => serde_json::Value::Null,
+                    serde_json::Value::String(id) if id.is_empty() => serde_json::Value::Null,
+                    serde_json::Value::String(id) if valid_media_id(id) => {
+                        media_ids_to_verify.insert(id.clone());
+                        serde_json::Value::String(id.clone())
+                    }
+                    _ => {
+                        for r in &newly_created_refs {
+                            store.remove_plugin_secret(r.as_str());
+                        }
+                        return Err(ApiError::bad_request(
+                            "Cài đặt media phải là media_id SHA-256 hợp lệ hoặc rỗng.",
+                        ));
+                    }
+                }
+            } else {
+                raw_val.clone()
+            };
+
+            if let Err(msg) = validate_single_field_value(&spec, Some(&clean_val), field.required)
+                .and_then(|()| validate_url_or_link_spec_strict(&spec, &clean_val))
+            {
+                for r in &newly_created_refs {
+                    store.remove_plugin_secret(r.as_str());
+                }
+                return Err(ApiError::bad_request(msg));
+            }
+
+            let prev = existing_map.get(&field.key);
+            if prev != Some(&clean_val) && !(prev.is_none() && clean_val == field.default) {
+                changed = true;
+            }
+            let media_id = if field.field_type == PluginSettingFieldType::Media {
+                clean_val
+                    .as_str()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+            } else {
+                None
+            };
+            planned.push(PlannedPluginWrite::Upsert {
+                key: field.key.clone(),
+                value: clean_val,
+                media_id,
+                sync_media_ref: field.field_type == PluginSettingFieldType::Media,
+            });
+        } else if field.required {
+            let effective = existing_map
+                .get(&field.key)
+                .or_else(|| (!field.default.is_null()).then_some(&field.default));
+            if let Err(msg) = validate_single_field_value(&spec, effective, true) {
+                for r in &newly_created_refs {
+                    store.remove_plugin_secret(r.as_str());
+                }
+                return Err(ApiError::bad_request(msg));
+            }
+        }
+    }
+
+    let cleanup_new_refs = |refs: &[crate::secrets::SecretRef]| {
+        for r in refs {
+            store.remove_plugin_secret(r.as_str());
+        }
+    };
+
+    let mut tx = match db.begin().await {
+        Ok(tx) => tx,
+        Err(err) => {
+            cleanup_new_refs(&newly_created_refs);
+            return Err(err.into());
+        }
+    };
+
+    for media_id in &media_ids_to_verify {
+        let exists: Result<Option<i64>, sqlx::Error> = sqlx::query_scalar(
+            "SELECT 1 FROM media_assets WHERE id = ? AND kind = 'image' AND lifecycle_state = 'active'",
+        )
+        .bind(media_id)
+        .fetch_optional(&mut *tx)
+        .await;
+        match exists {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                cleanup_new_refs(&newly_created_refs);
+                return Err(ApiError::bad_request(
+                    "media_id của cài đặt plugin không tồn tại hoặc không phải ảnh active.",
+                ));
+            }
+            Err(err) => {
+                cleanup_new_refs(&newly_created_refs);
+                return Err(err.into());
+            }
+        }
+    }
+
+    let tx_ver: Option<i64> = match sqlx::query_scalar(
+        "SELECT version FROM theme_option_versions WHERE owner_kind = 'plugin' AND owner_id = ?",
+    )
+    .bind(plugin_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(v) => v,
+        Err(err) => {
+            cleanup_new_refs(&newly_created_refs);
+            return Err(err.into());
+        }
+    };
+
+    match tx_ver {
+        None => {
+            if expected_version != 1 {
+                cleanup_new_refs(&newly_created_refs);
+                return Err(ApiError::precondition_failed(
+                    "Cài đặt plugin đã thay đổi ở phiên khác. Tải lại trước khi lưu.",
+                ));
+            }
+            if let Err(err) = sqlx::query(
+                "INSERT INTO theme_option_versions (theme_id, owner_kind, owner_id, version)
+                 VALUES (?, 'plugin', ?, 2)",
+            )
+            .bind(plugin_id)
+            .bind(plugin_id)
+            .execute(&mut *tx)
+            .await
+            {
+                cleanup_new_refs(&newly_created_refs);
+                return Err(err.into());
+            }
+        }
+        Some(ver) => {
+            if ver != expected_version {
+                cleanup_new_refs(&newly_created_refs);
+                return Err(ApiError::precondition_failed(
+                    "Cài đặt plugin đã thay đổi ở phiên khác. Tải lại trước khi lưu.",
+                ));
+            }
+            match sqlx::query(
+                "UPDATE theme_option_versions
+                    SET version = version + 1,
+                        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                  WHERE owner_kind = 'plugin' AND owner_id = ? AND version = ?",
+            )
+            .bind(plugin_id)
+            .bind(expected_version)
+            .execute(&mut *tx)
+            .await
+            {
+                Ok(res) if res.rows_affected() == 1 => {}
+                Ok(_) => {
+                    cleanup_new_refs(&newly_created_refs);
+                    return Err(ApiError::precondition_failed(
+                        "Cài đặt plugin đã thay đổi ở phiên khác. Tải lại trước khi lưu.",
+                    ));
+                }
+                Err(err) => {
+                    cleanup_new_refs(&newly_created_refs);
+                    return Err(err.into());
+                }
+            }
+        }
+    }
+
+    for item in planned {
+        match item {
+            PlannedPluginWrite::Delete { key } => {
+                if let Err(err) = sqlx::query(
+                    "DELETE FROM theme_option_values
+                      WHERE owner_kind = 'plugin' AND owner_id = ? AND option_key = ?",
+                )
+                .bind(plugin_id)
+                .bind(&key)
+                .execute(&mut *tx)
+                .await
+                {
+                    cleanup_new_refs(&newly_created_refs);
+                    return Err(err.into());
+                }
+            }
+            PlannedPluginWrite::Upsert {
+                key,
+                value,
+                media_id,
+                sync_media_ref,
+            } => {
+                let v_json = match serde_json::to_string(&value) {
+                    Ok(s) => s,
+                    Err(err) => {
+                        cleanup_new_refs(&newly_created_refs);
+                        return Err(err.into());
+                    }
+                };
+                if let Err(err) = sqlx::query(
+                    "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json, updated_at)
+                     VALUES (?, 'plugin', ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                     ON CONFLICT(owner_kind, owner_id, option_key) DO UPDATE SET
+                         value_json = excluded.value_json,
+                         updated_at = excluded.updated_at",
+                )
+                .bind(plugin_id)
+                .bind(plugin_id)
+                .bind(&key)
+                .bind(v_json)
+                .execute(&mut *tx)
+                .await
+                {
+                    cleanup_new_refs(&newly_created_refs);
+                    return Err(err.into());
+                }
+                if sync_media_ref {
+                    if let Err(err) = sqlx::query(
+                        "DELETE FROM theme_option_media_refs
+                          WHERE owner_kind = 'plugin' AND owner_id = ? AND option_key = ?",
+                    )
+                    .bind(plugin_id)
+                    .bind(&key)
+                    .execute(&mut *tx)
+                    .await
+                    {
+                        cleanup_new_refs(&newly_created_refs);
+                        return Err(err.into());
+                    }
+                    if let Some(ref mid) = media_id
+                        && let Err(err) = sqlx::query(
+                            "INSERT INTO theme_option_media_refs (theme_id, owner_kind, owner_id, option_key, media_id)
+                             VALUES (?, 'plugin', ?, ?, ?)",
+                        )
+                        .bind(plugin_id)
+                        .bind(plugin_id)
+                        .bind(&key)
+                        .bind(mid)
+                        .execute(&mut *tx)
+                        .await
+                    {
+                        cleanup_new_refs(&newly_created_refs);
+                        return Err(err.into());
+                    }
+                }
+            }
+        }
+    }
+
+    let snapshot = match get_plugin_settings_redacted_in_conn(&mut tx, plugin_id, schema).await {
+        Ok(s) => s,
+        Err(err) => {
+            cleanup_new_refs(&newly_created_refs);
+            return Err(err);
+        }
+    };
+
+    if let Err(err) = tx.commit().await {
+        cleanup_new_refs(&newly_created_refs);
+        return Err(err.into());
+    }
+
+    for old_ref in old_refs_to_remove {
+        store.remove_plugin_secret(&old_ref);
+    }
+
+    Ok(PluginSettingsOutcome {
+        snapshot,
+        changed,
+        has_projection_filters,
+    })
 }
 
 pub const MAX_CONTENT_LANGUAGE_BYTES: usize = opendash_core::id::MAX_BCP47_TAG_BYTES;
@@ -3211,5 +3866,509 @@ pub async fn save_public(
             let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
             Err(err)
         }
+    }
+}
+
+#[cfg(test)]
+mod plugin_settings_s02_tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    struct TempDirGuard(PathBuf);
+
+    impl TempDirGuard {
+        fn new(prefix: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path =
+                std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDirGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn count_files_in_dir(dir: &std::path::Path) -> usize {
+        if !dir.exists() {
+            return 0;
+        }
+        fs::read_dir(dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .count()
+    }
+
+    fn sample_plugin_schema() -> Vec<opendash_core::plugin::PluginSettingField> {
+        use opendash_core::plugin::{
+            PluginSettingChoice, PluginSettingField, PluginSettingFieldType,
+        };
+        vec![
+            PluginSettingField {
+                key: "api_key".into(),
+                label: "API Key".into(),
+                field_type: PluginSettingFieldType::Secret,
+                required: true,
+                default: serde_json::Value::Null,
+                min: None,
+                max: None,
+                choices: vec![],
+            },
+            PluginSettingField {
+                key: "optional_token".into(),
+                label: "Optional Token".into(),
+                field_type: PluginSettingFieldType::Secret,
+                required: false,
+                default: serde_json::Value::Null,
+                min: None,
+                max: None,
+                choices: vec![],
+            },
+            PluginSettingField {
+                key: "endpoint".into(),
+                label: "Endpoint".into(),
+                field_type: PluginSettingFieldType::Url,
+                required: true,
+                default: serde_json::json!("https://api.example.com"),
+                min: None,
+                max: None,
+                choices: vec![],
+            },
+            PluginSettingField {
+                key: "mode".into(),
+                label: "Mode".into(),
+                field_type: PluginSettingFieldType::Select,
+                required: false,
+                default: serde_json::json!("safe"),
+                min: None,
+                max: None,
+                choices: vec![
+                    PluginSettingChoice {
+                        value: "safe".into(),
+                        label: "Safe".into(),
+                    },
+                    PluginSettingChoice {
+                        value: "fast".into(),
+                        label: "Fast".into(),
+                    },
+                ],
+            },
+            PluginSettingField {
+                key: "badge_logo".into(),
+                label: "Badge Logo".into(),
+                field_type: PluginSettingFieldType::Media,
+                required: false,
+                default: serde_json::Value::Null,
+                min: None,
+                max: None,
+                choices: vec![],
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn migration_0050_schema_delta_is_plus_two_and_under_object_limit() {
+        let temp = TempDirGuard::new("s02_m50_delta");
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        let migrations_dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../migrations");
+        let pre_dir = temp.0.join("pre_0050");
+        fs::create_dir_all(&pre_dir).unwrap();
+        for entry in fs::read_dir(&migrations_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+        {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.ends_with(".sql") && !name.starts_with("0050_") {
+                fs::copy(entry.path(), pre_dir.join(entry.file_name())).unwrap();
+            }
+        }
+
+        let pre_migrator = sqlx::migrate::Migrator::new(pre_dir.as_path())
+            .await
+            .unwrap();
+        pre_migrator.run(&db).await.unwrap();
+
+        let before_user_objects: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+
+        let after_user_objects: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        let total_objects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_schema")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+
+        assert_eq!(after_user_objects - before_user_objects, 2);
+        assert!(total_objects < 256, "sqlite_schema total={total_objects}");
+    }
+
+    #[tokio::test]
+    async fn theme_and_plugin_with_identical_ids_are_strictly_isolated() {
+        let temp = TempDirGuard::new("s02_isolation");
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+
+        let theme_media = "a".repeat(64);
+        let plugin_media = "b".repeat(64);
+        for (idx, mid) in [&theme_media, &plugin_media].into_iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO media_assets (id, kind, filename, mime_type, extension, byte_size, width, height, thumb_width, thumb_height, lifecycle_state)
+                 VALUES (?, 'image', ?, 'image/png', 'png', 100, 10, 10, 10, 10, 'active')",
+            )
+            .bind(mid)
+            .bind(format!("img-{idx}.png"))
+            .execute(&db)
+            .await
+            .unwrap();
+        }
+
+        let theme_manifest = serde_json::json!({
+            "manifest_version": 3,
+            "theme_id": "shared-id",
+            "name": "Shared Theme",
+            "version": "1.0.0",
+            "templates": [{ "kind": "index", "file": "index.html" }],
+            "options": [
+                { "key": "hero_title", "label": "Hero", "type": "string", "default": "Init Theme", "public": true },
+                { "key": "badge_logo", "label": "Logo", "type": "media", "default": "", "public": true }
+            ]
+        })
+        .to_string();
+        sqlx::query(
+            "INSERT INTO theme_packages (theme_id, display_name, source_format)
+             VALUES ('shared-id', 'Shared Theme', 'v3')",
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO theme_revisions (revision_id, theme_id, version, revision_digest, source_format, manifest_json, file_digests_json, provenance_json)
+             VALUES ('rev-shared', 'shared-id', '1.0.0', 'dig-shared', 'v3', ?, '{}', '{}')",
+        )
+        .bind(&theme_manifest)
+        .execute(&db)
+        .await
+        .unwrap();
+        sqlx::query("UPDATE theme_active_selection SET revision_id = 'rev-shared' WHERE id = 1")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let plugin_schema = sample_plugin_schema();
+        let plugin_manifest = serde_json::json!({
+            "id": "shared-id",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 3,
+            "name": "Shared Plugin",
+            "settings_schema": plugin_schema
+        })
+        .to_string();
+        sqlx::query(
+            "INSERT INTO plugins (id, version, name, description, manifest_json, wasm_blob, enabled)
+             VALUES ('shared-id', '1.0.0', 'Shared Plugin', '', ?, X'0061736d01000000', 1)",
+        )
+        .bind(&plugin_manifest)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let mut tx = db.begin().await.unwrap();
+        let theme_outcome = put_theme_options_in_conn_for_locale(
+            &mut tx,
+            "shared-id",
+            1,
+            BTreeMap::from([
+                ("hero_title".into(), serde_json::json!("Theme Value")),
+                ("badge_logo".into(), serde_json::json!(theme_media)),
+            ]),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(theme_outcome, ThemeOptionsOutcome::Saved(ref s) if s.version == 2));
+        tx.commit().await.unwrap();
+
+        let mut plugin_submit = serde_json::Map::new();
+        plugin_submit.insert("api_key".into(), serde_json::json!("plugin_secret_value"));
+        plugin_submit.insert(
+            "endpoint".into(),
+            serde_json::json!("https://plugin.example.com"),
+        );
+        plugin_submit.insert("badge_logo".into(), serde_json::json!(plugin_media));
+
+        let plugin_outcome = put_plugin_settings(
+            &db,
+            temp.0.as_path(),
+            "shared-id",
+            1,
+            &sample_plugin_schema(),
+            &plugin_submit,
+        )
+        .await
+        .unwrap();
+        assert_eq!(plugin_outcome.snapshot.version, 2);
+
+        let theme_snap = get_theme_options_for_locale(&db, "shared-id", None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(theme_snap.version, 2);
+        assert_eq!(
+            theme_snap.values.get("hero_title"),
+            Some(&serde_json::json!("Theme Value"))
+        );
+        assert_eq!(
+            theme_snap.values.get("badge_logo"),
+            Some(&serde_json::json!(theme_media))
+        );
+
+        let plugin_snap = get_plugin_settings_redacted(&db, "shared-id", &sample_plugin_schema())
+            .await
+            .unwrap();
+        assert_eq!(plugin_snap.version, 2);
+        assert_eq!(
+            plugin_snap.values.get("endpoint"),
+            Some(&serde_json::json!("https://plugin.example.com"))
+        );
+        assert_eq!(
+            plugin_snap.values.get("badge_logo"),
+            Some(&serde_json::json!(plugin_media))
+        );
+        assert_eq!(
+            plugin_snap.values.get("api_key"),
+            Some(&serde_json::json!({ "configured": true }))
+        );
+
+        let mut pin_tx = db.begin().await.unwrap();
+        let theme_pins = crate::storage::media_refs::collect_pins_in_tx(&mut pin_tx, &theme_media)
+            .await
+            .unwrap();
+        let plugin_pins =
+            crate::storage::media_refs::collect_pins_in_tx(&mut pin_tx, &plugin_media)
+                .await
+                .unwrap();
+        pin_tx.commit().await.unwrap();
+        assert!(
+            theme_pins
+                .pins
+                .iter()
+                .any(|p| p.source_kind == "theme_option")
+        );
+        assert!(
+            !theme_pins
+                .pins
+                .iter()
+                .any(|p| p.source_kind == "plugin_option")
+        );
+        assert!(
+            plugin_pins
+                .pins
+                .iter()
+                .any(|p| p.source_kind == "plugin_option")
+        );
+        assert!(
+            !plugin_pins
+                .pins
+                .iter()
+                .any(|p| p.source_kind == "theme_option")
+        );
+
+        assert!(
+            crate::storage::public_content::media_is_referenced(&db, &theme_media)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !crate::storage::public_content::media_is_referenced(&db, &plugin_media)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn plugin_settings_storage_handles_redaction_cas_preserve_rotate_clear_and_required_secret()
+     {
+        let temp = TempDirGuard::new("s02_secrets");
+        let db = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::migrate!("../../migrations").run(&db).await.unwrap();
+
+        let schema = sample_plugin_schema();
+        let plugin_manifest = serde_json::json!({
+            "id": "sec-plugin",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 3,
+            "name": "Secret Plugin",
+            "settings_schema": schema
+        })
+        .to_string();
+        sqlx::query(
+            "INSERT INTO plugins (id, version, name, description, manifest_json, wasm_blob, enabled)
+             VALUES ('sec-plugin', '1.0.0', 'Secret Plugin', '', ?, X'0061736d01000000', 1)",
+        )
+        .bind(&plugin_manifest)
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let plugin_secret_dir = temp.0.join("plugins").join("sec-plugin");
+        let store = crate::secrets::SecretStore::for_plugin_dir(plugin_secret_dir.clone());
+
+        // 1. Initial GET is redacted and unconfigured.
+        let init_snap = get_plugin_settings_redacted(&db, "sec-plugin", &schema)
+            .await
+            .unwrap();
+        assert_eq!(init_snap.version, 1);
+        assert_eq!(
+            init_snap.values.get("api_key"),
+            Some(&serde_json::json!({ "configured": false }))
+        );
+        assert_eq!(
+            init_snap.values.get("optional_token"),
+            Some(&serde_json::json!({ "configured": false }))
+        );
+
+        // 2. Stale CAS (412) leaves 0 secret blob files on disk.
+        let mut stale_submit = serde_json::Map::new();
+        stale_submit.insert("api_key".into(), serde_json::json!("should_not_persist"));
+        stale_submit.insert(
+            "endpoint".into(),
+            serde_json::json!("https://v1.example.com"),
+        );
+        let stale_err = put_plugin_settings(
+            &db,
+            temp.0.as_path(),
+            "sec-plugin",
+            99,
+            &schema,
+            &stale_submit,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(stale_err.0, axum::http::StatusCode::PRECONDITION_FAILED);
+        assert_eq!(count_files_in_dir(&plugin_secret_dir), 0);
+
+        // 3. Initial valid save writes 2 secrets + non-secret URL, returns redacted snapshot v2.
+        let mut save1 = serde_json::Map::new();
+        save1.insert("api_key".into(), serde_json::json!("sk_live_first"));
+        save1.insert("optional_token".into(), serde_json::json!("opt_first"));
+        save1.insert(
+            "endpoint".into(),
+            serde_json::json!("https://v1.example.com"),
+        );
+        let res1 = put_plugin_settings(&db, temp.0.as_path(), "sec-plugin", 1, &schema, &save1)
+            .await
+            .unwrap();
+        assert!(res1.changed);
+        assert_eq!(res1.snapshot.version, 2);
+        assert_eq!(count_files_in_dir(&plugin_secret_dir), 2);
+        assert_eq!(
+            res1.snapshot.values.get("api_key"),
+            Some(&serde_json::json!({ "configured": true }))
+        );
+        assert!(
+            !serde_json::to_string(&res1.snapshot)
+                .unwrap()
+                .contains("sk_live_first")
+        );
+        assert!(
+            !serde_json::to_string(&res1.snapshot)
+                .unwrap()
+                .contains("secret_ref")
+        );
+
+        let raw1 = crate::storage::plugin::read_raw_plugin_option_map(&db, "sec-plugin")
+            .await
+            .unwrap();
+        let ref1 = raw1["api_key"]["secret_ref"].as_str().unwrap().to_owned();
+        assert_eq!(store.read_plugin_secret(&ref1).unwrap(), "sk_live_first");
+
+        // 4. Updating endpoint with null secrets preserves existing secrets without churn.
+        let mut save2 = serde_json::Map::new();
+        save2.insert("api_key".into(), serde_json::Value::Null);
+        save2.insert("optional_token".into(), serde_json::Value::Null);
+        save2.insert(
+            "endpoint".into(),
+            serde_json::json!("https://v2.example.com"),
+        );
+        let res2 = put_plugin_settings(&db, temp.0.as_path(), "sec-plugin", 2, &schema, &save2)
+            .await
+            .unwrap();
+        assert!(res2.changed);
+        assert_eq!(res2.snapshot.version, 3);
+        assert_eq!(count_files_in_dir(&plugin_secret_dir), 2);
+        assert_eq!(store.read_plugin_secret(&ref1).unwrap(), "sk_live_first");
+
+        // 5. Rotating api_key removes old secret blob on commit; clearing optional_token deletes both DB & blob.
+        let mut save3 = serde_json::Map::new();
+        save3.insert("api_key".into(), serde_json::json!("sk_live_rotated"));
+        save3.insert(
+            "optional_token".into(),
+            serde_json::json!({ "clear": true }),
+        );
+        let res3 = put_plugin_settings(&db, temp.0.as_path(), "sec-plugin", 3, &schema, &save3)
+            .await
+            .unwrap();
+        assert!(res3.changed);
+        assert_eq!(res3.snapshot.version, 4);
+        assert_eq!(count_files_in_dir(&plugin_secret_dir), 1);
+        assert_eq!(
+            res3.snapshot.values.get("api_key"),
+            Some(&serde_json::json!({ "configured": true }))
+        );
+        assert_eq!(
+            res3.snapshot.values.get("optional_token"),
+            Some(&serde_json::json!({ "configured": false }))
+        );
+        assert!(store.read_plugin_secret(&ref1).is_err());
+
+        let raw3 = crate::storage::plugin::read_raw_plugin_option_map(&db, "sec-plugin")
+            .await
+            .unwrap();
+        assert!(!raw3.contains_key("optional_token"));
+        let ref2 = raw3["api_key"]["secret_ref"].as_str().unwrap().to_owned();
+        assert_eq!(store.read_plugin_secret(&ref2).unwrap(), "sk_live_rotated");
+
+        // 6. Reject clearing a required secret without deleting existing secret.
+        let mut bad_clear = serde_json::Map::new();
+        bad_clear.insert("api_key".into(), serde_json::json!({ "clear": true }));
+        let clear_err =
+            put_plugin_settings(&db, temp.0.as_path(), "sec-plugin", 4, &schema, &bad_clear)
+                .await
+                .unwrap_err();
+        assert_eq!(clear_err.0, axum::http::StatusCode::BAD_REQUEST);
+        assert_eq!(count_files_in_dir(&plugin_secret_dir), 1);
+        assert_eq!(store.read_plugin_secret(&ref2).unwrap(), "sk_live_rotated");
     }
 }

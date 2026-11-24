@@ -10,11 +10,15 @@ import {
   type ThemeOptionDef,
   type ThemeOptionsSnapshot,
 } from '../../api/themes.ts';
-import { BlockSchemaForm } from '../../builder/BlockSchemaForm.tsx';
 import type { BuilderViewport } from '../../builder/document.ts';
-import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { LocaleTabs } from '../../components/LocaleTabs.tsx';
-import type { BlockFieldSpec, BlockSchemaV1 } from '../../types.ts';
+import type { BlockFieldSpec } from '../../types.ts';
+import {
+  buildOwnerOptionsSubmitPayload,
+  OwnerOptionsForm,
+  sameOwnerOptionValues,
+  upcastOwnerDefToBlockField,
+} from '../shared/OwnerOptionsForm.tsx';
 
 interface Props {
   themeId: string;
@@ -30,92 +34,6 @@ interface Props {
   externalValues?: Record<string, unknown> | null;
   hideSubmitButton?: boolean;
   reloadToken?: number;
-}
-
-function sameOptionValues(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function upcastDefToBlockField(def: ThemeOptionDef): BlockFieldSpec {
-  switch (def.type) {
-    case 'boolean':
-      return {
-        type: 'boolean',
-        key: def.key,
-        label: def.label,
-        default: typeof def.default === 'boolean' ? def.default : false,
-      };
-    case 'number':
-      return {
-        type: 'number',
-        key: def.key,
-        label: def.label,
-        min: def.min ?? null,
-        max: def.max ?? null,
-        default: typeof def.default === 'number' ? def.default : 0,
-      };
-    case 'select':
-      return {
-        type: 'select',
-        key: def.key,
-        label: def.label,
-        options: (def.choices ?? []).map(c => ({ value: c.value, label: c.label })),
-        default: typeof def.default === 'string' ? def.default : undefined,
-      };
-    case 'image_ref':
-    case 'media':
-      return {
-        type: 'media',
-        key: def.key,
-        label: def.label,
-        media_kind: 'image',
-        default: typeof def.default === 'string' ? def.default : undefined,
-      };
-    case 'url':
-      return {
-        type: 'url',
-        key: def.key,
-        label: def.label,
-        default: typeof def.default === 'string' ? def.default : '',
-      };
-    case 'textarea':
-      return {
-        type: 'textarea',
-        key: def.key,
-        label: def.label,
-        max_chars: 4096,
-        default: typeof def.default === 'string' ? def.default : '',
-      };
-    default:
-      return {
-        type: 'text',
-        key: def.key,
-        label: def.label,
-        max_chars: 4096,
-        default: typeof def.default === 'string' ? def.default : '',
-      };
-  }
-}
-
-function normalizeValuesForSchema(
-  next: Record<string, unknown>,
-  schema: ThemeOptionDef[],
-  baseline: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...next };
-  for (const def of schema) {
-    const val = out[def.key];
-    if (def.type === 'image_ref') {
-      if (val === '' || val === undefined) out[def.key] = null;
-    } else if (def.type === 'number' && (val === '' || val === undefined)) {
-      out[def.key] = typeof def.default === 'number' ? def.default : 0;
-    } else if (def.type === 'spacing' && val === undefined) {
-      out[def.key] = {};
-    } else if (val === undefined && def.key in baseline) {
-      out[def.key] = baseline[def.key];
-    }
-  }
-  return out;
 }
 
 export const ThemeOptionsForm: React.FC<Props> = ({
@@ -168,18 +86,18 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     setError('');
     setNotice('');
     void getThemeOptions(themeId, effectiveLocale)
-      .then(res => {
+      .then((res) => {
         if (!active) return;
         setSnapshot(res);
         const initial = externalValuesRef.current ?? res.values;
         setDraft(initial);
         onValuesChangeRef.current?.(initial, {
           version: res.version,
-          dirty: !sameOptionValues(initial, res.values),
+          dirty: !sameOwnerOptionValues(initial, res.values),
           schema: res.schema,
         });
       })
-      .catch(cause => {
+      .catch((cause) => {
         if (!active) return;
         if (cause instanceof ApiClientError && cause.status === 404) {
           setSnapshot(null);
@@ -191,73 +109,72 @@ export const ThemeOptionsForm: React.FC<Props> = ({
       .finally(() => {
         if (active) setLoading(false);
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [themeId, reloadToken, onApiError, effectiveLocale]);
 
   useEffect(() => {
     if (!snapshot || !externalValues) return;
-    if (!sameOptionValues(externalValues, draft)) {
+    if (!sameOwnerOptionValues(externalValues, draft)) {
       setDraft(externalValues);
     }
   }, [externalValues, snapshot]);
 
-  const blockSchema: BlockSchemaV1 | null = useMemo(() => {
-    if (!snapshot) return null;
-    const allFields = snapshot.fields && snapshot.fields.length > 0
-      ? snapshot.fields
-      : snapshot.schema.map(upcastDefToBlockField);
+  const visibleFields: BlockFieldSpec[] = useMemo(() => {
+    if (!snapshot) return [];
+    const allFields =
+      snapshot.fields && snapshot.fields.length > 0
+        ? snapshot.fields
+        : snapshot.schema
+            .map(upcastOwnerDefToBlockField)
+            .filter((f): f is BlockFieldSpec => f !== null);
     const translatableKeys = new Set(
       snapshot.schema.filter((d) => d.translatable).map((d) => d.key),
     );
-    const fields = isSecondaryLocale
+    return isSecondaryLocale
       ? allFields.filter((f) => translatableKeys.has(f.key))
       : allFields;
-    return {
-      schema_version: 1,
-      id: `theme/${themeId}`,
-      title: themeId,
-      category: 'content',
-      render: 'render.html',
-      fields,
-    };
-  }, [snapshot, themeId, isSecondaryLocale]);
+  }, [snapshot, isSecondaryLocale]);
 
   const readOnlyGlobalOptions = useMemo(() => {
     if (!snapshot || !isSecondaryLocale) return [];
     return snapshot.schema.filter((d) => !d.translatable);
   }, [snapshot, isSecondaryLocale]);
 
-  if (loading) return <p role="status" className="text-sm text-zinc-600">Đang tải tùy chọn theme…</p>;
-  if (!snapshot || !blockSchema || (blockSchema.fields.length === 0 && readOnlyGlobalOptions.length === 0)) {
+  if (loading) {
+    return <p role="status" className="text-sm text-zinc-600">Đang tải tùy chọn theme…</p>;
+  }
+  if (
+    !snapshot ||
+    (visibleFields.length === 0 && readOnlyGlobalOptions.length === 0)
+  ) {
     return hideSubmitButton ? (
-      <p className="text-xs text-zinc-500">Theme hiện tại không khai báo tùy chọn riêng (theme_options).</p>
+      <p className="text-xs text-zinc-500">
+        Theme hiện tại không khai báo tùy chọn riêng (theme_options).
+      </p>
     ) : null;
   }
 
-  const handleChangeValues = (nextRaw: Record<string, unknown>) => {
-    const normalized = normalizeValuesForSchema(nextRaw, snapshot.schema, snapshot.values);
+  const handleChangeValues = (normalized: Record<string, unknown>) => {
     setDraft(normalized);
     onValuesChangeRef.current?.(normalized, {
       version: snapshot.version,
-      dirty: !sameOptionValues(normalized, snapshot.values),
+      dirty: !sameOwnerOptionValues(normalized, snapshot.values),
       schema: snapshot.schema,
     });
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const handleSubmit = async () => {
     if (!csrfToken || saving) return;
     setSaving(true);
     setError('');
     setNotice('');
     try {
-      const payload = isSecondaryLocale
-        ? Object.fromEntries(
-            snapshot.schema
-              .filter((d) => d.translatable && d.key in draft)
-              .map((d) => [d.key, draft[d.key]]),
-          )
-        : draft;
+      const translatableKeys = isSecondaryLocale
+        ? new Set(snapshot.schema.filter((d) => d.translatable).map((d) => d.key))
+        : undefined;
+      const payload = buildOwnerOptionsSubmitPayload(snapshot.schema, draft, translatableKeys);
       const saved = await saveThemeOptions(
         themeId,
         payload,
@@ -275,86 +192,75 @@ export const ThemeOptionsForm: React.FC<Props> = ({
       setNotice('Đã lưu tùy chọn theme.');
     } catch (cause) {
       const stale = cause instanceof ApiClientError && cause.status === 412;
-      setError(stale
-        ? 'Tùy chọn theme đã thay đổi ở phiên khác (412). Tải lại trước khi lưu.'
-        : cause instanceof Error ? cause.message : 'Không thể lưu tùy chọn theme.');
+      setError(
+        stale
+          ? 'Tùy chọn theme đã thay đổi ở phiên khác (412). Tải lại trước khi lưu.'
+          : cause instanceof Error
+            ? cause.message
+            : 'Không thể lưu tùy chọn theme.',
+      );
       onApiError(cause, 'Không thể lưu tùy chọn theme.');
     } finally {
       setSaving(false);
     }
   };
 
-  if (hideSubmitButton) {
-    return (
-      <div data-testid="theme-options-form" className="space-y-3">
-        <div className="flex items-center justify-between gap-2 text-xs text-zinc-500">
-          <span>Theme: <strong className="font-medium text-zinc-700">{themeId}</strong></span>
-          <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>
-        </div>
-        {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
-        {error && <AdminAlert tone="error">{error}</AdminAlert>}
-        <BlockSchemaForm
-          schema={blockSchema}
-          values={draft}
-          onChange={handleChangeValues}
-          viewport={viewport}
-          csrfToken={csrfToken}
-          onError={onApiError}
-          disabled={saving}
-        />
-      </div>
-    );
-  }
-
   return (
-    <form
-      onSubmit={e => void handleSubmit(e)}
-      data-testid="theme-options-form"
-      className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5"
-    >
-      <div className="flex items-center justify-between gap-2 border-b border-zinc-100 pb-3">
-        <h3 className="text-base font-semibold text-zinc-950">Tùy chọn theme ({themeId})</h3>
-        <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>
-      </div>
-      {!controlledLocale && (
-        <LocaleTabs
-          localeState={localeState}
-          activeLocale={effectiveLocale ?? defaultLocaleCode}
-          onSelectLocale={setTabLocale}
-          testId="theme-options-locale-tabs"
-        />
-      )}
-      {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
-      {error && <AdminAlert tone="error">{error}</AdminAlert>}
-      <BlockSchemaForm
-        schema={blockSchema}
-        values={draft}
-        onChange={handleChangeValues}
-        viewport={viewport}
-        csrfToken={csrfToken}
-        onError={onApiError}
-        disabled={saving}
-      />
-      {readOnlyGlobalOptions.length > 0 && (
-        <div className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700" data-testid="theme-options-readonly-globals">
-          <p className="font-medium text-zinc-800">
-            Tùy chọn dùng chung ở ngôn ngữ mặc định (chỉ đọc ở ngôn ngữ phụ):
-          </p>
-          <dl className="grid gap-1.5 sm:grid-cols-2">
-            {readOnlyGlobalOptions.map((def) => (
-              <div key={def.key} className="flex items-center justify-between gap-2 rounded bg-white px-2.5 py-1.5 border border-zinc-200">
-                <dt className="font-medium text-zinc-700">{def.label}</dt>
-                <dd className="font-mono text-zinc-600">{String(draft[def.key] ?? def.default ?? '')}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      )}
-      <div className="pt-1">
-        <AdminButton type="submit" variant="primary" size="md" disabled={!csrfToken || saving}>
-          {saving ? 'Đang lưu…' : 'Lưu tùy chọn'}
-        </AdminButton>
-      </div>
-    </form>
+    <OwnerOptionsForm
+      ownerKind="theme"
+      ownerId={themeId}
+      title={`Tùy chọn theme (${themeId})`}
+      schema={snapshot.schema}
+      fields={visibleFields}
+      values={draft}
+      savedValues={snapshot.values}
+      version={snapshot.version}
+      csrfToken={csrfToken}
+      viewport={viewport}
+      saving={saving}
+      notice={notice}
+      error={error}
+      hideSubmitButton={hideSubmitButton}
+      submitLabel={saving ? 'Đang lưu…' : 'Lưu tùy chọn'}
+      testId="theme-options-form"
+      beforeFields={
+        !controlledLocale ? (
+          <LocaleTabs
+            localeState={localeState}
+            activeLocale={effectiveLocale ?? defaultLocaleCode}
+            onSelectLocale={setTabLocale}
+            testId="theme-options-locale-tabs"
+          />
+        ) : undefined
+      }
+      afterFields={
+        readOnlyGlobalOptions.length > 0 ? (
+          <div
+            className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700"
+            data-testid="theme-options-readonly-globals"
+          >
+            <p className="font-medium text-zinc-800">
+              Tùy chọn dùng chung ở ngôn ngữ mặc định (chỉ đọc ở ngôn ngữ phụ):
+            </p>
+            <dl className="grid gap-1.5 sm:grid-cols-2">
+              {readOnlyGlobalOptions.map((def) => (
+                <div
+                  key={def.key}
+                  className="flex items-center justify-between gap-2 rounded border border-zinc-200 bg-white px-2.5 py-1.5"
+                >
+                  <dt className="font-medium text-zinc-700">{def.label}</dt>
+                  <dd className="font-mono text-zinc-600">
+                    {String(draft[def.key] ?? def.default ?? '')}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ) : undefined
+      }
+      onChange={handleChangeValues}
+      onSubmit={() => void handleSubmit()}
+      onApiError={onApiError}
+    />
   );
 };

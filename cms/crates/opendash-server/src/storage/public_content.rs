@@ -1249,7 +1249,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
          ) OR EXISTS (
            SELECT 1
            FROM theme_option_media_refs AS tom
-           JOIN theme_revisions AS r ON r.theme_id = tom.theme_id
+           JOIN theme_revisions AS r ON r.theme_id = tom.owner_id
            JOIN theme_active_selection AS a ON a.revision_id = r.revision_id AND a.id = 1
            JOIN json_each(
              CASE
@@ -1257,7 +1257,8 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                ELSE '[]'
              END
            ) AS opt
-           WHERE tom.media_id = ?
+           WHERE tom.owner_kind = 'theme'
+             AND tom.media_id = ?
              AND json_extract(opt.value, '$.key') = tom.option_key
              AND json_extract(opt.value, '$.public') = 1
          ) OR EXISTS (

@@ -73,6 +73,11 @@ impl SitePaths {
     }
 
     #[allow(dead_code)]
+    pub fn plugin_secrets_dir(&self, plugin_id: &str) -> PathBuf {
+        self.secrets_dir().join("plugins").join(plugin_id)
+    }
+
+    #[allow(dead_code)]
     pub fn themes_dir(&self) -> PathBuf {
         self.site_root.join("themes")
     }
@@ -382,6 +387,14 @@ mod tests {
         assert_eq!(paths.database_dir(), temp.path().join("database"));
         assert_eq!(paths.themes_dir(), temp.path().join("themes"));
         assert_eq!(paths.plugins_dir(), temp.path().join("plugins"));
+        assert_eq!(
+            paths.plugin_secrets_dir("demo-plugin"),
+            temp.path()
+                .join("database")
+                .join("secrets")
+                .join("plugins")
+                .join("demo-plugin")
+        );
         assert_eq!(paths.uploads_dir(), temp.path().join("uploads"));
         assert_eq!(paths.backups_dir(), temp.path().join("backups"));
         assert_eq!(

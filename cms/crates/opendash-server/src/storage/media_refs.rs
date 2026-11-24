@@ -233,33 +233,46 @@ pub async fn collect_pins_in_tx(
         }
     }
 
-    // 5. Theme option values + option media refs (even inactive/private themes)
+    // 5. Owner option values + option media refs (even inactive/private themes and plugins)
     let option_rows =
-        sqlx::query("SELECT theme_id, option_key, value_json FROM theme_option_values")
+        sqlx::query("SELECT owner_kind, owner_id, option_key, value_json FROM theme_option_values")
             .fetch_all(&mut *conn)
             .await?;
-    let mut seen_theme_opts = std::collections::HashSet::new();
+    let mut seen_owner_opts = std::collections::HashSet::new();
     for row in option_rows {
-        let theme_id: String = row.try_get("theme_id")?;
+        let owner_kind: String = row.try_get("owner_kind")?;
+        let owner_id: String = row.try_get("owner_id")?;
         let option_key: String = row.try_get("option_key")?;
         let value_json: String = row.try_get("value_json")?;
+        let pin_kind = if owner_kind == "plugin" {
+            "plugin_option"
+        } else {
+            "theme_option"
+        };
         if parse_json_and_check_pin(&value_json, media_id, "theme_option_values")? {
-            let entity = format!("{theme_id}:{option_key}");
-            seen_theme_opts.insert(entity.clone());
-            push_pin(&mut summary, "theme_option", entity);
+            let entity = format!("{owner_id}:{option_key}");
+            seen_owner_opts.insert((owner_kind, entity.clone()));
+            push_pin(&mut summary, pin_kind, entity);
         }
     }
-    let opt_ref_rows =
-        sqlx::query("SELECT theme_id, option_key FROM theme_option_media_refs WHERE media_id = ?")
-            .bind(media_id)
-            .fetch_all(&mut *conn)
-            .await?;
+    let opt_ref_rows = sqlx::query(
+        "SELECT owner_kind, owner_id, option_key FROM theme_option_media_refs WHERE media_id = ?",
+    )
+    .bind(media_id)
+    .fetch_all(&mut *conn)
+    .await?;
     for row in opt_ref_rows {
-        let theme_id: String = row.try_get("theme_id")?;
+        let owner_kind: String = row.try_get("owner_kind")?;
+        let owner_id: String = row.try_get("owner_id")?;
         let option_key: String = row.try_get("option_key")?;
-        let entity = format!("{theme_id}:{option_key}");
-        if !seen_theme_opts.contains(&entity) {
-            push_pin(&mut summary, "theme_option", entity);
+        let pin_kind = if owner_kind == "plugin" {
+            "plugin_option"
+        } else {
+            "theme_option"
+        };
+        let entity = format!("{owner_id}:{option_key}");
+        if !seen_owner_opts.contains(&(owner_kind, entity.clone())) {
+            push_pin(&mut summary, pin_kind, entity);
         }
     }
 

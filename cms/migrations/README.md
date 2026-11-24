@@ -1,6 +1,6 @@
-# SQLite migrations (`0001`–`0049`)
+# SQLite migrations (`0001`–`0050`)
 
-Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (48 file, đánh số từ `0001` đến `0049`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
+Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (49 file, đánh số từ `0001` đến `0050`, bỏ qua số `0016`). **Không chỉnh sửa nội dung hoặc đổi LF của các migration đã áp dụng để bảo toàn checksum**; mọi thay đổi schema mới phải tạo file migration tăng tiến tiếp theo.
 
 | Nhóm / Mốc | Migrations | Nội dung chính |
 | --- | --- | --- |
@@ -19,3 +19,4 @@ Hệ thống sử dụng SQLx migrations nhúng vào `opendash-server` (48 file,
 | **Đa ngôn ngữ & Theme L10n (Lớp 1–2)** | `0047_multilingual_content_and_theme_l10n.sql` | `site_locales`/`site_locales_state`, rebuild topo `content_entries`/`taxonomy_terms` + 8 bảng FK con, rebuild `site_reading_settings`/`site_home_seo`/`site_menu_slot_*`/`permalink_route_*`, `site_general_settings_locales`, `theme_option_locale_*`, và 10 triggers toàn vẹn `locale`. |
 | **Unified Studio & Global Site Options** | `0048_global_site_options.sql` | Bảng `site_global_option_version`, `site_global_option_values`, `site_global_option_media_refs` lưu tùy chọn dùng chung toàn site bền vững qua đổi theme. |
 | **Theme Ergonomics (`published_at`)** | `0049_entry_published_at.sql` | Thêm cột `content_entries.published_at` (+0 schema objects) và backfill theo `updated_at` cho các bản ghi đã xuất bản. |
+| **Plugin Extensibility & Projections (Spec 2)** | `0050_plugin_extensibility_and_projections.sql` | Rebuild PK 3 bảng `theme_option_values` / `theme_option_versions` / `theme_option_media_refs` theo `(owner_kind, owner_id, ...)` (+0 net objects) và tạo bảng `plugin_entry_projections` + `idx_plugin_entry_projections_plugin` (+2 net objects). |
