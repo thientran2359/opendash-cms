@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "theme_id": "sample-theme-v3",
+  "name": "Sample Theme v3",
+  "version": "1.0.0",
+  "templates": [
+    {
+      "kind": "single",
+      "file": "single.html"
+    }
+  ],
+  "assets": [
+    "assets/app.css"
+  ]
+}

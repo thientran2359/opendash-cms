@@ -358,7 +358,7 @@ macro_rules! export_plugin {
 - **`manifest.json` (`manifest_schema: 3`, đủ toàn bộ trường bắt buộc của `PluginManifest`):**
   - `id: "rust-seo-plugin"`, `version: "0.1.0"`, `api_version: 1`, `manifest_schema: 3`, `min_host_version: "0.1.0"`, `name: "Rust SEO & View Projection Example"`, `description: "Plugin mẫu minh họa Rust Guest SDK v1.1, filters seo/head + entry/view và secret webhook"`, `entrypoint: "plugin.wasm"`.
   - `hooks: ["content/after_publish"]`, `filters: ["filter:seo/head", "filter:entry/view"]`.
-  - `permissions`: `sqlite: ["kv_read", "kv_write"]`, `plugin_settings_read: true`, `plugin_secrets_read: ["webhook_token"]`, `network: [{ scheme: "https", host: "hooks.example.com", port: 443, methods: ["POST"], path_prefix: "/seo-ping" }]`.
+  - `permissions`: `sqlite: ["kv_read", "kv_write"]`, `content_read: ["*"]`, `plugin_settings_read: true`, `plugin_secrets_read: ["webhook_token"]`, `network: [{ scheme: "https", host: "hooks.example.com", port: 443, methods: ["POST"], path_prefix: "/seo-ping" }]`.
   - `settings_schema`: `brand_name` (`text`), `default_badge` (`text`, default `"Mới"`), `webhook_token` (`secret`).
 - **`src/lib.rs`:**
   - `pub fn handle(env: Envelope) -> Result<(), SdkError>` xử lý:
@@ -388,7 +388,7 @@ macro_rules! export_plugin {
     <span class="badge">{{ seo_ext.badge | default("") }}</span>
   {% endif %}
   ```
-  và `{% for rel in related_entries(entry.type_key, entry.id, 3) %}`. *(Ghi chú: Test render runtime cho `entry.ext` dưới `UndefinedBehavior::Strict` thuộc phạm vi `plugin_extensibility_test.rs` trong `opendash-server` ở Spec 2, giữ Spec 3 không đụng `opendash-server`.)*
+  và `{% for rel in related_entries %}` *(ngữ cảnh chuỗi trong C-SEC, không dùng lời gọi hàm `related_entries(...)`)*. *(Ghi chú: Test render runtime cho `entry.ext` dưới `UndefinedBehavior::Strict` thuộc phạm vi `plugin_extensibility_test.rs` trong `opendash-server` ở Spec 2, giữ Spec 3 không đụng runtime render của `opendash-server`; riêng `theme::walk_v3_dir` cho phép bỏ qua file `README.md` ở root khi chạy CLI `--check-theme` trên thư mục.)*
 - **`README.md` *(Create)*:** Hướng dẫn cấu trúc `sample-theme-v3`, chạy `./cms/target/release/opendash --check-theme cms/examples/themes/sample-theme-v3` và tích hợp `entry.ext.*` từ `rust-seo-plugin`. *(Thư mục `cms/examples/themes/sample-theme/` cũ giữ nguyên làm tài liệu v2 tham khảo.)*
 
 ---
@@ -446,6 +446,7 @@ macro_rules! export_plugin {
 - **Dependencies:** S02 (`opendash-plugin-sdk`), Spec 1 (`--check-theme` / helpers), Spec 2 (`--check-plugin` / `entry.ext.*`).
 - **File Ownership:**
   - `.gitignore` *(Modify)* (ignore `/cms/examples/plugins/rust-seo-plugin/target/` và `/cms/examples/plugins/rust-seo-plugin/Cargo.lock`)
+  - `cms/crates/opendash-server/src/theme.rs` *(Modify)* (`walk_v3_dir` bỏ qua file `README.md` ở root `depth == 0` khi chạy CLI `--check-theme` trên thư mục và bổ sung unit test tương ứng; giữ nguyên D01 cho mọi file con và gói ZIP)
   - `cms/examples/plugins/rust-seo-plugin/Cargo.toml` *(Create)* (`[workspace]`, `crate-type = ["cdylib", "rlib"]`, `edition = "2024"`, `serde` với `features = ["derive"]`)
   - `cms/examples/plugins/rust-seo-plugin/manifest.json` *(Create)* (đủ trường bắt buộc của `PluginManifest`, `manifest_schema: 3`, `filters: ["filter:seo/head", "filter:entry/view"]`, `hooks: ["content/after_publish"]`, `settings_schema` có `secret`)
   - `cms/examples/plugins/rust-seo-plugin/src/lib.rs` *(Create)* (`handle` + `export_plugin!(handle)` + `MockHost` unit tests)
@@ -464,6 +465,7 @@ macro_rules! export_plugin {
 - `.gitignore` *(Modify)*
 - `cms/Cargo.toml` *(Modify)*
 - `cms/Cargo.lock` *(Modify)*
+- `cms/crates/opendash-server/src/theme.rs` *(Modify)*
 - `cms/crates/opendash-plugin-sdk/Cargo.toml` *(Create)*
 - `cms/crates/opendash-plugin-sdk/src/abi.rs` *(Create)*
 - `cms/crates/opendash-plugin-sdk/src/host.rs` *(Create)*

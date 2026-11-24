@@ -1,0 +1,50 @@
+.sample-container {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  font-family: system-ui, -apple-system, sans-serif;
+  color: #111827;
+  line-height: 1.6;
+}
+
+.sample-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.sample-header {
+  margin-bottom: 1.5rem;
+}
+
+.sample-badge {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+  background-color: #eef2ff;
+  color: #3730a3;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.sample-meta {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #4b5563;
+}
+
+.sample-body {
+  margin-top: 1.5rem;
+}
+
+.sample-related {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid #e5e7eb;
+}
