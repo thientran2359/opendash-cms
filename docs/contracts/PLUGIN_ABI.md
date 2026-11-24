@@ -1,44 +1,51 @@
-# Hợp đồng Plugin ABI v1 — OpenDash
+# Hợp đồng Plugin ABI v1 / v1.1 — OpenDash
 
-**Phiên bản API**: `1` (kèm Manifest Schema `1` & `2` đã triển khai)\
-**Trạng thái**: `AGREED` · `implemented`\
-**Tài liệu tham chiếu**: [docs/product/PRODUCT_REQUIREMENTS.md](../product/PRODUCT_REQUIREMENTS.md), [M6 Plugin Extensions](M6_PLUGIN_EXTENSIONS.md), [Wasmi 2.0.0 Documentation](https://docs.rs/wasmi/2.0.0/wasmi/)
+**Phiên bản ABI:** `1` & `1.1` (hỗ trợ `manifest_schema` `1`, `2`, `3` đã triển khai)\
+**Trạng thái:** `AGREED` · `Implemented` (M6 baseline + [Spec 2: Plugin Hooks, Host Ops v1.1, Owner Settings & Write-Time Projections](../designs/plugin-hooks-host-ops-and-projections.md))\
+**Tài liệu tham chiếu:** [docs/product/PRODUCT_REQUIREMENTS.md](../product/PRODUCT_REQUIREMENTS.md), [CORE_FOUNDATION.md](CORE_FOUNDATION.md), [M6 Plugin Extensions](M6_PLUGIN_EXTENSIONS.md), [M8 Writer Inventory](M8_WRITER_INVENTORY.md), [Wasmi 2.0.0 Documentation](https://docs.rs/wasmi/2.0.0/wasmi/)
 
 ---
 
-## 1. Cấu trúc Gói Plugin ZIP & Revisions
+## 1. Cấu trúc Gói Plugin (ZIP / Directory) & Kiểm tra Offline (`--check-plugin`)
 
-Gói ZIP cài đặt vào OpenDash phải tuân thủ nghiêm ngặt các giới hạn an toàn:
+Gói plugin cài đặt vào OpenDash (dạng `.zip` qua Admin API hoặc thư mục/ZIP qua CLI) phải tuân thủ nghiêm ngặt các giới hạn an toàn:
 
-1. **Các file trong ZIP**:
-   - `manifest.json` (bắt buộc, tối đa `64 KiB`): Chứa thông tin định danh, phiên bản, ranh giới quyền và khai báo mở rộng.
-   - `plugin.wasm` (bắt buộc, tối đa `2 MiB`): File nhị phân WebAssembly biên dịch cho `wasm32-unknown-unknown`.
+1. **Các file được hỗ trợ trong gói (`cms/crates/opendash-server/src/plugin/package.rs`):**
+   - `manifest.json` (bắt buộc, tối đa `64 KiB` — `MAX_MANIFEST_BYTES`): Định danh, phiên bản, phạm vi quyền, hooks/filters, actions, declarations và `settings_schema`.
+   - `plugin.wasm` (bắt buộc, tối đa `2 MiB` — `MAX_WASM_BYTES`): Module WebAssembly `wasm32-unknown-unknown`.
    - `README.md` (tùy chọn).
-   - `blocks/<slug>/block.json` + `blocks/<slug>/render.html` (tùy chọn, luôn đủ cặp): khai báo block Builder theo `BlockSchemaV1` và template MiniJinja được kiểm tra C-SEC; mỗi gói tối đa **32 blocks**, mỗi `slug` dài tối đa 32 ký tự dạng kebab-case. `schema.id` bắt buộc bằng `<plugin-id>/<slug>`; plugin có blocks phải dùng `plugin-id` hợp lệ dài tối đa 32 ký tự. Không cho phép ID `core` hoặc `legacy`.
-2. **Quy tắc an toàn khi giải nén**:
-   - Tối đa **72 file thường** (bao gồm 64 file block, `manifest.json`, `plugin.wasm` và `README.md`), tối đa **256 ZIP entries** kể cả thư mục rỗng; kích thước ZIP tối đa **5 MiB**, tổng giải nén tối đa **10 MiB**, tỷ lệ giải nén mỗi file tối đa **100:1**.
-   - Từ chối đường dẫn tuyệt đối, traversal (`..`), backslash, symlink, file lạ hoặc file trùng nhau kể cả xung đột chữ hoa/thường. Chỉ chấp nhận thư mục con tại `blocks/<slug>/`; bỏ qua ZIP directory entries rỗng sau khi xác minh đường dẫn.
-   - **Không thực thi code tại thời điểm cài đặt**; host chỉ kiểm tra manifest và chữ ký module Wasm (`wasmi::Module::new`).
-3. **Immutable Revisions (`plugins/revisions/<revision_digest>/`)**:
-   - Staging qua `.staging/<run_uuid>/`, ghi `.complete` và cập nhật bảng `plugin_revisions`, cột `active_revision_id`, `revision_generation` và `cas_version` trên bảng `plugins` (`0022_plugin_revisions.sql`).
-   - Plugin không khai báo block giữ nguyên công thức revision digest hiện hành và không sinh `blocks.json` trên đĩa. Plugin có block ghi `plugins/revisions/<digest>/blocks.json` canonical (JSON object sorted theo slug: `{ "<slug>": { "schema": { ... }, "template": "..." } }`), đưa bytes vào digest và lưu cùng nội dung tại `plugin_revisions.blocks_json`. Durability verification xác minh cả digest và nội dung canonical.
-   - Cài đặt / nâng cấp đăng ký block trong `builder_block_definitions`; trùng block ID với chủ sở hữu khác trả `409`. Block bị rút khỏi phiên bản mới được ghi nhận `withdrawn`; tắt plugin chuyển block còn khai báo thành `provider_inactive`. Kích hoạt trở lại chỉ phục hồi các block còn khai báo. Media ACL được đồng bộ lại ngay trong transaction.
+   - `blocks/<slug>/block.json` + `blocks/<slug>/render.html` (tùy chọn, luôn đủ cặp, mỗi file text tối đa `256 KiB` — `V2_MAX_TEXT_BYTES`): Khai báo block Builder theo `BlockSchemaV1` (`cms/crates/opendash-core`) và template MiniJinja C-SEC; tối đa **32 blocks**, mỗi `slug` tối đa 32 ký tự kebab-case, `schema.id == "<plugin-id>/<slug>"`, cấm `plugin-id` là `core` hoặc `legacy`.
+2. **Quy tắc an toàn khi giải nén ZIP & quét thư mục:**
+   - Tối đa **72 file thường** (`MAX_PLUGIN_FILES`), tối đa **256 ZIP entries**; kích thước ZIP tối đa **5 MiB** (`MAX_PLUGIN_ZIP_BYTES`), tổng kích thước giải nén tối đa **10 MiB** (`MAX_UNCOMPRESSED_TOTAL_BYTES`), tỷ lệ giải nén mỗi file ZIP tối đa **100:1** (`V2_MAX_EXPANSION_RATIO`).
+   - Từ chối đường dẫn tuyệt đối, traversal (`..`), backslash, entry ẩn (bắt đầu bằng `.`), tên non-UTF-8, FIFO/socket/device, symlink/reparse point nội bộ, độ sâu thư mục vượt quá **`MAX_PLUGIN_DIR_DEPTH = 4`**, file ngoài hợp đồng, hoặc xung đột tên không phân biệt chữ hoa/thường (`to_ascii_lowercase()`).
+   - Đọc mọi file (ZIP và directory) qua `.take((cap + 1) as u64)` có giới hạn trước khi parse. Không thực thi Wasm lúc cài đặt hoặc kiểm tra; chỉ biên dịch tĩnh bằng `wasmi::Module::new`.
+3. **Validator CLI offline `opendash --check-plugin <path>` (`--check-plugin=<path>`):**
+   - Chạy hoàn toàn offline **trước** `SiteCoordinator::acquire` và SQLite init (hỗ trợ cả file ZIP kể cả không có đuôi `.zip` và thư mục giải nén).
+   - Thành công (`exit(0)`): In 1 dòng JSON lên `stdout` với tất cả mảng sort ASCII tăng dần:
+     ```json
+     { "ok": true, "plugin_id": "...", "version": "...", "manifest_schema": 3, "hooks": [], "filters": [], "actions": [], "blocks": [], "settings_count": 0 }
+     ```
+   - Thất bại (`exit(1)`): In `{ "ok": false, "error": "..." }` lên `stdout`.
+4. **Immutable Revisions (`plugins/revisions/<revision_digest>/`):**
+   - Staging qua `.staging/<run_uuid>/`, `.complete`, bảng `plugin_revisions`, cột `active_revision_id`, `revision_generation` và `cas_version` (`0022_plugin_revisions.sql`).
+   - Plugin có block ghi `blocks.json` canonical sort theo slug và đồng bộ `builder_block_definitions`; xung đột ID block với owner khác trả `409`. Tắt plugin chuyển declarations sang `provider_inactive` mà không xóa dữ liệu/nội dung.
 
 ---
 
-## 2. Đặc tả `manifest.json` (`PluginManifest`)
+## 2. Đặc tả `manifest.json` (`PluginManifest`) & Owner Settings (`SecretStore`)
 
 ```json
 {
   "id": "my-plugin",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "api_version": 1,
-  "manifest_schema": 2,
+  "manifest_schema": 3,
   "min_host_version": "0.1.0",
   "name": "Tên hiển thị của Plugin",
   "description": "Mô tả ngắn gọn về chức năng của plugin",
   "entrypoint": "plugin.wasm",
-  "hooks": ["page/after_save", "content/before_save", "content/after_save"],
+  "hooks": ["content/before_save", "content/after_publish", "settings/after_save"],
+  "filters": ["filter:content/prepare_save", "filter:seo/head", "filter:entry/view"],
   "hook_priority": 100,
   "permissions": {
     "sqlite": ["kv_read", "kv_write"],
@@ -46,78 +53,120 @@ Gói ZIP cài đặt vào OpenDash phải tuân thủ nghiêm ngặt các giới
     "network": [{ "scheme": "https", "host": "api.example.com", "port": 443, "methods": ["GET", "POST"], "path_prefix": "/v1/" }],
     "content_read": ["post"],
     "content_write": ["post"],
-    "content_read_private": [{ "type_key": "post", "field_keys": ["internal_note"] }],
-    "content_write_private": [{ "type_key": "post", "field_keys": ["internal_note"] }]
+    "content_delete": ["post"],
+    "content_read_private": [{ "content_type": "post", "field_keys": ["internal_note"] }],
+    "content_write_private": [{ "content_type": "post", "field_keys": ["internal_note"] }],
+    "taxonomy_read": true,
+    "media_read": true,
+    "site_options_read": true,
+    "plugin_settings_read": true,
+    "plugin_secrets_read": ["api_key"]
   },
   "actions": [],
   "declarations": {},
   "editor_panels": [],
-  "admin_extensions": {}
+  "admin_extensions": {},
+  "settings_schema": [
+    { "key": "api_key", "label": "API Key", "type": "secret", "required": false },
+    { "key": "mode", "label": "Mode", "type": "text", "default": "auto" }
+  ]
 }
 ```
 
-### Các trường dữ liệu chính (`cms/crates/opendash-core/src/plugin.rs`):
-- **Thông tin cơ bản:** `id` (`PackageId` 3–64 ký tự `[a-z0-9-]`), `version` (SemVer), `api_version` (`1`), `manifest_schema` (`1` hoặc `2`, tùy chọn), `min_host_version` (SemVer, tùy chọn), `name` (1–100 ký tự), `description`, `entrypoint` (`"plugin.wasm"`).
-- **Hooks & Actions:** `hooks` (`page/after_save`, `content/before_save`, `content/after_save`), `hook_priority` (`i32`), `actions` (`PluginActionDeclaration`: `id`, `title`, `required_role`, `capabilities`).
-- **Quyền (`PluginPermissions`):**
-  - `sqlite`: `"kv_read"`, `"kv_write"`.
-  - `http`: Allowlist origin v1; hoặc `network`: `NetworkScopeGrant` v2 (`scheme`, `host`, `port`, `methods`, `path_prefix`).
-  - `content_read`, `content_write`: Danh sách `type_key` CPT được phép đọc/ghi các trường `public`.
-  - `content_read_private`, `content_write_private`: `ScopedFieldGrant` cấp quyền tường minh trên từng trường `private` của một CPT.
-- **Khai báo mở rộng (Declarative Extensions):** `declarations` (`CntDeclarations`: `content_types`, `taxonomy_definitions`, `taxonomy_eligibility`, `field_groups`, `rewrite_base`), `editor_panels` (`ManifestActionPanelInput`), `admin_extensions` (`AdminExtensions`: columns, entry actions, term panels).
+### Quy tắc `PluginManifest` (`cms/crates/opendash-core/src/plugin.rs`):
+- **`manifest_schema`:** Hỗ trợ `1`, `2`, `3` (mặc định `1`). Khai báo bất kỳ tính năng v3 (`filters`, `settings_schema`, quyền v3 `taxonomy_read`/`media_read`/`site_options_read`/`plugin_settings_read`/`plugin_secrets_read`/`content_delete`, hoặc lifecycle `hooks` v3 ngoài `page/after_save`, `content/before_save`, `content/after_save`) bắt buộc đặt `manifest_schema >= 3` và khai báo `min_host_version`.
+- **Lifecycle `hooks`:** `page/after_save`, `content/before_save`, `content/after_save`, và các post-commit async events (`content/after_delete`, `content/after_publish`, `content/after_unpublish`, `contact/after_submit`, `plugin/after_enable`, `plugin/after_disable`, `settings/after_save`). Không chứa `plugin/manual_run` hay `filter:*`.
+- **Synchronous `filters`:** `filter:content/prepare_save`, `filter:contact/before_submit`, `filter:seo/head`, `filter:entry/view`.
+- **Actions & `capabilities`:** Allowlist gồm `kv_read`, `kv_list`, `kv_write`, `kv_delete`, `http`, `content_read`, `content_read_private`, `content_write`, `content_write_private`, `content_delete`, `taxonomy_read`, `media_read`, `site_options_read`, `plugin_settings_read`, `plugin_secrets_read`, `log`. Trong một action **không được kết hợp** nhiều scope ghi khác loại (`kv_write`/`kv_delete` vs `content_write` vs `content_delete` ⇒ từ chối ngay lúc validate/runtime với `ERR_MIXED_WRITE_SCOPE`).
+- **Settings & `SecretStore` (Migration `0050`):**
+  - Bảng `theme_option_values`, `theme_option_versions`, `theme_option_media_refs` dùng khóa chính `(owner_kind, owner_id, ...)` tách biệt Theme vs Plugin.
+  - `settings_schema` tối đa `64` trường (`text`, `textarea`, `number`, `boolean`, `select`, `url`, `media`, `secret`). Trường `secret` cấm đặt `default` khác `null`, lưu ngoài SQLite qua `SecretStore` tại `database/secrets/plugins/<plugin_id>/<64-hex>.json` (giới hạn `4096 B` plaintext, quyền thư mục `0700` / file `0600` trên Unix, Protected DACL trên Windows).
+  - Admin endpoints `GET`/`PUT /api/admin/plugins/{id}/settings` (yêu cầu Admin + CSRF + `If-Match`) luôn ẩn `secret` và `secret_ref`, chỉ trả `{"configured": bool}`; `PUT` với `null` giữ nguyên secret cũ và `{"clear": true}` xóa sạch cả DB lẫn file.
 
 ---
 
-## 3. WebAssembly Interface (`opendash_v1`)
+## 3. WebAssembly Interface (`opendash_v1`) & Envelope Formats
 
-### 3.1. Guest Exports (Guest cung cấp cho Host)
+### 3.1. Guest Exports
 1. `memory`: Linear memory WebAssembly chuẩn.
 2. `opendash_run() -> i32`: `0` = thành công, khác `0` = mã lỗi guest.
 
-### 3.2. Host Imports (Host cung cấp cho Guest trong module `"opendash_v1"`)
-- `host_get_input_len() -> i32`
-- `host_read_input(dest_ptr: i32, max_len: i32) -> i32`
-- `host_write_output(src_ptr: i32, len: i32) -> i32`
-- `host_call(op_ptr: i32, op_len: i32, resp_ptr: i32, max_resp_len: i32) -> i32` (trả `-2` nếu `BUFFER_TOO_SMALL`).
-- Hỗ trợ thêm `env:abort(i32, i32, i32, i32)` cho AssemblyScript runtime.
+### 3.2. Host Imports (`opendash_v1` + `env:abort`)
+- **ABI v1 (cốt lõi):**
+  - `host_get_input_len() -> i32`
+  - `host_read_input(dest_ptr: i32, max_len: i32) -> i32`
+  - `host_write_output(src_ptr: i32, len: i32) -> i32`
+  - `host_call(op_ptr: i32, op_len: i32, resp_ptr: i32, max_resp_len: i32) -> i32`: trả về số byte đã ghi khi vừa buffer, hoặc **`-2`** (`BUFFER_TOO_SMALL`) khi `resp.len() > max_resp_len` (và `<= MAX_IPC_FRAME_BYTES` `2 MiB`).
+  - `env:abort(i32, i32, i32, i32)` cho AssemblyScript runtime.
+- **ABI v1.1 (Readback không chạy lại `host_call`):**
+  - `host_last_resp_len() -> i32`: trả về độ dài byte phản hồi `host_call` gần nhất chưa đọc hết (hoặc `0`).
+  - `host_read_last_resp(dest_ptr: i32, max_len: i32) -> i32`: sao chép tối đa `max_len` byte phản hồi gần nhất vào guest memory (kiểm bounds/overflow, trả `-1` nếu lỗi con trỏ hoặc rỗng; tự xóa buffer nội bộ sau khi đọc đủ độ dài hoặc khi `host_call` mới được gọi).
+
+### 3.3. Envelope Compatibility (`HookEnvelope` vs `PluginEnvelopeV2`)
+- Plugin `manifest_schema <= 2` tiếp tục nhận `HookEnvelope` (`event`, `occurred_at_ms`, `correlation_id`, `locale?`, `translation_group_id?`, `payload`) cho các sự kiện cũ.
+- Plugin `manifest_schema >= 3` nhận **`PluginEnvelopeV2`** (`cms/crates/opendash-core/src/hooks.rs`):
+  ```json
+  {
+    "envelope_version": 2,
+    "kind": "hook | filter | action | manual",
+    "event": "content/after_publish",
+    "occurred_at_ms": 1732450000000,
+    "correlation_id": "...",
+    "locale": "vi",
+    "principal": "admin | editor | public | system",
+    "dispatch_depth": 0,
+    "payload": {}
+  }
+  ```
+  *(Các biến thể `EnvelopeKind::Route` và `EnvelopeKind::Cron` được giữ chỗ trong schema nhưng bị từ chối ở mọi V1 dispatcher.)*
 
 ---
 
-## 4. Định dạng Host Operations qua `host_call` (`plugin/host_ops.rs`)
+## 4. Binary Worker IPC Framing & Ma trận 15 Host Operations (`HostPolicy`)
 
-1. **`kv_get`** (`sqlite:kv_read`): `{ "op": "kv_get", "key": "..." }` → `{ "ok": true, "found": true, "value": ... }`. Giới hạn key `256` bytes.
-2. **`kv_set`** (`sqlite:kv_write`): `{ "op": "kv_set", "key": "...", "value": ... }` → `{ "ok": true }`. Giới hạn value `512 KiB`; bị chặn trong `content/before_save` và `content/after_save`.
-3. **`http_request`** (`http` / `network`): `{ "op": "http_request", "method": "GET", "url": "...", "headers": {...}, "body": null }`. Tối đa `10` HTTP calls/invocation; DNS pinning chống SSRF; bị chặn trong save hooks.
-4. **`content_save`** (`content_write` / `content_write_private`):
-   - Tạo hoặc cập nhật entry ở chế độ `HookExecutionMode::Standard` (bị chặn trong save hooks):
-   ```json
-   {
-     "op": "content_save",
-     "type_key": "post",
-     "entry_id": null,
-     "expected_version": null,
-     "slug": "bai-viet-moi",
-     "title": "Tiêu đề",
-     "values": { "body": "Nội dung" },
-     "term_ids": [1]
-   }
-   ```
-   - Host kiểm tra `plugin_can_write_field`, `verify_plugin_action_fence` (`enabled = 1`, `revision_generation`), CAS `expected_version`, media pins và `sync_claims_in_tx` trong cùng transaction `StagedCommitGuard`.
+- **Worker IPC Framing (`cms/crates/opendash-server/src/plugin/worker.rs`, `runtime.rs`):**
+  - Tiến trình con `--plugin-worker` gửi magic `\x00ODIPC2\x00` trên `stdout`, sau đó Host ↔ Worker giao tiếp bằng **binary `u32 LE` length prefix + UTF-8 JSON payload** (`MAX_IPC_FRAME_BYTES = 2 MiB`) hỗ trợ dữ liệu chứa `\n` mà không vỡ khung.
+  - Worker không giữ `SqlitePool`; mọi `HostReadRequest` (`kv_get`, `kv_list`, `content_get`, `content_list`, `taxonomy_list`, `media_get`, `site_options_get`, `plugin_settings_get`, `plugin_secret_get`) đi qua `WorkerToHostFrame::ReadRequest` / `HostToWorkerFrame::ReadResponse` về Host chính chịu kiểm soát `HostPolicy` và `Actor`/`Principal`.
+
+### Bảng 15 Host Operations (`plugin/host_ops.rs`)
+
+| Host Op (`op`) | Quyền Manifest | Mode Cho phép (`HookExecutionMode`) | Phạm vi, Giới hạn & Ghi chú |
+|---|---|---|---|
+| `kv_get` | `sqlite:kv_read` | Tất cả | Đọc `staged_kv` (kể cả tombstone `None`) trước khi truy vấn DB; trả `{"ok":true,"found":bool,"value":...}`. |
+| `kv_set` | `sqlite:kv_write` | `Standard`, `AsyncPostCommit` | Key `<= 256 B`, value `<= 512 KiB`; tổng `staged_kv <= 64` ops / `2 MiB`. Cấm trộn với `content_*`. |
+| `kv_delete` | `sqlite:kv_write` | `Standard`, `AsyncPostCommit` | Ghi tombstone `None` vào `staged_kv`; trả `{"ok":true,"data":{"deleted":true}}`. |
+| `kv_list` | `sqlite:kv_read` | `Standard`, `AsyncPostCommit` | `{ prefix?, limit? }` (`limit` clamp `1..=100`, mặc định `50`); hợp nhất DB + `staged_kv`; trả `{"items":[{"key","value"}]}`. |
+| `http_request` | `http` / `network` | `Standard`, `AsyncPostCommit`, `FilterContactBeforeSubmit` *(max 1)* | SSRF DNS-pinning qua `egress.rs`, `timeout <= 2s`, max `1 MiB` response, chặn `/api/admin`, `/save`, `/preview`, `/theme`, `/api/p/`. |
+| `content_save` | `content_write` (+ private) | `Standard` (Action) | Tối đa `1` command/invocation; kiểm `plugin_can_write_field` theo `actor_role`, fence + CAS. Cấm trộn KV/`content_delete`. |
+| `content_delete` | `content_delete` | `Standard` (Action) | `{ type_key, entry_id, expected_version }`; stage commit qua `delete_entry_with_plugin_fence` + CAS. Cấm trộn KV/`content_save`. |
+| `content_get` | `content_read` (+ private) | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ type_key, entry_id, locale? }`; ở scope `Public` / `FilterProjection` chỉ trả bài `published` thuộc CPT active & public, lọc field qua `plugin_can_read_field`. |
+| `content_list` | `content_read` (+ private) | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ type_key, locale?, limit?, offset?, published_only? }`; `limit` clamp `1..=50`, `offset <= 10_000`; ở scope `Public` / `FilterProjection` ép `published_only = true`. |
+| `taxonomy_list` | `taxonomy_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ kind, locale?, limit? }`; `limit` clamp `1..=100`; từ chối taxonomy private nếu `principal != Admin`. |
+| `media_get` | `media_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ media_id }`; ở scope `Public` / `FilterProjection` yêu cầu `media_is_referenced` và trả URL public `/media/{id}/file`. |
+| `site_options_get` | `site_options_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ locale? }`; chỉ trả theme options có `public = true`. |
+| `plugin_settings_get` | `plugin_settings_read` | Tất cả *(trừ `FilterContactBeforeSubmit`)* | Trả settings của chính plugin; mọi trường `secret` chỉ xuất `{"configured": bool}`. |
+| `plugin_secret_get` | `plugin_secrets_read` chứa `key` | `Standard`, `AsyncPostCommit`, `FilterContactBeforeSubmit` | Giải mã plaintext từ `SecretStore`; bị cấm trong `FilterProjection` và `ContentBeforeSave`. |
+| `log` | *(mọi plugin)* | Tất cả *(trừ `FilterContactBeforeSubmit`)* | `{ level: "info"\|"warn"\|"error", message }`; tối đa `20` logs/invocation, sanitize `512` chars vào `plugin_logs`. |
 
 ---
 
-## 5. Giới hạn Tài nguyên, Cô lập Worker & Commit Handover
+## 5. Giới hạn Tài nguyên, `StagedCommitGuard`, Pipelines & Materialized Projections
 
 | Tài nguyên | Giới hạn | Cơ chế kiểm soát |
 |---|---|---|
-| **Fuel (CPU)** | 20.000.000 units / invocation | Wasmi engine fuel metering (`OutOfFuel` trap). |
-| **Linear Memory** | 16 MB (256 pages Wasm) | `StoreLimitsBuilder::memory_size(16 << 20)`. |
-| **Upload Plugin ZIP** | 5 MB | `DefaultBodyLimit::max(5MB)` trên `POST /api/admin/plugins`. |
-| **Input / Output Payload** | 1 MB | `DefaultBodyLimit::max(1MB)` và kiểm tra `host_write_output`. |
-| **KV Key / Value** | 256 bytes / 512 KiB | `MAX_KV_KEY_BYTES` / `MAX_KV_VALUE_BYTES` trong `host_ops.rs`. |
-| **Host Calls / HTTP Sub-quota** | 100 tổng / 10 HTTP calls | Bộ đếm trong invocation; HTTP timeout `2s`, response stream cap `1 MiB`. |
-| **Invocation Deadline** | 5 giây / invocation | Tokio deadline + `ProcessGuard` (`--plugin-worker`). |
-| **Concurrency Pool** | 4 tác vụ đồng thời | Tokio Semaphore fail-fast `1000ms`. |
+| **Fuel (CPU)** | `20.000.000` units / invocation | Wasmi engine fuel metering (`OutOfFuel` trap). |
+| **Linear Memory** | `16 MiB` (`256` pages Wasm) | `StoreLimitsBuilder::memory_size(16 << 20)`. |
+| **Input / Output / IPC Frame** | `1 MiB` I/O · `2 MiB` IPC frame | `MAX_IPC_FRAME_BYTES` + `host_write_output`. |
+| **KV Key / Value / Staged Batch** | `256 B` key · `512 KiB` val · `64` ops / `2 MiB` | `host_ops.rs` & single `BEGIN IMMEDIATE` tx. |
+| **Host Calls / HTTP Sub-quota** | `100` calls/run · `10` HTTP (`1` in contact filter) | `HTTP_TIMEOUT = 2s`, max `1 MiB` response stream. |
+| **Invocation Deadline** | `5s` (`2s` phase cap cho `prepare_save` / `contact/before_submit`) | Tokio deadline + `ProcessGuard` (`--plugin-worker`). |
+| **Concurrency Pool** | `4` Admin + `2` Background/Public = `6` max workers | Dual Tokio Semaphores (`MAX_TOTAL_CONCURRENT_WORKERS = 6`). |
+| **`AsyncHookQueue`** | `2` workers · queue `64` jobs · `dispatch_depth < 2` | Giữ `MutationLease`, hủy & drain tức thì khi `SiteCoordinator::maintenance_cancel_rx() == true`, thoát khi `shutdown_rx == true`. |
 
-- **Worker cô lập & Zero Late Writes:** Mọi lượt chạy tạo tiến trình con `--plugin-worker` từ cùng binary; timeout/hủy sẽ kill/wait tiến trình con đồng bộ, `kv_set` và `content_save` được stage trong worker và chỉ commit vào SQLite qua `StagedCommitGuard` khi chưa quá hạn.
-- **HTTP SSRF & DNS Pinning (`plugin/egress.rs`):** Phân giải DNS và chặn toàn bộ IP loopback/private/CGNAT/link-local/multicast/ULA, pin `SocketAddr`, bật `.no_proxy()`, tắt redirect (`Policy::none()`), đọc stream tối đa `1 MiB`.
+- **Single-Tx `StagedCommitGuard` (`plugin/runtime.rs`):** Chỉ cho phép commit `staged_kv` và `staged_logs` trong `HookExecutionMode::{Standard, AsyncPostCommit}`, và `staged_content_command` / `staged_content_delete` trong `HookExecutionMode::Standard`. Toàn bộ writes + tombstones + `plugin_logs` commit trong một transaction `BEGIN IMMEDIATE` sau khi kiểm `revision_generation` + `actor_role`.
+- **Typed Synchronous Pipelines (`hooks.rs`, `routes/entries.rs`, `routes/contact.rs`):**
+  - `filter:content/prepare_save`: chạy **trước** `content/before_save`, áp sparse patch kiểm quyền CPT & từng field qua `plugin_can_write_field` theo `actor_role` thật (`Admin`/`Editor`), sau đó bắt buộc re-validate đầy đủ (`validate_against_effective` + media refs + slug).
+  - `filter:contact/before_submit`: chạy sau Honeypot/Origin/RateLimit/FormSchema (đã drop `rate_lease` ngắn hạn) và **trước** khi cấp `MutationLease` ghi `contact_submissions`; rejection trả HTTP `422` escaped HTML + `Cache-Control: no-store`.
+- **Write-Time Materialized Projections (`0050`, `storage/plugin_projections.rs`, `seo.rs`, `content_render.rs`):**
+  - Bảng `plugin_entry_projections (entry_id, plugin_id, locale, seo_json, ext_json, updated_at)` được tính sẵn bằng `ExecutionPrincipal::Public` khi tạo/sửa/xuất bản entry (xóa khi chuyển về `draft`/`deleted`), và tính lại theo batch async khi enable plugin / lưu settings, xóa ngay khi disable/uninstall.
+  - Đường nóng public `GET` chỉ chạy 1 batch `SELECT` (`batch_load_entry_projections_in_conn`) với **`0` Wasm spawn**: nạp `EntryView.ext[<plugin_id>]`, trộn `SeoView`, bảo vệ bất biến **`final_noindex = core_noindex || plugin_noindex`** (plugin không thể gỡ `noindex: true`), kiểm bounds `json_ld` (`<= 4` blocks, `<= 16 KiB`, depth `<= 8`, `Value::Object`), và escape `<`/`>`/`&`/U+2028/U+2029 khi serialize `<script type="application/ld+json">`.

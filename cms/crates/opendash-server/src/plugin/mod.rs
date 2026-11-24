@@ -21,7 +21,7 @@ pub use manager::{PluginManager, PluginSummary};
 #[allow(unused_imports)]
 pub use manifest::{PluginManifest, PluginPermissions};
 #[allow(unused_imports)]
-pub use package::PluginPackage;
+pub use package::{PluginCheckSummary, PluginPackage, check_plugin_path};
 #[allow(unused_imports)]
 pub use runtime::{PluginError, PluginRuntime};
 
