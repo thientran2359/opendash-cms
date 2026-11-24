@@ -316,9 +316,11 @@ pub async fn collect_pins_in_tx(
             .fetch_all(&mut *conn)
             .await?;
     let default_locale: Option<String> = if !home_seo_rows.is_empty() {
-        sqlx::query_scalar("SELECT code FROM site_locales WHERE is_default = 1 LIMIT 1")
-            .fetch_optional(&mut *conn)
-            .await?
+        sqlx::query_scalar(
+            "SELECT code FROM site_locales WHERE is_default = 1 AND deleted_at IS NULL LIMIT 1",
+        )
+        .fetch_optional(&mut *conn)
+        .await?
     } else {
         None
     };

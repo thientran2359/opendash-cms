@@ -959,10 +959,13 @@ pub async fn execute_host_read_request(
             {
                 return HostOperationResponse::ok_data(json!({ "entry": Value::Null }));
             }
-            let entry_opt = match entries::get_entry(db, &type_key, entry_id).await {
-                Ok(e) => e,
-                Err(e) => return HostOperationResponse::err(e.1.to_string()),
-            };
+            let entry_opt =
+                match plugin_storage::get_entry_for_host(db, &type_key, entry_id, is_public_scope)
+                    .await
+                {
+                    Ok(e) => e,
+                    Err(e) => return HostOperationResponse::err(e.1.to_string()),
+                };
             let Some(entry) = entry_opt else {
                 return HostOperationResponse::ok_data(json!({ "entry": Value::Null }));
             };
@@ -1032,32 +1035,19 @@ pub async fn execute_host_read_request(
                 include_descendants: false,
                 locale: resolved_locale.clone(),
             };
-            let list_res = if eff_published {
-                entries::list_published_filtered(
-                    db,
-                    &type_key,
-                    clamped_limit,
-                    clamped_offset,
-                    filters,
-                )
-                .await
-            } else {
-                entries::list_entries(db, &type_key, clamped_limit, clamped_offset, filters).await
-            };
-            let rows = match list_res {
-                Ok(r) => r,
-                Err(e) => return HostOperationResponse::err(e.1.to_string()),
-            };
-            let total = match plugin_storage::count_entries_for_host_list(
+            let (rows, total) = match plugin_storage::list_entries_for_host(
                 db,
                 &type_key,
-                resolved_locale.as_deref(),
+                clamped_limit,
+                clamped_offset,
+                filters,
                 eff_published,
+                is_public_scope,
             )
             .await
             {
-                Ok(t) => t,
-                Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
+                Ok(result) => result,
+                Err(e) => return HostOperationResponse::err(e.1.to_string()),
             };
             let items: Vec<Value> = rows
                 .into_iter()
@@ -1090,16 +1080,17 @@ pub async fn execute_host_read_request(
             if def.provider_status != ProviderStatus::Active {
                 return HostOperationResponse::ok_data(json!({ "items": [] }));
             }
-            if !def.public && principal != ExecutionPrincipal::Admin {
+            if !def.public && (is_public_scope || principal != ExecutionPrincipal::Admin) {
                 return HostOperationResponse::err("permission_denied: taxonomy_private");
             }
             let clamped = limit.unwrap_or(50).clamp(1, 100) as i64;
-            let page = match taxonomy::list_terms_for_locale(
+            let page = match taxonomy::list_terms_for_host(
                 db,
                 Some(&kind),
                 locale.as_deref(),
                 clamped,
                 0,
+                is_public_scope,
             )
             .await
             {

@@ -177,6 +177,18 @@ async fn multilingual_end_to_end_cuj_suite() {
     // -----------------------------------------------------------------------
     // CUJ-2: Add secondary locale cleanly
     // -----------------------------------------------------------------------
+    let enabled = client
+        .put(format!("{}/api/admin/locales/multilingual", srv.origin))
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, &srv.origin)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, &locales_etag)
+        .json(&json!({"enabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(enabled.status(), StatusCode::OK);
+    let locales_etag = etag_of(&enabled);
     let add_locale = client
         .post(format!("{}/api/admin/locales", srv.origin))
         .header(header::COOKIE, &cookie)
@@ -541,6 +553,18 @@ async fn cuj2_root_collision_returns_409() {
         StatusCode::OK
     );
 
+    let enabled = client
+        .put(format!("{}/api/admin/locales/multilingual", srv.origin))
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, &srv.origin)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, &locales_etag)
+        .json(&json!({"enabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(enabled.status(), StatusCode::OK);
+    let locales_etag = etag_of(&enabled);
     let conflict_resp = client
         .post(format!("{}/api/admin/locales", srv.origin))
         .header(header::COOKIE, &cookie)

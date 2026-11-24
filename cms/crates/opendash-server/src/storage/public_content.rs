@@ -502,8 +502,11 @@ async fn validate_taxonomy_page_filters_in_tx(
         if let Some(filter_id) = filter_id {
             let exists: Option<i64> = sqlx::query_scalar(
                 "SELECT 1 FROM taxonomy_terms t JOIN taxonomy_definitions d ON d.key=t.kind
+                 JOIN site_locales sl ON sl.code=t.locale AND sl.deleted_at IS NULL
                  WHERE t.id=? AND t.kind=? AND d.public=1
-                   AND d.provider_status='active' AND d.declaration_state='declared'",
+                   AND d.provider_status='active' AND d.declaration_state='declared'
+                   AND sl.enabled=1 AND (sl.is_default=1 OR
+                       (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)",
             )
             .bind(filter_id)
             .bind(filter_kind.as_str())
@@ -528,8 +531,10 @@ async fn validate_taxonomy_page_filters_in_tx(
         let record: Option<(i64, i64)> = sqlx::query_as(
             "SELECT d.hierarchical,d.public FROM taxonomy_terms t
              JOIN taxonomy_definitions d ON d.key=t.kind
+             JOIN site_locales sl ON sl.code=t.locale AND sl.deleted_at IS NULL
              WHERE t.id=? AND t.kind=? AND d.provider_status='active'
-               AND d.declaration_state='declared'",
+               AND d.declaration_state='declared' AND sl.enabled=1
+               AND (sl.is_default=1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)",
         )
         .bind(id)
         .bind(key)

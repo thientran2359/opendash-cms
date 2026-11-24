@@ -175,6 +175,18 @@ async fn add_locale(
         .unwrap();
     assert_eq!(get.status(), StatusCode::OK);
     let etag = etag_version(&get);
+    let enabled = client
+        .put(format!("{base}/api/admin/locales/multilingual"))
+        .header(header::COOKIE, cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(header::IF_MATCH, &etag)
+        .json(&json!({"enabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(enabled.status(), StatusCode::OK);
+    let etag = etag_version(&enabled);
     client
         .post(format!("{base}/api/admin/locales"))
         .header(header::COOKIE, cookie)
@@ -1390,6 +1402,7 @@ async fn s02_disable_locale_hides_routes_redirects_and_media_acl_without_data_lo
         .await
         .unwrap();
     assert_eq!(enable_vi.status(), StatusCode::OK);
+    let mut toggle_etag = etag_version(&enable_vi);
     assert_eq!(
         client
             .get(format!("{}/vi/new-vi-showcase", srv.base_url))
@@ -1419,6 +1432,73 @@ async fn s02_disable_locale_hides_routes_redirects_and_media_acl_without_data_lo
                 .status(),
             StatusCode::OK
         );
+    }
+
+    // Global toggle must also hide the enabled secondary locale, then restore
+    // its route, history and media without rewriting the per-locale flag.
+    for enabled in [false, true] {
+        let toggle = client
+            .put(format!("{}/api/admin/locales/multilingual", srv.base_url))
+            .header(header::COOKIE, &cookie)
+            .header("Origin", &srv.base_url)
+            .header("X-CSRF-Token", &csrf)
+            .header(header::IF_MATCH, &toggle_etag)
+            .json(&json!({"enabled": enabled}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(toggle.status(), StatusCode::OK);
+        toggle_etag = etag_version(&toggle);
+        let state: Value = toggle.json().await.unwrap();
+        assert_eq!(state["multilingual_enabled"], enabled);
+        assert_eq!(
+            state["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["code"] == "vi")
+                .unwrap()["enabled"],
+            true
+        );
+        let visible_status = if enabled {
+            StatusCode::OK
+        } else {
+            StatusCode::NOT_FOUND
+        };
+        assert_eq!(
+            client
+                .get(format!("{}/vi/new-vi-showcase", srv.base_url))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            visible_status
+        );
+        assert_eq!(
+            client
+                .get(format!("{}/old-vi-showcase", srv.base_url))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            if enabled {
+                StatusCode::MOVED_PERMANENTLY
+            } else {
+                StatusCode::NOT_FOUND
+            }
+        );
+        for mid in [&m_entry_seo, &m_home_seo, &m_builder, &m_override] {
+            assert_eq!(
+                client
+                    .get(format!("{}/media/{mid}/file", srv.base_url))
+                    .send()
+                    .await
+                    .unwrap()
+                    .status(),
+                visible_status,
+                "toggle {enabled}, media {mid}"
+            );
+        }
     }
 }
 

@@ -110,12 +110,13 @@ pub async fn resolve_in_tx_with_route_and_locale(
                         let source_row: Option<(i64, String, String, String)> = sqlx::query_as(
                             "SELECT e.id, t.definition_json, e.title, e.values_json
                                FROM content_entries e
-                               JOIN site_locales sl ON sl.code = e.locale
+                               JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
                                JOIN content_types t ON t.key = e.content_type_key
                               WHERE e.content_type_key = ? AND e.slug = ? AND e.locale = ?
                                 AND t.provider_status = 'active'
                                 AND (? = 1 OR (
                                     sl.enabled = 1
+                                    AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                                     AND e.publication_status = 'published'
                                     AND e.content_type_key != 'pattern'
                                     AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1

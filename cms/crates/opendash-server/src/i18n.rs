@@ -72,6 +72,36 @@ fn capture_template<'a>(raw: &'a str, pieces: &[&str]) -> Option<Vec<&'a str>> {
 
 const EXACT_ERROR_ENTRIES: &[(&str, &str, &str)] = &[
     (
+        "request.invalid_body",
+        "Body của DELETE locale phải rỗng.",
+        "DELETE locale body must be empty.",
+    ),
+    (
+        "multilingual.disabled",
+        "Hỗ trợ đa ngôn ngữ đang tắt.",
+        "Multilingual support is disabled.",
+    ),
+    (
+        "locale.cannot_delete_default",
+        "Không thể xóa ngôn ngữ mặc định.",
+        "Cannot delete the default language.",
+    ),
+    (
+        "locale.not_deleted",
+        "Ngôn ngữ chưa bị xóa.",
+        "The language has not been deleted.",
+    ),
+    (
+        "locale.purge_confirm_mismatch",
+        "Mã xác nhận xóa vĩnh viễn không khớp.",
+        "The purge confirmation code does not match.",
+    ),
+    (
+        "locale.orphaned_conflict",
+        "Mã ngôn ngữ đang có dữ liệu mồ côi.",
+        "The language code has orphaned data.",
+    ),
+    (
         "server.error",
         "Không thể điều phối tác vụ băm mật khẩu.",
         "Could not schedule password hashing.",

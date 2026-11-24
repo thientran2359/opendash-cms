@@ -265,6 +265,18 @@ async fn s04_theme_l10n_csec_hardening_per_key_merge_and_starter_v110() {
         .to_str()
         .unwrap()
         .to_owned();
+    let enabled = client
+        .put(format!("{}/api/admin/locales/multilingual", srv.origin))
+        .header(header::COOKIE, &cookie)
+        .header(header::ORIGIN, &srv.origin)
+        .header("X-CSRF-Token", &csrf)
+        .header(header::IF_MATCH, &etag)
+        .json(&json!({"enabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(enabled.status(), StatusCode::OK);
+    let etag = enabled.headers()[header::ETAG].to_str().unwrap().to_owned();
     let add_en = client
         .post(format!("{}/api/admin/locales", srv.origin))
         .header(header::COOKIE, &cookie)

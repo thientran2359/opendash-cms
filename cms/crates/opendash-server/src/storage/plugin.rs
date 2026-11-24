@@ -1037,24 +1037,61 @@ pub async fn read_raw_plugin_option_map(
     Ok(map)
 }
 
-pub async fn count_entries_for_host_list(
+/// Read the host projection's source row only if its locale is visible in
+/// this scope. The check and hydration use one SQLite read snapshot.
+pub(crate) async fn get_entry_for_host(
     db: &SqlitePool,
     type_key: &str,
-    locale: Option<&str>,
-    published_only: bool,
-) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT COUNT(*) FROM content_entries
-         WHERE content_type_key = ?
-           AND (? IS NULL OR locale = ?)
-           AND (? = 0 OR publication_status = 'published')",
+    entry_id: i64,
+    enforce_public_locale: bool,
+) -> crate::error::ApiResult<Option<super::entries::ContentEntryRecord>> {
+    let mut tx = db.begin().await?;
+    let visible: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM content_entries e
+          JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
+          WHERE e.id = ? AND e.content_type_key = ?
+            AND (? = 0 OR (sl.enabled = 1 AND e.publication_status = 'published'
+              AND (sl.is_default = 1 OR
+                  (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))))",
     )
+    .bind(entry_id)
     .bind(type_key)
-    .bind(locale)
-    .bind(locale)
-    .bind(if published_only { 1i64 } else { 0i64 })
-    .fetch_one(db)
-    .await
+    .bind(i64::from(enforce_public_locale))
+    .fetch_one(&mut *tx)
+    .await?;
+    let entry = if visible {
+        super::entries::get_entry_in_tx(&mut tx, type_key, entry_id).await?
+    } else {
+        None
+    };
+    tx.commit().await?;
+    Ok(entry)
+}
+
+/// Rows and total share a single predicate, including the locale and provider
+/// scope, rather than independently counting unfiltered rows.
+pub(crate) async fn list_entries_for_host(
+    db: &SqlitePool,
+    type_key: &str,
+    limit: i64,
+    offset: i64,
+    filters: super::entries::EntryFilters,
+    published_only: bool,
+    enforce_public_locale: bool,
+) -> crate::error::ApiResult<(Vec<super::entries::ContentEntryRecord>, i64)> {
+    let mut tx = db.begin().await?;
+    let result = super::entries::list_host_entries_in_tx(
+        &mut tx,
+        type_key,
+        limit,
+        offset,
+        filters,
+        published_only,
+        enforce_public_locale,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(result)
 }
 
 pub async fn delete_entry_with_plugin_fence(
