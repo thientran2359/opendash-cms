@@ -53,10 +53,11 @@ use crate::{
         public::public_page,
         public_content::{media_file, media_thumb},
         settings::{
-            general_get, general_put, locales_create, locales_get, locales_set_default,
-            locales_update, permalinks_get, permalinks_put, public_get, public_put, reading_get,
-            reading_put, site_options_get, site_options_put, theme_options_get, theme_options_put,
-            timezones_get,
+            general_get, general_put, locales_create, locales_delete, locales_get,
+            locales_multilingual_put, locales_orphans_get, locales_orphans_purge,
+            locales_set_default, locales_update, permalinks_get, permalinks_put, public_get,
+            public_put, reading_get, reading_put, site_options_get, site_options_put,
+            theme_options_get, theme_options_put, timezones_get,
         },
         taxonomy::{
             MAX_TAXONOMY_JSON_BYTES, taxonomy_create, taxonomy_definitions_create,
@@ -317,8 +318,17 @@ pub fn build_router_with_themes_root(
                 .layer(DefaultBodyLimit::max(4096)),
         )
         .route(
+            "/api/admin/locales/multilingual",
+            put(locales_multilingual_put).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route("/api/admin/locales/orphans", get(locales_orphans_get))
+        .route(
+            "/api/admin/locales/orphans/{code}/purge",
+            post(locales_orphans_purge).layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
             "/api/admin/locales/{code}",
-            put(locales_update).layer(DefaultBodyLimit::max(4096)),
+            put(locales_update).delete(locales_delete).layer(DefaultBodyLimit::max(4096)),
         )
         .route(
             "/api/admin/locales/{code}/set-default",

@@ -2,7 +2,10 @@
 use axum::{
     Json,
     body::Bytes,
-    extract::{Path, Query, State, rejection::JsonRejection},
+    extract::{
+        Path, Query, State,
+        rejection::{BytesRejection, JsonRejection},
+    },
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
@@ -19,9 +22,9 @@ use crate::{
     storage::settings::{
         self, CreateLocaleInput, GeneralSettings, GeneralSettingsInput, GlobalSiteOptionsOutcome,
         GlobalSiteOptionsSnapshot, LocaleMutationError, LocaleQuery, PublicSaveOutcome,
-        PublicSiteSettings, PublicSiteSettingsInput, ReadingSettings, ReadingSettingsInput,
-        SaveOutcome, SiteLocalesSnapshot, ThemeOptionsOutcome, ThemeOptionsSnapshot,
-        UpdateLocaleInput,
+        PublicSiteSettings, PublicSiteSettingsInput, PurgeOrphanLocaleInput, ReadingSettings,
+        ReadingSettingsInput, SaveOutcome, SetMultilingualEnabledInput, SiteLocalesSnapshot,
+        ThemeOptionsOutcome, ThemeOptionsSnapshot, UpdateLocaleInput,
     },
 };
 
@@ -181,6 +184,86 @@ pub async fn locales_get(State(db): State<SqlitePool>, headers: HeaderMap) -> Ap
     Ok(locales_response(StatusCode::OK, snapshot))
 }
 
+fn locale_body_error(status: StatusCode) -> ApiError {
+    if status == StatusCode::PAYLOAD_TOO_LARGE {
+        ApiError(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Dữ liệu cài đặt công khai vượt quá 4 KiB.".into(),
+        )
+    } else {
+        ApiError::bad_request("Dữ liệu Settings không hợp lệ.")
+    }
+}
+
+pub async fn locales_multilingual_put(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    input: Result<Json<SetMultilingualEnabledInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) = input.map_err(|err| locale_body_error(err.status()))?;
+    match settings::set_multilingual_enabled(&db, version, input).await {
+        Ok(snapshot) => Ok(locales_response(StatusCode::OK, snapshot)),
+        Err(err) => map_locale_mutation_error(err),
+    }
+}
+
+pub async fn locales_delete(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(code): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    if !body
+        .map_err(|err| locale_body_error(err.status()))?
+        .is_empty()
+    {
+        return Err(ApiError::bad_request("Body của DELETE locale phải rỗng."));
+    }
+    match settings::delete_locale(&db, &code, version).await {
+        Ok(result) => Ok((
+            no_store_headers(Some(result.snapshot.version)),
+            Json(result),
+        )
+            .into_response()),
+        Err(err) => map_locale_mutation_error(err),
+    }
+}
+
+pub async fn locales_orphans_get(
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+) -> ApiResult<Response> {
+    require_admin(&headers, &db).await?;
+    let snapshot = settings::list_orphaned_locales(&db).await?;
+    Ok((no_store_headers(Some(snapshot.version)), Json(snapshot)).into_response())
+}
+
+pub async fn locales_orphans_purge(
+    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    State(db): State<SqlitePool>,
+    headers: HeaderMap,
+    Path(code): Path<String>,
+    input: Result<Json<PurgeOrphanLocaleInput>, JsonRejection>,
+) -> ApiResult<Response> {
+    require_admin_with_csrf(&headers, &db).await?;
+    let version = parse_if_match(&headers)?;
+    let Json(input) = input.map_err(|err| locale_body_error(err.status()))?;
+    match settings::purge_orphan_locale(&db, &code, version, input).await {
+        Ok(result) => Ok((
+            no_store_headers(Some(result.snapshot.version)),
+            Json(result),
+        )
+            .into_response()),
+        Err(err) => map_locale_mutation_error(err),
+    }
+}
+
 pub async fn locales_create(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
@@ -189,8 +272,13 @@ pub async fn locales_create(
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     let version = parse_if_match(&headers)?;
-    let Json(input) =
-        input.map_err(|_| ApiError::bad_request("Dữ liệu tạo ngôn ngữ không hợp lệ."))?;
+    let Json(input) = input.map_err(|err| {
+        if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            locale_body_error(err.status())
+        } else {
+            ApiError::bad_request("Dữ liệu tạo ngôn ngữ không hợp lệ.")
+        }
+    })?;
     match settings::create_locale(&db, version, input).await {
         Ok(snapshot) => Ok(locales_response(StatusCode::CREATED, snapshot)),
         Err(err) => map_locale_mutation_error(err),
@@ -206,8 +294,13 @@ pub async fn locales_update(
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     let version = parse_if_match(&headers)?;
-    let Json(input) =
-        input.map_err(|_| ApiError::bad_request("Dữ liệu cập nhật ngôn ngữ không hợp lệ."))?;
+    let Json(input) = input.map_err(|err| {
+        if err.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            locale_body_error(err.status())
+        } else {
+            ApiError::bad_request("Dữ liệu cập nhật ngôn ngữ không hợp lệ.")
+        }
+    })?;
     match settings::update_locale(&db, &code, version, input).await {
         Ok(snapshot) => Ok(locales_response(StatusCode::OK, snapshot)),
         Err(err) => map_locale_mutation_error(err),
@@ -219,10 +312,11 @@ pub async fn locales_set_default(
     State(db): State<SqlitePool>,
     headers: HeaderMap,
     Path(code): Path<String>,
-    body: Bytes,
+    body: Result<Bytes, BytesRejection>,
 ) -> ApiResult<Response> {
     require_admin_with_csrf(&headers, &db).await?;
     let version = parse_if_match(&headers)?;
+    let body = body.map_err(|err| locale_body_error(err.status()))?;
     if !body.is_empty() {
         let parsed: serde_json::Value = serde_json::from_slice(&body)
             .map_err(|_| ApiError::bad_request("Body của set-default phải rỗng hoặc {}."))?;
@@ -283,6 +377,9 @@ pub async fn public_put(
         PublicSaveOutcome::MultiLocaleConflict => Err(ApiError::conflict(
             "Website đang bật nhiều ngôn ngữ; hãy quản lý ngôn ngữ mặc định tại phần Ngôn ngữ nội dung.",
         )),
+        PublicSaveOutcome::OrphanedLocaleConflict => {
+            Err(ApiError::conflict("Mã ngôn ngữ đang có dữ liệu mồ côi."))
+        }
         PublicSaveOutcome::SyncFailed(err) => Err(err),
     }
 }
