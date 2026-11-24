@@ -67,7 +67,7 @@ impl MockHost {
                 json!({ "ok": true, "data": { "deleted": deleted } })
             }
             MockOpRequest::KvList { prefix, limit } => {
-                let lim = limit.unwrap_or(50).min(100);
+                let lim = limit.unwrap_or(50).clamp(1, 100);
                 let items: Vec<Value> = self
                     .kv
                     .iter()
@@ -102,6 +102,7 @@ impl MockHost {
                 type_key,
                 entry_id,
                 expected_version,
+                locale,
                 title,
                 slug,
                 status,
@@ -129,6 +130,9 @@ impl MockHost {
                             "error": format!("version conflict: expected {exp_ver}, actual {}", existing.version)
                         }))
                         .unwrap());
+                    }
+                    if let Some(loc) = locale {
+                        existing.locale = loc;
                     }
                     if let Some(t) = title {
                         existing.title = t;
@@ -162,7 +166,7 @@ impl MockHost {
                         title: title.unwrap_or_else(|| format!("Entry {next_id}")),
                         status: status.unwrap_or_else(|| "draft".to_owned()),
                         version: 1,
-                        locale: "vi".to_owned(),
+                        locale: locale.unwrap_or_else(|| "vi".to_owned()),
                         values,
                         term_ids: term_ids.unwrap_or_default(),
                     };
@@ -237,7 +241,7 @@ impl MockHost {
                 _locale: _,
                 limit,
             } => {
-                let lim = limit.unwrap_or(50).min(200);
+                let lim = limit.unwrap_or(50).clamp(1, 100);
                 let items: Vec<&TaxonomyTerm> = self
                     .taxonomies
                     .get(&kind)
@@ -315,6 +319,8 @@ enum MockOpRequest {
         entry_id: Option<i64>,
         #[serde(default)]
         expected_version: Option<i64>,
+        #[serde(default)]
+        locale: Option<String>,
         #[serde(default)]
         title: Option<String>,
         #[serde(default)]
@@ -499,6 +505,7 @@ pub(crate) fn abi_host_call(req_json: &[u8], resp_buf: &mut [u8]) -> Result<i32,
                     type_key,
                     entry_id,
                     expected_version,
+                    locale,
                     title,
                     slug,
                     status,
@@ -509,6 +516,7 @@ pub(crate) fn abi_host_call(req_json: &[u8], resp_buf: &mut [u8]) -> Result<i32,
                         type_key,
                         entry_id,
                         expected_version,
+                        locale,
                         title,
                         slug,
                         status,

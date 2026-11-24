@@ -117,6 +117,8 @@ pub struct ContentSaveInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_version: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slug: Option<String>,

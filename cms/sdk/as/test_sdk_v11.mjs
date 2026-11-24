@@ -4,7 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const wasmPath = path.resolve(__dirname, "../../target/opendash_sdk_test.wasm");
+const wasmPath = process.argv[2]
+  ? path.resolve(process.argv[2])
+  : path.resolve(__dirname, "../../target/opendash_sdk_test.wasm");
 const wasmBytes = fs.readFileSync(wasmPath);
 const wasmModule = await WebAssembly.compile(wasmBytes);
 

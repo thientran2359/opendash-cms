@@ -1,5 +1,6 @@
 <!doctype html>
-<html lang="{{ locale.code | default('vi') }}">
+{% set current_locale = locale | default({}) %}
+<html lang="{{ current_locale.code | default('vi') }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
