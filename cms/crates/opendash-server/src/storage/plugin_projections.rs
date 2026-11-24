@@ -133,11 +133,15 @@ async fn load_published_entry_source(
     db: &SqlitePool,
     entry_id: i64,
 ) -> ApiResult<Option<EntryProjectionSource>> {
+    let mut tx = db.begin().await?;
     let row = sqlx::query(
         "SELECT e.id, e.content_type_key, e.locale, e.translation_group_id,
                 e.slug, e.title, e.values_json, e.published_at
            FROM content_entries e
            JOIN content_types t ON t.key = e.content_type_key
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+            AND sl.deleted_at IS NULL
+            AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
           WHERE e.id = ?
             AND e.publication_status = 'published'
             AND e.content_type_key != 'pattern'
@@ -145,10 +149,11 @@ async fn load_published_entry_source(
             AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(entry_id)
-    .fetch_optional(db)
+    .fetch_optional(&mut *tx)
     .await?;
 
     let Some(row) = row else {
+        tx.commit().await?;
         return Ok(None);
     };
 
@@ -164,8 +169,9 @@ async fn load_published_entry_source(
     let term_ids: Vec<i64> =
         sqlx::query_scalar("SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id")
             .bind(entry_id)
-            .fetch_all(db)
+            .fetch_all(&mut *tx)
             .await?;
+    tx.commit().await?;
 
     let payload = json!({
         "id": entry_id,
@@ -339,6 +345,41 @@ async fn evaluate_entry_projections(
         .collect())
 }
 
+/// Recheck eligibility after reserving the SQLite writer. A locale-only
+/// visibility change parks existing projections, whereas a missing, draft or
+/// private entry retains the original cleanup behavior. Never apply work
+/// computed for a locale that has since been renamed or changed.
+async fn projection_write_allowed_in_tx(
+    tx: &mut SqliteConnection,
+    entry_id: i64,
+    computed_locale: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await?;
+    let current: Option<(String, bool)> = sqlx::query_as(
+        "SELECT e.locale, (sl.enabled = 1 AND sl.deleted_at IS NULL
+                    AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))
+           FROM content_entries e
+           JOIN content_types t ON t.key = e.content_type_key
+           JOIN site_locales sl ON sl.code = e.locale
+          WHERE e.id = ? AND e.publication_status = 'published'
+            AND e.content_type_key != 'pattern'
+            AND t.provider_status = 'active'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
+    )
+    .bind(entry_id)
+    .fetch_optional(&mut *tx)
+    .await?;
+    match current {
+        None => {
+            delete_entry_projections_in_tx(tx, entry_id).await?;
+            Ok(false)
+        }
+        Some((locale, active)) => Ok(active && computed_locale == Some(locale.as_str())),
+    }
+}
+
 async fn write_entry_projections_in_tx(
     tx: &mut SqliteConnection,
     entry_id: i64,
@@ -346,9 +387,9 @@ async fn write_entry_projections_in_tx(
     items: &[ComputedPluginProjection],
     plugin_filter: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
-        .execute(&mut *tx)
-        .await?;
+    if !projection_write_allowed_in_tx(tx, entry_id, Some(locale)).await? {
+        return Ok(());
+    }
     if let Some(pid) = plugin_filter {
         let enabled: Option<i64> = sqlx::query_scalar("SELECT enabled FROM plugins WHERE id = ?")
             .bind(pid)
@@ -431,7 +472,9 @@ pub async fn recompute_entry_projections(
 ) -> ApiResult<()> {
     let Some(source) = load_published_entry_source(db, entry_id).await? else {
         let mut tx = db.begin().await?;
-        delete_entry_projections_in_tx(&mut tx, entry_id).await?;
+        // A missing source can mean the locale is parked. Recheck under
+        // the writer before deciding whether existing projections are stale.
+        projection_write_allowed_in_tx(&mut tx, entry_id, None).await?;
         tx.commit().await?;
         return Ok(());
     };
@@ -483,6 +526,9 @@ pub async fn spawn_recompute_plugin_projections_batched(
                 "SELECT e.id
                    FROM content_entries e
                    JOIN content_types t ON t.key = e.content_type_key
+                   JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+                    AND sl.deleted_at IS NULL
+                    AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                   WHERE e.id > ?
                     AND e.publication_status = 'published'
                     AND e.content_type_key != 'pattern'
@@ -666,6 +712,136 @@ pub async fn batch_load_entry_projections(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn projection_locale_gate_preserves_parked_rows_and_rejects_stale_writes() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("../../migrations").run(&pool).await.unwrap();
+        sqlx::query("INSERT INTO site_locales(code,bcp47_tag,label) VALUES('en','en','English')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE site_locales_state SET multilingual_enabled = 1 WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO plugins (id,name,version,manifest_json,wasm_blob,enabled)
+             VALUES('projection-test','Projection Test','1.0.0','{}',X'00',1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO content_entries
+             (id,content_type_key,locale,translation_group_id,slug,title,values_json,publication_status)
+             VALUES(1,'post','en','grp-en','example','Example','{}','draft')",
+        ).execute(&pool).await.unwrap();
+        sqlx::query("UPDATE content_entries SET publication_status = 'published' WHERE id = 1")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let source = load_published_entry_source(&pool, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        let items = vec![ComputedPluginProjection {
+            plugin_id: "projection-test".into(),
+            seo_json: None,
+            ext_json: Some(r#"{"badge":"original"}"#.into()),
+        }];
+        let mut tx = pool.begin().await.unwrap();
+        write_entry_projections_in_tx(&mut tx, 1, &source.locale, &items, None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        for (toggle, locale_enabled, deleted_at) in
+            [(0, 1, None), (1, 0, None), (1, 0, Some("2026-01-01"))]
+        {
+            let mut tx = pool.begin().await.unwrap();
+            sqlx::query("UPDATE site_locales_state SET multilingual_enabled = ? WHERE id = 1")
+                .bind(toggle)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE site_locales SET enabled = ?, deleted_at = ? WHERE code = 'en'")
+                .bind(locale_enabled)
+                .bind(deleted_at)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            assert!(
+                load_published_entry_source(&pool, 1)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+
+            let mut tx = pool.begin().await.unwrap();
+            // Neither the missing-source cleanup nor an in-flight empty
+            // computation may erase parked projections.
+            assert!(
+                !projection_write_allowed_in_tx(&mut tx, 1, None)
+                    .await
+                    .unwrap()
+            );
+            write_entry_projections_in_tx(&mut tx, 1, "en", &[], None)
+                .await
+                .unwrap();
+            write_entry_projections_in_tx(&mut tx, 1, "en", &[], Some("projection-test"))
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            let stored: String = sqlx::query_scalar(
+                "SELECT ext_json FROM plugin_entry_projections WHERE entry_id = 1",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            assert_eq!(stored, r#"{"badge":"original"}"#);
+        }
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("UPDATE site_locales SET enabled = 1, deleted_at = NULL WHERE code = 'en'")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        // A stale computed locale must not overwrite or erase the current one.
+        write_entry_projections_in_tx(&mut tx, 1, "vi", &[], None)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert!(
+            load_published_entry_source(&pool, 1)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plugin_entry_projections")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("UPDATE content_entries SET publication_status = 'draft' WHERE id = 1")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        assert!(
+            !projection_write_allowed_in_tx(&mut tx, 1, None)
+                .await
+                .unwrap()
+        );
+        tx.commit().await.unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM plugin_entry_projections")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 
     #[tokio::test]
     async fn public_seo_read_uses_projections_with_zero_wasm_and_monotonic_noindex() {

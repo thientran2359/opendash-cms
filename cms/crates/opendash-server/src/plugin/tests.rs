@@ -25,6 +25,127 @@ mod tests {
         pool
     }
 
+    #[tokio::test]
+    async fn host_locale_visibility_and_list_total_follow_public_scope() {
+        use crate::plugin::{host_ops::HostReadRequest, runtime::execute_host_read_request};
+        use opendash_core::hooks::{ExecutionPrincipal, HookExecutionMode};
+
+        let db = create_test_db().await;
+        sqlx::query("INSERT INTO site_locales (code,bcp47_tag,label,direction,is_default,enabled,position) VALUES ('en','en','English','ltr',0,1,1)")
+            .execute(&db).await.unwrap();
+        for locale in ["vi", "en"] {
+            sqlx::query("INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id) VALUES('post','hello','Hello','{}','draft',?,'host-locale-group')")
+                .bind(locale).execute(&db).await.unwrap();
+            sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Hello','hello',?,'host-term-group')")
+                .bind(locale).execute(&db).await.unwrap();
+        }
+        sqlx::query("UPDATE content_entries SET publication_status='published' WHERE translation_group_id='host-locale-group'")
+            .execute(&db).await.unwrap();
+        let en_id: i64 = sqlx::query_scalar("SELECT id FROM content_entries WHERE locale='en'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+        let manifest = PluginManifest::from_json_str(r#"{"id":"locale-reader","version":"1.0.0","api_version":1,"manifest_schema":3,"min_host_version":"0.1.0","name":"Locale reader","entrypoint":"plugin.wasm","permissions":{"content_read":["post"],"taxonomy_read":true}}"#).unwrap();
+        for (state, public_count, admin_count) in [("off", 1, 2), ("on", 2, 2), ("deleted", 1, 1)] {
+            match state {
+                "on" => {
+                    sqlx::query("UPDATE site_locales_state SET multilingual_enabled=1 WHERE id=1")
+                        .execute(&db)
+                        .await
+                        .unwrap();
+                }
+                "deleted" => {
+                    sqlx::query("UPDATE site_locales SET enabled=0,deleted_at='2026-01-01T00:00:00Z' WHERE code='en'").execute(&db).await.unwrap();
+                }
+                _ => {}
+            }
+            for (principal, mode, expected) in [
+                (
+                    ExecutionPrincipal::Public,
+                    HookExecutionMode::Standard,
+                    public_count,
+                ),
+                (
+                    ExecutionPrincipal::Admin,
+                    HookExecutionMode::FilterProjection,
+                    public_count,
+                ),
+                (
+                    ExecutionPrincipal::Admin,
+                    HookExecutionMode::Standard,
+                    admin_count,
+                ),
+            ] {
+                let req = HostReadRequest::ContentList {
+                    type_key: "post".into(),
+                    locale: None,
+                    limit: Some(1),
+                    offset: None,
+                    published_only: Some(true),
+                };
+                let response = execute_host_read_request(
+                    &db,
+                    &manifest.id,
+                    &manifest,
+                    mode,
+                    principal,
+                    None,
+                    None,
+                    req,
+                )
+                .await;
+                assert!(response.ok, "{state}: {:?}", response.error);
+                let data = response.data.unwrap();
+                assert_eq!(data["total"], expected, "{state}");
+                assert_eq!(data["items"].as_array().unwrap().len(), 1);
+                let req = HostReadRequest::ContentGet {
+                    type_key: "post".into(),
+                    entry_id: en_id,
+                    locale: None,
+                };
+                let response = execute_host_read_request(
+                    &db,
+                    &manifest.id,
+                    &manifest,
+                    mode,
+                    principal,
+                    None,
+                    None,
+                    req,
+                )
+                .await;
+                assert!(response.ok, "{state}: {:?}", response.error);
+                assert_eq!(
+                    response.data.unwrap()["entry"].is_null(),
+                    expected == 1,
+                    "{state}"
+                );
+                let req = HostReadRequest::TaxonomyList {
+                    kind: "category".into(),
+                    locale: None,
+                    limit: None,
+                };
+                let response = execute_host_read_request(
+                    &db,
+                    &manifest.id,
+                    &manifest,
+                    mode,
+                    principal,
+                    None,
+                    None,
+                    req,
+                )
+                .await;
+                assert!(response.ok, "{state}: {:?}", response.error);
+                assert_eq!(
+                    response.data.unwrap()["items"].as_array().unwrap().len(),
+                    expected as usize,
+                    "{state}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn test_worker_entry() {
         if std::env::var("OPENDASH_WORKER_CHILD").is_ok() {

@@ -60,6 +60,35 @@ fn decode_hydrated_entry_rows(
     Ok(records)
 }
 
+// Administrative locale resolution accepts disabled locales and rejects
+// deleted ones. Public lookup instead treats known but inactive locales as
+// missing, while retaining validation for malformed/unknown codes.
+async fn resolve_public_locale_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    locale: Option<&str>,
+) -> ApiResult<Option<String>> {
+    let Some(raw) = locale else {
+        return crate::storage::settings::get_default_locale_code_in_conn(tx)
+            .await
+            .map(Some);
+    };
+    let normalized = raw.trim().to_ascii_lowercase();
+    let row: Option<(String, i64)> = sqlx::query_as(
+        "SELECT sl.code, (sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))
+           FROM site_locales sl WHERE sl.code = ?",
+    )
+    .bind(normalized)
+    .fetch_optional(&mut **tx)
+    .await?;
+    match row {
+        Some((code, 1)) => Ok(Some(code)),
+        Some(_) => Ok(None),
+        None => crate::storage::settings::resolve_requested_locale_in_conn(tx, Some(raw))
+            .await
+            .map(Some),
+    }
+}
+
 /// Slug is unique per `(content_type_key, locale)`; defaults to the active
 /// default locale when omitted. Never bypasses enabled locale visibility.
 pub async fn get_by_slug(
@@ -80,17 +109,14 @@ pub async fn get_by_slug_for_locale(
         return Ok(None);
     }
     let mut tx = db.begin().await?;
-    let active_locale = match locale {
-        Some(raw) => {
-            crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, Some(raw)).await?
-        }
-        None => crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?,
+    let Some(active_locale) = resolve_public_locale_in_tx(&mut tx, locale).await? else {
+        return Ok(None);
     };
     let row: Option<entries::EntryRow> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at
          FROM content_entries e
-         JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+         JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
          JOIN content_types t ON t.key = e.content_type_key
          WHERE e.content_type_key = ? AND e.locale = ? AND e.slug = ?
            AND e.publication_status = 'published'
@@ -128,7 +154,7 @@ async fn get_published_by_id_in_tx(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at
          FROM content_entries e
-         JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+         JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
          JOIN content_types t ON t.key = e.content_type_key
          WHERE e.id = ? AND e.publication_status = 'published'
            AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
@@ -476,8 +502,11 @@ async fn validate_taxonomy_page_filters_in_tx(
         if let Some(filter_id) = filter_id {
             let exists: Option<i64> = sqlx::query_scalar(
                 "SELECT 1 FROM taxonomy_terms t JOIN taxonomy_definitions d ON d.key=t.kind
+                 JOIN site_locales sl ON sl.code=t.locale AND sl.deleted_at IS NULL
                  WHERE t.id=? AND t.kind=? AND d.public=1
-                   AND d.provider_status='active' AND d.declaration_state='declared'",
+                   AND d.provider_status='active' AND d.declaration_state='declared'
+                   AND sl.enabled=1 AND (sl.is_default=1 OR
+                       (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)",
             )
             .bind(filter_id)
             .bind(filter_kind.as_str())
@@ -502,8 +531,10 @@ async fn validate_taxonomy_page_filters_in_tx(
         let record: Option<(i64, i64)> = sqlx::query_as(
             "SELECT d.hierarchical,d.public FROM taxonomy_terms t
              JOIN taxonomy_definitions d ON d.key=t.kind
+             JOIN site_locales sl ON sl.code=t.locale AND sl.deleted_at IS NULL
              WHERE t.id=? AND t.kind=? AND d.provider_status='active'
-               AND d.declaration_state='declared'",
+               AND d.declaration_state='declared' AND sl.enabled=1
+               AND (sl.is_default=1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)",
         )
         .bind(id)
         .bind(key)
@@ -544,16 +575,13 @@ pub async fn taxonomy_public_page_for_locale(
     offset: i64,
 ) -> ApiResult<Option<(PublicTerm, TaxonomyPublishedPage)>> {
     let mut tx = db.begin().await?;
-    let active_locale = match locale {
-        Some(raw) => {
-            crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, Some(raw)).await?
-        }
-        None => crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?,
+    let Some(active_locale) = resolve_public_locale_in_tx(&mut tx, locale).await? else {
+        return Ok(None);
     };
     let row: Option<(i64, String, String, String, i64)> = sqlx::query_as(
         "SELECT t.id, t.name, t.slug, t.locale, d.hierarchical
            FROM taxonomy_terms t
-           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN taxonomy_definitions d ON d.key = t.kind
           WHERE t.kind = ? AND t.locale = ? AND t.slug = ? AND d.public = 1
             AND d.provider_status = 'active' AND d.declaration_state = 'declared'",
@@ -594,7 +622,7 @@ pub async fn taxonomy_public_page_by_id(
     let row: Option<(String, String, String, String, i64)> = sqlx::query_as(
         "SELECT t.kind, t.name, t.slug, t.locale, d.hierarchical
            FROM taxonomy_terms t
-           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN taxonomy_definitions d ON d.key = t.kind
           WHERE t.id = ? AND d.public = 1 AND d.provider_status = 'active'
             AND d.declaration_state = 'declared'",
@@ -1088,7 +1116,7 @@ pub async fn query_related_entries(
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
                 e.primary_category_term_id, e.locale
            FROM content_entries e
-           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types t ON t.key = e.content_type_key
            LEFT JOIN content_type_taxonomy_overrides override
              ON override.content_type_key = e.content_type_key
@@ -1165,7 +1193,7 @@ pub async fn query_recent_posts(
                 e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
                 e.primary_category_term_id, e.locale
            FROM content_entries e
-           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types t ON t.key = e.content_type_key
           WHERE e.content_type_key = 'post'
             AND e.locale = ?
@@ -1197,7 +1225,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
         r#"SELECT EXISTS (
            SELECT 1
            FROM content_entries AS e
-           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN json_each(t.definition_json, '$.fields') AS f
            WHERE e.publication_status = 'published' AND e.content_type_key != 'pattern'
@@ -1222,7 +1250,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
          ) OR EXISTS (
            SELECT 1
            FROM content_entries AS e
-           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types AS t ON t.key = e.content_type_key
            JOIN content_field_group_targets AS gt
              ON gt.type_key = e.content_type_key
@@ -1277,7 +1305,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            SELECT 1
            FROM seo_public_media_refs AS sm
            JOIN content_entries AS e ON sm.source_kind = 'entry_seo' AND e.id = sm.source_id
-           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types AS t ON t.key = e.content_type_key
            WHERE sm.media_id = ?
              AND e.publication_status = 'published'
@@ -1288,7 +1316,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
            SELECT 1
            FROM site_home_seo AS h
            JOIN site_locales AS sl ON sl.code = h.locale
-           WHERE h.og_image_id = ? AND sl.enabled = 1
+           WHERE h.og_image_id = ? AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
          ) OR EXISTS (
            SELECT 1 FROM builder_homepage_video_refs AS bv
            JOIN builder_homepage AS b ON b.id = 1
@@ -1302,7 +1330,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                ov.target_kind IN ('index', 'not_found', 'singular', 'part')
                OR (ov.target_kind = 'home' AND EXISTS (
                  SELECT 1 FROM site_reading_settings AS reading
-                 JOIN site_locales AS sl ON sl.code = reading.locale AND sl.enabled = 1
+                 JOIN site_locales AS sl ON sl.code = reading.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                  JOIN content_entries AS e ON e.id = reading.homepage_page_id
                  WHERE e.content_type_key = 'page'
                    AND e.locale = reading.locale
@@ -1310,18 +1338,18 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                ))
                OR (ov.target_kind = 'page' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
-                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
+                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                  WHERE e.content_type_key = 'page' AND e.publication_status = 'published'
                ))
                OR (ov.target_kind = 'page_layout' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
-                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
+                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                  WHERE e.content_type_key = 'page' AND e.publication_status = 'published'
                    AND e.page_layout_key = json_extract(ov.target_json, '$.layout_key')
                ))
                OR (ov.target_kind = 'single_custom' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
-                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
+                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                  JOIN content_types AS t ON t.key = e.content_type_key
                  WHERE e.custom_template_key = json_extract(ov.target_json, '$.custom_key')
                    AND e.publication_status = 'published'
@@ -1330,7 +1358,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                ))
                OR (ov.target_kind = 'single' AND EXISTS (
                  SELECT 1 FROM content_entries AS e
-                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
+                 JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                  JOIN content_types AS t ON t.key = e.content_type_key
                  WHERE e.publication_status = 'published'
                    AND t.provider_status = 'active' AND t.key NOT IN ('pattern', 'page')
@@ -1353,7 +1381,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
                OR (ov.target_kind = 'taxonomy' AND EXISTS (
                  SELECT 1 FROM taxonomy_definitions AS d
                  LEFT JOIN taxonomy_terms AS term ON term.kind = d.key
-                 LEFT JOIN site_locales AS sl ON sl.code = term.locale AND sl.enabled = 1
+                 LEFT JOIN site_locales AS sl ON sl.code = term.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                  WHERE d.public = 1 AND d.provider_status = 'active'
                    AND d.declaration_state = 'declared'
                    AND (json_extract(ov.target_json, '$.taxonomy') IS NULL
@@ -1390,7 +1418,7 @@ pub async fn media_is_referenced(db: &SqlitePool, id: &str) -> ApiResult<bool> {
     // projections cannot serve a private body or an inactive provider.
     let builder_type_keys: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT e.content_type_key FROM content_entries AS e
-         JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1
+         JOIN site_locales AS sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
          WHERE e.publication_status = 'published'
            AND e.content_type_key NOT IN ('pattern', 'section')
            AND (

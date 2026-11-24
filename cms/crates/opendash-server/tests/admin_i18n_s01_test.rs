@@ -436,6 +436,17 @@ async fn admin_i18n_bootstrap_settings_http_scope_and_restart() {
     save_locale(&client, &server, &admin, None, "vi").await;
 
     let (locale_etag, _) = admin.get(&client, &server, "/api/admin/locales").await;
+    let enabled = admin
+        .put(
+            &client,
+            &server,
+            "/api/admin/locales/multilingual",
+            &locale_etag,
+            &json!({"enabled": true}),
+        )
+        .await;
+    assert_eq!(enabled.status(), StatusCode::OK);
+    let locale_etag = enabled.headers()[header::ETAG].to_str().unwrap().to_owned();
     let created = client
         .post(server.url("/api/admin/locales"))
         .header(header::COOKIE, &admin.cookie)

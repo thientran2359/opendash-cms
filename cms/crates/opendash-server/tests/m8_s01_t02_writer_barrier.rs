@@ -165,6 +165,9 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "locales_create",
                 "locales_update",
                 "locales_set_default",
+                "locales_multilingual_put",
+                "locales_delete",
+                "locales_orphans_purge",
             ],
         ),
         (

@@ -98,7 +98,7 @@ async fn batch_term_translations_in_conn(
     let rows: Vec<(String, String, i64, String, String, String)> = sqlx::query_as(
         "SELECT t.kind, t.translation_group_id, t.id, t.locale, t.name, t.slug
            FROM taxonomy_terms t
-           JOIN site_locales sl ON sl.code = t.locale
+           JOIN site_locales sl ON sl.code = t.locale AND sl.deleted_at IS NULL
           WHERE t.translation_group_id IN (SELECT value FROM json_each(?))
           ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
     )
@@ -770,6 +770,17 @@ pub async fn list_terms_for_locale(
     limit: i64,
     offset: i64,
 ) -> ApiResult<TaxonomyPage> {
+    list_terms_for_host(db, kind, locale, limit, offset, false).await
+}
+
+pub(crate) async fn list_terms_for_host(
+    db: &SqlitePool,
+    kind: Option<&str>,
+    locale: Option<&str>,
+    limit: i64,
+    offset: i64,
+    enforce_public_locale: bool,
+) -> ApiResult<TaxonomyPage> {
     let mut tx = db.begin().await?;
     let resolved_locale = match locale {
         Some(raw) => Some(
@@ -780,12 +791,17 @@ pub async fn list_terms_for_locale(
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM taxonomy_terms
           WHERE (? IS NULL OR kind = ?)
-            AND (? IS NULL OR locale = ?)",
+            AND (? IS NULL OR locale = ?)
+            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = taxonomy_terms.locale
+                AND sl.deleted_at IS NULL AND (? = 0 OR
+                    (sl.enabled = 1 AND (sl.is_default = 1 OR
+                      (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))))",
     )
     .bind(kind)
     .bind(kind)
     .bind(resolved_locale.as_deref())
     .bind(resolved_locale.as_deref())
+    .bind(i64::from(enforce_public_locale))
     .fetch_one(&mut *tx)
     .await?;
     let rows: Vec<TermRow> = sqlx::query_as(
@@ -793,6 +809,10 @@ pub async fn list_terms_for_locale(
            FROM taxonomy_terms
           WHERE (? IS NULL OR kind = ?)
             AND (? IS NULL OR locale = ?)
+            AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = taxonomy_terms.locale
+                AND sl.deleted_at IS NULL AND (? = 0 OR
+                    (sl.enabled = 1 AND (sl.is_default = 1 OR
+                      (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))))
           ORDER BY name COLLATE BINARY ASC, id ASC
           LIMIT ? OFFSET ?",
     )
@@ -800,6 +820,7 @@ pub async fn list_terms_for_locale(
     .bind(kind)
     .bind(resolved_locale.as_deref())
     .bind(resolved_locale.as_deref())
+    .bind(i64::from(enforce_public_locale))
     .bind(limit)
     .bind(offset)
     .fetch_all(&mut *tx)
@@ -947,12 +968,18 @@ pub async fn create_term_with_locale(
     }
     let target_locale =
         crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, locale).await?;
+    let default_code = crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?;
+    if target_locale != default_code || source_term_id.is_some() {
+        crate::storage::settings::require_multilingual_enabled_in_conn(&mut tx).await?;
+    }
 
     let mut effective_parent_id = parent_id;
     let group_id = if let Some(src_id) = source_term_id {
         let src: Option<(String, String, String, Option<i64>)> = sqlx::query_as(
             "SELECT kind, locale, translation_group_id, parent_id
-               FROM taxonomy_terms WHERE id = ?",
+               FROM taxonomy_terms WHERE id = ?
+                 AND EXISTS (SELECT 1 FROM site_locales sl
+                    WHERE sl.code = taxonomy_terms.locale AND sl.deleted_at IS NULL)",
         )
         .bind(src_id)
         .fetch_optional(&mut *tx)

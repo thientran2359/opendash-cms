@@ -170,6 +170,18 @@ async fn add_locale(
         .unwrap();
     assert_eq!(list_resp.status(), StatusCode::OK);
     let etag = etag_version(&list_resp);
+    let enabled = client
+        .put(format!("{base}/api/admin/locales/multilingual"))
+        .header(header::COOKIE, cookie)
+        .header("Origin", base)
+        .header("X-CSRF-Token", csrf)
+        .header(header::IF_MATCH, &etag)
+        .json(&json!({"enabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(enabled.status(), StatusCode::OK);
+    let etag = etag_version(&enabled);
     let create = client
         .post(format!("{base}/api/admin/locales"))
         .header(header::COOKIE, cookie)

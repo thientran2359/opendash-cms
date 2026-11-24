@@ -71,7 +71,7 @@ pub async fn reading_page_state_for_locale(
                             AND e.publication_status='published' AND t.provider_status='active'
                             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
                    FROM site_reading_settings r
-                   JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1
+                   JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                   WHERE r.locale = ?",
             );
             sqlx::query_as(sqlx::AssertSqlSafe(sql))
@@ -88,7 +88,7 @@ pub async fn reading_page_state_for_locale(
                             AND e.publication_status='published' AND t.provider_status='active'
                             AND COALESCE(json_extract(t.definition_json,'$.settings.public'),1)=1)
                    FROM site_reading_settings r
-                   JOIN site_locales sl ON sl.code = r.locale
+                   JOIN site_locales sl ON sl.code = r.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                   WHERE sl.is_default = 1",
             );
             sqlx::query_as(sqlx::AssertSqlSafe(sql))
@@ -150,7 +150,7 @@ pub async fn resolve_public_entry_paths_by_entry_ids_in_conn(
         let rows: Vec<(i64, String)> = sqlx::query_as(
             "SELECT e.id, c.path
                FROM content_entries e
-               JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+               JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                JOIN content_types t ON t.key = e.content_type_key
                JOIN permalink_route_claims c
                  ON c.target_kind = 'entry'
@@ -318,9 +318,10 @@ pub async fn validate_route_claim_in_tx(
         )));
     }
     let historical_owner: Option<(String, String)> = sqlx::query_as(
-        "SELECT target_kind,target_id
-           FROM permalink_route_redirects
-          WHERE source_path=? AND origin != 'locale_swap'",
+        "SELECT r.target_kind,r.target_id
+           FROM permalink_route_redirects r
+           JOIN site_locales sl ON sl.code = r.locale AND sl.deleted_at IS NULL
+          WHERE r.source_path=? AND r.origin != 'locale_swap'",
     )
     .bind(&effective_path)
     .fetch_optional(&mut *conn)
@@ -342,7 +343,7 @@ pub async fn check_cpt_root_claim_in_tx(
     type_key: &str,
 ) -> ApiResult<()> {
     let locale_conflict: Option<String> = sqlx::query_scalar(
-        "SELECT code FROM site_locales WHERE code = ? AND enabled = 1 AND is_default = 0 LIMIT 1",
+        "SELECT code FROM site_locales WHERE code = ? AND enabled = 1 AND deleted_at IS NULL AND is_default = 0 LIMIT 1",
     )
     .bind(type_key)
     .fetch_optional(&mut *conn)
@@ -355,7 +356,9 @@ pub async fn check_cpt_root_claim_in_tx(
     let exact = format!("/{type_key}");
     let prefix = format!("/{type_key}/%");
     let custom_hit: Option<i64> = sqlx::query_scalar(
-        "SELECT entry_id FROM entry_public_paths WHERE path = ? OR path LIKE ? LIMIT 1",
+        "SELECT p.entry_id FROM entry_public_paths p
+           JOIN site_locales sl ON sl.code = p.locale AND sl.deleted_at IS NULL
+          WHERE p.path = ? OR p.path LIKE ? LIMIT 1",
     )
     .bind(&exact)
     .bind(&prefix)
@@ -383,6 +386,7 @@ pub async fn check_cpt_root_claim_in_tx(
     let redirect_hit: Option<i64> = sqlx::query_scalar(
         "SELECT r.entry_id FROM entry_redirects r
            JOIN content_entries e ON e.id = r.entry_id
+           JOIN site_locales sl ON sl.code = r.locale AND sl.deleted_at IS NULL
           WHERE r.source_path = ? OR r.source_path LIKE ? LIMIT 1",
     )
     .bind(&exact)
@@ -396,6 +400,7 @@ pub async fn check_cpt_root_claim_in_tx(
     }
     let route_redirect_hit: Option<String> = sqlx::query_scalar(
         "SELECT r.target_id FROM permalink_route_redirects r
+           JOIN site_locales sl ON sl.code = r.locale AND sl.deleted_at IS NULL
           WHERE (r.source_path = ? OR r.source_path LIKE ?)
             AND r.origin != 'locale_swap'
             AND (
@@ -605,7 +610,7 @@ pub async fn custom_path_for_published_slug(
     let custom: Option<String> = sqlx::query_scalar(
         "SELECT p.path
            FROM content_entries e
-           JOIN site_locales sl ON sl.code = e.locale AND sl.is_default = 1
+           JOIN site_locales sl ON sl.code = e.locale AND sl.is_default = 1 AND sl.enabled = 1 AND sl.deleted_at IS NULL
            JOIN content_types t ON t.key = e.content_type_key
            JOIN entry_public_paths p ON p.entry_id = e.id
           WHERE e.content_type_key = ?
@@ -653,7 +658,7 @@ pub async fn resolve_custom_or_redirect_path(
             "SELECT e.id
                FROM entry_public_paths p
                JOIN content_entries e ON e.id = p.entry_id
-               JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+               JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                JOIN content_types t ON t.key = e.content_type_key
               WHERE p.locale = ?
                 AND p.path = ?
@@ -689,7 +694,7 @@ pub async fn resolve_custom_or_redirect_path(
         "SELECT r.entry_id
            FROM entry_redirects r
            JOIN content_entries e ON e.id = r.entry_id
-           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN content_types t ON t.key = e.content_type_key
           WHERE r.locale = ?
             AND r.source_path = ?
@@ -1114,12 +1119,7 @@ async fn has_multilingual_alternates_prereq(
     let Some(origin) = pub_settings.public_origin.as_deref() else {
         return Ok(None);
     };
-    let enabled: Vec<settings::SiteLocale> = settings::list_locales_in_conn(conn)
-        .await?
-        .items
-        .into_iter()
-        .filter(|l| l.enabled)
-        .collect();
+    let enabled = settings::list_enabled_locales_in_conn(conn).await?;
     if enabled.len() < 2 {
         return Ok(None);
     }
@@ -1225,11 +1225,11 @@ pub async fn build_entry_seo_view_for_locale(
         let sibs: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
             "SELECT sib_sl.bcp47_tag, sib_sl.is_default, claims.path, s.canonical_url
                FROM content_entries cur
-               JOIN site_locales cur_sl ON cur_sl.code = cur.locale AND cur_sl.enabled = 1
+               JOIN site_locales cur_sl ON cur_sl.code = cur.locale AND cur_sl.enabled = 1 AND cur_sl.deleted_at IS NULL AND (cur_sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                JOIN content_entries sib
                  ON sib.content_type_key = cur.content_type_key
                 AND sib.translation_group_id = cur.translation_group_id
-               JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1
+               JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1 AND sib_sl.deleted_at IS NULL AND (sib_sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                JOIN content_types t ON t.key = sib.content_type_key
                JOIN permalink_route_claims claims
                  ON claims.target_kind = 'entry'
@@ -1384,7 +1384,7 @@ pub async fn build_home_seo_view_for_locale(
         let homes: Vec<(String, i64, String, Option<String>)> = sqlx::query_as(
             "SELECT sl.bcp47_tag, sl.is_default, claims.path, COALESCE(s.canonical_url, h.canonical_url)
                FROM site_reading_settings reading
-               JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1
+               JOIN site_locales sl ON sl.code = reading.locale AND sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
                JOIN content_entries e ON e.id = reading.homepage_page_id
                JOIN content_types t ON t.key = e.content_type_key
                JOIN permalink_route_claims claims
@@ -1453,7 +1453,7 @@ pub async fn build_archive_seo_view_for_locale(
     let rows: Vec<(String, i64, String)> = sqlx::query_as(
         "SELECT sl.bcp47_tag, sl.is_default, claims.path
            FROM content_types t
-           JOIN site_locales sl ON sl.enabled = 1
+           JOIN site_locales sl ON sl.enabled = 1 AND sl.deleted_at IS NULL AND (sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN permalink_route_claims claims
              ON claims.target_kind = 'archive'
             AND claims.target_id = t.key
@@ -1532,7 +1532,7 @@ pub async fn build_term_seo_view_for_locale(
            JOIN taxonomy_terms sib
              ON sib.kind = cur.kind
             AND sib.translation_group_id = cur.translation_group_id
-           JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1
+           JOIN site_locales sib_sl ON sib_sl.code = sib.locale AND sib_sl.enabled = 1 AND sib_sl.deleted_at IS NULL AND (sib_sl.is_default = 1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1)
            JOIN taxonomy_definitions td ON td.key = sib.kind
            JOIN permalink_route_claims claims
              ON claims.target_kind = 'term'
@@ -1657,12 +1657,7 @@ pub(crate) async fn build_theme_locale_context_in_conn(
     current_locale: Option<&str>,
     target: ThemeLocaleTarget<'_>,
 ) -> ApiResult<serde_json::Value> {
-    let enabled: Vec<settings::SiteLocale> = settings::list_locales_in_conn(conn)
-        .await?
-        .items
-        .into_iter()
-        .filter(|l| l.enabled)
-        .collect();
+    let enabled = settings::list_enabled_locales_in_conn(conn).await?;
     if enabled.is_empty() {
         return Ok(serde_json::json!({
             "code": "vi",
@@ -1697,6 +1692,9 @@ pub(crate) async fn build_theme_locale_context_in_conn(
             .fetch_all(&mut *conn)
             .await?;
             for (loc,) in rows {
+                if !enabled.iter().any(|l| l.code == loc) {
+                    continue;
+                }
                 translated_paths.insert(
                     loc.clone(),
                     crate::storage::permalinks::prefix_for_locale(&loc, &default_code, "/"),
@@ -1725,7 +1723,9 @@ pub(crate) async fn build_theme_locale_context_in_conn(
                 .fetch_all(&mut *conn)
                 .await?;
                 for (loc, path) in rows {
-                    translated_paths.insert(loc, path);
+                    if enabled.iter().any(|l| l.code == loc) {
+                        translated_paths.insert(loc, path);
+                    }
                 }
             }
         }
@@ -1739,7 +1739,9 @@ pub(crate) async fn build_theme_locale_context_in_conn(
             .fetch_all(&mut *conn)
             .await?;
             for (loc, path) in rows {
-                translated_paths.insert(loc, path);
+                if enabled.iter().any(|l| l.code == loc) {
+                    translated_paths.insert(loc, path);
+                }
             }
         }
         ThemeLocaleTarget::Term { term_id } => {
@@ -1762,7 +1764,9 @@ pub(crate) async fn build_theme_locale_context_in_conn(
                 .fetch_all(&mut *conn)
                 .await?;
                 for (loc, path) in rows {
-                    translated_paths.insert(loc, path);
+                    if enabled.iter().any(|l| l.code == loc) {
+                        translated_paths.insert(loc, path);
+                    }
                 }
             }
         }

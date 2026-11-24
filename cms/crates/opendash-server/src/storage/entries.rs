@@ -400,7 +400,7 @@ pub(super) async fn decoded_with_terms(
     let sibling_rows: Vec<(i64, String, String, String, String)> = sqlx::query_as(
         "SELECT e.id, e.locale, e.slug, e.title, e.publication_status
            FROM content_entries e
-           JOIN site_locales sl ON sl.code = e.locale
+           JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
           WHERE e.content_type_key = ?
             AND e.translation_group_id = ?
           ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
@@ -474,7 +474,7 @@ pub(crate) async fn batch_translations_by_group_in_tx(
         let rows: Vec<(String, i64, String, String, String, String)> = sqlx::query_as(
             "SELECT e.translation_group_id, e.id, e.locale, e.slug, e.title, e.publication_status
                FROM content_entries e
-               JOIN site_locales sl ON sl.code = e.locale
+               JOIN site_locales sl ON sl.code = e.locale AND sl.deleted_at IS NULL
               WHERE e.content_type_key = ?
                 AND e.translation_group_id IN (SELECT value FROM json_each(?))
               ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
@@ -613,7 +613,7 @@ async fn resolve_entry_write_locale_in_tx(
     requested: Option<&str>,
     existing_locale: Option<&str>,
 ) -> ApiResult<String> {
-    match existing_locale {
+    let locale = match existing_locale {
         Some(cur) => {
             if let Some(raw) = requested {
                 let norm = raw.trim().to_ascii_lowercase();
@@ -626,7 +626,18 @@ async fn resolve_entry_write_locale_in_tx(
             Ok(cur.to_owned())
         }
         None => crate::storage::settings::resolve_requested_locale_in_conn(conn, requested).await,
+    }?;
+    let active: Option<i64> = sqlx::query_scalar(
+        "SELECT is_default FROM site_locales WHERE code = ? AND deleted_at IS NULL",
+    )
+    .bind(&locale)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let is_default = active.ok_or_else(|| ApiError::not_found("Không tìm thấy ngôn ngữ."))?;
+    if is_default == 0 {
+        crate::storage::settings::require_multilingual_enabled_in_conn(conn).await?;
     }
+    Ok(locale)
 }
 
 pub async fn get_entry_locale_and_group(
@@ -844,8 +855,10 @@ pub async fn list_published_page_in_tx(
             let actual: Option<String> = sqlx::query_scalar(
                 "SELECT term.kind FROM taxonomy_terms term
                    JOIN taxonomy_definitions d ON d.key=term.kind
+                   JOIN site_locales sl ON sl.code=term.locale AND sl.deleted_at IS NULL
                   WHERE term.id=? AND d.public=1 AND d.provider_status='active'
-                    AND d.declaration_state='declared'",
+                    AND d.declaration_state='declared' AND sl.enabled=1
+                    AND (sl.is_default=1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)",
             )
             .bind(id)
             .fetch_optional(&mut **tx)
@@ -865,9 +878,11 @@ pub async fn list_published_page_in_tx(
         let usable: Option<i64> = sqlx::query_scalar(
             "SELECT d.hierarchical FROM taxonomy_terms term
               JOIN taxonomy_definitions d ON d.key = term.kind
+              JOIN site_locales sl ON sl.code=term.locale AND sl.deleted_at IS NULL
              WHERE term.id = ? AND term.kind = ? AND d.public = 1
                AND d.provider_status = 'active'
-               AND d.declaration_state = 'declared'",
+               AND d.declaration_state = 'declared' AND sl.enabled=1
+               AND (sl.is_default=1 OR (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)",
         )
         .bind(id)
         .bind(kind)
@@ -891,8 +906,17 @@ pub async fn list_published_page_in_tx(
     // One extra row tells the renderer whether to expose a next-page link.
     // Bounds above guarantee no integer overflow or unbounded fetch.
     let offset = (page - 1) * page_size;
-    let mut entries =
-        query_entries_filtered(tx, type_key, page_size + 1, offset, filters, true, sort).await?;
+    let mut entries = query_entries_filtered(
+        tx,
+        type_key,
+        page_size + 1,
+        offset,
+        filters,
+        true,
+        true,
+        sort,
+    )
+    .await?;
     // ADR-0011 stops pagination at page 100 even if more records exist.
     let has_next = page < 100 && entries.len() > page_size as usize;
     entries.truncate(page_size as usize);
@@ -918,6 +942,7 @@ async fn list_entries_filtered(
         limit,
         offset,
         filters,
+        published_only,
         published_only,
         PublishedListSort::IdDesc,
     )
@@ -968,10 +993,14 @@ pub(crate) async fn validate_filter_in_tx(
             let actual: Option<(String, i64, i64)> = sqlx::query_as(
                 "SELECT t.kind,d.public,d.hierarchical FROM taxonomy_terms t
                   JOIN taxonomy_definitions d ON d.key=t.kind
+                  JOIN site_locales sl ON sl.code=t.locale AND sl.deleted_at IS NULL
                  WHERE t.id=? AND d.provider_status='active'
-                   AND d.declaration_state='declared'",
+                   AND d.declaration_state='declared'
+                   AND (?=0 OR (sl.enabled=1 AND (sl.is_default=1 OR
+                        (SELECT multilingual_enabled FROM site_locales_state WHERE id=1)=1)))",
             )
             .bind(id)
+            .bind(i64::from(published_only))
             .fetch_optional(&mut **tx)
             .await?;
             if !actual.as_ref().is_some_and(|(actual, _, _)| actual == kind) {
@@ -1029,7 +1058,11 @@ const FILTERED_ENTRIES_WHERE: &str = "FROM content_entries e
         SELECT 1 FROM entry_terms et WHERE et.entry_id=e.id
           AND et.term_id IN (SELECT id FROM generic_scope)
     ))
-    AND (? IS NULL OR e.locale = ?)";
+    AND (? IS NULL OR e.locale = ?)
+    AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale
+        AND sl.deleted_at IS NULL
+        AND (? = 0 OR (sl.enabled = 1 AND (sl.is_default = 1 OR
+             (SELECT multilingual_enabled FROM site_locales_state WHERE id = 1) = 1))))";
 
 #[derive(sqlx::FromRow)]
 struct FullEntryDbRow {
@@ -1056,6 +1089,7 @@ pub(crate) async fn count_entries_filtered_in_tx(
     type_key: &str,
     filters: &EntryFilters,
     published_only: bool,
+    enforce_public_locale: bool,
 ) -> ApiResult<i64> {
     let statement =
         format!("{FILTERED_ENTRIES_CTE_AND_FROM} SELECT COUNT(*) {FILTERED_ENTRIES_WHERE}");
@@ -1073,6 +1107,7 @@ pub(crate) async fn count_entries_filtered_in_tx(
         .bind(filters.term_id)
         .bind(&filters.locale)
         .bind(&filters.locale)
+        .bind(i64::from(enforce_public_locale))
         .fetch_one(&mut **tx)
         .await?;
     Ok(total)
@@ -1090,9 +1125,46 @@ pub(crate) async fn list_published_filtered_with_total_in_tx(
         return Err(ApiError::not_found("Pattern là nội dung riêng tư."));
     }
     validate_filter_in_tx(tx, type_key, &filters, true).await?;
-    let total = count_entries_filtered_in_tx(tx, type_key, &filters, true).await?;
-    let entries = query_entries_filtered(tx, type_key, limit, offset, filters, true, sort).await?;
+    let total = count_entries_filtered_in_tx(tx, type_key, &filters, true, true).await?;
+    let entries =
+        query_entries_filtered(tx, type_key, limit, offset, filters, true, true, sort).await?;
     Ok((entries, total))
+}
+
+/// Plugin host reads share the same SQL predicate and snapshot for rows and total.
+pub(super) async fn list_host_entries_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    limit: i64,
+    offset: i64,
+    filters: EntryFilters,
+    published_only: bool,
+    enforce_public_locale: bool,
+) -> ApiResult<(Vec<ContentEntryRecord>, i64)> {
+    if published_only && type_key == "pattern" {
+        return Err(ApiError::not_found("Pattern là nội dung riêng tư."));
+    }
+    validate_filter_in_tx(tx, type_key, &filters, published_only).await?;
+    let total = count_entries_filtered_in_tx(
+        tx,
+        type_key,
+        &filters,
+        published_only,
+        enforce_public_locale,
+    )
+    .await?;
+    let rows = query_entries_filtered(
+        tx,
+        type_key,
+        limit,
+        offset,
+        filters,
+        published_only,
+        enforce_public_locale,
+        PublishedListSort::IdDesc,
+    )
+    .await?;
+    Ok((rows, total))
 }
 
 /// Shared category/tag AND predicates for the old archives and new list
@@ -1104,6 +1176,7 @@ async fn query_entries_filtered(
     offset: i64,
     filters: EntryFilters,
     published_only: bool,
+    enforce_public_locale: bool,
     sort: PublishedListSort,
 ) -> ApiResult<Vec<ContentEntryRecord>> {
     let direction = match sort {
@@ -1135,6 +1208,7 @@ async fn query_entries_filtered(
         .bind(filters.term_id)
         .bind(&filters.locale)
         .bind(&filters.locale)
+        .bind(i64::from(enforce_public_locale))
         .bind(limit)
         .bind(offset)
         .fetch_all(&mut **tx)
@@ -2841,6 +2915,8 @@ pub async fn prepare_entry_translation(
             "Phiên bản nội dung gốc đã thay đổi. Hãy tải lại trước khi tạo bản dịch.",
         ));
     }
+    let mut conn = db.acquire().await?;
+    crate::storage::settings::require_multilingual_enabled_in_conn(&mut conn).await?;
     let target_locale = input.target_locale.trim().to_ascii_lowercase();
     if target_locale.is_empty() || !opendash_core::id::valid_lowercase_locale_code(&target_locale) {
         return Err(ApiError::unprocessable("Mã ngôn ngữ đích không hợp lệ."));
@@ -2850,12 +2926,21 @@ pub async fn prepare_entry_translation(
             "Ngôn ngữ đích phải khác ngôn ngữ của bài gốc.",
         ));
     }
-    let mut conn = db.acquire().await?;
-    let locale_exists: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM site_locales WHERE code = ?)")
-            .bind(&target_locale)
-            .fetch_one(&mut *conn)
-            .await?;
+    let source_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM site_locales WHERE code = ? AND deleted_at IS NULL)",
+    )
+    .bind(&source.locale)
+    .fetch_one(&mut *conn)
+    .await?;
+    if !source_active {
+        return Err(ApiError::not_found("Không tìm thấy ngôn ngữ."));
+    }
+    let locale_exists: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM site_locales WHERE code = ? AND deleted_at IS NULL)",
+    )
+    .bind(&target_locale)
+    .fetch_one(&mut *conn)
+    .await?;
     if locale_exists == 0 {
         return Err(ApiError::unprocessable(
             "Ngôn ngữ đích không tồn tại trong site_locales.",
@@ -3019,15 +3104,27 @@ pub async fn commit_entry_translation(
     }
     let mut tx = begin_entry_write(db, actor).await?;
     current_entry_in_write(&mut tx, type_key, source_id, expected_source_version).await?;
+    crate::storage::settings::require_multilingual_enabled_in_conn(&mut tx).await?;
+    let source_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM content_entries e JOIN site_locales sl
+           ON sl.code = e.locale AND sl.deleted_at IS NULL WHERE e.id = ?)",
+    )
+    .bind(source_id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !source_active {
+        return Err(ApiError::not_found("Không tìm thấy ngôn ngữ."));
+    }
     let effective =
         crate::storage::content::load_effective_content_schema_in_tx(&mut *tx, type_key)
             .await?
             .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
-    let locale_exists: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM site_locales WHERE code = ?)")
-            .bind(&plan.target_locale)
-            .fetch_one(&mut *tx)
-            .await?;
+    let locale_exists: i64 = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM site_locales WHERE code = ? AND deleted_at IS NULL)",
+    )
+    .bind(&plan.target_locale)
+    .fetch_one(&mut *tx)
+    .await?;
     if locale_exists == 0 {
         return Err(ApiError::unprocessable(
             "Ngôn ngữ đích không tồn tại trong site_locales.",
@@ -3200,6 +3297,15 @@ pub async fn set_publication_status(
             "Loại nội dung này sử dụng chế độ lưu ngay.",
         ));
     }
+    current_entry_in_write(&mut tx, type_key, id, expected_version).await?;
+    let locale: String = sqlx::query_scalar(
+        "SELECT locale FROM content_entries WHERE content_type_key = ? AND id = ?",
+    )
+    .bind(type_key)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    resolve_entry_write_locale_in_tx(&mut tx, None, Some(&locale)).await?;
     let result = sqlx::query(
         "UPDATE content_entries
          SET publication_status = ?,

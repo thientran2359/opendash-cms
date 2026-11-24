@@ -109,6 +109,7 @@ const SCOPE: &str = "
  FROM content_entries e
  WHERE e.content_type_key = ?
    AND (? IS NULL OR e.locale = ?)
+   AND EXISTS (SELECT 1 FROM site_locales sl WHERE sl.code = e.locale AND sl.deleted_at IS NULL)
    AND (? = '' OR instr(lower(e.title), lower(?)) > 0
                 OR instr(lower(e.slug), lower(?)) > 0)
    AND (? IS NULL OR substr(e.updated_at, 1, 7) = ?)

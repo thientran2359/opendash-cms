@@ -981,6 +981,19 @@ async fn locale_registry_single_locale_rename_overlays_and_theme_options_e2e() {
         );
     }
 
+    let enabled = client
+        .put(format!("{origin}/api/admin/locales/multilingual"))
+        .header(header::COOKIE, &admin_cookie)
+        .header("Origin", &origin)
+        .header("X-CSRF-Token", &admin_csrf)
+        .header(header::IF_MATCH, &loc_etag)
+        .json(&json!({"enabled": true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(enabled.status(), StatusCode::OK);
+    let loc_etag = etag_version(&enabled);
+
     // Create secondary locale "vi" -> 201 Created
     let create_vi = client
         .post(format!("{origin}/api/admin/locales"))
