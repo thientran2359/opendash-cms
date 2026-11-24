@@ -495,7 +495,7 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
                 return HostOperationResponse::err("permission_denied: action:http");
             }
             if let Ok(parsed) = url::Url::parse(&url) {
-                let path = parsed.path();
+                let path = parsed.path().to_ascii_lowercase();
                 if path.starts_with("/api/admin")
                     || path == "/save"
                     || path == "/preview"

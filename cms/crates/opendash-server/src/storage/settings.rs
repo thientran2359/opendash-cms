@@ -3253,7 +3253,7 @@ pub async fn put_plugin_settings(
             .await?;
     let has_projection_filters = manifest_json
         .as_deref()
-        .and_then(|raw| serde_json::from_str::<opendash_core::plugin::PluginManifest>(raw).ok())
+        .and_then(|raw| opendash_core::plugin::PluginManifest::from_json_str(raw).ok())
         .is_some_and(|manifest| {
             manifest
                 .filters

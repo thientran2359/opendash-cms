@@ -1,9 +1,10 @@
 # Đặc tả Thiết kế EGM — Spec 2: Plugin Hooks, Host Ops v1.1, Owner Settings (`SecretStore`) & Write-Time Projections
 
-- **Status:** Approved
+- **Status:** Verified
 - **Approved By:** Owner
 - **Approval Evidence:** Owner chat decisions 1A-4A & directive 2026-11-24 (Issue từng Slice cho Nova)
 - **Goldfish Review:** 3-round zero-context Goldfish review (egm-design, egm-codebase-details, egm-implementation-readiness) · 2026-11-24 · 3/3 APPROVED
+- **Implementation & Closure Evidence:** S01 `#524` / PR `#536` (`e48a65d`), S02 `#525` / PR `#540` (`e6e1934`), S03 `#526` / PR `#542` (`c3dd2e4`), S04 `#527` / PR `#543` (`65dd049`), drift report & hardening closure: [2026-11-24 drift report](../../.agents/research/2026-11-24_SPEC2_PLUGIN_HOOKS_DRIFT_REPORT.md) (`0 Blocker · 0 Major · 2 Minor · 2 Nit` sau hardening) và [2026-11-24 closure](../verification/2026-11-24-spec2-plugin-hooks-closure.md).
 - **Date:** 2026-11-24
 - **Author:** Orion (Elephant)
 - **Thuộc Lộ trình:** Giai đoạn 2 & Giai đoạn 3 (Tinh gọn) trong Tầm nhìn 6 Giai đoạn (`concepts_brief.md`: Decisions `2A`, `3A`, `4A`)

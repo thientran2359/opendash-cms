@@ -66,6 +66,9 @@ pub struct AsyncHookJob {
 #[derive(Clone)]
 pub struct AsyncHookQueue {
     tx: tokio::sync::mpsc::Sender<AsyncHookJob>,
+    shared_rx: Arc<tokio::sync::Mutex<tokio::sync::mpsc::Receiver<AsyncHookJob>>>,
+    maint_rx: tokio::sync::watch::Receiver<bool>,
+    shut_rx: tokio::sync::watch::Receiver<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -346,19 +349,118 @@ impl AsyncHookQueue {
             });
         }
 
-        Self { tx }
+        Self {
+            tx,
+            shared_rx,
+            maint_rx: maintenance_cancel_rx,
+            shut_rx: shutdown_rx,
+        }
     }
 
     pub fn enqueue(&self, job: AsyncHookJob) {
-        if job.dispatch_depth >= 2 {
+        if job.dispatch_depth >= 2 || *self.maint_rx.borrow() || *self.shut_rx.borrow() {
             return;
         }
-        if let Err(err) = self.tx.try_send(job) {
-            let event_name = match &err {
-                tokio::sync::mpsc::error::TrySendError::Full(j)
-                | tokio::sync::mpsc::error::TrySendError::Closed(j) => j.event.as_str(),
-            };
-            eprintln!("AsyncHookQueue drop {event_name}: queue full or closed");
+        match self.tx.try_send(job) {
+            Ok(()) => {
+                if *self.maint_rx.borrow() || *self.shut_rx.borrow() {
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        let rx_ref = Arc::clone(&self.shared_rx);
+                        handle.spawn(async move {
+                            let mut guard = rx_ref.lock().await;
+                            while guard.try_recv().is_ok() {}
+                        });
+                    }
+                }
+            }
+            Err(err) => {
+                let event_name = match &err {
+                    tokio::sync::mpsc::error::TrySendError::Full(j)
+                    | tokio::sync::mpsc::error::TrySendError::Closed(j) => j.event.as_str(),
+                };
+                eprintln!("AsyncHookQueue drop {event_name}: queue full or closed");
+            }
+        }
+    }
+}
+
+impl HookDispatcher {
+    pub fn enqueue_plugin_action_hooks(
+        &self,
+        principal: ExecutionPrincipal,
+        data: Option<&Value>,
+        lease: crate::operations::MutationLease,
+    ) {
+        let Some(data) = data else {
+            return;
+        };
+        if let Some(entry) = data.get("entry").filter(|v| v.is_object()) {
+            let entry_id = entry.get("id").and_then(|v| v.as_i64());
+            let type_key = entry
+                .get("content_type_key")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let locale = entry
+                .get("locale")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let version = entry.get("version").and_then(|v| v.as_i64());
+            let publication_status = entry.get("publication_status").and_then(|v| v.as_str());
+            let translation_group_id = entry.get("translation_group_id").and_then(|v| v.as_str());
+            if publication_status == Some("published") {
+                self.enqueue_async(AsyncHookJob {
+                    event: HookEvent::ContentAfterPublish,
+                    principal,
+                    locale: locale.clone(),
+                    type_key: type_key.clone(),
+                    payload: serde_json::json!({
+                        "type_key": &type_key,
+                        "id": entry_id,
+                        "entry_id": entry_id,
+                        "version": version,
+                        "locale": &locale,
+                        "publication_status": publication_status,
+                        "translation_group_id": translation_group_id,
+                    }),
+                    dispatch_depth: 0,
+                    lease: lease.clone(),
+                });
+            }
+            self.enqueue_async(AsyncHookJob {
+                event: HookEvent::ContentAfterSave,
+                principal,
+                locale,
+                type_key,
+                payload: serde_json::json!({
+                    "type_key": entry.get("content_type_key").and_then(|v| v.as_str()),
+                    "id": entry_id,
+                    "entry_id": entry_id,
+                    "operation": "plugin_action",
+                    "version": version,
+                    "locale": entry.get("locale").and_then(|v| v.as_str()),
+                    "translation_group_id": translation_group_id,
+                }),
+                dispatch_depth: 0,
+                lease,
+            });
+        } else if let Some(deleted_id) = data.get("deleted_entry_id").and_then(|v| v.as_i64()) {
+            let type_key = data
+                .get("deleted_type_key")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            self.enqueue_async(AsyncHookJob {
+                event: HookEvent::ContentAfterDelete,
+                principal,
+                locale: None,
+                type_key: type_key.clone(),
+                payload: serde_json::json!({
+                    "type_key": &type_key,
+                    "id": deleted_id,
+                    "entry_id": deleted_id,
+                }),
+                dispatch_depth: 0,
+                lease,
+            });
         }
     }
 }
@@ -1176,17 +1278,19 @@ impl HookDispatcher {
         let started = Instant::now();
         let envelope = Self::envelope(event, entry_payload);
 
-        for (index, (_prio, pid)) in subs.into_iter().enumerate() {
+        let mut dispatched = 0usize;
+        for (_prio, pid) in subs {
             if let Some(target_pid) = plugin_id
                 && pid != target_pid
             {
                 continue;
             }
-            if index >= MAX_PROJECTION_FILTER_PLUGINS
+            if dispatched >= MAX_PROJECTION_FILTER_PLUGINS
                 || started.elapsed() >= PROJECTION_FILTER_PHASE_BUDGET
             {
                 break;
             }
+            dispatched += 1;
             let remaining = PROJECTION_FILTER_PHASE_BUDGET.saturating_sub(started.elapsed());
             let mut plugin_payload = envelope.payload.clone();
             if let Some(tk) = type_key.as_deref() {

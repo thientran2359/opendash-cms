@@ -488,7 +488,7 @@ impl PluginManager {
                 mk_err(
                     StatusCode::NOT_FOUND,
                     "content_type_not_found",
-                    "Kh?ng t?m th?y lo?i n?i dung.".into(),
+                    "Không tìm thấy loại nội dung.".into(),
                 )
             })?;
 
@@ -498,7 +498,7 @@ impl PluginManager {
                         StatusCode::UNPROCESSABLE_ENTITY,
                         "unknown_field_key",
                         format!(
-                            "Tr??ng '{field_key}' kh?ng t?n t?i trong schema c?a '{}'.",
+                            "Trường '{field_key}' không tồn tại trong schema của '{}'.",
                             cmd.type_key
                         ),
                     ));
@@ -513,7 +513,7 @@ impl PluginManager {
                     return Err(mk_err(
                         StatusCode::FORBIDDEN,
                         "field_edit_forbidden",
-                        format!("Plugin ho?c t?i kho?n kh?ng c? quy?n ghi tr??ng '{field_key}'."),
+                        format!("Plugin hoặc tài khoản không có quyền ghi trường '{field_key}'."),
                     ));
                 }
             }
@@ -674,6 +674,12 @@ impl PluginManager {
                     return Err(mk_err(err.0, "content_commit_fenced", err.1.to_string()));
                 }
             };
+            let _ = crate::storage::plugin_projections::recompute_entry_projections(
+                &self.db_pool,
+                hooks,
+                record.id,
+            )
+            .await;
             hooks
                 .dispatch_content_after_save_for_actor(
                     &cmd.type_key,
@@ -741,6 +747,7 @@ impl PluginManager {
                 data: Some(serde_json::json!({
                     "output": exec_out.output,
                     "deleted_entry_id": del.entry_id,
+                    "deleted_type_key": del.type_key,
                 })),
                 error: None,
                 code: None,
