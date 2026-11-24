@@ -65,38 +65,43 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
   const onLocalesChangedRef = useRef(onLocalesChanged);
   onLocalesChangedRef.current = onLocalesChanged;
   const mutationRef = useRef(false);
+  const mountedRef = useRef(false);
 
   const loadOrphans = useCallback(async (signal?: AbortSignal) => {
     const data = await listOrphanedLocales(signal);
-    if (!signal?.aborted) setOrphans(data);
+    if (mountedRef.current && !signal?.aborted) setOrphans(data);
     return data;
   }, []);
 
   const load = useCallback(async (signal?: AbortSignal, syncParent = false) => {
+    const reportError = onApiErrorRef.current;
+    const refreshParent = onLocalesChangedRef.current;
     setLoading(true);
     setError(null);
     setConflicts([]);
     try {
       const [locales, orphanData] = await Promise.all([listLocales(signal), loadOrphans(signal)]);
-      if (signal?.aborted) return;
+      if (!mountedRef.current || signal?.aborted) return;
       setSnap(locales);
-      if (syncParent) await onLocalesChangedRef.current();
+      if (syncParent) await refreshParent();
+      if (!mountedRef.current || signal?.aborted) return;
       setStale(locales.version !== orphanData.version);
     } catch (reason) {
-      if (!signal?.aborted) {
+      if (mountedRef.current && !signal?.aborted) {
         setStale(true);
         setError(messageFor(reason));
-        onApiErrorRef.current(reason);
+        reportError(reason);
       }
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (mountedRef.current && !signal?.aborted) setLoading(false);
     }
   }, [loadOrphans]);
 
   useEffect(() => {
+    mountedRef.current = true;
     const controller = new AbortController();
     void load(controller.signal);
-    return () => controller.abort();
+    return () => { mountedRef.current = false; controller.abort(); };
   }, [load]);
 
   const enabled = snap?.multilingual_enabled ?? localeState.multilingualEnabled;
@@ -109,6 +114,8 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
   // refresh both snapshots and the shell before accepting another mutation.
   async function mutate(run: (version: number, token: string) => Promise<void>) {
     if (blocked || mutationRef.current || !snap || !csrfToken) return;
+    const reportError = onApiErrorRef.current;
+    const refreshParent = onLocalesChangedRef.current;
     mutationRef.current = true;
     setBusy(true);
     setError(null);
@@ -116,32 +123,48 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
     setNotice(null);
     try {
       await run(snap.version, csrfToken);
+      // Even if the user navigated away, the committed mutation must refresh
+      // the parent locale state for the originating authenticated session.
+      if (!mountedRef.current) { await refreshParent(); return; }
       try {
         const [locales, orphanData] = await Promise.all([
-          listLocales(), loadOrphans(), onLocalesChangedRef.current(),
+          listLocales(), loadOrphans(), refreshParent(),
         ]);
+        if (!mountedRef.current) return;
         setSnap(locales);
         setStale(locales.version !== orphanData.version);
       } catch (reason) {
+        if (!mountedRef.current) return;
         setStale(true);
         setError(messageFor(reason));
-        onApiErrorRef.current(reason);
+        reportError(reason);
       }
     } catch (reason) {
+      if (!mountedRef.current) return;
       if (reason instanceof ApiClientError) {
         if (reason.status === 412) setStale(true);
         if (reason.conflicts?.length) setConflicts(reason.conflicts);
       }
       setError(messageFor(reason));
-      onApiErrorRef.current(reason);
+      reportError(reason);
     } finally {
       mutationRef.current = false;
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   }
 
+  function openModal(next: Modal) {
+    setError(null);
+    setConflicts([]);
+    setConfirmCode('');
+    setModal(next);
+  }
+  function closeModal() {
+    setModal(null);
+    setConfirmCode('');
+  }
   function toggle(next: boolean) {
-    if (!next) { setModal({ kind: 'disable' }); return; }
+    if (!next) { openModal({ kind: 'disable' }); return; }
     void mutate(async (version, token) => {
       setSnap(await setMultilingualEnabled(true, version, token));
       setNotice(t('multilingual.enabled_notice'));
@@ -181,14 +204,11 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
       setNotice(t('multilingual.updated'));
     });
   }
-  function closeModal() {
-    setModal(null);
-    setConfirmCode('');
-  }
   function confirmModal() {
     if (!modal) return;
     const target = modal;
-    if (target.kind === 'purge' && confirmCode !== target.code) return;
+    const normalizedConfirm = confirmCode.trim().toLowerCase();
+    if (target.kind === 'purge' && normalizedConfirm !== target.code) return;
     void mutate(async (version, token) => {
       if (target.kind === 'disable') {
         setSnap(await setMultilingualEnabled(false, version, token));
@@ -200,7 +220,7 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
           ? t('multilingual.soft_deleted', { code: result.deleted_code, count: result.orphan_total })
           : t('multilingual.deleted', { code: result.deleted_code }));
       } else {
-        const result = await purgeOrphanedLocale(target.code, confirmCode, version, token);
+        const result = await purgeOrphanedLocale(target.code, normalizedConfirm, version, token);
         setOrphans(result.snapshot);
         setNotice(t('multilingual.purged', { code: result.purged_code }));
       }
@@ -299,7 +319,7 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
                           {enabled && <AdminButton size="sm" data-testid={'edit-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => setEdit({ code: item.code, label: item.label, direction: item.direction })}>{t('multilingual.edit')}</AdminButton>}
                           {enabled && !item.is_default && item.enabled && <AdminButton size="sm" data-testid={'set-default-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => makeDefault(item)}>{t('multilingual.set_default')}</AdminButton>}
                           {enabled && !item.is_default && <AdminButton size="sm" data-testid={'toggle-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => toggleLocale(item)}>{item.enabled ? t('multilingual.disable') : t('multilingual.reenable')}</AdminButton>}
-                          {!item.is_default && <AdminButton variant="danger" size="sm" data-testid={'delete-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => setModal({ kind: 'delete', code: item.code })}>{t('multilingual.delete')}</AdminButton>}
+                          {!item.is_default && <AdminButton variant="danger" size="sm" data-testid={'delete-locale-' + item.code} disabled={blocked || !!edit || showAdd} onClick={() => openModal({ kind: 'delete', code: item.code })}>{t('multilingual.delete')}</AdminButton>}
                         </>
                       )}
                     </div></td>
@@ -355,7 +375,7 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
                     <td className={CELL}>{formatCount(item.counts.routes)}</td><td className={CELL}>{formatCount(item.counts.projections)}</td>
                     <td className={CELL}>{formatCount(item.counts.media_seo_refs)}</td><td className={CELL}>{formatCount(item.counts.total)}</td>
                     <td className={CELL}><AdminButton variant="danger" size="sm" data-testid={'purge-orphan-' + item.code}
-                      disabled={blocked || !!edit || showAdd} onClick={() => { setConfirmCode(''); setModal({ kind: 'purge', code: item.code }); }}>{t('multilingual.purge')}</AdminButton></td>
+                      disabled={blocked || !!edit || showAdd} onClick={() => openModal({ kind: 'purge', code: item.code })}>{t('multilingual.purge')}</AdminButton></td>
                   </tr>
                 ))}
               </tbody>
@@ -378,7 +398,7 @@ export function MultilingualSettingsPage({ csrfToken, localeState, onLocalesChan
             </label>}
             <div className="flex flex-wrap justify-end gap-2">
               <AdminButton autoFocus disabled={busy} data-testid={modal.kind === 'disable' ? 'cancel-disable-multilingual' : modal.kind === 'delete' ? 'cancel-delete-locale' : 'cancel-purge-orphan'} onClick={closeModal}>{t('multilingual.cancel')}</AdminButton>
-              <AdminButton variant="danger" disabled={blocked || (modal.kind === 'purge' && confirmCode !== modal.code)}
+              <AdminButton variant="danger" disabled={blocked || (modal.kind === 'purge' && confirmCode.trim().toLowerCase() !== modal.code)}
                 data-testid={modal.kind === 'disable' ? 'confirm-disable-multilingual' : modal.kind === 'delete' ? 'confirm-delete-locale' : 'purge-confirm-submit'} onClick={confirmModal}>
                 {modal.kind === 'disable' ? t('multilingual.disable') : modal.kind === 'delete' ? t('multilingual.delete') : t('multilingual.purge')}
               </AdminButton>

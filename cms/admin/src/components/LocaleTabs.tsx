@@ -48,10 +48,12 @@ export const LocaleTabs: React.FC<LocaleTabsProps> = ({
             <span>{item.label}</span>
             <span className="opacity-75">({item.code})</span>
             {item.is_default && (
-              <span className="rounded bg-white/20 px-1 py-0.5 text-[10px]">{t('shell.locale_default')}</span>
+              <span className={`rounded px-1 py-0.5 text-[10px] ${selected ? 'bg-white/20' : 'bg-zinc-200 text-zinc-800'}`}>
+                {t('shell.locale_default')}
+              </span>
             )}
             {!item.enabled && (
-              <span className="rounded bg-amber-500/20 px-1 py-0.5 text-[10px] text-amber-200">
+              <span className={`rounded px-1 py-0.5 text-[10px] ${selected ? 'bg-amber-500/20 text-amber-200' : 'bg-amber-100 text-amber-800'}`}>
                 {t('shell.locale_disabled')}
               </span>
             )}

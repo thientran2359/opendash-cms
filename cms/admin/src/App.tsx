@@ -631,6 +631,12 @@ const AppContent: React.FC = () => {
     handleApiError(error, fallback);
   };
 
+  const scopedLocaleRefresh = async () => {
+    if (requestActorId === undefined || userRef.current?.id !== requestActorId
+      || authSessionEpochRef.current !== requestEpoch) return;
+    await refreshLocales();
+  };
+
   return (
     <AdminShell
       user={user}
@@ -726,9 +732,9 @@ const AppContent: React.FC = () => {
           ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.reconcile_error"))} />
           : route.sub === 'health' ? <SystemStatus /> : null}
       settingsContent={route.sub === 'general'
-        ? <GeneralSettingsPanel csrfToken={csrfToken} localeState={localeState} onLocalesChanged={refreshLocales} onApiError={(error) => handleApiError(error, tStatic("app.general_error"))} />
+        ? <GeneralSettingsPanel key={`general:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, tStatic("app.general_error"))} />
         : route.sub === 'multilingual'
-          ? <MultilingualSettingsPage csrfToken={csrfToken} localeState={localeState} onLocalesChanged={refreshLocales} onApiError={(error) => handleApiError(error, tStatic('app.general_error'))} />
+          ? <MultilingualSettingsPage key={`multilingual:${requestEpoch}`} csrfToken={csrfToken} localeState={localeState} onLocalesChanged={scopedLocaleRefresh} onApiError={(error) => scopedTaxonomyApiError(error, tStatic('app.general_error'))} />
         : route.sub === 'permalinks'
           ? <PermalinkSettingsPage key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
               user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
