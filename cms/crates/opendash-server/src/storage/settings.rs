@@ -227,6 +227,14 @@ pub(crate) async fn resolve_requested_locale_in_conn(
     found.ok_or_else(|| ApiError::bad_request("Ngôn ngữ được yêu cầu không tồn tại."))
 }
 
+pub(crate) async fn resolve_requested_locale(
+    db: &SqlitePool,
+    requested: Option<&str>,
+) -> ApiResult<String> {
+    let mut conn = db.acquire().await?;
+    resolve_requested_locale_in_conn(&mut conn, requested).await
+}
+
 pub(crate) async fn list_locales_in_conn(
     conn: &mut SqliteConnection,
 ) -> ApiResult<SiteLocalesSnapshot> {
@@ -809,7 +817,7 @@ pub async fn get_general(db: &SqlitePool) -> ApiResult<GeneralSettings> {
     get_general_for_locale(db, None).await
 }
 
-pub(super) async fn get_general_in_conn_for_locale(
+pub(crate) async fn get_general_in_conn_for_locale(
     conn: &mut SqliteConnection,
     requested_locale: Option<&str>,
 ) -> ApiResult<GeneralSettings> {

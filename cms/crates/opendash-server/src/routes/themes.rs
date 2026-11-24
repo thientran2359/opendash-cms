@@ -49,6 +49,8 @@ pub struct TemplateOverridePreviewInput {
     document: opendash_core::builder::BuilderDocument,
     #[serde(default)]
     preview_entry: Option<overrides::TemplatePreviewEntry>,
+    #[serde(default)]
+    preview_locale: Option<String>,
 }
 
 fn override_if_match(headers: &HeaderMap) -> ApiResult<Option<i64>> {
@@ -161,6 +163,8 @@ pub struct StudioPreviewRequest {
     preview_annotations: bool,
     #[serde(default)]
     transient: Option<overrides::TransientStudioOverrides>,
+    #[serde(default)]
+    preview_locale: Option<String>,
 }
 
 pub async fn studio_targets(
@@ -201,7 +205,7 @@ pub async fn studio_preview(
     }
     let input: StudioPreviewRequest = serde_json::from_slice(&body)
         .map_err(|_| ApiError::bad_request("Invalid studio preview JSON."))?;
-    let rendered = overrides::preview_studio_with_cache(
+    let rendered = overrides::preview_studio_with_cache_and_locale(
         &db,
         &themes_root.0,
         &actor,
@@ -210,6 +214,7 @@ pub async fn studio_preview(
         input.preview_entry.as_ref(),
         input.preview_annotations,
         input.transient.as_ref(),
+        input.preview_locale.as_deref(),
         &block_template_cache,
     )
     .await?;
@@ -255,7 +260,7 @@ pub async fn template_overrides_preview(
     let expected = override_if_match(&request_headers)?;
     let input: TemplateOverridePreviewInput = serde_json::from_slice(&body)
         .map_err(|_| ApiError::bad_request("Invalid template preview JSON."))?;
-    let rendered = overrides::preview_typed_override_with_cache(
+    let rendered = overrides::preview_typed_override_with_cache_and_locale(
         &db,
         &themes_root.0,
         &actor,
@@ -263,6 +268,7 @@ pub async fn template_overrides_preview(
         &input.document,
         input.preview_entry.as_ref(),
         expected,
+        input.preview_locale.as_deref(),
         &block_template_cache,
     )
     .await?;

@@ -51,7 +51,24 @@ pub async fn resolve_in_tx_with_route(
     authenticated_preview: bool,
     route_entry: Option<(&str, &str)>,
 ) -> ApiResult<BindingResults> {
-    let mut cache: BTreeMap<(String, String), Option<SourceRow>> = BTreeMap::new();
+    resolve_in_tx_with_route_and_locale(tx, document, authenticated_preview, route_entry, None)
+        .await
+}
+
+pub async fn resolve_in_tx_with_route_and_locale(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    authenticated_preview: bool,
+    route_entry: Option<(&str, &str)>,
+    render_locale: Option<&str>,
+) -> ApiResult<BindingResults> {
+    let active_locale = match render_locale {
+        Some(raw) => {
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut **tx, Some(raw)).await?
+        }
+        None => crate::storage::settings::get_default_locale_code_in_conn(&mut **tx).await?,
+    };
+    let mut cache: BTreeMap<(String, String, String), Option<SourceRow>> = BTreeMap::new();
     let mut results = BindingResults::new();
     for section in &document.sections {
         for row in &section.children {
@@ -65,15 +82,22 @@ pub async fn resolve_in_tx_with_route(
                     };
                     let key = match &binding.source {
                         BindingSource::RouteContext { .. } => match route_entry {
-                            Some((rt, rs)) => (rt.to_string(), rs.to_string()),
+                            Some((rt, rs)) => {
+                                (rt.to_string(), rs.to_string(), active_locale.clone())
+                            }
                             None => {
                                 results.insert(element.id.clone(), BindingResult::Unavailable);
                                 continue;
                             }
                         },
-                        BindingSource::Title | BindingSource::Field { .. } => {
-                            (binding.type_key.clone(), binding.entry_slug.clone())
-                        }
+                        BindingSource::Title | BindingSource::Field { .. } => (
+                            binding.type_key.clone(),
+                            binding.entry_slug.clone(),
+                            binding
+                                .entry_locale
+                                .clone()
+                                .unwrap_or_else(|| active_locale.clone()),
+                        ),
                     };
                     if !cache.contains_key(&key) {
                         // Defensive limit even for damaged/trusted stored JSON.
@@ -85,18 +109,21 @@ pub async fn resolve_in_tx_with_route(
                         // the published predicate and active provider check both hold.
                         let source_row: Option<(i64, String, String, String)> = sqlx::query_as(
                             "SELECT e.id, t.definition_json, e.title, e.values_json
-                               FROM content_entries e JOIN content_types t
-                                 ON t.key = e.content_type_key
-                              WHERE e.content_type_key = ? AND e.slug = ?
+                               FROM content_entries e
+                               JOIN site_locales sl ON sl.code = e.locale
+                               JOIN content_types t ON t.key = e.content_type_key
+                              WHERE e.content_type_key = ? AND e.slug = ? AND e.locale = ?
                                 AND t.provider_status = 'active'
                                 AND (? = 1 OR (
-                                    e.publication_status = 'published'
+                                    sl.enabled = 1
+                                    AND e.publication_status = 'published'
                                     AND e.content_type_key != 'pattern'
                                     AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
                                 ))",
                         )
                         .bind(&key.0)
                         .bind(&key.1)
+                        .bind(&key.2)
                         .bind(i64::from(authenticated_preview))
                         .fetch_optional(&mut **tx)
                         .await?;

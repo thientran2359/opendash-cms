@@ -278,18 +278,28 @@ pub(super) async fn build_reset_candidate_chain_in_conn(
     conn: &mut SqliteConnection,
     target: &TemplateCandidate,
 ) -> ApiResult<Vec<TemplateCandidate>> {
+    build_reset_candidate_chain_for_locale_in_conn(conn, target, None).await
+}
+
+pub(super) async fn build_reset_candidate_chain_for_locale_in_conn(
+    conn: &mut SqliteConnection,
+    target: &TemplateCandidate,
+    locale: Option<&str>,
+) -> ApiResult<Vec<TemplateCandidate>> {
     use TemplateCandidateKind as K;
     let mut candidates = vec![target.clone()];
     match target.kind {
         K::Home => {
+            let effective_locale = settings::resolve_requested_locale_in_conn(conn, locale).await?;
             let layout: Option<String> = sqlx::query_scalar(
                 "SELECT e.page_layout_key FROM site_reading_settings AS reading
-                   JOIN site_locales AS sl ON sl.code = reading.locale AND sl.is_default = 1
                    JOIN content_entries AS e ON e.id = reading.homepage_page_id
-                  WHERE e.content_type_key='page'
+                  WHERE reading.locale = ?
+                    AND e.content_type_key='page'
                     AND e.locale = reading.locale
                     AND e.publication_status='published'",
             )
+            .bind(&effective_locale)
             .fetch_optional(&mut *conn)
             .await?
             .flatten();
@@ -1244,6 +1254,7 @@ struct PreviewRenderContext<'a> {
     graph: &'a BTreeMap<String, PreviewPartSource>,
     theme_context: &'a serde_json::Value,
     route: Option<(&'a str, &'a str)>,
+    render_locale: &'a str,
     cache: &'a page::BlockTemplateCache,
     url_policy: &'a template_sec::ThemeUrlPolicy,
 }
@@ -1268,8 +1279,21 @@ async fn render_preview_builder(
             parts.insert(key, part.html);
         }
     }
-    let bindings = builder_binding::resolve_in_tx_with_route(tx, document, true, ctx.route).await?;
-    let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
+    let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
+        tx,
+        document,
+        true,
+        ctx.route,
+        Some(ctx.render_locale),
+    )
+    .await?;
+    let lists = builder::resolve_lists_in_tx_for_locale(
+        tx,
+        document,
+        &BTreeMap::new(),
+        Some(ctx.render_locale),
+    )
+    .await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
     let empty_patterns = page::PatternResults::new();
     let mut rb = budget.as_render_budget();
@@ -1387,6 +1411,7 @@ async fn resolve_preview_entry(
     target: &TemplateCandidate,
     sample: Option<&TemplatePreviewEntry>,
     active: Option<&ActiveThemeV3>,
+    preview_locale: &str,
 ) -> ApiResult<Option<(entries::ContentEntryRecord, ContentTypeDefinition)>> {
     use TemplateCandidateKind as K;
     let selected = if let Some(sample) = sample {
@@ -1399,10 +1424,11 @@ async fn resolve_preview_entry(
             (Some(t), Some(id), _) => Some((t.clone(), id)),
             (Some(t), None, Some(slug)) => {
                 let id: i64 = sqlx::query_scalar(
-                    "SELECT id FROM content_entries WHERE content_type_key = ? AND slug = ?",
+                    "SELECT id FROM content_entries WHERE content_type_key = ? AND slug = ? AND locale = ?",
                 )
                 .bind(t)
                 .bind(slug)
+                .bind(preview_locale)
                 .fetch_optional(&mut **tx)
                 .await?
                 .ok_or_else(|| ApiError::not_found("Preview entry not found."))?;
@@ -1502,8 +1528,36 @@ pub async fn preview_typed_override_with_cache(
     expected_version: Option<i64>,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
+    preview_typed_override_with_cache_and_locale(
+        db,
+        themes_root,
+        actor,
+        target,
+        document,
+        preview_entry,
+        expected_version,
+        None,
+        cache,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn preview_typed_override_with_cache_and_locale(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: &BuilderDocument,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    expected_version: Option<i64>,
+    preview_locale: Option<&str>,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     let key = target.canonical_key().map_err(ApiError::bad_request)?;
     let mut tx = db.begin().await?;
+    let effective_locale =
+        settings::resolve_requested_locale_in_conn(&mut *tx, preview_locale).await?;
     let existing = get_typed_override_on_connection(&mut tx, &key).await?;
     if expected_version.is_some_and(|v| existing.as_ref().is_none_or(|r| r.version != v)) {
         return Err(ApiError::precondition_failed("Template override changed."));
@@ -1519,8 +1573,16 @@ pub async fn preview_typed_override_with_cache(
     let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut budget = PreviewCompositionBudget::new();
     let graph = preview_part_graph(&mut tx, target, document, active.as_ref(), &mut budget).await?;
-    let entry = resolve_preview_entry(&mut tx, target, preview_entry, active.as_ref()).await?;
-    let general = settings::get_general_in_conn(&mut tx).await?;
+    let entry = resolve_preview_entry(
+        &mut tx,
+        target,
+        preview_entry,
+        active.as_ref(),
+        &effective_locale,
+    )
+    .await?;
+    let general =
+        settings::get_general_in_conn_for_locale(&mut *tx, Some(&effective_locale)).await?;
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
@@ -1534,12 +1596,22 @@ pub async fn preview_typed_override_with_cache(
         .zip(manifest_json.as_deref())
         .map(|(a, m)| (a.manifest.theme_id.as_str(), m));
     let options = settings::resolve_merged_public_options_with_overrides_in_conn(
-        &mut tx, active_ref, None, None, true, None,
+        &mut tx,
+        active_ref,
+        None,
+        None,
+        true,
+        Some(&effective_locale),
     )
     .await?;
     state.site_options = options.clone();
     let menus = if let Some(active) = &active {
-        menu::resolve_slot_menus_in_tx(&mut tx, &active.manifest.theme_id).await?
+        menu::resolve_slot_menus_for_locale_in_tx(
+            &mut tx,
+            &active.manifest.theme_id,
+            &effective_locale,
+        )
+        .await?
     } else {
         BTreeMap::new()
     };
@@ -1601,6 +1673,7 @@ pub async fn preview_typed_override_with_cache(
         graph: &graph,
         theme_context: &theme_context,
         route,
+        render_locale: &effective_locale,
         cache,
         url_policy: &url_policy,
     };
@@ -1763,6 +1836,7 @@ struct PublicBuilderContext<'a> {
     active: Option<&'a ActiveThemeV3>,
     theme_context: &'a serde_json::Value,
     route_entry: Option<(&'a str, &'a str)>,
+    render_locale: &'a str,
     cache: &'a page::BlockTemplateCache,
     url_policy: &'a template_sec::ThemeUrlPolicy,
 }
@@ -1874,9 +1948,21 @@ async fn render_public_builder(
             parts.insert(key, rendered.html);
         }
     }
-    let bindings =
-        builder_binding::resolve_in_tx_with_route(tx, document, false, ctx.route_entry).await?;
-    let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
+    let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
+        tx,
+        document,
+        false,
+        ctx.route_entry,
+        Some(ctx.render_locale),
+    )
+    .await?;
+    let lists = builder::resolve_lists_in_tx_for_locale(
+        tx,
+        document,
+        &BTreeMap::new(),
+        Some(ctx.render_locale),
+    )
+    .await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
     let empty_patterns = page::PatternResults::new();
     let mut rendered = page::render_builder_with_budget(
@@ -1912,12 +1998,37 @@ pub async fn render_resolved_public_builder(
     slot: Option<&str>,
     budget: &mut PublicCompositionBudget,
 ) -> ApiResult<RenderedLayout> {
-    render_resolved_public_builder_with_cache(
+    render_resolved_public_builder_for_locale(
         db,
         record,
         active,
         theme_context,
         route_entry,
+        None,
+        slot,
+        budget,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn render_resolved_public_builder_for_locale(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    route_entry: Option<(&str, &str)>,
+    locale: Option<&str>,
+    slot: Option<&str>,
+    budget: &mut PublicCompositionBudget,
+) -> ApiResult<RenderedLayout> {
+    render_resolved_public_builder_with_cache_for_locale(
+        db,
+        record,
+        active,
+        theme_context,
+        route_entry,
+        locale,
         slot,
         budget,
         page::BlockTemplateCache::global(),
@@ -1936,7 +2047,34 @@ pub async fn render_resolved_public_builder_with_cache(
     budget: &mut PublicCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
+    render_resolved_public_builder_with_cache_for_locale(
+        db,
+        record,
+        active,
+        theme_context,
+        route_entry,
+        None,
+        slot,
+        budget,
+        cache,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn render_resolved_public_builder_with_cache_for_locale(
+    db: &SqlitePool,
+    record: &TemplateOverrideRecord,
+    active: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    route_entry: Option<(&str, &str)>,
+    locale: Option<&str>,
+    slot: Option<&str>,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     let mut tx = db.begin().await?;
+    let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
     let state = builder::read_home_tx(&mut tx).await?;
     let url_policy = active_theme_url_policy(active)?;
     let context = PublicBuilderContext {
@@ -1944,6 +2082,7 @@ pub async fn render_resolved_public_builder_with_cache(
         active,
         theme_context,
         route_entry,
+        render_locale: &effective_locale,
         cache,
         url_policy: &url_policy,
     };
@@ -2022,6 +2161,7 @@ pub async fn resolve_and_render_header_footer_with_cache_for_locale(
         "site": site_ctx, "options": theme_opts, "theme_options": theme_opts, "menus": menus,
     });
     let mut tx = db.begin().await?;
+    let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
     let state = builder::read_home_tx(&mut tx).await?;
     let url_policy = active_theme_url_policy(active_v3)?;
     let context = PublicBuilderContext {
@@ -2029,6 +2169,7 @@ pub async fn resolve_and_render_header_footer_with_cache_for_locale(
         active: active_v3,
         theme_context: &part_context,
         route_entry: None,
+        render_locale: &effective_locale,
         cache,
         url_policy: &url_policy,
     };
@@ -2296,12 +2437,13 @@ async fn build_preview_context_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     active: Option<&ActiveThemeV3>,
     transient: Option<&TransientStudioOverrides>,
+    locale: &str,
 ) -> ApiResult<(
     settings::GeneralSettings,
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, menu::MenuViewModel>,
 )> {
-    let mut general = settings::get_general_in_conn(&mut **tx).await?;
+    let mut general = settings::get_general_in_conn_for_locale(&mut **tx, Some(locale)).await?;
     if let Some(g) = transient.and_then(|t| t.general.as_ref()) {
         let valid = settings::GeneralSettingsInput {
             site_title: g.site_title.clone(),
@@ -2334,7 +2476,7 @@ async fn build_preview_context_in_tx(
         transient.and_then(|t| t.global_options.as_ref()),
         transient.and_then(|t| t.theme_options.as_ref()),
         true,
-        None,
+        Some(locale),
     )
     .await?;
 
@@ -2342,7 +2484,8 @@ async fn build_preview_context_in_tx(
     if let Some(active) = active {
         let manifest_json = manifest_json.as_deref().unwrap_or("{}");
         let mut assignments =
-            menu::list_slot_assignments_in_tx(tx, &active.manifest.theme_id).await?;
+            menu::list_slot_assignments_for_locale_in_tx(tx, &active.manifest.theme_id, locale)
+                .await?;
         if let Some(slot_ov) = transient.and_then(|t| t.menu_slots.as_ref()) {
             let declared = menu::extract_declared_menu_slots(manifest_json);
             for (slot_key, maybe_id) in slot_ov {
@@ -2388,6 +2531,7 @@ async fn render_preview_named_part_in_tx(
     active: Option<&ActiveThemeV3>,
     theme_context: &serde_json::Value,
     route: Option<(&str, &str)>,
+    render_locale: &str,
     budget: &mut PreviewCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
@@ -2405,6 +2549,7 @@ async fn render_preview_named_part_in_tx(
             graph: &graph,
             theme_context,
             route,
+            render_locale,
             cache,
             url_policy: &url_policy,
         };
@@ -2432,6 +2577,7 @@ async fn render_preview_named_part_in_tx(
             graph: &graph,
             theme_context,
             route,
+            render_locale,
             cache,
             url_policy: &url_policy,
         };
@@ -2528,44 +2674,84 @@ pub async fn preview_studio_with_cache(
     transient: Option<&TransientStudioOverrides>,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
+    preview_studio_with_cache_and_locale(
+        db,
+        themes_root,
+        actor,
+        target,
+        document,
+        preview_entry,
+        preview_annotations,
+        transient,
+        None,
+        cache,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn preview_studio_with_cache_and_locale(
+    db: &SqlitePool,
+    themes_root: &Path,
+    actor: &SessionContext,
+    target: &TemplateCandidate,
+    document: Option<&BuilderDocument>,
+    preview_entry: Option<&TemplatePreviewEntry>,
+    preview_annotations: bool,
+    transient: Option<&TransientStudioOverrides>,
+    preview_locale: Option<&str>,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<RenderedLayout> {
     use TemplateCandidateKind as K;
     let key = target.canonical_key().map_err(ApiError::bad_request)?;
     let mut tx = db.begin().await?;
+    let effective_locale =
+        settings::resolve_requested_locale_in_conn(&mut *tx, preview_locale).await?;
     validate_typed_target_in_tx(&mut tx, target).await?;
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut state = builder::read_home_tx(&mut tx).await?;
     let (general, options, menus) =
-        build_preview_context_in_tx(&mut tx, active.as_ref(), transient).await?;
+        build_preview_context_in_tx(&mut tx, active.as_ref(), transient, &effective_locale).await?;
     state.site_options = options.clone();
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
     };
 
-    let default_home_entry: Option<TemplatePreviewEntry> =
-        if preview_entry.is_none() && target.kind == K::Home {
-            let reading = settings::get_reading_in_conn(&mut *tx).await?;
-            match reading.homepage_page_id {
-                Some(id) => {
-                    let exists: Option<i64> = sqlx::query_scalar(
-                        "SELECT id FROM content_entries WHERE id = ? AND content_type_key = 'page'",
+    let default_home_entry: Option<TemplatePreviewEntry> = if preview_entry.is_none()
+        && target.kind == K::Home
+    {
+        let reading =
+            settings::get_reading_in_conn_for_locale(&mut *tx, Some(&effective_locale)).await?;
+        match reading.homepage_page_id {
+            Some(id) => {
+                let exists: Option<i64> = sqlx::query_scalar(
+                        "SELECT id FROM content_entries WHERE id = ? AND content_type_key = 'page' AND locale = ?",
                     )
                     .bind(id)
+                    .bind(&effective_locale)
                     .fetch_optional(&mut *tx)
                     .await?;
-                    exists.map(|entry_id| TemplatePreviewEntry {
-                        type_key: "page".to_owned(),
-                        entry_id,
-                    })
-                }
-                None => None,
+                exists.map(|entry_id| TemplatePreviewEntry {
+                    type_key: "page".to_owned(),
+                    entry_id,
+                })
             }
-        } else {
-            None
-        };
+            None => None,
+        }
+    } else {
+        None
+    };
     let effective_sample = preview_entry.or(default_home_entry.as_ref());
-    let entry = resolve_preview_entry(&mut tx, target, effective_sample, active.as_ref()).await?;
+    let entry = resolve_preview_entry(
+        &mut tx,
+        target,
+        effective_sample,
+        active.as_ref(),
+        &effective_locale,
+    )
+    .await?;
 
     let mut theme_context = serde_json::json!({
         "site": site,
@@ -2692,6 +2878,7 @@ pub async fn preview_studio_with_cache(
             graph: &graph,
             theme_context: &theme_context,
             route,
+            render_locale: &effective_locale,
             cache,
             url_policy: &url_policy,
         };
@@ -2709,7 +2896,12 @@ pub async fn preview_studio_with_cache(
         has_active_contact_form |= rendered.has_active_contact_form;
         rendered.html
     } else {
-        let chain = build_reset_candidate_chain_in_conn(&mut tx, target).await?;
+        let chain = build_reset_candidate_chain_for_locale_in_conn(
+            &mut tx,
+            target,
+            Some(&effective_locale),
+        )
+        .await?;
         let resolved = resolve_template_2axis_on_connection(
             &mut tx,
             &chain,
@@ -2734,6 +2926,7 @@ pub async fn preview_studio_with_cache(
                     graph: &graph,
                     theme_context: &theme_context,
                     route,
+                    render_locale: &effective_locale,
                     cache,
                     url_policy: &url_policy,
                 };
@@ -2799,6 +2992,7 @@ pub async fn preview_studio_with_cache(
             active.as_ref(),
             &theme_context,
             route,
+            &effective_locale,
             &mut preview_budget,
             cache,
         )
@@ -2810,6 +3004,7 @@ pub async fn preview_studio_with_cache(
             active.as_ref(),
             &theme_context,
             route,
+            &effective_locale,
             &mut preview_budget,
             cache,
         )
@@ -2825,7 +3020,9 @@ pub async fn preview_studio_with_cache(
         (None, None)
     };
 
-    let seo = crate::seo::SeoView::for_noindex_page("vi", &general.site_title);
+    let (_, bcp47_tag, dir) =
+        settings::get_locale_bcp47_and_dir_in_conn(&mut *tx, Some(&effective_locale)).await?;
+    let seo = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &general.site_title);
     let full_html = content_render::compose_document_with_seo(
         header_html.as_deref(),
         &main_html,
@@ -2861,7 +3058,8 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut state = builder::read_home_tx(tx).await?;
-    let (general, options, menus) = build_preview_context_in_tx(tx, active.as_ref(), None).await?;
+    let (general, options, menus) =
+        build_preview_context_in_tx(tx, active.as_ref(), None, &record.locale).await?;
     state.site_options = options.clone();
     let site = SiteContext {
         title: &general.site_title,
@@ -2929,6 +3127,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
                 graph: &graph,
                 theme_context: &theme_context,
                 route,
+                render_locale: &record.locale,
                 cache,
                 url_policy: &url_policy,
             };
@@ -2972,6 +3171,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
             active.as_ref(),
             &theme_context,
             route,
+            &record.locale,
             &mut preview_budget,
             cache,
         )
@@ -2983,6 +3183,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
             active.as_ref(),
             &theme_context,
             route,
+            &record.locale,
             &mut preview_budget,
             cache,
         )
@@ -2992,7 +3193,9 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
         (None, None)
     };
 
-    let seo = crate::seo::SeoView::for_noindex_page("vi", &record.title);
+    let (_, bcp47_tag, dir) =
+        settings::get_locale_bcp47_and_dir_in_conn(&mut **tx, Some(&record.locale)).await?;
+    let seo = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &record.title);
     let full_html = content_render::compose_document_with_seo(
         header_html.as_deref(),
         &template_html,

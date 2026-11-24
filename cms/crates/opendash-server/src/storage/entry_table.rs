@@ -20,6 +20,7 @@ use crate::{
 pub struct EntryTableFilter {
     pub q: String,
     pub status: String,
+    pub locale: Option<String>,
     pub category_id: Option<i64>,
     pub tag_id: Option<i64>,
     pub taxonomy_key: Option<String>,
@@ -37,6 +38,7 @@ impl Default for EntryTableFilter {
         Self {
             q: String::new(),
             status: "all".into(),
+            locale: None,
             category_id: None,
             tag_id: None,
             taxonomy_key: None,
@@ -55,6 +57,8 @@ impl Default for EntryTableFilter {
 pub struct EntryTableRow {
     pub id: i64,
     pub type_key: String,
+    pub locale: String,
+    pub translation_group_id: String,
     pub title: String,
     pub slug: String,
     pub publication_status: String,
@@ -64,6 +68,7 @@ pub struct EntryTableRow {
     pub term_ids: Vec<i64>,
     pub public_url: Option<String>,
     pub fields: BTreeMap<String, Value>,
+    pub translations: Vec<entries::TranslationLinkSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,6 +108,7 @@ const CATEGORY_SCOPE: &str = "
 const SCOPE: &str = "
  FROM content_entries e
  WHERE e.content_type_key = ?
+   AND (? IS NULL OR e.locale = ?)
    AND (? = '' OR instr(lower(e.title), lower(?)) > 0
                 OR instr(lower(e.slug), lower(?)) > 0)
    AND (? IS NULL OR substr(e.updated_at, 1, 7) = ?)
@@ -119,7 +125,7 @@ const SCOPE: &str = "
    ))";
 
 macro_rules! bind_scope {
-    ($query:expr, $key:expr, $filter:expr) => {
+    ($query:expr, $key:expr, $filter:expr, $locale:expr) => {
         $query
             .bind($filter.category_id)
             .bind(i64::from($filter.include_descendants))
@@ -127,6 +133,8 @@ macro_rules! bind_scope {
             .bind(&$filter.taxonomy_key)
             .bind(i64::from($filter.include_descendants))
             .bind($key)
+            .bind($locale)
+            .bind($locale)
             .bind(&$filter.q)
             .bind(&$filter.q)
             .bind(&$filter.q)
@@ -172,6 +180,12 @@ pub async fn query(
         return Err(ApiError::forbidden("Section dùng bảng quản lý riêng tư."));
     }
     let mut tx = db.begin().await?;
+    let resolved_locale = match filter.locale.as_deref() {
+        Some(raw) => Some(
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, Some(raw)).await?,
+        ),
+        None => None,
+    };
     let Some(effective) = content::load_effective_content_schema_in_tx(&mut tx, type_key).await?
     else {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
@@ -190,7 +204,8 @@ pub async fn query(
     let (all, draft, published): (i64, i64, i64) = bind_scope!(
         sqlx::query_as(sqlx::AssertSqlSafe(count_sql)),
         type_key,
-        filter
+        filter,
+        resolved_locale.as_deref()
     )
     .fetch_one(&mut *tx)
     .await?;
@@ -220,7 +235,8 @@ pub async fn query(
     };
     let rows_sql = format!(
         "{CATEGORY_SCOPE} SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
-                e.publication_status, e.version, e.created_at, e.updated_at
+                e.publication_status, e.version, e.created_at, e.updated_at,
+                e.locale, e.translation_group_id
          {SCOPE} AND (? = 'all' OR e.publication_status = ?)
          ORDER BY {column} {direction}{tie} LIMIT ? OFFSET ?"
     );
@@ -234,10 +250,13 @@ pub async fn query(
         i64,
         String,
         String,
+        String,
+        String,
     )> = bind_scope!(
         sqlx::query_as(sqlx::AssertSqlSafe(rows_sql)),
         type_key,
-        filter
+        filter,
+        resolved_locale.as_deref()
     )
     .bind(&filter.status)
     .bind(&filter.status)
@@ -246,9 +265,42 @@ pub async fn query(
     .fetch_all(&mut *tx)
     .await?;
 
+    let mut group_ids: Vec<String> = selected
+        .iter()
+        .map(|row| row.10.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let translations_by_group =
+        entries::batch_translations_by_group_in_tx(&mut tx, type_key, &group_ids).await?;
+    group_ids.clear();
+
     let mut items = Vec::with_capacity(selected.len());
-    for row in selected {
-        let mut record = entries::decode_row(row)?;
+    for (
+        id,
+        content_type_key,
+        slug,
+        title,
+        json,
+        publication_status,
+        version,
+        created_at,
+        updated_at,
+        locale,
+        translation_group_id,
+    ) in selected
+    {
+        let mut record = entries::decode_row((
+            id,
+            content_type_key,
+            slug,
+            title,
+            json,
+            publication_status,
+            version,
+            created_at,
+            updated_at,
+        ))?;
         let term_ids: Vec<i64> = sqlx::query_scalar(
             "SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id",
         )
@@ -270,9 +322,15 @@ pub async fn query(
         } else {
             None
         };
+        let translations = translations_by_group
+            .get(&translation_group_id)
+            .cloned()
+            .unwrap_or_default();
         items.push(EntryTableRow {
             id: record.id,
             type_key: record.content_type_key,
+            locale,
+            translation_group_id,
             title: record.title,
             slug: record.slug,
             publication_status: record.publication_status,
@@ -282,6 +340,7 @@ pub async fn query(
             term_ids,
             public_url,
             fields: record.values,
+            translations,
         });
     }
     tx.commit().await?;

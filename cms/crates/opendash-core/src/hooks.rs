@@ -36,6 +36,10 @@ pub struct HookEnvelope {
     pub event: HookEvent,
     pub occurred_at_ms: u64,
     pub correlation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation_group_id: Option<String>,
     pub payload: Value,
 }
 
@@ -46,10 +50,20 @@ impl HookEnvelope {
         correlation_id: impl Into<String>,
         payload: Value,
     ) -> Self {
+        let locale = payload
+            .get("locale")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        let translation_group_id = payload
+            .get("translation_group_id")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
         Self {
             event,
             occurred_at_ms,
             correlation_id: correlation_id.into(),
+            locale,
+            translation_group_id,
             payload,
         }
     }

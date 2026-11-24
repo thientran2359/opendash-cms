@@ -44,6 +44,8 @@ pub struct StagedContentCommand {
     pub entry_id: Option<i64>,
     #[serde(default)]
     pub expected_version: Option<i64>,
+    #[serde(default)]
+    pub locale: Option<String>,
     pub slug: String,
     pub title: String,
     #[serde(default)]
@@ -74,6 +76,8 @@ pub enum HostOperationRequest {
         entry_id: Option<i64>,
         #[serde(default)]
         expected_version: Option<i64>,
+        #[serde(default)]
+        locale: Option<String>,
         slug: String,
         title: String,
         #[serde(default)]
@@ -188,6 +192,7 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
             type_key,
             entry_id,
             expected_version,
+            locale,
             slug,
             title,
             values,
@@ -218,6 +223,7 @@ pub fn handle_host_call(ctx: &mut HostContext, req_json: &str) -> HostOperationR
                 type_key,
                 entry_id,
                 expected_version,
+                locale,
                 slug,
                 title,
                 values,
@@ -468,5 +474,69 @@ mod egress_quota_tests {
             "expected quota_exceeded, got {:?}",
             res.error
         );
+    }
+
+    #[test]
+    fn content_save_stages_optional_locale_and_hook_envelope_extracts_locale() {
+        let manifest = PluginManifest {
+            id: "locale-test".into(),
+            version: "1.0.0".into(),
+            api_version: 1,
+            manifest_schema: 2,
+            min_host_version: None,
+            name: "Locale Test".into(),
+            description: "Locale test".into(),
+            entrypoint: "plugin.wasm".into(),
+            permissions: PluginPermissions {
+                sqlite: vec![],
+                http: vec![],
+                network: vec![],
+                content_read: vec![],
+                content_write: vec!["post".into()],
+                ..Default::default()
+            },
+            hooks: vec![],
+            hook_priority: 0,
+            actions: vec![],
+            declarations: Default::default(),
+            editor_panels: vec![],
+        };
+        let mut ctx = HostContext {
+            plugin_id: manifest.id.clone(),
+            manifest,
+            input_bytes: vec![],
+            output_bytes: None,
+            host_calls_count: 0,
+            http_calls_count: 0,
+            db_pool: None,
+            kv_ipc: None,
+            _correlation_id: "locale".into(),
+            allow_loopback: false,
+            limits: Default::default(),
+            staged_kv_writes: Default::default(),
+            cancellation_token: Arc::new(AtomicBool::new(false)),
+            deadline: Instant::now() + Duration::from_secs(5),
+            execution_mode: opendash_core::hooks::HookExecutionMode::Standard,
+            staged_content_command: None,
+            action_capabilities: Some(vec!["content_write".into()]),
+        };
+        let req_json = r#"{"op":"content_save","type_key":"post","locale":"en","slug":"en-post","title":"EN Post"}"#;
+        let resp = handle_host_call(&mut ctx, req_json);
+        assert!(resp.ok, "unexpected error: {:?}", resp.error);
+        let staged = ctx.staged_content_command.expect("staged command");
+        assert_eq!(staged.locale.as_deref(), Some("en"));
+
+        let env = opendash_core::hooks::HookEnvelope::new(
+            opendash_core::hooks::HookEvent::ContentAfterSave,
+            1_700_000_000_000,
+            "locale-test",
+            serde_json::json!({
+                "id": 1,
+                "locale": "en",
+                "translation_group_id": "tg_123"
+            }),
+        );
+        assert_eq!(env.locale.as_deref(), Some("en"));
+        assert_eq!(env.translation_group_id.as_deref(), Some("tg_123"));
     }
 }

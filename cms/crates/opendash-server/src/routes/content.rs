@@ -126,12 +126,13 @@ pub async fn content_entry_preview(
         };
         entry_storage::filter_entry_values_for_role(&mut record, &effective, role);
     }
+    let entry_locale = record.locale.clone();
     let view = content_render::authenticated_preview_view(record, &schema);
     let (_, selected_template) = active_content_templates(&db).await?;
     let raw = content_render::render_single(&schema, &view, selected_template.as_deref())?;
-    let public_settings = crate::storage::settings::get_public(&db).await?;
-    let seo_view =
-        crate::seo::SeoView::for_noindex_page(&public_settings.content_language, &view.title);
+    let (_, bcp47_tag, dir) =
+        crate::storage::settings::get_locale_bcp47_and_dir(&db, Some(&entry_locale)).await?;
+    let seo_view = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &view.title);
     let html = content_render::compose_document_with_seo(None, &raw, None, &seo_view)?;
     Ok((
         [

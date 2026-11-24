@@ -143,12 +143,13 @@ async fn render_resolved_public_template_html(
         TemplateResolution::DbOverride(record) => {
             let canvas_layout =
                 record.target.kind == opendash_core::theme::TemplateCandidateKind::PageLayout;
-            let rendered = overrides::render_resolved_public_builder(
+            let rendered = overrides::render_resolved_public_builder_for_locale(
                 db,
                 &record,
                 active,
                 &context,
                 route_entry,
+                locale,
                 Some(&slot_html),
                 budget,
             )

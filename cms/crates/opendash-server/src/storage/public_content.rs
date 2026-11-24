@@ -7,26 +7,45 @@ use super::entries::{self, ContentEntryRecord, EntryFilters, decode_row};
 use crate::error::ApiResult;
 use crate::public_context::{PublicFilters, TaxonomyKind};
 
-/// Slug is unique within each CPT; lookup never relies on a numeric admin ID.
+/// Slug is unique per `(content_type_key, locale)`; defaults to the active
+/// default locale when omitted. Never bypasses enabled locale visibility.
 pub async fn get_by_slug(
     db: &SqlitePool,
     type_key: &str,
     slug: &str,
 ) -> ApiResult<Option<ContentEntryRecord>> {
+    get_by_slug_for_locale(db, type_key, slug, None).await
+}
+
+pub async fn get_by_slug_for_locale(
+    db: &SqlitePool,
+    type_key: &str,
+    slug: &str,
+    locale: Option<&str>,
+) -> ApiResult<Option<ContentEntryRecord>> {
     if type_key == "pattern" {
         return Ok(None);
     }
     let mut tx = db.begin().await?;
+    let active_locale = match locale {
+        Some(raw) => {
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, Some(raw)).await?
+        }
+        None => crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?,
+    };
     let row: Option<entries::EntryRow> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
                 e.publication_status, e.version, e.created_at, e.updated_at
          FROM content_entries e
+         JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
          JOIN content_types t ON t.key = e.content_type_key
-         WHERE e.content_type_key = ? AND e.slug = ? AND e.publication_status = 'published'
+         WHERE e.content_type_key = ? AND e.locale = ? AND e.slug = ?
+           AND e.publication_status = 'published'
            AND t.provider_status = 'active'
            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
     )
     .bind(type_key)
+    .bind(&active_locale)
     .bind(slug)
     .fetch_optional(&mut *tx)
     .await?;
@@ -223,14 +242,21 @@ pub async fn load_entry_render_snapshot_with_options(
             opendash_core::builder_blocks::parse_blocks_lenient_or_recover(raw_body.unwrap_or(""))
                 .document;
         let state = builder::read_home_tx(&mut tx).await?;
-        let bindings = builder_binding::resolve_in_tx_with_route(
+        let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
             &mut tx,
             &doc,
             false,
             Some((&entry.content_type_key, &entry.slug)),
+            Some(entry_locale.as_str()),
         )
         .await?;
-        let lists = builder::resolve_lists_in_tx(&mut tx, &doc, list_pages).await?;
+        let lists = builder::resolve_lists_in_tx_for_locale(
+            &mut tx,
+            &doc,
+            list_pages,
+            Some(entry_locale.as_str()),
+        )
+        .await?;
         let forms = builder::resolve_contact_forms_in_tx(&mut tx, &doc).await?;
         let patterns = builder::resolve_patterns_in_tx_with_budget(
             &mut tx,
@@ -415,16 +441,35 @@ pub async fn taxonomy_public_page(
     limit: i64,
     offset: i64,
 ) -> ApiResult<Option<(PublicTerm, TaxonomyPublishedPage)>> {
+    taxonomy_public_page_for_locale(db, kind, slug, None, filters, limit, offset).await
+}
+
+pub async fn taxonomy_public_page_for_locale(
+    db: &SqlitePool,
+    kind: TaxonomyKind,
+    slug: &str,
+    locale: Option<&str>,
+    filters: PublicFilters,
+    limit: i64,
+    offset: i64,
+) -> ApiResult<Option<(PublicTerm, TaxonomyPublishedPage)>> {
     let mut tx = db.begin().await?;
+    let active_locale = match locale {
+        Some(raw) => {
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut tx, Some(raw)).await?
+        }
+        None => crate::storage::settings::get_default_locale_code_in_conn(&mut tx).await?,
+    };
     let row: Option<(i64, String, String, String, i64)> = sqlx::query_as(
         "SELECT t.id, t.name, t.slug, t.locale, d.hierarchical
            FROM taxonomy_terms t
-           JOIN site_locales sl ON sl.code = t.locale AND sl.is_default = 1
+           JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
            JOIN taxonomy_definitions d ON d.key = t.kind
-          WHERE t.kind = ? AND t.slug = ? AND d.public = 1
+          WHERE t.kind = ? AND t.locale = ? AND t.slug = ? AND d.public = 1
             AND d.provider_status = 'active' AND d.declaration_state = 'declared'",
     )
     .bind(kind.as_str())
+    .bind(&active_locale)
     .bind(slug)
     .fetch_optional(&mut *tx)
     .await?;

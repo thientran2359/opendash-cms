@@ -120,6 +120,21 @@ pub async fn resolve_lists_in_tx(
     document: &BuilderDocument,
     pages: &BTreeMap<String, i64>,
 ) -> ApiResult<ListResults> {
+    resolve_lists_in_tx_for_locale(tx, document, pages, None).await
+}
+
+pub async fn resolve_lists_in_tx_for_locale(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    pages: &BTreeMap<String, i64>,
+    render_locale: Option<&str>,
+) -> ApiResult<ListResults> {
+    let active_locale = match render_locale {
+        Some(raw) => {
+            crate::storage::settings::resolve_requested_locale_in_conn(&mut **tx, Some(raw)).await?
+        }
+        None => crate::storage::settings::get_default_locale_code_in_conn(&mut **tx).await?,
+    };
     let mut results = ListResults::new();
     for section in &document.sections {
         for row in &section.children {
@@ -143,7 +158,7 @@ pub async fn resolve_lists_in_tx(
                         taxonomy_key: props.taxonomy_key.clone(),
                         term_id: props.term_id,
                         include_descendants: props.include_descendants,
-                        locale: None,
+                        locale: Some(active_locale.clone()),
                     };
                     let sort = match props.sort {
                         opendash_core::builder::ListSort::IdDesc => PublishedListSort::IdDesc,
@@ -1219,6 +1234,8 @@ pub struct EntryBuilderOpen {
 struct EntryBuilderSnapshot {
     opened: EntryBuilderOpen,
     schema: EffectiveContentSchema,
+    locale: String,
+    translation_group_id: String,
     title: String,
     slug: String,
     values: BTreeMap<String, Value>,
@@ -1290,6 +1307,8 @@ async fn entry_builder_snapshot(
         return Err(ApiError::forbidden("Content Builder is not enabled."));
     }
     let (
+        locale,
+        translation_group_id,
         title,
         slug,
         values_json,
@@ -1301,6 +1320,8 @@ async fn entry_builder_snapshot(
         page_layout_key,
         custom_template_key,
     ): (
+        String,
+        String,
         String,
         String,
         String,
@@ -1318,11 +1339,13 @@ async fn entry_builder_snapshot(
             String,
             String,
             String,
+            String,
+            String,
             i64,
             String,
             Option<String>,
         ) = sqlx::query_as(
-            "SELECT e.title, e.slug, e.values_json, e.content_mode, e.publication_status, e.version, e.updated_at, d.document_json
+            "SELECT e.locale, e.translation_group_id, e.title, e.slug, e.values_json, e.content_mode, e.publication_status, e.version, e.updated_at, d.document_json
                FROM content_entries e LEFT JOIN entry_builder_documents d ON d.entry_id = e.id
               WHERE e.id = ? AND e.content_type_key = ?",
         )
@@ -1332,10 +1355,12 @@ async fn entry_builder_snapshot(
         .await?
         .ok_or_else(|| ApiError::not_found("Content entry not found."))?;
         (
-            row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, None, None,
+            row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, None, None,
         )
     } else {
         let row: Option<(
+            String,
+            String,
             String,
             String,
             String,
@@ -1346,7 +1371,7 @@ async fn entry_builder_snapshot(
             Option<String>,
             Option<String>,
         )> = sqlx::query_as(
-            "SELECT title, slug, values_json, content_mode, publication_status, version, updated_at,
+            "SELECT locale, translation_group_id, title, slug, values_json, content_mode, publication_status, version, updated_at,
                     page_layout_key, custom_template_key
                FROM content_entries
               WHERE id = ? AND content_type_key = ?",
@@ -1356,6 +1381,8 @@ async fn entry_builder_snapshot(
         .fetch_optional(&mut **tx)
         .await?;
         let (
+            locale,
+            translation_group_id,
             title,
             slug,
             values_json,
@@ -1367,6 +1394,8 @@ async fn entry_builder_snapshot(
             custom_template_key,
         ) = row.ok_or_else(|| ApiError::not_found("Content entry not found."))?;
         (
+            locale,
+            translation_group_id,
             title,
             slug,
             values_json,
@@ -1429,6 +1458,8 @@ async fn entry_builder_snapshot(
             had_recovery,
         },
         schema,
+        locale,
+        translation_group_id,
         title,
         slug,
         values,
@@ -1639,14 +1670,21 @@ async fn render_entry_builder_preview_with_budget(
     budget: &mut page::RenderBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<RenderedLayout> {
-    let bindings = builder_binding::resolve_in_tx_with_route(
+    let bindings = builder_binding::resolve_in_tx_with_route_and_locale(
         tx,
         document,
         true,
         Some((&current.opened.type_key, &current.slug)),
+        Some(current.locale.as_str()),
     )
     .await?;
-    let lists = resolve_lists_in_tx(tx, document, &BTreeMap::new()).await?;
+    let lists = resolve_lists_in_tx_for_locale(
+        tx,
+        document,
+        &BTreeMap::new(),
+        Some(current.locale.as_str()),
+    )
+    .await?;
     let forms = resolve_contact_forms_in_tx(tx, document).await?;
     let patterns =
         resolve_patterns_in_tx_with_budget(tx, state, document, true, budget, cache).await?;
@@ -1995,6 +2033,8 @@ async fn mutate_entry_builder(
                 "type_key": type_key,
                 "entry_id": id,
                 "expected_version": expected_version,
+                "locale": &before.locale,
+                "translation_group_id": &before.translation_group_id,
                 "schema_token": &before.schema.schema_token,
                 "title": &before.title,
                 "slug": &before.slug,
@@ -2155,6 +2195,8 @@ async fn mutate_entry_builder(
                 "entry_id": id,
                 "version": saved.opened.version,
                 "type_key": type_key,
+                "locale": &saved.locale,
+                "translation_group_id": &saved.translation_group_id,
                 "values": &saved.values,
                 "term_ids": &saved.term_ids,
                 "builder_operation": operation,
