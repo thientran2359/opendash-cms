@@ -34,11 +34,13 @@ mod tests {
         sqlx::query("INSERT INTO site_locales (code,bcp47_tag,label,direction,is_default,enabled,position) VALUES ('en','en','English','ltr',0,1,1)")
             .execute(&db).await.unwrap();
         for locale in ["vi", "en"] {
-            sqlx::query("INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id) VALUES('post','hello','Hello','{}','published',?,'host-locale-group')")
+            sqlx::query("INSERT INTO content_entries(content_type_key,slug,title,values_json,publication_status,locale,translation_group_id) VALUES('post','hello','Hello','{}','draft',?,'host-locale-group')")
                 .bind(locale).execute(&db).await.unwrap();
             sqlx::query("INSERT INTO taxonomy_terms(kind,name,slug,locale,translation_group_id) VALUES('category','Hello','hello',?,'host-term-group')")
                 .bind(locale).execute(&db).await.unwrap();
         }
+        sqlx::query("UPDATE content_entries SET publication_status='published' WHERE translation_group_id='host-locale-group'")
+            .execute(&db).await.unwrap();
         let en_id: i64 = sqlx::query_scalar("SELECT id FROM content_entries WHERE locale='en'")
             .fetch_one(&db)
             .await
