@@ -212,7 +212,8 @@ async fn check_strict_contact_origin(
 }
 
 pub async fn public_submit(
-    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
+    State(coordinator): State<std::sync::Arc<crate::operations::SiteCoordinator>>,
+    State(hooks): State<std::sync::Arc<crate::hooks::HookDispatcher>>,
     State(db): State<SqlitePool>,
     Extension(limiter): Extension<ContactAdmissionLimiter>,
     Extension(ExpectedListenerOrigin(listener_origin)): Extension<ExpectedListenerOrigin>,
@@ -224,6 +225,9 @@ pub async fn public_submit(
     headers: HeaderMap,
     body: Bytes,
 ) -> ApiResult<Response> {
+    if let Err(err) = coordinator.admit_mutation() {
+        return Ok(err.into_response());
+    }
     if recovery
         .as_ref()
         .is_some_and(|Extension(r)| r.is_safe_mode())
@@ -313,6 +317,8 @@ pub async fn public_submit(
 
     let outcome = submit(
         &db,
+        &coordinator,
+        &hooks,
         &limiter,
         peer_ip,
         SubmitInput {
@@ -326,9 +332,31 @@ pub async fn public_submit(
     .await?;
 
     match outcome {
-        SubmitOutcome::Accepted(receipt) => {
+        SubmitOutcome::Accepted {
+            receipt,
+            lease,
+            values,
+        } => {
             if let Some(attempt_id) = receipt.initial_attempt_id {
                 smtp_service.spawn_initial_attempt(attempt_id, lease.clone());
+            }
+            if !receipt.honeypot_triggered
+                && !receipt.deduplicated
+                && let Some(submission_id) = receipt.submission_id
+            {
+                hooks.enqueue_async(crate::hooks::AsyncHookJob {
+                    event: opendash_core::hooks::HookEvent::ContactAfterSubmit,
+                    principal: opendash_core::hooks::ExecutionPrincipal::Public,
+                    locale: None,
+                    type_key: None,
+                    payload: serde_json::json!({
+                        "form_id": receipt.form_id,
+                        "submission_id": submission_id,
+                        "values": values,
+                    }),
+                    dispatch_depth: 0,
+                    lease,
+                });
             }
             Ok((
                 StatusCode::SEE_OTHER,
@@ -337,6 +365,34 @@ pub async fn public_submit(
                     (header::CACHE_CONTROL, "no-store"),
                 ],
                 "",
+            )
+                .into_response())
+        }
+        SubmitOutcome::MaintenanceRejected(err) => Ok(err.into_response()),
+        SubmitOutcome::PluginRejected { code, message } => {
+            let (locale_code, bcp47_tag, _dir) =
+                crate::storage::settings::get_locale_bcp47_and_dir(&db, None)
+                    .await
+                    .unwrap_or_else(|_| ("vi".to_owned(), "vi".to_owned(), "ltr".to_owned()));
+            let l10n = crate::content_render::core_l10n(&locale_code);
+            let safe_code = opendash_core::hooks::sanitize_plain_text(&code, 64);
+            let safe_message = opendash_core::hooks::sanitize_plain_text(&message, 256);
+            let html = format!(
+                "<!DOCTYPE html><html lang=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>{}</title></head><body><main role=\"alert\" data-error-code=\"{}\"><h1>{}</h1><p>{}</p></main></body></html>",
+                escape_html(&bcp47_tag),
+                escape_html(l10n.contact_error_title),
+                escape_html(&safe_code),
+                escape_html(l10n.contact_error_heading),
+                escape_html(&safe_message),
+            );
+            Ok((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                [
+                    (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                    (header::CACHE_CONTROL, "no-store"),
+                    (header::HeaderName::from_static("x-robots-tag"), "noindex"),
+                ],
+                Html(html),
             )
                 .into_response())
         }

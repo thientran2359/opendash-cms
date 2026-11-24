@@ -86,13 +86,14 @@ pub async fn content_type_update(
 /// Publication policy is persisted per CPT; one CAS endpoint handles Post/Page
 /// and opted-in user CPTs with the same authorization and transaction semantics.
 pub async fn content_entry_publication(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
+    State(hooks): State<Arc<crate::hooks::HookDispatcher>>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
     Json(input): Json<crate::routes::entries::PublicationInput>,
 ) -> ApiResult<impl IntoResponse> {
-    require_session_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     if !valid_content_type_key(&type_key) || type_key == "pattern" {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     }
@@ -100,6 +101,33 @@ pub async fn content_entry_publication(
     let entry =
         entry_storage::set_publication_status(&db, &type_key, id, expected_version, &input.status)
             .await?;
+    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, entry.id).await?;
+    let principal = match actor.user.role {
+        Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
+        Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
+    };
+    let hook_event = if entry.publication_status == "published" {
+        opendash_core::hooks::HookEvent::ContentAfterPublish
+    } else {
+        opendash_core::hooks::HookEvent::ContentAfterUnpublish
+    };
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: hook_event,
+        principal,
+        locale: Some(entry.locale.clone()),
+        type_key: Some(type_key),
+        payload: serde_json::json!({
+            "type_key": &entry.content_type_key,
+            "id": entry.id,
+            "entry_id": entry.id,
+            "version": entry.version,
+            "locale": &entry.locale,
+            "publication_status": &entry.publication_status,
+            "translation_group_id": &entry.translation_group_id,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok((no_store_headers(Some(entry.version)), Json(entry)))
 }
 

@@ -154,6 +154,7 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let allow_loopback = env::var("OPENDASH_PLUGIN_ALLOW_LOOPBACK")
         .map(|v| v == "1" || v == "true")
         .unwrap_or(false);
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
     let plugin_manager = Arc::new(
         PluginManager::with_roots(
             db.clone(),
@@ -163,7 +164,11 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .with_recovery_state(recovery.clone()),
     );
-    let hooks = Arc::new(HookDispatcher::new(plugin_manager.clone()));
+    let hooks = Arc::new(HookDispatcher::with_async_queue(
+        plugin_manager.clone(),
+        coordinator.maintenance_cancel_rx(),
+        shutdown_rx.clone(),
+    ));
     let content_registry = Arc::new(tokio::sync::RwLock::new(
         storage::content::load_content_type_catalog(&db)
             .await
@@ -204,9 +209,10 @@ async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     let app = build_router(state, address.to_string());
 
     println!("OpenDash: http://{address}/builder");
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    let coordinator_for_signal = state_for_shutdown.coordinator.clone();
     tokio::spawn(async move {
         shutdown_signal().await;
+        coordinator_for_signal.notify_shutdown();
         let _ = shutdown_tx.send(true);
     });
     let mut shutdown_rx_for_serve = shutdown_rx.clone();

@@ -34,9 +34,20 @@ pub struct Receipt {
 
 #[derive(Debug)]
 pub enum SubmitOutcome {
-    Accepted(Receipt),
-    RateLimited { retry_after_secs: u64 },
+    Accepted {
+        receipt: Receipt,
+        lease: crate::operations::MutationLease,
+        values: serde_json::Value,
+    },
+    RateLimited {
+        retry_after_secs: u64,
+    },
     ValidationFailed(Vec<FieldValidationError>),
+    PluginRejected {
+        code: String,
+        message: String,
+    },
+    MaintenanceRejected(crate::operations::MutationAdmissionError),
 }
 
 #[derive(Clone)]
@@ -89,6 +100,8 @@ fn valid_nonce(nonce: &str) -> bool {
 
 pub async fn submit(
     db: &SqlitePool,
+    coordinator: &crate::operations::SiteCoordinator,
+    hooks: &crate::hooks::HookDispatcher,
     limiter: &ContactAdmissionLimiter,
     peer_ip: IpAddr,
     input: SubmitInput,
@@ -102,28 +115,37 @@ pub async fn submit(
         });
     };
 
+    let rate_lease = match coordinator.admit_mutation() {
+        Ok(lease) => lease,
+        Err(err) => return Ok(SubmitOutcome::MaintenanceRejected(err)),
+    };
     let now_secs = current_time_secs();
     let normalized_peer = normalize_peer_ip(peer_ip);
-    if let Some(retry_after_secs) = store::check_and_increment_rate_limits(
+    let rate_limited = store::check_and_increment_rate_limits(
         db,
         input.form_id,
         |salt| hash_peer_with_salt(&normalized_peer, salt),
         now_secs,
     )
-    .await?
-    {
+    .await?;
+    if let Some(retry_after_secs) = rate_limited {
         return Ok(SubmitOutcome::RateLimited { retry_after_secs });
     }
 
     if !input.honeypot.trim().is_empty() {
-        return Ok(SubmitOutcome::Accepted(Receipt {
-            form_id: input.form_id,
-            submission_id: None,
-            deduplicated: false,
-            honeypot_triggered: true,
-            initial_attempt_id: None,
-        }));
+        return Ok(SubmitOutcome::Accepted {
+            receipt: Receipt {
+                form_id: input.form_id,
+                submission_id: None,
+                deduplicated: false,
+                honeypot_triggered: true,
+                initial_attempt_id: None,
+            },
+            lease: rate_lease,
+            values: serde_json::Value::Null,
+        });
     }
+    drop(rate_lease);
 
     if !valid_nonce(&input.nonce) {
         return Err(ApiError::unprocessable("Nonce biểu mẫu không hợp lệ."));
@@ -142,6 +164,27 @@ pub async fn submit(
     let validated = match validate_and_normalize_submission(&form.schema, &input.values) {
         Ok(v) => v,
         Err(errs) => return Ok(SubmitOutcome::ValidationFailed(errs)),
+    };
+
+    let filter_payload = serde_json::json!({
+        "form_id": form.id,
+        "form_version": form.version,
+        "values": &validated.values,
+        "reply_to_email": &validated.reply_to_email,
+    });
+    match hooks
+        .dispatch_contact_before_submit(&form.id.to_string(), filter_payload)
+        .await?
+    {
+        crate::hooks::ContactBeforeSubmitDecision::Allow => {}
+        crate::hooks::ContactBeforeSubmitDecision::Reject { code, message } => {
+            return Ok(SubmitOutcome::PluginRejected { code, message });
+        }
+    }
+
+    let mutation_lease = match coordinator.admit_mutation() {
+        Ok(lease) => lease,
+        Err(err) => return Ok(SubmitOutcome::MaintenanceRejected(err)),
     };
 
     let schema_snapshot_json =
@@ -167,11 +210,15 @@ pub async fn submit(
     .await?;
     tx.commit().await?;
 
-    Ok(SubmitOutcome::Accepted(Receipt {
-        form_id: form.id,
-        submission_id: Some(submission_id),
-        deduplicated,
-        honeypot_triggered: false,
-        initial_attempt_id,
-    }))
+    Ok(SubmitOutcome::Accepted {
+        receipt: Receipt {
+            form_id: form.id,
+            submission_id: Some(submission_id),
+            deduplicated,
+            honeypot_triggered: false,
+            initial_attempt_id,
+        },
+        lease: mutation_lease,
+        values: serde_json::to_value(&validated.values).unwrap_or(serde_json::Value::Null),
+    })
 }

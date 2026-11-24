@@ -45,6 +45,59 @@ fn actor_field_role(actor: &crate::auth::SessionContext) -> opendash_core::conte
     }
 }
 
+fn execution_principal_for_actor(
+    actor: &crate::auth::SessionContext,
+) -> opendash_core::hooks::ExecutionPrincipal {
+    match actor.user.role {
+        crate::auth::Role::Admin => opendash_core::hooks::ExecutionPrincipal::Admin,
+        crate::auth::Role::Editor => opendash_core::hooks::ExecutionPrincipal::Editor,
+    }
+}
+
+fn apply_prepare_save_patch_to_entry_input(
+    input: &mut ContentEntryInput,
+    patch: crate::hooks::ContentPrepareSavePatch,
+) -> bool {
+    if patch.is_empty() {
+        return false;
+    }
+    if let Some(title) = patch.title {
+        input.title = title;
+    }
+    if let Some(slug) = patch.slug {
+        input.slug = slug;
+    }
+    for (k, v) in patch.values_patch {
+        input.values.insert(k, v);
+    }
+    if let Some(term_ids) = patch.term_ids {
+        input.term_ids = Some(term_ids);
+    }
+    true
+}
+
+fn apply_prepare_save_patch_to_composite_input(
+    input: &mut entry_storage::CompositeEntrySaveInput,
+    patch: crate::hooks::ContentPrepareSavePatch,
+) -> bool {
+    if patch.is_empty() {
+        return false;
+    }
+    if let Some(title) = patch.title {
+        input.title = title;
+    }
+    if let Some(slug) = patch.slug {
+        input.slug = slug;
+    }
+    for (k, v) in patch.values_patch {
+        input.values.insert(k, v);
+    }
+    if let Some(term_ids) = patch.term_ids {
+        input.term_ids = Some(term_ids);
+    }
+    true
+}
+
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct EntryPagination {
@@ -419,12 +472,12 @@ pub async fn entry_get(
 }
 
 pub async fn entry_create(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path(type_key): Path<String>,
-    Json(input): Json<ContentEntryInput>,
+    Json(mut input): Json<ContentEntryInput>,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     let mut schema = content_schema(&db, &type_key).await?;
@@ -442,6 +495,32 @@ pub async fn entry_create(
     media_storage::require_existing_references(&db, &schema, &input).await?;
     let candidate_locale =
         crate::storage::settings::resolve_requested_locale(&db, input.locale.as_deref()).await?;
+    let actor_role = actor_field_role(&actor);
+    if let Some(eff) = &effective {
+        let prepare_payload = json!({
+            "operation": "create",
+            "type_key": &type_key,
+            "entry_id": serde_json::Value::Null,
+            "locale": &candidate_locale,
+            "title": &input.title,
+            "slug": &input.slug,
+            "candidate_values": &input.values,
+            "term_ids": &input.term_ids,
+        });
+        let patch = hooks
+            .dispatch_content_prepare_save(&type_key, actor_role, eff, prepare_payload)
+            .await?;
+        if apply_prepare_save_patch_to_entry_input(&mut input, patch) {
+            input
+                .validate_against(&schema)
+                .map_err(ApiError::unprocessable)?;
+            input
+                .validate_against_effective(eff)
+                .map_err(ApiError::unprocessable)?;
+            media_storage::require_existing_references(&db, &schema, &input).await?;
+            media_storage::require_existing_effective_references(&db, eff, &input.values).await?;
+        }
+    }
     let candidate = json!({
         "operation": "create",
         "type_key": &type_key,
@@ -454,7 +533,6 @@ pub async fn entry_create(
         "candidate_values": &input.values,
         "term_ids": &input.term_ids,
     });
-    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
         .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
@@ -470,20 +548,24 @@ pub async fn entry_create(
         }
         None => entry_storage::create_entry(&db, &actor, &type_key, &schema, &input).await?,
     };
-    let _ = hooks
-        .dispatch_content_after_save_for_actor(
-            &type_key,
-            actor_role,
-            json!({
-                "type_key": &type_key,
-                "id": entry.id,
-                "operation": "create",
-                "version": entry.version,
-                "locale": &entry.locale,
-                "translation_group_id": &entry.translation_group_id,
-            }),
-        )
-        .await;
+    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, entry.id).await?;
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::ContentAfterSave,
+        principal: execution_principal_for_actor(&actor),
+        locale: Some(entry.locale.clone()),
+        type_key: Some(type_key.clone()),
+        payload: json!({
+            "type_key": &type_key,
+            "id": entry.id,
+            "entry_id": entry.id,
+            "operation": "create",
+            "version": entry.version,
+            "locale": &entry.locale,
+            "translation_group_id": &entry.translation_group_id,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok((
         StatusCode::CREATED,
         [
@@ -499,12 +581,12 @@ pub async fn entry_create(
 }
 
 pub async fn entry_update(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
-    Json(input): Json<ContentEntryInput>,
+    Json(mut input): Json<ContentEntryInput>,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     let version = expected_version(&headers)?;
@@ -529,6 +611,32 @@ pub async fn entry_update(
             "Không thể đổi ngôn ngữ của nội dung đã tạo.",
         ));
     }
+    let actor_role = actor_field_role(&actor);
+    if let Some(eff) = &effective {
+        let prepare_payload = json!({
+            "operation": "update",
+            "type_key": &type_key,
+            "entry_id": id,
+            "locale": existing_meta.as_ref().map(|(l, _)| l.as_str()),
+            "title": &input.title,
+            "slug": &input.slug,
+            "candidate_values": &input.values,
+            "term_ids": &input.term_ids,
+        });
+        let patch = hooks
+            .dispatch_content_prepare_save(&type_key, actor_role, eff, prepare_payload)
+            .await?;
+        if apply_prepare_save_patch_to_entry_input(&mut input, patch) {
+            input
+                .validate_against(&schema)
+                .map_err(ApiError::unprocessable)?;
+            input
+                .validate_against_effective(eff)
+                .map_err(ApiError::unprocessable)?;
+            media_storage::require_existing_references(&db, &schema, &input).await?;
+            media_storage::require_existing_effective_references(&db, eff, &input.values).await?;
+        }
+    }
     let candidate = json!({
         "operation": "update",
         "type_key": &type_key,
@@ -541,7 +649,6 @@ pub async fn entry_update(
         "candidate_values": &input.values,
         "term_ids": &input.term_ids,
     });
-    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
         .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
@@ -560,46 +667,69 @@ pub async fn entry_update(
                 .await?
         }
     };
-    let _ = hooks
-        .dispatch_content_after_save_for_actor(
-            &type_key,
-            actor_role,
-            json!({
-                "type_key": &type_key,
-                "id": entry.id,
-                "operation": "update",
-                "version": entry.version,
-                "locale": &entry.locale,
-                "translation_group_id": &entry.translation_group_id,
-            }),
-        )
-        .await;
+    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, entry.id).await?;
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::ContentAfterSave,
+        principal: execution_principal_for_actor(&actor),
+        locale: Some(entry.locale.clone()),
+        type_key: Some(type_key.clone()),
+        payload: json!({
+            "type_key": &type_key,
+            "id": entry.id,
+            "entry_id": entry.id,
+            "operation": "update",
+            "version": entry.version,
+            "locale": &entry.locale,
+            "translation_group_id": &entry.translation_group_id,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok(([(header::ETAG, etag(entry.version))], Json(entry)).into_response())
 }
 
 pub async fn entry_delete(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
 ) -> ApiResult<StatusCode> {
-    require_session_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     let version = expected_version(&headers)?;
     valid_type_key(&type_key)?;
+    let existing_meta = entry_storage::get_entry_locale_and_group(&db, &type_key, id).await?;
     entry_storage::delete_entry(&db, &type_key, id, version).await?;
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::ContentAfterDelete,
+        principal: execution_principal_for_actor(&actor),
+        locale: existing_meta.as_ref().map(|(l, _)| l.clone()),
+        type_key: Some(type_key.clone()),
+        payload: json!({
+            "type_key": &type_key,
+            "id": id,
+            "entry_id": id,
+            "version": version,
+            "locale": existing_meta.as_ref().map(|(l, _)| l.as_str()),
+            "translation_group_id": existing_meta.as_ref().map(|(_, g)| g.as_str()),
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Publish/Unpublish is a separate, authenticated optimistic-CAS operation.
 /// Ordinary PUT/Save deliberately never alters the current status.
 pub async fn entry_publication(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
+    State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
     Json(input): Json<PublicationInput>,
 ) -> ApiResult<Response> {
-    require_session_with_csrf(&headers, &db).await?;
+    let actor = require_session_with_csrf(&headers, &db).await?;
     valid_type_key(&type_key)?;
     if !is_builtin(&type_key) || !matches!(input.status.as_str(), "draft" | "published") {
         return Err(ApiError::bad_request(
@@ -609,6 +739,29 @@ pub async fn entry_publication(
     let version = expected_version(&headers)?;
     let record =
         entry_storage::set_publication_status(&db, &type_key, id, version, &input.status).await?;
+    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, record.id).await?;
+    let hook_event = if record.publication_status == "published" {
+        opendash_core::hooks::HookEvent::ContentAfterPublish
+    } else {
+        opendash_core::hooks::HookEvent::ContentAfterUnpublish
+    };
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: hook_event,
+        principal: execution_principal_for_actor(&actor),
+        locale: Some(record.locale.clone()),
+        type_key: Some(type_key.clone()),
+        payload: json!({
+            "type_key": &type_key,
+            "id": record.id,
+            "entry_id": record.id,
+            "version": record.version,
+            "locale": &record.locale,
+            "publication_status": &record.publication_status,
+            "translation_group_id": &record.translation_group_id,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     // No success hooks are emitted until state is durable; on CAS failures
     // storage returns 404/412 without any external side effects.
     Ok(([(header::ETAG, etag(record.version))], Json(record)).into_response())
@@ -787,17 +940,40 @@ mod tests {
 }
 
 pub async fn entry_composite_create(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path(type_key): Path<String>,
-    Json(input): Json<entry_storage::CompositeEntrySaveInput>,
+    Json(mut input): Json<entry_storage::CompositeEntrySaveInput>,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     valid_type_key(&type_key)?;
-    let plan =
+    let mut plan =
         entry_storage::prepare_composite_entry_save(&db, &actor, &type_key, None, &input).await?;
+    let actor_role = actor_field_role(&actor);
+    if let Some(eff) =
+        crate::storage::content::load_effective_content_schema(&db, &type_key).await?
+    {
+        let prepare_payload = json!({
+            "operation": "create",
+            "type_key": &type_key,
+            "entry_id": serde_json::Value::Null,
+            "locale": &plan.locale,
+            "title": &plan.merged_input.title,
+            "slug": &plan.merged_input.slug,
+            "candidate_values": &plan.merged_input.values,
+            "term_ids": &plan.merged_input.term_ids,
+        });
+        let patch = hooks
+            .dispatch_content_prepare_save(&type_key, actor_role, &eff, prepare_payload)
+            .await?;
+        if apply_prepare_save_patch_to_composite_input(&mut input, patch) {
+            plan =
+                entry_storage::prepare_composite_entry_save(&db, &actor, &type_key, None, &input)
+                    .await?;
+        }
+    }
     let candidate = json!({
         "operation": "create",
         "type_key": &type_key,
@@ -810,7 +986,6 @@ pub async fn entry_composite_create(
         "candidate_values": &plan.merged_input.values,
         "term_ids": &plan.merged_input.term_ids,
     });
-    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
         .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
@@ -820,20 +995,45 @@ pub async fn entry_composite_create(
     let result =
         entry_storage::commit_composite_entry_save(&db, &actor, &type_key, None, &input, &plan)
             .await?;
-    let _ = hooks
-        .dispatch_content_after_save_for_actor(
-            &type_key,
-            actor_role,
-            json!({
+    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, result.entry.id)
+        .await?;
+    let principal = execution_principal_for_actor(&actor);
+    if result.entry.publication_status == "published" {
+        hooks.enqueue_async(crate::hooks::AsyncHookJob {
+            event: opendash_core::hooks::HookEvent::ContentAfterPublish,
+            principal,
+            locale: Some(result.entry.locale.clone()),
+            type_key: Some(type_key.clone()),
+            payload: json!({
                 "type_key": &type_key,
                 "id": result.entry.id,
-                "operation": "create",
+                "entry_id": result.entry.id,
                 "version": result.entry.version,
                 "locale": &result.entry.locale,
+                "publication_status": &result.entry.publication_status,
                 "translation_group_id": &result.entry.translation_group_id,
             }),
-        )
-        .await;
+            dispatch_depth: 0,
+            lease: lease.clone(),
+        });
+    }
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::ContentAfterSave,
+        principal,
+        locale: Some(result.entry.locale.clone()),
+        type_key: Some(type_key.clone()),
+        payload: json!({
+            "type_key": &type_key,
+            "id": result.entry.id,
+            "entry_id": result.entry.id,
+            "operation": "create",
+            "version": result.entry.version,
+            "locale": &result.entry.locale,
+            "translation_group_id": &result.entry.translation_group_id,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok((
         StatusCode::CREATED,
         [
@@ -852,18 +1052,49 @@ pub async fn entry_composite_create(
 }
 
 pub async fn entry_composite_update(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     Path((type_key, id)): Path<(String, i64)>,
-    Json(input): Json<entry_storage::CompositeEntrySaveInput>,
+    Json(mut input): Json<entry_storage::CompositeEntrySaveInput>,
 ) -> ApiResult<Response> {
     let actor = require_session_with_csrf(&headers, &db).await?;
     valid_type_key(&type_key)?;
-    let plan =
+    let before_status = entry_storage::get_entry(&db, &type_key, id)
+        .await?
+        .map(|e| e.publication_status);
+    let mut plan =
         entry_storage::prepare_composite_entry_save(&db, &actor, &type_key, Some(id), &input)
             .await?;
+    let actor_role = actor_field_role(&actor);
+    if let Some(eff) =
+        crate::storage::content::load_effective_content_schema(&db, &type_key).await?
+    {
+        let prepare_payload = json!({
+            "operation": "update",
+            "type_key": &type_key,
+            "entry_id": id,
+            "locale": &plan.locale,
+            "title": &plan.merged_input.title,
+            "slug": &plan.merged_input.slug,
+            "candidate_values": &plan.merged_input.values,
+            "term_ids": &plan.merged_input.term_ids,
+        });
+        let patch = hooks
+            .dispatch_content_prepare_save(&type_key, actor_role, &eff, prepare_payload)
+            .await?;
+        if apply_prepare_save_patch_to_composite_input(&mut input, patch) {
+            plan = entry_storage::prepare_composite_entry_save(
+                &db,
+                &actor,
+                &type_key,
+                Some(id),
+                &input,
+            )
+            .await?;
+        }
+    }
     let candidate = json!({
         "operation": "update",
         "type_key": &type_key,
@@ -876,7 +1107,6 @@ pub async fn entry_composite_update(
         "candidate_values": &plan.merged_input.values,
         "term_ids": &plan.merged_input.term_ids,
     });
-    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
         .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
@@ -886,25 +1116,55 @@ pub async fn entry_composite_update(
     let result =
         entry_storage::commit_composite_entry_save(&db, &actor, &type_key, Some(id), &input, &plan)
             .await?;
-    let _ = hooks
-        .dispatch_content_after_save_for_actor(
-            &type_key,
-            actor_role,
-            json!({
+    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, result.entry.id)
+        .await?;
+    let principal = execution_principal_for_actor(&actor);
+    if before_status.as_deref() != Some(result.entry.publication_status.as_str()) {
+        let pub_event = if result.entry.publication_status == "published" {
+            opendash_core::hooks::HookEvent::ContentAfterPublish
+        } else {
+            opendash_core::hooks::HookEvent::ContentAfterUnpublish
+        };
+        hooks.enqueue_async(crate::hooks::AsyncHookJob {
+            event: pub_event,
+            principal,
+            locale: Some(result.entry.locale.clone()),
+            type_key: Some(type_key.clone()),
+            payload: json!({
                 "type_key": &type_key,
                 "id": result.entry.id,
-                "operation": "update",
+                "entry_id": result.entry.id,
                 "version": result.entry.version,
                 "locale": &result.entry.locale,
+                "publication_status": &result.entry.publication_status,
                 "translation_group_id": &result.entry.translation_group_id,
             }),
-        )
-        .await;
+            dispatch_depth: 0,
+            lease: lease.clone(),
+        });
+    }
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::ContentAfterSave,
+        principal,
+        locale: Some(result.entry.locale.clone()),
+        type_key: Some(type_key.clone()),
+        payload: json!({
+            "type_key": &type_key,
+            "id": result.entry.id,
+            "entry_id": result.entry.id,
+            "operation": "update",
+            "version": result.entry.version,
+            "locale": &result.entry.locale,
+            "translation_group_id": &result.entry.translation_group_id,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok(([(header::ETAG, etag(result.entry.version))], Json(result)).into_response())
 }
 
 pub async fn entry_translation_create(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
@@ -953,20 +1213,25 @@ pub async fn entry_translation_create(
         &plan,
     )
     .await?;
-    let _ = hooks
-        .dispatch_content_after_save_for_actor(
-            &type_key,
-            actor_role,
-            json!({
-                "type_key": &type_key,
-                "id": created.id,
-                "operation": "create_translation",
-                "version": created.version,
-                "locale": &created.locale,
-                "translation_group_id": &created.translation_group_id,
-            }),
-        )
-        .await;
+    crate::storage::plugin_projections::recompute_entry_projections(&db, &hooks, created.id)
+        .await?;
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::ContentAfterSave,
+        principal: execution_principal_for_actor(&actor),
+        locale: Some(created.locale.clone()),
+        type_key: Some(type_key.clone()),
+        payload: json!({
+            "type_key": &type_key,
+            "id": created.id,
+            "entry_id": created.id,
+            "operation": "create_translation",
+            "version": created.version,
+            "locale": &created.locale,
+            "translation_group_id": &created.translation_group_id,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok((
         StatusCode::CREATED,
         [

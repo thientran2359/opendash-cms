@@ -104,7 +104,6 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "admin_update_form",
                 "admin_delete_form",
                 "admin_delete_submission",
-                "public_submit",
             ],
         ),
         (
@@ -148,6 +147,7 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
                 "plugin_action",
                 "plugin_disable",
                 "plugin_enable",
+                "plugin_put_settings",
             ],
         ),
         (
@@ -222,6 +222,35 @@ fn audited_writer_inventory_covers_every_mutating_route_handler() {
             );
         }
     }
+
+    // public_submit uses two-phase coordinator admission so filter:contact/before_submit runs
+    // after cheap shields and without holding MutationLease across Wasm/HTTP execution.
+    let contact_route_src =
+        fs::read_to_string(routes_dir.join("contact.rs")).expect("read contact.rs route");
+    let pub_pos = contact_route_src
+        .find("pub async fn public_submit(")
+        .expect("missing contact.rs::public_submit");
+    let pub_sig_end = contact_route_src[pub_pos..]
+        .find(") ->")
+        .map(|off| pub_pos + off)
+        .unwrap_or(contact_route_src.len());
+    let pub_sig = &contact_route_src[pub_pos..pub_sig_end];
+    assert!(
+        pub_sig.contains("State(coordinator)"),
+        "contact.rs::public_submit must extract State(coordinator) for admission"
+    );
+    let pub_body = &contact_route_src[pub_sig_end..];
+    assert!(
+        pub_body.contains("coordinator.admit_mutation()"),
+        "contact.rs::public_submit must run coordinator.admit_mutation() pre-check"
+    );
+    let contact_src =
+        fs::read_to_string(manifest_dir.join("src").join("contact.rs")).expect("read contact.rs");
+    assert!(
+        contact_src.contains("coordinator.admit_mutation()")
+            && contact_src.contains("dispatch_contact_before_submit"),
+        "contact::submit must admit SQLite writes via coordinator.admit_mutation() and run dispatch_contact_before_submit without holding a lease"
+    );
 
     // Verify background SMTP spawn requires MutationLease
     let smtp_src =

@@ -21,6 +21,41 @@ use crate::{
 pub const MAX_PLUGIN_ZIP_BYTES: usize = 5 * 1024 * 1024; // 5 MiB
 pub const MAX_PLUGIN_JSON_BYTES: usize = 1024 * 1024; // 1 MiB
 
+async fn maybe_spawn_projection_recompute(
+    db: &SqlitePool,
+    plugins: &PluginManager,
+    hooks: &Arc<HookDispatcher>,
+    coordinator: &Arc<crate::operations::SiteCoordinator>,
+    plugin_id: &str,
+) {
+    let Some(manifest) = plugins.cached_plugin_manifest(plugin_id).await else {
+        return;
+    };
+    if manifest
+        .filters
+        .iter()
+        .chain(manifest.hooks.iter())
+        .any(|h| {
+            matches!(
+                h,
+                opendash_core::hooks::HookEvent::FilterSeoHead
+                    | opendash_core::hooks::HookEvent::FilterEntryView
+            )
+        })
+    {
+        let _handle =
+            crate::storage::plugin_projections::spawn_recompute_plugin_projections_batched(
+                db.clone(),
+                Arc::clone(hooks),
+                Arc::clone(coordinator),
+                plugin_id.to_owned(),
+                coordinator.maintenance_cancel_rx(),
+                coordinator.shutdown_rx(),
+            )
+            .await;
+    }
+}
+
 pub async fn plugin_install(
     crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
@@ -34,6 +69,8 @@ pub async fn plugin_install(
             >,
         >,
     >,
+    State(hooks): State<Arc<HookDispatcher>>,
+    State(coordinator): State<Arc<crate::operations::SiteCoordinator>>,
     headers: HeaderMap,
     bytes: Bytes,
 ) -> ApiResult<Response> {
@@ -52,6 +89,9 @@ pub async fn plugin_install(
         .map_err(map_plugin_storage_err)?;
     *content_registry.write().await =
         crate::storage::content::load_content_type_catalog(&db).await?;
+    if summary.enabled {
+        maybe_spawn_projection_recompute(&db, &plugins, &hooks, &coordinator, &summary.id).await;
+    }
     Ok((StatusCode::CREATED, Json(summary)).into_response())
 }
 
@@ -166,7 +206,7 @@ pub async fn plugin_action(
 }
 
 pub async fn plugin_disable(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
     State(content_registry): State<
@@ -178,6 +218,7 @@ pub async fn plugin_disable(
             >,
         >,
     >,
+    State(hooks): State<Arc<HookDispatcher>>,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
@@ -190,6 +231,18 @@ pub async fn plugin_disable(
         .map_err(map_plugin_storage_err)?;
     *content_registry.write().await =
         crate::storage::content::load_content_type_catalog(&db).await?;
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::PluginAfterDisable,
+        principal: opendash_core::hooks::ExecutionPrincipal::Admin,
+        locale: None,
+        type_key: None,
+        payload: serde_json::json!({
+            "plugin_id": &id,
+            "cas_version": next_cas,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok(
         Json(serde_json::json!({ "message": "Đã vô hiệu hóa plugin.", "cas_version": next_cas }))
             .into_response(),
@@ -197,7 +250,7 @@ pub async fn plugin_disable(
 }
 
 pub async fn plugin_enable(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
     State(content_registry): State<
@@ -209,6 +262,8 @@ pub async fn plugin_enable(
             >,
         >,
     >,
+    State(hooks): State<Arc<HookDispatcher>>,
+    State(coordinator): State<Arc<crate::operations::SiteCoordinator>>,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> ApiResult<Response> {
@@ -221,6 +276,19 @@ pub async fn plugin_enable(
         .map_err(map_plugin_storage_err)?;
     *content_registry.write().await =
         crate::storage::content::load_content_type_catalog(&db).await?;
+    maybe_spawn_projection_recompute(&db, &plugins, &hooks, &coordinator, &id).await;
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::PluginAfterEnable,
+        principal: opendash_core::hooks::ExecutionPrincipal::Admin,
+        locale: None,
+        type_key: None,
+        payload: serde_json::json!({
+            "plugin_id": &id,
+            "cas_version": next_cas,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok(
         Json(serde_json::json!({ "message": "Đã kích hoạt plugin.", "cas_version": next_cas }))
             .into_response(),
@@ -260,9 +328,11 @@ pub async fn plugin_get_settings(
 }
 
 pub async fn plugin_put_settings(
-    crate::operations::AdmittedMutation(_lease): crate::operations::AdmittedMutation,
+    crate::operations::AdmittedMutation(lease): crate::operations::AdmittedMutation,
     State(db): State<SqlitePool>,
     State(plugins): State<Arc<PluginManager>>,
+    State(hooks): State<Arc<HookDispatcher>>,
+    State(coordinator): State<Arc<crate::operations::SiteCoordinator>>,
     headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
     input: Result<Json<PluginSettingsPutInput>, axum::extract::rejection::JsonRejection>,
@@ -296,6 +366,20 @@ pub async fn plugin_put_settings(
         &input.values,
     )
     .await?;
+    maybe_spawn_projection_recompute(&db, &plugins, &hooks, &coordinator, &id).await;
+    hooks.enqueue_async(crate::hooks::AsyncHookJob {
+        event: opendash_core::hooks::HookEvent::SettingsAfterSave,
+        principal: opendash_core::hooks::ExecutionPrincipal::Admin,
+        locale: None,
+        type_key: None,
+        payload: serde_json::json!({
+            "scope": "plugin",
+            "plugin_id": &id,
+            "version": outcome.snapshot.version,
+        }),
+        dispatch_depth: 0,
+        lease,
+    });
     Ok((
         crate::routes::settings::no_store_headers(Some(outcome.snapshot.version)),
         Json(outcome.snapshot),

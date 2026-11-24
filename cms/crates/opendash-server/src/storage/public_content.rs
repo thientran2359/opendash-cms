@@ -1030,6 +1030,9 @@ async fn hydrate_entry_views_in_conn(
         }
     }
 
+    let mut proj_map =
+        super::plugin_projections::batch_load_entry_projections_in_conn(conn, &entry_ids).await?;
+
     let mut views = Vec::with_capacity(records.len());
     for record in records {
         let Some(eff) = schemas.get(&record.content_type_key) else {
@@ -1041,14 +1044,19 @@ async fn hydrate_entry_views_in_conn(
             .get(&record.content_type_key)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
-        views.push(crate::content_render::entry_view_with_context(
+        let mut view = crate::content_render::entry_view_with_context(
             &record,
             eff,
             url,
             &terms,
             eligible_taxonomies,
             opendash_core::content::FieldRole::Editor,
-        ));
+        );
+        view.ext = proj_map
+            .remove(&record.id)
+            .map(|p| p.ext)
+            .unwrap_or_default();
+        views.push(view);
     }
     Ok(views)
 }

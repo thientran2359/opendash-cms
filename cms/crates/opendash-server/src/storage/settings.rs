@@ -3483,6 +3483,13 @@ pub async fn put_plugin_settings(
             return Err(err.into());
         }
     };
+    if let Err(err) = sqlx::query("UPDATE bootstrap SET initialized = initialized WHERE id = 1")
+        .execute(&mut *tx)
+        .await
+    {
+        cleanup_new_refs(&newly_created_refs);
+        return Err(err.into());
+    }
 
     for media_id in &media_ids_to_verify {
         let exists: Result<Option<i64>, sqlx::Error> = sqlx::query_scalar(

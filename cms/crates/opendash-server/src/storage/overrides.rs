@@ -1457,6 +1457,7 @@ fn build_placeholder_preview_entry(type_key: &str) -> EntryView {
         terms,
         all_terms: Vec::new(),
         primary_category: None,
+        ext: BTreeMap::new(),
     }
 }
 

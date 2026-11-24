@@ -173,6 +173,50 @@ impl PluginManager {
         Ok(built)
     }
 
+    pub async fn cached_plugin_manifest(&self, id: &str) -> Option<PluginManifest> {
+        let cache = self.ensure_manifest_cache().await.ok()?;
+        cache.get(id).map(|item| item.manifest.clone())
+    }
+
+    pub async fn filter_public_content_payload_for_plugin(
+        &self,
+        plugin_id: &str,
+        type_key: &str,
+        payload: &mut Value,
+    ) {
+        let manifest_opt = self.cached_plugin_manifest(plugin_id).await;
+        let schema_opt =
+            crate::storage::content::load_effective_content_schema(&self.db_pool, type_key)
+                .await
+                .ok()
+                .flatten();
+
+        for field_map_key in ["candidate_values", "values"] {
+            if let Some(Value::Object(map)) = payload.get_mut(field_map_key) {
+                match (&manifest_opt, &schema_opt) {
+                    (Some(manifest), Some(effective)) => {
+                        map.retain(|k, _| {
+                            effective.effective_fields.get(k).is_some_and(|fe| {
+                                fe.definition.public_exposure
+                                    == opendash_core::content::PublicExposure::Public
+                                    && opendash_core::plugin::plugin_can_read_field(
+                                        manifest,
+                                        None,
+                                        opendash_core::content::FieldRole::Editor,
+                                        type_key,
+                                        fe,
+                                    )
+                            })
+                        });
+                    }
+                    _ => {
+                        map.clear();
+                    }
+                }
+            }
+        }
+    }
+
     pub fn with_recovery_state(mut self, recovery: crate::config::RecoveryState) -> Self {
         self.recovery = recovery;
         self

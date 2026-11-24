@@ -460,19 +460,27 @@ pub(crate) async fn render_canonical_archive(
             .await?
             .remove(&type_key)
             .unwrap_or_default();
+    let archive_ids: Vec<i64> = records.iter().map(|r| r.id).collect();
+    let mut proj_map =
+        crate::storage::plugin_projections::batch_load_entry_projections(&db, &archive_ids).await?;
     let entries: Vec<_> = records
         .into_iter()
         .map(|record| {
             let u = entry_urls.get(&record.id).cloned();
             let terms = terms_map.remove(&record.id).unwrap_or_default();
-            content_render::entry_view_with_context(
+            let mut view = content_render::entry_view_with_context(
                 &record,
                 &effective_schema,
                 u,
                 &terms,
                 &eligible_taxonomies,
                 FieldRole::Editor,
-            )
+            );
+            view.ext = proj_map
+                .remove(&record.id)
+                .map(|p| p.ext)
+                .unwrap_or_default();
+            view
         })
         .collect();
     let previous = (page > 1)
@@ -785,11 +793,18 @@ async fn render_entry_response_with_cache(
     let fmt_cfg = crate::template_sec::RenderFormattingConfig {
         timezone: site.timezone.clone(),
     };
-    let archive_path = {
+    let (archive_path, mut proj_map) = {
         let mut conn = db.acquire().await?;
-        permalinks::canonical_archive_path_in_tx(&mut conn, &type_key, &entry_locale).await?
+        let path =
+            permalinks::canonical_archive_path_in_tx(&mut conn, &type_key, &entry_locale).await?;
+        let proj_map = crate::storage::plugin_projections::batch_load_entry_projections_in_conn(
+            &mut conn,
+            &[entry.id],
+        )
+        .await?;
+        (path, proj_map)
     };
-    let view = content_render::entry_view_with_context(
+    let mut view = content_render::entry_view_with_context(
         &entry,
         &effective_schema,
         Some(canonical_path_for_seo.clone()),
@@ -797,6 +812,10 @@ async fn render_entry_response_with_cache(
         &eligible_public_taxonomies,
         FieldRole::Editor,
     );
+    view.ext = proj_map
+        .remove(&entry.id)
+        .map(|p| p.ext)
+        .unwrap_or_default();
     let breadcrumbs = if is_home {
         content_render::home_breadcrumbs(
             content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
@@ -1046,6 +1065,10 @@ pub(crate) async fn render_canonical_taxonomy(
             .ok_or_else(|| ApiError::internal("Không tìm thấy schema nội dung."))?;
         schemas.insert(tk.clone(), eff);
     }
+    let tax_entry_ids: Vec<i64> = page.entries.iter().map(|r| r.id).collect();
+    let mut proj_map =
+        crate::storage::plugin_projections::batch_load_entry_projections(db, &tax_entry_ids)
+            .await?;
     let mut entries = Vec::with_capacity(page.entries.len());
     for record in page.entries {
         if let Some(eff) = schemas.get(&record.content_type_key) {
@@ -1055,14 +1078,19 @@ pub(crate) async fn render_canonical_taxonomy(
                 .get(&record.content_type_key)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            entries.push(content_render::entry_view_with_context(
+            let mut view = content_render::entry_view_with_context(
                 &record,
                 eff,
                 u,
                 &terms,
                 eligible,
                 FieldRole::Editor,
-            ));
+            );
+            view.ext = proj_map
+                .remove(&record.id)
+                .map(|p| p.ext)
+                .unwrap_or_default();
+            entries.push(view);
         }
     }
     let previous = (query.page > 1)

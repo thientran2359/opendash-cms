@@ -399,7 +399,7 @@ impl PaginationView {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct EntryView {
     pub id: i64,
     pub type_key: String,
@@ -417,6 +417,7 @@ pub struct EntryView {
     pub terms: BTreeMap<String, Vec<PublicTermView>>,
     pub all_terms: Vec<PublicTermView>,
     pub primary_category: Option<PublicTermView>,
+    pub ext: BTreeMap<String, Value>,
 }
 
 /// Only typed site strings enter the custom-template context; MiniJinja
@@ -778,6 +779,7 @@ fn build_entry_view_with_defs(
         terms: terms_map,
         all_terms,
         primary_category,
+        ext: BTreeMap::new(),
     }
 }
 
@@ -1173,6 +1175,11 @@ pub fn compose_document_with_seo_with_body_classes(
             escape_html_attr(og_img)
         ));
     }
+    for block in &seo.json_ld {
+        head.push_str("<script type=\"application/ld+json\">");
+        head.push_str(&serialize_json_ld_safe(block));
+        head.push_str("</script>");
+    }
     if !styles
         .iter()
         .any(|style| style.contains("/assets/opendash-tailwind.css"))
@@ -1188,6 +1195,22 @@ pub fn compose_document_with_seo_with_body_classes(
         escape_html_attr(&seo.lang),
         dir
     ))
+}
+
+pub fn serialize_json_ld_safe(val: &Value) -> String {
+    let raw = serde_json::to_string(val).unwrap_or_else(|_| "{}".to_owned());
+    let mut out = String::with_capacity(raw.len());
+    for ch in raw.chars() {
+        match ch {
+            '<' => out.push_str("\\u003c"),
+            '>' => out.push_str("\\u003e"),
+            '&' => out.push_str("\\u0026"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 pub fn render_archive_with_site(

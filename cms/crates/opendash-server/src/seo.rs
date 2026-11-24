@@ -111,6 +111,7 @@ pub struct SeoView {
     pub og_description: Option<String>,
     pub og_url: Option<String>,
     pub og_image_url: Option<String>,
+    pub json_ld: Vec<serde_json::Value>,
 }
 
 impl SeoView {
@@ -139,8 +140,58 @@ impl SeoView {
             og_description: None,
             og_url: None,
             og_image_url: None,
+            json_ld: Vec::new(),
         }
     }
+}
+
+pub const MAX_JSON_LD_BLOCKS: usize = 4;
+pub const MAX_JSON_LD_TOTAL_BYTES: usize = 16 * 1024;
+pub const MAX_JSON_LD_DEPTH: usize = 8;
+
+pub fn json_value_depth(val: &serde_json::Value) -> usize {
+    match val {
+        serde_json::Value::Array(items) => {
+            1 + items.iter().map(json_value_depth).max().unwrap_or(0)
+        }
+        serde_json::Value::Object(map) => 1 + map.values().map(json_value_depth).max().unwrap_or(0),
+        _ => 1,
+    }
+}
+
+pub fn validate_json_ld_block(val: &serde_json::Value) -> Result<usize, &'static str> {
+    if !val.is_object() {
+        return Err("Mỗi phần tử json_ld bắt buộc phải là JSON Object.");
+    }
+    if json_value_depth(val) > MAX_JSON_LD_DEPTH {
+        return Err("Block json_ld vượt quá độ sâu tối đa 8 tầng.");
+    }
+    let bytes = serde_json::to_vec(val)
+        .map(|v| v.len())
+        .map_err(|_| "Không thể serialize block json_ld.")?;
+    if bytes > MAX_JSON_LD_TOTAL_BYTES {
+        return Err("Block json_ld vượt quá giới hạn 16 KiB.");
+    }
+    Ok(bytes)
+}
+
+pub fn validate_json_ld_blocks(
+    blocks: &[serde_json::Value],
+) -> Result<Vec<serde_json::Value>, &'static str> {
+    if blocks.len() > MAX_JSON_LD_BLOCKS {
+        return Err("json_ld vượt quá tối đa 4 block trên một trang.");
+    }
+    let mut total_bytes: usize = 0;
+    let mut out = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        let len = validate_json_ld_block(block)?;
+        total_bytes = total_bytes.saturating_add(len);
+        if total_bytes > MAX_JSON_LD_TOTAL_BYTES {
+            return Err("Tổng dung lượng json_ld vượt quá 16 KiB.");
+        }
+        out.push(block.clone());
+    }
+    Ok(out)
 }
 
 fn clean_plain_text(raw: Option<&str>, max_chars: usize, label: &str) -> ApiResult<Option<String>> {
