@@ -139,8 +139,20 @@ pub fn render(template: &str, fields: &Fields, block: &Block) -> Result<String, 
 /// Shared MiniJinja C-SEC HTML auto-escaping and fuel budget for theme CPT
 /// templates and the built-in fallback, matching the Builder's rendering rules.
 pub fn render_content(template: &str, data: &serde_json::Value) -> Result<String, &'static str> {
+    render_content_with_config(
+        template,
+        data,
+        &crate::template_sec::RenderFormattingConfig::default(),
+    )
+}
+
+pub fn render_content_with_config(
+    template: &str,
+    data: &serde_json::Value,
+    fmt_cfg: &crate::template_sec::RenderFormattingConfig,
+) -> Result<String, &'static str> {
     let context = crate::template_sec::json_to_safe_value(data);
-    crate::template_sec::render_csec("content", template, context)
+    crate::template_sec::render_csec_with_config("content", template, context, fmt_cfg)
         .map_err(|_| "Không thể render template nội dung.")
 }
 

@@ -1380,7 +1380,10 @@ pub fn render_builder_with_budget_and_base_path(
                                             &def.template,
                                         )
                                         .and_then(|compiled| {
-                                            crate::template_sec::render_block_csec_with_options_and_budget(
+                                            let fmt_cfg = crate::template_sec::RenderFormattingConfig {
+                                                timezone: state.timezone.clone(),
+                                            };
+                                            crate::template_sec::render_block_csec_with_options_and_budget_and_config(
                                                 &compiled.block_id,
                                                 &compiled.source,
                                                 &def.schema.schema,
@@ -1388,6 +1391,7 @@ pub fn render_builder_with_budget_and_base_path(
                                                 Some(&state.site_options),
                                                 is_preview,
                                                 budget,
+                                                &fmt_cfg,
                                             )
                                         });
                                     match render_res {
@@ -1425,11 +1429,15 @@ pub fn render_builder_with_budget_and_base_path(
                                 .get(&props.block_id)
                                 .map(|d| d.template.as_str())
                             {
-                                match render_plugin_block_csec_with_budget(
+                                let fmt_cfg = crate::template_sec::RenderFormattingConfig {
+                                    timezone: state.timezone.clone(),
+                                };
+                                match render_plugin_block_csec_with_budget_and_config(
                                     &props.block_id,
                                     template_src,
                                     &props.values,
                                     budget,
+                                    &fmt_cfg,
                                 ) {
                                     Ok(rendered_inner) => {
                                         already_charged_bytes = already_charged_bytes
@@ -2056,6 +2064,22 @@ pub fn render_plugin_block_csec_with_budget(
     values: &std::collections::BTreeMap<String, serde_json::Value>,
     budget: &mut RenderBudget,
 ) -> ApiResult<String> {
+    render_plugin_block_csec_with_budget_and_config(
+        block_id,
+        template_source,
+        values,
+        budget,
+        &crate::template_sec::RenderFormattingConfig::default(),
+    )
+}
+
+pub fn render_plugin_block_csec_with_budget_and_config(
+    block_id: &str,
+    template_source: &str,
+    values: &std::collections::BTreeMap<String, serde_json::Value>,
+    budget: &mut RenderBudget,
+    fmt_cfg: &crate::template_sec::RenderFormattingConfig,
+) -> ApiResult<String> {
     if budget.fuel_remaining == 0 {
         return Err(ApiError::bad_request("Đã hết ngân sách fuel render trang."));
     }
@@ -2069,7 +2093,7 @@ pub fn render_plugin_block_csec_with_budget(
         ctx_map.insert(k.clone(), crate::template_sec::json_to_safe_value(v));
     }
     let ctx = minijinja::Value::from(ctx_map);
-    let mut env = crate::template_sec::restricted_environment();
+    let mut env = crate::template_sec::restricted_environment_with_config(fmt_cfg);
     env.set_fuel(Some(node_fuel));
     env.add_template(block_id, template_source)
         .map_err(|_| ApiError::bad_request("Không thể biên dịch template."))?;

@@ -1142,7 +1142,7 @@ enum PreviewPartSource {
 
 /// Only the manifest captured for this request can authorize theme anchor
 /// expressions; no caller-provided preview values contribute permissions.
-fn active_theme_url_policy(
+pub(crate) fn active_theme_url_policy(
     active: Option<&ActiveThemeV3>,
 ) -> ApiResult<template_sec::ThemeUrlPolicy> {
     match active {
@@ -1257,6 +1257,7 @@ struct PreviewRenderContext<'a> {
     render_locale: &'a str,
     cache: &'a page::BlockTemplateCache,
     url_policy: &'a template_sec::ThemeUrlPolicy,
+    fmt_cfg: &'a template_sec::RenderFormattingConfig,
 }
 
 async fn render_preview_builder(
@@ -1386,7 +1387,7 @@ async fn render_preview_part(
                     trusted.insert(child, String::new());
                 }
             }
-            let html = template_sec::render_preview_csec_fragment_with_theme_urls(
+            let html = template_sec::render_preview_csec_fragment_with_theme_urls_and_config(
                 key,
                 source,
                 template_sec::json_to_safe_value(ctx.theme_context),
@@ -1394,6 +1395,7 @@ async fn render_preview_part(
                 &trusted,
                 budget,
                 ctx.url_policy,
+                ctx.fmt_cfg,
             )
             .map_err(ApiError::bad_request)?;
             Ok(Some(RenderedLayout {
@@ -1583,6 +1585,10 @@ pub async fn preview_typed_override_with_cache_and_locale(
     .await?;
     let general =
         settings::get_general_in_conn_for_locale(&mut *tx, Some(&effective_locale)).await?;
+    state.timezone = general.timezone.clone();
+    let fmt_cfg = template_sec::RenderFormattingConfig {
+        timezone: state.timezone.clone(),
+    };
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
@@ -1639,6 +1645,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
                 &record.content_type_key,
                 record.id,
                 Some(&options),
+                Some(general.timezone.as_str()),
                 &mut rb,
                 cache,
             )
@@ -1676,6 +1683,7 @@ pub async fn preview_typed_override_with_cache_and_locale(
         render_locale: &effective_locale,
         cache,
         url_policy: &url_policy,
+        fmt_cfg: &fmt_cfg,
     };
     let root_scope = if target.kind == TemplateCandidateKind::Part {
         part_scope_prefix(target.part_key.as_deref().unwrap_or("part"), 0)
@@ -1840,9 +1848,24 @@ impl PublicCompositionBudget {
         context: &serde_json::Value,
         slot: Option<&str>,
     ) -> ApiResult<String> {
+        self.render_theme_with_config(
+            compiled,
+            context,
+            slot,
+            &template_sec::RenderFormattingConfig::default(),
+        )
+    }
+
+    pub fn render_theme_with_config(
+        &mut self,
+        compiled: &template_sec::CompiledCsecComposition,
+        context: &serde_json::Value,
+        slot: Option<&str>,
+        fmt_cfg: &template_sec::RenderFormattingConfig,
+    ) -> ApiResult<String> {
         self.charge(compiled.part_expansions())?;
         let html = compiled
-            .render_with_remaining_fuel(
+            .render_with_config_and_remaining_fuel(
                 template_sec::json_context_with_shared_locale(
                     context,
                     self.shared_t.as_ref(),
@@ -1850,6 +1873,7 @@ impl PublicCompositionBudget {
                 ),
                 slot,
                 &mut self.render_budget.fuel_remaining,
+                fmt_cfg,
             )
             .map_err(ApiError::internal)?;
         let own_bytes = html.len().saturating_sub(slot.map_or(0, str::len));
@@ -1868,6 +1892,7 @@ struct PublicBuilderContext<'a> {
     render_locale: &'a str,
     cache: &'a page::BlockTemplateCache,
     url_policy: &'a template_sec::ThemeUrlPolicy,
+    fmt_cfg: &'a template_sec::RenderFormattingConfig,
 }
 
 /// Check the full depth of a contiguous theme graph at its actual Builder
@@ -1943,7 +1968,7 @@ async fn render_public_part(
     )
     .map_err(ApiError::internal)?;
     check_theme_part_depth(key, &active.parts, depth, ctx.url_policy)?;
-    let html = budget.render_theme(&compiled, ctx.theme_context, None)?;
+    let html = budget.render_theme_with_config(&compiled, ctx.theme_context, None, ctx.fmt_cfg)?;
     Ok(Some(RenderedLayout {
         html,
         diagnostics: Vec::new(),
@@ -2106,6 +2131,9 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
     let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
     let state = builder::read_home_tx(&mut tx).await?;
     let url_policy = active_theme_url_policy(active)?;
+    let fmt_cfg = template_sec::RenderFormattingConfig {
+        timezone: state.timezone.clone(),
+    };
     let context = PublicBuilderContext {
         state: &state,
         active,
@@ -2114,6 +2142,7 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
         render_locale: &effective_locale,
         cache,
         url_policy: &url_policy,
+        fmt_cfg: &fmt_cfg,
     };
     let stack = vec![record.canonical_target_key.clone()];
     let rendered = render_public_builder(
@@ -2193,6 +2222,9 @@ pub async fn resolve_and_render_header_footer_with_cache_for_locale(
     let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
     let state = builder::read_home_tx(&mut tx).await?;
     let url_policy = active_theme_url_policy(active_v3)?;
+    let fmt_cfg = template_sec::RenderFormattingConfig {
+        timezone: state.timezone.clone(),
+    };
     let context = PublicBuilderContext {
         state: &state,
         active: active_v3,
@@ -2201,6 +2233,7 @@ pub async fn resolve_and_render_header_footer_with_cache_for_locale(
         render_locale: &effective_locale,
         cache,
         url_policy: &url_policy,
+        fmt_cfg: &fmt_cfg,
     };
     let header = render_public_part(&mut tx, "header", 0, &[], &context, budget).await?;
     let footer = render_public_part(&mut tx, "footer", 0, &[], &context, budget).await?;
@@ -2565,6 +2598,9 @@ async fn render_preview_named_part_in_tx(
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
     let url_policy = active_theme_url_policy(active)?;
+    let fmt_cfg = template_sec::RenderFormattingConfig {
+        timezone: state.timezone.clone(),
+    };
     let part_target = TemplateCandidate {
         part_key: Some(key.to_owned()),
         ..candidate(TemplateCandidateKind::Part)
@@ -2581,6 +2617,7 @@ async fn render_preview_named_part_in_tx(
             render_locale,
             cache,
             url_policy: &url_policy,
+            fmt_cfg: &fmt_cfg,
         };
         let scope = part_scope_prefix(key, budget.expansions);
         let rendered = render_preview_builder(
@@ -2609,6 +2646,7 @@ async fn render_preview_named_part_in_tx(
             render_locale,
             cache,
             url_policy: &url_policy,
+            fmt_cfg: &fmt_cfg,
         };
         return render_preview_part(tx, key, &ctx, budget).await;
     }
@@ -2622,6 +2660,7 @@ fn render_csec_template_for_preview(
     theme_context: &serde_json::Value,
     slot_html: Option<&str>,
     budget: &mut PublicCompositionBudget,
+    fmt_cfg: &template_sec::RenderFormattingConfig,
 ) -> ApiResult<String> {
     use crate::template_sec::{
         CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
@@ -2648,7 +2687,7 @@ fn render_csec_template_for_preview(
         &url_policy,
     )
     .map_err(ApiError::bad_request)?;
-    budget.render_theme(&composition, theme_context, slot_html)
+    budget.render_theme_with_config(&composition, theme_context, slot_html, fmt_cfg)
 }
 
 fn escape_preview_text(value: &str) -> String {
@@ -2743,6 +2782,10 @@ pub async fn preview_studio_with_cache_and_locale(
     let (general, options, menus) =
         build_preview_context_in_tx(&mut tx, active.as_ref(), transient, &effective_locale).await?;
     state.site_options = options.clone();
+    state.timezone = general.timezone.clone();
+    let fmt_cfg = template_sec::RenderFormattingConfig {
+        timezone: state.timezone.clone(),
+    };
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
@@ -2813,6 +2856,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     &record.content_type_key,
                     record.id,
                     Some(&options),
+                    Some(general.timezone.as_str()),
                     &mut shared_rb,
                     cache,
                 )
@@ -2928,6 +2972,7 @@ pub async fn preview_studio_with_cache_and_locale(
             render_locale: &effective_locale,
             cache,
             url_policy: &url_policy,
+            fmt_cfg: &fmt_cfg,
         };
         let mut rendered = render_preview_builder(
             &mut tx,
@@ -2976,6 +3021,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     render_locale: &effective_locale,
                     cache,
                     url_policy: &url_policy,
+                    fmt_cfg: &fmt_cfg,
                 };
                 let slot = if target.kind == K::Part {
                     None
@@ -3012,6 +3058,7 @@ pub async fn preview_studio_with_cache_and_locale(
                     &theme_context,
                     slot,
                     &mut public_budget,
+                    &fmt_cfg,
                 )?;
                 preview_budget.sync_from_render_budget(&public_budget.render_budget);
                 out
@@ -3108,6 +3155,10 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     let (general, options, menus) =
         build_preview_context_in_tx(tx, active.as_ref(), None, &record.locale).await?;
     state.site_options = options.clone();
+    state.timezone = general.timezone.clone();
+    let fmt_cfg = template_sec::RenderFormattingConfig {
+        timezone: state.timezone.clone(),
+    };
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
@@ -3197,6 +3248,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
                 render_locale: &record.locale,
                 cache,
                 url_policy: &url_policy,
+                fmt_cfg: &fmt_cfg,
             };
             let mut tpl_rendered = render_preview_builder(
                 tx,
@@ -3223,6 +3275,7 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
                 &theme_context,
                 Some(&slot_fragment),
                 &mut public_budget,
+                &fmt_cfg,
             )?;
             preview_budget.sync_from_render_budget(&public_budget.render_budget);
             out

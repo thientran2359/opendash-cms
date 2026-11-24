@@ -1051,6 +1051,19 @@ pub struct ActiveThemeV3 {
 }
 
 impl ActiveThemeV3 {
+    pub fn asset_url_map(&self) -> BTreeMap<String, String> {
+        self.manifest
+            .assets
+            .iter()
+            .map(|asset| {
+                (
+                    asset.clone(),
+                    format!("/theme/{}/{}", self.revision_digest, asset),
+                )
+            })
+            .collect()
+    }
+
     /// Per-key merges theme dictionaries (`default_locale -> primary_subtag -> exact code`)
     /// so missing keys in secondary dictionaries never trigger strict UndefinedError.
     pub fn merged_translations(&self, locale_code: &str) -> BTreeMap<String, String> {

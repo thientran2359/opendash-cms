@@ -130,7 +130,7 @@ fn build_studio_theme_v3_zip() -> Vec<u8> {
         zip.write_all(manifest.to_string().as_bytes()).unwrap();
         zip.start_file("header.html", opts).unwrap();
         zip.write_all(
-            b"<header data-theme-header=\"1\"><span>{{ site.title }}</span><em>{{ options.banner_text }}</em>{% if options.logo_ref %}{% set url = options.logo_ref %}<img src=\"{{ url }}\" alt=\"Logo\">{% endif %}</header>",
+            b"<header data-theme-header=\"1\"><span>{{ site.title }}</span><em>{{ options.banner_text }}</em>{% if options.logo_ref %}<img src=\"{{ options.logo_ref }}\" alt=\"Logo\">{% endif %}</header>",
         )
         .unwrap();
         zip.start_file("footer.html", opts).unwrap();

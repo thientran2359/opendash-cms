@@ -19,25 +19,61 @@ pub const TEMPLATE_RECURSION_LIMIT: usize = 16;
 const MAX_COMPOSITION_PART_DEPTH: usize = 3;
 const MAX_COMPOSITION_EXPANSIONS: usize = 32;
 
-/// Explicit, manifest-derived theme anchor permissions. The private set only
-/// contains exact `options.<key>` expressions declared as public URL options.
+/// Host formatting configuration supplied per request or preview to C-SEC helpers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderFormattingConfig {
+    pub timezone: String,
+}
+
+impl Default for RenderFormattingConfig {
+    fn default() -> Self {
+        Self {
+            timezone: "UTC".to_owned(),
+        }
+    }
+}
+
+/// Explicit, manifest-derived theme URL and declared-asset permissions.
 #[derive(Debug, Clone, Default)]
 pub struct ThemeUrlPolicy {
     permitted_href_expressions: BTreeSet<String>,
+    permitted_src_expressions: BTreeSet<String>,
+    declared_assets: BTreeSet<String>,
 }
 
 impl ThemeUrlPolicy {
-    pub(crate) fn from_option_keys(keys: impl IntoIterator<Item = String>) -> Self {
+    pub(crate) fn new(
+        permitted_href_expressions: BTreeSet<String>,
+        permitted_src_expressions: BTreeSet<String>,
+        declared_assets: BTreeSet<String>,
+    ) -> Self {
         Self {
-            permitted_href_expressions: keys
-                .into_iter()
-                .map(|key| format!("options.{key}"))
-                .collect(),
+            permitted_href_expressions,
+            permitted_src_expressions,
+            declared_assets,
         }
     }
 
-    fn allows_anchor_href(&self, expr: &str) -> bool {
+    pub(crate) fn from_option_keys(keys: impl IntoIterator<Item = String>) -> Self {
+        Self::new(
+            keys.into_iter()
+                .map(|key| format!("options.{key}"))
+                .collect(),
+            BTreeSet::new(),
+            BTreeSet::new(),
+        )
+    }
+
+    fn allows_cite_href(&self, expr: &str) -> bool {
         self.permitted_href_expressions.contains(expr)
+    }
+
+    fn allows_media_src(&self, expr: &str) -> bool {
+        self.permitted_src_expressions.contains(expr)
+    }
+
+    fn allows_declared_asset(&self, path: &str) -> bool {
+        self.declared_assets.contains(path)
     }
 }
 
@@ -60,6 +96,8 @@ pub struct CompiledCsecComposition {
     name: String,
     content_count: usize,
     part_expansions: usize,
+    pub uses_related_entries: bool,
+    pub uses_recent_posts: bool,
 }
 
 impl CompiledCsecComposition {
@@ -88,6 +126,23 @@ impl CompiledCsecComposition {
         sanitized_content_html: Option<&str>,
         fuel_remaining: &mut u64,
     ) -> Result<String, &'static str> {
+        self.render_with_config_and_remaining_fuel(
+            context,
+            sanitized_content_html,
+            fuel_remaining,
+            &RenderFormattingConfig::default(),
+        )
+    }
+
+    /// Renders the compiled theme shell with host-configured date/timezone formatting
+    /// while sharing the request-local fuel budget.
+    pub(crate) fn render_with_config_and_remaining_fuel(
+        &self,
+        context: Value,
+        sanitized_content_html: Option<&str>,
+        fuel_remaining: &mut u64,
+        fmt_cfg: &RenderFormattingConfig,
+    ) -> Result<String, &'static str> {
         if *fuel_remaining == 0 || *fuel_remaining > TEMPLATE_FUEL_LIMIT {
             return Err("Fuel composition không hợp lệ hoặc đã hết.");
         }
@@ -109,7 +164,7 @@ impl CompiledCsecComposition {
         } else {
             self.source.clone()
         };
-        let mut env = restricted_environment();
+        let mut env = restricted_environment_with_config(fmt_cfg);
         env.set_fuel(Some(*fuel_remaining));
         env.add_template(&self.name, &source)
             .map_err(|_| "Không thể biên dịch theme composition.")?;
@@ -328,6 +383,29 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls(
     budget: &mut PreviewCompositionBudget,
     policy: &ThemeUrlPolicy,
 ) -> Result<String, &'static str> {
+    render_preview_csec_fragment_with_theme_urls_and_config(
+        name,
+        source,
+        context,
+        theme_sources,
+        trusted_builder_parts,
+        budget,
+        policy,
+        &RenderFormattingConfig::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_preview_csec_fragment_with_theme_urls_and_config(
+    name: &str,
+    source: &str,
+    context: Value,
+    theme_sources: &BTreeMap<String, String>,
+    trusted_builder_parts: &BTreeMap<String, String>,
+    budget: &mut PreviewCompositionBudget,
+    policy: &ThemeUrlPolicy,
+    fmt_cfg: &RenderFormattingConfig,
+) -> Result<String, &'static str> {
     if budget.fuel_remaining == 0 || budget.fuel_remaining > TEMPLATE_FUEL_LIMIT {
         return Err("Fuel preview không hợp lệ hoặc đã hết.");
     }
@@ -345,7 +423,7 @@ pub(crate) fn render_preview_csec_fragment_with_theme_urls(
     // Revalidate across source boundaries; the original source checks alone
     // cannot detect markup or syntax introduced by concatenation.
     validate_template_csec_with_theme_urls(name, &program, policy)?;
-    let mut env = restricted_environment();
+    let mut env = restricted_environment_with_config(fmt_cfg);
     env.set_fuel(Some(budget.fuel_remaining));
     env.add_template(name, &program)
         .map_err(|_| "Không thể biên dịch theme preview.")?;
@@ -522,16 +600,8 @@ const FORBIDDEN_TAGS: &[&str] = &[
     "plaintext",
 ];
 
-const ALLOWED_DYNAMIC_URL_VARS: &[&str] = &[
-    "entry.url",
-    "entry.cover_url",
-    "field.image_url",
-    "url",
-    "previous_url",
-    "next_url",
-    "archive_url",
-    "theme_asset_url",
-];
+const MAX_FILTER_STRING_BYTES: usize = 128 * 1024;
+const MAX_FILTER_SEQ_ITEMS: usize = 500;
 
 /// Constructs the restricted `Environment::empty()` with unconditional HTML auto-escaping,
 /// strict undefined behavior, fuel budget, and recursion limit.
@@ -557,16 +627,631 @@ const ALLOWED_FILTERS: &[&str] = &[
     "unique",
     "title",
     "capitalize",
+    "date_format",
+    "truncate",
+    "format_number",
+    "batch",
+    "selectattr",
+    "rejectattr",
+    "map",
 ];
 
+const UNARY_ALLOWED_TESTS: &[&str] = &[
+    "defined",
+    "undefined",
+    "even",
+    "odd",
+    "number",
+    "string",
+    "sequence",
+    "mapping",
+    "none",
+    "true",
+    "false",
+];
+
+const BINARY_ALLOWED_TESTS: &[&str] = &[
+    "eq",
+    "equalto",
+    "ne",
+    "lt",
+    "le",
+    "gt",
+    "ge",
+    "in",
+    "startingwith",
+    "endingwith",
+];
+
+const ALLOWED_TESTS: &[&str] = &[
+    "defined",
+    "undefined",
+    "in",
+    "startingwith",
+    "endingwith",
+    "even",
+    "odd",
+    "number",
+    "string",
+    "sequence",
+    "mapping",
+    "eq",
+    "equalto",
+    "ne",
+    "lt",
+    "le",
+    "gt",
+    "ge",
+    "none",
+    "true",
+    "false",
+];
+
+fn filter_default(
+    state: &minijinja::State,
+    value: &Value,
+    args: minijinja::value::Rest<Value>,
+) -> Result<Value, minijinja::Error> {
+    if value.is_none() {
+        if args.len() > 2 {
+            return Err(minijinja::Error::new(
+                minijinja::ErrorKind::TooManyArguments,
+                "too many arguments to default filter",
+            ));
+        }
+        Ok(args.first().cloned().unwrap_or_else(|| Value::from("")))
+    } else {
+        minijinja::filters::default(state, value, args)
+    }
+}
+
+fn filter_invalid_op(msg: &'static str) -> minijinja::Error {
+    minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, msg)
+}
+
+fn filter_date_format(
+    value: Value,
+    fmt: Option<&str>,
+    tz: Option<&str>,
+    default_tz: &jiff::tz::TimeZone,
+) -> Result<Value, minijinja::Error> {
+    if value.is_undefined() || value.is_none() {
+        return Ok(Value::from(""));
+    }
+    if value.kind() != minijinja::value::ValueKind::String {
+        return Err(filter_invalid_op("date_format requires a string value"));
+    }
+    let raw = value
+        .as_str()
+        .ok_or_else(|| filter_invalid_op("date_format requires a string value"))?;
+    if raw.len() > 128 {
+        return Err(filter_invalid_op("date_format input exceeds 128 bytes"));
+    }
+    let s = raw.trim();
+    if s.is_empty() {
+        return Ok(Value::from(""));
+    }
+    let fmt = match fmt {
+        Some("") => return Err(filter_invalid_op("date_format format cannot be empty")),
+        Some(f) if f.len() > 64 => {
+            return Err(filter_invalid_op("date_format format exceeds 64 bytes"));
+        }
+        Some(f) => f,
+        None => "%d/%m/%Y",
+    };
+    let target_tz = match tz {
+        Some(t) => {
+            if t.len() > 64 {
+                return Err(filter_invalid_op("date_format timezone exceeds 64 bytes"));
+            }
+            let trimmed_tz = t.trim();
+            if trimmed_tz.is_empty() {
+                default_tz.clone()
+            } else {
+                jiff::tz::TimeZone::get(trimmed_tz)
+                    .map_err(|_| filter_invalid_op("date_format invalid timezone"))?
+            }
+        }
+        None => default_tz.clone(),
+    };
+
+    if s.len() == 10
+        && s.is_ascii()
+        && let Ok(date) = jiff::civil::Date::strptime("%Y-%m-%d", s)
+    {
+        let dt = date.at(0, 0, 0, 0);
+        let formatted = jiff::fmt::strtime::format(fmt, dt)
+            .map_err(|_| filter_invalid_op("date_format invalid format for civil date"))?;
+        return Ok(Value::from(formatted));
+    }
+    if let Ok(ts) = s.parse::<jiff::Timestamp>() {
+        let zdt = ts.to_zoned_datetime(target_tz);
+        let formatted = jiff::fmt::strtime::format(fmt, &zdt)
+            .map_err(|_| filter_invalid_op("date_format failed to format timestamp"))?;
+        return Ok(Value::from(formatted));
+    }
+    if let Ok(naive) = s.parse::<jiff::civil::DateTime>() {
+        let utc_zdt = naive
+            .to_zoned_datetime(jiff::tz::TimeZone::UTC)
+            .map_err(|_| filter_invalid_op("date_format failed to normalize naive datetime"))?;
+        let zdt = utc_zdt.with_time_zone(target_tz);
+        let formatted = jiff::fmt::strtime::format(fmt, &zdt)
+            .map_err(|_| filter_invalid_op("date_format failed to format datetime"))?;
+        return Ok(Value::from(formatted));
+    }
+    Ok(Value::from(""))
+}
+
+fn filter_truncate(
+    value: Value,
+    max_chars: Option<i64>,
+    suffix: Option<&str>,
+) -> Result<Value, minijinja::Error> {
+    if value.is_undefined() || value.is_none() {
+        return Ok(Value::from(""));
+    }
+    if value.kind() != minijinja::value::ValueKind::String {
+        return Err(filter_invalid_op("truncate requires a string value"));
+    }
+    let s = value
+        .as_str()
+        .ok_or_else(|| filter_invalid_op("truncate requires a string value"))?;
+    if s.len() > MAX_FILTER_STRING_BYTES {
+        return Err(filter_invalid_op("truncate input exceeds 128 KiB"));
+    }
+    let limit = match max_chars {
+        Some(n) if n <= 0 => return Err(filter_invalid_op("truncate length must be positive")),
+        Some(n) => (n as usize).min(10_000),
+        None => 160,
+    };
+    let suffix = suffix.unwrap_or("...");
+    if suffix.chars().count() > 32 {
+        return Err(filter_invalid_op("truncate suffix exceeds 32 chars"));
+    }
+    let half = limit / 2;
+    let mut hard_end = None;
+    let mut last_ws_after_half = None;
+    for (count, (byte_idx, ch)) in s.char_indices().enumerate() {
+        if count == limit {
+            hard_end = Some(byte_idx);
+            break;
+        }
+        if ch.is_whitespace() && count >= half {
+            last_ws_after_half = Some(byte_idx);
+        }
+    }
+    let Some(hard_end) = hard_end else {
+        return Ok(Value::from(s));
+    };
+    let cut = last_ws_after_half.unwrap_or(hard_end);
+    let prefix = s[..cut].trim_end();
+    let mut out = String::with_capacity(prefix.len() + suffix.len());
+    out.push_str(prefix);
+    out.push_str(suffix);
+    Ok(Value::from(out))
+}
+
+fn group_thousands_and_join(
+    negative: bool,
+    int_part: &str,
+    frac_part: &str,
+    thousands_sep: &str,
+    decimal_sep: &str,
+) -> String {
+    let mut out = String::with_capacity(
+        usize::from(negative)
+            + int_part.len()
+            + (int_part.len() / 3) * thousands_sep.len()
+            + decimal_sep.len()
+            + frac_part.len(),
+    );
+    if negative {
+        out.push('-');
+    }
+    for (idx, chunk) in int_part.as_bytes().rchunks(3).rev().enumerate() {
+        if idx > 0 {
+            out.push_str(thousands_sep);
+        }
+        out.push_str(std::str::from_utf8(chunk).unwrap_or(""));
+    }
+    if !frac_part.is_empty() {
+        out.push_str(decimal_sep);
+        out.push_str(frac_part);
+    }
+    out
+}
+
+fn filter_format_number(
+    value: Value,
+    decimals: Option<i64>,
+    thousands_sep: Option<&str>,
+    decimal_sep: Option<&str>,
+) -> Result<Value, minijinja::Error> {
+    if value.is_undefined() || value.is_none() {
+        return Ok(Value::from(""));
+    }
+    if matches!(
+        value.kind(),
+        minijinja::value::ValueKind::Bool
+            | minijinja::value::ValueKind::Seq
+            | minijinja::value::ValueKind::Map
+            | minijinja::value::ValueKind::Bytes
+    ) {
+        return Err(filter_invalid_op("format_number requires number or string"));
+    }
+    let dec = decimals.unwrap_or(0);
+    if !(0..=6).contains(&dec) {
+        return Err(filter_invalid_op("format_number decimals must be 0..=6"));
+    }
+    let thousands_sep = thousands_sep.unwrap_or(".");
+    let decimal_sep = decimal_sep.unwrap_or(",");
+    if thousands_sep.chars().count() > 4 || decimal_sep.chars().count() > 4 {
+        return Err(filter_invalid_op("format_number separator exceeds 4 chars"));
+    }
+    let dec_usize = dec as usize;
+
+    enum ParsedNum {
+        Int(i128),
+        Float(f64),
+        NonNumeric,
+    }
+
+    let parsed = match value.kind() {
+        minijinja::value::ValueKind::Number => {
+            if value.is_integer() {
+                if let Ok(i) = i128::try_from(value.clone()) {
+                    ParsedNum::Int(i)
+                } else {
+                    ParsedNum::Float(f64::try_from(value)?)
+                }
+            } else {
+                ParsedNum::Float(f64::try_from(value)?)
+            }
+        }
+        minijinja::value::ValueKind::String => {
+            let s = value.as_str().unwrap_or("");
+            if s.len() > 64 {
+                return Err(filter_invalid_op("format_number string exceeds 64 bytes"));
+            }
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return Ok(Value::from(""));
+            }
+            if !trimmed.contains('.') && !trimmed.contains(['e', 'E']) {
+                if let Ok(i) = trimmed.parse::<i128>() {
+                    ParsedNum::Int(i)
+                } else if let Ok(f) = trimmed.parse::<f64>() {
+                    ParsedNum::Float(f)
+                } else {
+                    ParsedNum::NonNumeric
+                }
+            } else if let Ok(f) = trimmed.parse::<f64>() {
+                ParsedNum::Float(f)
+            } else {
+                ParsedNum::NonNumeric
+            }
+        }
+        _ => return Err(filter_invalid_op("format_number unsupported value type")),
+    };
+
+    match parsed {
+        ParsedNum::NonNumeric => Ok(Value::from("")),
+        ParsedNum::Int(i) => {
+            let abs_digits = i.unsigned_abs().to_string();
+            if abs_digits.len() > 32 {
+                return Err(filter_invalid_op("format_number integer exceeds 32 digits"));
+            }
+            let frac = if dec_usize > 0 {
+                "0".repeat(dec_usize)
+            } else {
+                String::new()
+            };
+            let negative = i < 0;
+            Ok(Value::from(group_thousands_and_join(
+                negative,
+                &abs_digits,
+                &frac,
+                thousands_sep,
+                decimal_sep,
+            )))
+        }
+        ParsedNum::Float(num) => {
+            if !num.is_finite() {
+                return Err(filter_invalid_op("format_number value must be finite"));
+            }
+            let formatted = format!("{:.*}", dec_usize, num.abs());
+            let (int_part, frac_part) = formatted.split_once('.').unwrap_or((&formatted, ""));
+            if int_part.len() > 32 {
+                return Err(filter_invalid_op(
+                    "format_number integer part exceeds 32 digits",
+                ));
+            }
+            let negative = num.is_sign_negative()
+                && (int_part.bytes().any(|b| b != b'0') || frac_part.bytes().any(|b| b != b'0'));
+            Ok(Value::from(group_thousands_and_join(
+                negative,
+                int_part,
+                frac_part,
+                thousands_sep,
+                decimal_sep,
+            )))
+        }
+    }
+}
+
+fn read_bounded_sequence(value: &Value, name: &str) -> Result<Vec<Value>, minijinja::Error> {
+    if value.kind() != minijinja::value::ValueKind::Seq {
+        return Err(filter_invalid_op(if name == "batch" {
+            "batch requires a sequence"
+        } else {
+            "sequence filter requires a sequence"
+        }));
+    }
+    let iter = value.try_iter()?;
+    let mut items = Vec::new();
+    for item in iter.take(MAX_FILTER_SEQ_ITEMS + 1) {
+        if items.len() == MAX_FILTER_SEQ_ITEMS {
+            return Err(filter_invalid_op("sequence exceeds 500 items limit"));
+        }
+        items.push(item);
+    }
+    Ok(items)
+}
+
+fn filter_batch(
+    value: Value,
+    size: i64,
+    extra: minijinja::value::Rest<Value>,
+) -> Result<Value, minijinja::Error> {
+    if value.is_undefined() || value.is_none() {
+        return Ok(Value::from(Vec::<Value>::new()));
+    }
+    if extra.len() > 1 {
+        return Err(filter_invalid_op(
+            "batch accepts at most 1 extra fill argument",
+        ));
+    }
+    if size <= 0 || size > 100 {
+        return Err(filter_invalid_op("batch size must be in 1..=100"));
+    }
+    let items = read_bounded_sequence(&value, "batch")?;
+    let fill = if extra.len() == 1 && !extra[0].is_undefined() {
+        Some(extra[0].clone())
+    } else {
+        None
+    };
+    let chunk_size = size as usize;
+    let mut chunks = Vec::with_capacity(items.len().div_ceil(chunk_size));
+    for slice in items.chunks(chunk_size) {
+        let mut chunk = slice.to_vec();
+        if chunk.len() < chunk_size
+            && let Some(pad) = &fill
+        {
+            while chunk.len() < chunk_size {
+                chunk.push(pad.clone());
+            }
+        }
+        chunks.push(Value::from(chunk));
+    }
+    Ok(Value::from(chunks))
+}
+
+fn parse_validated_attr_path(attr: &str) -> Result<Vec<&str>, minijinja::Error> {
+    let segments: Vec<&str> = attr.split('.').collect();
+    if !(1..=3).contains(&segments.len()) {
+        return Err(filter_invalid_op("attribute path must have 1..=3 segments"));
+    }
+    for seg in &segments {
+        if seg.is_empty()
+            || seg.len() > 64
+            || seg.starts_with("__")
+            || !seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            return Err(filter_invalid_op("invalid attribute path segment"));
+        }
+    }
+    Ok(segments)
+}
+
+fn resolve_attr_path(item: &Value, segments: &[&str]) -> Value {
+    let mut cur = item.clone();
+    for seg in segments {
+        if cur.kind() != minijinja::value::ValueKind::Map {
+            return Value::UNDEFINED;
+        }
+        match cur.get_attr(seg) {
+            Ok(next) => cur = next,
+            Err(_) => return Value::UNDEFINED,
+        }
+    }
+    cur
+}
+
+fn eval_attr_test_predicate(
+    state: &minijinja::State,
+    attr_val: &Value,
+    test_name: Option<&str>,
+    rhs: Option<&Value>,
+) -> Result<bool, minijinja::Error> {
+    let Some(test_name) = test_name else {
+        return Ok(attr_val.is_true());
+    };
+    match rhs {
+        None => Ok(match test_name {
+            "defined" => minijinja::tests::is_defined(attr_val),
+            "undefined" => minijinja::tests::is_undefined(attr_val),
+            "even" => minijinja::tests::is_even(attr_val.clone()),
+            "odd" => minijinja::tests::is_odd(attr_val.clone()),
+            "number" => minijinja::tests::is_number(attr_val),
+            "string" => minijinja::tests::is_string(attr_val),
+            "sequence" => minijinja::tests::is_sequence(attr_val),
+            "mapping" => minijinja::tests::is_mapping(attr_val),
+            "none" => minijinja::tests::is_none(attr_val),
+            "true" => minijinja::tests::is_true(attr_val),
+            "false" => minijinja::tests::is_false(attr_val),
+            _ => return Err(filter_invalid_op("disallowed unary test")),
+        }),
+        Some(rhs) => match test_name {
+            "eq" | "equalto" => Ok(minijinja::tests::is_eq(attr_val, rhs)),
+            "ne" => Ok(minijinja::tests::is_ne(attr_val, rhs)),
+            "lt" => Ok(minijinja::tests::is_lt(attr_val, rhs)),
+            "le" => Ok(minijinja::tests::is_le(attr_val, rhs)),
+            "gt" => Ok(minijinja::tests::is_gt(attr_val, rhs)),
+            "ge" => Ok(minijinja::tests::is_ge(attr_val, rhs)),
+            "in" => minijinja::tests::is_in(state, attr_val, rhs),
+            "startingwith" => {
+                let prefix = rhs
+                    .as_str()
+                    .ok_or_else(|| filter_invalid_op("startingwith requires string operand"))?;
+                Ok(attr_val.as_str().is_some_and(|s| {
+                    minijinja::tests::is_startingwith(
+                        std::borrow::Cow::Borrowed(s),
+                        std::borrow::Cow::Borrowed(prefix),
+                    )
+                }))
+            }
+            "endingwith" => {
+                let suffix = rhs
+                    .as_str()
+                    .ok_or_else(|| filter_invalid_op("endingwith requires string operand"))?;
+                Ok(attr_val.as_str().is_some_and(|s| {
+                    minijinja::tests::is_endingwith(
+                        std::borrow::Cow::Borrowed(s),
+                        std::borrow::Cow::Borrowed(suffix),
+                    )
+                }))
+            }
+            _ => Err(filter_invalid_op("disallowed binary test")),
+        },
+    }
+}
+
+fn filter_sequence_by_attr(
+    state: &minijinja::State,
+    value: Value,
+    attr: &str,
+    extra: minijinja::value::Rest<Value>,
+    invert: bool,
+) -> Result<Value, minijinja::Error> {
+    if value.is_undefined() || value.is_none() {
+        return Ok(Value::from(Vec::<Value>::new()));
+    }
+    let segments = parse_validated_attr_path(attr)?;
+    let (test_name, rhs): (Option<&str>, Option<&Value>) = match extra.len() {
+        0 => (None, None),
+        1 => {
+            let name = extra[0]
+                .as_str()
+                .ok_or_else(|| filter_invalid_op("test name must be a string"))?;
+            if !UNARY_ALLOWED_TESTS.contains(&name) {
+                return Err(filter_invalid_op("test is not an allowed unary C-SEC test"));
+            }
+            (Some(name), None)
+        }
+        2 => {
+            let name = extra[0]
+                .as_str()
+                .ok_or_else(|| filter_invalid_op("test name must be a string"))?;
+            if !BINARY_ALLOWED_TESTS.contains(&name) {
+                return Err(filter_invalid_op(
+                    "test is not an allowed binary C-SEC test",
+                ));
+            }
+            if matches!(name, "startingwith" | "endingwith") && extra[1].as_str().is_none() {
+                return Err(filter_invalid_op("string test requires string operand"));
+            }
+            (Some(name), Some(&extra[1]))
+        }
+        _ => return Err(filter_invalid_op("too many arguments to attr filter")),
+    };
+    let items = read_bounded_sequence(&value, "attr")?;
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let attr_val = resolve_attr_path(&item, &segments);
+        let matched = eval_attr_test_predicate(state, &attr_val, test_name, rhs)?;
+        if matched ^ invert {
+            out.push(item);
+        }
+    }
+    Ok(Value::from(out))
+}
+
+fn filter_selectattr(
+    state: &minijinja::State,
+    value: Value,
+    attr: &str,
+    extra: minijinja::value::Rest<Value>,
+) -> Result<Value, minijinja::Error> {
+    filter_sequence_by_attr(state, value, attr, extra, false)
+}
+
+fn filter_rejectattr(
+    state: &minijinja::State,
+    value: Value,
+    attr: &str,
+    extra: minijinja::value::Rest<Value>,
+) -> Result<Value, minijinja::Error> {
+    filter_sequence_by_attr(state, value, attr, extra, true)
+}
+
+fn filter_map(
+    value: Value,
+    rest: minijinja::value::Rest<minijinja::value::ValueOrKwargs>,
+) -> Result<Value, minijinja::Error> {
+    if value.is_undefined() || value.is_none() {
+        return Ok(Value::from(Vec::<Value>::new()));
+    }
+    let raw = rest.into_values();
+    let (args, kwargs) = minijinja::value::from_args::<(&[Value], minijinja::value::Kwargs)>(&raw)?;
+    let (attr, default_val) = match args.len() {
+        1 => {
+            let attr = args[0]
+                .as_str()
+                .ok_or_else(|| filter_invalid_op("map positional argument must be a string"))?;
+            kwargs.assert_all_used()?;
+            (attr, Value::from(()))
+        }
+        0 => {
+            let attr: &str = kwargs.get("attribute")?;
+            let default_opt: Option<Value> = kwargs.get("default")?;
+            kwargs.assert_all_used()?;
+            (attr, default_opt.unwrap_or_else(|| Value::from(())))
+        }
+        _ => return Err(filter_invalid_op("map requires attribute argument")),
+    };
+    let segments = parse_validated_attr_path(attr)?;
+    let items = read_bounded_sequence(&value, "map")?;
+    let mut out = Vec::with_capacity(items.len());
+    for item in items {
+        let resolved = resolve_attr_path(&item, &segments);
+        if resolved.is_undefined() {
+            out.push(default_val.clone());
+        } else {
+            out.push(resolved);
+        }
+    }
+    Ok(Value::from(out))
+}
+
 pub fn restricted_environment() -> Environment<'static> {
+    restricted_environment_with_config(&RenderFormattingConfig::default())
+}
+
+pub fn restricted_environment_with_config(cfg: &RenderFormattingConfig) -> Environment<'static> {
     let mut env = Environment::empty();
     env.set_auto_escape_callback(|_| AutoEscape::Html);
     env.set_undefined_behavior(UndefinedBehavior::Strict);
     env.set_fuel(Some(TEMPLATE_FUEL_LIMIT));
     env.set_recursion_limit(TEMPLATE_RECURSION_LIMIT);
-    env.add_filter("default", minijinja::filters::default);
-    env.add_filter("d", minijinja::filters::default);
+    env.set_formatter(|out, state, value| {
+        if value.is_none() {
+            Ok(())
+        } else {
+            minijinja::escape_formatter(out, state, value)
+        }
+    });
+    env.add_filter("default", filter_default);
+    env.add_filter("d", filter_default);
     env.add_filter("trim", minijinja::filters::trim);
     env.add_filter("lower", minijinja::filters::lower);
     env.add_filter("upper", minijinja::filters::upper);
@@ -586,8 +1271,42 @@ pub fn restricted_environment() -> Environment<'static> {
     env.add_filter("unique", minijinja::filters::unique);
     env.add_filter("title", minijinja::filters::title);
     env.add_filter("capitalize", minijinja::filters::capitalize);
+    let default_tz =
+        jiff::tz::TimeZone::get(cfg.timezone.as_str()).unwrap_or(jiff::tz::TimeZone::UTC);
+    env.add_filter(
+        "date_format",
+        move |value: Value, fmt: Option<&str>, tz: Option<&str>| {
+            filter_date_format(value, fmt, tz, &default_tz)
+        },
+    );
+    env.add_filter("truncate", filter_truncate);
+    env.add_filter("format_number", filter_format_number);
+    env.add_filter("batch", filter_batch);
+    env.add_filter("selectattr", filter_selectattr);
+    env.add_filter("rejectattr", filter_rejectattr);
+    env.add_filter("map", filter_map);
+
     env.add_test("defined", minijinja::tests::is_defined);
     env.add_test("undefined", minijinja::tests::is_undefined);
+    env.add_test("eq", minijinja::tests::is_eq);
+    env.add_test("equalto", minijinja::tests::is_eq);
+    env.add_test("ne", minijinja::tests::is_ne);
+    env.add_test("lt", minijinja::tests::is_lt);
+    env.add_test("le", minijinja::tests::is_le);
+    env.add_test("gt", minijinja::tests::is_gt);
+    env.add_test("ge", minijinja::tests::is_ge);
+    env.add_test("none", minijinja::tests::is_none);
+    env.add_test("true", minijinja::tests::is_true);
+    env.add_test("false", minijinja::tests::is_false);
+    env.add_test("in", minijinja::tests::is_in);
+    env.add_test("startingwith", minijinja::tests::is_startingwith);
+    env.add_test("endingwith", minijinja::tests::is_endingwith);
+    env.add_test("even", minijinja::tests::is_even);
+    env.add_test("odd", minijinja::tests::is_odd);
+    env.add_test("number", minijinja::tests::is_number);
+    env.add_test("string", minijinja::tests::is_string);
+    env.add_test("sequence", minijinja::tests::is_sequence);
+    env.add_test("mapping", minijinja::tests::is_mapping);
     env
 }
 
@@ -601,6 +1320,14 @@ pub fn validate_template_csec_with_theme_urls(
     source: &str,
     policy: &ThemeUrlPolicy,
 ) -> Result<(), &'static str> {
+    validate_template_csec_with_usage_flags(name, source, policy).map(|_| ())
+}
+
+fn validate_template_csec_with_usage_flags(
+    name: &str,
+    source: &str,
+    policy: &ThemeUrlPolicy,
+) -> Result<ThemeTemplateUsageFlags, &'static str> {
     if source.trim().is_empty() {
         return Err("Template không được để trống.");
     }
@@ -609,19 +1336,32 @@ pub fn validate_template_csec_with_theme_urls(
 
     validate_stmt(&ast)?;
     reject_reserved_context_rebinding(&ast)?;
-    validate_theme_html_context(source, false, policy)?;
+    let is_full_doctype_doc = source
+        .trim_start()
+        .to_ascii_lowercase()
+        .starts_with("<!doctype");
+    let usage = walk_theme_ast_with_url_scopes(&ast, false, is_full_doctype_doc, policy)?;
 
     let mut env = restricted_environment();
     env.add_template(name, source)
         .map_err(|_| "Không thể biên dịch template trong môi trường an toàn.")?;
-    Ok(())
+    Ok(usage)
 }
 
 /// Validates and renders a template under C-SEC limits (fuel, recursion, 512 KiB output cap,
 /// and post-render URL/HTML boundary verification).
 pub fn render_csec(name: &str, source: &str, context: Value) -> Result<String, &'static str> {
+    render_csec_with_config(name, source, context, &RenderFormattingConfig::default())
+}
+
+pub fn render_csec_with_config(
+    name: &str,
+    source: &str,
+    context: Value,
+    fmt_cfg: &RenderFormattingConfig,
+) -> Result<String, &'static str> {
     validate_template_csec(name, source)?;
-    let mut env = restricted_environment();
+    let mut env = restricted_environment_with_config(fmt_cfg);
     env.add_template(name, source)
         .map_err(|_| "Không thể biên dịch template.")?;
     let tpl = env
@@ -721,12 +1461,14 @@ pub fn validate_and_compile_csec_composition_with_theme_urls(
     }
     // This last check catches dangerous markup introduced across part boundaries,
     // in addition to the independent source checks before expansion.
-    validate_template_csec_with_theme_urls(root_name, &compiled_source, policy)?;
+    let usage = validate_template_csec_with_usage_flags(root_name, &compiled_source, policy)?;
     Ok(CompiledCsecComposition {
         source: compiled_source,
         name: root_name.to_owned(),
         content_count,
         part_expansions: expansions,
+        uses_related_entries: usage.uses_related_entries,
+        uses_recent_posts: usage.uses_recent_posts,
     })
 }
 
@@ -841,27 +1583,15 @@ fn composition_sites(
     if source.contains(CONTENT_SLOT_TOKEN) {
         return Err("Theme HTML chứa marker nội bộ bị cấm.");
     }
-    validate_theme_html_context(source, false, policy)?;
     let ast = parse(source, name, SyntaxConfig::default())
         .map_err(|_| "Cú pháp theme MiniJinja không hợp lệ.")?;
     reject_reserved_context_rebinding(&ast)?;
-    // Scan what each possible MiniJinja branch can actually emit. A linear
-    // scan through the source can see a closing quote in the *other* branch
-    // and mistake a real runtime attribute for an HTML body position.
-    let final_contexts =
-        ensure_composition_body_context(&ast, &BTreeSet::from([HtmlScanState::Body]))?;
-    // A part is substituted into its caller as a raw HTML fragment. Even if
-    // the caller's next od_content() is body-scoped, an unclosed attribute,
-    // comment or style from one Jinja branch of the part would move the
-    // injected content into an unsafe context. Require every possible part
-    // execution path to return to the HTML body before composing it.
-    if is_part
-        && final_contexts
-            .iter()
-            .any(|state| *state != HtmlScanState::Body)
-    {
-        return Err("Template part phải kết thúc ngoài HTML tag/comment/style.");
-    }
+    let is_full_doctype_doc = !is_part
+        && source
+            .trim_start()
+            .to_ascii_lowercase()
+            .starts_with("<!doctype");
+    let _ = walk_theme_ast_with_url_scopes(&ast, is_part, is_full_doctype_doc, policy)?;
     let mut sites = Vec::new();
     collect_composition_sites(&ast, source, false, &mut sites)?;
     sites.sort_by_key(|site| site.start);
@@ -1012,10 +1742,41 @@ enum CommentScanSubState {
     Dash2Bang,
 }
 
-/// Bounded lexical HTML states for each possible Jinja control-flow path.
-/// A Jinja branch cannot borrow a closing quote/tag from another branch.
-/// The prefix is only used to recognize comments, style, and title tags; it is
-/// deliberately bounded so hostile templates cannot grow validation state.
+fn step_comment_substate(sub: CommentScanSubState, byte: u8) -> Option<CommentScanSubState> {
+    match sub {
+        CommentScanSubState::Start => match byte {
+            b'>' => None,
+            b'-' => Some(CommentScanSubState::StartDash),
+            _ => Some(CommentScanSubState::Body),
+        },
+        CommentScanSubState::StartDash => match byte {
+            b'>' => None,
+            b'-' => Some(CommentScanSubState::Dash2),
+            _ => Some(CommentScanSubState::Body),
+        },
+        CommentScanSubState::Body => match byte {
+            b'-' => Some(CommentScanSubState::Dash1),
+            _ => Some(CommentScanSubState::Body),
+        },
+        CommentScanSubState::Dash1 => match byte {
+            b'-' => Some(CommentScanSubState::Dash2),
+            _ => Some(CommentScanSubState::Body),
+        },
+        CommentScanSubState::Dash2 => match byte {
+            b'>' => None,
+            b'!' => Some(CommentScanSubState::Dash2Bang),
+            b'-' => Some(CommentScanSubState::Dash2),
+            _ => Some(CommentScanSubState::Body),
+        },
+        CommentScanSubState::Dash2Bang => match byte {
+            b'>' => None,
+            b'-' => Some(CommentScanSubState::Dash1),
+            _ => Some(CommentScanSubState::Body),
+        },
+    }
+}
+
+/// Bounded lexical HTML states for block templates and preview nonce replacement.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum HtmlScanState {
     Body,
@@ -1033,36 +1794,9 @@ impl HtmlScanState {
                 prefix: "<".to_owned(),
             },
             Self::Body => Self::Body,
-            Self::Comment(sub) => match sub {
-                CommentScanSubState::Start => match byte {
-                    b'>' => Self::Body,
-                    b'-' => Self::Comment(CommentScanSubState::StartDash),
-                    _ => Self::Comment(CommentScanSubState::Body),
-                },
-                CommentScanSubState::StartDash => match byte {
-                    b'>' => Self::Body,
-                    b'-' => Self::Comment(CommentScanSubState::Dash2),
-                    _ => Self::Comment(CommentScanSubState::Body),
-                },
-                CommentScanSubState::Body => match byte {
-                    b'-' => Self::Comment(CommentScanSubState::Dash1),
-                    _ => Self::Comment(CommentScanSubState::Body),
-                },
-                CommentScanSubState::Dash1 => match byte {
-                    b'-' => Self::Comment(CommentScanSubState::Dash2),
-                    _ => Self::Comment(CommentScanSubState::Body),
-                },
-                CommentScanSubState::Dash2 => match byte {
-                    b'>' => Self::Body,
-                    b'!' => Self::Comment(CommentScanSubState::Dash2Bang),
-                    b'-' => Self::Comment(CommentScanSubState::Dash2),
-                    _ => Self::Comment(CommentScanSubState::Body),
-                },
-                CommentScanSubState::Dash2Bang => match byte {
-                    b'>' => Self::Body,
-                    b'-' => Self::Comment(CommentScanSubState::Dash1),
-                    _ => Self::Comment(CommentScanSubState::Body),
-                },
+            Self::Comment(sub) => match step_comment_substate(sub, byte) {
+                Some(next) => Self::Comment(next),
+                None => Self::Body,
             },
             Self::Style { closing_prefix } => {
                 const CLOSE: &[u8] = b"</style>";
@@ -1140,85 +1874,6 @@ impl HtmlScanState {
             }
         }
     }
-}
-
-fn ensure_composition_body_context(
-    stmt: &Stmt<'_>,
-    states: &BTreeSet<HtmlScanState>,
-) -> Result<BTreeSet<HtmlScanState>, &'static str> {
-    match stmt {
-        Stmt::Template(t) => ensure_composition_body_sequence(&t.children, states),
-        Stmt::EmitRaw(raw) => {
-            let mut result = BTreeSet::new();
-            for initial in states {
-                let final_state = raw
-                    .raw
-                    .bytes()
-                    .fold(initial.clone(), HtmlScanState::consume);
-                result.insert(final_state);
-            }
-            Ok(result)
-        }
-        Stmt::EmitExpr(expr) => {
-            if parse_composition_call(&expr.expr)?.is_some()
-                && states.iter().any(|state| *state != HtmlScanState::Body)
-            {
-                return Err("od_part/od_content chỉ được xuất hiện trong thân HTML.");
-            }
-            Ok(states.clone())
-        }
-        Stmt::IfCond(condition) => {
-            let mut result = ensure_composition_body_sequence(&condition.true_body, states)?;
-            result.extend(ensure_composition_body_sequence(
-                &condition.false_body,
-                states,
-            )?);
-            bounded_html_states(result)
-        }
-        Stmt::WithBlock(block) => ensure_composition_body_sequence(&block.body, states),
-        Stmt::ForLoop(loop_stmt) => {
-            // Zero, one and repeated iterations can leave different HTML
-            // contexts for a following slot. Close over those finite states;
-            // composition *within* the loop is separately rejected by AST.
-            let mut possible = states.clone();
-            let mut frontier = states.clone();
-            let mut settled = false;
-            for _ in 0..64 {
-                let after = ensure_composition_body_sequence(&loop_stmt.body, &frontier)?;
-                let new_states: BTreeSet<_> = after.difference(&possible).cloned().collect();
-                if new_states.is_empty() {
-                    settled = true;
-                    break;
-                }
-                possible.extend(new_states.iter().cloned());
-                bounded_html_states(possible.clone())?;
-                frontier = new_states;
-            }
-            if !settled {
-                return Err("Không thể xác định vị trí HTML sau vòng lặp.");
-            }
-            // The else body may follow the loop; over-approximate safely.
-            let after_else = ensure_composition_body_sequence(&loop_stmt.else_body, &possible)?;
-            possible.extend(after_else);
-            bounded_html_states(possible)
-        }
-        // SetBlock captures text into a variable and does not emit the body
-        // directly. Calls within it are prohibited by collect_composition_sites.
-        Stmt::SetBlock(_) => Ok(states.clone()),
-        _ => Ok(states.clone()),
-    }
-}
-
-fn ensure_composition_body_sequence(
-    children: &[Stmt<'_>],
-    states: &BTreeSet<HtmlScanState>,
-) -> Result<BTreeSet<HtmlScanState>, &'static str> {
-    let mut result = states.clone();
-    for child in children {
-        result = ensure_composition_body_context(child, &result)?;
-        bounded_html_states(result.clone())?;
-    }
-    Ok(result)
 }
 
 fn bounded_html_states(
@@ -1521,12 +2176,25 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
 const RESERVED_CONTEXT_VARS: &[&str] = &[
     "options",
     "theme_options",
-    "locale",
-    "t",
+    "theme_assets",
     "site",
     "menus",
-    "entry",
     "entries",
+    "pagination",
+    "breadcrumbs",
+    "taxonomy",
+    "related_entries",
+    "recent_posts",
+    "route",
+    "locale",
+    "t",
+    "content_type",
+    "theme_asset_url",
+    "previous_url",
+    "next_url",
+    "archive_url",
+    "od_content",
+    "od_part",
 ];
 
 fn binds_reserved_context(expr: &Expr<'_>) -> bool {
@@ -1550,9 +2218,7 @@ fn reject_reserved_context_rebinding(stmt: &Stmt<'_>) -> Result<(), &'static str
             .iter()
             .try_for_each(reject_reserved_context_rebinding),
         Stmt::ForLoop(f) => {
-            let is_canonical_entries_loop = matches!(&f.target, Expr::Var(t) if t.id == "entry")
-                && matches!(&f.iter, Expr::Var(it) if it.id == "entries");
-            if !is_canonical_entries_loop && binds_reserved_context(&f.target) {
+            if binds_reserved_context(&f.target) {
                 return forbidden();
             }
             f.body
@@ -1641,6 +2307,10 @@ fn validate_expr(expr: &Expr<'_>) -> Result<(), &'static str> {
             if matches!(&g.expr, Expr::Var(v) if v.id == "t") {
                 return Err("C-SEC cấm truy cập t[...] động; hãy dùng t.<key>.");
             }
+            if matches!(&g.subscript_expr, Expr::Const(c) if c.value.as_str().is_some_and(|s| s.starts_with("__")))
+            {
+                return Err("C-SEC cấm truy cập thuộc tính dunder (__).");
+            }
             validate_expr(&g.expr)?;
             validate_expr(&g.subscript_expr)
         }
@@ -1676,6 +2346,9 @@ fn validate_expr(expr: &Expr<'_>) -> Result<(), &'static str> {
             Ok(())
         }
         Expr::Test(t) => {
+            if !ALLOWED_TESTS.contains(&t.name) {
+                return Err("Template sử dụng test MiniJinja không nằm trong whitelist C-SEC.");
+            }
             validate_expr(&t.expr)?;
             for arg in &t.args {
                 validate_call_arg(arg)?;
@@ -1858,16 +2531,1642 @@ fn find_html5_comment_end_in_template(bytes: &[u8], start: usize) -> Option<usiz
     None
 }
 
-fn validate_html_and_css_context(src: &str, post_render: bool) -> Result<(), &'static str> {
-    validate_html_and_css_context_with_url_vars(src, post_render, None, None)
+#[derive(Debug, Default, Clone, Copy)]
+struct ThemeTemplateUsageFlags {
+    uses_related_entries: bool,
+    uses_recent_posts: bool,
 }
 
-fn validate_theme_html_context(
-    src: &str,
-    post_render: bool,
-    policy: &ThemeUrlPolicy,
+fn record_usage_flags_in_call_arg(
+    arg: &minijinja::machinery::ast::CallArg<'_>,
+    usage: &mut ThemeTemplateUsageFlags,
+) {
+    match arg {
+        minijinja::machinery::ast::CallArg::Pos(e)
+        | minijinja::machinery::ast::CallArg::Kwarg(_, e)
+        | minijinja::machinery::ast::CallArg::PosSplat(e)
+        | minijinja::machinery::ast::CallArg::KwargSplat(e) => record_usage_flags_in_expr(e, usage),
+    }
+}
+
+fn record_usage_flags_in_expr(expr: &Expr<'_>, usage: &mut ThemeTemplateUsageFlags) {
+    match expr {
+        Expr::Var(v) => {
+            if v.id == "related_entries" {
+                usage.uses_related_entries = true;
+            } else if v.id == "recent_posts" {
+                usage.uses_recent_posts = true;
+            }
+        }
+        Expr::Const(_) => {}
+        Expr::Slice(s) => {
+            record_usage_flags_in_expr(&s.expr, usage);
+            if let Some(start) = &s.start {
+                record_usage_flags_in_expr(start, usage);
+            }
+            if let Some(stop) = &s.stop {
+                record_usage_flags_in_expr(stop, usage);
+            }
+            if let Some(step) = &s.step {
+                record_usage_flags_in_expr(step, usage);
+            }
+        }
+        Expr::UnaryOp(u) => record_usage_flags_in_expr(&u.expr, usage),
+        Expr::BinOp(b) => {
+            record_usage_flags_in_expr(&b.left, usage);
+            record_usage_flags_in_expr(&b.right, usage);
+        }
+        Expr::Compare(c) => {
+            record_usage_flags_in_expr(&c.expr, usage);
+            for op in &c.ops {
+                record_usage_flags_in_expr(&op.expr, usage);
+            }
+        }
+        Expr::IfExpr(i) => {
+            record_usage_flags_in_expr(&i.test_expr, usage);
+            record_usage_flags_in_expr(&i.true_expr, usage);
+            if let Some(f) = &i.false_expr {
+                record_usage_flags_in_expr(f, usage);
+            }
+        }
+        Expr::GetAttr(g) => record_usage_flags_in_expr(&g.expr, usage),
+        Expr::GetItem(g) => {
+            record_usage_flags_in_expr(&g.expr, usage);
+            record_usage_flags_in_expr(&g.subscript_expr, usage);
+        }
+        Expr::List(l) => {
+            for item in &l.items {
+                record_usage_flags_in_expr(item, usage);
+            }
+        }
+        Expr::Tuple(t) => {
+            for item in &t.items {
+                record_usage_flags_in_expr(item, usage);
+            }
+        }
+        Expr::Map(m) => {
+            for (k, v) in m.keys.iter().zip(m.values.iter()) {
+                record_usage_flags_in_expr(k, usage);
+                record_usage_flags_in_expr(v, usage);
+            }
+        }
+        Expr::Filter(f) => {
+            if let Some(e) = &f.expr {
+                record_usage_flags_in_expr(e, usage);
+            }
+            for arg in &f.args {
+                record_usage_flags_in_call_arg(arg, usage);
+            }
+        }
+        Expr::Test(t) => {
+            record_usage_flags_in_expr(&t.expr, usage);
+            for arg in &t.args {
+                record_usage_flags_in_call_arg(arg, usage);
+            }
+        }
+        Expr::Call(c) => {
+            record_usage_flags_in_expr(&c.expr, usage);
+            for arg in &c.args {
+                record_usage_flags_in_call_arg(arg, usage);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum UrlSourceKind {
+    TrustedEntry,
+    TrustedEntryBatch,
+    TrustedLink,
+    TrustedField,
+    TrustedRawUrl,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UrlScopeStack {
+    frames: Vec<BTreeMap<String, Option<UrlSourceKind>>>,
+}
+
+impl UrlScopeStack {
+    fn root() -> Self {
+        Self {
+            frames: vec![BTreeMap::from([(
+                "entry".to_owned(),
+                Some(UrlSourceKind::TrustedEntry),
+            )])],
+        }
+    }
+
+    fn push_frame(&mut self, frame: BTreeMap<String, Option<UrlSourceKind>>) {
+        self.frames.push(frame);
+    }
+
+    fn pop_frame(&mut self) {
+        if self.frames.len() > 1 {
+            self.frames.pop();
+        }
+    }
+
+    fn insert_top(&mut self, name: String, binding: Option<UrlSourceKind>) {
+        if let Some(top) = self.frames.last_mut() {
+            top.insert(name, binding);
+        }
+    }
+
+    fn lookup(&self, name: &str) -> Option<UrlSourceKind> {
+        for frame in self.frames.iter().rev() {
+            if let Some(binding) = frame.get(name) {
+                return *binding;
+            }
+        }
+        None
+    }
+
+    fn intersect(a: &Self, b: &Self) -> Self {
+        let frames = a
+            .frames
+            .iter()
+            .zip(b.frames.iter())
+            .map(|(fa, fb)| {
+                let mut merged = BTreeMap::new();
+                for key in fa.keys().chain(fb.keys()) {
+                    let val = match (fa.get(key), fb.get(key)) {
+                        (Some(Some(ka)), Some(Some(kb))) if ka == kb => Some(*ka),
+                        _ => None,
+                    };
+                    merged.insert(key.clone(), val);
+                }
+                merged
+            })
+            .collect();
+        Self { frames }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum TagPhase {
+    TagName,
+    BeforeAttr,
+    AttrName,
+    AfterAttrName,
+    BeforeAttrValue,
+    AttrValue,
+    SelfClosingSlash,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum ThemeHtmlState {
+    Body,
+    BodyLt,
+    BodyLtSlash,
+    BodyLtBang {
+        buf: [u8; 7],
+        len: u8,
+    },
+    Doctype,
+    Comment(CommentScanSubState),
+    Style {
+        closing_prefix: usize,
+        css_buf: String,
+    },
+    Title {
+        closing_prefix: usize,
+    },
+    Tag {
+        tag_name: String,
+        is_close: bool,
+        phase: TagPhase,
+        attr_name: String,
+        quote: Option<u8>,
+        attr_has_static_bytes: bool,
+        attr_expr_count: u8,
+        seen_attrs: BTreeSet<String>,
+        link_rel_stylesheet: bool,
+        link_has_valid_href: bool,
+        meta_ok: bool,
+        attr_static_buf: String,
+    },
+}
+
+const MAX_THEME_WALKER_STATES: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UrlAttrSlot {
+    AnchorHref,
+    Cite,
+    SrcAndHref,
+    LinkCss,
+}
+
+fn is_safe_theme_relative_path(raw: &str) -> bool {
+    !raw.is_empty()
+        && raw.is_ascii()
+        && !raw.starts_with('/')
+        && !raw.ends_with('/')
+        && !raw.contains('\\')
+        && !raw.contains(':')
+        && !raw.bytes().any(|b| b < 0x20 || b == 0x7f)
+        && raw
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+pub(crate) fn is_valid_theme_stylesheet_href(raw_val: &str) -> bool {
+    if raw_val.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return false;
+    }
+    let decoded = decode_html_entities_for_url(raw_val);
+    if decoded.chars().any(|c| c.is_whitespace() || c.is_control())
+        || decoded.contains(['?', '#', '\\'])
+    {
+        return false;
+    }
+    let Some(rest) = decoded.strip_prefix("/theme/") else {
+        return false;
+    };
+    let Some((digest, rel_path)) = rest.split_once('/') else {
+        return false;
+    };
+    digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        && is_safe_theme_relative_path(rel_path)
+        && rel_path.ends_with(".css")
+}
+
+fn is_dangerous_attr_name(attr_name: &str) -> bool {
+    attr_name.starts_with("on")
+        || matches!(
+            attr_name,
+            "srcdoc" | "formaction" | "action" | "xmlns" | "xlink:href"
+        )
+}
+
+fn is_security_checked_attr(attr_name: &str) -> bool {
+    matches!(
+        attr_name,
+        "href"
+            | "src"
+            | "poster"
+            | "cite"
+            | "style"
+            | "srcset"
+            | "ping"
+            | "rel"
+            | "http-equiv"
+            | "content"
+            | "name"
+    )
+}
+
+fn new_theme_tag_state(first_char: char, is_close: bool) -> ThemeHtmlState {
+    ThemeHtmlState::Tag {
+        tag_name: String::from(first_char.to_ascii_lowercase()),
+        is_close,
+        phase: TagPhase::TagName,
+        attr_name: String::new(),
+        quote: None,
+        attr_has_static_bytes: false,
+        attr_expr_count: 0,
+        seen_attrs: BTreeSet::new(),
+        link_rel_stylesheet: false,
+        link_has_valid_href: false,
+        meta_ok: false,
+        attr_static_buf: String::new(),
+    }
+}
+
+fn is_ascii_html_whitespace(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0c)
+}
+
+fn check_theme_tag_name(
+    tag_name: &str,
+    is_close: bool,
+    is_part: bool,
+    is_full_doctype_doc: bool,
 ) -> Result<(), &'static str> {
-    validate_html_and_css_context_with_url_vars(src, post_render, None, Some(policy))
+    if tag_name.is_empty() {
+        return Err("Thẻ HTML không có tên hợp lệ.");
+    }
+    if is_close && matches!(tag_name, "link" | "meta" | "title" | "style") {
+        return Err("Thẻ đóng HTML không hợp lệ ở vị trí này.");
+    }
+    if FORBIDDEN_TAGS.contains(&tag_name)
+        && !(tag_name == "title" && !is_close && !is_part && is_full_doctype_doc)
+    {
+        return Err("Template chứa thẻ HTML bị C-SEC cấm.");
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finalize_theme_attr(
+    tag_name: &str,
+    attr_name: &mut String,
+    quote: &mut Option<u8>,
+    attr_has_static_bytes: &mut bool,
+    attr_expr_count: &mut u8,
+    seen_attrs: &mut BTreeSet<String>,
+    link_rel_stylesheet: &mut bool,
+    link_has_valid_href: &mut bool,
+    meta_ok: &mut bool,
+    attr_static_buf: &mut String,
+) -> Result<(), &'static str> {
+    if attr_name.is_empty() {
+        return Ok(());
+    }
+    if !seen_attrs.insert(attr_name.clone()) {
+        return Err("Thẻ HTML chứa thuộc tính bị trùng lặp.");
+    }
+    if is_dangerous_attr_name(attr_name) {
+        return Err("Template chứa thuộc tính HTML bị C-SEC cấm.");
+    }
+    if tag_name == "meta" {
+        if !matches!(attr_name.as_str(), "charset" | "name" | "content") {
+            return Err("C-SEC chỉ cho phép <meta charset> hoặc <meta name=\"viewport\">.");
+        }
+        if attr_name == "charset" {
+            *meta_ok = true;
+        } else if attr_name == "name" {
+            if *attr_expr_count != 0 || !attr_static_buf.trim().eq_ignore_ascii_case("viewport") {
+                return Err("C-SEC chỉ cho phép <meta charset> hoặc <meta name=\"viewport\">.");
+            }
+            *meta_ok = true;
+        }
+    }
+    if tag_name == "link" {
+        if attr_name == "rel"
+            && *attr_expr_count == 0
+            && attr_static_buf.trim().eq_ignore_ascii_case("stylesheet")
+        {
+            *link_rel_stylesheet = true;
+        } else if attr_name == "href" && *attr_expr_count == 0 {
+            *link_has_valid_href = is_valid_theme_stylesheet_href(attr_static_buf);
+        }
+    }
+    if attr_name == "style" && *attr_expr_count == 0 {
+        validate_safe_css(attr_static_buf)?;
+    }
+    if matches!(attr_name.as_str(), "srcset" | "ping") && *attr_expr_count == 0 {
+        let decoded = decode_html_entities_for_url(attr_static_buf);
+        if decoded.trim().is_empty()
+            || decoded.contains('\0')
+            || decoded.bytes().any(|b| b <= 0x1f || b == 0x7f)
+        {
+            return Err("Thuộc tính URL danh sách không hợp lệ.");
+        }
+        if attr_name == "srcset" {
+            for candidate in decoded.split(',') {
+                let url_part = candidate
+                    .split_whitespace()
+                    .next()
+                    .ok_or("Thuộc tính srcset chứa mục rỗng.")?;
+                validate_safe_url(url_part)?;
+            }
+        } else {
+            for target in decoded.split_whitespace() {
+                validate_safe_url(target)?;
+            }
+        }
+    }
+    if matches!(attr_name.as_str(), "href" | "src" | "poster" | "cite") {
+        if *attr_expr_count > 1 || (*attr_expr_count > 0 && *attr_has_static_bytes) {
+            return Err("URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.");
+        }
+        if *attr_expr_count == 0 && !(tag_name == "link" && attr_name == "href") {
+            let decoded = decode_html_entities_for_url(attr_static_buf);
+            if tag_name == "a" && attr_name == "href" {
+                validate_safe_href_url(&decoded)?;
+            } else {
+                validate_safe_url(&decoded)?;
+            }
+        }
+    }
+    attr_name.clear();
+    *quote = None;
+    *attr_has_static_bytes = false;
+    *attr_expr_count = 0;
+    attr_static_buf.clear();
+    Ok(())
+}
+
+fn finalize_theme_tag(
+    tag_name: &str,
+    is_close: bool,
+    link_rel_stylesheet: bool,
+    link_has_valid_href: bool,
+    meta_ok: bool,
+    is_part: bool,
+    is_full_doctype_doc: bool,
+) -> Result<ThemeHtmlState, &'static str> {
+    check_theme_tag_name(tag_name, is_close, is_part, is_full_doctype_doc)?;
+    if is_close {
+        return Ok(ThemeHtmlState::Body);
+    }
+    if tag_name == "link" && !(link_rel_stylesheet && link_has_valid_href) {
+        return Err("C-SEC chỉ cho phép <link rel=\"stylesheet\" href=\"/theme/...\">.");
+    }
+    if tag_name == "meta" && !meta_ok {
+        return Err("C-SEC chỉ cho phép <meta charset> hoặc <meta name=\"viewport\">.");
+    }
+    match tag_name {
+        "style" => Ok(ThemeHtmlState::Style {
+            closing_prefix: 0,
+            css_buf: String::new(),
+        }),
+        "title" => Ok(ThemeHtmlState::Title { closing_prefix: 0 }),
+        _ => Ok(ThemeHtmlState::Body),
+    }
+}
+
+fn step_theme_raw_char(
+    state: ThemeHtmlState,
+    ch: char,
+    is_part: bool,
+    is_full_doctype_doc: bool,
+) -> Result<ThemeHtmlState, &'static str> {
+    let ascii = if ch.is_ascii() { Some(ch as u8) } else { None };
+    match state {
+        ThemeHtmlState::Body => {
+            if ascii == Some(b'<') {
+                Ok(ThemeHtmlState::BodyLt)
+            } else {
+                Ok(ThemeHtmlState::Body)
+            }
+        }
+        ThemeHtmlState::BodyLt => match ascii {
+            Some(b'a'..=b'z' | b'A'..=b'Z') => Ok(new_theme_tag_state(ch, false)),
+            Some(b'/') => Ok(ThemeHtmlState::BodyLtSlash),
+            Some(b'!') => Ok(ThemeHtmlState::BodyLtBang {
+                buf: [0; 7],
+                len: 0,
+            }),
+            Some(b'<') => Ok(ThemeHtmlState::BodyLt),
+            Some(b'?') => {
+                Err("Template không được chứa processing instruction hoặc bogus comment `<?`.")
+            }
+            _ => Ok(ThemeHtmlState::Body),
+        },
+        ThemeHtmlState::BodyLtSlash => match ascii {
+            Some(b'a'..=b'z' | b'A'..=b'Z') => Ok(new_theme_tag_state(ch, true)),
+            _ => Err("Thẻ đóng HTML phải bắt đầu bằng ký tự chữ cái ASCII."),
+        },
+        ThemeHtmlState::BodyLtBang { mut buf, mut len } => {
+            let Some(b) = ascii else {
+                return Err("Template chỉ cho phép HTML comment <!-- hoặc <!DOCTYPE>.");
+            };
+            if len == 7 {
+                if is_part {
+                    return Err("Part không được chứa DOCTYPE.");
+                }
+                if b == b'>' {
+                    return Ok(ThemeHtmlState::Body);
+                }
+                if is_ascii_html_whitespace(b) {
+                    return Ok(ThemeHtmlState::Doctype);
+                }
+                return Err("<!DOCTYPE> không hợp lệ.");
+            }
+            buf[len as usize] = b.to_ascii_lowercase();
+            len += 1;
+            if len == 2 && &buf[..2] == b"--" {
+                return Ok(ThemeHtmlState::Comment(CommentScanSubState::Start));
+            }
+            let prefix = &buf[..len as usize];
+            if b"--".starts_with(prefix) || b"doctype".starts_with(prefix) {
+                Ok(ThemeHtmlState::BodyLtBang { buf, len })
+            } else {
+                Err("Template chỉ cho phép HTML comment <!-- hoặc <!DOCTYPE>.")
+            }
+        }
+        ThemeHtmlState::Doctype => {
+            if let Some(b) = ascii {
+                if b == b'>' {
+                    return Ok(ThemeHtmlState::Body);
+                }
+                if matches!(b, b'<' | b'"' | b'\'' | 0x00..=0x1f | 0x7f) {
+                    return Err("<!DOCTYPE> chứa ký tự không hợp lệ.");
+                }
+            }
+            Ok(ThemeHtmlState::Doctype)
+        }
+        ThemeHtmlState::Comment(sub) => {
+            let next = match ascii {
+                Some(b) => step_comment_substate(sub, b),
+                None => Some(CommentScanSubState::Body),
+            };
+            Ok(match next {
+                Some(s) => ThemeHtmlState::Comment(s),
+                None => ThemeHtmlState::Body,
+            })
+        }
+        ThemeHtmlState::Style {
+            mut closing_prefix,
+            mut css_buf,
+        } => {
+            const EXPECTED: &[u8; 7] = b"</style";
+            if closing_prefix == 7 {
+                if ascii == Some(b'>') {
+                    let trim_to = css_buf.len().saturating_sub(7);
+                    css_buf.truncate(trim_to);
+                    if css_buf.len() > MAX_RENDERED_HTML_BYTES {
+                        return Err("Khối <style> vượt giới hạn 512 KiB.");
+                    }
+                    validate_safe_css(&css_buf)?;
+                    return Ok(ThemeHtmlState::Body);
+                }
+                if ascii.is_some_and(|b| is_ascii_html_whitespace(b) || b == b'/') {
+                    return Err("Thẻ đóng </style> không được chứa khoảng trắng hoặc dấu /.");
+                }
+                if css_buf.len() + ch.len_utf8() > MAX_RENDERED_HTML_BYTES + 8 {
+                    return Err("Khối <style> vượt giới hạn 512 KiB.");
+                }
+                css_buf.push(ch);
+                closing_prefix = if ascii == Some(b'<') { 1 } else { 0 };
+                return Ok(ThemeHtmlState::Style {
+                    closing_prefix,
+                    css_buf,
+                });
+            }
+            if css_buf.len() + ch.len_utf8() > MAX_RENDERED_HTML_BYTES + 8 {
+                return Err("Khối <style> vượt giới hạn 512 KiB.");
+            }
+            css_buf.push(ch);
+            closing_prefix = match ascii {
+                Some(b) if b.to_ascii_lowercase() == EXPECTED[closing_prefix] => closing_prefix + 1,
+                Some(b'<') => 1,
+                _ => 0,
+            };
+            Ok(ThemeHtmlState::Style {
+                closing_prefix,
+                css_buf,
+            })
+        }
+        ThemeHtmlState::Title { mut closing_prefix } => {
+            const EXPECTED: &[u8; 7] = b"</title";
+            if closing_prefix == 7 {
+                if ascii == Some(b'>') {
+                    return Ok(ThemeHtmlState::Body);
+                }
+                if ascii.is_some_and(|b| is_ascii_html_whitespace(b) || b == b'/') {
+                    return Err("Thẻ đóng </title> không được chứa khoảng trắng hoặc dấu /.");
+                }
+                closing_prefix = if ascii == Some(b'<') { 1 } else { 0 };
+                return Ok(ThemeHtmlState::Title { closing_prefix });
+            }
+            closing_prefix = match ascii {
+                Some(b) if b.to_ascii_lowercase() == EXPECTED[closing_prefix] => closing_prefix + 1,
+                Some(b'<') => 1,
+                _ => 0,
+            };
+            Ok(ThemeHtmlState::Title { closing_prefix })
+        }
+        ThemeHtmlState::Tag {
+            mut tag_name,
+            is_close,
+            mut phase,
+            mut attr_name,
+            mut quote,
+            mut attr_has_static_bytes,
+            mut attr_expr_count,
+            mut seen_attrs,
+            mut link_rel_stylesheet,
+            mut link_has_valid_href,
+            mut meta_ok,
+            mut attr_static_buf,
+        } => {
+            if ascii == Some(0) {
+                return Err("Thẻ HTML chứa byte NUL bị cấm.");
+            }
+            match phase {
+                TagPhase::TagName => match ascii {
+                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-') => {
+                        if tag_name.len() >= 32 {
+                            return Err("Tên thẻ HTML vượt giới hạn 32 ký tự.");
+                        }
+                        tag_name.push(ch.to_ascii_lowercase());
+                    }
+                    Some(b) if is_ascii_html_whitespace(b) => {
+                        check_theme_tag_name(&tag_name, is_close, is_part, is_full_doctype_doc)?;
+                        phase = TagPhase::BeforeAttr;
+                    }
+                    Some(b'/') => {
+                        if is_close
+                            || tag_name.is_empty()
+                            || matches!(tag_name.as_str(), "style" | "title")
+                        {
+                            return Err("Dấu tự đóng `/` trên thẻ HTML không hợp lệ.");
+                        }
+                        check_theme_tag_name(&tag_name, is_close, is_part, is_full_doctype_doc)?;
+                        phase = TagPhase::SelfClosingSlash;
+                    }
+                    Some(b'>') => {
+                        return finalize_theme_tag(
+                            &tag_name,
+                            is_close,
+                            link_rel_stylesheet,
+                            link_has_valid_href,
+                            meta_ok,
+                            is_part,
+                            is_full_doctype_doc,
+                        );
+                    }
+                    _ => return Err("Tên thẻ HTML chứa ký tự không hợp lệ."),
+                },
+                TagPhase::BeforeAttr => {
+                    if is_close {
+                        match ascii {
+                            Some(b) if is_ascii_html_whitespace(b) => {}
+                            Some(b'>') => {
+                                return finalize_theme_tag(
+                                    &tag_name,
+                                    is_close,
+                                    link_rel_stylesheet,
+                                    link_has_valid_href,
+                                    meta_ok,
+                                    is_part,
+                                    is_full_doctype_doc,
+                                );
+                            }
+                            _ => return Err("Thẻ đóng HTML không được chứa thuộc tính hoặc /."),
+                        }
+                    } else {
+                        match ascii {
+                            Some(b) if is_ascii_html_whitespace(b) => {}
+                            Some(b'a'..=b'z' | b'A'..=b'Z') => {
+                                attr_name.clear();
+                                attr_name.push(ch.to_ascii_lowercase());
+                                quote = None;
+                                attr_has_static_bytes = false;
+                                attr_expr_count = 0;
+                                attr_static_buf.clear();
+                                phase = TagPhase::AttrName;
+                            }
+                            Some(b'/') => {
+                                if matches!(tag_name.as_str(), "style" | "title") {
+                                    return Err("Thẻ <style>/<title> không được tự đóng.");
+                                }
+                                phase = TagPhase::SelfClosingSlash;
+                            }
+                            Some(b'>') => {
+                                return finalize_theme_tag(
+                                    &tag_name,
+                                    is_close,
+                                    link_rel_stylesheet,
+                                    link_has_valid_href,
+                                    meta_ok,
+                                    is_part,
+                                    is_full_doctype_doc,
+                                );
+                            }
+                            _ => return Err("Thuộc tính HTML phải bắt đầu bằng chữ cái ASCII."),
+                        }
+                    }
+                }
+                TagPhase::AttrName => match ascii {
+                    Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b':' | b'-') => {
+                        if attr_name.len() >= 32 {
+                            return Err("Tên thuộc tính HTML vượt giới hạn 32 ký tự.");
+                        }
+                        attr_name.push(ch.to_ascii_lowercase());
+                    }
+                    Some(b) if is_ascii_html_whitespace(b) => {
+                        phase = TagPhase::AfterAttrName;
+                    }
+                    Some(b'=') => {
+                        phase = TagPhase::BeforeAttrValue;
+                    }
+                    Some(b'/') => {
+                        finalize_theme_attr(
+                            &tag_name,
+                            &mut attr_name,
+                            &mut quote,
+                            &mut attr_has_static_bytes,
+                            &mut attr_expr_count,
+                            &mut seen_attrs,
+                            &mut link_rel_stylesheet,
+                            &mut link_has_valid_href,
+                            &mut meta_ok,
+                            &mut attr_static_buf,
+                        )?;
+                        if matches!(tag_name.as_str(), "style" | "title") {
+                            return Err("Thẻ <style>/<title> không được tự đóng.");
+                        }
+                        phase = TagPhase::SelfClosingSlash;
+                    }
+                    Some(b'>') => {
+                        finalize_theme_attr(
+                            &tag_name,
+                            &mut attr_name,
+                            &mut quote,
+                            &mut attr_has_static_bytes,
+                            &mut attr_expr_count,
+                            &mut seen_attrs,
+                            &mut link_rel_stylesheet,
+                            &mut link_has_valid_href,
+                            &mut meta_ok,
+                            &mut attr_static_buf,
+                        )?;
+                        return finalize_theme_tag(
+                            &tag_name,
+                            is_close,
+                            link_rel_stylesheet,
+                            link_has_valid_href,
+                            meta_ok,
+                            is_part,
+                            is_full_doctype_doc,
+                        );
+                    }
+                    _ => return Err("Tên thuộc tính HTML chứa ký tự không hợp lệ."),
+                },
+                TagPhase::AfterAttrName => match ascii {
+                    Some(b) if is_ascii_html_whitespace(b) => {}
+                    Some(b'=') => {
+                        phase = TagPhase::BeforeAttrValue;
+                    }
+                    Some(b'/') => {
+                        finalize_theme_attr(
+                            &tag_name,
+                            &mut attr_name,
+                            &mut quote,
+                            &mut attr_has_static_bytes,
+                            &mut attr_expr_count,
+                            &mut seen_attrs,
+                            &mut link_rel_stylesheet,
+                            &mut link_has_valid_href,
+                            &mut meta_ok,
+                            &mut attr_static_buf,
+                        )?;
+                        if matches!(tag_name.as_str(), "style" | "title") {
+                            return Err("Thẻ <style>/<title> không được tự đóng.");
+                        }
+                        phase = TagPhase::SelfClosingSlash;
+                    }
+                    Some(b'>') => {
+                        finalize_theme_attr(
+                            &tag_name,
+                            &mut attr_name,
+                            &mut quote,
+                            &mut attr_has_static_bytes,
+                            &mut attr_expr_count,
+                            &mut seen_attrs,
+                            &mut link_rel_stylesheet,
+                            &mut link_has_valid_href,
+                            &mut meta_ok,
+                            &mut attr_static_buf,
+                        )?;
+                        return finalize_theme_tag(
+                            &tag_name,
+                            is_close,
+                            link_rel_stylesheet,
+                            link_has_valid_href,
+                            meta_ok,
+                            is_part,
+                            is_full_doctype_doc,
+                        );
+                    }
+                    Some(b'a'..=b'z' | b'A'..=b'Z') => {
+                        finalize_theme_attr(
+                            &tag_name,
+                            &mut attr_name,
+                            &mut quote,
+                            &mut attr_has_static_bytes,
+                            &mut attr_expr_count,
+                            &mut seen_attrs,
+                            &mut link_rel_stylesheet,
+                            &mut link_has_valid_href,
+                            &mut meta_ok,
+                            &mut attr_static_buf,
+                        )?;
+                        attr_name.push(ch.to_ascii_lowercase());
+                        phase = TagPhase::AttrName;
+                    }
+                    _ => return Err("Cú pháp sau tên thuộc tính HTML không hợp lệ."),
+                },
+                TagPhase::BeforeAttrValue => match ascii {
+                    Some(b) if is_ascii_html_whitespace(b) => {}
+                    Some(q @ (b'"' | b'\'')) => {
+                        quote = Some(q);
+                        phase = TagPhase::AttrValue;
+                    }
+                    Some(b'>' | b'<' | b'=' | b'`' | 0x00..=0x1f | 0x7f) => {
+                        return Err("Giá trị thuộc tính HTML chứa ký tự không hợp lệ.");
+                    }
+                    _ => {
+                        quote = None;
+                        phase = TagPhase::AttrValue;
+                        attr_has_static_bytes = true;
+                        if is_security_checked_attr(&attr_name) {
+                            if attr_static_buf.len() + ch.len_utf8() > 4096 {
+                                return Err("Giá trị thuộc tính tĩnh vượt quá 4096 bytes.");
+                            }
+                            attr_static_buf.push(ch);
+                        }
+                    }
+                },
+                TagPhase::AttrValue => {
+                    if let Some(q) = quote {
+                        if ascii == Some(q) {
+                            finalize_theme_attr(
+                                &tag_name,
+                                &mut attr_name,
+                                &mut quote,
+                                &mut attr_has_static_bytes,
+                                &mut attr_expr_count,
+                                &mut seen_attrs,
+                                &mut link_rel_stylesheet,
+                                &mut link_has_valid_href,
+                                &mut meta_ok,
+                                &mut attr_static_buf,
+                            )?;
+                            phase = TagPhase::BeforeAttr;
+                        } else {
+                            if matches!(attr_name.as_str(), "href" | "src" | "poster" | "cite")
+                                && attr_expr_count > 0
+                            {
+                                return Err(
+                                    "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",
+                                );
+                            }
+                            attr_has_static_bytes = true;
+                            if is_security_checked_attr(&attr_name) {
+                                if attr_static_buf.len() + ch.len_utf8() > 4096 {
+                                    return Err("Giá trị thuộc tính tĩnh vượt quá 4096 bytes.");
+                                }
+                                attr_static_buf.push(ch);
+                            }
+                        }
+                    } else if ascii.is_some_and(is_ascii_html_whitespace) {
+                        finalize_theme_attr(
+                            &tag_name,
+                            &mut attr_name,
+                            &mut quote,
+                            &mut attr_has_static_bytes,
+                            &mut attr_expr_count,
+                            &mut seen_attrs,
+                            &mut link_rel_stylesheet,
+                            &mut link_has_valid_href,
+                            &mut meta_ok,
+                            &mut attr_static_buf,
+                        )?;
+                        phase = TagPhase::BeforeAttr;
+                    } else if ascii == Some(b'>') {
+                        finalize_theme_attr(
+                            &tag_name,
+                            &mut attr_name,
+                            &mut quote,
+                            &mut attr_has_static_bytes,
+                            &mut attr_expr_count,
+                            &mut seen_attrs,
+                            &mut link_rel_stylesheet,
+                            &mut link_has_valid_href,
+                            &mut meta_ok,
+                            &mut attr_static_buf,
+                        )?;
+                        return finalize_theme_tag(
+                            &tag_name,
+                            is_close,
+                            link_rel_stylesheet,
+                            link_has_valid_href,
+                            meta_ok,
+                            is_part,
+                            is_full_doctype_doc,
+                        );
+                    } else if matches!(
+                        ascii,
+                        Some(b'"' | b'\'' | b'<' | b'=' | b'`' | 0x00..=0x1f | 0x7f)
+                    ) {
+                        return Err(
+                            "Giá trị thuộc tính HTML không ngoặc kép chứa ký tự không hợp lệ.",
+                        );
+                    } else {
+                        attr_has_static_bytes = true;
+                        if is_security_checked_attr(&attr_name) {
+                            if attr_static_buf.len() + ch.len_utf8() > 4096 {
+                                return Err("Giá trị thuộc tính tĩnh vượt quá 4096 bytes.");
+                            }
+                            attr_static_buf.push(ch);
+                        }
+                    }
+                }
+                TagPhase::SelfClosingSlash => {
+                    if ascii == Some(b'>') {
+                        return finalize_theme_tag(
+                            &tag_name,
+                            is_close,
+                            link_rel_stylesheet,
+                            link_has_valid_href,
+                            meta_ok,
+                            is_part,
+                            is_full_doctype_doc,
+                        );
+                    }
+                    return Err("Sau `/` ở cuối thẻ mở phải là `>`.");
+                }
+            }
+            Ok(ThemeHtmlState::Tag {
+                tag_name,
+                is_close,
+                phase,
+                attr_name,
+                quote,
+                attr_has_static_bytes,
+                attr_expr_count,
+                seen_attrs,
+                link_rel_stylesheet,
+                link_has_valid_href,
+                meta_ok,
+                attr_static_buf,
+            })
+        }
+    }
+}
+
+fn extract_bound_idents(expr: &Expr<'_>) -> Result<Vec<String>, &'static str> {
+    match expr {
+        Expr::Var(v) => Ok(vec![v.id.to_owned()]),
+        Expr::Tuple(t) => {
+            let mut out = Vec::new();
+            for item in &t.items {
+                out.extend(extract_bound_idents(item)?);
+            }
+            Ok(out)
+        }
+        Expr::List(l) => {
+            let mut out = Vec::new();
+            for item in &l.items {
+                out.extend(extract_bound_idents(item)?);
+            }
+            Ok(out)
+        }
+        _ => Err("C-SEC cấm gán thuộc tính/phần tử bằng GetAttr hoặc GetItem."),
+    }
+}
+
+fn resolve_collection_source(expr: &Expr<'_>, scopes: &UrlScopeStack) -> Option<UrlSourceKind> {
+    match expr {
+        Expr::Slice(s) => resolve_collection_source(&s.expr, scopes),
+        Expr::Filter(f) => {
+            let inner = f.expr.as_ref()?;
+            if matches!(f.name, "selectattr" | "rejectattr" | "sort" | "reverse") {
+                resolve_collection_source(inner, scopes)
+            } else if f.name == "batch" {
+                match resolve_collection_source(inner, scopes) {
+                    Some(UrlSourceKind::TrustedEntry) => Some(UrlSourceKind::TrustedEntryBatch),
+                    _ => None,
+                }
+            } else {
+                None
+            }
+        }
+        Expr::Var(v) => {
+            if matches!(v.id, "entries" | "related_entries" | "recent_posts") {
+                Some(UrlSourceKind::TrustedEntry)
+            } else if v.id == "breadcrumbs" {
+                Some(UrlSourceKind::TrustedLink)
+            } else if scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntryBatch) {
+                Some(UrlSourceKind::TrustedEntry)
+            } else {
+                None
+            }
+        }
+        Expr::GetAttr(g) => match &g.expr {
+            Expr::Var(v) if v.id == "pagination" && g.name == "pages" => {
+                Some(UrlSourceKind::TrustedLink)
+            }
+            Expr::Var(v) if v.id == "locale" && g.name == "alternates" => {
+                Some(UrlSourceKind::TrustedLink)
+            }
+            Expr::GetAttr(menu_slot)
+                if g.name == "items"
+                    && matches!(&menu_slot.expr, Expr::Var(v) if v.id == "menus") =>
+            {
+                Some(UrlSourceKind::TrustedLink)
+            }
+            Expr::GetItem(menu_slot)
+                if g.name == "items"
+                    && matches!(&menu_slot.expr, Expr::Var(v) if v.id == "menus")
+                    && matches!(&menu_slot.subscript_expr, Expr::Const(c) if c.value.as_str().is_some()) =>
+            {
+                Some(UrlSourceKind::TrustedLink)
+            }
+            Expr::Var(v)
+                if g.name == "children"
+                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedLink) =>
+            {
+                Some(UrlSourceKind::TrustedLink)
+            }
+            Expr::Var(v)
+                if g.name == "all_terms"
+                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry) =>
+            {
+                Some(UrlSourceKind::TrustedLink)
+            }
+            Expr::GetAttr(terms_attr)
+                if terms_attr.name == "terms"
+                    && matches!(
+                        &terms_attr.expr,
+                        Expr::Var(v) if scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry)
+                    ) =>
+            {
+                Some(UrlSourceKind::TrustedLink)
+            }
+            Expr::Var(v)
+                if g.name == "fields"
+                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry) =>
+            {
+                Some(UrlSourceKind::TrustedField)
+            }
+            Expr::Var(v)
+                if g.name == "gallery_urls"
+                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedField) =>
+            {
+                Some(UrlSourceKind::TrustedRawUrl)
+            }
+            _ => None,
+        },
+        Expr::GetItem(g) => {
+            let Expr::Const(c) = &g.subscript_expr else {
+                return None;
+            };
+            let _tax = c.value.as_str()?;
+            match &g.expr {
+                Expr::GetAttr(terms_attr)
+                    if terms_attr.name == "terms"
+                        && matches!(
+                            &terms_attr.expr,
+                            Expr::Var(v) if scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry)
+                        ) =>
+                {
+                    Some(UrlSourceKind::TrustedLink)
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+fn is_href_only_expr(expr: &Expr<'_>, scopes: &UrlScopeStack, policy: &ThemeUrlPolicy) -> bool {
+    match expr {
+        Expr::Var(v) => matches!(v.id, "archive_url" | "previous_url" | "next_url"),
+        Expr::GetAttr(g) => match &g.expr {
+            Expr::Var(v) if v.id == "pagination" => {
+                matches!(g.name, "previous_url" | "next_url")
+            }
+            Expr::Var(v) if v.id == "locale" => g.name == "home_url",
+            Expr::Var(v) if v.id == "options" => {
+                policy.allows_cite_href(&format!("options.{}", g.name))
+            }
+            Expr::Var(v)
+                if g.name == "url"
+                    && matches!(
+                        scopes.lookup(v.id),
+                        Some(UrlSourceKind::TrustedEntry | UrlSourceKind::TrustedLink)
+                    ) =>
+            {
+                true
+            }
+            Expr::GetAttr(cat_attr)
+                if g.name == "url"
+                    && cat_attr.name == "primary_category"
+                    && matches!(
+                        &cat_attr.expr,
+                        Expr::Var(v) if scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry)
+                    ) =>
+            {
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn is_src_and_href_expr(expr: &Expr<'_>, scopes: &UrlScopeStack, policy: &ThemeUrlPolicy) -> bool {
+    match expr {
+        Expr::Var(v) => {
+            v.id == "theme_asset_url" || scopes.lookup(v.id) == Some(UrlSourceKind::TrustedRawUrl)
+        }
+        Expr::GetAttr(g) => match &g.expr {
+            Expr::Var(v) if v.id == "options" => {
+                policy.allows_media_src(&format!("options.{}", g.name))
+            }
+            Expr::Var(v)
+                if g.name == "cover_url"
+                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedEntry) =>
+            {
+                true
+            }
+            Expr::Var(v)
+                if g.name == "image_url"
+                    && scopes.lookup(v.id) == Some(UrlSourceKind::TrustedField) =>
+            {
+                true
+            }
+            _ => false,
+        },
+        Expr::GetItem(g) => {
+            matches!(&g.expr, Expr::Var(v) if v.id == "theme_assets")
+                && matches!(
+                    &g.subscript_expr,
+                    Expr::Const(c) if c.value.as_str().is_some_and(|p| policy.allows_declared_asset(p))
+                )
+        }
+        _ => false,
+    }
+}
+
+fn is_valid_theme_url_expr(
+    expr: &Expr<'_>,
+    slot: UrlAttrSlot,
+    scopes: &UrlScopeStack,
+    policy: &ThemeUrlPolicy,
+) -> bool {
+    match slot {
+        UrlAttrSlot::AnchorHref => {
+            is_href_only_expr(expr, scopes, policy) || is_src_and_href_expr(expr, scopes, policy)
+        }
+        UrlAttrSlot::Cite => is_href_only_expr(expr, scopes, policy),
+        UrlAttrSlot::SrcAndHref => is_src_and_href_expr(expr, scopes, policy),
+        UrlAttrSlot::LinkCss => {
+            matches!(&expr, Expr::GetItem(g)
+                if matches!(&g.expr, Expr::Var(v) if v.id == "theme_assets")
+                    && matches!(
+                        &g.subscript_expr,
+                        Expr::Const(c) if c.value.as_str().is_some_and(|p| {
+                            policy.allows_declared_asset(p)
+                                && is_safe_theme_relative_path(p)
+                                && p.ends_with(".css")
+                        })
+                    )
+            )
+        }
+    }
+}
+
+fn classify_theme_url_slot(tag_name: &str, attr_name: &str) -> Option<UrlAttrSlot> {
+    match (tag_name, attr_name) {
+        ("a", "href") => Some(UrlAttrSlot::AnchorHref),
+        ("link", "href") => Some(UrlAttrSlot::LinkCss),
+        ("blockquote" | "q", "cite") => Some(UrlAttrSlot::Cite),
+        (t, "src" | "poster") if !matches!(t, "link" | "meta" | "style" | "title") => {
+            Some(UrlAttrSlot::SrcAndHref)
+        }
+        _ => None,
+    }
+}
+
+fn reject_style_control_flow(states: &BTreeSet<ThemeHtmlState>) -> Result<(), &'static str> {
+    if states
+        .iter()
+        .any(|s| matches!(s, ThemeHtmlState::Style { .. }))
+    {
+        return Err("C-SEC cấm nội suy và khối điều khiển Jinja bên trong <style>.");
+    }
+    Ok(())
+}
+
+fn walk_theme_ast_with_url_scopes(
+    stmt: &Stmt<'_>,
+    is_part: bool,
+    is_full_doctype_doc: bool,
+    policy: &ThemeUrlPolicy,
+) -> Result<ThemeTemplateUsageFlags, &'static str> {
+    let mut usage = ThemeTemplateUsageFlags::default();
+    let (final_states, _) = walk_theme_stmt_with_url_scopes(
+        stmt,
+        BTreeSet::from([ThemeHtmlState::Body]),
+        UrlScopeStack::root(),
+        is_part,
+        is_full_doctype_doc,
+        policy,
+        &mut usage,
+    )?;
+    if final_states
+        .iter()
+        .any(|state| *state != ThemeHtmlState::Body)
+    {
+        return Err(
+            "Template phải kết thúc ở trạng thái thân HTML (đóng đủ thẻ/comment/style/title).",
+        );
+    }
+    Ok(usage)
+}
+
+fn walk_theme_stmts_with_url_scopes(
+    stmts: &[Stmt<'_>],
+    mut states: BTreeSet<ThemeHtmlState>,
+    mut scopes: UrlScopeStack,
+    is_part: bool,
+    is_full_doctype_doc: bool,
+    policy: &ThemeUrlPolicy,
+    usage: &mut ThemeTemplateUsageFlags,
+) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
+    for child in stmts {
+        let (next_states, next_scopes) = walk_theme_stmt_with_url_scopes(
+            child,
+            states,
+            scopes,
+            is_part,
+            is_full_doctype_doc,
+            policy,
+            usage,
+        )?;
+        states = next_states;
+        scopes = next_scopes;
+        if states.len() > MAX_THEME_WALKER_STATES {
+            return Err("Quá nhiều trạng thái HTML trong theme template.");
+        }
+    }
+    Ok((states, scopes))
+}
+
+fn walk_theme_stmt_with_url_scopes(
+    stmt: &Stmt<'_>,
+    states: BTreeSet<ThemeHtmlState>,
+    mut scopes: UrlScopeStack,
+    is_part: bool,
+    is_full_doctype_doc: bool,
+    policy: &ThemeUrlPolicy,
+    usage: &mut ThemeTemplateUsageFlags,
+) -> Result<(BTreeSet<ThemeHtmlState>, UrlScopeStack), &'static str> {
+    match stmt {
+        Stmt::Template(t) => walk_theme_stmts_with_url_scopes(
+            &t.children,
+            states,
+            scopes,
+            is_part,
+            is_full_doctype_doc,
+            policy,
+            usage,
+        ),
+        Stmt::EmitRaw(raw) => {
+            let mut next_states = BTreeSet::new();
+            for initial in states {
+                let mut cur = initial;
+                for ch in raw.raw.chars() {
+                    cur = step_theme_raw_char(cur, ch, is_part, is_full_doctype_doc)?;
+                }
+                next_states.insert(cur);
+            }
+            if next_states.len() > MAX_THEME_WALKER_STATES {
+                return Err("Quá nhiều trạng thái HTML trong theme template.");
+            }
+            Ok((next_states, scopes))
+        }
+        Stmt::EmitExpr(expr) => {
+            reject_style_control_flow(&states)?;
+            if parse_composition_call(&expr.expr)?.is_some() {
+                if states.iter().any(|s| *s != ThemeHtmlState::Body) {
+                    return Err("od_part/od_content chỉ được xuất hiện trong thân HTML.");
+                }
+                return Ok((states, scopes));
+            }
+            record_usage_flags_in_expr(&expr.expr, usage);
+            if states.iter().any(|s| {
+                matches!(
+                    s,
+                    ThemeHtmlState::Style { .. }
+                        | ThemeHtmlState::Comment(_)
+                        | ThemeHtmlState::BodyLt
+                        | ThemeHtmlState::BodyLtSlash
+                        | ThemeHtmlState::BodyLtBang { .. }
+                        | ThemeHtmlState::Doctype
+                        | ThemeHtmlState::Title {
+                            closing_prefix: 1..
+                        }
+                )
+            }) {
+                return Err(
+                    "C-SEC cấm nội suy Jinja ở comment, <style>, DOCTYPE hoặc biên thẻ HTML.",
+                );
+            }
+            let has_non_tag = states
+                .iter()
+                .any(|s| !matches!(s, ThemeHtmlState::Tag { .. }));
+            let has_tag = states
+                .iter()
+                .any(|s| matches!(s, ThemeHtmlState::Tag { .. }));
+            if has_non_tag && has_tag {
+                return Err("C-SEC cấm trộn lẫn ngữ cảnh thẻ HTML và thân HTML tại điểm nội suy.");
+            }
+            if !has_tag {
+                return Ok((states, scopes));
+            }
+
+            let mut expected_url_slot: Option<Option<UrlAttrSlot>> = None;
+            let mut updated_states = BTreeSet::new();
+            for state in states {
+                let ThemeHtmlState::Tag {
+                    tag_name,
+                    is_close,
+                    phase,
+                    attr_name,
+                    quote,
+                    attr_has_static_bytes,
+                    mut attr_expr_count,
+                    seen_attrs,
+                    link_rel_stylesheet,
+                    mut link_has_valid_href,
+                    meta_ok,
+                    attr_static_buf,
+                } = state
+                else {
+                    unreachable!("non-tag state already filtered");
+                };
+                if is_close || phase != TagPhase::AttrValue || quote.is_none() {
+                    return Err(
+                        "C-SEC chỉ cho phép nội suy bên trong giá trị thuộc tính có dấu ngoặc kép.",
+                    );
+                }
+                if is_dangerous_attr_name(&attr_name)
+                    || matches!(attr_name.as_str(), "style" | "srcset" | "ping")
+                    || (tag_name == "link" && attr_name == "rel")
+                    || tag_name == "meta"
+                {
+                    return Err(
+                        "C-SEC cấm nội suy bên trong thuộc tính bảo mật hoặc sự kiện HTML.",
+                    );
+                }
+                if matches!(attr_name.as_str(), "href" | "src" | "poster" | "cite") {
+                    if attr_has_static_bytes || attr_expr_count != 0 {
+                        return Err(
+                            "URL động trong thuộc tính chỉ được phép là biểu thức {{ ... }} đơn.",
+                        );
+                    }
+                    let Some(slot) = classify_theme_url_slot(&tag_name, &attr_name) else {
+                        return Err("C-SEC cấm nội suy URL động trên thuộc tính hoặc thẻ này.");
+                    };
+                    if let Some(prev_slot) = expected_url_slot {
+                        if prev_slot != Some(slot) {
+                            return Err("Nhóm thuộc tính URL phải đồng nhất qua các nhánh rẽ.");
+                        }
+                    } else {
+                        expected_url_slot = Some(Some(slot));
+                    }
+                    if !is_valid_theme_url_expr(&expr.expr, slot, &scopes, policy) {
+                        return Err(
+                            "URL động trong thuộc tính không nằm trong whitelist typed URL.",
+                        );
+                    }
+                    attr_expr_count = 1;
+                    if slot == UrlAttrSlot::LinkCss {
+                        link_has_valid_href = true;
+                    }
+                } else {
+                    if let Some(prev_slot) = expected_url_slot {
+                        if prev_slot.is_some() {
+                            return Err(
+                                "Không thể trộn thuộc tính URL và thuộc tính thường qua các nhánh.",
+                            );
+                        }
+                    } else {
+                        expected_url_slot = Some(None);
+                    }
+                    attr_expr_count = attr_expr_count.saturating_add(1);
+                }
+                updated_states.insert(ThemeHtmlState::Tag {
+                    tag_name,
+                    is_close,
+                    phase,
+                    attr_name,
+                    quote,
+                    attr_has_static_bytes,
+                    attr_expr_count,
+                    seen_attrs,
+                    link_rel_stylesheet,
+                    link_has_valid_href,
+                    meta_ok,
+                    attr_static_buf,
+                });
+            }
+            Ok((updated_states, scopes))
+        }
+        Stmt::IfCond(cond) => {
+            reject_style_control_flow(&states)?;
+            validate_expr(&cond.expr)?;
+            record_usage_flags_in_expr(&cond.expr, usage);
+            let (mut true_states, true_scopes) = walk_theme_stmts_with_url_scopes(
+                &cond.true_body,
+                states.clone(),
+                scopes.clone(),
+                is_part,
+                is_full_doctype_doc,
+                policy,
+                usage,
+            )?;
+            let (false_states, false_scopes) = walk_theme_stmts_with_url_scopes(
+                &cond.false_body,
+                states,
+                scopes,
+                is_part,
+                is_full_doctype_doc,
+                policy,
+                usage,
+            )?;
+            true_states.extend(false_states);
+            if true_states.len() > MAX_THEME_WALKER_STATES {
+                return Err("Quá nhiều trạng thái HTML tại nhánh điều kiện.");
+            }
+            Ok((
+                true_states,
+                UrlScopeStack::intersect(&true_scopes, &false_scopes),
+            ))
+        }
+        Stmt::WithBlock(w) => {
+            reject_style_control_flow(&states)?;
+            let mut frame = BTreeMap::new();
+            for (k, v) in &w.assignments {
+                validate_expr(k)?;
+                validate_expr(v)?;
+                record_usage_flags_in_expr(v, usage);
+                for ident in extract_bound_idents(k)? {
+                    if ident == "entry" {
+                        return Err("C-SEC cấm gán lại biến ngữ cảnh `entry` trong with.");
+                    }
+                    frame.insert(ident, None);
+                }
+            }
+            scopes.push_frame(frame);
+            let (out_states, mut out_scopes) = walk_theme_stmts_with_url_scopes(
+                &w.body,
+                states,
+                scopes,
+                is_part,
+                is_full_doctype_doc,
+                policy,
+                usage,
+            )?;
+            out_scopes.pop_frame();
+            Ok((out_states, out_scopes))
+        }
+        Stmt::Set(s) => {
+            reject_style_control_flow(&states)?;
+            validate_expr(&s.target)?;
+            validate_expr(&s.expr)?;
+            record_usage_flags_in_expr(&s.expr, usage);
+            for ident in extract_bound_idents(&s.target)? {
+                if ident == "entry" {
+                    return Err("C-SEC cấm gán lại biến ngữ cảnh `entry` qua set.");
+                }
+                scopes.insert_top(ident, None);
+            }
+            Ok((states, scopes))
+        }
+        Stmt::SetBlock(sb) => {
+            reject_style_control_flow(&states)?;
+            if sb.filter.is_some() {
+                return Err("C-SEC cấm modifier filter trong khối set.");
+            }
+            validate_expr(&sb.target)?;
+            let target_idents = extract_bound_idents(&sb.target)?;
+            if target_idents.iter().any(|id| id == "entry") {
+                return Err("C-SEC cấm gán lại biến ngữ cảnh `entry` qua set block.");
+            }
+            let (sb_states, sb_scopes) = walk_theme_stmts_with_url_scopes(
+                &sb.body,
+                BTreeSet::from([ThemeHtmlState::Body]),
+                scopes.clone(),
+                is_part,
+                is_full_doctype_doc,
+                policy,
+                usage,
+            )?;
+            if sb_states.iter().any(|s| *s != ThemeHtmlState::Body) {
+                return Err("Khối set block phải đóng đủ thẻ/comment HTML bên trong.");
+            }
+            scopes = UrlScopeStack::intersect(&scopes, &sb_scopes);
+            for ident in target_idents {
+                scopes.insert_top(ident, None);
+            }
+            Ok((states, scopes))
+        }
+        Stmt::ForLoop(f) => {
+            reject_style_control_flow(&states)?;
+            validate_expr(&f.target)?;
+            validate_expr(&f.iter)?;
+            record_usage_flags_in_expr(&f.iter, usage);
+            if let Some(cond) = &f.filter_expr {
+                validate_expr(cond)?;
+                record_usage_flags_in_expr(cond, usage);
+            }
+
+            let (else_states, else_scopes) = walk_theme_stmts_with_url_scopes(
+                &f.else_body,
+                states.clone(),
+                scopes.clone(),
+                is_part,
+                is_full_doctype_doc,
+                policy,
+                usage,
+            )?;
+
+            let target_idents = extract_bound_idents(&f.target)?;
+            let iter_kind = resolve_collection_source(&f.iter, &scopes);
+            if target_idents.iter().any(|id| id == "entry") {
+                let valid_entry_loop = matches!(&f.target, Expr::Var(v) if v.id == "entry")
+                    && iter_kind == Some(UrlSourceKind::TrustedEntry);
+                if !valid_entry_loop {
+                    return Err("C-SEC cấm gán lại biến ngữ cảnh `entry` từ nguồn không tin cậy.");
+                }
+            }
+
+            let loop_targets: BTreeMap<String, Option<UrlSourceKind>> =
+                if let Expr::Var(v) = &f.target {
+                    BTreeMap::from([(v.id.to_owned(), iter_kind)])
+                } else {
+                    target_idents.into_iter().map(|id| (id, None)).collect()
+                };
+
+            let mut loop_states = states;
+            let mut loop_scopes = scopes;
+            loop_scopes.push_frame(loop_targets.clone());
+
+            let mut settled = false;
+            let mut final_loop_states = BTreeSet::new();
+            let mut final_loop_scopes = loop_scopes.clone();
+
+            for _ in 0..MAX_THEME_WALKER_STATES {
+                let (after_states, after_scopes) = walk_theme_stmts_with_url_scopes(
+                    &f.body,
+                    loop_states.clone(),
+                    loop_scopes.clone(),
+                    is_part,
+                    is_full_doctype_doc,
+                    policy,
+                    usage,
+                )?;
+                let mut next_states = loop_states.clone();
+                next_states.extend(after_states);
+                if next_states.len() > MAX_THEME_WALKER_STATES {
+                    return Err("Quá nhiều trạng thái HTML trong vòng lặp.");
+                }
+                let next_scopes = UrlScopeStack::intersect(&loop_scopes, &after_scopes);
+                let mut next_header_scopes = next_scopes.clone();
+                for (k, v) in &loop_targets {
+                    next_header_scopes.insert_top(k.clone(), *v);
+                }
+                if next_states == loop_states && next_header_scopes == loop_scopes {
+                    final_loop_states = next_states;
+                    final_loop_scopes = next_scopes;
+                    settled = true;
+                    break;
+                }
+                loop_states = next_states;
+                loop_scopes = next_header_scopes;
+            }
+            if !settled {
+                return Err("Không thể hội tụ trạng thái HTML/URL trong vòng lặp.");
+            }
+
+            final_loop_scopes.pop_frame();
+            let mut combined_states = final_loop_states;
+            combined_states.extend(else_states);
+            if combined_states.len() > MAX_THEME_WALKER_STATES {
+                return Err("Quá nhiều trạng thái HTML sau vòng lặp.");
+            }
+            let combined_scopes = UrlScopeStack::intersect(&final_loop_scopes, &else_scopes);
+            Ok((combined_states, combined_scopes))
+        }
+        _ => Err("Template sử dụng câu lệnh MiniJinja bị C-SEC cấm."),
+    }
+}
+
+fn validate_html_and_css_context(src: &str, post_render: bool) -> Result<(), &'static str> {
+    validate_html_and_css_context_with_url_vars(src, post_render, None)
+}
+
+fn find_rawtext_or_rcdata_end(
+    src: &str,
+    body_start: usize,
+    tag_name: &str,
+) -> Result<(usize, usize), &'static str> {
+    let bytes = src.as_bytes();
+    let needle = if tag_name == "style" {
+        b"</style"
+    } else {
+        b"</title"
+    };
+    let mut pos = body_start;
+    while pos + needle.len() <= bytes.len() {
+        if bytes[pos..pos + needle.len()].eq_ignore_ascii_case(needle) {
+            match bytes.get(pos + needle.len()) {
+                Some(&b'>') => return Ok((pos, pos + needle.len() + 1)),
+                Some(&b) if is_ascii_html_whitespace(b) || b == b'/' => {
+                    return Err(
+                        "Thẻ đóng </style> hoặc </title> không được chứa khoảng trắng hoặc /.",
+                    );
+                }
+                None => return Err("Thẻ đóng </style> hoặc </title> không hoàn chỉnh."),
+                Some(_) => {}
+            }
+        }
+        pos += 1;
+    }
+    Err("Thẻ <style> hoặc <title> thiếu thẻ đóng hợp lệ.")
 }
 
 fn is_sensitive_global_option_key(key: &str) -> bool {
@@ -1924,110 +4223,137 @@ fn validate_html_and_css_context_with_url_vars(
     src: &str,
     post_render: bool,
     block_url_vars: Option<&BlockUrlVarAllowlist>,
-    theme_policy: Option<&ThemeUrlPolicy>,
 ) -> Result<(), &'static str> {
     let lower = src.to_ascii_lowercase();
     let is_full_doctype_doc =
         block_url_vars.is_none() && lower.trim_start().starts_with("<!doctype");
 
-    // Validate <style>...</style> blocks
-    let mut style_search = 0;
-    while let Some(open_pos) = lower[style_search..].find("<style") {
-        if block_url_vars.is_some() {
-            return Err("Template block không được chứa thẻ <style> trực tiếp (dùng css_var).");
-        }
-        let tag_start = style_search + open_pos;
-        let Some(gt_rel) = lower[tag_start..].find('>') else {
-            return Err("Thẻ <style> không đóng đúng cú pháp.");
-        };
-        let body_start = tag_start + gt_rel + 1;
-        let Some(close_rel) = lower[body_start..].find("</style>") else {
-            return Err("Thẻ <style> thiếu </style>.");
-        };
-        let css_body = &src[body_start..body_start + close_rel];
-        if !post_render && (css_body.contains("{{") || css_body.contains("{%")) {
-            return Err("C-SEC cấm nội suy {{ ... }} bên trong <style>.");
-        }
-        validate_safe_css(css_body)?;
-        style_search = body_start + close_rel + 8;
-    }
-
-    // Scan HTML tags and attributes
+    // Single-pass scan over HTML, RAWTEXT `<style>`, and RCDATA `<title>`.
     let bytes = src.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'<' {
-            // Skip doctype or comments (using HTML5 comment end rules)
-            if lower[i..].starts_with("<!--") {
-                if let Some(end) = find_html5_comment_end_in_template(bytes, i) {
-                    i = end;
-                    continue;
-                }
-                return Err("HTML comment không đóng.");
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        if lower[i..].starts_with("<!--") {
+            if let Some(end) = find_html5_comment_end_in_template(bytes, i) {
+                i = end;
+                continue;
             }
-            if lower[i..].starts_with("<!doctype") {
+            return Err("HTML comment không đóng.");
+        }
+        if bytes.get(i + 1) == Some(&b'?') {
+            return Err("Template không được chứa processing instruction `<?`.");
+        }
+        if bytes.get(i + 1) == Some(&b'!') {
+            if lower[i..].starts_with("<!doctype")
+                && bytes
+                    .get(i + 9)
+                    .is_some_and(|b| *b == b'>' || is_ascii_html_whitespace(*b))
+            {
                 if block_url_vars.is_some() {
                     return Err("Template block không được chứa DOCTYPE.");
                 }
-                if let Some(end) = bytes[i..].iter().position(|&b| b == b'>') {
-                    i += end + 1;
-                    continue;
-                }
-                return Err("DOCTYPE không đóng.");
-            }
-
-            let mut j = i + 1;
-            if j < bytes.len() && bytes[j] == b'/' {
-                j += 1;
-            }
-            let name_start = j;
-            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'-') {
-                j += 1;
-            }
-            let tag_name = lower[name_start..j].to_string();
-            if FORBIDDEN_TAGS.contains(&tag_name.as_str())
-                && !(tag_name == "title" && is_full_doctype_doc)
-            {
-                return Err("Template chứa thẻ HTML bị C-SEC cấm.");
-            }
-
-            // Find end of tag (respecting quotes)
-            let mut k = j;
-            let mut quote: Option<u8> = None;
-            while k < bytes.len() {
-                let b = bytes[k];
-                if let Some(q) = quote {
-                    if b == q {
-                        quote = None;
+                let mut d = i + 9;
+                while d < bytes.len() && bytes[d] != b'>' {
+                    if matches!(bytes[d], b'<' | b'"' | b'\'' | 0x00..=0x1f | 0x7f) {
+                        return Err("<!DOCTYPE> chứa ký tự không hợp lệ.");
                     }
-                } else if b == b'"' || b == b'\'' {
-                    quote = Some(b);
-                } else if b == b'>' {
-                    break;
+                    d += 1;
                 }
-                k += 1;
-            }
-            if k >= bytes.len() {
-                // Could be `<` inside template text? Only if tag_name is non-empty!
-                if !tag_name.is_empty() {
-                    return Err("Thẻ HTML không đóng đúng cú pháp.");
+                if d >= bytes.len() {
+                    return Err("DOCTYPE không đóng.");
                 }
-                i += 1;
+                i = d + 1;
                 continue;
             }
-
-            let attr_slice = &src[j..k];
-            validate_tag_attributes(
-                &tag_name,
-                attr_slice,
-                post_render,
-                block_url_vars,
-                theme_policy,
-            )?;
-            i = k + 1;
-        } else {
-            i += 1;
+            return Err("HTML chỉ cho phép comment <!-- hoặc <!DOCTYPE>.");
         }
+
+        let is_close = if bytes.get(i + 1) == Some(&b'/') {
+            if !bytes.get(i + 2).is_some_and(u8::is_ascii_alphabetic) {
+                return Err("Thẻ đóng HTML phải bắt đầu bằng ký tự chữ cái ASCII.");
+            }
+            true
+        } else if bytes.get(i + 1).is_some_and(u8::is_ascii_alphabetic) {
+            false
+        } else {
+            // Plain text '<' (e.g. "1 < 2") per WHATWG HTML data state.
+            i += 1;
+            continue;
+        };
+
+        let mut j = i + if is_close { 2 } else { 1 };
+        let name_start = j;
+        while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'-') {
+            j += 1;
+        }
+        let tag_name = lower[name_start..j].to_string();
+        if tag_name.is_empty() {
+            return Err("Tên thẻ HTML không hợp lệ.");
+        }
+        if is_close && matches!(tag_name.as_str(), "style" | "title" | "link" | "meta") {
+            return Err("Thẻ đóng HTML không hợp lệ ở vị trí này.");
+        }
+        if FORBIDDEN_TAGS.contains(&tag_name.as_str())
+            && !(tag_name == "title" && !is_close && is_full_doctype_doc)
+        {
+            return Err("Template chứa thẻ HTML bị C-SEC cấm.");
+        }
+
+        let mut k = j;
+        let mut quote: Option<u8> = None;
+        while k < bytes.len() {
+            let b = bytes[k];
+            if let Some(q) = quote {
+                if b == q {
+                    quote = None;
+                }
+            } else if b == b'"' || b == b'\'' {
+                quote = Some(b);
+            } else if b == b'>' {
+                break;
+            }
+            k += 1;
+        }
+        if k >= bytes.len() {
+            return Err("Thẻ HTML không đóng đúng cú pháp.");
+        }
+
+        let attr_slice = &src[j..k];
+        if is_close {
+            if !attr_slice.trim().is_empty() {
+                return Err("Thẻ đóng HTML không được chứa thuộc tính hoặc /.");
+            }
+            i = k + 1;
+            continue;
+        }
+
+        validate_tag_attributes(&tag_name, attr_slice, post_render, block_url_vars)?;
+        if matches!(tag_name.as_str(), "style" | "title") && attr_slice.trim_end().ends_with('/') {
+            return Err("Thẻ <style>/<title> không được tự đóng.");
+        }
+
+        if tag_name == "style" {
+            if block_url_vars.is_some() {
+                return Err("Template block không được chứa thẻ <style> trực tiếp (dùng css_var).");
+            }
+            let (close_start, next_i) = find_rawtext_or_rcdata_end(src, k + 1, "style")?;
+            let css_body = &src[k + 1..close_start];
+            if !post_render && (css_body.contains("{{") || css_body.contains("{%")) {
+                return Err("C-SEC cấm nội suy {{ ... }} bên trong <style>.");
+            }
+            validate_safe_css(css_body)?;
+            i = next_i;
+            continue;
+        }
+        if tag_name == "title" {
+            let (_close_start, next_i) = find_rawtext_or_rcdata_end(src, k + 1, "title")?;
+            i = next_i;
+            continue;
+        }
+        i = k + 1;
     }
 
     Ok(())
@@ -2038,15 +4364,20 @@ fn validate_tag_attributes(
     attr_slice: &str,
     post_render: bool,
     block_url_vars: Option<&BlockUrlVarAllowlist>,
-    theme_policy: Option<&ThemeUrlPolicy>,
 ) -> Result<(), &'static str> {
     let attrs = parse_attributes(attr_slice)?;
 
     if tag_name == "meta" {
+        if !attrs
+            .keys()
+            .all(|k| matches!(k.as_str(), "charset" | "name" | "content"))
+        {
+            return Err("C-SEC chỉ cho phép <meta charset> hoặc <meta name=\"viewport\">.");
+        }
         let allowed_meta = attrs.contains_key("charset")
             || attrs
                 .get("name")
-                .is_some_and(|v| v.eq_ignore_ascii_case("viewport"));
+                .is_some_and(|v| v.trim().eq_ignore_ascii_case("viewport"));
         if !allowed_meta {
             return Err("C-SEC chỉ cho phép <meta charset> hoặc <meta name=\"viewport\">.");
         }
@@ -2054,10 +4385,10 @@ fn validate_tag_attributes(
     if tag_name == "link" {
         let rel_ok = attrs
             .get("rel")
-            .is_some_and(|v| v.eq_ignore_ascii_case("stylesheet"));
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("stylesheet"));
         let href_ok = attrs
             .get("href")
-            .is_some_and(|v| v.starts_with("/theme/") && !v.contains("{{") && !v.contains(".."));
+            .is_some_and(|v| is_valid_theme_stylesheet_href(v));
         if !(rel_ok && href_ok) {
             return Err("C-SEC chỉ cho phép <link rel=\"stylesheet\" href=\"/theme/...\">.");
         }
@@ -2108,13 +4439,7 @@ fn validate_tag_attributes(
                             "URL động trong template block phải khớp đúng biến kiểu url (href) hoặc <media_key>_url (src/poster).",
                         );
                     }
-                } else if !ALLOWED_DYNAMIC_URL_VARS.contains(&expr_inner)
-                    && !(tag_name == "a"
-                        && name == "href"
-                        && (matches!(expr_inner, "item.url" | "locale.home_url")
-                            || theme_policy
-                                .is_some_and(|policy| policy.allows_anchor_href(expr_inner))))
-                {
+                } else {
                     return Err("URL động trong thuộc tính không nằm trong whitelist typed URL.");
                 }
             } else {
@@ -2860,7 +5185,7 @@ pub fn validate_block_template_csec(
 
     let ctx = BlockSchemaTemplateContext::from_schema(schema);
     let url_allowlist = ctx.url_allowlist();
-    validate_html_and_css_context_with_url_vars(source, false, Some(&url_allowlist), None)?;
+    validate_html_and_css_context_with_url_vars(source, false, Some(&url_allowlist))?;
 
     let ast = parse(source, block_id, SyntaxConfig::default())
         .map_err(|_| "Cú pháp MiniJinja của template block không hợp lệ.")?;
@@ -3214,6 +5539,29 @@ pub fn render_block_csec_with_options_and_budget(
     is_preview: bool,
     budget: &mut RenderBudget,
 ) -> Result<String, &'static str> {
+    render_block_csec_with_options_and_budget_and_config(
+        block_id,
+        template_source,
+        schema,
+        values,
+        site_options,
+        is_preview,
+        budget,
+        &RenderFormattingConfig::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_block_csec_with_options_and_budget_and_config(
+    block_id: &str,
+    template_source: &str,
+    schema: &opendash_core::block_schema::BlockSchemaV1,
+    values: &BTreeMap<String, serde_json::Value>,
+    site_options: Option<&BTreeMap<String, serde_json::Value>>,
+    is_preview: bool,
+    budget: &mut RenderBudget,
+    fmt_cfg: &RenderFormattingConfig,
+) -> Result<String, &'static str> {
     use opendash_core::block_schema::BlockFieldSpec;
 
     if budget.fuel_remaining == 0 {
@@ -3287,7 +5635,7 @@ pub fn render_block_csec_with_options_and_budget(
         .entry("od_is_preview".to_owned())
         .or_insert_with(|| Value::from(is_preview));
 
-    let mut env = restricted_environment();
+    let mut env = restricted_environment_with_config(fmt_cfg);
     env.set_fuel(Some(node_fuel));
     env.add_template(block_id, template_source)
         .map_err(|_| "Không thể biên dịch template block.")?;
@@ -4153,5 +6501,350 @@ mod composition_tests {
         );
         validate_safe_scoped_block_css(&preview_css, true).unwrap();
         assert!(validate_safe_scoped_block_css(&preview_css, false).is_err());
+    }
+}
+
+#[cfg(test)]
+mod spec1_s01_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn none_formatter_and_default_wrapper_keep_strict_undefined() {
+        let tpl = "<p>{{ entry.values.note }}|{{ entry.values.note | default('N/A') }}|{{ entry.values.note | d('') }}</p>";
+        let out = render_csec(
+            "none_test",
+            tpl,
+            json_to_safe_value(&json!({ "entry": { "values": { "note": null } } })),
+        )
+        .unwrap();
+        assert_eq!(decode_html_entities_for_url(&out), "<p>|N/A|</p>");
+
+        assert_eq!(
+            render_csec(
+                "none_check",
+                "{% if x is none and x is defined %}ok{% endif %}",
+                json_to_safe_value(&json!({ "x": null })),
+            )
+            .unwrap(),
+            "ok"
+        );
+        assert!(render_csec("strict_missing", "<p>{{ missing }}</p>", Value::UNDEFINED).is_err());
+    }
+
+    #[test]
+    fn date_format_supports_civil_rfc3339_naive_and_rejects_bad_inputs() {
+        let cfg = RenderFormattingConfig {
+            timezone: "America/New_York".to_owned(),
+        };
+        let tz_hcm = RenderFormattingConfig {
+            timezone: "Asia/Ho_Chi_Minh".to_owned(),
+        };
+        // Civil YYYY-MM-DD must NOT shift to previous day on negative timezone
+        assert_eq!(
+            decode_html_entities_for_url(
+                &render_csec_with_config(
+                    "civil",
+                    "{{ d | date_format }}",
+                    json_to_safe_value(&json!({ "d": "2026-06-15" })),
+                    &cfg,
+                )
+                .unwrap()
+            ),
+            "15/06/2026"
+        );
+        // RFC 3339 shifts from UTC midnight-ish to Asia/Ho_Chi_Minh (+7h -> 16/06)
+        assert_eq!(
+            render_csec_with_config(
+                "rfc",
+                "{{ d | date_format('%Y-%m-%d %H:%M') }}",
+                json_to_safe_value(&json!({ "d": "2026-06-15T23:30:00Z" })),
+                &tz_hcm,
+            )
+            .unwrap(),
+            "2026-06-16 06:30"
+        );
+        // Naive SQLite treated as UTC then shifted to explicit tz arg
+        assert_eq!(
+            decode_html_entities_for_url(
+                &render_csec_with_config(
+                    "sqlite",
+                    "{{ d | date_format('%d/%m %H:%M', 'Asia/Ho_Chi_Minh') }}",
+                    json_to_safe_value(&json!({ "d": "2026-06-15 23:30:00" })),
+                    &cfg,
+                )
+                .unwrap()
+            ),
+            "16/06 06:30"
+        );
+        // Malformed / blank / missing -> ""
+        assert_eq!(
+            render_csec_with_config(
+                "bad_date",
+                "{{ a | date_format }}|{{ b | date_format }}|{{ n | date_format }}",
+                json_to_safe_value(&json!({ "a": "2026-1-5", "b": "not-a-date", "n": null })),
+                &cfg,
+            )
+            .unwrap(),
+            "||"
+        );
+        // Error cases
+        for (tpl, val) in [
+            ("{{ v | date_format }}", json!(123)),
+            ("{{ v | date_format }}", json!("x".repeat(129))),
+            ("{{ v | date_format('') }}", json!("2026-06-15")),
+            (
+                &format!("{{{{ v | date_format('{}') }}}}", "a".repeat(65)),
+                json!("2026-06-15"),
+            ),
+            ("{{ v | date_format('%Z') }}", json!("2026-06-15")),
+            (
+                "{{ v | date_format('%Y', 'Invalid/Zone') }}",
+                json!("2026-06-15T00:00:00Z"),
+            ),
+        ] {
+            assert!(
+                render_csec_with_config(
+                    "err",
+                    tpl,
+                    json_to_safe_value(&json!({ "v": val })),
+                    &cfg,
+                )
+                .is_err(),
+                "{tpl}"
+            );
+        }
+    }
+
+    #[test]
+    fn truncate_and_format_number_filters_are_exact_and_bounded() {
+        let out = render_csec(
+            "trunc_num",
+            "{{ s | truncate(12) }}|{{ small | truncate(12) }}|{{ n | format_number }}|{{ f | format_number(2) }}|{{ neg0 | format_number(2) }}|{{ big | format_number(0, ',', '.') }}",
+            json_to_safe_value(&json!({
+                "s": "Xin chào thế giới Rust",
+                "small": "Ngắn",
+                "n": 1234567,
+                "f": 1234.5,
+                "neg0": -0.001,
+                "big": 1.5e20
+            })),
+        )
+        .unwrap();
+        assert_eq!(
+            out,
+            "Xin chào...|Ngắn|1.234.567|1.234,50|0,00|150,000,000,000,000,000,000"
+        );
+
+        for (tpl, val) in [
+            ("{{ v | truncate(0) }}", json!("abc")),
+            ("{{ v | truncate(5, 'x'.repeat(33)) }}", json!("abcdefgh")),
+            ("{{ v | truncate(5) }}", json!(123)),
+            ("{{ v | truncate(5) }}", json!("a".repeat(128 * 1024 + 1))),
+            ("{{ v | format_number }}", json!(true)),
+            ("{{ v | format_number }}", json!([1, 2])),
+            ("{{ v | format_number(7) }}", json!(12)),
+            ("{{ v | format_number(0, '-----') }}", json!(12)),
+            ("{{ v | format_number }}", json!("9".repeat(33))),
+            ("{{ v | format_number }}", json!(1e35)),
+            ("{{ v | format_number }}", json!("NaN")),
+        ] {
+            assert!(
+                render_csec("err", tpl, json_to_safe_value(&json!({ "v": val }))).is_err(),
+                "{tpl}"
+            );
+        }
+    }
+
+    #[test]
+    fn batch_selectattr_rejectattr_map_and_21_tests_work_with_limits() {
+        let ctx = json_to_safe_value(&json!({
+            "items": [
+                { "id": 1, "name": "Alpha", "active": true, "cat": { "slug": "news" } },
+                { "id": 2, "name": "Beta", "active": false, "cat": null },
+                { "id": 3, "name": "Alpine", "active": true, "cat": { "slug": "tech" } }
+            ]
+        }));
+        let rendered = render_csec(
+            "seq_filters",
+            "{% for row in [1,2,3,4] | batch(3, 0) %}[{{ row | join(',') }}]{% endfor %}|\
+             {{ items | selectattr('active') | map('name') | join(',') }}|\
+             {{ items | rejectattr('id', 'even') | map(attribute='cat.slug', default='none') | join(',') }}|\
+             {{ items | selectattr('id', 'even') | map(attribute='cat.slug', default='none') | join(',') }}|\
+             {{ items | selectattr('name', 'startingwith', 'Alp') | selectattr('cat.slug', 'in', ['news']) | map('name') | join(',') }}|\
+             {% if 2 is even and 'abc' is startingwith('a') and 'abc' is endingwith('c') and 'a' is in(['a','b']) and 5 is gt(3) %}yes{% endif %}",
+            ctx,
+        )
+        .unwrap();
+        assert_eq!(
+            rendered,
+            "[1,2,3][4,0,0]|Alpha,Alpine|news,tech|none|Alpha|yes"
+        );
+
+        // Security & OOM bounds
+        for bad in [
+            "{{ items | selectattr('__class__') }}",
+            "{{ items | selectattr('a.b.c.d') }}",
+            "{{ items | selectattr('id', 'safe') }}",
+            "{{ items | selectattr('id', 'eq') }}",
+            "{{ items | selectattr('id', 'even', 1) }}",
+            "{{ items | map(attribute='name', filter='upper') }}",
+            "{{ items | map('name', attribute='id') }}",
+            "{{ items | batch(0) }}",
+            "{{ items | batch(101) }}",
+            "{{ 'not_seq' | batch(2) }}",
+            "{{ items[0]['__class__'] }}",
+            "{{ t[dynamic_key] }}",
+            "{% if 'x' is unknown_test %}bad{% endif %}",
+        ] {
+            assert!(validate_template_csec("bad", bad).is_err() || render_csec(
+                "bad",
+                bad,
+                json_to_safe_value(&json!({ "items": [{ "name": "a", "id": 1 }], "t": {}, "dynamic_key": "k" })),
+            ).is_err(), "{bad}");
+        }
+
+        let too_many = json_to_safe_value(&json!({ "items": vec![json!({"id": 1}); 501] }));
+        for tpl in [
+            "{{ items | batch(2) }}",
+            "{{ items | selectattr('id') }}",
+            "{{ items | rejectattr('id') }}",
+            "{{ items | map('id') }}",
+        ] {
+            assert!(render_csec("oom", tpl, too_many.clone()).is_err(), "{tpl}");
+        }
+    }
+
+    #[test]
+    fn walk_theme_ast_enforces_theme_assets_url_scopes_and_antibypass() {
+        let digest = "a".repeat(64);
+        let policy = ThemeUrlPolicy::new(
+            BTreeSet::from(["options.cta_url".to_owned()]),
+            BTreeSet::from(["options.logo_ref".to_owned()]),
+            BTreeSet::from(["assets/app.css".to_owned(), "assets/logo.png".to_owned()]),
+        );
+
+        let full_doc = r#"<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ entry.title }}</title>
+<link rel="stylesheet" href="{{ theme_assets['assets/app.css'] }}">
+</head><body>
+<p>Math: 1 < 2 and 3 > 1</p>
+<a href="{{ options.cta_url }}">CTA</a>
+<img src="{{ options.logo_ref }}" alt="Prefix {{ entry.title }}">
+<img src="{{ theme_assets['assets/logo.png'] }}" alt="Logo">
+<a href="{{ locale.home_url }}">Home</a>
+<blockquote cite="{{ entry.url }}">Quote</blockquote>
+<q cite="{{ options.cta_url }}">Short</q>
+{% for item in locale.alternates %}<a href="{{ item.url }}">{{ item.label }}</a>{% endfor %}
+{% for row in entries | batch(2) %}{% for entry in row %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% for f in entry.fields %}<img src="{{ f.image_url }}">{% for u in f.gallery_urls %}<img src="{{ u }}">{% endfor %}{% endfor %}{% endfor %}{% endfor %}
+{% if entry.primary_category %}<a href="{{ entry.primary_category.url }}">Cat</a>{% endif %}
+</body></html>"#;
+
+        validate_template_csec_with_theme_urls("doc", full_doc, &policy).unwrap();
+        let compiled = validate_and_compile_csec_composition_with_theme_urls(
+            "doc",
+            full_doc,
+            &BTreeMap::new(),
+            CsecContentKind::NonEntry,
+            &policy,
+        )
+        .unwrap();
+        assert!(!compiled.uses_related_entries);
+        assert!(!compiled.uses_recent_posts);
+        let rendered = compiled
+            .render(
+                json_to_safe_value(&json!({
+                    "theme_assets": {
+                        "assets/app.css": format!("/theme/{digest}/assets/app.css"),
+                        "assets/logo.png": format!("/theme/{digest}/assets/logo.png")
+                    },
+                    "options": { "cta_url": "/contact", "logo_ref": "/media/ok.png" },
+                    "locale": { "home_url": "/en", "alternates": [{ "url": "/vi", "label": "VI" }] },
+                    "entry": { "title": "Post", "url": "/posts/1", "primary_category": { "url": "/cat/news" } },
+                    "entries": []
+                })),
+                None,
+            )
+            .unwrap();
+        assert!(rendered.contains("Math: 1 < 2"));
+
+        let rejected = [
+            // Provenance & URL slots
+            r#"<a href="{{ item.url }}">untrusted item outside loop</a>"#,
+            r#"<img src="{{ field.image_url }}">"#,
+            r#"<img src="{{ url }}">"#,
+            r#"<img src="{{ locale.home_url }}">"#,
+            r#"<img src="{{ options.cta_url }}">"#,
+            r#"<cite cite="{{ options.cta_url }}">bad cite tag</cite>"#,
+            r#"<link rel="stylesheet" href="{{ theme_assets['assets/logo.png'] }}">"#,
+            r#"<link rel="stylesheet" href="{{ theme_assets['assets/missing.css'] }}">"#,
+            r#"<a href="{{ entry.url }}/tail">split url</a>"#,
+            r#"<a href="/prefix{{ entry.url }}">split url</a>"#,
+            // Tombstones & loop fixed point
+            r#"{% set row = [{"url":"/x"}] %}{% for entry in row %}<a href="{{ entry.url }}">x</a>{% endfor %}"#,
+            r#"{% for i, entry in entries %}<a href="{{ entry.url }}">x</a>{% endfor %}"#,
+            r#"{% for outer in menus.primary.items %}{% for n in [1,2] %}<a href="{{ outer.url }}">x</a>{% set outer = "x" %}{% endfor %}{% endfor %}"#,
+            r#"{% for outer in menus.primary.items %}{% for n in [1,2] %}<a href="{{ outer.url }}">x</a>{% set x %}{% set outer = "bad" %}{% endset %}{% endfor %}{% endfor %}"#,
+            r#"{% set unused %}<script>alert(1)</script>{% endset %}"#,
+            r#"{% for x in entries %}{% else %}<div id="open"{% endfor %}"#,
+            r#"{% with x = 1 %}{% set y = menus.primary.items %}{% endwith %}{% for a in menus.primary.items %}{% set a = 1 %}<a href="{{ a.url }}">x</a>{% endfor %}"#,
+            // HTML/RCDATA/RAWTEXT/Tag phase anti-bypass
+            "<!DOCTYPE html><html><head><title></titl{{ site.title }}e><div title=\"</title><script>alert(1)</script>\"></head><body></body></html>",
+            "<!DOCTYPE html><html><head><title>x</title ><script>alert(1)</script></head><body></body></html>",
+            "<?x <div title=\"><script>alert(1)</script>\">",
+            "</1 <div title=\"><script>alert(1)</script>\">",
+            "<!doctypex><p>bad</p>",
+            "<!CDATA[bad]>",
+            "<style>{% if cond %}body{}{% endif %}</style>",
+            "<style>body{}</style/>",
+            "<style>body{}</style >",
+            "<meta charset=\"utf-8\" http-equiv=\"refresh\" content=\"0;url=/x\">",
+            "{% if false %}<a href=\"javascript:alert(1)\">x</a>{% endif %}",
+            "<{{ 'script' }}>alert(1)</script>",
+            "<!-- a{{ options.cta_url }}><script>alert(1)</script> -->",
+            "</link>",
+            "</meta>",
+        ];
+        for tpl in rejected {
+            assert!(
+                validate_template_csec_with_theme_urls("reject", tpl, &policy).is_err(),
+                "expected C-SEC reject for: {tpl}"
+            );
+        }
+    }
+
+    #[test]
+    fn compiled_composition_reports_lazy_related_and_recent_usage_flags() {
+        let parts = BTreeMap::from([
+            (
+                "sidebar".to_owned(),
+                "<aside>{% for p in recent_posts %}<a href=\"{{ p.url }}\">{{ p.title }}</a>{% endfor %}</aside>".to_owned(),
+            ),
+            (
+                "dormant".to_owned(),
+                "<div>{{ related_entries | length }}</div>".to_owned(),
+            ),
+        ]);
+        let comp = validate_and_compile_csec_composition(
+            "single",
+            "<main>{{ od_content() }}{{ od_part('sidebar') }}</main>",
+            &parts,
+            CsecContentKind::Entry,
+        )
+        .unwrap();
+        assert!(!comp.uses_related_entries);
+        assert!(comp.uses_recent_posts);
+
+        let comp_related = validate_and_compile_csec_composition(
+            "single",
+            "<main>{{ od_content() }}{% if related_entries %}<p>{{ related_entries | length }}</p>{% endif %}</main>",
+            &parts,
+            CsecContentKind::Entry,
+        )
+        .unwrap();
+        assert!(comp_related.uses_related_entries);
+        assert!(!comp_related.uses_recent_posts);
     }
 }
