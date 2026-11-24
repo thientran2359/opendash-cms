@@ -2087,7 +2087,7 @@ export const en = {
   "studio.saved_and_published_changes_v_version": "Saved and published changes (v{{version}}).",
   "studio.loaded_latest_version_v_version": "Loaded latest version v{{version}}.",
   "studio.initialized_the_page_builder_for_label_not_yet_saved_to_the_database": "Initialized the page builder for \"{{label}}\". Not yet saved to the database.",
-  "studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale": "The preview locale is no longer available. Drafts are retained; reload to switch to the default locale.",
+  "studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale": "The preview language changed or is no longer available. Drafts are retained; reload to switch languages.",
   "studio.page_builder_override": "Page builder override",
   "studio.c_sec_theme": "C-SEC theme",
   "studio.core_default": "Core default",

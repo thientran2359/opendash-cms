@@ -2089,7 +2089,7 @@ export const vi: Record<TranslationKey, string> = {
   "studio.saved_and_published_changes_v_version": "Đã lưu và cập nhật công khai (v{{version}}).",
   "studio.loaded_latest_version_v_version": "Đã tải bản mới nhất v{{version}}.",
   "studio.initialized_the_page_builder_for_label_not_yet_saved_to_the_database": "Đã khởi tạo bản dựng Trình dựng trang cho \"{{label}}\". Chưa lưu lên CSDL.",
-  "studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale": "Ngôn ngữ xem trước không còn khả dụng. Nháp vẫn được giữ; tải lại để chuyển sang ngôn ngữ mặc định.",
+  "studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale": "Ngôn ngữ xem trước đã thay đổi hoặc không còn khả dụng. Nháp vẫn được giữ; tải lại để chuyển ngôn ngữ.",
   "studio.page_builder_override": "Trình dựng trang Override",
   "studio.c_sec_theme": "Theme C-SEC",
   "studio.core_default": "Mặc định Core",

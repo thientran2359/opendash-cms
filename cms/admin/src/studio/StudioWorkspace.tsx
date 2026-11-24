@@ -134,8 +134,11 @@ export const StudioWorkspace: React.FC<Props> = ({
   const effectivePreviewLocale = (previewLocaleInvalid ? '' : previewLocale) || localeState.defaultLocale?.code || '';
   const [localeDraftConflict, setLocaleDraftConflict] = useState<string | null>(null);
   const [localeReloadPending, setLocaleReloadPending] = useState(false);
+  const [hydratedPreviewLocale, setHydratedPreviewLocale] = useState<string | null>(null);
+  const localeBaselineMismatch = Boolean(hydratedPreviewLocale && effectivePreviewLocale
+    && hydratedPreviewLocale !== effectivePreviewLocale);
   // A failed locale load must never leave the old draft eligible for a new locale's CAS.
-  const localeDraftBlocked = !isMode2 && Boolean(localeDraftConflict || previewLocaleInvalid || localeReloadPending);
+  const localeDraftBlocked = !isMode2 && Boolean(localeDraftConflict || previewLocaleInvalid || localeReloadPending || localeBaselineMismatch);
   const [activeThemeId, setActiveThemeId] = useState<string | null>(null);
   const [activeThemeName, setActiveThemeName] = useState<string | null>(null);
   const [targets, setTargets] = useState<StudioTargetItem[]>([]);
@@ -199,7 +202,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   const previewSeqRef = useRef(0);
   const previewAbortRef = useRef<AbortController | null>(null);
 
-  const authority = JSON.stringify([route.view, entryTypeKey, entryId, user?.id, user?.role, csrfToken, resetToken, active]);
+  const authority = JSON.stringify([route.view, entryTypeKey, entryId, user?.id, user?.role, csrfToken, resetToken, active, isMode2 ? null : effectivePreviewLocale]);
   const authorityRef = useRef(authority);
   authorityRef.current = authority;
 
@@ -226,6 +229,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setConflict(false);
     setLocaleDraftConflict(null);
     setLocaleReloadPending(false);
+    setHydratedPreviewLocale(null);
     resetHistory();
     mode1LoadedRef.current = false;
     mode2LoadedKeyRef.current = null;
@@ -289,18 +293,19 @@ export const StudioWorkspace: React.FC<Props> = ({
     onDirtyChange(totalDirty);
   }, [totalDirty, onDirtyChange]);
 
-  // Reset a disabled/deleted preview locale without silently rebasing local drafts.
+  // A disabled/deleted preview locale or a changed default invalidates its loaded CAS baseline.
   useEffect(() => {
-    if (isMode2 || !previewLocaleInvalid || savingRef.current) return;
+    if (isMode2 || savingRef.current || localeDraftConflict) return;
+    if (!previewLocaleInvalid && (!localeBaselineMismatch || localeReloadPending)) return;
     loadSeqRef.current += 1;
     previewSeqRef.current += 1;
     previewAbortRef.current?.abort();
-    setPreviewLocale('');
+    if (previewLocaleInvalid) setPreviewLocale('');
     setPreviewHtml('');
     setLocaleReloadPending(true);
     setLoading(false);
-    if (mode1Dirty) {
-      setLocaleDraftConflict(previewLocale);
+    if (mode1Dirty && !localeReloadPending) {
+      setLocaleDraftConflict(hydratedPreviewLocale || previewLocale);
       setStatus(t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale"), true);
     } else {
       mode1ForceReloadRef.current = true;
@@ -308,7 +313,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setLoading(true);
       setMode1ReloadSeq(v => v + 1);
     }
-  }, [isMode2, previewLocaleInvalid, saving, mode1Dirty, t]);
+  }, [isMode2, previewLocaleInvalid, localeBaselineMismatch, localeReloadPending, localeDraftConflict, hydratedPreviewLocale, previewLocale, saving, mode1Dirty, t]);
 
   // Keep route-driven Mode 1 panel/target synchronized cleanly on navigation.
   useEffect(() => {
@@ -380,7 +385,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     const reqAuthority = authority;
 
     if (!isMode2) {
-      if (previewLocaleInvalid || localeDraftConflict) return;
+      if (!effectivePreviewLocale || previewLocaleInvalid || localeDraftConflict || (localeBaselineMismatch && !localeReloadPending)) return;
       if (mode1LoadedRef.current && !conflict) {
         return;
       }
@@ -419,6 +424,10 @@ export const StudioWorkspace: React.FC<Props> = ({
           globalOptsRes,
         ]) => {
           if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
+          if ((generalRes.locale && generalRes.locale !== effectivePreviewLocale)
+              || (readingRes.locale && readingRes.locale !== effectivePreviewLocale)) {
+            throw new Error(t("studio.reload_preview_locale_before_saving"));
+          }
           let slotsRes: MenuSlotsSnapshot | null = null;
           if (targetsRes.active_theme_id) {
             slotsRes = await getMenuSlots(targetsRes.active_theme_id, undefined, effectivePreviewLocale || undefined).catch(() => null);
@@ -473,6 +482,7 @@ export const StudioWorkspace: React.FC<Props> = ({
             hydrateTemplateTarget(initialKey, targetsRes.items, byKey);
           }
           mode1LoadedRef.current = true;
+          setHydratedPreviewLocale(effectivePreviewLocale);
           setLocaleReloadPending(false);
           setConflict(false);
           setStatus(t("studio.ready_to_customize_the_website_and_build_templates"));
@@ -538,7 +548,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         if (alive && seq === loadSeqRef.current) setLoading(false);
       });
     return () => { alive = false; };
-  }, [active, isMode2, entryTypeKey, entryId, user?.id, user?.role, csrfToken, resetToken, themeRevision, mode1ReloadSeq]);
+  }, [active, isMode2, entryTypeKey, entryId, user?.id, user?.role, csrfToken, resetToken, themeRevision, mode1ReloadSeq, isMode2 ? null : effectivePreviewLocale, previewLocaleInvalid, localeDraftConflict]);
 
   const activeDoc = isMode2 ? entryDoc : templateDoc;
   const activeSelectedId = isMode2 ? entrySelectedNodeId : templateSelectedNodeId;
@@ -632,7 +642,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   useEffect(() => {
     if (!active || !user || !csrfToken) return;
-    if (!isMode2 && (!previewTargetCandidate || previewLocaleInvalid || (localeReloadPending && !localeDraftConflict))) return;
+    if (!isMode2 && (!previewTargetCandidate || !effectivePreviewLocale || previewLocaleInvalid || ((localeReloadPending || localeBaselineMismatch) && !localeDraftConflict))) return;
     if (isMode2 && (!entryTypeKey || entryId === null || entryVersion === null)) return;
 
     const seq = ++previewSeqRef.current;
@@ -717,6 +727,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     previewLocaleInvalid,
     localeDraftConflict,
     localeReloadPending,
+    localeBaselineMismatch,
   ]);
 
   const handleSelectTarget = (nextKey: string | null) => {
@@ -740,7 +751,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   };
 
   const handleSaveMode1 = async () => {
-    if (!active || !user || !csrfToken || loading || savingRef.current || !mode1Dirty || localeDraftBlocked) return;
+    if (!active || !user || !csrfToken || loading || savingRef.current || !mode1Dirty || localeDraftBlocked || !hydratedPreviewLocale || hydratedPreviewLocale !== effectivePreviewLocale) return;
 
     if (readingDirty && readingDraft && readingDraft.homepage_page_id !== null &&
         readingDraft.homepage_page_id === readingDraft.posts_page_id) {
@@ -1120,7 +1131,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                 onChange={e => {
                   const next = e.target.value;
                   if (next === effectivePreviewLocale) return;
-                  const hasTransient = generalDirty || readingDirty || menuSlotsDirty || globalOptionsDirty || themeOptionsDirty;
+                  const hasTransient = mode1Dirty;
                   if (hasTransient) {
                     if (!window.confirm(t("studio.there_are_unsaved_changes_in_the_current_language_discard_them_to_switch_preview_locale"))) {
                       return;
@@ -1224,7 +1235,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               panel={panel}
               onPanelChange={handlePanelChange}
               localeState={localeState}
-              previewLocale={localeDraftConflict ?? (previewLocaleInvalid ? previewLocale : effectivePreviewLocale)}
+              previewLocale={localeDraftConflict ?? (localeBaselineMismatch ? hydratedPreviewLocale! : previewLocaleInvalid ? previewLocale : effectivePreviewLocale)}
               activeThemeId={activeThemeId}
               generalDraft={generalDraft}
               generalDirty={generalDirty}
@@ -1239,7 +1250,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               themeOptionsDirty={themeOptionsDirty}
               themeOptionsReloadToken={themeOptionsReloadToken}
               onThemeOptionsChange={(vals, meta) => {
-                if (localeDraftBlocked) return;
+                if (localeDraftBlocked || !hydratedPreviewLocale || hydratedPreviewLocale !== effectivePreviewLocale) return;
                 setThemeOptionsDraft(vals);
                 setThemeOptionsVersion(meta.version);
                 setThemeOptionsDirty(meta.dirty);
