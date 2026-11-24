@@ -146,11 +146,19 @@ export function previewMenu(
   });
 }
 
-export function getMenuSlots(themeId: string, signal?: AbortSignal): Promise<MenuSlotsSnapshot> {
-  return requestJson<MenuSlotsSnapshot>(`/api/admin/menu-slots/${encodeURIComponent(themeId)}`, {
-    signal,
-    defaultErrorMessage: 'Không tải được slot menu của theme.',
-  });
+export function getMenuSlots(
+  themeId: string,
+  signal?: AbortSignal,
+  locale?: string | null,
+): Promise<MenuSlotsSnapshot> {
+  const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  return requestJson<MenuSlotsSnapshot>(
+    `/api/admin/menu-slots/${encodeURIComponent(themeId)}${query}`,
+    {
+      signal,
+      defaultErrorMessage: 'Không tải được slot menu của theme.',
+    },
+  );
 }
 
 export function putMenuSlots(
@@ -158,13 +166,18 @@ export function putMenuSlots(
   assignments: Record<string, number | null>,
   version: number,
   csrfToken: string,
+  locale?: string | null,
 ): Promise<MenuSlotsSnapshot> {
-  return requestJson<MenuSlotsSnapshot>(`/api/admin/menu-slots/${encodeURIComponent(themeId)}`, {
-    method: 'PUT',
-    csrfToken,
-    ifMatchVersion: version,
-    contentType: 'application/json',
-    body: JSON.stringify({ assignments }),
-    defaultErrorMessage: 'Không lưu được gắn slot menu.',
-  });
+  const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  return requestJson<MenuSlotsSnapshot>(
+    `/api/admin/menu-slots/${encodeURIComponent(themeId)}${query}`,
+    {
+      method: 'PUT',
+      csrfToken,
+      ifMatchVersion: version,
+      contentType: 'application/json',
+      body: JSON.stringify({ assignments }),
+      defaultErrorMessage: 'Không lưu được gắn slot menu.',
+    },
+  );
 }

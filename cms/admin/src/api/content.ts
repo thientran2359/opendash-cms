@@ -193,11 +193,37 @@ export function listContentEntries(
   limit = 50,
   offset = 0,
   filters: EntryTermFilters = {},
+  locale?: string | null,
 ): Promise<ContentEntryRecord[]> {
   const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   appendEntryTermFilters(query, filters);
+  if (locale) query.set('locale', locale);
   return requestJson(`${entriesPath(typeKey)}?${query}`, {
     defaultErrorMessage: 'Không thể tải danh sách nội dung.',
+  });
+}
+
+export interface CreateEntryTranslationInput {
+  target_locale: string;
+  slug: string;
+  title?: string;
+  auto_unique_slug?: boolean;
+}
+
+export function createEntryTranslation(
+  typeKey: string,
+  entryId: number,
+  input: CreateEntryTranslationInput,
+  expectedSourceVersion: number,
+  csrfToken: string,
+): Promise<ContentEntryRecord> {
+  return requestJson(`${entryPath(typeKey, entryId)}/translations`, {
+    method: 'POST',
+    csrfToken,
+    ifMatchVersion: expectedSourceVersion,
+    contentType: 'application/json',
+    body: JSON.stringify(input),
+    defaultErrorMessage: 'Không thể tạo bản dịch mới.',
   });
 }
 

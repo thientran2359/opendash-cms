@@ -75,6 +75,7 @@ export interface ThemeOptionDef {
   type: ThemeOptionType;
   default: unknown;
   public: boolean;
+  translatable?: boolean;
   min?: number;
   max?: number;
   choices?: ThemeOptionChoice[];
@@ -131,8 +132,12 @@ export function activateThemeRevision(revisionId: string, selectionVersion: numb
   });
 }
 
-export function getThemeOptions(themeId: string): Promise<ThemeOptionsSnapshot> {
-  return requestJson(`/api/themes/${encodeURIComponent(themeId)}/options`, {
+export function getThemeOptions(
+  themeId: string,
+  locale?: string | null,
+): Promise<ThemeOptionsSnapshot> {
+  const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  return requestJson(`/api/themes/${encodeURIComponent(themeId)}/options${query}`, {
     defaultErrorMessage: 'Không thể tải tùy chọn theme.',
   });
 }
@@ -142,8 +147,10 @@ export function saveThemeOptions(
   values: Record<string, unknown>,
   version: number,
   csrfToken: string,
+  locale?: string | null,
 ): Promise<ThemeOptionsSnapshot> {
-  return requestJson(`/api/themes/${encodeURIComponent(themeId)}/options`, {
+  const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  return requestJson(`/api/themes/${encodeURIComponent(themeId)}/options${query}`, {
     method: 'PUT',
     csrfToken,
     ifMatchVersion: version,

@@ -4,6 +4,10 @@ import { createTaxonomyTerm, getTaxonomyTerm, getEffectiveTermConfig, getTaxonom
   listAllTaxonomyTerms, updateTaxonomyTerm,
   type TaxonomyDefinition, type TaxonomyKind, type TaxonomyTerm, type TaxonomyTermChanges } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
+import {
+  EMPTY_ADMIN_LOCALE_STATE,
+  type AdminLocaleState,
+} from '../../api/locales.ts';
 import { AdminTermPanels, type EffectiveTermConfig, type TermExtensionValues } from '../extensions/AdminContributionRenderer.tsx';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 
@@ -15,6 +19,7 @@ interface TermEditProps {
   /** Site instance from App, required to safely recover a draft after a 401. */
   siteInstanceId?: string;
   csrfToken: string | null;
+  localeState?: AdminLocaleState;
   onApiError: (error: unknown, fallback: string) => void;
   onDirtyChange: (dirty: boolean) => void;
   onNavigateHash: (hash: string) => void;
@@ -78,8 +83,8 @@ function allowedParents(terms: TaxonomyTerm[], targetId: number | null): Taxonom
 }
 
 /** A full-route editor; extension mount slots intentionally contain no fake fields. */
-export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToken, onApiError,
-  onDirtyChange, onNavigateHash}: TermEditProps) {
+export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToken,
+  localeState = EMPTY_ADMIN_LOCALE_STATE, onApiError, onDirtyChange, onNavigateHash}: TermEditProps) {
   const scope = termScope(siteInstanceId, user, kind, mode, termId);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -116,9 +121,22 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
   const hierarchical = Boolean(definition?.hierarchical);
   const providerUnavailable = Boolean(definition &&
     (definition.provider_status !== 'active' || definition.declaration_state !== 'declared'));
+  const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
+  const [selectedLocale, setSelectedLocale] = useState<string>(defaultLocaleCode);
+  useEffect(() => {
+    if (!selectedLocale && defaultLocaleCode) {
+      setSelectedLocale(defaultLocaleCode);
+    }
+  }, [selectedLocale, defaultLocaleCode]);
+  const activeTermLocale = mode === 'edit' ? (current?.locale ?? defaultLocaleCode) : selectedLocale;
   const dirty = form.name !== baseline.name || form.slug !== baseline.slug ||
     form.parentId !== baseline.parentId || JSON.stringify(extensions) !== JSON.stringify(extensionBaseline);
-  const parentOptions = useMemo(() => allowedParents(allTerms, current?.id ?? null), [allTerms, current?.id]);
+  const parentOptions = useMemo(() => {
+    const scoped = activeTermLocale
+      ? allTerms.filter((t) => !t.locale || t.locale === activeTermLocale)
+      : allTerms;
+    return allowedParents(scoped, current?.id ?? null);
+  }, [allTerms, current?.id, activeTermLocale]);
 
   useEffect(() => { reportDirtyRef.current(dirty); }, [dirty]);
   useEffect(() => () => reportDirtyRef.current(false), []);
@@ -287,8 +305,13 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
       try {
         let saved: TaxonomyTerm;
         if (mode === 'new') {
-          saved = await createTaxonomyTerm({kind, name, slug,
-            ...(hierarchical ? {parent_id: parentId} : {})}, csrfToken);
+          saved = await createTaxonomyTerm({
+            kind,
+            name,
+            slug,
+            ...(hierarchical ? { parent_id: parentId } : {}),
+            ...(localeState.hasMultipleLocales && selectedLocale ? { locale: selectedLocale } : {}),
+          }, csrfToken);
         } else {
           if (!current || version === null) return;
           const changes: TaxonomyTermChanges = {};
@@ -394,6 +417,33 @@ export function TermEditPage({kind, mode, termId, user, siteInstanceId, csrfToke
             onChange={event => { setManualSlug(true); setForm(previous => ({...previous, slug: event.target.value})); }} />
           <span className="text-xs font-normal text-zinc-500">Slug duy nhất trong loại, bắt đầu bằng a-z, tối đa 64 ký tự.</span>
         </label>
+        {localeState.hasMultipleLocales && (
+          <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-locale">
+            <span>Ngôn ngữ</span>
+            <select
+              id="term-locale"
+              className={selectClass}
+              value={activeTermLocale}
+              disabled={mode !== 'new' || busy || user.role !== 'admin'}
+              onChange={(event) => {
+                setSelectedLocale(event.target.value);
+                setForm((previous) => ({ ...previous, parentId: '' }));
+              }}
+              data-testid="term-locale-select"
+            >
+              {localeState.allLocales.map((loc) => (
+                <option key={loc.code} value={loc.code}>
+                  {loc.label} ({loc.code})
+                </option>
+              ))}
+            </select>
+            <span className="text-xs font-normal text-zinc-500">
+              {mode === 'new'
+                ? 'Ngôn ngữ của term được cố định sau khi tạo.'
+                : 'Ngôn ngữ không thể đổi sau khi tạo.'}
+            </span>
+          </label>
+        )}
         {hierarchical && <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800" htmlFor="term-parent">
           <span>Term cha</span>
           <select id="term-parent" className={selectClass} value={form.parentId} disabled={busy || user.role !== 'admin'}

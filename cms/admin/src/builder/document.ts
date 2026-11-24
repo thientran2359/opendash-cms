@@ -29,6 +29,7 @@ export type BindingSource =
 export interface ElementBinding {
   type_key: string;
   entry_slug: string;
+  entry_locale?: string | null;
   source: BindingSource;
   target: BindingTarget;
 }

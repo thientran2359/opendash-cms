@@ -30,3 +30,4 @@ export type {
 export * from './contact.ts';
 export * from './smtp.ts';
 export * from './operations.ts';
+export * from './locales.ts';

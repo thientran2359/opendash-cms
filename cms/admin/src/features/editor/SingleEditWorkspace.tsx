@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createEntryComposite,
+  createEntryTranslation,
   contentEntryPreviewPath,
   deleteContentEntry,
   effectiveContentTypeSettings,
@@ -14,12 +15,20 @@ import {
 import { runPluginAction } from '../../api/plugins.ts';
 import { getEntryRoute, getEntrySeo } from '../../api/seo.ts';
 import { ApiClientError } from '../../api/client.ts';
-import { getActiveThemeLayouts, type ThemeLayoutCatalog } from '../../api/themes.ts';
+import {
+  getActiveThemeLayouts,
+  type ThemeLayoutCatalog,
+} from '../../api/themes.ts';
+import {
+  EMPTY_ADMIN_LOCALE_STATE,
+  type AdminLocaleState,
+} from '../../api/locales.ts';
 import type { AuthUser } from '../../types.ts';
 import type {
   ContentFieldValue,
   EffectiveEditorConfigProjection,
   EffectivePanelProjection,
+  TranslationLinkSummary,
 } from '../content/types.ts';
 import { editorDraftStore, diffEditorPayload, type EditorDraftPayload } from './EditorDraftStore.ts';
 import { PanelRegionRenderer } from './PanelRegionRenderer.tsx';
@@ -45,6 +54,7 @@ interface SingleEditWorkspaceProps {
   routeHash?: string;
   isActive?: boolean;
   csrfToken: string | null;
+  localeState?: AdminLocaleState;
   onApiError: (error: unknown, fallback: string) => void;
   onDirtyChange: (dirty: boolean) => void;
   onNavigateHash: (hash: string) => void;
@@ -126,10 +136,24 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
   routeHash,
   isActive = true,
   csrfToken,
+  localeState = EMPTY_ADMIN_LOCALE_STATE,
   onApiError,
   onDirtyChange,
   onNavigateHash,
 }) => {
+  const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
+  const [entryLocale, setEntryLocale] = useState<string>(defaultLocaleCode);
+  const [translations, setTranslations] = useState<TranslationLinkSummary[]>([]);
+  const [translationModalLocale, setTranslationModalLocale] = useState<string | null>(null);
+  const [translationTitle, setTranslationTitle] = useState('');
+  const [translationSlug, setTranslationSlug] = useState('');
+  const [creatingTranslation, setCreatingTranslation] = useState(false);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  useEffect(() => {
+    if (entryId === null && !entryLocale && defaultLocaleCode) {
+      setEntryLocale(defaultLocaleCode);
+    }
+  }, [entryId, entryLocale, defaultLocaleCode]);
   // Pattern is a private, Builder-only CPT. Its metadata mutations go through
   // PatternsPage (/api/admin/patterns); generic entry editing must not expose
   // public URLs, publication controls or a second write path for Patterns.
@@ -244,6 +268,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     setSeoDescription(payload.seo?.description ?? '');
     setSeoOgImageId(payload.seo?.og_image_id ?? '');
     setSeoNoindex(Boolean(payload.seo?.noindex));
+    if (payload.locale) setEntryLocale(payload.locale);
   };
 
   const persistDraftPatch = (patch: Partial<EditorDraftPayload>) => {
@@ -380,9 +405,11 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           const allowedValues = Object.fromEntries(
             Object.entries(rec.values).filter(([key]) => key in freshCfg.effective_fields),
           );
+          setEntryLocale(rec.locale ?? defaultLocaleCode);
+          setTranslations(rec.translations ?? []);
           baseline = {
             id: rec.id, version: rec.version, title: rec.title, slug: rec.slug,
-            slug_touched: true, publication_status: rec.publication_status,
+            slug_touched: true, locale: rec.locale, publication_status: rec.publication_status,
             content_mode: rec.content_mode,
             values: allowedValues, cleared_fields: [], term_ids: rec.term_ids ?? [],
             primary_category_term_id: rec.primary_category_term_id ?? null,
@@ -544,6 +571,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           && baselineRef.current?.primary_category_term_id !== snapshot.primary_category_term_id
           ? { primary_category_term_id: snapshot.primary_category_term_id } : {}),
         ...(entryId === null ? { auto_unique_slug: true } : {}),
+        ...(entryId === null && localeState.hasMultipleLocales && entryLocale ? { locale: entryLocale } : {}),
         ...(canWriteRouteRef.current ? {
           custom_path: snapshot.custom_path?.trim() ? snapshot.custom_path.trim() : null,
         } : {}),
@@ -563,10 +591,12 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           ? await createEntryComposite(typeKey, payload, csrfToken)
           : await updateEntryComposite(typeKey, entryId, payload, csrfToken);
       if (requestEpoch !== editorDraftStore.getSessionEpoch() || activeDraftKeyRef.current !== draftKey) return null;
+      setEntryLocale(res.entry.locale ?? entryLocale);
+      if (res.entry.translations) setTranslations(res.entry.translations);
       const saved: EditorDraftPayload = {
         ...snapshot,
         id: res.entry.id, version: res.entry.version, title: res.entry.title, slug: res.entry.slug,
-        slug_touched: true, publication_status: res.entry.publication_status,
+        slug_touched: true, locale: res.entry.locale, publication_status: res.entry.publication_status,
         content_mode: res.entry.content_mode,
         values: res.entry.values, cleared_fields: [], term_ids: res.entry.term_ids ?? snapshot.term_ids,
         primary_category_term_id: res.entry.primary_category_term_id ?? null,
@@ -685,7 +715,7 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
     if (!isActive || !user) return null;
     return <EntryListPage typeKey={typeKey} user={user} siteInstanceId={siteInstanceId}
       authGeneration={authGeneration} csrfToken={csrfToken} routeHash={routeHash ?? listHashPrefix}
-      onApiError={onApiError} onNavigateHash={onNavigateHash} />;
+      localeState={localeState} onApiError={onApiError} onNavigateHash={onNavigateHash} />;
   }
 
   if (!config) {
@@ -742,6 +772,126 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
         </select>
       </label>
       {themeKeyDirty && <p className="text-xs font-medium text-amber-700">● Chưa lưu</p>}
+    </div>
+  ) : null;
+
+  const missingTranslationLocales = localeState.allLocales.filter(
+    loc => loc.code !== entryLocale && !translations.some(tr => tr.locale === loc.code),
+  );
+
+  const handleCreateTranslation = async () => {
+    if (!csrfToken || entryId === null || !translationModalLocale) return;
+    const expectedVersion = baselineRef.current?.version;
+    if (expectedVersion === undefined || expectedVersion === null) return;
+    setCreatingTranslation(true);
+    setTranslationError(null);
+    try {
+      const created = await createEntryTranslation(
+        typeKey,
+        entryId,
+        {
+          target_locale: translationModalLocale,
+          title: translationTitle.trim() || undefined,
+          slug: translationSlug.trim() || slug || `${typeKey}-${translationModalLocale}`,
+          auto_unique_slug: !translationSlug.trim(),
+        },
+        expectedVersion,
+        csrfToken,
+      );
+      setTranslationModalLocale(null);
+      onNavigateHash(`${listHashPrefix}/${created.id}`);
+    } catch (error) {
+      if (error instanceof ApiClientError) {
+        setTranslationError(error.message);
+      } else {
+        setTranslationError('Không thể tạo bản dịch.');
+      }
+      onApiError(error, 'Không thể tạo bản dịch');
+    } finally {
+      setCreatingTranslation(false);
+    }
+  };
+
+  const translationPanelNode = localeState.hasMultipleLocales && !isPattern ? (
+    <div className="space-y-2.5" data-testid="entry-translations-panel">
+      {entryId === null ? (
+        <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700" htmlFor="entry-locale-select">
+          <span>Ngôn ngữ nội dung</span>
+          <select
+            id="entry-locale-select"
+            data-testid="entry-locale-select"
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
+            value={entryLocale || defaultLocaleCode}
+            disabled={saving || !csrfToken}
+            onChange={event => {
+              const nextLocale = event.target.value;
+              setEntryLocale(nextLocale);
+              persistDraftPatch({ locale: nextLocale });
+            }}
+          >
+            {localeState.allLocales.map(loc => (
+              <option key={loc.code} value={loc.code}>
+                {loc.label} ({loc.code}){loc.is_default ? ' — Mặc định' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <>
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium text-zinc-700">Ngôn ngữ</span>
+            <span className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-zinc-800" data-testid="entry-locked-locale">
+              {entryLocale || defaultLocaleCode}
+            </span>
+          </div>
+          {translations.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-zinc-600">Bản dịch liên kết</p>
+              <ul className="space-y-1">
+                {translations.map(tr => (
+                  <li key={tr.id} className="flex items-center justify-between gap-2 text-xs">
+                    <a
+                      href={`${listHashPrefix}/${tr.id}`}
+                      onClick={e => {
+                        e.preventDefault();
+                        onNavigateHash(`${listHashPrefix}/${tr.id}`);
+                      }}
+                      className="truncate font-medium text-od-accent hover:underline"
+                    >
+                      [{tr.locale}] {tr.title || `#${tr.id}`}
+                    </a>
+                    <span className="shrink-0 text-[11px] text-zinc-500">{tr.publication_status}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {missingTranslationLocales.length > 0 && (
+            <div className="space-y-1 pt-1">
+              <p className="text-xs font-medium text-zinc-600">Tạo bản dịch</p>
+              <div className="flex flex-wrap gap-1.5">
+                {missingTranslationLocales.map(loc => (
+                  <button
+                    key={loc.code}
+                    type="button"
+                    disabled={saving || !csrfToken}
+                    onClick={() => {
+                      setTranslationModalLocale(loc.code);
+                      setTranslationTitle('');
+                      setTranslationSlug('');
+                      setTranslationError(null);
+                    }}
+                    data-testid={`create-translation-${loc.code}`}
+                    className="inline-flex h-7 items-center rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+                  >
+                    + Tạo bản dịch ({loc.code})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   ) : null;
 
@@ -813,6 +963,8 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
           setDirty(true);
         }}
         templatePanelNode={templatePanelNode}
+        translationPanelNode={translationPanelNode}
+        locale={localeState.hasMultipleLocales && !isPattern ? (entryLocale || defaultLocaleCode || undefined) : undefined}
         saving={saving}
         dirty={dirty}
         onDelete={entryId !== null && baselineRef.current?.version !== null && baselineRef.current?.version !== undefined ? () => void handleDelete() : undefined}
@@ -1015,6 +1167,65 @@ export const SingleEditWorkspace: React.FC<SingleEditWorkspaceProps> = ({
             }}
           />
         )}
+      {translationModalLocale && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          data-testid="create-translation-modal"
+        >
+          <div className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl space-y-4">
+            <h3 className="text-base font-semibold text-zinc-900">
+              Tạo bản dịch ({translationModalLocale})
+            </h3>
+            <p className="text-xs text-zinc-600">
+              Hệ thống sẽ sao chép nội dung, custom fields, taxonomy terms cùng ngôn ngữ và media tham chiếu sang bản dịch mới ở trạng thái nháp.
+            </p>
+            <div className="space-y-3">
+              <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+                <span>Tiêu đề (tùy chọn)</span>
+                <input
+                  type="text"
+                  value={translationTitle}
+                  onChange={e => setTranslationTitle(e.target.value)}
+                  placeholder={title || 'Để trống để sao chép tiêu đề gốc'}
+                  className="h-9 rounded-md border border-zinc-300 px-2.5 text-sm text-zinc-900"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
+                <span>Slug (tùy chọn)</span>
+                <input
+                  type="text"
+                  value={translationSlug}
+                  onChange={e => setTranslationSlug(e.target.value)}
+                  placeholder="Để trống để tự sinh theo tiêu đề"
+                  className="h-9 rounded-md border border-zinc-300 px-2.5 text-sm text-zinc-900"
+                />
+              </label>
+              {translationError && (
+                <p className="text-xs font-medium text-rose-700">{translationError}</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={creatingTranslation}
+                onClick={() => setTranslationModalLocale(null)}
+                className="inline-flex h-9 items-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={creatingTranslation || !csrfToken}
+                onClick={() => void handleCreateTranslation()}
+                data-testid="confirm-create-translation"
+                className="inline-flex h-9 items-center rounded-md bg-od-accent px-3.5 text-xs font-medium text-white hover:bg-od-accent-hover disabled:opacity-50"
+              >
+                {creatingTranslation ? 'Đang tạo…' : 'Tạo bản dịch'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

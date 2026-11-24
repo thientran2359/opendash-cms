@@ -9,14 +9,39 @@ import {
   putHomeSeo,
 } from '../../api/seo.ts';
 import { safePublicPath } from '../content/EntryListPage.tsx';
+import {
+  EMPTY_ADMIN_LOCALE_STATE,
+  type AdminLocaleState,
+} from '../../api/locales.ts';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { LocaleTabs } from '../../components/LocaleTabs.tsx';
 
 interface SeoPanelProps {
   csrfToken: string | null;
   onApiError: (error: unknown) => void;
+  localeState?: AdminLocaleState;
 }
 
-export function SeoPanel({ csrfToken, onApiError }: SeoPanelProps) {
+export function SeoPanel({
+  csrfToken,
+  onApiError,
+  localeState = EMPTY_ADMIN_LOCALE_STATE,
+}: SeoPanelProps) {
+  const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
+  const [activeLocale, setActiveLocale] = useState<string>(defaultLocaleCode);
+  useEffect(() => {
+    if (!localeState.hasMultipleLocales) {
+      setActiveLocale(defaultLocaleCode);
+      return;
+    }
+    if (!activeLocale || !localeState.allLocales.some((l) => l.code === activeLocale)) {
+      setActiveLocale(defaultLocaleCode);
+    }
+  }, [localeState, activeLocale, defaultLocaleCode]);
+
+  const effectiveLocale =
+    localeState.hasMultipleLocales && activeLocale ? activeLocale : undefined;
+
   const [version, setVersion] = useState<number>(1);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -32,7 +57,7 @@ export function SeoPanel({ csrfToken, onApiError }: SeoPanelProps) {
     setLoading(true);
     setStaleConflict(false);
     try {
-      const snap = await getHomeSeo();
+      const snap = await getHomeSeo(effectiveLocale);
       setVersion(snap.version);
       setTitle(snap.title ?? '');
       setDescription(snap.description ?? '');
@@ -48,7 +73,7 @@ export function SeoPanel({ csrfToken, onApiError }: SeoPanelProps) {
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [effectiveLocale]);
 
   const handleSave = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -67,6 +92,7 @@ export function SeoPanel({ csrfToken, onApiError }: SeoPanelProps) {
           noindex,
         },
         csrfToken,
+        effectiveLocale,
       );
       setVersion(saved.version);
       setStatus(`Đã lưu SEO trang chủ (v${saved.version}).`);
@@ -95,6 +121,12 @@ export function SeoPanel({ csrfToken, onApiError }: SeoPanelProps) {
           Tải lại
         </AdminButton>
       </div>
+      <LocaleTabs
+        localeState={localeState}
+        activeLocale={effectiveLocale ?? defaultLocaleCode}
+        onSelectLocale={setActiveLocale}
+        testId="seo-locale-tabs"
+      />
       {status && (
         <AdminAlert tone={staleConflict ? 'error' : 'success'}>
           {status}

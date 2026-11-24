@@ -26,6 +26,7 @@ import {
   nodeTitle,
   nodeTypeTitle,
 } from './document.ts';
+import type { AdminLocaleState } from '../api/locales.ts';
 import { BuilderBindingFields } from './BuilderBindingFields.tsx';
 import { BuilderListFields } from './BuilderListFields.tsx';
 import { BuilderContactFormFields } from './BuilderContactFormFields.tsx';
@@ -53,6 +54,7 @@ interface Props {
   csrfToken: string | null;
   viewport: BuilderViewport;
   allowRouteContext?: boolean;
+  localeState?: AdminLocaleState;
   requiresContentSlot?: boolean;
   availablePartKeys?: string[];
   patterns: PatternRecord[];
@@ -137,6 +139,7 @@ export function BuilderInspector({
   csrfToken,
   viewport,
   allowRouteContext,
+  localeState,
   requiresContentSlot = false,
   availablePartKeys,
   patterns,
@@ -682,7 +685,7 @@ export function BuilderInspector({
         </div>
       )}
       {element && !locked && ['core/heading', 'core/text', 'core/image', 'core/button'].includes(element.type) && (
-        <BuilderBindingFields key={element.id} element={element} allowRouteContext={allowRouteContext} onBindingChange={onBindingChange} onError={onError} />
+        <BuilderBindingFields key={element.id} element={element} allowRouteContext={allowRouteContext} localeState={localeState} onBindingChange={onBindingChange} onError={onError} />
       )}
       {element?.type === 'core/list' && !locked && (
         <BuilderListFields key={element.id} element={element} onChange={onListChange} onError={onError} />

@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import {
+  EMPTY_ADMIN_LOCALE_STATE,
+  type AdminLocaleState,
+} from '../../api/locales.ts';
+import {
   getThemeOptions,
   saveThemeOptions,
   type ThemeOptionDef,
@@ -9,12 +13,15 @@ import {
 import { BlockSchemaForm } from '../../builder/BlockSchemaForm.tsx';
 import type { BuilderViewport } from '../../builder/document.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { LocaleTabs } from '../../components/LocaleTabs.tsx';
 import type { BlockFieldSpec, BlockSchemaV1 } from '../../types.ts';
 
 interface Props {
   themeId: string;
   csrfToken: string | null;
   viewport?: BuilderViewport;
+  localeState?: AdminLocaleState;
+  locale?: string | null;
   onApiError: (error: unknown, fallback: string) => void;
   onValuesChange?: (
     values: Record<string, unknown>,
@@ -115,12 +122,35 @@ export const ThemeOptionsForm: React.FC<Props> = ({
   themeId,
   csrfToken,
   viewport = 'desktop',
+  localeState = EMPTY_ADMIN_LOCALE_STATE,
+  locale: controlledLocale,
   onApiError,
   onValuesChange,
   externalValues,
   hideSubmitButton = false,
   reloadToken = 0,
 }) => {
+  const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
+  const [tabLocale, setTabLocale] = useState<string>(defaultLocaleCode);
+  useEffect(() => {
+    if (!localeState.hasMultipleLocales) {
+      setTabLocale(defaultLocaleCode);
+      return;
+    }
+    if (!tabLocale || !localeState.allLocales.some((l) => l.code === tabLocale)) {
+      setTabLocale(defaultLocaleCode);
+    }
+  }, [localeState, tabLocale, defaultLocaleCode]);
+
+  const effectiveLocale = controlledLocale
+    ? controlledLocale
+    : localeState.hasMultipleLocales && tabLocale
+      ? tabLocale
+      : undefined;
+  const isSecondaryLocale = Boolean(
+    effectiveLocale && defaultLocaleCode && effectiveLocale !== defaultLocaleCode,
+  );
+
   const [snapshot, setSnapshot] = useState<ThemeOptionsSnapshot | null>(null);
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
@@ -137,7 +167,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     setLoading(true);
     setError('');
     setNotice('');
-    void getThemeOptions(themeId)
+    void getThemeOptions(themeId, effectiveLocale)
       .then(res => {
         if (!active) return;
         setSnapshot(res);
@@ -162,7 +192,7 @@ export const ThemeOptionsForm: React.FC<Props> = ({
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [themeId, reloadToken, onApiError]);
+  }, [themeId, reloadToken, onApiError, effectiveLocale]);
 
   useEffect(() => {
     if (!snapshot || !externalValues) return;
@@ -173,9 +203,15 @@ export const ThemeOptionsForm: React.FC<Props> = ({
 
   const blockSchema: BlockSchemaV1 | null = useMemo(() => {
     if (!snapshot) return null;
-    const fields = snapshot.fields && snapshot.fields.length > 0
+    const allFields = snapshot.fields && snapshot.fields.length > 0
       ? snapshot.fields
       : snapshot.schema.map(upcastDefToBlockField);
+    const translatableKeys = new Set(
+      snapshot.schema.filter((d) => d.translatable).map((d) => d.key),
+    );
+    const fields = isSecondaryLocale
+      ? allFields.filter((f) => translatableKeys.has(f.key))
+      : allFields;
     return {
       schema_version: 1,
       id: `theme/${themeId}`,
@@ -184,10 +220,15 @@ export const ThemeOptionsForm: React.FC<Props> = ({
       render: 'render.html',
       fields,
     };
-  }, [snapshot, themeId]);
+  }, [snapshot, themeId, isSecondaryLocale]);
+
+  const readOnlyGlobalOptions = useMemo(() => {
+    if (!snapshot || !isSecondaryLocale) return [];
+    return snapshot.schema.filter((d) => !d.translatable);
+  }, [snapshot, isSecondaryLocale]);
 
   if (loading) return <p role="status" className="text-sm text-zinc-600">Đang tải tùy chọn theme…</p>;
-  if (!snapshot || !blockSchema || blockSchema.fields.length === 0) {
+  if (!snapshot || !blockSchema || (blockSchema.fields.length === 0 && readOnlyGlobalOptions.length === 0)) {
     return hideSubmitButton ? (
       <p className="text-xs text-zinc-500">Theme hiện tại không khai báo tùy chọn riêng (theme_options).</p>
     ) : null;
@@ -210,7 +251,20 @@ export const ThemeOptionsForm: React.FC<Props> = ({
     setError('');
     setNotice('');
     try {
-      const saved = await saveThemeOptions(themeId, draft, snapshot.version, csrfToken);
+      const payload = isSecondaryLocale
+        ? Object.fromEntries(
+            snapshot.schema
+              .filter((d) => d.translatable && d.key in draft)
+              .map((d) => [d.key, draft[d.key]]),
+          )
+        : draft;
+      const saved = await saveThemeOptions(
+        themeId,
+        payload,
+        snapshot.version,
+        csrfToken,
+        effectiveLocale,
+      );
       setSnapshot(saved);
       setDraft(saved.values);
       onValuesChangeRef.current?.(saved.values, {
@@ -262,6 +316,14 @@ export const ThemeOptionsForm: React.FC<Props> = ({
         <h3 className="text-base font-semibold text-zinc-950">Tùy chọn theme ({themeId})</h3>
         <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>
       </div>
+      {!controlledLocale && (
+        <LocaleTabs
+          localeState={localeState}
+          activeLocale={effectiveLocale ?? defaultLocaleCode}
+          onSelectLocale={setTabLocale}
+          testId="theme-options-locale-tabs"
+        />
+      )}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       <BlockSchemaForm
@@ -273,6 +335,21 @@ export const ThemeOptionsForm: React.FC<Props> = ({
         onError={onApiError}
         disabled={saving}
       />
+      {readOnlyGlobalOptions.length > 0 && (
+        <div className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700" data-testid="theme-options-readonly-globals">
+          <p className="font-medium text-zinc-800">
+            Tùy chọn dùng chung ở ngôn ngữ mặc định (chỉ đọc ở ngôn ngữ phụ):
+          </p>
+          <dl className="grid gap-1.5 sm:grid-cols-2">
+            {readOnlyGlobalOptions.map((def) => (
+              <div key={def.key} className="flex items-center justify-between gap-2 rounded bg-white px-2.5 py-1.5 border border-zinc-200">
+                <dt className="font-medium text-zinc-700">{def.label}</dt>
+                <dd className="font-mono text-zinc-600">{String(draft[def.key] ?? def.default ?? '')}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
       <div className="pt-1">
         <AdminButton type="submit" variant="primary" size="md" disabled={!csrfToken || saving}>
           {saving ? 'Đang lưu…' : 'Lưu tùy chọn'}

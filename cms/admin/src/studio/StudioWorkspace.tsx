@@ -3,6 +3,7 @@ import * as api from '../api/index.ts';
 import * as builderApi from '../api/builder.ts';
 import { changeContentEntryPublication, getContentEntry, queryContentEntryTable } from '../api/content.ts';
 import { getMenuSlots, listMenus, putMenuSlots, type MenuRecord, type MenuSlotsSnapshot } from '../api/menus.ts';
+import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
 import { listPatterns, type PatternRecord } from '../api/patterns.ts';
 import {
   getGeneralSettings,
@@ -52,6 +53,7 @@ interface Props {
   csrfToken: string | null;
   resetToken: number;
   themeRevision: number;
+  localeState?: AdminLocaleState;
   onNavigateHash: (hash: string) => void;
   onDirtyChange: (dirty: boolean) => void;
   onApiError: (error: unknown, fallback: string) => void;
@@ -91,6 +93,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   csrfToken,
   resetToken,
   themeRevision,
+  localeState = EMPTY_ADMIN_LOCALE_STATE,
   onNavigateHash,
   onDirtyChange,
   onApiError,
@@ -122,6 +125,8 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   // Mode 1 state
   const [panel, setPanel] = useState<StudioPanelId>(route.studioPanel ?? 'root');
+  const [previewLocale, setPreviewLocale] = useState<string>('');
+  const effectivePreviewLocale = previewLocale || localeState.defaultLocale?.code || '';
   const [activeThemeId, setActiveThemeId] = useState<string | null>(null);
   const [activeThemeName, setActiveThemeName] = useState<string | null>(null);
   const [targets, setTargets] = useState<StudioTargetItem[]>([]);
@@ -351,10 +356,17 @@ export const StudioWorkspace: React.FC<Props> = ({
       setStatus('Đang tải không gian Tùy chỉnh giao diện...');
       Promise.all([
         getStudioTargets(),
-        getGeneralSettings(),
+        getGeneralSettings(undefined, effectivePreviewLocale || undefined),
         getTimezoneCatalog(),
-        getReadingSettings(),
-        queryContentEntryTable('page', { status: 'published', sort: 'title', order: 'asc', limit: 100, offset: 0 }),
+        getReadingSettings(undefined, effectivePreviewLocale || undefined),
+        queryContentEntryTable('page', {
+          status: 'published',
+          sort: 'title',
+          order: 'asc',
+          limit: 100,
+          offset: 0,
+          locale: effectivePreviewLocale || undefined,
+        }),
         builderApi.getTemplateOverrides(),
         listMenus(100, 0),
         api.getRegistry(),
@@ -376,7 +388,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
           let slotsRes: MenuSlotsSnapshot | null = null;
           if (targetsRes.active_theme_id) {
-            slotsRes = await getMenuSlots(targetsRes.active_theme_id).catch(() => null);
+            slotsRes = await getMenuSlots(targetsRes.active_theme_id, undefined, effectivePreviewLocale || undefined).catch(() => null);
             if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
           }
           const byKey: Record<string, builderApi.TypedTemplateOverride> = {};
@@ -621,6 +633,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           target: previewTargetCandidate,
           document: editingSelectedTemplate ? templateDoc : null,
           preview_annotations: editingSelectedTemplate,
+          preview_locale: effectivePreviewLocale || undefined,
           transient,
         },
         csrfToken,
@@ -665,6 +678,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     menuSlotsDirty,
     menuSlotsDraft,
     menuPreviewSeq,
+    effectivePreviewLocale,
   ]);
 
   const handleSelectTarget = (nextKey: string | null) => {
@@ -723,19 +737,19 @@ export const StudioWorkspace: React.FC<Props> = ({
     const savedNames: string[] = [];
     try {
       if (generalDirty && generalSaved && generalDraft) {
-        const res = await saveGeneralSettings(generalDraft, generalSaved.version, csrfToken);
+        const res = await saveGeneralSettings(generalDraft, generalSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setGeneralSaved(res);
         setGeneralDraft({ site_title: res.site_title, tagline: res.tagline, timezone: res.timezone });
         savedNames.push('Nhận diện Site');
       }
       if (readingDirty && readingSaved && readingDraft) {
-        const res = await saveReadingSettings(readingDraft, readingSaved.version, csrfToken);
+        const res = await saveReadingSettings(readingDraft, readingSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setReadingSaved(res);
         setReadingDraft({ homepage_page_id: res.homepage_page_id, posts_page_id: res.posts_page_id });
         savedNames.push('Trang chủ & Đọc');
       }
       if (menuSlotsDirty && menuSlotsSaved && menuSlotsDraft) {
-        const res = await putMenuSlots(menuSlotsSaved.theme_id, menuSlotsDraft, menuSlotsSaved.version, csrfToken);
+        const res = await putMenuSlots(menuSlotsSaved.theme_id, menuSlotsDraft, menuSlotsSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setMenuSlotsSaved(res);
         setMenuSlotsDraft(buildSlotAssignmentsMap(res));
         savedNames.push('Vị trí Menu');
@@ -747,7 +761,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         savedNames.push('Tùy chọn toàn trang');
       }
       if (themeOptionsDirty && activeThemeId && themeOptionsDraft && themeOptionsVersion !== null) {
-        const res = await saveThemeOptions(activeThemeId, themeOptionsDraft, themeOptionsVersion, csrfToken);
+        const res = await saveThemeOptions(activeThemeId, themeOptionsDraft, themeOptionsVersion, csrfToken, effectivePreviewLocale || undefined);
         setThemeOptionsVersion(res.version);
         setThemeOptionsDraft(res.values);
         setThemeOptionsDirty(false);
@@ -1050,6 +1064,46 @@ export const StudioWorkspace: React.FC<Props> = ({
             conflict={conflict}
             onReloadConflict={handleReloadConflict}
           />
+          {!isMode2 && localeState.hasMultipleLocales && (
+            <div className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2" data-testid="studio-preview-locale-bar">
+              <label htmlFor="studio-preview-locale" className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
+                Preview Locale
+              </label>
+              <select
+                id="studio-preview-locale"
+                data-testid="studio-preview-locale-select"
+                className="h-7 rounded border border-zinc-300 bg-white px-2 text-xs text-zinc-900"
+                value={effectivePreviewLocale}
+                disabled={saving || loading}
+                onChange={e => {
+                  const next = e.target.value;
+                  if (next === effectivePreviewLocale) return;
+                  const hasTransient = generalDirty || readingDirty || menuSlotsDirty || globalOptionsDirty || themeOptionsDirty;
+                  if (hasTransient) {
+                    if (!window.confirm('Đang có thay đổi chưa lưu ở ngôn ngữ hiện tại. Bỏ thay đổi chưa lưu để chuyển Preview Locale?')) {
+                      return;
+                    }
+                    setGeneralDraft(generalSaved ? { site_title: generalSaved.site_title, tagline: generalSaved.tagline, timezone: generalSaved.timezone } : null);
+                    setReadingDraft(readingSaved ? { homepage_page_id: readingSaved.homepage_page_id, posts_page_id: readingSaved.posts_page_id } : null);
+                    setMenuSlotsDraft(menuSlotsSaved ? buildSlotAssignmentsMap(menuSlotsSaved) : null);
+                    setGlobalOptionsDraft(globalOptionsSaved ? globalOptionsSaved.values : null);
+                    setThemeOptionsDraft(null);
+                    setThemeOptionsDirty(false);
+                  }
+                  setPreviewLocale(next);
+                  mode1ForceReloadRef.current = true;
+                  mode1LoadedRef.current = false;
+                  setMode1ReloadSeq(v => v + 1);
+                }}
+              >
+                {localeState.allLocales.map(loc => (
+                  <option key={loc.code} value={loc.code}>
+                    {loc.label} ({loc.code}){loc.is_default ? ' ★' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {(error || conflict) && (
             <div
               role="alert"
@@ -1124,6 +1178,8 @@ export const StudioWorkspace: React.FC<Props> = ({
               openPatternSeq={patternRequestSeq}
               panel={panel}
               onPanelChange={handlePanelChange}
+              localeState={localeState}
+              previewLocale={effectivePreviewLocale}
               activeThemeId={activeThemeId}
               generalDraft={generalDraft}
               generalDirty={generalDirty}

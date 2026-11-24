@@ -47,6 +47,7 @@ export interface StudioPreviewInput {
   document?: BuilderDocument | null;
   preview_entry?: TemplatePreviewEntry | null;
   preview_annotations?: boolean;
+  preview_locale?: string | null;
   transient?: TransientStudioOverrides | null;
 }
 
@@ -66,6 +67,7 @@ export function postStudioPreview(
   if (input.document !== undefined) payload.document = input.document;
   if (input.preview_entry !== undefined) payload.preview_entry = input.preview_entry;
   if (input.preview_annotations !== undefined) payload.preview_annotations = input.preview_annotations;
+  if (input.preview_locale) payload.preview_locale = input.preview_locale;
   if (input.transient !== undefined && input.transient !== null) {
     const transient: TransientStudioOverrides = {};
     if (input.transient.general) {

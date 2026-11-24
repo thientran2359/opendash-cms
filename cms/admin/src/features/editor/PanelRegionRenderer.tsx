@@ -39,6 +39,8 @@ export interface PanelRegionRendererProps {
   onCreatedAtChange?: (isoUtc: string | null) => void;
   onUpdatedAtChange?: (isoUtc: string | null) => void;
   templatePanelNode?: React.ReactNode;
+  locale?: string | null;
+  translationPanelNode?: React.ReactNode;
   onToggleCollapse: (panelId: string) => void;
   onTitleChange: (title: string) => void;
   onSlugChange: (slug: string) => void;
@@ -113,6 +115,8 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   onCreatedAtChange,
   onUpdatedAtChange,
   templatePanelNode,
+  locale,
+  translationPanelNode,
   onToggleCollapse,
   onTitleChange,
   onSlugChange,
@@ -648,7 +652,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           return config.taxonomies.length > 0 ? (
             <div data-testid="single-edit-terms">
               <TermPicker userId={userId} selectedIds={termIds} disabled={saving}
-                typeKey={config.type_key} allowedKinds={config.taxonomies}
+                typeKey={config.type_key} locale={locale} allowedKinds={config.taxonomies}
                 variant="cards"
                 primaryCategoryTermId={config.type_key === 'post' && config.taxonomies.includes('category')
                   ? primaryCategoryTermId : null}
@@ -758,6 +762,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           {renderRegion('main_bottom', config.regions.main_bottom, 'space-y-4')}
         </div>
         <div className="space-y-4 lg:col-span-4">
+          {translationPanelNode}
           {renderRegion('sidebar', config.regions.sidebar, 'space-y-4')}
           {templatePanelNode && !hasPageAttributesPanel && (
             <section className="rounded-xl border border-zinc-200 bg-white p-4">
