@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ApiClientError } from '../../api/client.ts';
+import {
+  EMPTY_ADMIN_LOCALE_STATE,
+  type AdminLocaleState,
+} from '../../api/locales.ts';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { LocaleTabs } from '../../components/LocaleTabs.tsx';
 import { queryContentEntryTable } from '../../api/content.ts';
 import {
   getReadingSettings,
@@ -15,6 +20,7 @@ interface Props {
   user: AuthUser | null;
   siteInstanceId: string;
   csrfToken: string | null;
+  localeState?: AdminLocaleState;
   onApiError?: (error: unknown) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }
@@ -25,7 +31,15 @@ type PendingDraft = { baseVersion: number; values: ReadingSettingsDraft };
 // Session-memory only. Never persist a draft belonging to another site/account.
 const pendingDrafts = new Map<string, PendingDraft>();
 
-export function discardReadingDraft(siteId: string, userId: number): void {
+export function discardReadingDraft(siteId: string, userId: number, locale?: string): void {
+  if (locale) {
+    pendingDrafts.delete(`${siteId}:${userId}:${locale}`);
+    return;
+  }
+  const prefix = `${siteId}:${userId}:`;
+  for (const key of pendingDrafts.keys()) {
+    if (key.startsWith(prefix)) pendingDrafts.delete(key);
+  }
   pendingDrafts.delete(`${siteId}:${userId}`);
 }
 
@@ -60,9 +74,31 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Không kết nối được với máy chủ.';
 }
 
-export function ReadingSettingsPanel({ user, siteInstanceId, csrfToken, onApiError, onDirtyChange }: Props) {
+export function ReadingSettingsPanel({
+  user,
+  siteInstanceId,
+  csrfToken,
+  localeState = EMPTY_ADMIN_LOCALE_STATE,
+  onApiError,
+  onDirtyChange,
+}: Props) {
   const actorId = user?.id ?? null;
-  const draftKey = actorId === null ? null : `${siteInstanceId}:${actorId}`;
+  const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
+  const [activeLocale, setActiveLocale] = useState<string>(defaultLocaleCode);
+  useEffect(() => {
+    if (!localeState.hasMultipleLocales) {
+      setActiveLocale(defaultLocaleCode);
+      return;
+    }
+    if (!activeLocale || !localeState.allLocales.some((l) => l.code === activeLocale)) {
+      setActiveLocale(defaultLocaleCode);
+    }
+  }, [localeState, activeLocale, defaultLocaleCode]);
+
+  const effectiveLocale =
+    localeState.hasMultipleLocales && activeLocale ? activeLocale : undefined;
+  const draftKey =
+    actorId === null ? null : `${siteInstanceId}:${actorId}:${effectiveLocale ?? 'default'}`;
   const [saved, setSaved] = useState<ReadingSettings | null>(null);
   const [draft, setDraft] = useState<ReadingSettingsDraft | null>(null);
   const [baseVersion, setBaseVersion] = useState<number | null>(null);
@@ -101,8 +137,19 @@ export function ReadingSettingsPanel({ user, siteInstanceId, csrfToken, onApiErr
     setNotice(null);
     try {
       const [settings, firstPage] = await Promise.all([
-        getReadingSettings(signal),
-        queryContentEntryTable('page', { status: 'published', sort: 'title', order: 'asc', limit: 100, offset: 0 }, signal),
+        getReadingSettings(signal, effectiveLocale),
+        queryContentEntryTable(
+          'page',
+          {
+            status: 'published',
+            ...(effectiveLocale ? { locale: effectiveLocale } : {}),
+            sort: 'title',
+            order: 'asc',
+            limit: 100,
+            offset: 0,
+          },
+          signal,
+        ),
       ]);
       if (signal?.aborted || serial !== loadSequence.current) return;
       const pending = pendingDrafts.get(draftKey);
@@ -121,7 +168,7 @@ export function ReadingSettingsPanel({ user, siteInstanceId, csrfToken, onApiErr
     } finally {
       if (!signal?.aborted && serial === loadSequence.current) setLoading(false);
     }
-  }, [draftKey]);
+  }, [draftKey, effectiveLocale]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -134,7 +181,12 @@ export function ReadingSettingsPanel({ user, siteInstanceId, csrfToken, onApiErr
     setLoadingMore(true);
     try {
       const page = await queryContentEntryTable('page', {
-        status: 'published', sort: 'title', order: 'asc', limit: 100, offset: pageOffset,
+        status: 'published',
+        ...(effectiveLocale ? { locale: effectiveLocale } : {}),
+        sort: 'title',
+        order: 'asc',
+        limit: 100,
+        offset: pageOffset,
       });
       setChoices(previous => {
         const byId = new Map(previous.map(item => [item.id, item]));
@@ -173,7 +225,7 @@ export function ReadingSettingsPanel({ user, siteInstanceId, csrfToken, onApiErr
     setError(null);
     setNotice(null);
     try {
-      const settings = await saveReadingSettings(draft, baseVersion, csrfToken);
+      const settings = await saveReadingSettings(draft, baseVersion, csrfToken, effectiveLocale);
       pendingDrafts.delete(draftKey ?? '');
       setSaved(settings);
       setDraft(snapshot(settings));
@@ -231,6 +283,12 @@ export function ReadingSettingsPanel({ user, siteInstanceId, csrfToken, onApiErr
         Việc dùng Page làm Trang bài viết không xóa nội dung đã nhập của Page đó.
       </p>
     </div>
+    <LocaleTabs
+      localeState={localeState}
+      activeLocale={effectiveLocale ?? defaultLocaleCode}
+      onSelectLocale={setActiveLocale}
+      testId="reading-locale-tabs"
+    />
     {loading && <p role="status" className="text-sm text-zinc-500">Đang tải các Page và cấu hình hiện tại…</p>}
     {error && <AdminAlert tone="error">{error}</AdminAlert>}
     {notice && <AdminAlert tone="success">{notice}</AdminAlert>}

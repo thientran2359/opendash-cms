@@ -7,6 +7,8 @@ export interface GeneralSettings {
   tagline: string;
   timezone: string;
   version: number;
+  has_override?: boolean;
+  locale?: string;
 }
 
 export type GeneralSettingsDraft = Pick<GeneralSettings, 'site_title' | 'tagline' | 'timezone'>;
@@ -16,8 +18,15 @@ export interface TimezoneCatalog {
   items: string[];
 }
 
-export function getGeneralSettings(signal?: AbortSignal): Promise<GeneralSettings> {
-  return requestJson<GeneralSettings>('/api/admin/settings/general', {
+function localeQuery(locale?: string | null): string {
+  return locale ? `?locale=${encodeURIComponent(locale)}` : '';
+}
+
+export function getGeneralSettings(
+  signal?: AbortSignal,
+  locale?: string | null,
+): Promise<GeneralSettings> {
+  return requestJson<GeneralSettings>(`/api/admin/settings/general${localeQuery(locale)}`, {
     signal,
     defaultErrorMessage: 'Không tải được cài đặt website.',
   });
@@ -34,8 +43,9 @@ export function saveGeneralSettings(
   draft: GeneralSettingsDraft,
   version: number,
   csrfToken: string,
+  locale?: string | null,
 ): Promise<GeneralSettings> {
-  return requestJson<GeneralSettings>('/api/admin/settings/general', {
+  return requestJson<GeneralSettings>(`/api/admin/settings/general${localeQuery(locale)}`, {
     method: 'PUT',
     csrfToken,
     ifMatchVersion: version,
@@ -121,12 +131,16 @@ export interface ReadingSettings {
   homepage_status: ReadingPageStatus;
   posts_page_status: ReadingPageStatus;
   version: number;
+  locale?: string;
 }
 
 export type ReadingSettingsDraft = Pick<ReadingSettings, 'homepage_page_id' | 'posts_page_id'>;
 
-export function getReadingSettings(signal?: AbortSignal): Promise<ReadingSettings> {
-  return requestJson<ReadingSettings>('/api/admin/settings/reading', {
+export function getReadingSettings(
+  signal?: AbortSignal,
+  locale?: string | null,
+): Promise<ReadingSettings> {
+  return requestJson<ReadingSettings>(`/api/admin/settings/reading${localeQuery(locale)}`, {
     signal,
     defaultErrorMessage: 'Không thể tải cấu hình trang chủ và trang bài viết.',
   });
@@ -136,8 +150,9 @@ export function saveReadingSettings(
   draft: ReadingSettingsDraft,
   version: number,
   csrfToken: string,
+  locale?: string | null,
 ): Promise<ReadingSettings> {
-  return requestJson<ReadingSettings>('/api/admin/settings/reading', {
+  return requestJson<ReadingSettings>(`/api/admin/settings/reading${localeQuery(locale)}`, {
     method: 'PUT',
     csrfToken,
     ifMatchVersion: version,

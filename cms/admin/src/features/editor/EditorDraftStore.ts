@@ -10,6 +10,7 @@ export interface EditorDraftPayload {
   slug: string;
   /** Keep manual slug edits from being replaced by title auto-slug after return. */
   slug_touched?: boolean;
+  locale?: string;
   publication_status: 'draft' | 'published';
   content_mode?: ContentMode;
   values: Record<string, ContentFieldValue>;

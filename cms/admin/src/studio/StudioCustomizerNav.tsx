@@ -1,4 +1,5 @@
 import React from 'react';
+import type { AdminLocaleState } from '../api/locales.ts';
 import type { MenuRecord, MenuSlotsSnapshot } from '../api/menus.ts';
 import type { PatternRecord } from '../api/patterns.ts';
 import type {
@@ -22,6 +23,8 @@ import { StudioMenuManager } from './StudioMenuManager.tsx';
 interface Props {
   panel: StudioPanelId;
   onPanelChange: (panel: StudioPanelId) => void;
+  localeState?: AdminLocaleState;
+  previewLocale?: string;
   activeThemeId: string | null;
   generalDraft: GeneralSettingsDraft | null;
   generalDirty: boolean;
@@ -123,6 +126,8 @@ function sourceBadge(item: StudioTargetItem): { label: string; tone: 'success' |
 export const StudioCustomizerNav: React.FC<Props> = ({
   panel,
   onPanelChange,
+  localeState,
+  previewLocale,
   activeThemeId,
   generalDraft,
   generalDirty,
@@ -367,6 +372,8 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 themeId={activeThemeId}
                 csrfToken={csrfToken}
                 viewport={viewport}
+                locale={previewLocale}
+                localeState={localeState}
                 onApiError={onApiError}
                 hideSubmitButton
                 externalValues={themeOptionsDraft}

@@ -7,6 +7,10 @@ import {
   AdminColumnCell, type EffectiveListConfig, type ProviderColumn,
 } from '../extensions/AdminContributionRenderer.tsx';
 import { ApiClientError } from '../../api/client.ts';
+import {
+  EMPTY_ADMIN_LOCALE_STATE,
+  type AdminLocaleState,
+} from '../../api/locales.ts';
 import { mediaThumbnailUrl } from '../../api/media.ts';
 import {
   listAllTaxonomyTerms, listTaxonomyDefinitions, resolveTaxonomyTermLabels,
@@ -23,6 +27,7 @@ interface Props {
   authGeneration: number;
   csrfToken: string | null;
   routeHash: string;
+  localeState?: AdminLocaleState;
   onNavigateHash: (hash: string) => void;
   onApiError: (error: unknown, fallback: string) => void;
 }
@@ -56,6 +61,8 @@ export function parseEntryTableHash(hash: string): TaxonomyTableQuery {
   if (q && [...q].length <= 200 && !/[\u0000-\u001f\u007f]/.test(q)) query.q = q;
   const status = p.get('status');
   if (status === 'draft' || status === 'published') query.status = status;
+  const locale = p.get('locale')?.trim();
+  if (locale && locale !== 'all') query.locale = locale;
   const category = boundedInt(p.get('category_id'), 0, 1, Number.MAX_SAFE_INTEGER);
   const tag = boundedInt(p.get('tag_id'), 0, 1, Number.MAX_SAFE_INTEGER);
   if (category) query.category_id = category;
@@ -81,6 +88,7 @@ export function entryTableHash(base: string, filter: TaxonomyTableQuery): string
   const p = new URLSearchParams();
   if (filter.q) p.set('q', filter.q);
   if (filter.status && filter.status !== 'all') p.set('status', filter.status);
+  if (filter.locale && filter.locale !== 'all') p.set('locale', filter.locale);
   if (filter.category_id) p.set('category_id', String(filter.category_id));
   if (filter.tag_id) p.set('tag_id', String(filter.tag_id));
   if (filter.taxonomy_key !== undefined) p.set('taxonomy_key', filter.taxonomy_key);
@@ -108,7 +116,8 @@ function readableError(cause: unknown): string {
 }
 
 export function EntryListPage({
-  typeKey, user, siteInstanceId, authGeneration, csrfToken, routeHash, onNavigateHash, onApiError,
+  typeKey, user, siteInstanceId, authGeneration, csrfToken, routeHash,
+  localeState = EMPTY_ADMIN_LOCALE_STATE, onNavigateHash, onApiError,
 }: Props) {
   const base = rootHash(typeKey);
   const filters = useMemo(() => parseEntryTableHash(routeHash), [routeHash]);
@@ -592,6 +601,31 @@ export function EntryListPage({
             <AdminButton type="submit" variant="secondary" disabled={bulkBusy}>Tìm kiếm</AdminButton>
           </form>
 
+          {localeState.hasMultipleLocales && (
+            <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
+              <span>Ngôn ngữ</span>
+              <select
+                aria-label="Lọc ngôn ngữ"
+                data-testid="entry-locale-filter"
+                className={`${control} w-full`}
+                value={filters.locale ?? 'all'}
+                disabled={bulkBusy}
+                onChange={(event) =>
+                  updateFilter({
+                    locale: event.target.value === 'all' ? undefined : event.target.value,
+                  })
+                }
+              >
+                <option value="all">Tất cả ngôn ngữ</option>
+                {localeState.allLocales.map((loc) => (
+                  <option key={loc.code} value={loc.code}>
+                    {loc.label} ({loc.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           {terms?.categoryEnabled && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
             <span>Danh mục</span>
             <select aria-label="Lọc danh mục" className={`${control} w-full`}
@@ -839,6 +873,11 @@ export function EntryListPage({
                     <span className="ml-1.5 inline-block align-middle rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-zinc-500">
                       #{row.id}
                     </span>
+                    {localeState.hasMultipleLocales && row.locale && (
+                      <span className="ml-1.5 inline-block align-middle">
+                        <AdminBadge tone="neutral">{row.locale}</AdminBadge>
+                      </span>
+                    )}
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                     <button

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import { LocaleTabs } from '../../components/LocaleTabs.tsx';
 import { ApiClientError } from '../../api/client.ts';
+import {
+  EMPTY_ADMIN_LOCALE_STATE,
+  type AdminLocaleState,
+} from '../../api/locales.ts';
 import { listContentEntries, listContentTypes } from '../../api/content.ts';
 import {
   createMenu,
@@ -25,6 +30,7 @@ import { getThemes } from '../../api/themes.ts';
 interface Props {
   csrfToken: string | null;
   themeRevision?: number;
+  localeState?: AdminLocaleState;
   onApiError?: (error: unknown) => void;
 }
 
@@ -100,7 +106,26 @@ function PreviewTree({ items }: { items: MenuItemView[] }) {
   );
 }
 
-export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) {
+export function MenusPanel({
+  csrfToken,
+  themeRevision = 0,
+  localeState = EMPTY_ADMIN_LOCALE_STATE,
+  onApiError,
+}: Props) {
+  const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
+  const [activeSlotLocale, setActiveSlotLocale] = useState<string>(defaultLocaleCode);
+  useEffect(() => {
+    if (!localeState.hasMultipleLocales) {
+      setActiveSlotLocale(defaultLocaleCode);
+      return;
+    }
+    if (!activeSlotLocale || !localeState.allLocales.some((l) => l.code === activeSlotLocale)) {
+      setActiveSlotLocale(defaultLocaleCode);
+    }
+  }, [localeState, activeSlotLocale, defaultLocaleCode]);
+
+  const effectiveSlotLocale =
+    localeState.hasMultipleLocales && activeSlotLocale ? activeSlotLocale : undefined;
   const [menus, setMenus] = useState<MenuRecord[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [loadedMenu, setLoadedMenu] = useState<MenuWithItems | null>(null);
@@ -155,7 +180,7 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
       const active = themesRes.active_id ?? null;
       setActiveThemeId(active);
       if (active) {
-        const slotSnap = await getMenuSlots(active).catch(() => null);
+        const slotSnap = await getMenuSlots(active, undefined, effectiveSlotLocale).catch(() => null);
         if (slotSnap) {
           setSlots(slotSnap);
           const nextDraft: Record<string, number | null> = {};
@@ -171,7 +196,7 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
       setError(messageFor(reason));
       onApiError?.(reason);
     }
-  }, [onApiError]);
+  }, [onApiError, effectiveSlotLocale]);
 
   async function loadMoreEntryOptions() {
     if (loadingMoreEntries) return;
@@ -237,7 +262,7 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
       setError(messageFor(reason));
       onApiError?.(reason);
     }
-  }, [onApiError]);
+  }, [onApiError, effectiveSlotLocale]);
 
   async function handleCreateMenu(event: FormEvent) {
     event.preventDefault();
@@ -350,7 +375,13 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
     setError(null);
     setNotice(null);
     try {
-      const updated = await putMenuSlots(activeThemeId, slotDraft, slots.version, csrfToken);
+      const updated = await putMenuSlots(
+        activeThemeId,
+        slotDraft,
+        slots.version,
+        csrfToken,
+        effectiveSlotLocale,
+      );
       setSlots(updated);
       setNotice('Đã lưu gắn slot menu.');
     } catch (reason) {
@@ -612,6 +643,12 @@ export function MenusPanel({ csrfToken, themeRevision = 0, onApiError }: Props) 
           <h3 className="text-base font-semibold text-slate-900">
             Slot menu của theme đang kích hoạt ({slots.theme_id} · v{slots.version})
           </h3>
+          <LocaleTabs
+            localeState={localeState}
+            activeLocale={effectiveSlotLocale ?? defaultLocaleCode}
+            onSelectLocale={setActiveSlotLocale}
+            testId="menu-slots-locale-tabs"
+          />
           {slots.available_slots.length === 0 ? (
             <p className="text-sm text-slate-500">Theme hiện tại không khai báo slot menu nào.</p>
           ) : (

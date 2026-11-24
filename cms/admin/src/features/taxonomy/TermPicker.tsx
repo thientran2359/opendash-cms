@@ -13,6 +13,7 @@ interface TermsProps {
   userId: number | null;
   /** Scope the picker to the server's current canonical eligibility for this CPT. */
   typeKey?: string;
+  locale?: string | null;
   disabled?: boolean;
   onApiError: (error: unknown, fallback: string) => void;
 }
@@ -69,7 +70,7 @@ function termTree(terms: TaxonomyTerm[]): Array<{ term: TaxonomyTerm; depth: num
 }
 
 function useTermOptions(userId: number | null, typeKey: string | undefined,
-  onApiError: TermsProps['onApiError'], allowedKinds?: TaxonomyKind[]) {
+  onApiError: TermsProps['onApiError'], allowedKinds?: TaxonomyKind[], locale?: string | null) {
   const [definitions, setDefinitions] = useState<TaxonomyDefinition[]>([]);
   const [byKind, setByKind] = useState<Record<string, TaxonomyTerm[]>>({});
   const [loading, setLoading] = useState(true);
@@ -102,7 +103,7 @@ function useTermOptions(userId: number | null, typeKey: string | undefined,
       const available = knownDefinitions.filter(definition => permitted.includes(definition.key)
         && definition.provider_status === 'active' && definition.declaration_state === 'declared');
       const pages = await Promise.all(available.map(async definition =>
-        [definition.key, await listAllTaxonomyTerms(definition.key, controller.signal)] as const));
+        [definition.key, await listAllTaxonomyTerms(definition.key, controller.signal, locale)] as const));
       return { available, pages };
     })
       .then(({ available, pages }) => {
@@ -117,7 +118,7 @@ function useTermOptions(userId: number | null, typeKey: string | undefined,
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [userId, typeKey, kindsKey, revision]);
+  }, [userId, typeKey, kindsKey, revision, locale]);
 
   return { definitions, byKind,
     categories: byKind.category ?? [], tags: byKind.tag ?? [], loading, error,
@@ -125,9 +126,9 @@ function useTermOptions(userId: number | null, typeKey: string | undefined,
 }
 
 /** Native checkboxes preserve keyboard navigation and leave unknown saved IDs removable. */
-export function TermPicker({ userId, typeKey, disabled, selectedIds, onChange,
+export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onChange,
   primaryCategoryTermId = null, onPrimaryCategoryChange, onApiError, allowedKinds, variant = 'default' }: TermPickerProps) {
-  const { definitions, byKind, loading, error, reload } = useTermOptions(userId, typeKey, onApiError, allowedKinds);
+  const { definitions, byKind, loading, error, reload } = useTermOptions(userId, typeKey, onApiError, allowedKinds, locale);
   const searchId = useId();
   const [search, setSearch] = useState('');
   const [searchByKind, setSearchByKind] = useState<Record<string, string>>({});

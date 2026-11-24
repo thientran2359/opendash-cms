@@ -91,6 +91,8 @@ export interface TaxonomyTerm {
   slug: string;
   parent_id: number | null;
   version: number;
+  locale?: string;
+  translation_group_id?: string;
   extensions?: TermExtensionValues;
   schema_token?: string;
 }
@@ -112,6 +114,8 @@ export interface TaxonomyTermInput {
   name: string;
   slug: string;
   parent_id?: number | null;
+  locale?: string;
+  source_term_id?: number | null;
 }
 
 export type TaxonomyTermChanges = Partial<Pick<TaxonomyTerm, 'name' | 'slug' | 'parent_id'>> & {
@@ -154,8 +158,10 @@ export function listTaxonomyTerms(
   limit = 100,
   offset = 0,
   signal?: AbortSignal,
+  locale?: string | null,
 ): Promise<TaxonomyTermPage> {
   const query = new URLSearchParams({ kind, limit: String(limit), offset: String(offset) });
+  if (locale) query.set('locale', locale);
   return requestJson<TaxonomyTermPage>(`${termsPath}?${query}`, {
     signal,
     defaultErrorMessage: 'Không thể tải danh sách term.',
@@ -163,11 +169,15 @@ export function listTaxonomyTerms(
 }
 
 /** Iterate the paged term endpoint so editors can choose every existing term. */
-export async function listAllTaxonomyTerms(kind: TaxonomyKind, signal?: AbortSignal): Promise<TaxonomyTerm[]> {
+export async function listAllTaxonomyTerms(
+  kind: TaxonomyKind,
+  signal?: AbortSignal,
+  locale?: string | null,
+): Promise<TaxonomyTerm[]> {
   const unique = new Map<number, TaxonomyTerm>();
   let offset = 0;
   while (true) {
-    const page = await listTaxonomyTerms(kind, 100, offset, signal);
+    const page = await listTaxonomyTerms(kind, 100, offset, signal, locale);
     for (const term of page.items) unique.set(term.id, term);
     offset += page.items.length;
     if (page.items.length === 0 || offset >= page.total) break;

@@ -3,12 +3,17 @@ import { ApiClientError } from '../../api/client.ts';
 import { deleteTaxonomyTerm, getTaxonomyDefinition, listAllTaxonomyTerms,
   type TaxonomyDefinition, type TaxonomyKind, type TaxonomyTerm } from '../../api/taxonomy.ts';
 import type { AuthUser } from '../../types.ts';
-import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  EMPTY_ADMIN_LOCALE_STATE,
+  type AdminLocaleState,
+} from '../../api/locales.ts';
+import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
 
 interface TaxonomyPageProps {
   kind: TaxonomyKind;
   user: AuthUser | null;
   csrfToken: string | null;
+  localeState?: AdminLocaleState;
   onApiError: (error: unknown, fallback: string) => void;
   onNavigateHash: (hash: string) => void;
 }
@@ -43,7 +48,14 @@ function orderedTerms(hierarchical: boolean, terms: TaxonomyTerm[]): Array<{ ter
 }
 
 /** Route chooses the fixed taxonomy kind. Lists never mount an editor form. */
-export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash }: TaxonomyPageProps) {
+export function TaxonomyPage({
+  kind,
+  user,
+  csrfToken,
+  localeState = EMPTY_ADMIN_LOCALE_STATE,
+  onApiError,
+  onNavigateHash,
+}: TaxonomyPageProps) {
   const [terms, setTerms] = useState<TaxonomyTerm[]>([]);
   const [definition, setDefinition] = useState<TaxonomyDefinition | null>(null);
   const [loading, setLoading] = useState(true);
@@ -51,6 +63,7 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [filterLocale, setFilterLocale] = useState('all');
   const [page, setPage] = useState(0);
   const admin = user?.role === 'admin';
   const listHash = kind === 'category' ? '#/posts/categories' : kind === 'tag' ? '#/posts/tags'
@@ -62,8 +75,10 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
     if (!user) return;
     setLoading(true);
     try {
+      const localeParam =
+        localeState.hasMultipleLocales && filterLocale !== 'all' ? filterLocale : undefined;
       const [received, descriptor] = await Promise.all([
-        listAllTaxonomyTerms(kind, signal), getTaxonomyDefinition(kind, signal),
+        listAllTaxonomyTerms(kind, signal, localeParam), getTaxonomyDefinition(kind, signal),
       ]);
       if (signal?.aborted) return;
       setTerms(received);
@@ -78,7 +93,7 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [kind, user?.id, user?.role]);
+  }, [kind, user?.id, user?.role, localeState.hasMultipleLocales, filterLocale]);
 
   useEffect(() => {
     setSearch(''); setPage(0); setNotice(''); setError(''); setTerms([]);
@@ -138,13 +153,37 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
 
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
-      <label htmlFor="taxonomy-search" className="flex max-w-md flex-col gap-1 text-xs font-medium text-zinc-600">
-        <span>Tìm theo tên, slug hoặc ID</span>
-        <input id="taxonomy-search" type="search" value={search}
-          onChange={event => { setSearch(event.target.value); setPage(0); }}
-          placeholder="Nhập tên, slug hoặc ID..."
-          className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900" />
-      </label>
+      <div className="flex flex-wrap items-end gap-3">
+        <label htmlFor="taxonomy-search" className="flex max-w-md flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
+          <span>Tìm theo tên, slug hoặc ID</span>
+          <input id="taxonomy-search" type="search" value={search}
+            onChange={event => { setSearch(event.target.value); setPage(0); }}
+            placeholder="Nhập tên, slug hoặc ID..."
+            className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900" />
+        </label>
+        {localeState.hasMultipleLocales && (
+          <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600">
+            <span>Ngôn ngữ</span>
+            <select
+              aria-label="Lọc ngôn ngữ taxonomy"
+              data-testid="taxonomy-locale-filter"
+              value={filterLocale}
+              onChange={(event) => {
+                setFilterLocale(event.target.value);
+                setPage(0);
+              }}
+              className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
+            >
+              <option value="all">Tất cả ngôn ngữ</option>
+              {localeState.allLocales.map((loc) => (
+                <option key={loc.code} value={loc.code}>
+                  {loc.label} ({loc.code})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
       {loading && <p role="status" className="text-xs text-zinc-500">Đang tải danh sách...</p>}
       <div className="space-y-2" aria-busy={loading}>
         {!loading && visible.length === 0 && <p className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500">
@@ -157,6 +196,11 @@ export function TaxonomyPage({ kind, user, csrfToken, onApiError, onNavigateHash
                 <h3 className="break-words text-sm font-semibold text-zinc-950">
                   {definition?.hierarchical && depth > 0 && <span aria-hidden="true" className="mr-1 text-zinc-400">{'— '.repeat(Math.min(depth, 7))}</span>}
                   {term.name}
+                  {localeState.hasMultipleLocales && term.locale && (
+                    <span className="ml-2 inline-block align-middle">
+                      <AdminBadge tone="neutral">{term.locale}</AdminBadge>
+                    </span>
+                  )}
                 </h3>
                 <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}</p>
                 {definition?.hierarchical && <p className="text-xs text-zinc-500">

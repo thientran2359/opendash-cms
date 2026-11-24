@@ -77,8 +77,9 @@ export function putEntrySeo(
   );
 }
 
-export function getHomeSeo(): Promise<HomeSeoSnapshot> {
-  return requestJson<HomeSeoSnapshot>('/api/admin/seo/home', {
+export function getHomeSeo(locale?: string | null): Promise<HomeSeoSnapshot> {
+  const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  return requestJson<HomeSeoSnapshot>(`/api/admin/seo/home${query}`, {
     defaultErrorMessage: 'Không thể tải SEO trang chủ.',
   });
 }
@@ -87,8 +88,10 @@ export function putHomeSeo(
   expectedVersion: number,
   input: SeoMetadataInput,
   csrfToken: string,
+  locale?: string | null,
 ): Promise<HomeSeoSnapshot> {
-  return requestJson<HomeSeoSnapshot>('/api/admin/seo/home', {
+  const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
+  return requestJson<HomeSeoSnapshot>(`/api/admin/seo/home${query}`, {
     method: 'PUT',
     csrfToken,
     contentType: 'application/json',

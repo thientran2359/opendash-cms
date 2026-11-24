@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getContentEntry, listContentEntries, listContentTypes } from '../api/content.ts';
+import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
 import { ApiClientError } from '../api/client.ts';
 import type { ContentEntryRecord, ContentFieldType, OwnedContentType } from '../features/content/types.ts';
 import type { BindingSource, BindingTarget, BuilderElement, ElementBinding, ElementType } from './document.ts';
@@ -34,6 +35,7 @@ const PAGE_SIZE = 50;
 interface Props {
   element: BuilderElement;
   allowRouteContext?: boolean;
+  localeState?: AdminLocaleState;
   onBindingChange: (id: string, binding: ElementBinding | null) => void;
   onError: (error: unknown, fallback: string) => void;
 }
@@ -58,13 +60,20 @@ function allowed(element: BuilderElement, target: BindingTarget, fieldType: Cont
   return COMPATIBLE[target].includes(fieldType);
 }
 
-export function BuilderBindingFields({ element, allowRouteContext = false, onBindingChange, onError }: Props) {
+export function BuilderBindingFields({
+  element,
+  allowRouteContext = false,
+  localeState = EMPTY_ADMIN_LOCALE_STATE,
+  onBindingChange,
+  onError,
+}: Props) {
   const existing = readBinding(element);
   const signature = JSON.stringify(existing);
   const targets = TARGETS[element.type as ElementType];
   const [types, setTypes] = useState<OwnedContentType[]>([]);
   const [entries, setEntries] = useState<ContentEntryRecord[]>([]);
   const [typeKey, setTypeKey] = useState(existing?.type_key ?? '');
+  const [entryLocale, setEntryLocale] = useState(existing?.entry_locale ?? '');
   const [entrySlug, setEntrySlug] = useState(existing?.entry_slug ?? '');
   const [target, setTarget] = useState<BindingTarget>(existing?.target ?? targets[0].key);
   const [sourceKey, setSourceKey] = useState(existing ? sourceValue(existing.source) : '');
@@ -79,6 +88,7 @@ export function BuilderBindingFields({ element, allowRouteContext = false, onBin
 
   useEffect(() => {
     setTypeKey(existing?.type_key ?? '');
+    setEntryLocale(existing?.entry_locale ?? '');
     setEntrySlug(existing?.entry_slug ?? '');
     setTarget(existing?.target ?? targets[0].key);
     setSourceKey(existing ? sourceValue(existing.source) : '');
@@ -110,7 +120,7 @@ export function BuilderBindingFields({ element, allowRouteContext = false, onBin
     setSelectionChecked(false);
     if (!typeKey) return;
     setEntriesBusy(true);
-    listContentEntries(typeKey, PAGE_SIZE, 0).then(result => {
+    listContentEntries(typeKey, PAGE_SIZE, 0, {}, entryLocale || undefined).then(result => {
       if (sequence !== entrySequence.current) return;
       setEntries(result);
       setHasMore(result.length === PAGE_SIZE);
@@ -123,7 +133,7 @@ export function BuilderBindingFields({ element, allowRouteContext = false, onBin
       if (sequence === entrySequence.current) setEntriesBusy(false);
     });
     return () => { entrySequence.current += 1; };
-  }, [typeKey, lookupRevision]);
+  }, [typeKey, entryLocale, lookupRevision]);
 
   const selectedType = types.find(type => type.descriptor.key === typeKey);
   const typeActive = selectedType?.status === 'active';
@@ -169,7 +179,7 @@ export function BuilderBindingFields({ element, allowRouteContext = false, onBin
     if (entriesBusy || !hasMore) return;
     const sequence = ++entrySequence.current;
     setEntriesBusy(true);
-    listContentEntries(typeKey, PAGE_SIZE, entries.length).then(next => {
+    listContentEntries(typeKey, PAGE_SIZE, entries.length, {}, entryLocale || undefined).then(next => {
       if (sequence !== entrySequence.current) return;
       setEntries(current => [...current, ...next]);
       setHasMore(next.length === PAGE_SIZE);
@@ -187,7 +197,13 @@ export function BuilderBindingFields({ element, allowRouteContext = false, onBin
     if (!valid) return;
     const source: BindingSource = sourceKey === 'title'
       ? { kind: 'title' } : { kind: 'field', key: sourceKey.slice(6) };
-    onBindingChange(element.id, { type_key: typeKey, entry_slug: entrySlug, source, target });
+    onBindingChange(element.id, {
+      type_key: typeKey,
+      entry_slug: entrySlug,
+      ...(entryLocale ? { entry_locale: entryLocale } : {}),
+      source,
+      target,
+    });
     setSavedStatus('Đã áp dụng vào bản nháp. Bấm Xem trước hoặc Lưu Builder để kiểm tra.');
   };
 
@@ -224,6 +240,29 @@ export function BuilderBindingFields({ element, allowRouteContext = false, onBin
       </label>
       {typeKey && !typeActive && !typesBusy &&
         <p role="status" className="text-xs text-amber-800">CPT không tồn tại hoặc provider không hoạt động. Binding đã lưu vẫn được giữ.</p>}
+      {localeState.hasMultipleLocales && (
+        <label className="block text-xs font-medium">
+          Ngôn ngữ entry (entry_locale)
+          <select
+            aria-label="Binding entry locale"
+            className="mt-1 w-full"
+            value={entryLocale}
+            onChange={event => {
+              setEntryLocale(event.target.value);
+              setEntrySlug('');
+              setLookupError('');
+              setSavedStatus('');
+            }}
+          >
+            <option value="">Theo ngôn ngữ đang render</option>
+            {localeState.allLocales.map(loc => (
+              <option key={loc.code} value={loc.code}>
+                {loc.label} ({loc.code})
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="block text-xs font-medium">
         Entry
         <select aria-label="Binding entry" className="mt-1 w-full" value={entrySlug}

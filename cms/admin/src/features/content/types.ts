@@ -70,12 +70,21 @@ export type ContentMode = 'editor' | 'builder';
 
 export type ContentFieldValue = string | number | boolean | string[] | null;
 
+export interface TranslationLinkSummary {
+  id: number;
+  locale: string;
+  slug: string;
+  title: string;
+  publication_status: 'draft' | 'published';
+}
+
 export interface ContentEntryInput {
   title: string;
   slug: string;
   values: Record<string, ContentFieldValue>;
   /** Omitted on legacy updates to preserve existing links; [] removes every link. */
   term_ids?: number[];
+  locale?: string;
 }
 
 export interface ContentEntryRecord extends ContentEntryInput {
@@ -88,6 +97,9 @@ export interface ContentEntryRecord extends ContentEntryInput {
   version: number;
   created_at: string;
   updated_at: string;
+  locale?: string;
+  translation_group_id?: string;
+  translations?: TranslationLinkSummary[];
 }
 
 /** M7-S16-T05: authenticated, ACL-projected server-side table result. */
@@ -101,6 +113,8 @@ export interface EntryTableRow {
   created_at: string;
   updated_at: string;
   term_ids: number[];
+  locale?: string;
+  translation_group_id?: string;
   /** Null for draft or any entry without a publicly routable URL. */
   public_url: string | null;
   /** Only custom fields the current actor is authorized to read. */
@@ -119,6 +133,7 @@ export interface EntryTableResult {
 export interface EntryTableQuery {
   q?: string;
   status?: 'all' | 'draft' | 'published';
+  locale?: string;
   category_id?: number;
   tag_id?: number;
   include_descendants?: boolean;

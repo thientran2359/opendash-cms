@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AuthUser, PluginSummary, type Role } from './types.ts';
+import {
+  deriveAdminLocaleState,
+  EMPTY_ADMIN_LOCALE_STATE,
+  listLocales,
+  type AdminLocaleState,
+} from './api/locales.ts';
 import * as api from './api/index.ts';
 import { AdminShell, isRouteAllowed, parseAdminRoute, type ParsedRoute } from './shell/AdminShell.tsx';
 import { getEffectiveContentTypeTaxonomies, listContentTypes } from './api/content.ts';
@@ -81,6 +87,7 @@ export const App: React.FC = () => {
   const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
   const [cptTypes, setCptTypes] = useState<OwnedContentType[]>([]);
   const [cptTaxonomies, setCptTaxonomies] = useState<Record<string, Array<{ key: string; label: string }>>>({});
+  const [localeState, setLocaleState] = useState<AdminLocaleState>(EMPTY_ADMIN_LOCALE_STATE);
   const [selectedSchemaTypeKey, setSelectedSchemaTypeKey] = useState<string | null>(null);
   const [siteInstanceId, setSiteInstanceId] = useState<string>('default-site');
   const siteInstanceIdRef = useRef(siteInstanceId);
@@ -167,6 +174,15 @@ export const App: React.FC = () => {
 
   // Hash routing works from /admin/ and /builder without server catch-all.
   // The existing editors stay mounted in AdminShell across route changes.
+  const loadLocales = useCallback(async () => {
+    try {
+      const snap = await listLocales();
+      setLocaleState(deriveAdminLocaleState(snap));
+    } catch {
+      // Non-fatal on boot; GeneralSettingsPanel surfaces explicit errors.
+    }
+  }, []);
+
   const loadCptTypes = useCallback(async () => {
     try {
       const [list, definitions] = await Promise.all([
@@ -376,7 +392,7 @@ export const App: React.FC = () => {
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
         setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
-        await loadCptTypes();
+        await Promise.all([loadCptTypes(), loadLocales()]);
         if (auth.user.role === 'admin') {
           await loadPlugins();
         }
@@ -442,7 +458,7 @@ export const App: React.FC = () => {
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
       setStatus('Đăng nhập thành công.', false);
-      await loadCptTypes();
+      await Promise.all([loadCptTypes(), loadLocales()]);
       if (res.user.role === 'admin') {
         await loadPlugins();
       }
@@ -632,18 +648,19 @@ export const App: React.FC = () => {
         csrfToken={csrfToken}
         resetToken={builderReset}
         themeRevision={themeRevision}
+        localeState={localeState}
         onNavigateHash={navigateHash}
         onDirtyChange={markStudioDirty}
         onApiError={handleApiError}
         onSavedSettingsOrTheme={() => setThemeRevision(v => v + 1)}
       /> : null}
       previewContent={null}
-      themesContent={<ThemesPanel mode="themes" csrfToken={csrfToken} onApiError={handleApiError}
+      themesContent={<ThemesPanel mode="themes" csrfToken={csrfToken} localeState={localeState} onApiError={handleApiError}
         onInstalled={() => setThemeRevision(value => value + 1)}
         onActivated={() => setThemeRevision(value => value + 1)}
       />}
-      menusContent={<MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />}
-      themeOptionsContent={<ThemesPanel mode="options" csrfToken={csrfToken} onApiError={handleApiError}
+      menusContent={<MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} localeState={localeState} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />}
+      themeOptionsContent={<ThemesPanel mode="options" csrfToken={csrfToken} localeState={localeState} onApiError={handleApiError}
         onInstalled={() => setThemeRevision(value => value + 1)}
         onActivated={() => setThemeRevision(value => value + 1)}
       />}
@@ -686,7 +703,7 @@ export const App: React.FC = () => {
           ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
           : route.sub === 'health' ? <SystemStatus /> : null}
       settingsContent={route.sub === 'general'
-        ? <GeneralSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        ? <GeneralSettingsPanel csrfToken={csrfToken} localeState={localeState} onLocalesChanged={loadLocales} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
         : route.sub === 'permalinks'
           ? <PermalinkSettingsPage key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
               user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
@@ -694,11 +711,11 @@ export const App: React.FC = () => {
               onDirtyChange={markPermalinkDirty} />
         : route.sub === 'reading'
           ? <ReadingSettingsPanel key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
-              user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+              user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} localeState={localeState}
               onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cấu hình Reading Settings.')}
               onDirtyChange={markReadingDirty} />
         : route.sub === 'seo'
-          ? <SeoPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
+          ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
           : route.sub === 'contact'
             ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
             : route.sub === 'smtp'
@@ -747,6 +764,7 @@ export const App: React.FC = () => {
             routeHash={route.rawHash}
             isActive={route.view === 'cpt'}
             csrfToken={csrfToken}
+            localeState={localeState}
             onApiError={handleApiError}
             onDirtyChange={setContentDirty}
             onNavigateHash={navigateHash}
@@ -766,6 +784,7 @@ export const App: React.FC = () => {
           routeHash={route.view === 'posts' ? route.rawHash : '#/posts'}
           isActive={route.view === 'posts'}
           csrfToken={csrfToken}
+          localeState={localeState}
           onApiError={handleApiError}
           onDirtyChange={setPostsDirty}
           onNavigateHash={navigateHash}
@@ -784,6 +803,7 @@ export const App: React.FC = () => {
           routeHash={route.view === 'pages' ? route.rawHash : '#/pages'}
           isActive={route.view === 'pages'}
           csrfToken={csrfToken}
+          localeState={localeState}
           onApiError={handleApiError}
           onDirtyChange={setPagesDirty}
           onNavigateHash={navigateHash}
@@ -803,9 +823,11 @@ export const App: React.FC = () => {
           ? <TermEditPage key={`term-${route.taxonomyKind}-${route.taxonomyMode}-${route.entryId ?? 'new'}-${user?.id ?? 'guest'}-${user?.role ?? 'none'}`}
               kind={route.taxonomyKind ?? 'category'} mode={route.taxonomyMode}
               termId={route.entryId ?? null} user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
+              localeState={localeState}
               onApiError={scopedTaxonomyApiError} onDirtyChange={markTermDirty} onNavigateHash={navigateHash} />
           : <TaxonomyPage key={`terms-${route.taxonomyKind}-${user?.id ?? 'guest'}`}
               kind={route.taxonomyKind ?? 'category'} user={user} csrfToken={csrfToken}
+              localeState={localeState}
               onApiError={scopedTaxonomyApiError} onNavigateHash={navigateHash} />}
     />
   );
