@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useI18n } from '../i18n/index.tsx';
 import type { AuthUser } from '../types.ts';
 import type { OwnedContentType } from '../features/content/types.ts';
 import { AuthPanel } from './AuthPanel.tsx';
@@ -41,6 +42,7 @@ interface ParentMenuItem {
 }
 
 function buildMenuTree(
+  t: ReturnType<typeof useI18n>['t'],
   cptTypes: OwnedContentType[],
   isAdmin: boolean,
   cptTaxonomies: Record<string, Array<{ key: string; label: string }>> = {},
@@ -49,29 +51,29 @@ function buildMenuTree(
     ct => ct.descriptor.key !== 'post' && ct.descriptor.key !== 'page' && ct.descriptor.key !== 'section' && ct.descriptor.key !== 'pattern',
   );
   return [
-    { id: 'dashboard', label: 'Tổng quan', icon: 'dashboard', hash: '#/dashboard' },
+    { id: 'dashboard', label: t('shell.dashboard'), icon: 'dashboard', hash: '#/dashboard' },
     {
       id: 'posts',
-      label: 'Bài viết',
+      label: t('shell.posts'),
       icon: 'posts',
       hash: '#/posts',
       group: 'content',
       children: [
-        { label: 'Tất cả bài viết', hash: '#/posts' },
-        { label: 'Viết bài mới', hash: '#/posts/new' },
-        { label: 'Chuyên mục', hash: '#/posts/categories' },
-        { label: 'Thẻ', hash: '#/posts/tags' },
+        { label: t('shell.all_posts'), hash: '#/posts' },
+        { label: t('shell.new_post'), hash: '#/posts/new' },
+        { label: t('shell.categories'), hash: '#/posts/categories' },
+        { label: t('shell.tags'), hash: '#/posts/tags' },
       ],
     },
     {
       id: 'pages',
-      label: 'Trang',
+      label: t('shell.pages'),
       icon: 'pages',
       hash: '#/pages',
       group: 'content',
       children: [
-        { label: 'Tất cả trang', hash: '#/pages' },
-        { label: 'Thêm trang mới', hash: '#/pages/new' },
+        { label: t('shell.all_pages'), hash: '#/pages' },
+        { label: t('shell.new_page'), hash: '#/pages/new' },
       ],
     },
     ...customTypes.map(ct => ({
@@ -81,8 +83,8 @@ function buildMenuTree(
       hash: `#/cpt/${ct.descriptor.key}`,
       group: 'content' as const,
       children: [
-        { label: `Tất cả ${ct.descriptor.label}`, hash: `#/cpt/${ct.descriptor.key}` },
-        { label: 'Thêm mới', hash: `#/cpt/${ct.descriptor.key}/new` },
+        { label: t('shell.all_custom', { label: ct.descriptor.label }), hash: `#/cpt/${ct.descriptor.key}` },
+        { label: t('shell.new'), hash: `#/cpt/${ct.descriptor.key}/new` },
         ...(cptTaxonomies[ct.descriptor.key] ?? []).map(tax => ({
           label: tax.label,
           hash:
@@ -96,14 +98,14 @@ function buildMenuTree(
     })),
     {
       id: 'media',
-      label: 'Thư viện media',
+      label: t('shell.media'),
       icon: 'media',
       hash: '#/media',
       group: 'content',
     },
     {
       id: 'contact',
-      label: 'Liên hệ',
+      label: t('shell.contact'),
       icon: 'mail',
       hash: '#/settings/contact',
       group: 'content',
@@ -111,7 +113,7 @@ function buildMenuTree(
     },
     {
       id: 'studio',
-      label: 'Tùy chỉnh giao diện',
+      label: t('shell.studio'),
       icon: 'builder',
       hash: '#/studio',
       group: 'appearance',
@@ -119,90 +121,91 @@ function buildMenuTree(
     },
     {
       id: 'themes',
-      label: 'Theme',
+      label: t('shell.themes'),
       icon: 'themes',
       hash: '#/appearance/themes',
       group: 'appearance',
       adminOnly: true,
       children: [
-        { label: 'Themes đã cài', hash: '#/appearance/themes' },
-        { label: 'Cài theme', hash: '#/appearance/library' },
+        { label: t('shell.installed_themes'), hash: '#/appearance/themes' },
+        { label: t('shell.install_theme'), hash: '#/appearance/library' },
       ],
     },
     {
       id: 'patterns',
-      label: 'Patterns',
+      label: t('shell.patterns'),
       icon: 'content',
       hash: '#/patterns',
       group: 'appearance',
       adminOnly: true,
       children: [
-        { label: 'Tất cả Pattern', hash: '#/patterns' },
-        { label: 'Thêm Pattern', hash: '#/patterns/new' },
+        { label: t('shell.all_patterns'), hash: '#/patterns' },
+        { label: t('shell.new_pattern'), hash: '#/patterns/new' },
       ],
     },
     {
       id: 'schema',
-      label: 'Cấu trúc nội dung',
+      label: t('shell.schema'),
       icon: 'schema',
       hash: '#/appearance/content-types',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: 'Loại nội dung & Trường', hash: '#/appearance/content-types' },
-        { label: 'Taxonomy tùy chỉnh', hash: '#/taxonomy/definitions' },
+        { label: t('shell.content_types'), hash: '#/appearance/content-types' },
+        { label: t('shell.taxonomy_definitions'), hash: '#/taxonomy/definitions' },
       ],
     },
     {
       id: 'plugins',
-      label: 'Plugins',
+      label: t('shell.plugins'),
       icon: 'plugins',
       hash: '#/plugins',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: 'Plugins đã cài', hash: '#/plugins' },
-        { label: 'Cài plugin', hash: '#/plugins/install' },
+        { label: t('shell.installed_plugins'), hash: '#/plugins' },
+        { label: t('shell.install_plugin'), hash: '#/plugins/install' },
       ],
     },
     {
       id: 'users',
-      label: 'Người dùng',
+      label: t('shell.users'),
       icon: 'users',
       hash: isAdmin ? '#/users' : '#/users/profile',
       group: 'system',
       children: [
-        { label: 'Tất cả người dùng', hash: '#/users', adminOnly: true },
-        { label: 'Thêm người dùng', hash: '#/users/new', adminOnly: true },
-        { label: 'Hồ sơ của tôi', hash: '#/users/profile' },
+        { label: t('shell.all_users'), hash: '#/users', adminOnly: true },
+        { label: t('shell.new_user'), hash: '#/users/new', adminOnly: true },
+        { label: t('shell.profile'), hash: '#/users/profile' },
       ],
     },
     {
       id: 'tools',
-      label: 'Công cụ',
+      label: t('shell.tools'),
       icon: 'tools',
       hash: '#/tools/backup',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: 'Sao lưu & Phục hồi', hash: '#/tools/backup' },
-        { label: 'Đối soát Media', hash: '#/tools/media-reconcile' },
-        { label: 'Tình trạng hệ thống', hash: '#/tools/health' },
+        { label: t('shell.backup'), hash: '#/tools/backup' },
+        { label: t('shell.media_reconcile'), hash: '#/tools/media-reconcile' },
+        { label: t('shell.health'), hash: '#/tools/health' },
       ],
     },
     {
       id: 'settings',
-      label: 'Cài đặt',
+      label: t('shell.settings'),
       icon: 'settings',
       hash: '#/settings/general',
       group: 'system',
       adminOnly: true,
       children: [
-        { label: 'Tổng quát', hash: '#/settings/general' },
-        { label: 'Trang chủ & Bài viết', hash: '#/settings/reading' },
-        { label: 'Đường dẫn tĩnh', hash: '#/settings/permalinks' },
-        { label: 'SEO', hash: '#/settings/seo' },
-        { label: 'Thông báo Email (SMTP)', hash: '#/settings/smtp' },
+        { label: t('shell.general'), hash: '#/settings/general' },
+        { label: t('shell.multilingual'), hash: '#/settings/multilingual', adminOnly: true },
+        { label: t('shell.reading'), hash: '#/settings/reading' },
+        { label: t('shell.permalinks'), hash: '#/settings/permalinks' },
+        { label: t('shell.seo'), hash: '#/settings/seo' },
+        { label: t('shell.smtp'), hash: '#/settings/smtp' },
       ],
     },
   ];
@@ -277,10 +280,11 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   pluginsContent, usersContent, profileContent, toolsContent, settingsContent, themesContent,
   menusContent, themeOptionsContent, libraryContent, studioContent,
 }) => {
+  const { t, setSection } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const menuTree = buildMenuTree(cptTypes, user?.role === 'admin', cptTaxonomies);
+  const menuTree = buildMenuTree(t, cptTypes, user?.role === 'admin', cptTaxonomies);
   const activeParentId =
     route.view === 'cpt' && route.typeKey
       ? `cpt:${route.typeKey}`
@@ -326,9 +330,9 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   const visibleMenu = menuTree.filter(item => !item.adminOnly || user?.role === 'admin');
   const groupOrder: { id: string; label: string | null; match: NavigationGroup | null }[] = [
     { id: 'dashboard', label: null, match: null },
-    { id: 'content', label: 'Nội dung', match: 'content' },
-    { id: 'appearance', label: 'Giao diện', match: 'appearance' },
-    { id: 'system', label: 'Hệ thống', match: 'system' },
+    { id: 'content', label: t('shell.group_content'), match: 'content' },
+    { id: 'appearance', label: t('shell.group_appearance'), match: 'appearance' },
+    { id: 'system', label: t('shell.group_system'), match: 'system' },
   ];
   const menuGroups = groupOrder.map(group => ({
     ...group,
@@ -354,19 +358,21 @@ export const AdminShell: React.FC<AdminShellProps> = ({
     route.rawHash.split('?')[0];
   const activeChild = activeParent?.children?.find(child => child.hash === selectedNavHash);
   const subLabels: Record<string, string> = {
-    list: 'Danh sách', new: 'Thêm mới', edit: 'Chỉnh sửa', library: 'Thư viện',
-    general: 'Tổng quát', reading: 'Trang chủ & Bài viết', permalinks: 'Đường dẫn tĩnh', seo: 'SEO', contact: 'Liên hệ', smtp: 'Thông báo Email (SMTP)',
-    'content-types': 'Loại nội dung & Trường', themes: 'Themes', menus: 'Menus',
-    definitions: 'Taxonomy tùy chỉnh', terms: 'Các term',
-    options: 'Tùy chọn theme', health: 'Tình trạng hệ thống',
-    'media-reconcile': 'Đối soát Media', backup: 'Sao lưu & Phục hồi',
-    install: 'Cài đặt', profile: 'Hồ sơ của tôi',
+    list: t('shell.list'), new: t('shell.new'), edit: t('shell.edit'), library: t('shell.library'),
+    general: t('shell.general'), multilingual: t('shell.multilingual'), reading: t('shell.reading'), permalinks: t('shell.permalinks'), seo: t('shell.seo'), contact: t('shell.contact'), smtp: t('shell.smtp'),
+    'content-types': t('shell.content_types'), themes: t('shell.themes'), menus: t('shell.menus'),
+    definitions: t('shell.taxonomy_definitions'), terms: t('shell.terms'),
+    options: t('shell.theme_options'), health: t('shell.health'),
+    'media-reconcile': t('shell.media_reconcile'), backup: t('shell.backup'),
+    install: t('shell.settings'), profile: t('shell.profile'),
   };
   const pageTitle = routeForbidden
-    ? '403 Không có quyền truy cập'
-    : activeChild?.label ?? (route.sub === 'edit' ? 'Chỉnh sửa' : subLabels[route.sub]) ?? activeParent?.label ?? 'Tổng quan';
+    ? t('shell.forbidden_title')
+    : activeChild?.label ?? (route.sub === 'edit' ? t('shell.edit') : subLabels[route.sub]) ?? activeParent?.label ?? t('shell.dashboard');
+  const documentSection = user ? pageTitle : t('shell.login_title');
+  useEffect(() => { setSection(documentSection); }, [documentSection, setSection]);
   const breadcrumbParts = [
-    'Quản trị',
+    t('shell.admin'),
     activeGroupLabel,
     activeParent?.label,
     ...(pageTitle !== activeParent?.label ? [pageTitle] : []),
@@ -404,8 +410,8 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           <section className="od-auth-card w-full max-w-md rounded-2xl p-7 shadow-xs sm:p-9">
             <div className="od-logo od-logo-large" aria-hidden="true">O</div>
             <div className="mt-4 text-xs font-semibold uppercase tracking-widest text-od-accent">OpenDash CMS</div>
-            <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-zinc-950">Đăng nhập quản trị</h1>
-            <p className="mb-6 mt-1.5 text-sm text-zinc-600">Quản lý nội dung và thiết kế website trong một không gian.</p>
+            <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-zinc-950">{t('shell.login_title')}</h1>
+            <p className="mb-6 mt-1.5 text-sm text-zinc-600">{t('shell.login_description')}</p>
             <AuthPanel
               user={user} authUsername={authUsername} authPassword={authPassword}
               statusMessage={statusMessage} isError={isError} isProcessing={isProcessing}
@@ -427,16 +433,16 @@ export const AdminShell: React.FC<AdminShellProps> = ({
       )}
 
       <div className={user && !isStudioView ? 'od-layout' : 'hidden'} data-testid="admin-layout" aria-hidden={!user || isStudioView}>
-        {mobileOpen && <button type="button" className="od-drawer-overlay" aria-label="Đóng menu" onClick={() => setMobileOpen(false)} />}
-        <aside id="admin-navigation" className={'od-sidebar ' + (mobileOpen ? 'od-sidebar-open' : '')} aria-label="Điều hướng quản trị">
+        {mobileOpen && <button type="button" className="od-drawer-overlay" aria-label={t('shell.close_menu')} onClick={() => setMobileOpen(false)} />}
+        <aside id="admin-navigation" className={'od-sidebar ' + (mobileOpen ? 'od-sidebar-open' : '')} aria-label={t('shell.navigation')}>
           <div className="od-brand flex items-center gap-2.5 px-4 py-3.5">
             <div className="od-logo" aria-hidden="true">O</div>
             <div className="min-w-0">
               <div className="text-sm font-bold tracking-tight text-zinc-950">OpenDash</div>
-              <div className="text-[11px] text-zinc-500">Content Management</div>
+              <div className="text-[11px] text-zinc-500">{t('shell.content_management')}</div>
             </div>
           </div>
-          <nav className="od-nav overflow-y-auto px-2.5 py-3" aria-label="Các mục quản trị">
+          <nav className="od-nav overflow-y-auto px-2.5 py-3" aria-label={t('shell.nav_items')}>
             <div className="flex flex-col gap-0.5">
               {menuGroups.map(group => <div key={group.id} className="od-nav-group" data-nav-group={group.id}>
                 {group.label && <p className="od-nav-group-title">{group.label}</p>}
@@ -454,7 +460,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                         data-menu-id={item.id}
                         aria-expanded={visibleChildren.length > 0 ? isExpanded : undefined}
                         disabled={item.disabled}
-                        title={item.disabled ? 'Chưa khả dụng — sẽ được bật khi tính năng hoàn thành' : undefined}
+                        title={item.disabled ? t('shell.unavailable') : undefined}
                         onClick={() => {
                           if (visibleChildren.length > 0) {
                             setOpenMenuId(isExpanded ? null : item.id);
@@ -465,7 +471,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                         <span className="flex min-w-0 items-center gap-2">
                           <NavIcon name={item.icon} />
                           <span className="truncate">{item.label}</span>
-                          {item.disabled && <span className="od-nav-coming-soon">Sắp có</span>}
+                          {item.disabled && <span className="od-nav-coming-soon">{t('shell.coming_soon')}</span>}
                         </span>
                         {visibleChildren.length > 0 && (
                           <span className="text-[11px] text-zinc-400" aria-hidden="true">
@@ -479,7 +485,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                             const isSubActive = selectedNavHash === sub.hash;
                             return (
                               sub.disabled
-                                ? <span key={sub.hash} className="od-nav-sub-disabled" aria-disabled="true">{sub.label} · Sắp có</span>
+                                ? <span key={sub.hash} className="od-nav-sub-disabled" aria-disabled="true">{t('shell.disabled_submenu', { label: sub.label })}</span>
                                 : <a key={sub.hash} href={sub.hash}
                                   onClick={e => { e.preventDefault(); navigate(sub.hash); }}
                                   aria-current={isSubActive ? 'page' : undefined}
@@ -499,13 +505,13 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               </div>)}
             </div>
           </nav>
-          <div className="od-sidebar-bottom px-4 py-2.5 text-[11px]">OpenDash · Admin</div>
+          <div className="od-sidebar-bottom px-4 py-2.5 text-[11px]">{t('shell.footer')}</div>
         </aside>
 
         <div className="od-workspace min-w-0">
           <header className="od-topbar flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <button type="button" className="od-menu-toggle" aria-label="Mở menu" aria-controls="admin-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}>
+              <button type="button" className="od-menu-toggle" aria-label={t('shell.open_menu')} aria-controls="admin-navigation" aria-expanded={mobileOpen} onClick={() => setMobileOpen(!mobileOpen)}>
                 <span aria-hidden="true">☰</span>
               </button>
               <div className="min-w-0">
@@ -516,7 +522,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
               </div>
             </div>
             <div className="od-topbar-actions flex flex-wrap items-center gap-2.5">
-              {hasUnsavedChanges && <span className="od-unsaved-label" role="status">● Có thay đổi chưa lưu</span>}
+              {hasUnsavedChanges && <span className="od-unsaved-label" role="status">{t('shell.unsaved')}</span>}
               {user && <AuthPanel
                 user={user} authUsername={authUsername} authPassword={authPassword}
                 statusMessage={statusMessage} isError={isError} isProcessing={isProcessing}
@@ -529,16 +535,16 @@ export const AdminShell: React.FC<AdminShellProps> = ({
           <PageContainerTag id="admin-main" className="od-page-container px-4 py-5 sm:px-6 sm:py-6">
             {user && routeForbidden && (
               <section className="od-admin-card border-rose-200 bg-rose-50" data-testid="rbac-forbidden" role="alert">
-                <h2 className="text-lg font-semibold text-rose-900">403 — Không có quyền truy cập</h2>
+                <h2 className="text-lg font-semibold text-rose-900">{t('shell.forbidden_heading')}</h2>
                 <p className="mt-2 text-sm text-rose-800">
-                  Tài khoản hiện tại không có quyền mở đường dẫn <code>{route.rawHash}</code>.
+                  {t('shell.forbidden_message', { path: route.rawHash })}
                 </p>
                 <button
                   type="button"
                   onClick={() => navigate('#/dashboard')}
                   className="mt-4 inline-flex h-9 items-center rounded-md bg-zinc-900 px-3.5 text-sm font-medium text-white hover:bg-zinc-800"
                 >
-                  Quay về Tổng quan
+                  {t('shell.back_dashboard')}
                 </button>
               </section>
             )}
@@ -546,16 +552,16 @@ export const AdminShell: React.FC<AdminShellProps> = ({
             {user && !routeForbidden && route.view === 'dashboard' && (
               <div className="od-dashboard space-y-6" id="dashboard-main">
                 <div className="od-welcome rounded-xl px-5 py-4 sm:px-6 sm:py-5">
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-od-accent">Trang tổng quan</div>
-                  <h2 className="mt-1 text-xl font-semibold tracking-tight text-zinc-950">Xin chào, {user.username}</h2>
-                  <p className="mt-1 max-w-2xl text-sm text-zinc-600">Chọn một khu vực từ menu bên trái để quản lý nội dung và cấu hình hệ thống.</p>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-od-accent">{t('shell.dashboard_heading')}</div>
+                  <h2 className="mt-1 text-xl font-semibold tracking-tight text-zinc-950">{t('shell.welcome', { username: user.username })}</h2>
+                  <p className="mt-1 max-w-2xl text-sm text-zinc-600">{t('shell.dashboard_description')}</p>
                 </div>
                 {dashboardContent}
                 {customCptTypes.length > 0 && (
                   <section className="space-y-3" aria-labelledby="dashboard-cpt-heading" data-testid="dashboard-cpt-shortcuts">
                     <div>
-                      <h2 id="dashboard-cpt-heading" className="text-base font-semibold text-zinc-950">Loại nội dung tùy chỉnh</h2>
-                      <p className="mt-0.5 text-sm text-zinc-600">Lối tắt quản lý các loại nội dung mở rộng đang hoạt động.</p>
+                      <h2 id="dashboard-cpt-heading" className="text-base font-semibold text-zinc-950">{t('shell.custom_types')}</h2>
+                      <p className="mt-0.5 text-sm text-zinc-600">{t('shell.custom_types_description')}</p>
                     </div>
                     <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {customCptTypes.map(ct => (
@@ -570,14 +576,14 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                               onClick={e => { e.preventDefault(); navigate(`#/cpt/${ct.descriptor.key}`); }}
                               className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
                             >
-                              Danh sách
+                              {t('shell.list')}
                             </a>
                             <a
                               href={`#/cpt/${ct.descriptor.key}/new`}
                               onClick={e => { e.preventDefault(); navigate(`#/cpt/${ct.descriptor.key}/new`); }}
                               className="inline-flex h-8 items-center rounded-md bg-od-accent px-2.5 text-xs font-medium text-white hover:bg-od-accent-hover"
                             >
-                              + Mới
+                              {t('shell.add_new_short')}
                             </a>
                           </div>
                         </article>
@@ -590,8 +596,8 @@ export const AdminShell: React.FC<AdminShellProps> = ({
 
             {!routeForbidden && (
               <>
-                <section className={user && route.view === 'posts' ? `od-editor-panel${postsLegacy}` : 'hidden'} aria-label="Bài viết" aria-hidden={!user || route.view !== 'posts'}>{postsContent}</section>
-                <section className={user && route.view === 'pages' ? `od-editor-panel${pagesLegacy}` : 'hidden'} aria-label="Trang" aria-hidden={!user || route.view !== 'pages'}>{pagesContent}</section>
+                <section className={user && route.view === 'posts' ? `od-editor-panel${postsLegacy}` : 'hidden'} aria-label={t('shell.posts')} aria-hidden={!user || route.view !== 'posts'}>{postsContent}</section>
+                <section className={user && route.view === 'pages' ? `od-editor-panel${pagesLegacy}` : 'hidden'} aria-label={t('shell.pages')} aria-hidden={!user || route.view !== 'pages'}>{pagesContent}</section>
                 {user && route.view === 'media' && mediaContent}
                 {user && route.view === 'taxonomy' && <div className="od-admin-card min-w-0 max-w-full">{taxonomyContent}</div>}
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'themes' && <div className="od-admin-card min-w-0">{themesContent}</div>}
@@ -600,19 +606,19 @@ export const AdminShell: React.FC<AdminShellProps> = ({
                 {user?.role === 'admin' && route.view === 'themes' && route.sub === 'library' && <div className="od-legacy-scope">{libraryContent}</div>}
                 {user?.role === 'admin' && route.view === 'patterns' && <div className="od-legacy-scope">{patternsContent}</div>}
 
-                <section className={user && route.view === 'builder' ? 'od-editor-panel od-legacy-scope' : 'hidden'} aria-label="Builder" aria-hidden={!user || route.view !== 'builder'}>
+                <section className={user && route.view === 'builder' ? 'od-editor-panel od-legacy-scope' : 'hidden'} aria-label={t('shell.builder')} aria-hidden={!user || route.view !== 'builder'}>
                   <div id="builder-main">
                     <section className="editor-sidebar">{sidebarContent}</section>
                     {previewContent}
                   </div>
                 </section>
 
-                <section className={user && route.view === 'cpt' ? `od-editor-panel${cptLegacy}` : 'hidden'} aria-label="Nội dung tùy chỉnh" aria-hidden={!user || route.view !== 'cpt'}>
+                <section className={user && route.view === 'cpt' ? `od-editor-panel${cptLegacy}` : 'hidden'} aria-label={t('shell.custom_content')} aria-hidden={!user || route.view !== 'cpt'}>
                   <div id="content-main">{contentContent}</div>
                 </section>
 
                 {user?.role === 'admin' && route.view === 'plugins' && <div className="od-admin-card">{pluginsContent}</div>}
-                <section className={user?.role === 'admin' && route.view === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label="Người dùng" aria-hidden={user?.role !== 'admin' || route.view !== 'users'}>
+                <section className={user?.role === 'admin' && route.view === 'users' ? 'od-admin-card min-w-0 max-w-full overflow-x-clip' : 'hidden'} aria-label={t('shell.users')} aria-hidden={user?.role !== 'admin' || route.view !== 'users'}>
                   {usersContent}
                 </section>
                 {user && route.view === 'profile' && <div className="od-admin-card min-w-0">{profileContent}</div>}

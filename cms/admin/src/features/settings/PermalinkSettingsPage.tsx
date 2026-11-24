@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useI18n, tStatic } from '../../i18n/index.tsx';
 import { ApiClientError, type PermalinkConflictItem } from '../../api/client.ts';
 import {
   getPermalinkSettings, savePermalinkSettings,
@@ -18,11 +19,11 @@ interface Props {
 }
 
 const PRESETS = [
-  { value: '/%postname%', label: 'Mặc định · /%postname%' },
-  { value: '/blog/%postname%', label: 'Blog · /blog/%postname%' },
-  { value: '/%category%/%postname%', label: 'Danh mục chính · /%category%/%postname%' },
-  { value: '/archives/%post_id%', label: 'ID bài viết · /archives/%post_id%' },
-];
+  { value: '/%postname%', labelKey: 'permalink.preset_default' },
+  { value: '/blog/%postname%', labelKey: 'permalink.preset_blog' },
+  { value: '/%category%/%postname%', labelKey: 'permalink.preset_category' },
+  { value: '/archives/%post_id%', labelKey: 'permalink.preset_id' },
+] as const;
 const CUSTOM = 'custom';
 const TOKENS = ['%category%', '%postname%', '%post_id%'] as const;
 type DraftRecord = { baselineVersion: number; draft: PermalinkSettingsDraft };
@@ -80,10 +81,11 @@ function safeServerPath(path: string | null): string | null {
 }
 
 function errorText(reason: unknown): string {
-  return reason instanceof Error ? reason.message : 'Không thể kết nối máy chủ.';
+  return reason instanceof Error ? reason.message : tStatic('permalink.network_error');
 }
 
 export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiError, onDirtyChange }: Props) {
+  const { t } = useI18n();
   const actorId = user?.id ?? null;
   const key = actorId === null ? null : `${siteInstanceId}:${actorId}`;
   const onApiErrorRef = useRef(onApiError);
@@ -227,7 +229,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     setStale(false);
     setError(null);
     setConflicts([]);
-    setNotice('Đã bỏ bản nhập chưa lưu; sử dụng cấu hình hiện tại trên máy chủ.');
+    setNotice(tStatic('permalink.discarded'));
   }
 
   function discardStaleAndReload() {
@@ -239,7 +241,7 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
     setCustomMode(false);
     setStale(false);
     setConflicts([]);
-    setNotice('Đã bỏ bản nhập, đang tải phiên bản mới từ máy chủ.');
+    setNotice(tStatic('permalink.discard_reload'));
     void load();
   }
 
@@ -266,16 +268,16 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
         setCustomMode(!PRESETS.some(item => item.value === result.post_structure));
       }
       setStale(false);
-      setNotice('Đã lưu permalink. Các URL công khai được cập nhật đồng bộ trên máy chủ.');
+      setNotice(tStatic('permalink.saved'));
       // Refresh URL examples only after successful persistence.
       void load();
     } catch (reason) {
       if (!mounted.current) return;
       if (reason instanceof ApiClientError && reason.status === 412) {
         setStale(true);
-        setError('Cấu hình đã thay đổi ở phiên khác (412). Bản nhập của bạn được giữ; tải phiên mới và đối chiếu trước khi lưu lại.');
+        setError(tStatic('permalink.stale_error'));
       } else if (reason instanceof ApiClientError && reason.status === 409) {
-        setError(`Đường dẫn bị xung đột (409). Máy chủ trả về: ${errorText(reason)}. Không thay đổi nào được lưu.`);
+        setError(tStatic('permalink.conflict_error', { message: errorText(reason) }));
         setConflicts(reason.conflicts ?? []);
       } else {
         setError(errorText(reason));
@@ -320,21 +322,20 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
   return (
     <section className="min-w-0 space-y-5" data-testid="permalink-settings" aria-labelledby="permalink-heading">
       <header>
-        <h2 id="permalink-heading" className="text-base font-semibold text-zinc-950">Đường dẫn tĩnh</h2>
+        <h2 id="permalink-heading" className="text-base font-semibold text-zinc-950">{t('permalink.heading')}</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          Chọn cách tạo URL công khai cho bài viết, CPT và taxonomy. URL đang dùng chỉ đổi sau khi Lưu thành công.
-          Page luôn dùng đường dẫn gốc (/&lt;slug&gt;); Pattern luôn riêng tư.
+          {t('permalink.description')}
         </p>
       </header>
-      {loading && <p role="status" className="text-sm text-zinc-500">Đang tải cấu hình permalink…</p>}
+      {loading && <p role="status" className="text-sm text-zinc-500">{t('permalink.loading')}</p>}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {conflicts.length > 0 && (
         <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm text-rose-900" data-testid="permalink-conflicts">
-          <p className="font-semibold">Các đường dẫn bị xung đột (tối đa 20 mục từ máy chủ):</p>
+          <p className="font-semibold">{t('permalink.conflicts')}</p>
           <ul className="mt-2 list-inside list-disc space-y-1 break-all font-mono text-xs">
             {conflicts.map((item, index) => (
               <li key={`${item.path}:${item.new_target}:${index}`}>
-                <span className="font-semibold">{item.path}</span> — {item.new_target} trùng với {item.existing_target}
+                <span className="font-semibold">{item.path}</span> — {t('permalink.conflict_item', { newTarget: item.new_target, existingTarget: item.existing_target })}
               </li>
             ))}
           </ul>
@@ -343,24 +344,24 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       {stale && (
         <AdminAlert tone="warning" className="space-y-2">
-          <p>Cấu hình trên máy chủ mới hơn bản bạn bắt đầu sửa. Form vẫn được giữ và nút Lưu tạm khóa để tránh ghi đè.</p>
+          <p>{t('permalink.stale_warning')}</p>
           <div className="flex flex-wrap gap-2">
             <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={() => void load()}>
-              Kiểm tra phiên bản mới
+              {t('permalink.check_latest')}
             </AdminButton>
             <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={discardStaleAndReload}>
-              Bỏ nháp, dùng phiên bản mới
+              {t('permalink.discard_latest')}
             </AdminButton>
           </div>
         </AdminAlert>
       )}
       {!loading && (!saved || !draft) && (
-        <AdminButton variant="primary" onClick={() => void load()}>Thử tải lại</AdminButton>
+        <AdminButton variant="primary" onClick={() => void load()}>{t('permalink.retry')}</AdminButton>
       )}
       {saved && draft && (
         <form onSubmit={event => void save(event)} className="space-y-6">
           <div className="space-y-2">
-            <label htmlFor="permalink-post-preset" className="block text-sm font-medium text-zinc-800">Cấu trúc bài viết Post</label>
+            <label htmlFor="permalink-post-preset" className="block text-sm font-medium text-zinc-800">{t('permalink.post_structure')}</label>
             <select id="permalink-post-preset" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
               value={preset} disabled={loading} onChange={event => {
                 if (event.target.value === CUSTOM) {
@@ -374,18 +375,18 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                   updateDraft({ ...draft, post_structure: event.target.value });
                 }
               }}>
-              {PRESETS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
-              <option value={CUSTOM}>Tùy chỉnh</option>
+              {PRESETS.map(item => <option key={item.value} value={item.value}>{t(item.labelKey)}</option>)}
+              <option value={CUSTOM}>{t('permalink.custom')}</option>
             </select>
             {customMode && (
               <div className="space-y-2">
-                <label htmlFor="permalink-post-custom" className="block text-xs font-medium text-zinc-700">Định dạng tùy chỉnh</label>
+                <label htmlFor="permalink-post-custom" className="block text-xs font-medium text-zinc-700">{t('permalink.custom_format')}</label>
                 <input id="permalink-post-custom" className="h-9 w-full max-w-2xl rounded-md border border-zinc-300 bg-white px-3 font-mono text-sm text-zinc-900"
                   value={draft.post_structure} maxLength={512} disabled={loading}
                   onChange={event => updateDraft({ ...draft, post_structure: event.target.value })} />
               </div>
             )}
-            <div className="flex flex-wrap gap-1.5" aria-label="Thêm thẻ vào cấu trúc permalink">
+            <div className="flex flex-wrap gap-1.5" aria-label={t('permalink.add_token')}>
               {TOKENS.map(token => (
                 <AdminButton key={token} variant="secondary" size="sm" disabled={loading}
                   onClick={() => {
@@ -396,12 +397,12 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                 </AdminButton>
               ))}
             </div>
-            <p className="text-xs text-zinc-500">Hỗ trợ literal kebab-case cùng các thẻ %category%, %postname%, %post_id% (không dùng ngày/tháng/năm).</p>
+            <p className="text-xs text-zinc-500">{t('permalink.token_help')}</p>
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-zinc-900">Đường dẫn cơ sở cho Custom Post Type</h3>
-            <p className="mb-3 mt-0.5 text-xs text-zinc-500">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc Mặc định hệ thống (/{'{key}'}/{'{slug}'}). Base tùy chỉnh gồm 1–3 đoạn kebab-case, không có dấu / ở đầu/cuối.</p>
-            {typeKeys.length === 0 && <p className="text-sm text-zinc-500">Chưa có CPT công khai có thể cấu hình.</p>}
+            <h3 className="text-sm font-semibold text-zinc-900">{t('permalink.cpt_heading')}</h3>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-500">{t('permalink.cpt_help')}</p>
+            {typeKeys.length === 0 && <p className="text-sm text-zinc-500">{t('permalink.no_cpt')}</p>}
             <div className="grid gap-3.5 sm:grid-cols-2">
               {typeKeys.map(keyName => {
                 const available = typeOptions.find(type => type.descriptor.key === keyName);
@@ -411,38 +412,38 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                 return <div key={keyName} className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5 text-sm text-zinc-800">
                   <label htmlFor={`permalink-cpt-${keyName}`} className="font-medium text-zinc-900">
                     {available?.descriptor.label ?? keyName} <span className="font-normal text-zinc-500">({keyName})</span>
-                    {!available && <span className="ml-2 text-xs text-amber-700">Không hoạt động, giữ cấu hình cũ</span>}
+                    {!available && <span className="ml-2 text-xs text-amber-700">{t('permalink.inactive')}</span>}
                   </label>
                   <input id={`permalink-cpt-${keyName}`} className="mt-1.5 h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-sm text-zinc-900"
-                    aria-label={`CPT base ${keyName}`} disabled={!available || loading}
+                    aria-label={t('permalink.cpt_aria', { key: keyName })} disabled={!available || loading}
                     value={draft.content_type_bases[keyName] ?? ''}
                     onChange={event => updateBaseChoice('content_type_bases', keyName, event.target.value || null)}
-                    placeholder="VD: projects" />
+                    placeholder={t('permalink.cpt_placeholder')} />
                   <p className="mt-1 text-xs text-zinc-500" data-testid={`cpt-base-mode-${keyName}`}>
-                    {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng Mặc định hệ thống (/{key}/{slug}).'
-                      : choice === 'system' ? 'Mặc định hệ thống (/{key}/{slug}).'
-                        : 'Đang dùng base tùy chỉnh của website.'}
+                    {choice === 'inherit' ? t('permalink.cpt_inherit_help')
+                      : choice === 'system' ? t('permalink.cpt_system_help')
+                        : t('permalink.custom_base')}
                   </p>
                   {available && <div className="mt-2.5 flex flex-wrap gap-1.5">
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'system'}
                       onClick={() => updateBaseChoice('content_type_bases', keyName, null)}
-                      aria-label={`Mặc định hệ thống (/{key}/{slug}) cho CPT ${keyName}`}>Mặc định hệ thống (/{'{key}'}/{'{slug}'})</AdminButton>
+                      aria-label={t('permalink.cpt_system_aria', { name: keyName })}>{t('permalink.cpt_system')}</AdminButton>
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'inherit'}
                       onClick={() => updateBaseChoice('content_type_bases', keyName, undefined)}
-                      aria-label={`Kế thừa mặc định cho CPT ${keyName}`}>Kế thừa mặc định</AdminButton>
+                      aria-label={t('permalink.cpt_inherit_aria', { key: keyName })}>{t('permalink.inherit')}</AdminButton>
                   </div>}
                   {hasPendingChange && <AdminButton variant="ghost" size="sm" disabled={loading} onClick={() => revertInactiveBase('content_type_bases', keyName)}
                     className="mt-1.5 text-od-accent">
-                    Bỏ thay đổi chưa lưu của CPT này
+                    {t('permalink.discard_cpt')}
                   </AdminButton>}
                 </div>;
               })}
             </div>
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-zinc-900">Đường dẫn cơ sở cho Taxonomy</h3>
-            <p className="mb-3 mt-0.5 text-xs text-zinc-500">Chọn kế thừa mặc định của nhà cung cấp (nếu có) hoặc Mặc định hệ thống (/{'{kind}'}/{'{slug}'}). Không cấu hình đường dẫn term phân cấp.</p>
-            {taxonomyKeys.length === 0 && <p className="text-sm text-zinc-500">Chưa có taxonomy công khai có thể cấu hình.</p>}
+            <h3 className="text-sm font-semibold text-zinc-900">{t('permalink.taxonomy_heading')}</h3>
+            <p className="mb-3 mt-0.5 text-xs text-zinc-500">{t('permalink.taxonomy_help')}</p>
+            {taxonomyKeys.length === 0 && <p className="text-sm text-zinc-500">{t('permalink.no_taxonomy')}</p>}
             <div className="grid gap-3.5 sm:grid-cols-2">
               {taxonomyKeys.map(keyName => {
                 const available = taxonomyOptions.find(type => type.key === keyName);
@@ -452,40 +453,40 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
                 return <div key={keyName} className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5 text-sm text-zinc-800">
                   <label htmlFor={`permalink-taxonomy-${keyName}`} className="font-medium text-zinc-900">
                     {available?.label ?? keyName} <span className="font-normal text-zinc-500">({keyName})</span>
-                    {!available && <span className="ml-2 text-xs text-amber-700">Không hoạt động, giữ cấu hình cũ</span>}
+                    {!available && <span className="ml-2 text-xs text-amber-700">{t('permalink.inactive')}</span>}
                   </label>
                   <input id={`permalink-taxonomy-${keyName}`} className="mt-1.5 h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 font-mono text-sm text-zinc-900"
-                    aria-label={`Taxonomy base ${keyName}`} disabled={!available || loading}
+                    aria-label={t('permalink.taxonomy_aria', { key: keyName })} disabled={!available || loading}
                     value={draft.taxonomy_bases[keyName] ?? ''}
                     onChange={event => updateBaseChoice('taxonomy_bases', keyName, event.target.value || null)}
-                    placeholder="VD: genres" />
+                    placeholder={t('permalink.taxonomy_placeholder')} />
                   <p className="mt-1 text-xs text-zinc-500" data-testid={`taxonomy-base-mode-${keyName}`}>
-                    {choice === 'inherit' ? 'Đang kế thừa mặc định nhà cung cấp; nếu không có sẽ dùng Mặc định hệ thống (/{kind}/{slug}).'
-                      : choice === 'system' ? 'Mặc định hệ thống (/{kind}/{slug}).'
-                        : 'Đang dùng base tùy chỉnh của website.'}
+                    {choice === 'inherit' ? t('permalink.taxonomy_inherit_help')
+                      : choice === 'system' ? t('permalink.taxonomy_system_help')
+                        : t('permalink.custom_base')}
                   </p>
                   {available && <div className="mt-2.5 flex flex-wrap gap-1.5">
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'system'}
                       onClick={() => updateBaseChoice('taxonomy_bases', keyName, null)}
-                      aria-label={`Mặc định hệ thống (/{kind}/{slug}) cho Taxonomy ${keyName}`}>Mặc định hệ thống (/{'{kind}'}/{'{slug}'})</AdminButton>
+                      aria-label={t('permalink.taxonomy_system_aria', { name: keyName })}>{t('permalink.taxonomy_system')}</AdminButton>
                     <AdminButton variant="secondary" size="sm" disabled={loading || choice === 'inherit'}
                       onClick={() => updateBaseChoice('taxonomy_bases', keyName, undefined)}
-                      aria-label={`Kế thừa mặc định cho Taxonomy ${keyName}`}>Kế thừa mặc định</AdminButton>
+                      aria-label={t('permalink.taxonomy_inherit_aria', { key: keyName })}>{t('permalink.inherit')}</AdminButton>
                   </div>}
                   {hasPendingChange && <AdminButton variant="ghost" size="sm" disabled={loading} onClick={() => revertInactiveBase('taxonomy_bases', keyName)}
                     className="mt-1.5 text-od-accent">
-                    Bỏ thay đổi chưa lưu của taxonomy này
+                    {t('permalink.discard_taxonomy')}
                   </AdminButton>}
                 </div>;
               })}
             </div>
           </div>
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4" data-testid="permalink-server-preview">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">URL hiện hành từ máy chủ</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{t('permalink.preview_heading')}</h3>
             <p className="mt-1 text-xs text-zinc-600">
-              Các ví dụ này được lấy từ trường public_url trong API. Khi form chưa lưu, các URL này vẫn là URL đang hoạt động.
+              {t('permalink.preview_help')}
             </p>
-            {examples.length === 0 && <p className="mt-2 text-sm text-zinc-500">Chưa có bài public để xem URL mẫu.</p>}
+            {examples.length === 0 && <p className="mt-2 text-sm text-zinc-500">{t('permalink.no_examples')}</p>}
             {examples.map(item => <p key={item.label + item.path} className="mt-1.5 break-all text-sm">
               <span className="mr-2 font-medium text-zinc-800">{item.label}:</span>
               <a href={item.path} target="_blank" rel="noopener noreferrer" className="text-od-accent underline">{item.path}</a>
@@ -493,12 +494,12 @@ export function PermalinkSettingsPage({ user, siteInstanceId, csrfToken, onApiEr
           </div>
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
             <AdminButton type="submit" variant="primary" disabled={!csrfToken || !dirty || stale || saving || loading}>
-              {saving ? 'Đang lưu…' : 'Lưu permalink'}
+              {saving ? t('permalink.saving') : t('permalink.save')}
             </AdminButton>
             <AdminButton variant="secondary" disabled={!dirty || stale || saving} onClick={resetDraft}>
-              Bỏ thay đổi
+              {t('permalink.discard')}
             </AdminButton>
-            <span className="text-xs text-zinc-500">Phiên bản {saved.version}{dirty ? ' · Chưa lưu' : ' · Đã đồng bộ'}</span>
+            <span className="text-xs text-zinc-500">{dirty ? t('permalink.version_unsaved', { version: saved.version }) : t('permalink.version_synced', { version: saved.version })}</span>
           </div>
         </form>
       )}

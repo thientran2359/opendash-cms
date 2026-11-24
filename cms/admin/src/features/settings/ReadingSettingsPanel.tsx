@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useI18n, tStatic } from '../../i18n/index.tsx';
 import { ApiClientError } from '../../api/client.ts';
 import {
   EMPTY_ADMIN_LOCALE_STATE,
@@ -57,10 +58,10 @@ function sameDraft(a: ReadingSettingsDraft, b: ReadingSettingsDraft): boolean {
 
 function statusLabel(status: ReadingPageStatus): string {
   switch (status) {
-    case 'published': return 'Đã xuất bản';
-    case 'draft': return 'Page hiện là bản nháp (đường dẫn công khai trả 404)';
-    case 'deleted': return 'Page đã xóa (đường dẫn công khai trả 404)';
-    case 'unconfigured': return 'Chưa chọn Page';
+    case 'published': return tStatic('reading.published');
+    case 'draft': return tStatic('reading.draft');
+    case 'deleted': return tStatic('reading.deleted');
+    case 'unconfigured': return tStatic('reading.unconfigured');
   }
 }
 
@@ -71,7 +72,7 @@ function pageId(value: string): number | null {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Không kết nối được với máy chủ.';
+  return error instanceof Error ? error.message : tStatic('reading.network_error');
 }
 
 export function ReadingSettingsPanel({
@@ -82,6 +83,7 @@ export function ReadingSettingsPanel({
   onApiError,
   onDirtyChange,
 }: Props) {
+  const { t } = useI18n();
   const actorId = user?.id ?? null;
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [activeLocale, setActiveLocale] = useState<string>(defaultLocaleCode);
@@ -218,7 +220,7 @@ export function ReadingSettingsPanel({
     event.preventDefault();
     if (!draft || !saved || !csrfToken || baseVersion === null || saving || stale) return;
     if (draft.homepage_page_id !== null && draft.homepage_page_id === draft.posts_page_id) {
-      setError('Trang chủ và Trang bài viết phải là hai Page khác nhau.');
+      setError(tStatic('reading.same_page_error'));
       return;
     }
     setSaving(true);
@@ -231,11 +233,11 @@ export function ReadingSettingsPanel({
       setDraft(snapshot(settings));
       setBaseVersion(settings.version);
       setStale(false);
-      setNotice('Đã lưu Trang chủ và Trang bài viết trong cùng một lần cập nhật.');
+      setNotice(tStatic('reading.saved'));
     } catch (reason) {
       if (reason instanceof ApiClientError && reason.status === 412) {
         setStale(true);
-        setError('Cấu hình đã được cập nhật ở phiên khác. Lựa chọn của bạn vẫn được giữ; hãy tải phiên bản mới trước khi lưu lại.');
+        setError(tStatic('reading.stale_error'));
       } else {
         setError(errorMessage(reason));
       }
@@ -265,22 +267,21 @@ export function ReadingSettingsPanel({
         disabled={saving || loading}
         onChange={event => updateDraft({ ...draft, [field]: pageId(event.target.value) })}
       >
-        <option value="">Chưa chọn</option>
-        {!hasSelected && selected !== null && <option value={selected}>Page #{selected} (không có trong danh sách đã tải)</option>}
-        {choices.map(item => <option key={item.id} value={item.id}>{item.title || '(Không có tiêu đề)'} · #{item.id}</option>)}
+        <option value="">{t('reading.no_selection')}</option>
+        {!hasSelected && selected !== null && <option value={selected}>{t('reading.missing_page', { id: selected })}</option>}
+        {choices.map(item => <option key={item.id} value={item.id}>{item.title || t('reading.untitled')} · #{item.id}</option>)}
       </select>
       <p className="text-xs text-zinc-500" role="status">
-        Trạng thái Page đã lưu: <strong className="text-zinc-800">{statusLabel(status)}</strong>{savedId !== null ? ` · ID ${savedId}` : ''}
+        {t('reading.saved_status')} <strong className="text-zinc-800">{statusLabel(status)}</strong>{savedId !== null ? t('reading.saved_id', { id: savedId }) : ''}
       </p>
     </div>;
   }
 
   return <section className="min-w-0 space-y-5" data-testid="reading-settings" aria-labelledby="reading-heading">
     <div>
-      <h2 id="reading-heading" className="text-base font-semibold text-zinc-950">Trang chủ và Trang bài viết</h2>
+      <h2 id="reading-heading" className="text-base font-semibold text-zinc-950">{t('reading.heading')}</h2>
       <p className="mt-1 text-sm text-zinc-600">
-        Chọn Page đã xuất bản để hiển thị ở trang chủ và chọn một Page khác làm địa chỉ danh sách bài viết Blog.
-        Việc dùng Page làm Trang bài viết không xóa nội dung đã nhập của Page đó.
+        {t('reading.description')}
       </p>
     </div>
     <LocaleTabs
@@ -289,45 +290,45 @@ export function ReadingSettingsPanel({
       onSelectLocale={setActiveLocale}
       testId="reading-locale-tabs"
     />
-    {loading && <p role="status" className="text-sm text-zinc-500">Đang tải các Page và cấu hình hiện tại…</p>}
+    {loading && <p role="status" className="text-sm text-zinc-500">{t('reading.loading_settings')}</p>}
     {error && <AdminAlert tone="error">{error}</AdminAlert>}
     {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
-    {!loading && (!saved || !draft) && <AdminButton variant="primary" onClick={() => void load()}>Tải lại</AdminButton>}
+    {!loading && (!saved || !draft) && <AdminButton variant="primary" onClick={() => void load()}>{t('reading.reload')}</AdminButton>}
     {!loading && saved && draft && <form className="space-y-5" onSubmit={event => void handleSave(event)}>
-      {picker('homepage_page_id', 'Trang chủ', saved.homepage_status, 'Page được hiển thị tại /; địa chỉ cũ của Page chuyển hướng về /.')}
-      {picker('posts_page_id', 'Trang bài viết', saved.posts_page_status, 'Page giữ URL riêng cho archive bài viết; nội dung Page vẫn được lưu trong cơ sở dữ liệu.')}
+      {picker('homepage_page_id', t('reading.homepage'), saved.homepage_status, t('reading.homepage_help'))}
+      {picker('posts_page_id', t('reading.posts_page'), saved.posts_page_status, t('reading.posts_help'))}
       {pageOffset < pageTotal && <AdminButton variant="secondary" size="sm" disabled={loadingMore} onClick={() => void loadMorePages()}>
-        {loadingMore ? 'Đang tải…' : `Tải thêm Page đã xuất bản (${pageOffset}/${pageTotal})`}
+        {loadingMore ? t('reading.loading') : t('reading.load_more', { offset: pageOffset, total: pageTotal })}
       </AdminButton>}
       {stale && <AdminAlert tone="warning" className="max-w-xl space-y-2">
-        <p>Phiên bản máy chủ đã thay đổi. Bản nháp đang nhập vẫn được giữ.</p>
+        <p>{t('reading.stale_warning')}</p>
         <AdminButton variant="secondary" size="sm"
           disabled={saving || saved.version === baseVersion}
           onClick={() => {
           setBaseVersion(saved.version);
           setStale(false);
           if (draftKey) pendingDrafts.set(draftKey, { baseVersion: saved.version, values: { ...draft } });
-        }}>Dùng bản nháp này với phiên bản máy chủ mới ({saved.version})</AdminButton>
+        }}>{t('reading.use_new_version', { version: saved.version })}</AdminButton>
       </AdminAlert>}
       {draft.homepage_page_id !== null && draft.homepage_page_id === draft.posts_page_id &&
-        <AdminAlert tone="error" className="max-w-xl">Hai lựa chọn không được trùng Page.</AdminAlert>}
+        <AdminAlert tone="error" className="max-w-xl">{t('reading.same_page_warning')}</AdminAlert>}
       <div className="flex flex-wrap items-center gap-2.5 pt-1">
         <AdminButton type="submit" variant="primary"
           disabled={!dirty || !csrfToken || saving || stale || (draft.homepage_page_id !== null && draft.homepage_page_id === draft.posts_page_id)}>
-          {saving ? 'Đang lưu…' : 'Lưu Reading Settings'}
+          {saving ? t('reading.saving') : t('reading.save')}
         </AdminButton>
-        <AdminButton variant="secondary" disabled={saving} onClick={() => void load()}>Làm mới trạng thái (giữ nháp)</AdminButton>
+        <AdminButton variant="secondary" disabled={saving} onClick={() => void load()}>{t('reading.refresh')}</AdminButton>
         {dirty && <AdminButton variant="ghost" size="sm" disabled={saving}
           onClick={() => {
-            if (!window.confirm('Bỏ các lựa chọn chưa lưu và khôi phục cấu hình đang hiển thị từ máy chủ?')) return;
+            if (!window.confirm(t('reading.discard_confirm'))) return;
             if (draftKey) pendingDrafts.delete(draftKey);
             setDraft(snapshot(saved));
             setBaseVersion(saved.version);
             setStale(false);
             setError(null);
-          }}>Bỏ bản nháp</AdminButton>}
-        {dirty && <span className="text-xs font-medium text-amber-800" role="status">Có lựa chọn chưa lưu</span>}
-        <span className="text-xs text-zinc-500">Phiên bản {saved.version}</span>
+          }}>{t('reading.discard')}</AdminButton>}
+        {dirty && <span className="text-xs font-medium text-amber-800" role="status">{t('reading.unsaved')}</span>}
+        <span className="text-xs text-zinc-500">{t('reading.version', { version: saved.version })}</span>
       </div>
     </form>}
   </section>;
