@@ -79,7 +79,9 @@ async fn invocation_timeout_must_not_commit_later() {
             content_write: vec![],
             ..Default::default()
         },
+        filters: vec![],
         editor_panels: vec![],
+        settings_schema: vec![],
     };
     let result = PluginRuntime::new()
         .run_plugin(
@@ -218,7 +220,9 @@ async fn assert_no_late_write_with_sqlite_lock(reader_blocks_commit: bool) {
             content_write: vec![],
             ..Default::default()
         },
+        filters: vec![],
         editor_panels: vec![],
+        settings_schema: vec![],
     };
     let result = PluginRuntime::new()
         .run_plugin(
@@ -361,7 +365,9 @@ async fn timeout_must_not_be_reported_if_commit_succeeded() {
             content_write: vec![],
             ..Default::default()
         },
+        filters: vec![],
         editor_panels: vec![],
+        settings_schema: vec![],
     };
 
     let result = PluginRuntime::new()
@@ -455,7 +461,9 @@ async fn ipc_kv_get_stuck_parent_must_cancel_and_clean_up() {
             content_write: vec![],
             ..Default::default()
         },
+        filters: vec![],
         editor_panels: vec![],
+        settings_schema: vec![],
     };
 
     let runtime = PluginRuntime::new();
@@ -569,7 +577,9 @@ async fn abort_during_staged_commit_must_cleanup_connection_and_pool() {
             content_write: vec![],
             ..Default::default()
         },
+        filters: vec![],
         editor_panels: vec![],
+        settings_schema: vec![],
     };
 
     let runtime = PluginRuntime::new();
@@ -703,7 +713,9 @@ async fn ipc_kv_get_stuck_parent_must_timeout_and_clean_up() {
             content_write: vec![],
             ..Default::default()
         },
+        filters: vec![],
         editor_panels: vec![],
+        settings_schema: vec![],
     };
 
     let runtime = PluginRuntime::new();

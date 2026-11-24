@@ -58,3 +58,45 @@ pub async fn set(
         ON CONFLICT(plugin_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at")
         .bind(plugin_id).bind(key).bind(value).execute(conn).await
 }
+
+pub async fn delete(
+    conn: &mut SqliteConnection,
+    plugin_id: &str,
+    key: &str,
+) -> Result<SqliteQueryResult, sqlx::Error> {
+    sqlx::query("DELETE FROM plugin_kv WHERE plugin_id = ? AND key = ?")
+        .bind(plugin_id)
+        .bind(key)
+        .execute(conn)
+        .await
+}
+
+pub async fn list(
+    db: &SqlitePool,
+    plugin_id: &str,
+    prefix: &str,
+    limit: i64,
+) -> Result<Vec<(String, String)>, sqlx::Error> {
+    let clamped = limit.clamp(1, 200);
+    if prefix.is_empty() {
+        sqlx::query_as(
+            "SELECT key, value_json FROM plugin_kv WHERE plugin_id = ? ORDER BY key COLLATE BINARY ASC LIMIT ?",
+        )
+        .bind(plugin_id)
+        .bind(clamped)
+        .fetch_all(db)
+        .await
+    } else {
+        sqlx::query_as(
+            "SELECT key, value_json FROM plugin_kv
+              WHERE plugin_id = ? AND substr(key, 1, length(?)) = ?
+              ORDER BY key COLLATE BINARY ASC LIMIT ?",
+        )
+        .bind(plugin_id)
+        .bind(prefix)
+        .bind(prefix)
+        .bind(clamped)
+        .fetch_all(db)
+        .await
+    }
+}

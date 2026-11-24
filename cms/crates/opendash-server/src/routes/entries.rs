@@ -38,6 +38,13 @@ fn is_builtin(key: &str) -> bool {
     matches!(key, "post" | "page")
 }
 
+fn actor_field_role(actor: &crate::auth::SessionContext) -> opendash_core::content::FieldRole {
+    match actor.user.role {
+        crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
+        crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
+    }
+}
+
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct EntryPagination {
@@ -447,8 +454,9 @@ pub async fn entry_create(
         "candidate_values": &input.values,
         "term_ids": &input.term_ids,
     });
+    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
-        .dispatch_content_before_save(&type_key, candidate)
+        .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
     {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
@@ -463,8 +471,9 @@ pub async fn entry_create(
         None => entry_storage::create_entry(&db, &actor, &type_key, &schema, &input).await?,
     };
     let _ = hooks
-        .dispatch_content_after_save(
+        .dispatch_content_after_save_for_actor(
             &type_key,
+            actor_role,
             json!({
                 "type_key": &type_key,
                 "id": entry.id,
@@ -532,8 +541,9 @@ pub async fn entry_update(
         "candidate_values": &input.values,
         "term_ids": &input.term_ids,
     });
+    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
-        .dispatch_content_before_save(&type_key, candidate)
+        .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
     {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
@@ -551,8 +561,9 @@ pub async fn entry_update(
         }
     };
     let _ = hooks
-        .dispatch_content_after_save(
+        .dispatch_content_after_save_for_actor(
             &type_key,
+            actor_role,
             json!({
                 "type_key": &type_key,
                 "id": entry.id,
@@ -799,8 +810,9 @@ pub async fn entry_composite_create(
         "candidate_values": &plan.merged_input.values,
         "term_ids": &plan.merged_input.term_ids,
     });
+    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
-        .dispatch_content_before_save(&type_key, candidate)
+        .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
     {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
@@ -809,8 +821,9 @@ pub async fn entry_composite_create(
         entry_storage::commit_composite_entry_save(&db, &actor, &type_key, None, &input, &plan)
             .await?;
     let _ = hooks
-        .dispatch_content_after_save(
+        .dispatch_content_after_save_for_actor(
             &type_key,
+            actor_role,
             json!({
                 "type_key": &type_key,
                 "id": result.entry.id,
@@ -863,8 +876,9 @@ pub async fn entry_composite_update(
         "candidate_values": &plan.merged_input.values,
         "term_ids": &plan.merged_input.term_ids,
     });
+    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
-        .dispatch_content_before_save(&type_key, candidate)
+        .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
     {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
@@ -873,8 +887,9 @@ pub async fn entry_composite_update(
         entry_storage::commit_composite_entry_save(&db, &actor, &type_key, Some(id), &input, &plan)
             .await?;
     let _ = hooks
-        .dispatch_content_after_save(
+        .dispatch_content_after_save_for_actor(
             &type_key,
+            actor_role,
             json!({
                 "type_key": &type_key,
                 "id": result.entry.id,
@@ -921,8 +936,9 @@ pub async fn entry_translation_create(
         "candidate_values": &plan.values,
         "term_ids": &plan.term_ids,
     });
+    let actor_role = actor_field_role(&actor);
     if let Err(veto) = hooks
-        .dispatch_content_before_save(&type_key, candidate)
+        .dispatch_content_before_save_for_actor(&type_key, actor_role, candidate)
         .await
     {
         return Ok((StatusCode::UNPROCESSABLE_ENTITY, Json(veto)).into_response());
@@ -938,8 +954,9 @@ pub async fn entry_translation_create(
     )
     .await?;
     let _ = hooks
-        .dispatch_content_after_save(
+        .dispatch_content_after_save_for_actor(
             &type_key,
+            actor_role,
             json!({
                 "type_key": &type_key,
                 "id": created.id,

@@ -1,6 +1,6 @@
-use crate::storage::plugin_kv;
 use std::{
     collections::BTreeMap,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -8,6 +8,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use opendash_core::{
+    content::{FieldRole, PublicExposure},
+    hooks::{ExecutionPrincipal, HookExecutionMode},
+    plugin::{PluginSettingFieldType, plugin_can_read_field},
+    registry::ProviderStatus,
+};
 use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use tokio::sync::{Semaphore, watch};
@@ -15,12 +21,23 @@ use wasmi::{AsContextMut, Caller, Config, Engine, Error as WasmiError, Linker};
 #[cfg(test)]
 use wasmi::{Module, Store, StoreLimitsBuilder, TrapCode};
 
-use super::host_ops::{self, HostContext};
+use crate::storage::{entries, media, plugin as plugin_storage, plugin_kv, settings, taxonomy};
+
+use super::host_ops::{
+    self, HostContext, HostOperationResponse, HostReadRequest, HostToWorkerFrame,
+    MAX_IPC_FRAME_BYTES, MAX_LOG_MESSAGE_CHARS, MAX_STAGED_LOGS, WorkerToHostFrame,
+};
 use super::manifest::PluginManifest;
+use super::worker::{IPC_STREAM_MAGIC, read_ipc_frame, write_ipc_frame};
 
 pub const INVOCATION_FUEL: u64 = 20_000_000;
 pub const MAX_LINEAR_MEMORY_BYTES: usize = 16 * 1024 * 1024; // 16 MB
 pub const INVOCATION_DEADLINE: Duration = Duration::from_secs(5);
+pub const MAX_CONCURRENT_INVOCATIONS: usize = 4;
+pub const MAX_BACKGROUND_PUBLIC_INVOCATIONS: usize = 2;
+#[allow(dead_code)]
+pub const MAX_TOTAL_CONCURRENT_WORKERS: usize =
+    MAX_CONCURRENT_INVOCATIONS + MAX_BACKGROUND_PUBLIC_INVOCATIONS;
 
 #[derive(Debug, Clone)]
 pub struct ActionActorFence {
@@ -32,8 +49,8 @@ pub struct ActionActorFence {
 pub struct ActionExecutionOutput {
     pub output: Value,
     pub staged_content_command: Option<host_ops::StagedContentCommand>,
+    pub staged_content_delete: Option<host_ops::StagedContentDeleteCommand>,
 }
-pub const MAX_CONCURRENT_INVOCATIONS: usize = 4;
 
 #[cfg(test)]
 pub(crate) static TEST_STAGE_WRITE_BARRIER_HIT: AtomicBool = AtomicBool::new(false);
@@ -50,10 +67,10 @@ struct StagedCommitGuard {
 
 impl Drop for StagedCommitGuard {
     fn drop(&mut self) {
-        if !self.committed {
-            if let Some(mut conn) = self.conn.take() {
-                conn.close_on_drop();
-            }
+        if !self.committed
+            && let Some(mut conn) = self.conn.take()
+        {
+            conn.close_on_drop();
         }
     }
 }
@@ -71,16 +88,16 @@ impl ProcessGuard {
     fn cleanup(&mut self) {
         self.cancellation_token.store(true, Ordering::SeqCst);
         let _ = self.cancel_tx.send(true);
-        if let Ok(mut lock) = self.child.lock() {
-            if let Some(mut child) = lock.take() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
+        if let Ok(mut lock) = self.child.lock()
+            && let Some(mut child) = lock.take()
+        {
+            let _ = child.kill();
+            let _ = child.wait();
         }
-        if let Ok(mut lock) = self.worker_thread.lock() {
-            if let Some(handle) = lock.take() {
-                let _ = handle.join();
-            }
+        if let Ok(mut lock) = self.worker_thread.lock()
+            && let Some(handle) = lock.take()
+        {
+            let _ = handle.join();
         }
         if self.permit.is_some() {
             self.active_workers.fetch_sub(1, Ordering::SeqCst);
@@ -141,19 +158,32 @@ impl std::error::Error for PluginError {}
 #[derive(Clone)]
 pub struct PluginRuntime {
     engine: Engine,
-    semaphore: Arc<Semaphore>,
+    admin_semaphore: Arc<Semaphore>,
+    background_public_semaphore: Arc<Semaphore>,
     active_workers: Arc<AtomicUsize>,
+    secrets_root: PathBuf,
 }
 
 impl PluginRuntime {
     pub fn new() -> Self {
+        let secrets_root = crate::paths::SitePaths::from_env()
+            .map(|p| p.secrets_dir())
+            .unwrap_or_else(|_| std::env::temp_dir().join("opendash_secrets_default"));
+        Self::with_secrets_root(secrets_root)
+    }
+
+    pub fn with_secrets_root(secrets_root: PathBuf) -> Self {
         let mut config = Config::default();
         config.consume_fuel(true);
         let engine = Engine::new(&config);
         Self {
             engine,
-            semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_INVOCATIONS)),
+            admin_semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_INVOCATIONS)),
+            background_public_semaphore: Arc::new(Semaphore::new(
+                MAX_BACKGROUND_PUBLIC_INVOCATIONS,
+            )),
             active_workers: Arc::new(AtomicUsize::new(0)),
+            secrets_root,
         }
     }
 
@@ -166,7 +196,11 @@ impl PluginRuntime {
     }
 
     pub fn semaphore(&self) -> &Arc<Semaphore> {
-        &self.semaphore
+        &self.admin_semaphore
+    }
+
+    pub fn background_public_semaphore(&self) -> &Arc<Semaphore> {
+        &self.background_public_semaphore
     }
 
     pub async fn run_plugin(
@@ -190,6 +224,7 @@ impl PluginRuntime {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_plugin_with_generation(
         &self,
         wasm_bytes: Vec<u8>,
@@ -208,7 +243,7 @@ impl PluginRuntime {
             correlation_id,
             allow_loopback,
             expected_generation,
-            opendash_core::hooks::HookExecutionMode::Standard,
+            HookExecutionMode::Standard,
             None,
         )
         .await
@@ -224,7 +259,7 @@ impl PluginRuntime {
         correlation_id: String,
         allow_loopback: bool,
         expected_generation: Option<i64>,
-        execution_mode: opendash_core::hooks::HookExecutionMode,
+        execution_mode: HookExecutionMode,
         timeout_override: Option<Duration>,
     ) -> Result<Value, PluginError> {
         self.run_plugin_action(
@@ -254,15 +289,54 @@ impl PluginRuntime {
         correlation_id: String,
         allow_loopback: bool,
         expected_generation: Option<i64>,
-        execution_mode: opendash_core::hooks::HookExecutionMode,
+        execution_mode: HookExecutionMode,
+        timeout_override: Option<Duration>,
+        action_capabilities: Option<Vec<String>>,
+        actor_fence: Option<ActionActorFence>,
+    ) -> Result<ActionExecutionOutput, PluginError> {
+        self.run_plugin_action_with_principal(
+            wasm_bytes,
+            manifest,
+            input,
+            db_pool,
+            correlation_id,
+            allow_loopback,
+            expected_generation,
+            execution_mode,
+            ExecutionPrincipal::Admin,
+            timeout_override,
+            action_capabilities,
+            actor_fence,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_plugin_action_with_principal(
+        &self,
+        wasm_bytes: Vec<u8>,
+        manifest: PluginManifest,
+        input: Value,
+        db_pool: SqlitePool,
+        correlation_id: String,
+        allow_loopback: bool,
+        expected_generation: Option<i64>,
+        execution_mode: HookExecutionMode,
+        principal: ExecutionPrincipal,
         timeout_override: Option<Duration>,
         action_capabilities: Option<Vec<String>>,
         actor_fence: Option<ActionActorFence>,
     ) -> Result<ActionExecutionOutput, PluginError> {
         let cancellation_token = Arc::new(AtomicBool::new(false));
 
-        // Fail-fast concurrency control to prevent RAM exhaustion
-        let permit = match self.semaphore.clone().try_acquire_owned() {
+        // Respect global 6-worker ceiling: 4 admin + 2 background/public
+        let target_sem = match execution_mode {
+            HookExecutionMode::AsyncPostCommit | HookExecutionMode::FilterContactBeforeSubmit => {
+                &self.background_public_semaphore
+            }
+            _ => &self.admin_semaphore,
+        };
+        let permit = match target_sem.clone().try_acquire_owned() {
             Ok(p) => p,
             Err(_) => return Err(PluginError::ConcurrencyLimit),
         };
@@ -274,7 +348,6 @@ impl PluginRuntime {
         let deadline = start + effective_budget;
         let remaining = effective_budget;
 
-        // In production and tests, always run in isolated worker process (no in-process fallback)
         let current_exe = std::env::current_exe().map_err(|e| {
             PluginError::Internal(format!("Không thể lấy đường dẫn executable hiện tại: {e}"))
         })?;
@@ -324,15 +397,18 @@ impl PluginRuntime {
         let worker_cancel = Arc::clone(&cancellation_token);
         let manifest_clone = manifest.clone();
         let db_pool_clone = db_pool.clone();
+        let secrets_root_clone = self.secrets_root.clone();
         let child_ref_worker = Arc::clone(&child_ref);
+        let action_caps_for_host = action_capabilities.clone();
+        let correlation_for_log = correlation_id.clone();
 
         let thread_handle = std::thread::Builder::new()
             .name(format!("plugin-worker-{}", manifest.id))
             .spawn(move || {
-                use std::io::{BufRead, BufReader, Write};
+                use std::io::{BufReader, Write};
 
                 let cancel_watch = cancel_rx;
-                let run = move || -> Result<(Value, BTreeMap<String, Value>, Option<host_ops::StagedContentCommand>), PluginError> {
+                let run = move || -> Result<super::host_ops::WorkerExecutionResult, PluginError> {
                     let wasm_len = wasm_bytes.len() as u32;
                     child_stdin
                         .write_all(&wasm_len.to_le_bytes())
@@ -348,146 +424,99 @@ impl PluginRuntime {
                         correlation_id,
                         deadline_ms: remaining.as_millis() as u64,
                         execution_mode,
+                        principal,
                         action_capabilities: action_capabilities.clone(),
                     };
-                    let req_json = serde_json::to_vec(&req)
-                        .map_err(|e| PluginError::Internal(format!("Lỗi serialize request: {e}")))?;
-                    let req_len = req_json.len() as u32;
-                    child_stdin
-                        .write_all(&req_len.to_le_bytes())
-                        .map_err(|e| PluginError::Internal(format!("Lỗi ghi request len: {e}")))?;
-                    child_stdin
-                        .write_all(&req_json)
-                        .map_err(|e| PluginError::Internal(format!("Lỗi ghi request bytes: {e}")))?;
-                    child_stdin
-                        .flush()
-                        .map_err(|e| PluginError::Internal(format!("Lỗi flush stdin: {e}")))?;
+                    write_ipc_frame(&mut child_stdin, &req, MAX_IPC_FRAME_BYTES)
+                        .map_err(PluginError::Internal)?;
 
-                    let reader = BufReader::new(child_stdout);
-                    for line_res in reader.lines() {
-                        let line = match line_res {
-                            Ok(l) => l,
-                            Err(_) => break, // EOF or pipe broken
-                        };
-                        if let Some(payload) = line.strip_prefix(crate::plugin::worker::IPC_PREFIX) {
-                            let msg: Value = serde_json::from_str(payload)
-                                .map_err(|e| PluginError::Internal(format!("Lỗi parse IPC: {e}")))?;
-                            let ipc_type = msg.get("ipc").and_then(|v| v.as_str()).unwrap_or("");
-                            match ipc_type {
-                                "kv_get" => {
-                                    if worker_cancel.load(Ordering::Relaxed) || Instant::now() >= deadline || *cancel_watch.borrow() {
-                                        return Err(PluginError::Timeout);
-                                    }
-                                    let key = msg.get("key").and_then(|v| v.as_str()).unwrap_or("");
-                                    let remaining_kv = deadline.saturating_duration_since(Instant::now());
-                                    if remaining_kv.is_zero() {
-                                        return Err(PluginError::Timeout);
-                                    }
+                    let mut reader = BufReader::new(child_stdout);
+                    scan_ipc_magic(&mut reader)?;
 
-                                    let plugin_id = manifest_clone.id.clone();
-                                    let key_str = key.to_string();
-                                    let db = db_pool_clone.clone();
+                    loop {
+                        let frame: WorkerToHostFrame =
+                            read_ipc_frame(&mut reader, MAX_IPC_FRAME_BYTES).map_err(|_| {
+                                PluginError::Trap("Worker process kết thúc bất ngờ".into())
+                            })?;
+                        match frame {
+                            WorkerToHostFrame::ReadRequest(read_req) => {
+                                if worker_cancel.load(Ordering::Relaxed)
+                                    || Instant::now() >= deadline
+                                    || *cancel_watch.borrow()
+                                {
+                                    return Err(PluginError::Timeout);
+                                }
+                                let rem = deadline.saturating_duration_since(Instant::now());
+                                if rem.is_zero() {
+                                    return Err(PluginError::Timeout);
+                                }
 
-                                    let query_fut = async move {
-                                        plugin_kv::get(&db, &plugin_id, &key_str)
-                                        .await
-                                    };
-
-                                    #[cfg(test)]
+                                #[cfg(test)]
+                                if matches!(read_req, HostReadRequest::KvGet { .. }) {
                                     TEST_IPC_KV_GET_WAITING.store(true, Ordering::SeqCst);
-
-                                    let mut watch_rx = cancel_watch.clone();
-                                    let val_opt = match tokio_handle.block_on(async {
-                                        tokio::select! {
-                                            biased;
-                                            _ = watch_rx.changed() => {
-                                                Err(PluginError::Timeout)
-                                            }
-                                            res = query_fut => {
-                                                match res {
-                                                    Ok(opt) => Ok(opt),
-                                                    Err(e) => Err(PluginError::Internal(format!("Lỗi DB kv_get: {e}"))),
-                                                }
-                                            }
-                                            _ = tokio::time::sleep(remaining_kv) => {
-                                                Err(PluginError::Timeout)
-                                            }
-                                        }
-                                    }) {
-                                        Ok(opt) => opt,
-                                        Err(err) => return Err(err),
-                                    };
-
-                                    let resp_val = match val_opt {
-                                        Some(s) => match serde_json::from_str::<Value>(&s) {
-                                            Ok(v) => json!({"found": true, "value": v}),
-                                            Err(_) => json!({"found": true, "value": Value::Null}),
-                                        },
-                                        None => json!({"found": false, "value": Value::Null}),
-                                    };
-                                    let resp_str = serde_json::to_string(&resp_val).unwrap();
-                                    if child_stdin.write_all(format!("{resp_str}\n").as_bytes()).is_err() {
-                                        break;
-                                    }
-                                    if child_stdin.flush().is_err() {
-                                        break;
-                                    }
                                 }
-                                "result" => {
-                                    let ok = msg.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
-                                    if let Ok(mut lock) = child_ref_worker.lock() {
-                                        if let Some(ref mut c) = *lock {
-                                            let _ = c.wait();
-                                        }
+
+                                let db = db_pool_clone.clone();
+                                let m = manifest_clone.clone();
+                                let caps = action_caps_for_host.clone();
+                                let sec_root = secrets_root_clone.clone();
+
+                                let read_fut = async move {
+                                    execute_host_read_request(
+                                        &db,
+                                        &m.id,
+                                        &m,
+                                        execution_mode,
+                                        principal,
+                                        caps.as_deref(),
+                                        Some(&sec_root),
+                                        read_req,
+                                    )
+                                    .await
+                                };
+
+                                let mut watch_rx = cancel_watch.clone();
+                                let resp = tokio_handle.block_on(async {
+                                    tokio::select! {
+                                        biased;
+                                        _ = watch_rx.changed() => Err(PluginError::Timeout),
+                                        res = read_fut => Ok(res),
+                                        _ = tokio::time::sleep(rem) => Err(PluginError::Timeout),
                                     }
-                                    if ok {
-                                        let output = msg.get("output").cloned().unwrap_or(Value::Null);
-                                        let staged_writes: BTreeMap<String, Value> = msg
-                                            .get("staged_kv_writes")
-                                            .and_then(|v| serde_json::from_value(v.clone()).ok())
-                                            .unwrap_or_default();
-                                        let staged_content: Option<host_ops::StagedContentCommand> = msg
-                                            .get("staged_content_command")
-                                            .and_then(|v| serde_json::from_value(v.clone()).ok())
-                                            .flatten();
-                                        return Ok((output, staged_writes, staged_content));
-                                    } else {
-                                        let error_type = msg
-                                            .get("error_type")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("internal");
-                                        let err_msg = msg
-                                            .get("error")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("Lỗi thực thi plugin");
-                                        match error_type {
-                                            "out_of_fuel" => return Err(PluginError::OutOfFuel),
-                                            "timeout" => return Err(PluginError::Timeout),
-                                            "memory_limit" => {
-                                                return Err(PluginError::Trap(
-                                                    "Vượt quá giới hạn bộ nhớ 16 MB.".into(),
-                                                ));
-                                            }
-                                            "invalid_output" => {
-                                                return Err(PluginError::InvalidOutput(err_msg.into()));
-                                            }
-                                            "guest_failed" => {
-                                                return Err(PluginError::GuestFailed(
-                                                    msg.get("code")
-                                                        .and_then(|v| v.as_i64())
-                                                        .unwrap_or(1)
-                                                        as i32,
-                                                ));
-                                            }
-                                            _ => return Err(PluginError::Trap(err_msg.into())),
-                                        }
-                                    }
+                                })?;
+
+                                write_ipc_frame(
+                                    &mut child_stdin,
+                                    &HostToWorkerFrame::ReadResponse(resp),
+                                    MAX_IPC_FRAME_BYTES,
+                                )
+                                .map_err(PluginError::Internal)?;
+                            }
+                            WorkerToHostFrame::Result(res) => {
+                                if let Ok(mut lock) = child_ref_worker.lock()
+                                    && let Some(ref mut c) = *lock
+                                {
+                                    let _ = c.wait();
                                 }
-                                _ => {}
+                                if res.ok {
+                                    return Ok(res);
+                                }
+                                let error_type = res.error_type.as_deref().unwrap_or("internal");
+                                let err_msg =
+                                    res.error.unwrap_or_else(|| "Lỗi thực thi plugin".into());
+                                return Err(match error_type {
+                                    "out_of_fuel" => PluginError::OutOfFuel,
+                                    "timeout" => PluginError::Timeout,
+                                    "memory_limit" => {
+                                        PluginError::Trap("Vượt quá giới hạn bộ nhớ 16 MB.".into())
+                                    }
+                                    "invalid_output" => PluginError::InvalidOutput(err_msg),
+                                    "guest_failed" => PluginError::GuestFailed(res.code),
+                                    _ => PluginError::Trap(err_msg),
+                                });
                             }
                         }
                     }
-                    Err(PluginError::Trap("Worker process kết thúc bất ngờ".into()))
                 };
 
                 let res = run();
@@ -499,47 +528,77 @@ impl PluginRuntime {
             *lock = Some(thread_handle);
         }
 
-        let (output_val, staged_writes, staged_content) =
-            match tokio::time::timeout(remaining, rx).await {
-                Ok(Ok(res)) => match res {
-                    Ok((out, writes, content_cmd)) => {
-                        // Disarm child kill in guard on normal completion
-                        if let Ok(mut lock) = guard.child.lock() {
-                            let _ = lock.take();
-                        }
-                        (out, writes, content_cmd)
+        let worker_res = match tokio::time::timeout(remaining, rx).await {
+            Ok(Ok(res)) => match res {
+                Ok(exec_res) => {
+                    if let Ok(mut lock) = guard.child.lock() {
+                        let _ = lock.take();
                     }
-                    Err(err) => {
-                        guard.cleanup();
-                        return Err(err);
-                    }
-                },
-                Ok(Err(_)) => {
-                    guard.cleanup();
-                    return Err(PluginError::Trap(
-                        "Worker process hoặc thread kết thúc bất ngờ".into(),
-                    ));
+                    exec_res
                 }
-                Err(_) => {
+                Err(err) => {
                     guard.cleanup();
-                    return Err(PluginError::Timeout);
+                    return Err(err);
                 }
-            };
+            },
+            Ok(Err(_)) => {
+                guard.cleanup();
+                return Err(PluginError::Trap(
+                    "Worker process hoặc thread kết thúc bất ngờ".into(),
+                ));
+            }
+            Err(_) => {
+                guard.cleanup();
+                return Err(PluginError::Timeout);
+            }
+        };
 
-        if !staged_writes.is_empty() && staged_content.is_some() {
+        let output_val = worker_res.output.unwrap_or(Value::Null);
+        let staged_kv = worker_res.staged_kv;
+        let staged_logs = worker_res.staged_logs;
+        let staged_content = worker_res.staged_content_command;
+        let staged_delete = worker_res.staged_content_delete;
+
+        let scope_count = (!staged_kv.is_empty() as u8)
+            + (staged_content.is_some() as u8)
+            + (staged_delete.is_some() as u8);
+        if scope_count > 1 {
             guard.cleanup();
             return Err(PluginError::InvalidOutput(
-                "Không cho phép trộn ghi KV và ghi nội dung trong cùng một action (V1).".into(),
+                "ERR_MIXED_WRITE_SCOPE: Không cho phép trộn ghi/xóa KV và ghi/xóa nội dung.".into(),
             ));
         }
 
-        if !staged_writes.is_empty() {
-            if execution_mode != opendash_core::hooks::HookExecutionMode::Standard {
-                guard.cleanup();
-                return Err(PluginError::InvalidOutput(
-                    "Ghi KV bị cấm trong save hook.".into(),
-                ));
-            }
+        if (staged_content.is_some() || staged_delete.is_some())
+            && execution_mode != HookExecutionMode::Standard
+        {
+            guard.cleanup();
+            return Err(PluginError::InvalidOutput(
+                "Ghi/xóa nội dung bị cấm ngoài action mode.".into(),
+            ));
+        }
+
+        if !staged_kv.is_empty()
+            && !matches!(
+                execution_mode,
+                HookExecutionMode::Standard | HookExecutionMode::AsyncPostCommit
+            )
+        {
+            guard.cleanup();
+            return Err(PluginError::InvalidOutput(
+                "Ghi/xóa KV bị cấm trong hook/filter đồng bộ.".into(),
+            ));
+        }
+
+        if !staged_logs.is_empty() && execution_mode == HookExecutionMode::FilterContactBeforeSubmit
+        {
+            guard.cleanup();
+            return Err(PluginError::InvalidOutput(
+                "Ghi log bị cấm trong filter:contact/before_submit.".into(),
+            ));
+        }
+
+        if !staged_kv.is_empty() || !staged_logs.is_empty() {
             if cancellation_token.load(Ordering::Relaxed) || Instant::now() >= deadline {
                 guard.cleanup();
                 return Err(PluginError::Timeout);
@@ -576,7 +635,6 @@ impl PluginRuntime {
                 committed: false,
             };
             let conn = commit_guard.conn.as_mut().unwrap();
-
             let plugin_id = manifest.id;
 
             let cur_rem = deadline.saturating_duration_since(Instant::now());
@@ -607,12 +665,8 @@ impl PluginRuntime {
             }
 
             if let Some(expected_gen) = expected_generation {
-                match crate::storage::plugin::is_plugin_generation_active(
-                    conn,
-                    &plugin_id,
-                    expected_gen,
-                )
-                .await
+                match plugin_storage::is_plugin_generation_active(conn, &plugin_id, expected_gen)
+                    .await
                 {
                     Ok(true) => {}
                     Ok(false) => {
@@ -635,7 +689,7 @@ impl PluginRuntime {
             }
 
             if let Some(ref fence) = actor_fence {
-                match crate::storage::plugin::is_actor_role_active(
+                match plugin_storage::is_actor_role_active(
                     conn,
                     fence.user_id,
                     &fence.required_role,
@@ -664,7 +718,7 @@ impl PluginRuntime {
                 }
             }
 
-            for (key, val) in staged_writes {
+            for (key, opt_val) in staged_kv {
                 let cur_rem = deadline.saturating_duration_since(Instant::now());
                 if cur_rem.is_zero() || cancellation_token.load(Ordering::Relaxed) {
                     let _ = plugin_kv::rollback(conn).await;
@@ -672,23 +726,30 @@ impl PluginRuntime {
                     guard.cleanup();
                     return Err(PluginError::Timeout);
                 }
-                let insert_budget_ms = cur_rem.as_millis().max(1);
-                let _ = plugin_kv::set_busy_timeout(conn, insert_budget_ms as u128).await;
+                let op_budget_ms = cur_rem.as_millis().max(1);
+                let _ = plugin_kv::set_busy_timeout(conn, op_budget_ms as u128).await;
 
-                let val_str = match serde_json::to_string(&val) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        let _ = plugin_kv::rollback(conn).await;
-                        let _ =
-                            plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
-                        guard.cleanup();
-                        return Err(PluginError::Internal(format!(
-                            "Lỗi serialize staged KV: {e}"
-                        )));
+                let write_res = match opt_val {
+                    Some(val) => {
+                        let val_str = match serde_json::to_string(&val) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                let _ = plugin_kv::rollback(conn).await;
+                                let _ =
+                                    plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128)
+                                        .await;
+                                guard.cleanup();
+                                return Err(PluginError::Internal(format!(
+                                    "Lỗi serialize staged KV: {e}"
+                                )));
+                            }
+                        };
+                        plugin_kv::set(conn, &plugin_id, &key, &val_str).await
                     }
+                    None => plugin_kv::delete(conn, &plugin_id, &key).await,
                 };
 
-                if let Err(e) = plugin_kv::set(conn, &plugin_id, &key, &val_str).await {
+                if let Err(e) = write_res {
                     let _ = plugin_kv::rollback(conn).await;
                     let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
                     guard.cleanup();
@@ -703,6 +764,32 @@ impl PluginRuntime {
                 }
             }
 
+            for entry in staged_logs.into_iter().take(MAX_STAGED_LOGS) {
+                let level = match entry.level.as_str() {
+                    "warn" => "warn",
+                    "error" => "error",
+                    _ => "info",
+                };
+                let msg = opendash_core::hooks::sanitize_plain_text(
+                    &entry.message,
+                    MAX_LOG_MESSAGE_CHARS,
+                );
+                if let Err(e) = plugin_storage::insert_plugin_log_in_conn(
+                    conn,
+                    &plugin_id,
+                    &correlation_for_log,
+                    level,
+                    &msg,
+                )
+                .await
+                {
+                    let _ = plugin_kv::rollback(conn).await;
+                    let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
+                    guard.cleanup();
+                    return Err(PluginError::Internal(format!("Lỗi ghi plugin_logs: {e}")));
+                }
+            }
+
             #[cfg(test)]
             {
                 if TEST_STAGE_WRITE_PAUSE.load(Ordering::SeqCst) {
@@ -712,7 +799,6 @@ impl PluginRuntime {
             }
 
             // --- COMMIT HANDOVER POINT ---
-            // If deadline expired or cancelled before sending COMMIT, we must rollback and confirm cleanup.
             if Instant::now() >= deadline || cancellation_token.load(Ordering::Relaxed) {
                 let _ = plugin_kv::rollback(conn).await;
                 let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
@@ -725,13 +811,10 @@ impl PluginRuntime {
             let _ = plugin_kv::set_busy_timeout(conn, commit_budget_ms as u128).await;
 
             let commit_res = plugin_kv::commit(conn).await;
-            // Always restore initial busy_timeout so it never leaks to other callers from the pool
             let _ = plugin_kv::set_busy_timeout(conn, initial_busy_timeout as u128).await;
 
             match commit_res {
                 Ok(_) => {
-                    // Transaction successfully committed to disk!
-                    // Invariant: Do NOT report Timeout for a committed transaction.
                     commit_guard.committed = true;
                 }
                 Err(e) => {
@@ -755,8 +838,425 @@ impl PluginRuntime {
         Ok(ActionExecutionOutput {
             output: output_val,
             staged_content_command: staged_content,
+            staged_content_delete: staged_delete,
         })
     }
+}
+
+fn scan_ipc_magic<R: std::io::Read>(reader: &mut R) -> Result<(), PluginError> {
+    let mut matched = 0usize;
+    let mut byte = [0u8; 1];
+    for _ in 0..8192 {
+        if reader.read_exact(&mut byte).is_err() {
+            return Err(PluginError::Trap(
+                "Worker process kết thúc trước khi gửi IPC magic".into(),
+            ));
+        }
+        if byte[0] == IPC_STREAM_MAGIC[matched] {
+            matched += 1;
+            if matched == IPC_STREAM_MAGIC.len() {
+                return Ok(());
+            }
+        } else {
+            matched = usize::from(byte[0] == IPC_STREAM_MAGIC[0]);
+        }
+    }
+    Err(PluginError::Trap(
+        "Không tìm thấy IPC stream magic hợp lệ từ worker".into(),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_host_read_request(
+    db: &SqlitePool,
+    plugin_id: &str,
+    manifest: &PluginManifest,
+    execution_mode: HookExecutionMode,
+    principal: ExecutionPrincipal,
+    action_caps: Option<&[String]>,
+    secrets_root: Option<&Path>,
+    req: HostReadRequest,
+) -> HostOperationResponse {
+    if let Err(msg) = host_ops::check_read_policy(manifest, execution_mode, action_caps, &req) {
+        return HostOperationResponse::err(msg);
+    }
+
+    let actor_role = match principal {
+        ExecutionPrincipal::Admin | ExecutionPrincipal::System => FieldRole::Admin,
+        ExecutionPrincipal::Editor | ExecutionPrincipal::Public => FieldRole::Editor,
+    };
+    let is_public_scope = principal == ExecutionPrincipal::Public
+        || execution_mode == HookExecutionMode::FilterProjection;
+
+    match req {
+        HostReadRequest::KvGet { key } => {
+            if key.is_empty() || key.len() > host_ops::MAX_KV_KEY_BYTES {
+                return HostOperationResponse::err("Key không hợp lệ hoặc quá dài.");
+            }
+            match plugin_kv::get(db, plugin_id, &key).await {
+                Ok(Some(val_str)) => match serde_json::from_str::<Value>(&val_str) {
+                    Ok(v) => HostOperationResponse {
+                        ok: true,
+                        error: None,
+                        data: None,
+                        found: Some(true),
+                        value: Some(v),
+                        status: None,
+                        headers: None,
+                        body: None,
+                    },
+                    Err(_) => {
+                        HostOperationResponse::err("Dữ liệu trong database không phải JSON hợp lệ.")
+                    }
+                },
+                Ok(None) => HostOperationResponse {
+                    ok: true,
+                    error: None,
+                    data: None,
+                    found: Some(false),
+                    value: None,
+                    status: None,
+                    headers: None,
+                    body: None,
+                },
+                Err(e) => HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
+            }
+        }
+        HostReadRequest::KvList { prefix, limit } => {
+            let prefix_str = prefix.unwrap_or_default();
+            let clamped = limit.unwrap_or(50).clamp(1, 200) as i64;
+            match plugin_kv::list(db, plugin_id, &prefix_str, clamped).await {
+                Ok(rows) => {
+                    let mut items = Vec::with_capacity(rows.len());
+                    for (k, v_json) in rows {
+                        let v = serde_json::from_str::<Value>(&v_json).unwrap_or(Value::Null);
+                        items.push(json!({ "key": k, "value": v }));
+                    }
+                    HostOperationResponse::ok_data(json!({ "items": items }))
+                }
+                Err(e) => HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
+            }
+        }
+        HostReadRequest::ContentGet {
+            type_key,
+            entry_id,
+            locale,
+        } => {
+            if !opendash_core::content::valid_content_type_key(&type_key) {
+                return HostOperationResponse::err("Loại nội dung không hợp lệ.");
+            }
+            let effective_opt =
+                match crate::storage::content::load_effective_content_schema(db, &type_key).await {
+                    Ok(opt) => opt,
+                    Err(e) => return HostOperationResponse::err(e.1.to_string()),
+                };
+            let Some(effective) = effective_opt else {
+                return HostOperationResponse::ok_data(json!({ "entry": Value::Null }));
+            };
+            if is_public_scope
+                && (effective.base.status != ProviderStatus::Active
+                    || !effective.base.descriptor.settings.public)
+            {
+                return HostOperationResponse::ok_data(json!({ "entry": Value::Null }));
+            }
+            let entry_opt = match entries::get_entry(db, &type_key, entry_id).await {
+                Ok(e) => e,
+                Err(e) => return HostOperationResponse::err(e.1.to_string()),
+            };
+            let Some(entry) = entry_opt else {
+                return HostOperationResponse::ok_data(json!({ "entry": Value::Null }));
+            };
+            if is_public_scope && entry.publication_status != "published" {
+                return HostOperationResponse::ok_data(json!({ "entry": Value::Null }));
+            }
+            if let Some(req_loc) = locale {
+                let normalized = match settings::resolve_requested_locale(db, Some(&req_loc)).await
+                {
+                    Ok(l) => l,
+                    Err(e) => return HostOperationResponse::err(e.1.to_string()),
+                };
+                if entry.locale != normalized {
+                    return HostOperationResponse::ok_data(json!({ "entry": Value::Null }));
+                }
+            }
+            let view = project_entry_for_host(
+                manifest,
+                action_caps,
+                actor_role,
+                is_public_scope,
+                &type_key,
+                &effective,
+                entry,
+            );
+            HostOperationResponse::ok_data(json!({ "entry": view }))
+        }
+        HostReadRequest::ContentList {
+            type_key,
+            locale,
+            limit,
+            offset,
+            published_only,
+        } => {
+            if !opendash_core::content::valid_content_type_key(&type_key) {
+                return HostOperationResponse::err("Loại nội dung không hợp lệ.");
+            }
+            let effective_opt =
+                match crate::storage::content::load_effective_content_schema(db, &type_key).await {
+                    Ok(opt) => opt,
+                    Err(e) => return HostOperationResponse::err(e.1.to_string()),
+                };
+            let Some(effective) = effective_opt else {
+                return HostOperationResponse::ok_data(json!({ "items": [], "total": 0 }));
+            };
+            if is_public_scope
+                && (effective.base.status != ProviderStatus::Active
+                    || !effective.base.descriptor.settings.public)
+            {
+                return HostOperationResponse::ok_data(json!({ "items": [], "total": 0 }));
+            }
+            let resolved_locale = match locale {
+                Some(raw) => match settings::resolve_requested_locale(db, Some(&raw)).await {
+                    Ok(l) => Some(l),
+                    Err(e) => return HostOperationResponse::err(e.1.to_string()),
+                },
+                None => None,
+            };
+            let clamped_limit = limit.unwrap_or(20).clamp(1, 50) as i64;
+            let clamped_offset = offset.unwrap_or(0).min(10_000) as i64;
+            let eff_published = is_public_scope || published_only.unwrap_or(false);
+            let filters = entries::EntryFilters {
+                category_id: None,
+                tag_id: None,
+                taxonomy_key: None,
+                term_id: None,
+                include_descendants: false,
+                locale: resolved_locale.clone(),
+            };
+            let list_res = if eff_published {
+                entries::list_published_filtered(
+                    db,
+                    &type_key,
+                    clamped_limit,
+                    clamped_offset,
+                    filters,
+                )
+                .await
+            } else {
+                entries::list_entries(db, &type_key, clamped_limit, clamped_offset, filters).await
+            };
+            let rows = match list_res {
+                Ok(r) => r,
+                Err(e) => return HostOperationResponse::err(e.1.to_string()),
+            };
+            let total = match plugin_storage::count_entries_for_host_list(
+                db,
+                &type_key,
+                resolved_locale.as_deref(),
+                eff_published,
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
+            };
+            let items: Vec<Value> = rows
+                .into_iter()
+                .map(|entry| {
+                    project_entry_for_host(
+                        manifest,
+                        action_caps,
+                        actor_role,
+                        is_public_scope,
+                        &type_key,
+                        &effective,
+                        entry,
+                    )
+                })
+                .collect();
+            HostOperationResponse::ok_data(json!({ "items": items, "total": total }))
+        }
+        HostReadRequest::TaxonomyList {
+            kind,
+            locale,
+            limit,
+        } => {
+            let def_opt = match taxonomy::get_definition(db, &kind).await {
+                Ok(d) => d,
+                Err(e) => return HostOperationResponse::err(e.1.to_string()),
+            };
+            let Some(def) = def_opt else {
+                return HostOperationResponse::ok_data(json!({ "items": [] }));
+            };
+            if def.provider_status != ProviderStatus::Active {
+                return HostOperationResponse::ok_data(json!({ "items": [] }));
+            }
+            if !def.public && principal != ExecutionPrincipal::Admin {
+                return HostOperationResponse::err("permission_denied: taxonomy_private");
+            }
+            let clamped = limit.unwrap_or(50).clamp(1, 100) as i64;
+            let page = match taxonomy::list_terms_for_locale(
+                db,
+                Some(&kind),
+                locale.as_deref(),
+                clamped,
+                0,
+            )
+            .await
+            {
+                Ok(p) => p,
+                Err(e) => return HostOperationResponse::err(e.1.to_string()),
+            };
+            let items: Vec<Value> = page
+                .items
+                .into_iter()
+                .map(|t| {
+                    json!({
+                        "id": t.id,
+                        "kind": t.kind,
+                        "slug": t.slug,
+                        "name": t.name,
+                        "parent_id": t.parent_id,
+                    })
+                })
+                .collect();
+            HostOperationResponse::ok_data(json!({ "items": items }))
+        }
+        HostReadRequest::MediaGet { media_id } => {
+            if !crate::storage::media::valid_media_id(&media_id) {
+                return HostOperationResponse::ok_data(json!({ "media": Value::Null }));
+            }
+            if is_public_scope {
+                match crate::storage::public_content::media_is_referenced(db, &media_id).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        return HostOperationResponse::ok_data(json!({ "media": Value::Null }));
+                    }
+                    Err(e) => return HostOperationResponse::err(e.1.to_string()),
+                }
+            }
+            match media::find(db, &media_id).await {
+                Ok(Some(m)) => {
+                    let url = if is_public_scope {
+                        format!("/media/{}/file", m.id)
+                    } else {
+                        format!("/api/admin/media/{}/file", m.id)
+                    };
+                    HostOperationResponse::ok_data(json!({
+                        "media": {
+                            "id": m.id,
+                            "filename": m.filename,
+                            "mime_type": m.mime_type,
+                            "url": url,
+                            "width": Some(m.width),
+                            "height": Some(m.height),
+                            "alt": Value::Null,
+                        }
+                    }))
+                }
+                Ok(None) => HostOperationResponse::ok_data(json!({ "media": Value::Null })),
+                Err(e) => HostOperationResponse::err(e.1.to_string()),
+            }
+        }
+        HostReadRequest::SiteOptionsGet { locale } => {
+            match settings::get_active_public_theme_options_for_locale(db, locale.as_deref()).await
+            {
+                Ok(map) => HostOperationResponse::ok_data(json!({ "options": map })),
+                Err(e) => HostOperationResponse::err(e.1.to_string()),
+            }
+        }
+        HostReadRequest::PluginSettingsGet => {
+            let raw_map = match plugin_storage::read_raw_plugin_option_map(db, plugin_id).await {
+                Ok(m) => m,
+                Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
+            };
+            let mut settings_map = serde_json::Map::new();
+            for field in &manifest.settings_schema {
+                if field.field_type == PluginSettingFieldType::Secret {
+                    let configured = raw_map
+                        .get(&field.key)
+                        .and_then(|v| v.get("secret_ref"))
+                        .and_then(Value::as_str)
+                        .is_some();
+                    settings_map.insert(field.key.clone(), json!({ "configured": configured }));
+                } else {
+                    let val = raw_map
+                        .get(&field.key)
+                        .cloned()
+                        .unwrap_or_else(|| field.default.clone());
+                    settings_map.insert(field.key.clone(), val);
+                }
+            }
+            HostOperationResponse::ok_data(json!({ "settings": settings_map }))
+        }
+        HostReadRequest::PluginSecretGet { key } => {
+            if !manifest
+                .settings_schema
+                .iter()
+                .any(|f| f.key == key && f.field_type == PluginSettingFieldType::Secret)
+            {
+                return HostOperationResponse::err(
+                    "Khóa secret không tồn tại trong settings_schema.",
+                );
+            }
+            let raw_map = match plugin_storage::read_raw_plugin_option_map(db, plugin_id).await {
+                Ok(m) => m,
+                Err(e) => return HostOperationResponse::err(format!("Lỗi cơ sở dữ liệu: {e}")),
+            };
+            let Some(secret_ref) = raw_map
+                .get(&key)
+                .and_then(|v| v.get("secret_ref"))
+                .and_then(Value::as_str)
+            else {
+                return HostOperationResponse::ok_data(json!({ "value": Value::Null }));
+            };
+            let Some(sec_root) = secrets_root else {
+                return HostOperationResponse::err("SecretStore không khả dụng.");
+            };
+            let store = crate::secrets::SecretStore::for_plugin_dir(
+                sec_root.join("plugins").join(plugin_id),
+            );
+            match store.read_plugin_secret(secret_ref) {
+                Ok(plaintext) => HostOperationResponse::ok_data(json!({ "value": plaintext })),
+                Err(e) => HostOperationResponse::err(e.1.to_string()),
+            }
+        }
+    }
+}
+
+fn project_entry_for_host(
+    manifest: &PluginManifest,
+    action_caps: Option<&[String]>,
+    actor_role: FieldRole,
+    is_public_scope: bool,
+    type_key: &str,
+    effective: &opendash_core::content::EffectiveContentSchema,
+    entry: entries::ContentEntryRecord,
+) -> Value {
+    let mut filtered_values = BTreeMap::new();
+    for (k, v) in entry.values {
+        if let Some(fe) = effective.effective_fields.get(&k) {
+            let allowed = if is_public_scope {
+                fe.definition.public_exposure == PublicExposure::Public
+                    && plugin_can_read_field(manifest, action_caps, actor_role, type_key, fe)
+            } else {
+                plugin_can_read_field(manifest, action_caps, actor_role, type_key, fe)
+            };
+            if allowed {
+                filtered_values.insert(k, v);
+            }
+        }
+    }
+    json!({
+        "id": entry.id,
+        "type_key": entry.content_type_key,
+        "slug": entry.slug,
+        "title": entry.title,
+        "status": entry.publication_status,
+        "version": entry.version,
+        "locale": entry.locale,
+        "values": filtered_values,
+        "term_ids": entry.term_ids,
+    })
 }
 
 #[cfg(test)]
@@ -771,7 +1271,7 @@ fn execute_wasm_sync(
     allow_loopback: bool,
     cancellation_token: Arc<AtomicBool>,
     deadline: Instant,
-) -> Result<(Value, BTreeMap<String, Value>), PluginError> {
+) -> Result<(Value, BTreeMap<String, Option<Value>>), PluginError> {
     if cancellation_token.load(Ordering::Relaxed) || Instant::now() >= deadline {
         return Err(PluginError::Timeout);
     }
@@ -796,18 +1296,24 @@ fn execute_wasm_sync(
         manifest,
         input_bytes,
         output_bytes: None,
+        last_resp_bytes: None,
         host_calls_count: 0,
         http_calls_count: 0,
-        db_pool: Some(db_pool.clone()),
-        kv_ipc: None,
+        db_pool: Some(db_pool),
+        secrets_root: None,
+        read_ipc: None,
         _correlation_id: correlation_id,
         allow_loopback,
         limits,
-        staged_kv_writes: Default::default(),
+        staged_kv: Default::default(),
+        staged_kv_bytes: 0,
+        staged_logs: vec![],
         cancellation_token,
         deadline,
-        execution_mode: opendash_core::hooks::HookExecutionMode::Standard,
+        execution_mode: HookExecutionMode::Standard,
+        principal: ExecutionPrincipal::Admin,
         staged_content_command: None,
+        staged_content_delete: None,
         action_capabilities: None,
     };
 
@@ -896,7 +1402,7 @@ fn execute_wasm_sync(
         return Err(PluginError::Timeout);
     }
 
-    Ok((output_val, ctx.staged_kv_writes))
+    Ok((output_val, ctx.staged_kv))
 }
 
 pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<(), WasmiError> {
@@ -974,7 +1480,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
             let src = src_ptr as usize;
             let length = len as usize;
             if length > 1024 * 1024 {
-                return Ok(-2); // Exceeds 1 MB
+                return Ok(-2);
             }
             let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
                 return Ok(-1);
@@ -992,10 +1498,10 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
             }
 
             let Ok(text) = std::str::from_utf8(&buf) else {
-                return Ok(-3); // Invalid UTF-8
+                return Ok(-3);
             };
             if serde_json::from_str::<Value>(text).is_err() {
-                return Ok(-4); // Invalid JSON
+                return Ok(-4);
             }
 
             caller.data_mut().output_bytes = Some(buf);
@@ -1046,6 +1552,7 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
                 return Ok(-1);
             };
 
+            caller.data_mut().last_resp_bytes = None;
             let resp = host_ops::handle_host_call(caller.data_mut(), op_str);
 
             if caller.data().is_cancelled() {
@@ -1058,8 +1565,12 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
             let resp_bytes = serde_json::to_vec(&resp)
                 .unwrap_or_else(|_| b"{\"ok\":false,\"error\":\"Internal JSON error\"}".to_vec());
 
+            if resp_bytes.len() > MAX_IPC_FRAME_BYTES {
+                return Ok(-1);
+            }
             if resp_bytes.len() > resp_max {
-                return Ok(-2); // Buffer too small
+                caller.data_mut().last_resp_bytes = Some(resp_bytes);
+                return Ok(-2);
             }
 
             let Some(resp_end) = resp_dest.checked_add(resp_bytes.len()) else {
@@ -1073,6 +1584,68 @@ pub(crate) fn register_host_imports(linker: &mut Linker<HostContext>) -> Result<
                 return Ok(-1);
             }
             Ok(resp_bytes.len() as i32)
+        },
+    )?;
+
+    // 5. host_last_resp_len() -> i32 (ABI v1.1)
+    linker.func_wrap(
+        "opendash_v1",
+        "host_last_resp_len",
+        |mut caller: Caller<'_, HostContext>| -> Result<i32, wasmi::Error> {
+            if caller.data().is_cancelled() {
+                let _ = caller.as_context_mut().set_fuel(0);
+                return Err(wasmi::Error::new(
+                    "Invocation deadline exceeded or cancelled",
+                ));
+            }
+            Ok(caller
+                .data()
+                .last_resp_bytes
+                .as_ref()
+                .map(|b| b.len() as i32)
+                .unwrap_or(0))
+        },
+    )?;
+
+    // 6. host_read_last_resp(dest_ptr: i32, max_len: i32) -> i32 (ABI v1.1)
+    linker.func_wrap(
+        "opendash_v1",
+        "host_read_last_resp",
+        |mut caller: Caller<'_, HostContext>,
+         dest_ptr: i32,
+         max_len: i32|
+         -> Result<i32, wasmi::Error> {
+            if caller.data().is_cancelled() {
+                let _ = caller.as_context_mut().set_fuel(0);
+                return Err(wasmi::Error::new(
+                    "Invocation deadline exceeded or cancelled",
+                ));
+            }
+            if dest_ptr < 0 || max_len < 0 {
+                return Ok(-1);
+            }
+            let Some(bytes) = caller.data().last_resp_bytes.clone() else {
+                return Ok(-1);
+            };
+            let dest = dest_ptr as usize;
+            let max = max_len as usize;
+            let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) else {
+                return Ok(-1);
+            };
+            let to_copy = std::cmp::min(max, bytes.len());
+            let Some(end) = dest.checked_add(to_copy) else {
+                return Ok(-1);
+            };
+            if end > memory.data_size(&caller) {
+                return Ok(-1);
+            }
+            if memory.write(&mut caller, dest, &bytes[..to_copy]).is_err() {
+                return Ok(-1);
+            }
+            if to_copy == bytes.len() {
+                caller.data_mut().last_resp_bytes = None;
+            }
+            Ok(to_copy as i32)
         },
     )?;
 

@@ -4,7 +4,16 @@ use crate::{
     plugin::{PluginManager, manager::PluginRunResponse},
 };
 use axum::http::StatusCode;
-use opendash_core::hooks::{HookEnvelope, HookEvent};
+use opendash_core::hooks::{
+    EnvelopeKind, ExecutionPrincipal, HookEnvelope, HookEvent, HookExecutionMode,
+};
+
+fn principal_for_field_role(role: opendash_core::content::FieldRole) -> ExecutionPrincipal {
+    match role {
+        opendash_core::content::FieldRole::Admin => ExecutionPrincipal::Admin,
+        opendash_core::content::FieldRole::Editor => ExecutionPrincipal::Editor,
+    }
+}
 use serde_json::Value;
 use std::{
     future::Future,
@@ -202,11 +211,21 @@ impl HookDispatcher {
                 }
             } else {
                 // No outer timeout around commit: retain M2 commit handover semantics.
+                let legacy_env = serde_json::to_value(&envelope).expect("JSON envelope");
                 self.plugin_manager
-                    .run_plugin_correlated(
+                    .run_plugin_dispatch(
                         id.strip_prefix("plugin/").unwrap(),
-                        serde_json::to_value(&envelope).expect("JSON envelope"),
+                        EnvelopeKind::Hook,
+                        legacy_env,
+                        envelope.event.as_str(),
+                        envelope.occurred_at_ms,
                         envelope.correlation_id.clone(),
+                        envelope.locale.clone(),
+                        ExecutionPrincipal::System,
+                        0,
+                        envelope.payload.clone(),
+                        HookExecutionMode::Standard,
+                        None,
                     )
                     .await
                     .map(|_| ())
@@ -232,17 +251,26 @@ impl HookDispatcher {
         DispatchReport { envelope, outcomes }
     }
 
+    #[allow(dead_code)]
+    pub async fn filter_subscriptions(
+        &self,
+        event: HookEvent,
+        type_key: Option<&str>,
+    ) -> Result<Vec<(i32, String)>, String> {
+        self.plugin_manager
+            .filter_subscriptions(event, type_key)
+            .await
+    }
+
+    #[allow(dead_code)]
     pub async fn dispatch_content_before_save(
         &self,
         type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
         payload: Value,
     ) -> Result<(), ContentBeforeSaveVeto> {
-        self.dispatch_content_before_save_for_actor(
-            type_key,
-            opendash_core::content::FieldRole::Admin,
-            payload,
-        )
-        .await
+        self.dispatch_content_before_save_for_actor(type_key, actor_role, payload)
+            .await
     }
 
     pub async fn dispatch_content_before_save_for_actor(
@@ -300,11 +328,18 @@ impl HookDispatcher {
                     let env_val = serde_json::to_value(&plugin_env).expect("JSON envelope");
                     let out = match self
                         .plugin_manager
-                        .run_plugin_with_mode(
+                        .run_plugin_dispatch(
                             &plugin_id,
+                            EnvelopeKind::Hook,
                             env_val,
+                            plugin_env.event.as_str(),
+                            plugin_env.occurred_at_ms,
                             envelope.correlation_id.clone(),
-                            opendash_core::hooks::HookExecutionMode::ContentBeforeSave,
+                            plugin_env.locale.clone(),
+                            principal_for_field_role(actor_role),
+                            0,
+                            plugin_env.payload,
+                            HookExecutionMode::ContentBeforeSave,
                             Some(remaining),
                         )
                         .await
@@ -379,17 +414,15 @@ impl HookDispatcher {
             .await
     }
 
+    #[allow(dead_code)]
     pub async fn dispatch_content_after_save(
         &self,
         type_key: &str,
+        actor_role: opendash_core::content::FieldRole,
         payload: Value,
     ) -> DispatchReport {
-        self.dispatch_content_after_save_for_actor(
-            type_key,
-            opendash_core::content::FieldRole::Admin,
-            payload,
-        )
-        .await
+        self.dispatch_content_after_save_for_actor(type_key, actor_role, payload)
+            .await
     }
 
     pub async fn dispatch_content_after_save_for_actor(
@@ -447,11 +480,18 @@ impl HookDispatcher {
                             .await;
                         let env_val = serde_json::to_value(&plugin_env).expect("JSON envelope");
                         self.plugin_manager
-                            .run_plugin_with_mode(
+                            .run_plugin_dispatch(
                                 &plugin_id,
+                                EnvelopeKind::Hook,
                                 env_val,
+                                plugin_env.event.as_str(),
+                                plugin_env.occurred_at_ms,
                                 envelope.correlation_id.clone(),
-                                opendash_core::hooks::HookExecutionMode::ContentAfterSave,
+                                plugin_env.locale.clone(),
+                                principal_for_field_role(actor_role),
+                                0,
+                                plugin_env.payload,
+                                HookExecutionMode::ContentAfterSave,
                                 Some(remaining),
                             )
                             .await
@@ -484,7 +524,20 @@ impl HookDispatcher {
     ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
         let envelope = Self::envelope(HookEvent::PluginManualRun, Value::Null);
         self.plugin_manager
-            .run_plugin_correlated(plugin_id, input, envelope.correlation_id)
+            .run_plugin_dispatch(
+                plugin_id,
+                EnvelopeKind::Manual,
+                input.clone(),
+                HookEvent::PluginManualRun.as_str(),
+                envelope.occurred_at_ms,
+                envelope.correlation_id,
+                None,
+                ExecutionPrincipal::Admin,
+                0,
+                input,
+                HookExecutionMode::Standard,
+                None,
+            )
             .await
     }
 }
