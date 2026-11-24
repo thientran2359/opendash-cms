@@ -1029,8 +1029,8 @@ pub const MAX_THEME_OPTION_STRING_CHARS: usize = 4096;
 pub const MAX_THEME_OPTION_CHOICES: usize = 64;
 
 pub use opendash_core::block_schema::{
-    GLOBAL_PUBLIC_URL_OPTION_KEYS, default_value_for_field_spec, global_site_option_defaults,
-    global_site_option_fields,
+    GLOBAL_PUBLIC_MEDIA_OPTION_KEYS, GLOBAL_PUBLIC_URL_OPTION_KEYS, default_value_for_field_spec,
+    global_site_option_defaults, global_site_option_fields,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1648,27 +1648,58 @@ pub fn theme_url_policy(
     manifest_json: &str,
 ) -> Result<crate::template_sec::ThemeUrlPolicy, &'static str> {
     let schema = parse_theme_options_schema(manifest_json)?;
-    Ok(crate::template_sec::ThemeUrlPolicy::from_option_keys(
-        GLOBAL_PUBLIC_URL_OPTION_KEYS
-            .iter()
-            .copied()
-            .map(ToOwned::to_owned)
-            .chain(
-                schema
-                    .iter()
-                    .filter(|def| def.public && def.option_type == ThemeOptionType::Url)
-                    .map(|def| def.key.clone()),
-            ),
+    let raw: serde_json::Value =
+        serde_json::from_str(manifest_json).map_err(|_| "theme.json không đúng JSON.")?;
+    let declared_assets: BTreeSet<String> = raw
+        .get("assets")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(ToOwned::to_owned))
+        .collect();
+    let href_exprs: BTreeSet<String> = GLOBAL_PUBLIC_URL_OPTION_KEYS
+        .iter()
+        .copied()
+        .map(ToOwned::to_owned)
+        .chain(
+            schema
+                .iter()
+                .filter(|def| def.public && def.option_type == ThemeOptionType::Url)
+                .map(|def| def.key.clone()),
+        )
+        .map(|k| format!("options.{k}"))
+        .collect();
+    let src_exprs: BTreeSet<String> = GLOBAL_PUBLIC_MEDIA_OPTION_KEYS
+        .iter()
+        .copied()
+        .map(ToOwned::to_owned)
+        .chain(
+            schema
+                .iter()
+                .filter(|def| def.public && is_media_option_type(def.option_type))
+                .map(|def| def.key.clone()),
+        )
+        .map(|k| format!("options.{k}"))
+        .collect();
+    Ok(crate::template_sec::ThemeUrlPolicy::new(
+        href_exprs,
+        src_exprs,
+        declared_assets,
     ))
 }
 
 pub fn global_theme_url_policy() -> crate::template_sec::ThemeUrlPolicy {
-    crate::template_sec::ThemeUrlPolicy::from_option_keys(
-        GLOBAL_PUBLIC_URL_OPTION_KEYS
-            .iter()
-            .copied()
-            .map(ToOwned::to_owned),
-    )
+    let href_exprs = GLOBAL_PUBLIC_URL_OPTION_KEYS
+        .iter()
+        .copied()
+        .map(|k| format!("options.{k}"))
+        .collect();
+    let src_exprs = GLOBAL_PUBLIC_MEDIA_OPTION_KEYS
+        .iter()
+        .copied()
+        .map(|k| format!("options.{k}"))
+        .collect();
+    crate::template_sec::ThemeUrlPolicy::new(href_exprs, src_exprs, BTreeSet::new())
 }
 
 async fn latest_revision_manifest_in_conn(

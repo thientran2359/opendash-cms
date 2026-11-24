@@ -14,6 +14,7 @@ argon2 = { workspace = true }
 axum = { workspace = true }
 http-body = { workspace = true }
 image = { workspace = true }
+jiff = { workspace = true }
 lettre = { workspace = true }
 minijinja = { workspace = true }
 mime_guess = { workspace = true }

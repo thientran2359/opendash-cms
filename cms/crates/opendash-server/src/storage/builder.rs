@@ -44,7 +44,6 @@ pub struct ThemeDefinition {
     pub template: String,
 }
 
-#[derive(Default)]
 pub struct HomeState {
     pub version: i64,
     pub saved: Option<BuilderDocument>,
@@ -55,6 +54,24 @@ pub struct HomeState {
     pub active_alias: Option<String>,
     pub active_template: Option<String>,
     pub site_options: BTreeMap<String, serde_json::Value>,
+    pub timezone: String,
+}
+
+impl Default for HomeState {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            saved: None,
+            legacy: None,
+            themes: BTreeMap::new(),
+            declared_blocks: BTreeMap::new(),
+            active_id: None,
+            active_alias: None,
+            active_template: None,
+            site_options: BTreeMap::new(),
+            timezone: "UTC".to_owned(),
+        }
+    }
 }
 
 /// Only public-safe display text and a canonical, storage-resolved href leave
@@ -399,6 +416,9 @@ pub(crate) async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<
     let site_options =
         crate::storage::settings::get_active_merged_public_options_in_conn(&mut **tx, false)
             .await?;
+    let timezone = crate::storage::settings::get_general_in_conn(&mut **tx)
+        .await?
+        .timezone;
     Ok(HomeState {
         version,
         saved,
@@ -409,6 +429,7 @@ pub(crate) async fn read_home_tx(tx: &mut Transaction<'_, Sqlite>) -> ApiResult<
         active_alias,
         active_template,
         site_options,
+        timezone,
     })
 }
 
@@ -1744,17 +1765,19 @@ pub(super) async fn preview_saved_page_body_in_tx_with_budget(
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
     preview_saved_page_body_in_tx_with_options_and_budget(
-        tx, actor, type_key, id, None, budget, cache,
+        tx, actor, type_key, id, None, None, budget, cache,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
     tx: &mut Transaction<'_, Sqlite>,
     actor: &SessionContext,
     type_key: &str,
     id: i64,
     site_options_override: Option<&BTreeMap<String, serde_json::Value>>,
+    timezone_override: Option<&str>,
     budget: &mut page::RenderBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<Option<RenderedLayout>> {
@@ -1769,6 +1792,9 @@ pub(super) async fn preview_saved_page_body_in_tx_with_options_and_budget(
         validate_entry_builder_document(tx, &current, actor_field_role(actor), document).await?;
     if let Some(opts) = site_options_override {
         state.site_options = opts.clone();
+    }
+    if let Some(tz) = timezone_override {
+        state.timezone = tz.to_owned();
     }
     Ok(Some(
         render_entry_builder_preview_with_budget(
