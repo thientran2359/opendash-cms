@@ -50,6 +50,45 @@ pub struct ScopedFieldGrant {
     pub field_keys: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginSettingFieldType {
+    Text,
+    Textarea,
+    Number,
+    Boolean,
+    Select,
+    Url,
+    Media,
+    Secret,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PluginSettingChoice {
+    pub value: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PluginSettingField {
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub field_type: PluginSettingFieldType,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub default: serde_json::Value,
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub max: Option<f64>,
+    #[serde(default)]
+    pub choices: Vec<PluginSettingChoice>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginPermissions {
@@ -67,6 +106,18 @@ pub struct PluginPermissions {
     pub content_read_private: Vec<ScopedFieldGrant>,
     #[serde(default)]
     pub content_write_private: Vec<ScopedFieldGrant>,
+    #[serde(default)]
+    pub taxonomy_read: bool,
+    #[serde(default)]
+    pub media_read: bool,
+    #[serde(default)]
+    pub site_options_read: bool,
+    #[serde(default)]
+    pub plugin_settings_read: bool,
+    #[serde(default)]
+    pub plugin_secrets_read: Vec<String>,
+    #[serde(default)]
+    pub content_delete: Vec<String>,
 }
 
 fn default_action_role() -> String {
@@ -85,7 +136,7 @@ pub struct PluginActionDeclaration {
     pub capabilities: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct PluginManifest {
     pub id: String,
@@ -105,6 +156,8 @@ pub struct PluginManifest {
     /// Optional lifecycle subscriptions; manual invocation input remains unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hooks: Vec<crate::hooks::HookEvent>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub filters: Vec<crate::hooks::HookEvent>,
     #[serde(default)]
     pub hook_priority: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -116,6 +169,8 @@ pub struct PluginManifest {
     pub declarations: crate::content::CntDeclarations,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub editor_panels: Vec<crate::content::ManifestActionPanelInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings_schema: Vec<PluginSettingField>,
 }
 
 pub const CURRENT_HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -208,8 +263,8 @@ impl PluginManifest {
                     .get("manifest_schema")
                     .and_then(serde_json::Value::as_u64)
                     .unwrap_or(1);
-                if schema != 2 {
-                    return Err("admin_extensions yêu cầu manifest_schema = 2.");
+                if schema < 2 {
+                    return Err("admin_extensions yêu cầu manifest_schema >= 2.");
                 }
                 let actions = obj
                     .get("actions")
@@ -252,24 +307,45 @@ impl PluginManifest {
         if self.api_version != PLUGIN_ABI_VERSION {
             return Err("Chỉ hỗ trợ api_version 1.");
         }
-        if self.manifest_schema != 1 && self.manifest_schema != 2 {
-            return Err("manifest_schema không được hỗ trợ (chỉ hỗ trợ 1 hoặc 2).");
+        if !matches!(self.manifest_schema, 1..=3) {
+            return Err("manifest_schema không được hỗ trợ (chỉ hỗ trợ 1, 2 hoặc 3).");
         }
-        if !self.declarations.field_groups.is_empty() && self.manifest_schema != 2 {
-            return Err("field_groups trong plugin.json chỉ hợp lệ khi manifest_schema = 2.");
+        if !self.declarations.field_groups.is_empty() && self.manifest_schema < 2 {
+            return Err("field_groups trong plugin.json chỉ hợp lệ khi manifest_schema >= 2.");
         }
-        if !self.editor_panels.is_empty() && self.manifest_schema != 2 {
-            return Err("editor_panels trong plugin.json chỉ hợp lệ khi manifest_schema = 2.");
+        if !self.editor_panels.is_empty() && self.manifest_schema < 2 {
+            return Err("editor_panels trong plugin.json chỉ hợp lệ khi manifest_schema >= 2.");
         }
         if self.editor_panels.len() > 16 {
             return Err("plugin.json không được khai báo quá 16 editor_panels.");
         }
         if (!self.permissions.content_read_private.is_empty()
             || !self.permissions.content_write_private.is_empty())
-            && (self.manifest_schema != 2 || self.min_host_version.is_none())
+            && (self.manifest_schema < 2 || self.min_host_version.is_none())
         {
             return Err(
-                "content_read_private và content_write_private chỉ hợp lệ khi manifest_schema = 2 và có khai báo min_host_version.",
+                "content_read_private và content_write_private chỉ hợp lệ khi manifest_schema >= 2 và có khai báo min_host_version.",
+            );
+        }
+        let uses_v3_features = !self.filters.is_empty()
+            || !self.settings_schema.is_empty()
+            || self.permissions.taxonomy_read
+            || self.permissions.media_read
+            || self.permissions.site_options_read
+            || self.permissions.plugin_settings_read
+            || !self.permissions.plugin_secrets_read.is_empty()
+            || !self.permissions.content_delete.is_empty()
+            || self.hooks.iter().any(|h| {
+                !matches!(
+                    h,
+                    crate::hooks::HookEvent::PageAfterSave
+                        | crate::hooks::HookEvent::ContentBeforeSave
+                        | crate::hooks::HookEvent::ContentAfterSave
+                )
+            });
+        if uses_v3_features && (self.manifest_schema < 3 || self.min_host_version.is_none()) {
+            return Err(
+                "Tính năng mở rộng v3 (filters, settings_schema, quyền v3, lifecycle hooks v3) yêu cầu manifest_schema >= 3 và khai báo min_host_version.",
             );
         }
         if let Some(min_ver) = &self.min_host_version {
@@ -295,16 +371,77 @@ impl PluginManifest {
         }
         let mut seen_hooks = HashSet::new();
         for event in &self.hooks {
-            if !matches!(
-                event,
-                crate::hooks::HookEvent::PageAfterSave
-                    | crate::hooks::HookEvent::ContentBeforeSave
-                    | crate::hooks::HookEvent::ContentAfterSave
-            ) {
-                return Err("Sự kiện hook không được hỗ trợ để đăng ký.");
+            if *event == crate::hooks::HookEvent::PluginManualRun || event.is_filter() {
+                return Err("Sự kiện hook không được hỗ trợ trong danh sách hooks.");
             }
             if !seen_hooks.insert(event.as_str()) {
                 return Err("Danh sách hooks không được chứa sự kiện trùng lặp.");
+            }
+        }
+        let mut seen_filters = HashSet::new();
+        for filter in &self.filters {
+            if !filter.is_filter() {
+                return Err("Chỉ các filter:* mới được khai báo trong danh sách filters.");
+            }
+            if !seen_filters.insert(filter.as_str()) {
+                return Err("Danh sách filters không được chứa sự kiện trùng lặp.");
+            }
+        }
+        if self.settings_schema.len() > 64 {
+            return Err("settings_schema không được vượt quá 64 trường.");
+        }
+        let mut seen_settings = HashSet::new();
+        let mut secret_keys = HashSet::new();
+        for field in &self.settings_schema {
+            if !crate::id::valid_snake_key(&field.key) || !seen_settings.insert(field.key.as_str())
+            {
+                return Err(
+                    "Khóa trường trong settings_schema phải là snake_case và không trùng lặp.",
+                );
+            }
+            if field.label.trim().is_empty() || field.label.chars().count() > 100 {
+                return Err("Nhãn trường trong settings_schema không hợp lệ.");
+            }
+            if field.field_type == PluginSettingFieldType::Secret {
+                if !field.default.is_null() {
+                    return Err(
+                        "Trường settings kiểu secret không được đặt giá trị mặc định khác null.",
+                    );
+                }
+                secret_keys.insert(field.key.as_str());
+            }
+            if let Some(min) = field.min
+                && !min.is_finite()
+            {
+                return Err("settings_schema min không hợp lệ.");
+            }
+            if let Some(max) = field.max
+                && !max.is_finite()
+            {
+                return Err("settings_schema max không hợp lệ.");
+            }
+            if let (Some(min), Some(max)) = (field.min, field.max)
+                && min > max
+            {
+                return Err("settings_schema yêu cầu min <= max.");
+            }
+            if field.field_type == PluginSettingFieldType::Select {
+                if field.choices.is_empty() || field.choices.len() > 64 {
+                    return Err("Trường select trong settings_schema phải có 1..=64 lựa chọn.");
+                }
+                let mut seen_choices = HashSet::new();
+                for ch in &field.choices {
+                    if ch.value.trim().is_empty()
+                        || ch.value.chars().count() > 100
+                        || ch.label.trim().is_empty()
+                        || ch.label.chars().count() > 100
+                        || !seen_choices.insert(ch.value.as_str())
+                    {
+                        return Err(
+                            "Lựa chọn của trường select trong settings_schema không hợp lệ.",
+                        );
+                    }
+                }
             }
         }
         for ct_perm in &self.permissions.content_read {
@@ -315,6 +452,23 @@ impl PluginManifest {
         for ct_perm in &self.permissions.content_write {
             if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
                 return Err("Quyền content_write không hợp lệ.");
+            }
+        }
+        for ct_perm in &self.permissions.content_delete {
+            if ct_perm != "*" && !crate::id::valid_snake_key(ct_perm) {
+                return Err("Quyền content_delete không hợp lệ.");
+            }
+        }
+        let mut seen_secrets_read = HashSet::new();
+        for secret_key in &self.permissions.plugin_secrets_read {
+            if secret_key == "*"
+                || !crate::id::valid_snake_key(secret_key)
+                || !seen_secrets_read.insert(secret_key.as_str())
+                || !secret_keys.contains(secret_key.as_str())
+            {
+                return Err(
+                    "plugin_secrets_read phải liệt kê các khóa secret hợp lệ tồn tại trong settings_schema (cấm wildcard '*').",
+                );
             }
         }
         validate_scoped_field_grants(
@@ -396,22 +550,34 @@ impl PluginManifest {
             }
             let mut has_kv_write = false;
             let mut has_content_write = false;
+            let mut has_content_delete = false;
             let mut has_content_read = false;
             let mut has_content_read_private = false;
             let mut has_content_write_private = false;
             for cap in &action.capabilities {
                 match cap.as_str() {
-                    "kv_read" | "http" => {}
+                    "kv_read"
+                    | "kv_list"
+                    | "http"
+                    | "taxonomy_read"
+                    | "media_read"
+                    | "site_options_read"
+                    | "plugin_settings_read"
+                    | "plugin_secrets_read"
+                    | "log" => {}
                     "content_read" => has_content_read = true,
                     "content_read_private" => has_content_read_private = true,
-                    "kv_write" => has_kv_write = true,
+                    "kv_write" | "kv_delete" => has_kv_write = true,
                     "content_write" => has_content_write = true,
                     "content_write_private" => has_content_write_private = true,
-                    _ => return Err("Action capability không nằm trong allowlist V1."),
+                    "content_delete" => has_content_delete = true,
+                    _ => return Err("Action capability không nằm trong allowlist."),
                 }
             }
-            if has_kv_write && has_content_write {
-                return Err("Action V1 không được kết hợp cả kv_write và content_write.");
+            if (has_kv_write as u8) + (has_content_write as u8) + (has_content_delete as u8) > 1 {
+                return Err(
+                    "Action không được kết hợp kv_write/kv_delete, content_write hoặc content_delete trong cùng một action.",
+                );
             }
             if has_content_read_private
                 && (!has_content_read || self.permissions.content_read_private.is_empty())
@@ -472,6 +638,13 @@ impl PluginManifest {
     pub fn can_write_content_type(&self, type_key: &str) -> bool {
         self.permissions
             .content_write
+            .iter()
+            .any(|k| k == "*" || k == type_key)
+    }
+
+    pub fn can_delete_content_type(&self, type_key: &str) -> bool {
+        self.permissions
+            .content_delete
             .iter()
             .any(|k| k == "*" || k == type_key)
     }
@@ -630,19 +803,22 @@ pub fn plugin_can_read_field(
         && action_caps.is_none_or(|caps| caps.iter().any(|c| c == "content_read_private"))
 }
 
-/// Checks whether a plugin executing an action with `action_caps` is permitted to write
-/// `field_entry` for `actor_role` (`270-R3`).
+/// Checks whether a plugin (in hook/filter mode `action_caps == None` or action mode `Some(caps)`)
+/// is permitted to write `field_entry` for `actor_role` (`270-R3`).
 pub fn plugin_can_write_field(
     manifest: &PluginManifest,
-    action_caps: &[String],
+    action_caps: Option<&[String]>,
     actor_role: crate::content::FieldRole,
     type_key: &str,
     field_entry: &crate::content::EffectiveFieldEntry,
 ) -> bool {
-    if !manifest.can_write_content_type(type_key)
-        || !action_caps.iter().any(|c| c == "content_write")
-    {
+    if !manifest.can_write_content_type(type_key) {
         return false;
+    }
+    if let Some(caps) = action_caps {
+        if !caps.iter().any(|c| c == "content_write") {
+            return false;
+        }
     }
     if actor_role < field_entry.definition.min_edit_role {
         return false;
@@ -654,7 +830,7 @@ pub fn plugin_can_write_field(
         return true;
     }
     manifest.has_private_write_grant(type_key, &field_entry.definition.key)
-        && action_caps.iter().any(|c| c == "content_write_private")
+        && action_caps.is_none_or(|caps| caps.iter().any(|c| c == "content_write_private"))
 }
 
 pub const PLUGIN_ABI_VERSION: u32 = 1;
@@ -873,5 +1049,82 @@ mod hook_tests {
             value["hooks"] = invalid;
             assert!(PluginManifest::from_json_str(&value.to_string()).is_err());
         }
+    }
+
+    #[test]
+    fn validates_manifest_schema_v3_features_and_rejects_misuse() {
+        let valid_v3 = serde_json::json!({
+            "id": "crm-sync",
+            "version": "1.0.0",
+            "api_version": 1,
+            "manifest_schema": 3,
+            "min_host_version": "0.1.0",
+            "name": "CRM Sync",
+            "permissions": {
+                "sqlite": ["kv_read", "kv_write"],
+                "taxonomy_read": true,
+                "media_read": true,
+                "site_options_read": true,
+                "plugin_settings_read": true,
+                "plugin_secrets_read": ["api_key"],
+                "content_delete": ["post"]
+            },
+            "hooks": ["content/after_publish", "settings/after_save"],
+            "filters": ["filter:seo/head", "filter:entry/view"],
+            "settings_schema": [
+                { "key": "api_key", "label": "API Key", "type": "secret", "required": true },
+                { "key": "mode", "label": "Mode", "type": "select", "default": "sync", "choices": [
+                    { "value": "sync", "label": "Sync" },
+                    { "value": "dry", "label": "Dry" }
+                ]}
+            ],
+            "actions": [
+                { "id": "purge_post", "required_role": "admin", "capabilities": ["content_delete", "log"] },
+                { "id": "list_kv", "required_role": "editor", "capabilities": ["kv_list", "kv_delete"] }
+            ]
+        });
+        let parsed = PluginManifest::from_json_str(&valid_v3.to_string()).expect("valid v3");
+        assert!(parsed.can_delete_content_type("post"));
+        assert!(!parsed.can_delete_content_type("page"));
+        assert_eq!(parsed.filters.len(), 2);
+
+        // Rejects v3 features without manifest_schema >= 3
+        let mut missing_schema = valid_v3.clone();
+        missing_schema["manifest_schema"] = serde_json::json!(2);
+        assert!(PluginManifest::from_json_str(&missing_schema.to_string()).is_err());
+
+        // Rejects v3 without min_host_version
+        let mut missing_host = valid_v3.clone();
+        missing_host
+            .as_object_mut()
+            .unwrap()
+            .remove("min_host_version");
+        assert!(PluginManifest::from_json_str(&missing_host.to_string()).is_err());
+
+        // Rejects plaintext default on Secret field
+        let mut secret_default = valid_v3.clone();
+        secret_default["settings_schema"][0]["default"] = serde_json::json!("sk_live_oops");
+        assert!(PluginManifest::from_json_str(&secret_default.to_string()).is_err());
+
+        // Rejects plugin_secrets_read referencing missing or wildcard key
+        let mut bad_secret_perm = valid_v3.clone();
+        bad_secret_perm["permissions"]["plugin_secrets_read"] = serde_json::json!(["*"]);
+        assert!(PluginManifest::from_json_str(&bad_secret_perm.to_string()).is_err());
+        bad_secret_perm["permissions"]["plugin_secrets_read"] = serde_json::json!(["mode"]);
+        assert!(PluginManifest::from_json_str(&bad_secret_perm.to_string()).is_err());
+
+        // Rejects filter in hooks or hook in filters
+        let mut filter_in_hooks = valid_v3.clone();
+        filter_in_hooks["hooks"] = serde_json::json!(["filter:seo/head"]);
+        assert!(PluginManifest::from_json_str(&filter_in_hooks.to_string()).is_err());
+        let mut hook_in_filters = valid_v3.clone();
+        hook_in_filters["filters"] = serde_json::json!(["content/after_publish"]);
+        assert!(PluginManifest::from_json_str(&hook_in_filters.to_string()).is_err());
+
+        // Rejects combining content_delete and kv_delete in the same action
+        let mut mixed_caps = valid_v3.clone();
+        mixed_caps["actions"][0]["capabilities"] =
+            serde_json::json!(["content_delete", "kv_delete"]);
+        assert!(PluginManifest::from_json_str(&mixed_caps.to_string()).is_err());
     }
 }

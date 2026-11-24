@@ -950,6 +950,160 @@ pub async fn hook_subscriptions(
     Ok(ids)
 }
 
+pub struct CachedActivePluginRow {
+    pub id: String,
+    pub wasm_blob: Vec<u8>,
+    pub manifest_json: String,
+    pub revision_generation: i64,
+    pub revision_digest: Option<String>,
+}
+
+pub async fn load_all_enabled_plugins_for_cache(
+    db: &SqlitePool,
+) -> Result<Vec<CachedActivePluginRow>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT p.id, p.wasm_blob, p.manifest_json, p.revision_generation, r.revision_digest
+         FROM plugins p
+         LEFT JOIN plugin_revisions r ON r.id = p.active_revision_id
+         WHERE p.enabled = 1
+         ORDER BY p.id COLLATE BINARY ASC",
+    )
+    .fetch_all(db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| CachedActivePluginRow {
+            id: row.get("id"),
+            wasm_blob: row.get("wasm_blob"),
+            manifest_json: row.get("manifest_json"),
+            revision_generation: row.get("revision_generation"),
+            revision_digest: row.get("revision_digest"),
+        })
+        .collect())
+}
+
+pub async fn insert_plugin_log_in_conn(
+    conn: &mut SqliteConnection,
+    plugin_id: &str,
+    correlation_id: &str,
+    level: &str,
+    message: &str,
+) -> Result<sqlx::sqlite::SqliteQueryResult, sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO plugin_logs (plugin_id, correlation_id, level, message) VALUES (?, ?, ?, ?)",
+    )
+    .bind(plugin_id)
+    .bind(correlation_id)
+    .bind(level)
+    .bind(message)
+    .execute(conn)
+    .await
+}
+
+pub async fn read_raw_plugin_option_map(
+    db: &SqlitePool,
+    plugin_id: &str,
+) -> Result<BTreeMap<String, serde_json::Value>, sqlx::Error> {
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT option_key, value_json FROM theme_option_values WHERE owner_kind = 'plugin' AND owner_id = ?",
+    )
+    .bind(plugin_id)
+    .fetch_all(db)
+    .await?;
+    let mut map = BTreeMap::new();
+    for (k, v_json) in rows {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&v_json) {
+            map.insert(k, v);
+        }
+    }
+    Ok(map)
+}
+
+pub async fn count_entries_for_host_list(
+    db: &SqlitePool,
+    type_key: &str,
+    locale: Option<&str>,
+    published_only: bool,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM content_entries
+         WHERE content_type_key = ?
+           AND (? IS NULL OR locale = ?)
+           AND (? = 0 OR publication_status = 'published')",
+    )
+    .bind(type_key)
+    .bind(locale)
+    .bind(locale)
+    .bind(if published_only { 1i64 } else { 0i64 })
+    .fetch_one(db)
+    .await
+}
+
+pub async fn delete_entry_with_plugin_fence(
+    db: &SqlitePool,
+    actor: &crate::auth::SessionContext,
+    type_key: &str,
+    entry_id: i64,
+    expected_version: i64,
+    fence: &crate::storage::entries::PluginActionFence,
+) -> crate::error::ApiResult<()> {
+    use crate::error::ApiError;
+    if matches!(type_key, "pattern" | "section") {
+        return Err(ApiError::bad_request(
+            "Không thể xóa Pattern/Section qua action plugin.",
+        ));
+    }
+    if expected_version < 1 {
+        return Err(ApiError::bad_request("expected_version không hợp lệ."));
+    }
+    let mut tx = db.begin().await?;
+    if !is_plugin_generation_active(&mut *tx, &fence.plugin_id, fence.expected_generation).await? {
+        return Err(ApiError::conflict(
+            "Plugin đã bị vô hiệu hóa hoặc thay đổi phiên bản trong lúc thực thi.",
+        ));
+    }
+    if !is_actor_role_active(&mut *tx, actor.user.id, &fence.required_role).await? {
+        return Err(ApiError::forbidden("Quyền của tài khoản đã bị thu hồi."));
+    }
+    let result = sqlx::query(
+        "DELETE FROM content_entries WHERE content_type_key = ? AND id = ? AND version = ?",
+    )
+    .bind(type_key)
+    .bind(entry_id)
+    .bind(expected_version)
+    .execute(&mut *tx)
+    .await?;
+    if result.rows_affected() == 0 {
+        let current_ver: Option<i64> = sqlx::query_scalar(
+            "SELECT version FROM content_entries WHERE content_type_key = ? AND id = ?",
+        )
+        .bind(type_key)
+        .bind(entry_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        return match current_ver {
+            Some(_) => Err(ApiError::precondition_failed(
+                "Nội dung đã bị thay đổi trước đó (xung đột version).",
+            )),
+            None => Err(ApiError::not_found("Không tìm thấy nội dung cần xóa.")),
+        };
+    }
+    if type_key == "page" {
+        crate::storage::settings::bump_reading_version_on_deleted_entry_in_tx(&mut tx, entry_id)
+            .await?;
+    }
+    sqlx::query(
+        "DELETE FROM seo_public_media_refs WHERE source_kind = 'entry_seo' AND source_id = ?",
+    )
+    .bind(entry_id)
+    .execute(&mut *tx)
+    .await?;
+    crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn is_actor_role_active(
     conn: &mut sqlx::SqliteConnection,
     user_id: i64,

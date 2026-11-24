@@ -1,7 +1,18 @@
+use std::{
+    collections::BTreeMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
+
 use axum::http::StatusCode;
+use opendash_core::hooks::{
+    EnvelopeKind, ExecutionPrincipal, HookEvent, HookExecutionMode, PluginEnvelopeV2,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::SqlitePool;
+use tokio::sync::RwLock;
 
 use crate::storage::plugin as plugin_storage;
 
@@ -10,6 +21,17 @@ use super::{
     package::PluginPackage,
     runtime::{PluginError, PluginRuntime},
 };
+
+#[derive(Debug, Clone)]
+pub struct CachedActivePlugin {
+    pub manifest: PluginManifest,
+    #[allow(dead_code)]
+    pub wasm_blob: Vec<u8>,
+    #[allow(dead_code)]
+    pub revision_generation: i64,
+    #[allow(dead_code)]
+    pub revision_digest: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginSummary {
@@ -57,34 +79,99 @@ pub struct PluginManager {
     runtime: PluginRuntime,
     active_action_leases: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     allow_loopback: bool,
-    plugins_root: std::path::PathBuf,
+    plugins_root: PathBuf,
+    #[allow(dead_code)]
+    secrets_root: PathBuf,
+    manifest_cache: Arc<RwLock<Option<BTreeMap<String, CachedActivePlugin>>>>,
     recovery: crate::config::RecoveryState,
 }
 
 impl PluginManager {
     pub fn new(db_pool: SqlitePool, allow_loopback: bool) -> Self {
-        let plugins_root = crate::paths::SitePaths::from_env()
-            .map(|p| p.plugins_dir())
-            .unwrap_or_else(|_| std::env::temp_dir().join("opendash_plugins_default"));
-        Self::with_plugins_root(db_pool, allow_loopback, plugins_root)
+        let (plugins_root, secrets_root) = match crate::paths::SitePaths::from_env() {
+            Ok(p) => (p.plugins_dir(), p.secrets_dir()),
+            Err(_) => (
+                std::env::temp_dir().join("opendash_plugins_default"),
+                std::env::temp_dir().join("opendash_secrets_default"),
+            ),
+        };
+        Self::with_roots(db_pool, allow_loopback, plugins_root, secrets_root)
     }
 
     pub fn with_plugins_root(
         db_pool: SqlitePool,
         allow_loopback: bool,
-        plugins_root: std::path::PathBuf,
+        plugins_root: PathBuf,
+    ) -> Self {
+        let secrets_root = crate::paths::SitePaths::from_env()
+            .map(|p| p.secrets_dir())
+            .unwrap_or_else(|_| {
+                plugins_root
+                    .parent()
+                    .unwrap_or(&plugins_root)
+                    .join("database")
+                    .join("secrets")
+            });
+        Self::with_roots(db_pool, allow_loopback, plugins_root, secrets_root)
+    }
+
+    pub fn with_roots(
+        db_pool: SqlitePool,
+        allow_loopback: bool,
+        plugins_root: PathBuf,
+        secrets_root: PathBuf,
     ) -> Self {
         // Layout dirs created lazily; startup quarantine runs once in main.rs.
         Self {
             db_pool,
-            runtime: PluginRuntime::new(),
+            runtime: PluginRuntime::with_secrets_root(secrets_root.clone()),
             active_action_leases: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
             allow_loopback,
             plugins_root,
+            secrets_root,
+            manifest_cache: Arc::new(RwLock::new(None)),
             recovery: crate::config::RecoveryState::new(false),
         }
+    }
+
+    pub async fn invalidate_cache(&self) {
+        *self.manifest_cache.write().await = None;
+    }
+
+    async fn ensure_manifest_cache(&self) -> Result<BTreeMap<String, CachedActivePlugin>, String> {
+        {
+            let guard = self.manifest_cache.read().await;
+            if let Some(ref map) = *guard {
+                return Ok(map.clone());
+            }
+        }
+        let rows = plugin_storage::load_all_enabled_plugins_for_cache(&self.db_pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut built = BTreeMap::new();
+        for row in rows {
+            match PluginManifest::from_json_str(&row.manifest_json) {
+                Ok(manifest) if manifest.id == row.id => {
+                    built.insert(
+                        row.id,
+                        CachedActivePlugin {
+                            manifest,
+                            wasm_blob: row.wasm_blob,
+                            revision_generation: row.revision_generation,
+                            revision_digest: row.revision_digest,
+                        },
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    eprintln!("Invalid cached manifest {}: {error}", row.id);
+                }
+            }
+        }
+        *self.manifest_cache.write().await = Some(built.clone());
+        Ok(built)
     }
 
     pub fn with_recovery_state(mut self, recovery: crate::config::RecoveryState) -> Self {
@@ -220,12 +307,23 @@ impl PluginManager {
         for cap in &action_decl.capabilities {
             let allowed = match cap.as_str() {
                 "kv_read" => manifest.has_sqlite_perm("kv_read"),
-                "kv_write" => manifest.has_sqlite_perm("kv_write"),
+                "kv_list" => manifest.has_sqlite_perm("kv_read"),
+                "kv_write" | "kv_delete" => manifest.has_sqlite_perm("kv_write"),
                 "content_read" => !manifest.permissions.content_read.is_empty(),
                 "content_read_private" => !manifest.permissions.content_read_private.is_empty(),
                 "content_write" => !manifest.permissions.content_write.is_empty(),
                 "content_write_private" => !manifest.permissions.content_write_private.is_empty(),
-                "http" => !manifest.permissions.http.is_empty(),
+                "content_delete" => !manifest.permissions.content_delete.is_empty(),
+                "http" => {
+                    !manifest.permissions.http.is_empty()
+                        || !manifest.permissions.network.is_empty()
+                }
+                "taxonomy_read" => manifest.permissions.taxonomy_read,
+                "media_read" => manifest.permissions.media_read,
+                "site_options_read" => manifest.permissions.site_options_read,
+                "plugin_settings_read" => manifest.permissions.plugin_settings_read,
+                "plugin_secrets_read" => !manifest.permissions.plugin_secrets_read.is_empty(),
+                "log" => true,
                 _ => false,
             };
             if !allowed {
@@ -254,17 +352,46 @@ impl PluginManager {
         )
         .await;
 
+        let principal = match actor.user.role {
+            crate::auth::Role::Admin => ExecutionPrincipal::Admin,
+            crate::auth::Role::Editor => ExecutionPrincipal::Editor,
+        };
+        let runtime_input = if manifest.manifest_schema >= 3 {
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let locale = filtered_input
+                .get("locale")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned);
+            serde_json::to_value(PluginEnvelopeV2::new(
+                EnvelopeKind::Action,
+                format!("action:{action_id}"),
+                now_ms,
+                correlation_id.clone(),
+                locale,
+                principal,
+                0,
+                filtered_input,
+            ))
+            .unwrap_or(Value::Null)
+        } else {
+            filtered_input
+        };
+
         let action_res = self
             .runtime
-            .run_plugin_action(
+            .run_plugin_action_with_principal(
                 wasm_blob,
                 manifest.clone(),
-                filtered_input,
+                runtime_input,
                 self.db_pool.clone(),
                 correlation_id.clone(),
                 self.allow_loopback,
                 Some(revision_generation),
-                opendash_core::hooks::HookExecutionMode::Standard,
+                HookExecutionMode::Standard,
+                principal,
                 None,
                 Some(action_decl.capabilities.clone()),
                 Some(crate::plugin::runtime::ActionActorFence {
@@ -335,7 +462,7 @@ impl PluginManager {
                 };
                 if !opendash_core::plugin::plugin_can_write_field(
                     &manifest,
-                    &action_decl.capabilities,
+                    Some(&action_decl.capabilities),
                     actor_role,
                     &cmd.type_key,
                     field_entry,
@@ -532,6 +659,52 @@ impl PluginManager {
             });
         }
 
+        if let Some(del) = exec_out.staged_content_delete {
+            if !manifest.can_delete_content_type(&del.type_key) {
+                return Err(mk_err(
+                    StatusCode::FORBIDDEN,
+                    "content_delete_denied",
+                    "Plugin không có quyền xóa loại nội dung này.".into(),
+                ));
+            }
+            let fence = crate::storage::entries::PluginActionFence {
+                plugin_id: id.to_string(),
+                expected_generation: revision_generation,
+                required_role: action_decl.required_role.clone(),
+            };
+            if let Err(err) = plugin_storage::delete_entry_with_plugin_fence(
+                &self.db_pool,
+                actor,
+                &del.type_key,
+                del.entry_id,
+                del.expected_version,
+                &fence,
+            )
+            .await
+            {
+                return Err(mk_err(err.0, "content_delete_fenced", err.1.to_string()));
+            }
+            plugin_storage::record_plugin_execution_result(
+                &self.db_pool,
+                id,
+                &correlation_id,
+                "info",
+                "Thực thi action thành công",
+                None,
+            )
+            .await;
+            return Ok(PluginRunResponse {
+                success: true,
+                data: Some(serde_json::json!({
+                    "output": exec_out.output,
+                    "deleted_entry_id": del.entry_id,
+                })),
+                error: None,
+                code: None,
+                correlation_id,
+            });
+        }
+
         plugin_storage::record_plugin_execution_result(
             &self.db_pool,
             id,
@@ -590,6 +763,7 @@ impl PluginManager {
             &package.blocks,
         )
         .await?;
+        self.invalidate_cache().await;
 
         self.get_plugin(&package.manifest.id)
             .await
@@ -606,7 +780,11 @@ impl PluginManager {
         id: &str,
         expected_cas_version: Option<i64>,
     ) -> Result<i64, plugin_storage::PluginStorageError> {
-        plugin_storage::set_plugin_enabled_cas(&self.db_pool, id, false, expected_cas_version).await
+        let cas =
+            plugin_storage::set_plugin_enabled_cas(&self.db_pool, id, false, expected_cas_version)
+                .await?;
+        self.invalidate_cache().await;
+        Ok(cas)
     }
 
     pub async fn enable_plugin_cas(
@@ -614,7 +792,11 @@ impl PluginManager {
         id: &str,
         expected_cas_version: Option<i64>,
     ) -> Result<i64, plugin_storage::PluginStorageError> {
-        plugin_storage::set_plugin_enabled_cas(&self.db_pool, id, true, expected_cas_version).await
+        let cas =
+            plugin_storage::set_plugin_enabled_cas(&self.db_pool, id, true, expected_cas_version)
+                .await?;
+        self.invalidate_cache().await;
+        Ok(cas)
     }
 
     pub async fn list_plugins(&self) -> Result<Vec<PluginSummary>, String> {
@@ -626,11 +808,15 @@ impl PluginManager {
     }
 
     pub async fn disable_plugin(&self, id: &str) -> Result<(), String> {
-        plugin_storage::set_plugin_enabled(&self.db_pool, id, false).await
+        plugin_storage::set_plugin_enabled(&self.db_pool, id, false).await?;
+        self.invalidate_cache().await;
+        Ok(())
     }
 
     pub async fn enable_plugin(&self, id: &str) -> Result<(), String> {
-        plugin_storage::set_plugin_enabled(&self.db_pool, id, true).await
+        plugin_storage::set_plugin_enabled(&self.db_pool, id, true).await?;
+        self.invalidate_cache().await;
+        Ok(())
     }
 
     pub async fn run_plugin(
@@ -644,19 +830,50 @@ impl PluginManager {
         self.run_plugin_correlated(id, input, correlation_id).await
     }
 
-    pub async fn hook_subscriptions(
-        &self,
-        event: opendash_core::hooks::HookEvent,
-    ) -> Result<Vec<String>, String> {
-        plugin_storage::hook_subscriptions(&self.db_pool, event).await
+    pub async fn hook_subscriptions(&self, event: HookEvent) -> Result<Vec<String>, String> {
+        let cache = self.ensure_manifest_cache().await?;
+        Ok(cache
+            .into_iter()
+            .filter_map(|(id, item)| item.manifest.hooks.contains(&event).then_some(id))
+            .collect())
     }
 
     pub async fn content_hook_subscriptions(
         &self,
-        event: opendash_core::hooks::HookEvent,
+        event: HookEvent,
         type_key: &str,
     ) -> Result<Vec<(i32, String)>, String> {
-        plugin_storage::content_hook_subscriptions(&self.db_pool, event, type_key).await
+        let cache = self.ensure_manifest_cache().await?;
+        let mut subs: Vec<(i32, String)> = cache
+            .into_iter()
+            .filter_map(|(id, item)| {
+                (item.manifest.hooks.contains(&event)
+                    && item.manifest.can_read_content_type(type_key))
+                .then_some((item.manifest.hook_priority, id))
+            })
+            .collect();
+        subs.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+        Ok(subs)
+    }
+
+    #[allow(dead_code)]
+    pub async fn filter_subscriptions(
+        &self,
+        event: HookEvent,
+        type_key: Option<&str>,
+    ) -> Result<Vec<(i32, String)>, String> {
+        let cache = self.ensure_manifest_cache().await?;
+        let mut subs: Vec<(i32, String)> = cache
+            .into_iter()
+            .filter_map(|(id, item)| {
+                let matches_type =
+                    type_key.is_none_or(|tk| item.manifest.can_read_content_type(tk));
+                (item.manifest.filters.contains(&event) && matches_type)
+                    .then_some((item.manifest.hook_priority, id))
+            })
+            .collect();
+        subs.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+        Ok(subs)
     }
 
     pub async fn filter_content_payload_for_plugin(
@@ -666,11 +883,10 @@ impl PluginManager {
         actor_role: opendash_core::content::FieldRole,
         payload: &mut Value,
     ) {
-        let manifest_opt = plugin_storage::load_plugin_executable(&self.db_pool, plugin_id)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|(_, manifest_json, _)| PluginManifest::from_json_str(&manifest_json).ok());
+        let manifest_opt = match self.ensure_manifest_cache().await {
+            Ok(cache) => cache.get(plugin_id).map(|c| c.manifest.clone()),
+            Err(_) => None,
+        };
         let schema_opt =
             crate::storage::content::load_effective_content_schema(&self.db_pool, type_key)
                 .await
@@ -771,7 +987,81 @@ impl PluginManager {
         id: &str,
         input: Value,
         correlation_id: String,
-        execution_mode: opendash_core::hooks::HookExecutionMode,
+        execution_mode: HookExecutionMode,
+        timeout_override: Option<std::time::Duration>,
+    ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
+        self.run_plugin_with_principal(
+            id,
+            None,
+            input,
+            correlation_id,
+            execution_mode,
+            ExecutionPrincipal::Admin,
+            timeout_override,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_plugin_dispatch(
+        &self,
+        id: &str,
+        kind: EnvelopeKind,
+        legacy_input: Value,
+        event_str: &str,
+        occurred_at_ms: u64,
+        correlation_id: String,
+        locale: Option<String>,
+        principal: ExecutionPrincipal,
+        dispatch_depth: u8,
+        payload: Value,
+        execution_mode: HookExecutionMode,
+        timeout_override: Option<std::time::Duration>,
+    ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
+        if matches!(kind, EnvelopeKind::Route | EnvelopeKind::Cron) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                PluginRunResponse {
+                    success: false,
+                    data: None,
+                    error: Some("Envelope kind route/cron chưa mở ở V1.".into()),
+                    code: Some("unsupported_envelope_kind".into()),
+                    correlation_id,
+                },
+            ));
+        }
+        let v2_envelope = serde_json::to_value(PluginEnvelopeV2::new(
+            kind,
+            event_str,
+            occurred_at_ms,
+            correlation_id.clone(),
+            locale,
+            principal,
+            dispatch_depth,
+            payload,
+        ))
+        .unwrap_or(Value::Null);
+        self.run_plugin_with_principal(
+            id,
+            Some(v2_envelope),
+            legacy_input,
+            correlation_id,
+            execution_mode,
+            principal,
+            timeout_override,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_plugin_with_principal(
+        &self,
+        id: &str,
+        v2_input: Option<Value>,
+        legacy_input: Value,
+        correlation_id: String,
+        execution_mode: HookExecutionMode,
+        principal: ExecutionPrincipal,
         timeout_override: Option<std::time::Duration>,
     ) -> Result<PluginRunResponse, (StatusCode, PluginRunResponse)> {
         let row_opt = plugin_storage::load_plugin_executable_with_generation(&self.db_pool, id)
@@ -861,9 +1151,15 @@ impl PluginManager {
             }
         }
 
+        let input = if manifest.manifest_schema >= 3 {
+            v2_input.unwrap_or(legacy_input)
+        } else {
+            legacy_input
+        };
+
         let run_res = self
             .runtime
-            .run_plugin_with_mode(
+            .run_plugin_action_with_principal(
                 wasm_blob,
                 manifest,
                 input,
@@ -872,9 +1168,13 @@ impl PluginManager {
                 self.allow_loopback,
                 Some(revision_generation),
                 execution_mode,
+                principal,
                 timeout_override,
+                None,
+                None,
             )
-            .await;
+            .await
+            .map(|r| r.output);
 
         match run_res {
             Ok(val) => {

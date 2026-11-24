@@ -231,6 +231,26 @@ impl PluginPackage {
                         return Err("Import 'opendash_v1:host_call' phải là hàm.");
                     }
                 }
+                ("opendash_v1", "host_last_resp_len") => {
+                    if let ExternType::Func(func_ty) = import.ty() {
+                        if !func_ty.params().is_empty() || func_ty.results() != [ValType::I32] {
+                            return Err("Import 'opendash_v1:host_last_resp_len' sai chữ ký hàm.");
+                        }
+                    } else {
+                        return Err("Import 'opendash_v1:host_last_resp_len' phải là hàm.");
+                    }
+                }
+                ("opendash_v1", "host_read_last_resp") => {
+                    if let ExternType::Func(func_ty) = import.ty() {
+                        if func_ty.params() != [ValType::I32, ValType::I32]
+                            || func_ty.results() != [ValType::I32]
+                        {
+                            return Err("Import 'opendash_v1:host_read_last_resp' sai chữ ký hàm.");
+                        }
+                    } else {
+                        return Err("Import 'opendash_v1:host_read_last_resp' phải là hàm.");
+                    }
+                }
                 ("env", "abort") => {
                     if let ExternType::Func(func_ty) = import.ty() {
                         if func_ty.params()
