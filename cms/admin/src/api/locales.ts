@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export type LocaleDirection = 'ltr' | 'rtl';
@@ -14,6 +15,7 @@ export interface SiteLocale {
 
 export interface SiteLocalesSnapshot {
   version: number;
+  multilingual_enabled: boolean;
   max_locales: number;
   default_code: string;
   items: SiteLocale[];
@@ -38,6 +40,8 @@ export interface AdminLocaleState {
   defaultLocale: SiteLocale | null;
   version: number;
   maxLocales: number;
+  multilingualEnabled: boolean;
+  hasStoredSecondaryLocales: boolean;
   hasMultipleLocales: boolean;
   hasMultiplePublicLocales: boolean;
 }
@@ -56,8 +60,10 @@ export function deriveAdminLocaleState(snapshot: SiteLocalesSnapshot): AdminLoca
     defaultLocale,
     version: snapshot.version,
     maxLocales: snapshot.max_locales,
-    hasMultipleLocales: allLocales.length > 1,
-    hasMultiplePublicLocales: enabledLocales.length > 1,
+    multilingualEnabled: snapshot.multilingual_enabled,
+    hasStoredSecondaryLocales: allLocales.length > 1,
+    hasMultipleLocales: snapshot.multilingual_enabled && allLocales.length > 1,
+    hasMultiplePublicLocales: snapshot.multilingual_enabled && enabledLocales.length > 1,
   };
 }
 
@@ -67,6 +73,8 @@ export const EMPTY_ADMIN_LOCALE_STATE: AdminLocaleState = {
   defaultLocale: null,
   version: 1,
   maxLocales: 20,
+  multilingualEnabled: false,
+  hasStoredSecondaryLocales: false,
   hasMultipleLocales: false,
   hasMultiplePublicLocales: false,
 };
@@ -74,7 +82,7 @@ export const EMPTY_ADMIN_LOCALE_STATE: AdminLocaleState = {
 export function listLocales(signal?: AbortSignal): Promise<SiteLocalesSnapshot> {
   return requestJson<SiteLocalesSnapshot>('/api/admin/locales', {
     signal,
-    defaultErrorMessage: 'Không thể tải danh sách ngôn ngữ nội dung.',
+    defaultErrorMessage: tStatic("api.locales.list_failed"),
   });
 }
 
@@ -89,7 +97,7 @@ export function createLocale(
     ifMatchVersion: expectedVersion,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể thêm ngôn ngữ mới.',
+    defaultErrorMessage: tStatic("api.locales.create_failed"),
   });
 }
 
@@ -105,7 +113,7 @@ export function updateLocale(
     ifMatchVersion: expectedVersion,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể cập nhật ngôn ngữ.',
+    defaultErrorMessage: tStatic("api.locales.update_failed"),
   });
 }
 
@@ -122,7 +130,79 @@ export function setDefaultLocale(
       ifMatchVersion: expectedVersion,
       contentType: 'application/json',
       body: JSON.stringify({}),
-      defaultErrorMessage: 'Không thể đặt ngôn ngữ mặc định.',
+      defaultErrorMessage: tStatic("api.locales.default_failed"),
     },
   );
+}
+
+export interface DeleteLocaleResponse {
+  snapshot: SiteLocalesSnapshot;
+  deleted_code: string;
+  soft_deleted: boolean;
+  orphan_total: number;
+}
+
+export interface OrphanedLocaleCounts {
+  entries: number;
+  terms: number;
+  settings: number;
+  menu_slots: number;
+  routes: number;
+  projections: number;
+  media_seo_refs: number;
+  total: number;
+}
+
+export interface OrphanedLocaleSummary {
+  code: string;
+  bcp47_tag: string;
+  label: string;
+  deleted_at: string;
+  counts: OrphanedLocaleCounts;
+}
+
+export interface OrphanedLocalesSnapshot {
+  version: number;
+  items: OrphanedLocaleSummary[];
+}
+
+export interface PurgeOrphanLocaleResult {
+  snapshot: OrphanedLocalesSnapshot;
+  purged_code: string;
+  deleted: OrphanedLocaleCounts;
+}
+
+export function setMultilingualEnabled(
+  enabled: boolean, expectedVersion: number, csrfToken: string,
+): Promise<SiteLocalesSnapshot> {
+  return requestJson<SiteLocalesSnapshot>('/api/admin/locales/multilingual', {
+    method: 'PUT', csrfToken, ifMatchVersion: expectedVersion,
+    contentType: 'application/json', body: JSON.stringify({ enabled }),
+    defaultErrorMessage: tStatic("api.locales.toggle_failed"),
+  });
+}
+
+export function deleteLocale(
+  code: string, expectedVersion: number, csrfToken: string,
+): Promise<DeleteLocaleResponse> {
+  return requestJson<DeleteLocaleResponse>(`/api/admin/locales/${encodeURIComponent(code)}`, {
+    method: 'DELETE', csrfToken, ifMatchVersion: expectedVersion,
+    defaultErrorMessage: tStatic("api.locales.delete_failed"),
+  });
+}
+
+export function listOrphanedLocales(signal?: AbortSignal): Promise<OrphanedLocalesSnapshot> {
+  return requestJson<OrphanedLocalesSnapshot>('/api/admin/locales/orphans', {
+    signal, defaultErrorMessage: tStatic("api.locales.orphans_failed"),
+  });
+}
+
+export function purgeOrphanedLocale(
+  code: string, confirmCode: string, expectedVersion: number, csrfToken: string,
+): Promise<PurgeOrphanLocaleResult> {
+  return requestJson<PurgeOrphanLocaleResult>(`/api/admin/locales/orphans/${encodeURIComponent(code)}/purge`, {
+    method: 'POST', csrfToken, ifMatchVersion: expectedVersion,
+    contentType: 'application/json', body: JSON.stringify({ confirm_code: confirmCode }),
+    defaultErrorMessage: tStatic("api.locales.purge_failed"),
+  });
 }

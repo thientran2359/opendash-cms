@@ -1,3 +1,5 @@
+import { tStatic } from '../i18n/index.tsx';
+
 export interface PermalinkConflictItem {
   path: string;
   new_target: string;
@@ -7,12 +9,14 @@ export interface PermalinkConflictItem {
 export class ApiClientError extends Error {
   status: number;
   readonly conflicts?: PermalinkConflictItem[];
+  readonly errorCode?: string;
 
-  constructor(status: number, message: string, conflicts?: PermalinkConflictItem[]) {
+  constructor(status: number, message: string, conflicts?: PermalinkConflictItem[], errorCode?: string) {
     super(message);
     this.name = 'ApiClientError';
     this.status = status;
     this.conflicts = conflicts;
+    this.errorCode = errorCode;
   }
 }
 
@@ -57,10 +61,33 @@ function buildRequestHeaders(
   return headers;
 }
 
+function responseError(res: Response, text: string, defaultMessage: string, oversizeMessage?: string): ApiClientError {
+  let msg = text;
+  let conflicts: PermalinkConflictItem[] | undefined;
+  try {
+    const errObj = JSON.parse(text);
+    if (errObj && typeof errObj.message === 'string') msg = errObj.message;
+    else if (errObj && typeof errObj.error === 'string') msg = errObj.error;
+    if (res.status === 409 && Array.isArray(errObj?.conflicts)) {
+      conflicts = errObj.conflicts.filter((item: unknown): item is PermalinkConflictItem => {
+        if (!item || typeof item !== 'object') return false;
+        const row = item as Record<string, unknown>;
+        return typeof row.path === 'string' && typeof row.new_target === 'string'
+          && typeof row.existing_target === 'string';
+      }).slice(0, 20);
+    }
+  } catch {
+    // Plain text error response.
+  }
+  if (res.status === 413 && oversizeMessage) msg = oversizeMessage;
+  return new ApiClientError(res.status, msg || defaultMessage, conflicts,
+    res.headers.get('X-OpenDash-Error-Code') ?? undefined);
+}
+
 export async function handleResponseText(res: Response, defaultMessage: string): Promise<string> {
   const text = await res.text();
   if (!res.ok) {
-    throw new ApiClientError(res.status, text || defaultMessage);
+    throw responseError(res, text, defaultMessage);
   }
   return text;
 }
@@ -118,36 +145,13 @@ export async function requestJson<T>(url: string, options: ApiRequestOptions): P
 
   const text = await res.text();
   if (!res.ok) {
-    let msg = text;
-    let conflicts: PermalinkConflictItem[] | undefined;
-    try {
-      const errObj = JSON.parse(text);
-      if (errObj && typeof errObj.error === 'string') {
-        msg = errObj.error;
-      }
-      if (res.status === 409 && Array.isArray(errObj?.conflicts)) {
-        // Only expose the known structured permalink conflict shape. Other
-        // errors keep their existing message/status handling.
-        conflicts = errObj.conflicts.filter((item: unknown): item is PermalinkConflictItem => {
-          if (!item || typeof item !== 'object') return false;
-          const row = item as Record<string, unknown>;
-          return typeof row.path === 'string' && typeof row.new_target === 'string'
-            && typeof row.existing_target === 'string';
-        }).slice(0, 20);
-      }
-    } catch {
-      // plain text error response
-    }
-    if (res.status === 413 && options.oversizeErrorMessage) {
-      msg = options.oversizeErrorMessage;
-    }
-    throw new ApiClientError(res.status, msg || options.defaultErrorMessage, conflicts);
+    throw responseError(res, text, options.defaultErrorMessage, options.oversizeErrorMessage);
   }
 
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new ApiClientError(res.status, 'Phản hồi từ máy chủ không phải là JSON hợp lệ.');
+    throw new ApiClientError(res.status, tStatic("api.client.invalid_json"));
   }
 }
 
@@ -160,6 +164,6 @@ export interface HealthResponse {
 export async function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return requestJson<HealthResponse>('/api/health', {
     signal,
-    defaultErrorMessage: 'Không kiểm tra được trạng thái máy chủ.',
+    defaultErrorMessage: tStatic("api.client.health_failed"),
   });
 }

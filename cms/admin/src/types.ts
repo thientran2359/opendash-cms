@@ -218,3 +218,23 @@ export interface PluginSettingsSnapshot {
   values: Record<string, unknown>;
   updated_at: string;
 }
+
+export interface CmsLocaleOption {
+  code: string;
+  bcp47: string;
+  native_name: string;
+  english_name: string;
+  direction: 'ltr' | 'rtl';
+  installed: boolean;
+  translation_coverage: number;
+}
+
+export interface AdminI18nBootstrap {
+  configured_locale: string;
+  effective_locale: 'en' | 'vi';
+  effective_bcp47: string;
+  effective_direction: 'ltr' | 'rtl';
+  configured_installed: boolean;
+  catalog_version: string;
+  available_locales: CmsLocaleOption[];
+}

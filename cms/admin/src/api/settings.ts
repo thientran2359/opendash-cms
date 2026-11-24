@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import type { BlockFieldSpec } from '../types.ts';
 import { requestJson } from './client.ts';
 
@@ -6,12 +7,13 @@ export interface GeneralSettings {
   site_title: string;
   tagline: string;
   timezone: string;
+  cms_locale: string;
   version: number;
   has_override?: boolean;
   locale?: string;
 }
 
-export type GeneralSettingsDraft = Pick<GeneralSettings, 'site_title' | 'tagline' | 'timezone'>;
+export type GeneralSettingsDraft = Pick<GeneralSettings, 'site_title' | 'tagline' | 'timezone'> & { cms_locale?: string };
 
 export interface TimezoneCatalog {
   version: string;
@@ -28,14 +30,14 @@ export function getGeneralSettings(
 ): Promise<GeneralSettings> {
   return requestJson<GeneralSettings>(`/api/admin/settings/general${localeQuery(locale)}`, {
     signal,
-    defaultErrorMessage: 'Không tải được cài đặt website.',
+    defaultErrorMessage: tStatic("api.settings.load_general"),
   });
 }
 
 export function getTimezoneCatalog(signal?: AbortSignal): Promise<TimezoneCatalog> {
   return requestJson<TimezoneCatalog>('/api/admin/settings/timezones', {
     signal,
-    defaultErrorMessage: 'Không tải được danh sách múi giờ.',
+    defaultErrorMessage: tStatic("api.settings.load_timezones"),
   });
 }
 
@@ -51,7 +53,7 @@ export function saveGeneralSettings(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(draft),
-    defaultErrorMessage: 'Không lưu được cài đặt website.',
+    defaultErrorMessage: tStatic("api.settings.save_general"),
   });
 }
 
@@ -71,7 +73,7 @@ export type PublicSiteSettingsDraft = Pick<
 export function getPublicSiteSettings(signal?: AbortSignal): Promise<PublicSiteSettings> {
   return requestJson<PublicSiteSettings>('/api/admin/settings/public', {
     signal,
-    defaultErrorMessage: 'Không tải được cài đặt công khai.',
+    defaultErrorMessage: tStatic("api.settings.load_public"),
   });
 }
 
@@ -86,7 +88,7 @@ export function savePublicSiteSettings(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(draft),
-    defaultErrorMessage: 'Không lưu được cài đặt công khai.',
+    defaultErrorMessage: tStatic("api.settings.save_public"),
   });
 }
 
@@ -103,7 +105,7 @@ export type PermalinkSettingsDraft = Omit<PermalinkSettings, 'version'>;
 export function getPermalinkSettings(signal?: AbortSignal): Promise<PermalinkSettings> {
   return requestJson<PermalinkSettings>('/api/admin/settings/permalinks', {
     signal,
-    defaultErrorMessage: 'Không thể tải cấu hình permalink.',
+    defaultErrorMessage: tStatic("api.settings.load_permalinks"),
   });
 }
 
@@ -118,7 +120,7 @@ export function savePermalinkSettings(
     ifMatchVersion: expectedVersion,
     contentType: 'application/json',
     body: JSON.stringify(draft),
-    defaultErrorMessage: 'Không thể lưu cấu hình permalink.',
+    defaultErrorMessage: tStatic("api.settings.save_permalinks"),
   });
 }
 
@@ -142,7 +144,7 @@ export function getReadingSettings(
 ): Promise<ReadingSettings> {
   return requestJson<ReadingSettings>(`/api/admin/settings/reading${localeQuery(locale)}`, {
     signal,
-    defaultErrorMessage: 'Không thể tải cấu hình trang chủ và trang bài viết.',
+    defaultErrorMessage: tStatic("api.settings.load_reading"),
   });
 }
 
@@ -158,7 +160,7 @@ export function saveReadingSettings(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(draft),
-    defaultErrorMessage: 'Không thể lưu cấu hình trang chủ và trang bài viết.',
+    defaultErrorMessage: tStatic("api.settings.save_reading"),
   });
 }
 
@@ -171,7 +173,7 @@ export interface GlobalSiteOptionsSnapshot {
 export function getGlobalSiteOptions(signal?: AbortSignal): Promise<GlobalSiteOptionsSnapshot> {
   return requestJson<GlobalSiteOptionsSnapshot>('/api/admin/settings/site-options', {
     signal,
-    defaultErrorMessage: 'Không thể tải tùy chọn toàn trang.',
+    defaultErrorMessage: tStatic("api.settings.load_site_options"),
   });
 }
 
@@ -186,6 +188,6 @@ export function saveGlobalSiteOptions(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify({ values }),
-    defaultErrorMessage: 'Không thể lưu tùy chọn toàn trang.',
+    defaultErrorMessage: tStatic("api.settings.save_site_options"),
   });
 }

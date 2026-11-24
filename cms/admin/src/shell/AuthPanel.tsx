@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '../i18n/index.tsx';
 import { AdminButton } from '../components/AdminPrimitives.tsx';
 import { TextInput } from '../components/FormPrimitives.tsx';
 import { AuthUser } from '../types.ts';
@@ -35,6 +36,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
   onLogin,
   onLogout,
 }) => {
+  const { t } = useI18n();
   return (
     <div id="auth-bar">
       {!user ? (
@@ -49,7 +51,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
           <TextInput
             id="auth-username"
             className={AUTH_INPUT_CLASS}
-            placeholder="Tên đăng nhập"
+            placeholder={t('shell.auth_username')}
             autoComplete="username"
             value={authUsername}
             onValueChange={onUsernameChange}
@@ -59,7 +61,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             id="auth-password"
             type="password"
             className={AUTH_INPUT_CLASS}
-            placeholder="Mật khẩu"
+            placeholder={t('shell.auth_password')}
             autoComplete="current-password"
             value={authPassword}
             onValueChange={onPasswordChange}
@@ -73,7 +75,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
               className="h-10 w-full"
               disabled={isProcessing}
             >
-              Đăng nhập
+              {t('shell.auth_login')}
             </AdminButton>
             <AdminButton
               type="button"
@@ -83,14 +85,14 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
               onClick={onSetup}
               disabled={isProcessing}
             >
-              Thiết lập Admin (lần đầu)
+              {t('shell.auth_setup')}
             </AdminButton>
           </div>
         </form>
       ) : (
         <div id="user-panel" className="flex items-center gap-3">
           <span id="user-info" className="text-xs font-medium text-zinc-600">
-            {user.username} <span className="text-zinc-400">({user.role})</span>
+            {user.username} <span className="text-zinc-400">({user.role === 'admin' ? t('shell.role_admin') : t('shell.role_editor')})</span>
           </span>
           <AdminButton
             id="auth-logout"
@@ -99,7 +101,7 @@ export const AuthPanel: React.FC<AuthPanelProps> = ({
             onClick={onLogout}
             disabled={isProcessing}
           >
-            Đăng xuất
+            {t('shell.auth_logout')}
           </AdminButton>
         </div>
       )}

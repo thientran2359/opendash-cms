@@ -343,6 +343,8 @@ export function parseAdminRoute(hash: string, pathname: string = '/admin/'): Par
     const sub = segs[1] === 'restore' ? 'backup' : (segs[1] ?? 'backup');
     return { view: 'tools', sub, rawHash: `#/tools/${segs[1] ?? 'backup'}` };
   }
+  // Settings includes the multilingual management route. The shared
+  // settings permission guard below applies to this deep link as well.
   if (first === 'settings') {
     const sub = segs[1] ?? 'general';
     const typeKey = sub === 'content-types' && segs[2] ? decodeURIComponent(segs[2]) : undefined;

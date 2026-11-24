@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { I18nProvider, tStatic, useI18n } from './i18n/index.tsx';
+import { getAdminI18nBootstrap } from './api/auth.ts';
+import { MultilingualSettingsPage } from './features/settings/MultilingualSettingsPage.tsx';
 import { AuthUser, PluginSummary, type Role } from './types.ts';
 import {
   deriveAdminLocaleState,
@@ -78,10 +81,16 @@ function studioIdentity(route: ParsedRoute): string | null {
   return null;
 }
 
-export const App: React.FC = () => {
+export const App: React.FC = () => (
+  <I18nProvider loadBootstrap={getAdminI18nBootstrap}><AppContent /></I18nProvider>
+);
+
+const AppContent: React.FC = () => {
+  const { t } = useI18n();
   const [user, setUser] = useState<AuthUser | null>(null);
   const [csrfToken, setCsrfToken] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string>('Đang kiểm tra trạng thái phiên...');
+  const [statusValue, setStatusMessage] = useState<string | (() => string)>(() => () => tStatic("app.checking_session"));
+  const statusMessage = typeof statusValue === 'function' ? statusValue() : statusValue;
   const [isError, setIsError] = useState<boolean>(false);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [route, setRoute] = useState<ParsedRoute>(() => parseAdminRoute(window.location.hash, window.location.pathname));
@@ -174,14 +183,22 @@ export const App: React.FC = () => {
 
   // Hash routing works from /admin/ and /builder without server catch-all.
   // The existing editors stay mounted in AdminShell across route changes.
-  const loadLocales = useCallback(async () => {
-    try {
-      const snap = await listLocales();
+  const localeLoadSequenceRef = useRef(0);
+  const refreshLocales = useCallback(async () => {
+    const epoch = authSessionEpochRef.current;
+    const sequence = ++localeLoadSequenceRef.current;
+    const snap = await listLocales();
+    if (epoch === authSessionEpochRef.current && sequence === localeLoadSequenceRef.current) {
       setLocaleState(deriveAdminLocaleState(snap));
-    } catch {
-      // Non-fatal on boot; GeneralSettingsPanel surfaces explicit errors.
     }
   }, []);
+  const loadLocales = useCallback(async () => {
+    try {
+      await refreshLocales();
+    } catch {
+      // Non-fatal on boot; the settings pages surface explicit errors.
+    }
+  }, [refreshLocales]);
 
   const loadCptTypes = useCallback(async () => {
     try {
@@ -199,7 +216,7 @@ export const App: React.FC = () => {
           const keys = await getEffectiveContentTypeTaxonomies(ct.descriptor.key).catch(() => []);
           const items = keys.map(key => ({
             key,
-            label: key === 'category' ? 'Chuyên mục' : key === 'tag' ? 'Thẻ' : (defMap.get(key)?.label ?? key),
+            label: defMap.get(key)?.label ?? key,
           }));
           return [ct.descriptor.key, items] as const;
         }),
@@ -247,14 +264,14 @@ export const App: React.FC = () => {
     const hasDirty = leavingDirtyEditor || leavingBuilder || leavingStudio || leavingTerm || leavingPattern || leavingSchema || leavingPermalinks || leavingReading;
     if (!hasDirty) return true;
     const approved = window.confirm(switchingBuilderTarget
-        ? 'Builder có thay đổi chưa lưu. Bỏ nháp và chuyển sang trang khác?'
+        ? tStatic("app.discard_builder")
         : leavingStudio
-          ? 'Tùy chỉnh giao diện có thay đổi chưa lưu. Bỏ thay đổi và thoát?'
+          ? tStatic("app.discard_studio")
         : leavingTerm
-          ? 'Taxonomy có thay đổi chưa lưu. Rời màn hình sẽ bỏ bản nhập. Tiếp tục?'
+          ? tStatic("app.discard_taxonomy")
           : leavingSchema || leavingPattern || leavingPermalinks || leavingReading
-            ? 'Có thay đổi chưa lưu. Rời màn hình có thể làm mất bản nhập. Tiếp tục?'
-            : 'Có dữ liệu chưa lưu. Rời màn hình? Nháp sẽ được giữ trong phiên hiện tại.');
+            ? tStatic("app.discard_changes")
+            : tStatic("app.keep_session_draft"));
     if (approved && leavingPermalinks && userRef.current) {
       discardPermalinkDraft(siteInstanceIdRef.current, userRef.current.id);
       markPermalinkDirty(false);
@@ -349,8 +366,8 @@ export const App: React.FC = () => {
     applyAcceptedRoute(target);
   };
 
-  const setStatus = (msg: string, error: boolean = false) => {
-    setStatusMessage(msg);
+  const setStatus = (msg: string | (() => string), error: boolean = false) => {
+    setStatusMessage(() => msg);
     setIsError(error);
   };
 
@@ -374,7 +391,7 @@ export const App: React.FC = () => {
         setSelectedPluginId(prev => (prev && list.some(p => p.id === prev) ? prev : list[0].id));
       }
     } catch (err) {
-      handleApiError(err, 'Lỗi khi tải danh sách plugin.');
+      handleApiError(err, tStatic("app.plugin_list_error"));
     }
   };
 
@@ -391,7 +408,7 @@ export const App: React.FC = () => {
         setSiteInstanceId(auth.site_instance_id ?? 'default-site');
         setUser(auth.user);
         setCsrfToken(auth.csrf_token);
-        setStatus(`Đang đăng nhập: ${auth.user.username} (${auth.user.role})`);
+        setStatus(() => tStatic("app.signed_in", { username: auth.user.username, role: tStatic(auth.user.role === "admin" ? "app.role_admin" : "app.role_editor") }));
         await Promise.all([loadCptTypes(), loadLocales()]);
         if (auth.user.role === 'admin') {
           await loadPlugins();
@@ -399,22 +416,22 @@ export const App: React.FC = () => {
       } catch {
         setUser(null);
         setCsrfToken(null);
-        setStatus('Vui lòng đăng nhập để sử dụng builder.');
+        setStatus(() => tStatic("app.sign_in_prompt"));
       }
     })();
   }, []);
 
   const handleSetup = async () => {
     if (!authUsername || !authPassword) {
-      setStatus('Vui lòng nhập tên đăng nhập và mật khẩu.', true);
+      setStatus(() => tStatic("app.credentials_required"), true);
       return;
     }
     setIsProcessing(true);
     try {
       await api.setupAdmin(authUsername, authPassword);
-      setStatus('Đã tạo quản trị viên. Hãy đăng nhập.', false);
+      setStatus(() => tStatic("app.setup_success"), false);
     } catch (err) {
-      handleApiError(err, 'Lỗi khi thiết lập quản trị viên.');
+      handleApiError(err, tStatic("app.setup_error"));
     } finally {
       setIsProcessing(false);
     }
@@ -422,7 +439,7 @@ export const App: React.FC = () => {
 
   const handleLogin = async () => {
     if (!authUsername || !authPassword) {
-      setStatus('Vui lòng nhập tên đăng nhập và mật khẩu.', true);
+      setStatus(() => tStatic("app.credentials_required"), true);
       return;
     }
     setIsProcessing(true);
@@ -433,6 +450,7 @@ export const App: React.FC = () => {
       if (nextSiteId !== siteInstanceId) {
         editorDraftStore.clear();
         setSiteInstanceId(nextSiteId);
+        setLocaleState(EMPTY_ADMIN_LOCALE_STATE);
         setBuilderReset(value => value + 1);
         setBuilderDirty(false);
         markStudioDirty(false);
@@ -457,20 +475,20 @@ export const App: React.FC = () => {
       setUser(res.user);
       setCsrfToken(res.csrf_token);
       setAuthPassword('');
-      setStatus('Đăng nhập thành công.', false);
+      setStatus(() => tStatic("app.login_success"), false);
       await Promise.all([loadCptTypes(), loadLocales()]);
       if (res.user.role === 'admin') {
         await loadPlugins();
       }
     } catch (err) {
-      handleApiError(err, 'Lỗi khi đăng nhập.');
+      handleApiError(err, tStatic("app.login_error"));
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleLogout = async () => {
-    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || builderDirty || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm('Có dữ liệu chưa lưu. Đăng xuất sẽ bỏ bản nhập hiện tại. Tiếp tục?')) {
+    if ((editorDraftStore.hasAnyDirty() || contentDirty || schemaDirty || permalinkDirtyRef.current || readingDirtyRef.current || builderDirty || studioDirty || postsDirty || pagesDirty || termDirtyRef.current || patternsDirtyRef.current) && !window.confirm(tStatic("app.discard_logout"))) {
       return;
     }
     setIsProcessing(true);
@@ -482,6 +500,7 @@ export const App: React.FC = () => {
       clearReadingDrafts();
       setUser(null);
       setCsrfToken(null);
+      setLocaleState(EMPTY_ADMIN_LOCALE_STATE);
       setAuthUsername('');
       setAuthPassword('');
       setAccountContextId(null);
@@ -507,9 +526,9 @@ export const App: React.FC = () => {
       setCptTypes([]);
       window.history.replaceState(null, '', window.location.pathname + window.location.search + '#/dashboard');
       acceptedHashRef.current = '#/dashboard';
-      setStatus('Đã đăng xuất.', false);
+      setStatus(() => tStatic("app.logout_success"), false);
     } catch (err) {
-      handleApiError(err, 'Lỗi khi đăng xuất.');
+      handleApiError(err, tStatic("app.logout_error"));
     } finally {
       setIsProcessing(false);
     }
@@ -521,20 +540,20 @@ export const App: React.FC = () => {
     setUser(null);
     setCsrfToken(null);
     setAuthPassword('');
-    setStatus('Phiên tài khoản đã được thu hồi. Vui lòng đăng nhập lại.', false);
+    setStatus(() => tStatic("app.session_revoked"), false);
   };
   const handlePluginUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !csrfToken) return;
     setIsProcessing(true);
-    setStatus('Đang cài đặt plugin...', false);
+    setStatus(() => tStatic("app.installing_plugin"), false);
     try {
       const summary = await api.installPlugin(file, csrfToken);
-      setStatus(`Đã cài đặt plugin ${summary.name} (${summary.id}).`, false);
+      setStatus(() => tStatic("app.plugin_installed", { name: summary.name, id: summary.id }), false);
       setSelectedPluginId(summary.id);
       await loadPlugins();
     } catch (err) {
-      handleApiError(err, 'Không thể cài đặt plugin.');
+      handleApiError(err, tStatic("app.install_error"));
     } finally {
       setIsProcessing(false);
       e.target.value = '';
@@ -546,10 +565,10 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       await api.disablePlugin(id, csrfToken);
-      setStatus(`Đã vô hiệu hóa plugin ${id}.`, false);
+      setStatus(() => tStatic("app.plugin_disabled", { id }), false);
       await loadPlugins();
     } catch (err) {
-      handleApiError(err, 'Không thể vô hiệu hóa plugin.');
+      handleApiError(err, tStatic("app.disable_error"));
     } finally {
       setIsProcessing(false);
     }
@@ -560,10 +579,10 @@ export const App: React.FC = () => {
     setIsProcessing(true);
     try {
       await api.enablePlugin(id, csrfToken);
-      setStatus(`Đã kích hoạt plugin ${id}.`, false);
+      setStatus(() => tStatic("app.plugin_enabled", { id }), false);
       await loadPlugins();
     } catch (err) {
-      handleApiError(err, 'Không thể kích hoạt plugin.');
+      handleApiError(err, tStatic("app.enable_error"));
     } finally {
       setIsProcessing(false);
     }
@@ -572,19 +591,19 @@ export const App: React.FC = () => {
   const handleRunPlugin = async () => {
     if (!selectedPluginId || !csrfToken) return;
     setIsProcessing(true);
-    setStatus(`Đang thực thi plugin ${selectedPluginId}...`, false);
+    setStatus(() => tStatic("app.plugin_running", { id: selectedPluginId }), false);
     setPluginRunOutput('');
     try {
       const res = await api.runPlugin(selectedPluginId, pluginInputJson, csrfToken);
       setPluginRunOutput(JSON.stringify(res, null, 2));
       if (res.success) {
-        setStatus(`Thực thi thành công [correlation: ${res.correlation_id}]`, false);
+        setStatus(() => tStatic("app.plugin_run_ok", { id: res.correlation_id }), false);
       } else {
-        setStatus(`Plugin lỗi: ${res.error || res.code} [correlation: ${res.correlation_id}]`, true);
+        setStatus(() => tStatic("app.plugin_run_error", { error: res.error || res.code || "", id: res.correlation_id }), true);
       }
       await loadPlugins();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Lỗi khi thực thi plugin.';
+      const msg = err instanceof Error ? err.message : tStatic("app.run_error");
       setPluginRunOutput(
         JSON.stringify(
           {
@@ -596,7 +615,7 @@ export const App: React.FC = () => {
           2,
         ),
       );
-      handleApiError(err, 'Lỗi khi thực thi plugin.');
+      handleApiError(err, tStatic("app.run_error"));
     } finally {
       setIsProcessing(false);
     }
@@ -628,7 +647,11 @@ export const App: React.FC = () => {
       route={route}
       routeForbidden={Boolean(user && !isRouteAllowed(route, user.role))}
       cptTypes={cptTypes}
-      cptTaxonomies={cptTaxonomies}
+      cptTaxonomies={Object.fromEntries(Object.entries(cptTaxonomies).map(([type, terms]) => [
+        type, terms.map(term => ({
+          ...term, label: term.key === 'category' ? t('app.category') : term.key === 'tag' ? t('app.tag') : term.label,
+        })),
+      ]))}
       onNavigateHash={navigateHash}
       dashboardContent={<DashboardPage onApiError={handleApiError} />}
       hasUnsavedChanges={contentDirty || schemaDirty || permalinkDirty || readingDirty || builderDirty || studioDirty || postsDirty || pagesDirty || termDirty || patternsDirty}
@@ -659,7 +682,7 @@ export const App: React.FC = () => {
         onInstalled={() => setThemeRevision(value => value + 1)}
         onActivated={() => setThemeRevision(value => value + 1)}
       />}
-      menusContent={<MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} localeState={localeState} onApiError={(error) => handleApiError(error, 'Lỗi quản lý menu.')} />}
+      menusContent={<MenusPanel csrfToken={csrfToken} themeRevision={themeRevision} localeState={localeState} onApiError={(error) => handleApiError(error, tStatic("app.menus_error"))} />}
       themeOptionsContent={<ThemesPanel mode="options" csrfToken={csrfToken} localeState={localeState} onApiError={handleApiError}
         onInstalled={() => setThemeRevision(value => value + 1)}
         onActivated={() => setThemeRevision(value => value + 1)}
@@ -696,30 +719,32 @@ export const App: React.FC = () => {
       }
       toolsContent={route.sub === 'backup'
         ? <>
-            <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi sao lưu mã hóa.')} />
-            <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi khôi phục & safe mode.')} />
+            <BackupsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.backup_error"))} />
+            <RestorePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.restore_error"))} />
           </>
         : route.sub === 'media-reconcile'
-          ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi đối soát & dọn cách ly.')} />
+          ? <ReconcilePanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.reconcile_error"))} />
           : route.sub === 'health' ? <SystemStatus /> : null}
       settingsContent={route.sub === 'general'
-        ? <GeneralSettingsPanel csrfToken={csrfToken} localeState={localeState} onLocalesChanged={loadLocales} onApiError={(error) => handleApiError(error, 'Lỗi cài đặt website.')} />
+        ? <GeneralSettingsPanel csrfToken={csrfToken} localeState={localeState} onLocalesChanged={refreshLocales} onApiError={(error) => handleApiError(error, tStatic("app.general_error"))} />
+        : route.sub === 'multilingual'
+          ? <MultilingualSettingsPage csrfToken={csrfToken} localeState={localeState} onLocalesChanged={refreshLocales} onApiError={(error) => handleApiError(error, tStatic('app.general_error'))} />
         : route.sub === 'permalinks'
           ? <PermalinkSettingsPage key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
               user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken}
-              onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cài đặt permalink.')}
+              onApiError={(error) => scopedTaxonomyApiError(error, tStatic("app.permalink_error"))}
               onDirtyChange={markPermalinkDirty} />
         : route.sub === 'reading'
           ? <ReadingSettingsPanel key={`${siteInstanceId}:${user?.id ?? 'guest'}`}
               user={user} siteInstanceId={siteInstanceId} csrfToken={csrfToken} localeState={localeState}
-              onApiError={(error) => scopedTaxonomyApiError(error, 'Lỗi cấu hình Reading Settings.')}
+              onApiError={(error) => scopedTaxonomyApiError(error, tStatic("app.reading_error"))}
               onDirtyChange={markReadingDirty} />
         : route.sub === 'seo'
-          ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onApiError={(error) => handleApiError(error, 'Lỗi SEO trang chủ.')} />
+          ? <SeoPanel csrfToken={csrfToken} localeState={localeState} onApiError={(error) => handleApiError(error, tStatic("app.seo_error"))} />
           : route.sub === 'contact'
-            ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi quản lý form liên hệ.')} />
+            ? <ContactPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.contact_error"))} />
             : route.sub === 'smtp'
-              ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, 'Lỗi cấu hình SMTP.')} />
+              ? <SmtpSettingsPanel csrfToken={csrfToken} onApiError={(error) => handleApiError(error, tStatic("app.smtp_error"))} />
               : null}
       usersContent={accountContextRole === 'admin' && <UsersPanel
         key={accountContextId ?? 'anonymous'}
