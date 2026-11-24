@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useState } from 'react';
 import {
   getSmtpSettings,
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
+  const { t: translate } = useI18n();
   const [settings, setSettings] = useState<SmtpSettingsPublic | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [host, setHost] = useState('');
@@ -72,7 +74,7 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
             : { mode: passwordMode },
       });
       applySettings(updated);
-      setNotice('Đã lưu cấu hình SMTP.');
+      setNotice(tStatic('feature.contact.smtpsettingspanel.smtp_settings_saved'));
     } catch (err) {
       onApiError(err);
     } finally {
@@ -85,7 +87,7 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
     setNotice('');
     try {
       await testSmtpSettings(csrfToken);
-      setNotice('Đã gửi email kiểm tra SMTP thành công.');
+      setNotice(tStatic('feature.contact.smtpsettingspanel.smtp_test_email_sent_successfully'));
     } catch (err) {
       onApiError(err);
     } finally {
@@ -96,10 +98,8 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
   return (
     <section id="smtp-settings-panel" className="space-y-4">
       <div>
-        <h2 className="text-base font-semibold text-zinc-950">Thông báo Email (SMTP)</h2>
-        <p className="mt-0.5 text-sm text-zinc-600">
-          Cấu hình máy chủ SMTP bảo mật TLS để gửi thông báo khi có liên hệ mới. Mật khẩu được lưu tách biệt và không hiển thị lại.
-        </p>
+        <h2 className="text-base font-semibold text-zinc-950">{translate('shell.smtp')}</h2>
+        <p className="mt-0.5 text-sm text-zinc-600">{translate('feature.contact.smtpsettingspanel.configure_a_tls_secured_smtp_server_to_send_notifications_for_new_contact_messag')}</p>
       </div>
 
       {notice && <AdminAlert tone="success" className="mt-3 max-w-2xl">{notice}</AdminAlert>}
@@ -110,13 +110,11 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
             type="checkbox"
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
-          />
-          Bật gửi email thông báo SMTP
-        </label>
+          />{translate('feature.contact.smtpsettingspanel.enable_smtp_email_notifications')}</label>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700 sm:col-span-2">
-            <span>Host SMTP</span>
+            <span>{translate('feature.contact.smtpsettingspanel.smtp_host')}</span>
             <input
               type="text"
               value={host}
@@ -126,7 +124,7 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
             />
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Cổng</span>
+            <span>{translate('feature.contact.smtpsettingspanel.port')}</span>
             <input
               type="number"
               min={1}
@@ -140,18 +138,18 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Chế độ TLS</span>
+            <span>{translate('feature.contact.smtpsettingspanel.tls_mode')}</span>
             <select
               value={tlsMode}
               onChange={(e) => setTlsMode(e.target.value as TlsMode)}
               className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             >
-              <option value="starttls">STARTTLS bắt buộc (cổng 587)</option>
-              <option value="implicit_tls">Implicit TLS (cổng 465)</option>
+              <option value="starttls">{translate('feature.contact.smtpsettingspanel.required_starttls_port_587')}</option>
+              <option value="implicit_tls">{translate('feature.contact.smtpsettingspanel.implicit_tls_port_465')}</option>
             </select>
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Tên đăng nhập</span>
+            <span>{translate('shell.auth_username')}</span>
             <input
               type="text"
               value={username}
@@ -163,20 +161,20 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Mật khẩu SMTP ({settings?.has_password ? 'đã cấu hình' : 'chưa đặt'})</span>
+            <span>{translate('feature.contact.smtpsettingspanel.smtp_password')}{settings?.has_password ? translate('feature.contact.smtpsettingspanel.configured') : translate('feature.contact.smtpsettingspanel.not_set')})</span>
             <select
               value={passwordMode}
               onChange={(e) => setPasswordMode(e.target.value as PasswordUpdateMode)}
               className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             >
-              <option value="keep">Giữ mật khẩu hiện tại</option>
-              <option value="replace">Thay mật khẩu mới</option>
-              <option value="clear">Xóa mật khẩu</option>
+              <option value="keep">{translate('feature.contact.smtpsettingspanel.keep_current_password')}</option>
+              <option value="replace">{translate('feature.contact.smtpsettingspanel.set_a_new_password')}</option>
+              <option value="clear">{translate('feature.contact.smtpsettingspanel.clear_password')}</option>
             </select>
           </label>
           {passwordMode === 'replace' && (
             <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>Mật khẩu mới</span>
+              <span>{translate('feature.users.userprofilepanel.new_password')}</span>
               <input
                 type="password"
                 value={passwordValue}
@@ -190,7 +188,7 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Địa chỉ gửi (From)</span>
+            <span>{translate('feature.contact.smtpsettingspanel.sender_address_from')}</span>
             <input
               type="email"
               value={fromAddress}
@@ -200,7 +198,7 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
             />
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Địa chỉ nhận (Recipient)</span>
+            <span>{translate('feature.contact.smtpsettingspanel.recipient_address')}</span>
             <input
               type="email"
               value={recipientAddress}
@@ -212,12 +210,8 @@ export function SmtpSettingsPanel({ csrfToken, onApiError }: Props) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pt-2">
-          <AdminButton type="submit" variant="primary" disabled={busy || !settings}>
-            Lưu cấu hình SMTP
-          </AdminButton>
-          <AdminButton variant="secondary" disabled={busy || !settings?.enabled} onClick={handleTest}>
-            Gửi email kiểm tra
-          </AdminButton>
+          <AdminButton type="submit" variant="primary" disabled={busy || !settings}>{translate('feature.contact.smtpsettingspanel.save_smtp_settings')}</AdminButton>
+          <AdminButton variant="secondary" disabled={busy || !settings?.enabled} onClick={handleTest}>{translate('feature.contact.smtpsettingspanel.send_test_email')}</AdminButton>
         </div>
       </form>
     </section>

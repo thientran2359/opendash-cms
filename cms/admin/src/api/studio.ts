@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import type { BuilderDocument } from '../builder/document.ts';
 import type {
   HomepagePreview,
@@ -54,7 +55,7 @@ export interface StudioPreviewInput {
 export function getStudioTargets(signal?: AbortSignal): Promise<StudioTargetsResponse> {
   return requestJson<StudioTargetsResponse>('/api/admin/studio/targets', {
     signal,
-    defaultErrorMessage: 'Không thể tải danh sách target OpenDash Studio.',
+    defaultErrorMessage: tStatic('api.studio.load_opendash_studio_targets'),
   });
 }
 
@@ -96,6 +97,6 @@ export function postStudioPreview(
     contentType: 'application/json',
     signal,
     body: JSON.stringify(payload),
-    defaultErrorMessage: 'Không thể tạo bản xem trước OpenDash Studio.',
+    defaultErrorMessage: tStatic('api.studio.generate_the_opendash_studio_preview'),
   });
 }

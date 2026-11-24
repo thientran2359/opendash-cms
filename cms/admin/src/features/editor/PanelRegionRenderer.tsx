@@ -1,3 +1,5 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { formatDateTime } from '../../i18n/format.ts';
 import React, { useState } from 'react';
 import type {
   ContentFieldDefinition,
@@ -137,6 +139,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   saving,
   dirty,
 }) => {
+  useI18n();
   const [editingPermalink, setEditingPermalink] = useState(false);
   const [editingStatus, setEditingStatus] = useState(false);
   const [editingCreatedAt, setEditingCreatedAt] = useState(false);
@@ -154,8 +157,8 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
   };
   const formatTimestamp = (raw?: string | null): string => {
     const d = parseUtcTimestamp(raw);
-    if (!d) return raw || 'Ngay khi lưu';
-    return d.toLocaleString('vi-VN', {
+    if (!d) return raw || tStatic("feature.editor.panelregionrenderer.on_save");
+    return formatDateTime(d, {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });
@@ -185,12 +188,12 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           <span className="text-xs font-medium text-slate-600">
             {isWithdrawn && (
               <span className="mr-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800">
-                Fallback ({eff.effective_status})
+                {tStatic("feature.common.fallback")} ({eff.effective_status})
               </span>
             )}
             {!eff.editable && (
               <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-semibold text-slate-600">
-                Chỉ đọc
+                {tStatic("feature.editor.panelregionrenderer.read_only")}
               </span>
             )}
           </span>
@@ -200,7 +203,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
               onClick={() => onFieldClear(fieldKey)}
               className="text-xs text-slate-500 underline hover:text-rose-700"
             >
-              Xóa giá trị
+              {tStatic("feature.editor.panelregionrenderer.clear_value")}
             </button>
           )}
         </div>
@@ -241,8 +244,8 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                 <input
                   id="entry-title-input"
                   type="text"
-                  aria-label="Tiêu đề"
-                  placeholder={`Nhập tiêu đề ${config.label.toLowerCase()}...`}
+                  aria-label={tStatic("feature.contact.contactpanel.title")}
+                  placeholder={tStatic("feature.editor.panelregionrenderer.enter_value_title", { value1: config.label.toLowerCase() })}
                   className="h-11 w-full rounded-lg border border-zinc-300 bg-white px-3.5 text-base font-semibold text-zinc-950 placeholder:font-normal placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:outline-od-accent"
                   value={title}
                   onChange={e => onTitleChange(e.target.value)}
@@ -252,7 +255,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-600">
-                <span className="font-medium text-zinc-500">Đường dẫn:</span>
+                <span className="font-medium text-zinc-500">{tStatic("feature.editor.panelregionrenderer.permalink")}</span>
                 {publicPath ? (
                   <a href={publicPath} target="_blank" rel="noopener noreferrer"
                     className="font-mono text-od-accent hover:underline">
@@ -268,14 +271,14 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   onClick={() => setEditingPermalink(prev => !prev)}
                   className="ml-1 rounded border border-zinc-300 bg-white px-2 py-0.5 text-[11px] font-medium text-zinc-700 hover:border-zinc-400 hover:bg-zinc-50"
                 >
-                  {showSlugEditor ? 'Đóng' : 'Chỉnh sửa'}
+                  {showSlugEditor ? tStatic("feature.media.mediapicker.close") : tStatic("shell.edit")}
                 </button>
               </div>
 
               {showSlugEditor && (
                 <div className="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 sm:grid-cols-2">
                   <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                    <span>Slug *</span>
+                    <span>{tStatic("feature.common.ui_slug")}</span>
                     <input
                       id="entry-slug-input"
                       type="text"
@@ -287,7 +290,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                     {fieldErrors.slug && <span className="text-xs text-rose-700">{fieldErrors.slug}</span>}
                   </label>
                   <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-                    <span>Đường dẫn tùy chỉnh (custom_path)</span>
+                    <span>{tStatic("feature.editor.panelregionrenderer.custom_path_custom_path")}</span>
                     <input
                       type="text"
                       placeholder="/duong-dan-tuy-chinh"
@@ -314,10 +317,10 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                         data-testid="od-blocks-badge"
                         className="inline-flex items-center rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-900 ring-1 ring-inset ring-sky-200"
                       >
-                        Chứa khối Trình dựng trang (&lt;!-- od:... --&gt;)
+                        {tStatic("feature.editor.panelregionrenderer.contains_builder_blocks_od")}
                       </span>
                     ) : (
-                      <span>Có thể chỉnh trực tiếp hoặc mở Trình dựng trang trực quan.</span>
+                      <span>{tStatic("feature.editor.panelregionrenderer.edit_directly_or_open_the_visual_builder")}</span>
                     )}
                   </div>
                   {canOpenBuilder && (
@@ -328,7 +331,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                       disabled={saving}
                       className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 shadow-2xs transition-colors hover:border-zinc-400 hover:bg-zinc-100 disabled:opacity-50"
                     >
-                      Sửa với Trình dựng trang
+                      {tStatic("feature.editor.panelregionrenderer.edit_with_builder")}
                     </button>
                   )}
                 </div>
@@ -353,11 +356,11 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                     disabled={!canEditImg}
                     onClick={() => onPickMedia('featured_image', 'image')}
                     className="group relative block w-full overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 text-left disabled:cursor-default"
-                    title={canEditImg ? 'Bấm để đổi ảnh đại diện' : undefined}
+                    title={canEditImg ? tStatic("feature.editor.panelregionrenderer.click_to_change_featured_image") : undefined}
                   >
                     <img
                       src={mediaThumbnailUrl(imgId)}
-                      alt="Ảnh đại diện"
+                      alt={tStatic("feature.editor.panelregionrenderer.featured_image")}
                       className="max-h-48 w-full object-cover transition-opacity group-hover:opacity-90"
                     />
                   </button>
@@ -368,7 +371,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                         onClick={() => onPickMedia('featured_image', 'image')}
                         className="inline-flex h-8 items-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 hover:border-zinc-400 hover:bg-zinc-50"
                       >
-                        Đổi ảnh
+                        {tStatic("feature.editor.panelregionrenderer.change_image")}
                       </button>
                       <button
                         type="button"
@@ -378,7 +381,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                         }}
                         className="text-xs font-medium text-rose-600 hover:text-rose-700 hover:underline"
                       >
-                        Gỡ ảnh đại diện
+                        {tStatic("feature.editor.panelregionrenderer.remove_featured_image")}
                       </button>
                     </div>
                   )}
@@ -390,7 +393,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   onClick={() => onPickMedia('featured_image', 'image')}
                   className="flex w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-zinc-300 bg-zinc-50/70 px-3 py-5 text-xs font-medium text-zinc-600 transition-colors hover:border-od-accent hover:bg-od-accent-soft/20 hover:text-od-accent disabled:opacity-50"
                 >
-                  <span>+ Chọn ảnh đại diện</span>
+                  <span>{tStatic("feature.editor.panelregionrenderer.choose_featured_image")}</span>
                 </button>
               )}
               {imgErr && <p className="text-xs font-medium text-rose-700" role="alert">{imgErr}</p>}
@@ -401,7 +404,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           return (
             <div className="space-y-3">
               {proj.field_keys.length === 0 ? (
-                <p className="text-xs text-slate-500">Không có trường cơ bản nào chưa được phân hoạch.</p>
+                <p className="text-xs text-slate-500">{tStatic("feature.editor.panelregionrenderer.no_unassigned_base_fields")}</p>
               ) : (
                 proj.field_keys.map(renderField)
               )}
@@ -411,7 +414,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           return (
             <div className="space-y-3">
               <label className="block text-xs font-medium text-slate-700">
-                SEO Title
+                {tStatic("feature.common.seo_title")}
                 <input
                   type="text"
                   className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
@@ -420,7 +423,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                 />
               </label>
               <label className="block text-xs font-medium text-slate-700">
-                SEO Description
+                {tStatic("feature.common.seo_description")}
                 <textarea
                   rows={2}
                   className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
@@ -429,7 +432,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                 />
               </label>
               <label className="block text-xs font-medium text-slate-700">
-                OG Image ID
+                {tStatic("feature.common.og_image_id")}
                 <input
                   type="text"
                   className="mt-1 w-full rounded border border-slate-300 px-2.5 py-1.5 text-sm"
@@ -443,7 +446,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   checked={seoNoindex}
                   onChange={e => onSeoChange({ noindex: e.target.checked })}
                 />
-                Chặn lập chỉ mục (noindex)
+                {tStatic("feature.editor.panelregionrenderer.prevent_indexing_noindex")}
               </label>
             </div>
           );
@@ -460,7 +463,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                       disabled={saving}
                       className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50 disabled:opacity-50"
                     >
-                      {saving ? 'Đang lưu...' : 'Lưu nháp'}
+                      {saving ? tStatic("feature.users.userprofilepanel.saving") : tStatic("feature.editor.panelregionrenderer.save_draft")}
                     </button>
                   ) : <span />}
                   {draftPreviewPath && (
@@ -470,7 +473,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                       rel="noopener noreferrer"
                       className="inline-flex h-8 items-center justify-center rounded-md border border-zinc-300 bg-white px-2.5 text-xs font-medium text-zinc-800 no-underline transition-colors hover:border-zinc-400 hover:bg-zinc-50"
                     >
-                      Xem trước nháp
+                      {tStatic("feature.editor.panelregionrenderer.preview_draft")}
                     </a>
                   )}
                 </div>
@@ -480,9 +483,9 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
               <div className="space-y-2 border-y border-zinc-100 py-2.5 text-xs text-zinc-600">
                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <span>
-                    Trạng thái:{' '}
+                    {tStatic("feature.editor.panelregionrenderer.status")}{' '}
                     <strong className="font-semibold text-zinc-900">
-                      {publicationStatus === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
+                      {publicationStatus === 'published' ? tStatic("reading.published") : tStatic("feature.content.entrylistpage.draft")}
                     </strong>
                   </span>
                   {isDraftPublish && (
@@ -491,20 +494,20 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                       onClick={() => setEditingStatus(prev => !prev)}
                       className="text-od-accent hover:underline"
                     >
-                      {editingStatus ? 'Đóng' : 'Chỉnh sửa'}
+                      {editingStatus ? tStatic("feature.media.mediapicker.close") : tStatic("shell.edit")}
                     </button>
                   )}
                 </div>
                 {isDraftPublish && editingStatus && (
                   <div className="flex items-center gap-2 pt-1">
                     <select
-                      aria-label="Trạng thái xuất bản"
+                      aria-label={tStatic("feature.editor.panelregionrenderer.publication_status")}
                       className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
                       value={publicationStatus}
                       onChange={e => onPublicationStatusChange(e.target.value as 'draft' | 'published')}
                     >
-                      <option value="draft">Bản nháp</option>
-                      <option value="published">Đã xuất bản</option>
+                      <option value="draft">{tStatic("feature.content.entrylistpage.draft")}</option>
+                      <option value="published">{tStatic("reading.published")}</option>
                     </select>
                     <button
                       type="button"
@@ -518,18 +521,18 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
 
                 <div className="flex items-center justify-between gap-1.5">
                   <span>
-                    Hiển thị:{' '}
+                    {tStatic("feature.editor.panelregionrenderer.visibility")}{' '}
                     <strong className="font-semibold text-zinc-900">
-                      {isPublic ? 'Công khai' : 'Riêng tư'}
+                      {isPublic ? tStatic("feature.editor.panelregionrenderer.public") : tStatic("feature.editor.panelregionrenderer.private")}
                     </strong>
                   </span>
-                  {dirty && <span className="font-medium text-amber-700">● Chưa lưu</span>}
+                  {dirty && <span className="font-medium text-amber-700">{tStatic("feature.editor.panelregionrenderer.unsaved")}</span>}
                 </div>
 
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between gap-1.5">
                     <span>
-                      Ngày tạo:{' '}
+                      {tStatic("feature.editor.panelregionrenderer.created")}{' '}
                       <strong className="font-medium text-zinc-800">
                         {formatTimestamp(createdAt)}
                       </strong>
@@ -540,7 +543,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                         onClick={() => setEditingCreatedAt(prev => !prev)}
                         className="text-od-accent hover:underline"
                       >
-                        {editingCreatedAt ? 'Đóng' : 'Chỉnh sửa'}
+                        {editingCreatedAt ? tStatic("feature.media.mediapicker.close") : tStatic("shell.edit")}
                       </button>
                     )}
                   </div>
@@ -548,7 +551,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                     <div className="flex items-center gap-1.5">
                       <input
                         type="datetime-local"
-                        aria-label="Ngày tạo"
+                        aria-label={tStatic("feature.editor.panelregionrenderer.created_date")}
                         className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
                         value={toDatetimeLocalValue(createdAt)}
                         onChange={e => onCreatedAtChange(fromDatetimeLocalValue(e.target.value))}
@@ -568,7 +571,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between gap-1.5">
                       <span>
-                        Cập nhật:{' '}
+                        {tStatic("feature.editor.panelregionrenderer.updated")}{' '}
                         <strong className="font-medium text-zinc-800">
                           {formatTimestamp(updatedAt)}
                         </strong>
@@ -579,7 +582,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                           onClick={() => setEditingUpdatedAt(prev => !prev)}
                           className="text-od-accent hover:underline"
                         >
-                          {editingUpdatedAt ? 'Đóng' : 'Chỉnh sửa'}
+                          {editingUpdatedAt ? tStatic("feature.media.mediapicker.close") : tStatic("shell.edit")}
                         </button>
                       )}
                     </div>
@@ -587,7 +590,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                       <div className="flex items-center gap-1.5">
                         <input
                           type="datetime-local"
-                          aria-label="Ngày cập nhật"
+                          aria-label={tStatic("feature.content.entrylistpage.updated_date")}
                           className="h-8 flex-1 rounded-md border border-zinc-300 bg-white px-2 text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
                           value={toDatetimeLocalValue(updatedAt)}
                           onChange={e => onUpdatedAtChange(fromDatetimeLocalValue(e.target.value))}
@@ -611,7 +614,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   onClick={onOpenBuilder}
                   className="inline-flex h-8 w-full items-center justify-center rounded-md border border-zinc-300 bg-white px-3 text-xs font-medium text-zinc-800 transition-colors hover:border-zinc-400 hover:bg-zinc-50"
                 >
-                  Sửa với Trình dựng trang
+                  {tStatic("feature.editor.panelregionrenderer.edit_with_builder")}
                 </button>
               )}
 
@@ -624,7 +627,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                     onClick={onDelete}
                     className="text-xs font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
                   >
-                    Xóa {config.label.toLowerCase()}
+                    {tStatic("multilingual.delete")}{' '}{config.label.toLowerCase()}
                   </button>
                 ) : <span />}
                 <button
@@ -634,10 +637,10 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                   className="inline-flex h-9 items-center justify-center rounded-md bg-od-accent px-4 text-sm font-medium text-white shadow-2xs transition-colors hover:bg-od-accent-hover disabled:opacity-50"
                 >
                   {saving
-                    ? 'Đang lưu...'
+                    ? tStatic("feature.users.userprofilepanel.saving")
                     : isDraftPublish
-                      ? (publicationStatus === 'published' ? 'Cập nhật' : 'Đăng bài')
-                      : (entryId === null ? 'Tạo mới' : 'Cập nhật')}
+                      ? (publicationStatus === 'published' ? tStatic("feature.editor.panelregionrenderer.update") : tStatic("feature.editor.panelregionrenderer.publish_post"))
+                      : (entryId === null ? tStatic("feature.editor.panelregionrenderer.create_new") : tStatic("feature.editor.panelregionrenderer.update"))}
                 </button>
               </div>
             </div>
@@ -646,7 +649,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           return templatePanelNode ? (
             <div>{templatePanelNode}</div>
           ) : (
-            <p className="text-xs text-zinc-500">Không có thuộc tính mở rộng.</p>
+            <p className="text-xs text-zinc-500">{tStatic("feature.editor.panelregionrenderer.no_extension_properties")}</p>
           );
         case 'taxonomies':
           return config.taxonomies.length > 0 ? (
@@ -662,7 +665,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
             </div>
           ) : null;
         default:
-          return <p className="text-xs text-slate-500">Panel hệ thống: {kind.core_key}</p>;
+          return <p className="text-xs text-slate-500">{tStatic("feature.editor.panelregionrenderer.system_panel")}{' '}{kind.core_key}</p>;
       }
     }
 
@@ -694,7 +697,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
             onClick={() => onRunAction(pluginId, kind.action_id, proj.panel.panel_id)}
             className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-900 hover:bg-sky-100 disabled:opacity-50"
           >
-            {busy ? 'Đang chạy...' : kind.button_label}
+            {busy ? tStatic("feature.editor.panelregionrenderer.running") : kind.button_label}
           </button>
           {output && (
             <pre className="max-h-32 overflow-auto rounded bg-slate-900 p-2 text-[11px] text-slate-100">
@@ -737,7 +740,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
                       onClick={() => onToggleCollapse(proj.panel.panel_id)}
                       className="rounded border-0 bg-transparent px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
                     >
-                      {isCollapsed ? 'Mở rộng' : 'Thu gọn'}
+                      {isCollapsed ? tStatic("feature.editor.panelregionrenderer.expand") : tStatic("feature.editor.panelregionrenderer.collapse")}
                     </button>
                   )}
                 </div>
@@ -766,7 +769,7 @@ export const PanelRegionRenderer: React.FC<PanelRegionRendererProps> = ({
           {renderRegion('sidebar', config.regions.sidebar, 'space-y-4')}
           {templatePanelNode && !hasPageAttributesPanel && (
             <section className="rounded-xl border border-zinc-200 bg-white p-4">
-              <h3 className="text-sm font-semibold text-zinc-900">Template</h3>
+              <h3 className="text-sm font-semibold text-zinc-900">{tStatic("feature.common.template")}</h3>
               <div className="mt-3">{templatePanelNode}</div>
             </section>
           )}

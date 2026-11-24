@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import {
@@ -61,6 +62,7 @@ interface ContentTypeFormProps {
 export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
   disabled, onCreate, onDirtyChange, initialDraft, onDraftChange,
 }) => {
+  useI18n();
   const [draft, setDraft] = useState<ContentTypeCreationDraft>(() =>
     copyDraft(initialDraft ?? blankContentTypeCreationDraft()));
   const draftRef = useRef(draft);
@@ -88,7 +90,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
 
   const addField = () => {
     if (fields.length >= 64) {
-      setError('Một loại nội dung hỗ trợ tối đa 64 custom fields.');
+      setError(tStatic("feature.content.contenttypeform.a_content_type_supports_up_to_64_custom_fields"));
       return;
     }
     nextId.current += 1;
@@ -110,34 +112,34 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
 
   const buildSchema = (): ContentTypeDefinitionWithSettings => {
     if (!snakeKeyPattern.test(key)) {
-      throw new Error('Khóa CPT phải bắt đầu bằng chữ thường và chỉ chứa chữ thường, số, dấu _ (tối đa 64 ký tự).');
+      throw new Error(tStatic("feature.content.contenttypeform.the_cpt_key_must_start_with_a_lowercase_letter"));
     }
-    if (!label.trim()) throw new Error('Cần nhập tên loại nội dung.');
-    if (label.length > 100) throw new Error('Tên loại nội dung tối đa 100 ký tự.');
+    if (!label.trim()) throw new Error(tStatic("feature.content.contenttypeform.enter_a_content_type_name"));
+    if (label.length > 100) throw new Error(tStatic("feature.content.contenttypeform.the_content_type_name_must_be_at_most_100"));
     const usedKeys = new Set<string>();
     const resultFields: ContentFieldDefinition[] = fields.map(field => {
-      if (!snakeKeyPattern.test(field.key)) throw new Error(`Khóa field "${field.label || field.key}" không hợp lệ.`);
-      if (!field.label.trim() || field.label.length > 100) throw new Error(`Tên field "${field.key}" không hợp lệ.`);
-      if (usedKeys.has(field.key)) throw new Error(`Field "${field.key}" bị trùng khóa.`);
+      if (!snakeKeyPattern.test(field.key)) throw new Error(tStatic("feature.content.contenttypeform.field_key_value_is_invalid", { value1: field.label || field.key }));
+      if (!field.label.trim() || field.label.length > 100) throw new Error(tStatic("feature.content.contenttypeform.field_name_value_is_invalid", { value1: field.key }));
+      if (usedKeys.has(field.key)) throw new Error(tStatic("feature.content.contenttypeform.field_value_has_a_duplicate_key", { value1: field.key }));
       usedKeys.add(field.key);
       let options: ContentFieldDefinition['options'] = [];
       if (field.type === 'select') {
         const lines = field.optionsText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
         if (!lines.length || lines.length > 100) {
-          throw new Error(`Field "${field.label}" cần từ 1 đến 100 lựa chọn.`);
+          throw new Error(tStatic("feature.content.contenttypeform.field_value_requires_1_to_100_options", { value1: field.label }));
         }
         options = lines.map(line => {
           const separator = line.indexOf('|');
-          if (separator < 1) throw new Error(`Lựa chọn "${line}" cần có dạng giá_trị|Nhãn.`);
+          if (separator < 1) throw new Error(tStatic("feature.content.contenttypeform.option_value_must_use_the_format_value_label", { value1: line }));
           const value = line.slice(0, separator).trim();
           const optionLabel = line.slice(separator + 1).trim();
           if (!value || value.length > 128 || !optionLabel || optionLabel.length > 100) {
-            throw new Error(`Lựa chọn "${line}" có giá trị hoặc nhãn không hợp lệ.`);
+            throw new Error(tStatic("feature.content.contenttypeform.option_value_has_an_invalid_value_or_label", { value1: line }));
           }
           return { value, label: optionLabel };
         });
         if (new Set(options.map(option => option.value)).size !== options.length) {
-          throw new Error(`Field "${field.label}" có lựa chọn trùng nhau.`);
+          throw new Error(tStatic("feature.content.contenttypeform.field_value_has_duplicate_options", { value1: field.label }));
         }
       }
       return {
@@ -163,19 +165,19 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
         updateDraft(blankContentTypeCreationDraft());
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Không thể đọc cấu hình CPT.');
+      setError(err instanceof Error ? err.message : tStatic("feature.content.contenttypeform.could_not_read_the_cpt_configuration"));
     }
   };
 
   return (
     <form onSubmit={submit} className="space-y-4">
       <div>
-        <h3 className="text-base font-semibold text-zinc-950">Đăng ký loại nội dung mới</h3>
-        <p className="mt-0.5 text-xs text-zinc-600">Chỉ quản trị viên được khai báo CPT. Có thể chỉnh sửa nhãn và hành vi trong phần cài đặt loại nội dung.</p>
+        <h3 className="text-base font-semibold text-zinc-950">{tStatic("feature.content.contenttypeform.register_a_new_content_type")}</h3>
+        <p className="mt-0.5 text-xs text-zinc-600">{tStatic("feature.content.contenttypeform.only_administrators_can_declare_cpts_labels_and_behavior_can")}</p>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label htmlFor="content-type-key" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>Khóa CPT *</span>
+          <span>{tStatic("feature.content.contenttypeform.cpt_key")}</span>
           <input
             id="content-type-key"
             name="key"
@@ -185,11 +187,11 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             maxLength={64}
             onChange={e => update({ key: e.target.value })}
-            placeholder="vi_du: portfolio_item"
+            placeholder={tStatic("feature.common.ui_vi_du_portfolio_item")}
           />
         </label>
         <label htmlFor="content-type-label" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>Tên hiển thị *</span>
+          <span>{tStatic("feature.content.contenttypeform.display_name")}</span>
           <input
             id="content-type-label"
             name="label"
@@ -199,12 +201,12 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             maxLength={100}
             onChange={e => update({ label: e.target.value })}
-            placeholder="Dự án"
+            placeholder={tStatic("feature.content.contenttypeform.project")}
           />
         </label>
       </div>
       <fieldset className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3.5">
-        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">Hành vi loại nội dung</legend>
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeform.content_type_behavior")}</legend>
         <label htmlFor="new-cpt-public" className="flex items-center gap-2 text-sm text-zinc-800">
           <input
             id="new-cpt-public"
@@ -213,7 +215,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             onChange={e => update({ isPublic: e.target.checked })}
           />
-          <span>Công khai bài viết (public)</span>
+          <span>{tStatic("feature.content.contenttypeform.public_entries_public")}</span>
         </label>
         <label htmlFor="new-cpt-archive" className="flex items-center gap-2 text-sm text-zinc-800">
           <input
@@ -223,10 +225,10 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             onChange={e => update({ hasArchive: e.target.checked })}
           />
-          <span>Cho phép trang danh sách (has_archive)</span>
+          <span>{tStatic("feature.content.contenttypeform.enable_archive_has_archive")}</span>
         </label>
         <label htmlFor="new-cpt-publication" className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>Cơ chế xuất bản</span>
+          <span>{tStatic("feature.content.contenttypeform.publishing_workflow")}</span>
           <select
             id="new-cpt-publication"
             className={SELECT_CLASS}
@@ -234,12 +236,12 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             disabled={disabled}
             onChange={event => update({ publication: event.target.value as ContentPublicationPolicy })}
           >
-            <option value="immediate">Lưu là xuất bản (immediate)</option>
-            <option value="draft_publish">Lưu nháp / Xuất bản (draft_publish)</option>
+            <option value="immediate">{tStatic("feature.content.contenttypeform.save_publishes_immediately_immediate")}</option>
+            <option value="draft_publish">{tStatic("feature.content.contenttypeform.save_draft_publish_draft_publish")}</option>
           </select>
         </label>
         <fieldset className="space-y-2 border-t border-zinc-100 pt-2.5">
-          <legend className="text-xs font-semibold uppercase tracking-wide text-zinc-700">Thành phần màn hình chỉnh sửa</legend>
+          <legend className="text-xs font-semibold uppercase tracking-wide text-zinc-700">{tStatic("feature.content.contenttypeform.editor_screen_features")}</legend>
           <label htmlFor="new-cpt-editor" className="flex items-center gap-2 text-sm text-zinc-800">
             <input
               id="new-cpt-editor"
@@ -248,7 +250,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               disabled={disabled}
               onChange={e => toggleSupport('editor', e.target.checked)}
             />
-            <span>Trình soạn thảo (editor)</span>
+            <span>{tStatic("feature.content.contenttypeform.editor_editor")}</span>
           </label>
           <label htmlFor="new-cpt-featured-image" className="flex items-center gap-2 text-sm text-zinc-800">
             <input
@@ -258,7 +260,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               disabled={disabled}
               onChange={e => toggleSupport('featured_image', e.target.checked)}
             />
-            <span>Ảnh đại diện (featured_image)</span>
+            <span>{tStatic("feature.content.contenttypeform.featured_image_featured_image")}</span>
           </label>
           <label htmlFor="new-cpt-builder" className="flex items-center gap-2 text-sm text-zinc-800">
             <input
@@ -268,23 +270,23 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               disabled={disabled}
               onChange={e => toggleSupport('builder', e.target.checked)}
             />
-            <span>Visual Builder (builder)</span>
+            <span>{tStatic("feature.common.visual_builder")}</span>
           </label>
-          <p className="text-xs text-zinc-500">Bật Builder để thiết kế nội dung riêng từng bản ghi. Tắt thành phần giữ nguyên văn bản, ảnh và thiết kế đã lưu.</p>
+          <p className="text-xs text-zinc-500">{tStatic("feature.content.contenttypeform.enable_builder_to_design_individual_entries_disabling_a_feature")}</p>
         </fieldset>
       </fieldset>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-zinc-900">Custom fields ({fields.length})</h4>
+        <h4 className="text-sm font-semibold text-zinc-900">{tStatic("feature.common.custom_fields")} ({fields.length})</h4>
         <AdminButton variant="secondary" size="sm" onClick={addField} disabled={disabled || fields.length >= 64}>
-          + Thêm field
+          {tStatic("feature.content.contenttypeform.add_field")}
         </AdminButton>
       </div>
       {fields.map((field, index) => (
         <fieldset key={field.id} className="space-y-3 rounded-lg border border-zinc-200 bg-white p-3.5">
-          <legend className="px-1 text-xs font-semibold text-zinc-700">Field {index + 1}</legend>
+          <legend className="px-1 text-xs font-semibold text-zinc-700">{tStatic("feature.common.field")} {index + 1}</legend>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label htmlFor={`schema-field-key-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>Khóa field *</span>
+              <span>{tStatic("feature.content.contenttypeform.field_key")}</span>
               <input
                 id={`schema-field-key-${field.id}`}
                 name="key"
@@ -297,7 +299,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               />
             </label>
             <label htmlFor={`schema-field-label-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>Tên field *</span>
+              <span>{tStatic("feature.content.contenttypeform.field_name")}</span>
               <input
                 id={`schema-field-label-${field.id}`}
                 name="label"
@@ -310,7 +312,7 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
               />
             </label>
             <label htmlFor={`schema-field-type-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>Kiểu dữ liệu</span>
+              <span>{tStatic("feature.content.contenttypeform.data_type")}</span>
               <select
                 id={`schema-field-type-${field.id}`}
                 className={SELECT_CLASS}
@@ -331,19 +333,19 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
                 disabled={disabled}
                 onChange={e => updateField(field.id, { required: e.target.checked })}
               />
-              <span>Bắt buộc</span>
+              <span>{tStatic("feature.contact.contactpanel.required")}</span>
             </label>
           </div>
           {field.type === 'select' && (
             <label htmlFor={`schema-field-options-${field.id}`} className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>Các lựa chọn * (mỗi dòng: giá_trị|Nhãn)</span>
+              <span>{tStatic("feature.content.contenttypeform.options_one_per_line_value_label")}</span>
               <textarea
                 id={`schema-field-options-${field.id}`}
                 className="w-full min-w-0 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50"
                 value={field.optionsText}
                 disabled={disabled}
                 rows={4}
-                placeholder={'draft|Bản nháp\npublished|Đã đăng'}
+                placeholder={tStatic("feature.content.contenttypeform.draft_draft_published_published")}
                 onChange={e => updateField(field.id, { optionsText: e.target.value })}
               />
             </label>
@@ -354,14 +356,14 @@ export const ContentTypeForm: React.FC<ContentTypeFormProps> = ({
             onClick={() => update({ fields: draftRef.current.fields.filter(item => item.id !== field.id) })}
             disabled={disabled}
           >
-            Bỏ field
+            {tStatic("feature.content.contenttypeform.remove_field")}
           </AdminButton>
         </fieldset>
       ))}
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       <div>
         <AdminButton type="submit" variant="primary" size="md" disabled={disabled}>
-          Tạo loại nội dung
+          {tStatic("feature.content.contenttypeform.create_content_type")}
         </AdminButton>
       </div>
     </form>

@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   activateRecovery,
@@ -22,6 +23,7 @@ function makeHexRequestId(): string {
 }
 
 export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiError }) => {
+  const { t: translate } = useI18n();
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [passphrase, setPassphrase] = useState('');
@@ -54,9 +56,9 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
         .then((job) => {
           setActiveJob(job);
           if (job.state === 'succeeded') {
-            setNotice('Đã giải mã và tái dựng site khôi phục vào thư mục riêng thành công.');
+            setNotice(tStatic('feature.operations.restorepanel.successfully_decrypted_and_rebuilt_the_restored_site_in_a_separate_directory'));
           } else if (job.state === 'failed') {
-            setErrorMsg(job.error_message || 'Khôi phục thất bại.');
+            setErrorMsg(job.error_message || tStatic('feature.operations.restorepanel.restore_failed'));
           }
         })
         .catch(() => {});
@@ -68,11 +70,11 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
     e.preventDefault();
     if (!csrfToken) return;
     if (!selectedFile) {
-      setErrorMsg('Vui lòng chọn tệp .odbackup.age để khôi phục.');
+      setErrorMsg(tStatic('feature.operations.restorepanel.select_an_odbackup_age_file_to_restore'));
       return;
     }
     if (!passphrase) {
-      setErrorMsg('Vui lòng nhập passphrase giải mã backup.');
+      setErrorMsg(tStatic('feature.operations.restorepanel.enter_the_backup_decryption_passphrase'));
       return;
     }
     setBusy(true);
@@ -88,9 +90,9 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
       });
       setActiveJob(job);
       setPassphrase('');
-      setNotice(`Đã tiếp nhận tác vụ khôi phục ${job.id.slice(0, 12)}...`);
+      setNotice(tStatic('feature.operations.restorepanel.restore_job_value1_accepted', { value1: job.id.slice(0, 12) }));
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Lỗi khởi chạy khôi phục.');
+      setErrorMsg(err instanceof Error ? err.message : tStatic('feature.operations.restorepanel.could_not_start_the_restore'));
       onApiError(err);
     } finally {
       setBusy(false);
@@ -101,7 +103,7 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
     e.preventDefault();
     if (!csrfToken || !recovery?.expected_generation) return;
     if (!adminPassword) {
-      setErrorMsg('Vui lòng nhập mật khẩu Admin để xác nhận mở khóa.');
+      setErrorMsg(tStatic('feature.operations.restorepanel.enter_the_administrator_password_to_confirm_unlocking'));
       return;
     }
     setBusy(true);
@@ -114,11 +116,11 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
       });
       setAdminPassword('');
       setNotice(
-        `Đã mở khóa safe mode cho generation ${res.generation.slice(0, 12)}. SMTP vẫn giữ ${res.smtp_enabled ? 'bật' : 'tắt'} cho tới khi cấu hình lại.`,
+        tStatic('feature.operations.restorepanel.unlocked_safe_mode_for_generation_value1_smtp_remains_value2_until_reconfigured', { value1: res.generation.slice(0, 12), value2: res.smtp_enabled ? tStatic('feature.operations.restorepanel.enabled') : tStatic('feature.operations.restorepanel.disabled') }),
       );
       await loadRecoveryStatus();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Không thể kích hoạt site.');
+      setErrorMsg(err instanceof Error ? err.message : tStatic('feature.operations.restorepanel.could_not_activate_the_site'));
       onApiError(err);
     } finally {
       setBusy(false);
@@ -129,28 +131,23 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
     <section className="mt-8 space-y-4 border-t border-zinc-200 pt-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold text-zinc-950">Khôi phục &amp; Safe Mode</h3>
-          <p className="mt-0.5 text-sm text-zinc-600">
-            Tải lên gói <code className="text-xs">.odbackup.age</code> để dựng vào thư mục riêng, hoặc mở khóa safe mode sau khi khởi chạy root mới.
-          </p>
+          <h3 className="text-base font-semibold text-zinc-950">{translate('feature.operations.restorepanel.restore_safe_mode')}</h3>
+          <p className="mt-0.5 text-sm text-zinc-600">{translate('feature.operations.restorepanel.upload_the_package')}{' '}<code className="text-xs">.odbackup.age</code>{' '}{translate('feature.operations.restorepanel.to_rebuild_in_a_separate_directory_or_unlock_safe_mode_after_starting_the_new_ro')}</p>
         </div>
-        <AdminButton variant="secondary" size="sm" onClick={() => void loadRecoveryStatus()}>
-          Làm mới
-        </AdminButton>
+        <AdminButton variant="secondary" size="sm" onClick={() => void loadRecoveryStatus()}>{translate('feature.users.userspanel.refresh')}</AdminButton>
       </div>
 
       {recovery && (
         <div className={`space-y-1.5 rounded-xl border p-3.5 text-xs ${recovery.safe_mode ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-zinc-200 bg-zinc-50 text-zinc-700'}`}>
           <div className="flex flex-wrap items-center gap-2 font-semibold">
             <AdminBadge tone={recovery.safe_mode ? 'warning' : 'success'}>
-              {recovery.safe_mode ? 'SAFE MODE' : 'Hoạt động bình thường'}
+              {recovery.safe_mode ? translate('feature.operations.restorepanel.safe_mode') : translate('feature.operations.restorepanel.normal_operation')}
             </AdminBadge>
-            {recovery.safe_mode && <span>Công khai noindex, contact/plugin/SMTP tạm khóa</span>}
+            {recovery.safe_mode && <span>{translate('feature.operations.restorepanel.public_pages_are_noindex_contact_plugins_and_smtp_are_temporarily_disabled')}</span>}
           </div>
-          <div>Site root: <code className="font-mono">{recovery.site_root}</code></div>
+          <div>{translate('feature.operations.restorepanel.site_root')}{' '}<code className="font-mono">{recovery.site_root}</code></div>
           {recovery.ready_marker && (
-            <div>
-              READY.json generation: <code className="font-mono">{recovery.ready_marker.job_id}</code> (files: {recovery.ready_marker.file_count})
+            <div>{translate('feature.operations.restorepanel.ready_json_generation')}{' '}<code className="font-mono">{recovery.ready_marker.job_id}</code>{' '}{translate('feature.operations.restorepanel.files')}{' '}{recovery.ready_marker.file_count})
             </div>
           )}
         </div>
@@ -161,30 +158,28 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
 
       {recovery?.safe_mode && recovery.expected_generation && (
         <form onSubmit={handleActivate} className="max-w-xl space-y-3 rounded-xl border border-amber-200 bg-white p-4">
-          <div className="text-sm font-semibold text-zinc-900">Kích hoạt vận hành sau khôi phục</div>
+          <div className="text-sm font-semibold text-zinc-900">{translate('feature.operations.restorepanel.activate_operation_after_restore')}</div>
           <div className="flex flex-wrap items-end gap-2.5">
             <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-700">
-              <span>Mật khẩu Admin</span>
+              <span>{translate('feature.operations.restorepanel.administrator_password')}</span>
               <input
                 type="password"
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
                 className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
-                placeholder="Nhập mật khẩu Admin hiện tại"
+                placeholder={translate('feature.operations.restorepanel.enter_the_current_administrator_password')}
               />
             </label>
-            <AdminButton type="submit" variant="primary" disabled={busy}>
-              Mở khóa Safe Mode
-            </AdminButton>
+            <AdminButton type="submit" variant="primary" disabled={busy}>{translate('feature.operations.restorepanel.unlock_safe_mode')}</AdminButton>
           </div>
         </form>
       )}
 
       <form onSubmit={handleRestoreUploadAndRun} className="max-w-2xl space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
-        <div className="text-sm font-semibold text-zinc-900">Khôi phục từ gói .odbackup.age</div>
+        <div className="text-sm font-semibold text-zinc-900">{translate('feature.operations.restorepanel.restore_from_odbackup_age_package')}</div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Tệp backup (.odbackup.age)</span>
+            <span>{translate('feature.operations.restorepanel.backup_file_odbackup_age')}</span>
             <input
               type="file"
               accept=".age,.odbackup.age"
@@ -193,36 +188,36 @@ export const RestorePanel: React.FC<RestorePanelProps> = ({ csrfToken, onApiErro
             />
           </label>
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Passphrase giải mã</span>
+            <span>{translate('feature.operations.restorepanel.decryption_passphrase')}</span>
             <input
               type="password"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
               className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
-              placeholder="Passphrase của gói backup"
+              placeholder={translate('feature.operations.restorepanel.backup_package_passphrase')}
             />
           </label>
         </div>
         <div className="flex flex-wrap items-end gap-2.5">
           <label className="flex min-w-[220px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Ghi chú (tùy chọn)</span>
+            <span>{translate('feature.operations.restorepanel.note_optional')}</span>
             <input
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
-              placeholder="Ví dụ: Khôi phục kiểm thử sang thư mục mới"
+              placeholder={translate('feature.operations.restorepanel.example_test_restore_to_a_new_directory')}
             />
           </label>
           <AdminButton type="submit" variant="primary" disabled={busy || !csrfToken}>
-            {busy ? 'Đang xử lý...' : 'Tải lên & Khôi phục'}
+            {busy ? translate('feature.operations.restorepanel.processing') : translate('feature.operations.restorepanel.upload_restore')}
           </AdminButton>
         </div>
       </form>
 
       {activeJob && (
         <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-700">
-          <div>Tác vụ: <code className="font-mono">{activeJob.id}</code> — Trạng thái: <strong>{activeJob.state}</strong></div>
+          <div>{translate('feature.operations.restorepanel.job')}{' '}<code className="font-mono">{activeJob.id}</code>{' '}{translate('feature.operations.restorepanel.status')}{' '}<strong>{activeJob.state}</strong></div>
           {activeJob.summary_json && (
             <pre className="mt-1.5 overflow-x-auto text-[11px] text-zinc-600">{activeJob.summary_json}</pre>
           )}

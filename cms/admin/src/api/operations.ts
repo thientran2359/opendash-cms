@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export interface MissingCanonicalDiagnostic {
@@ -89,7 +90,7 @@ export interface OperationsDiagnostics {
 export function getOperationsDiagnostics(): Promise<OperationsDiagnostics> {
   return requestJson<OperationsDiagnostics>('/api/admin/operations/diagnostics', {
     method: 'GET',
-    defaultErrorMessage: 'Không tải được chẩn đoán vận hành.',
+    defaultErrorMessage: tStatic('api.operations.load_operational_diagnostics'),
   });
 }
 
@@ -97,7 +98,7 @@ export function planReconcile(csrfToken: string): Promise<ReconcilePlan> {
   return requestJson<ReconcilePlan>('/api/admin/operations/reconcile/plan', {
     method: 'POST',
     csrfToken,
-    defaultErrorMessage: 'Không thể lập kế hoạch đối soát.',
+    defaultErrorMessage: tStatic('api.operations.plan_reconciliation'),
   });
 }
 
@@ -116,7 +117,7 @@ export function applyReconcile(
       digest: plan.digest,
       confirm: true,
     }),
-    defaultErrorMessage: 'Không thể áp dụng kế hoạch đối soát.',
+    defaultErrorMessage: tStatic('api.operations.apply_the_reconciliation_plan'),
   });
 }
 
@@ -126,7 +127,7 @@ export function purgeQuarantine(csrfToken: string): Promise<PurgeQuarantineResul
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify({ confirm: true }),
-    defaultErrorMessage: 'Không thể dọn vùng cách ly.',
+    defaultErrorMessage: tStatic('api.operations.purge_quarantine'),
   });
 }
 
@@ -152,7 +153,7 @@ export interface BackupListResponse {
 export function listBackups(limit = 20): Promise<BackupListResponse> {
   return requestJson<BackupListResponse>(`/api/admin/operations/backups?limit=${limit}`, {
     method: 'GET',
-    defaultErrorMessage: 'Không tải được danh sách bản sao lưu.',
+    defaultErrorMessage: tStatic('api.operations.load_backups'),
   });
 }
 
@@ -165,14 +166,14 @@ export function createBackup(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể khởi tạo tác vụ sao lưu.',
+    defaultErrorMessage: tStatic('api.operations.start_the_backup_job'),
   });
 }
 
 export function getOperationJob(id: string): Promise<OperationJob> {
   return requestJson<OperationJob>(`/api/admin/operations/jobs/${encodeURIComponent(id)}`, {
     method: 'GET',
-    defaultErrorMessage: 'Không tải được trạng thái tác vụ.',
+    defaultErrorMessage: tStatic('api.operations.load_the_job_status'),
   });
 }
 
@@ -186,7 +187,7 @@ export function cancelOperationJob(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(expectedVersion != null ? { expected_version: expectedVersion } : {}),
-    defaultErrorMessage: 'Không thể hủy tác vụ.',
+    defaultErrorMessage: tStatic('api.operations.cancel_the_job'),
   });
 }
 
@@ -194,7 +195,7 @@ export function deleteBackupArtifact(csrfToken: string, id: string): Promise<Ope
   return requestJson<OperationJob>(`/api/admin/operations/backups/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     csrfToken,
-    defaultErrorMessage: 'Không thể xóa bản sao lưu.',
+    defaultErrorMessage: tStatic('api.operations.delete_the_backup'),
   });
 }
 
@@ -240,7 +241,7 @@ export function uploadRestoreArchive(
     csrfToken,
     contentType: 'application/octet-stream',
     body: file,
-    defaultErrorMessage: 'Không thể tải lên gói backup.',
+    defaultErrorMessage: tStatic('api.operations.upload_the_backup_package'),
   });
 }
 
@@ -253,14 +254,14 @@ export function createRestoreJob(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể khởi chạy tác vụ khôi phục.',
+    defaultErrorMessage: tStatic('api.operations.start_the_restore_job'),
   });
 }
 
 export function getRecoveryStatus(): Promise<RecoveryStatus> {
   return requestJson<RecoveryStatus>('/api/admin/operations/recovery/status', {
     method: 'GET',
-    defaultErrorMessage: 'Không tải được trạng thái safe mode.',
+    defaultErrorMessage: tStatic('api.operations.load_safe_mode_status'),
   });
 }
 
@@ -273,6 +274,6 @@ export function activateRecovery(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể kích hoạt site sau khôi phục.',
+    defaultErrorMessage: tStatic('api.operations.activate_the_site_after_restore'),
   });
 }

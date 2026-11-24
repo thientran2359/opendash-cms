@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { getPluginUiSchema, invokePluginAction } from '../../api/plugins.ts';
@@ -28,6 +29,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
   csrfToken,
   onUnauthorized,
 }) => {
+  const { t: translate } = useI18n();
   const [schema, setSchema] = useState<DeclarativeUiSchemaV1 | null>(null);
   const [activeScreenId, setActiveScreenId] = useState<string>('');
   const [loadError, setLoadError] = useState<string>('');
@@ -56,10 +58,10 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
         if (controller.signal.aborted) return;
         if (err instanceof ApiClientError && err.status === 401) {
           onUnauthorized();
-          setLoadError('Phiên đăng nhập đã hết hạn (401). Bản nháp được giữ nguyên.');
+          setLoadError(tStatic('feature.plugins.declarativepluginui.your_session_has_expired_401_the_draft_is_retained'));
           return;
         }
-        setLoadError(err instanceof Error ? err.message : 'Không tải được declarative UI.');
+        setLoadError(err instanceof Error ? err.message : tStatic('api.plugins.load_the_declarative_ui'));
       });
     return () => controller.abort();
   }, [pluginId, onUnauthorized]);
@@ -106,14 +108,14 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
       if (err instanceof ApiClientError && err.status === 401) {
         // Keep draft in memory; never auto-resubmit after re-login.
         onUnauthorized();
-        setActionError('Phiên đăng nhập hết hạn (401). Vui lòng đăng nhập lại; bản nháp đã được giữ nguyên.');
+        setActionError(tStatic('feature.plugins.declarativepluginui.your_session_has_expired_401_sign_in_again_the_draft_has_been_retained'));
       } else if (err instanceof ApiClientError) {
         const codeLabel = [403, 412, 422].includes(err.status) ? ` (${err.status})` : '';
         setActionError(`${err.message}${codeLabel}`);
       } else if (err instanceof DOMException && err.name === 'AbortError') {
-        setActionError('Yêu cầu quá thời gian chờ (timeout). Bản nháp vẫn được giữ.');
+        setActionError(tStatic('feature.plugins.declarativepluginui.the_request_timed_out_the_draft_is_retained'));
       } else {
-        setActionError(err instanceof Error ? err.message : 'Lỗi kết nối.');
+        setActionError(err instanceof Error ? err.message : tStatic('feature.plugins.declarativepluginui.connection_error'));
       }
     } finally {
       window.clearTimeout(timer);
@@ -222,7 +224,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
             }
           }}
         >
-          {isSubmitting ? 'Đang thực thi...' : (node.label ?? node.action_id ?? 'Thực thi')}
+          {isSubmitting ? translate('feature.plugins.declarativepluginui.executing') : (node.label ?? node.action_id ?? translate('feature.plugins.declarativepluginui.execute'))}
         </button>
       );
     }
@@ -238,7 +240,7 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
         <div key={node.id} className="declarative-collection">
           {node.label && <strong>{node.label}</strong>}
           {node.columns && node.columns.length > 0 && (
-            <div className="muted">Cột: {node.columns.join(', ')}</div>
+            <div className="muted">{translate('feature.plugins.declarativepluginui.columns')}{' '}{node.columns.join(', ')}</div>
           )}
         </div>
       );
@@ -247,8 +249,8 @@ export const DeclarativePluginUi: React.FC<DeclarativePluginUiProps> = ({
   };
 
   return (
-    <section aria-label="Declarative Plugin UI" style={{ marginTop: 16 }}>
-      <h3>Giao diện khai báo ({schema.plugin_id})</h3>
+    <section aria-label={translate('feature.plugins.declarativepluginui.declarative_plugin_ui')} style={{ marginTop: 16 }}>
+      <h3>{translate('feature.plugins.declarativepluginui.declarative_ui')}{schema.plugin_id})</h3>
       {schema.screens.length > 1 && (
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
           {schema.screens.map(scr => (

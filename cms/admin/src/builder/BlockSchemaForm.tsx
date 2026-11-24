@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n/index.tsx';
 import { useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type {
@@ -181,6 +182,7 @@ interface FieldControlProps {
 }
 
 function FieldControl({ field, current, viewport, disabled, onSet, onPickMedia }: FieldControlProps) {
+  const { t } = useI18n();
   const id = useId();
   const fallback = primitiveDefault(field);
   const responsive = isResponsiveField(field);
@@ -419,7 +421,7 @@ function FieldControl({ field, current, viewport, disabled, onSet, onPickMedia }
             disabled={disabled}
             onChange={event => setValue(event.target.value || (responsive ? undefined : ''))}
           >
-            {value == null && <option value="">Chưa chọn</option>}
+            {value == null && <option value="">{t('builder.block_schema_form.none')}</option>}
             {field.options.map(option => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
@@ -479,11 +481,11 @@ function FieldControl({ field, current, viewport, disabled, onSet, onPickMedia }
             onChange={event => setValue(event.target.value)}
           />
           <p className="text-xs text-zinc-500">
-            Đường dẫn /…, liên kết https://…, #mục, mailto: hoặc tel:; tối đa 4.096 ký tự Unicode. ({scalarCount}/4096)
+            {t('builder.block_schema_form.url_help', { count: scalarCount })}
           </p>
           {scalarCount > 4096 && (
             <p role="alert" className="text-xs text-red-700">
-              URL vượt giới hạn 4.096 ký tự Unicode. Giá trị nháp được giữ để sửa.
+              {t('builder.block_schema_form.url_long')}
             </p>
           )}
         </div>
@@ -503,6 +505,7 @@ interface PickerState {
 export function BlockSchemaForm({
   schema, values, onChange, viewport, csrfToken, onError, disabled = false,
 }: BlockSchemaFormProps) {
+  const { t } = useI18n();
   const [picker, setPicker] = useState<PickerState | null>(null);
   const [expandedRepeaters, setExpandedRepeaters] = useState<Set<string>>(() => new Set());
   const latestValues = useRef(values);
@@ -557,7 +560,7 @@ export function BlockSchemaForm({
           <div className="flex items-center justify-between gap-2">
             <h3 className="!m-0 text-xs font-semibold uppercase tracking-wide text-zinc-700">{field.label}</h3>
             <span className="text-[11px] text-zinc-500">
-              {items.length}/{max}{items.length < min ? ` · tối thiểu ${min}` : ''}
+              {items.length}/{max}{items.length < min ? t('builder.block_schema_form.min', { min }) : ''}
             </span>
           </div>
           <div className="divide-y divide-zinc-200 border-y border-zinc-200">
@@ -566,7 +569,7 @@ export function BlockSchemaForm({
               const labelValue = field.item_label_field ? row[field.item_label_field] : undefined;
               const itemKey = `${key}.${index}`;
               const expanded = expandedRepeaters.has(itemKey);
-              const titleText = typeof labelValue === 'string' && labelValue ? labelValue : `Mục ${index + 1}`;
+              const titleText = typeof labelValue === 'string' && labelValue ? labelValue : t('builder.block_schema_form.item', { index: index + 1 });
               return (
                 <div key={index} className="py-1.5">
                   <div className="flex items-center justify-between gap-1">
@@ -582,8 +585,8 @@ export function BlockSchemaForm({
                     <div className="flex shrink-0 items-center gap-0.5">
                       <button
                         type="button"
-                        title="Di chuyển lên"
-                        aria-label={`Lên ${titleText}`}
+                        title={t('builder.block_schema_form.up')}
+                        aria-label={t('builder.block_schema_form.up_item', { title: titleText })}
                         className={BUTTON_CLASS}
                         disabled={disabled || index === 0}
                         onClick={() => {
@@ -594,8 +597,8 @@ export function BlockSchemaForm({
                       >↑</button>
                       <button
                         type="button"
-                        title="Di chuyển xuống"
-                        aria-label={`Xuống ${titleText}`}
+                        title={t('builder.block_schema_form.down')}
+                        aria-label={t('builder.block_schema_form.down_item', { title: titleText })}
                         className={BUTTON_CLASS}
                         disabled={disabled || index === items.length - 1}
                         onClick={() => {
@@ -606,8 +609,8 @@ export function BlockSchemaForm({
                       >↓</button>
                       <button
                         type="button"
-                        title="Nhân bản mục"
-                        aria-label={`Nhân bản ${titleText}`}
+                        title={t('builder.block_schema_form.duplicate')}
+                        aria-label={t('builder.block_schema_form.duplicate_item', { title: titleText })}
                         className={BUTTON_CLASS}
                         disabled={disabled || items.length >= max}
                         onClick={() => {
@@ -618,8 +621,8 @@ export function BlockSchemaForm({
                       >⧉</button>
                       <button
                         type="button"
-                        title="Xóa mục"
-                        aria-label={`Xóa ${titleText}`}
+                        title={t('builder.block_schema_form.delete')}
+                        aria-label={t('builder.block_schema_form.delete_item', { title: titleText })}
                         className={BUTTON_CLASS + ' text-rose-700 hover:bg-rose-50'}
                         disabled={disabled || items.length <= min}
                         onClick={() => mutate(items.filter((_, idx) => idx !== index))}
@@ -650,7 +653,7 @@ export function BlockSchemaForm({
               setExpandedRepeaters(prev => new Set(prev).add(`${key}.${newIdx}`));
             }}
           >
-            + Thêm mục
+            {t('builder.block_schema_form.add')}
           </button>
         </div>
       );
@@ -669,7 +672,7 @@ export function BlockSchemaForm({
   });
 
   return (
-    <div className="space-y-3.5" aria-label={`Thuộc tính block ${schema.title}`}>
+    <div className="space-y-3.5" aria-label={t('builder.block_schema_form.properties', { title: schema.title })}>
       {renderFields(schema.fields, values, patchRoot, 'block.', [])}
       {picker && (
         <MediaPicker

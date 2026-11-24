@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
 import { getContentEntry, listContentEntries, listContentTypes } from '../api/content.ts';
 import { EMPTY_ADMIN_LOCALE_STATE, type AdminLocaleState } from '../api/locales.ts';
@@ -15,21 +16,6 @@ const COMPATIBLE: Record<BindingTarget, readonly ContentFieldType[]> = {
 };
 // Heading text has a stricter matrix than core/text.
 const HEADING_TEXT: readonly ContentFieldType[] = ['short_text', 'select'];
-const TARGETS: Record<ElementType, readonly { key: BindingTarget; label: string }[]> = {
-  'core/heading': [{ key: 'text', label: 'Tiêu đề (text)' }],
-  'core/text': [{ key: 'text', label: 'Nội dung (text)' }],
-  'core/image': [
-    { key: 'media_id', label: 'Mã ảnh (media_id)' },
-    { key: 'alt', label: 'Mô tả ảnh (alt)' },
-  ],
-  'core/button': [
-    { key: 'label', label: 'Nhãn nút (label)' },
-    { key: 'url', label: 'Đường dẫn (url)' },
-  ],
-  'core/list': [],
-  'core/video': [],
-  'core/contact_form': [],
-};
 const PAGE_SIZE = 50;
 
 interface Props {
@@ -67,6 +53,22 @@ export function BuilderBindingFields({
   onBindingChange,
   onError,
 }: Props) {
+  const { t } = useI18n();
+  const TARGETS: Record<ElementType, readonly { key: BindingTarget; label: string }[]> = {
+    'core/heading': [{ key: 'text', label: t('builder.builder_binding_fields.heading_text') }],
+    'core/text': [{ key: 'text', label: t('builder.builder_binding_fields.body_text') }],
+    'core/image': [
+      { key: 'media_id', label: t('builder.builder_binding_fields.image_id') },
+      { key: 'alt', label: t('builder.builder_binding_fields.image_alt') },
+    ],
+    'core/button': [
+      { key: 'label', label: t('builder.builder_binding_fields.button_label') },
+      { key: 'url', label: t('builder.builder_binding_fields.url') },
+    ],
+    'core/list': [],
+    'core/video': [],
+    'core/contact_form': [],
+  };
   const existing = readBinding(element);
   const signature = JSON.stringify(existing);
   const targets = TARGETS[element.type as ElementType];
@@ -106,9 +108,9 @@ export function BuilderBindingFields({
       if (alive) setTypes(result);
     }).catch(cause => {
       if (!alive) return;
-      setLookupError('Không thể tải loại nội dung; liên kết đang lưu vẫn được giữ.');
+      setLookupError(t('builder.builder_binding_fields.type_error'));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, 'Phiên đăng nhập hết hạn khi tra cứu nội dung.');
+        onError(cause, t('builder.builder_binding_fields.type_auth'));
     }).finally(() => { if (alive) setTypesBusy(false); });
     return () => { alive = false; };
   }, [element.id, lookupRevision]);
@@ -126,9 +128,9 @@ export function BuilderBindingFields({
       setHasMore(result.length === PAGE_SIZE);
     }).catch(cause => {
       if (sequence !== entrySequence.current) return;
-      setLookupError('Không thể tải entry; lựa chọn và binding hiện tại vẫn được giữ.');
+      setLookupError(t('builder.builder_binding_fields.entry_error'));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, 'Phiên đăng nhập hết hạn khi tra cứu entry.');
+        onError(cause, t('builder.builder_binding_fields.entry_auth'));
     }).finally(() => {
       if (sequence === entrySequence.current) setEntriesBusy(false);
     });
@@ -166,12 +168,12 @@ export function BuilderBindingFields({
     getContentEntry(typeKey, entry.id).then(actual => {
       if (sequence !== entrySequence.current) return;
       if (actual.slug === slug && actual.content_type_key === typeKey) setSelectionChecked(true);
-      else setLookupError('Entry đã đổi slug; hãy tải lại danh sách trước khi áp dụng.');
+      else setLookupError(t('builder.builder_binding_fields.slug_changed'));
     }).catch(cause => {
       if (sequence !== entrySequence.current) return;
-      setLookupError('Entry không thể tra cứu; lựa chọn của bạn vẫn được giữ.');
+      setLookupError(t('builder.builder_binding_fields.entry_lookup'));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, 'Phiên đăng nhập hết hạn khi đọc entry.');
+        onError(cause, t('builder.builder_binding_fields.entry_read_auth'));
     });
   };
 
@@ -185,9 +187,9 @@ export function BuilderBindingFields({
       setHasMore(next.length === PAGE_SIZE);
     }).catch(cause => {
       if (sequence !== entrySequence.current) return;
-      setLookupError('Không thể tải thêm entry; binding hiện tại không bị thay đổi.');
+      setLookupError(t('builder.builder_binding_fields.more_error'));
       if (cause instanceof ApiClientError && cause.status === 401)
-        onError(cause, 'Phiên đăng nhập hết hạn khi tải thêm entry.');
+        onError(cause, t('builder.builder_binding_fields.more_auth'));
     }).finally(() => {
       if (sequence === entrySequence.current) setEntriesBusy(false);
     });
@@ -204,16 +206,15 @@ export function BuilderBindingFields({
       source,
       target,
     });
-    setSavedStatus('Đã áp dụng vào bản nháp. Bấm Xem trước hoặc Lưu Builder để kiểm tra.');
+    setSavedStatus(t('builder.builder_binding_fields.applied'));
   };
 
   return (
-    <fieldset className="space-y-3 rounded-lg border border-indigo-200 p-3" aria-label="Field Binding">
-      <legend className="px-1 text-sm font-semibold text-indigo-900">Field Binding</legend>
-      <p className="text-xs text-slate-600">Liên kết dùng entry theo slug, không sao chép giá trị field. Preview có thể xem draft; trang công khai chỉ hiển thị published.</p>
-      <label className="block text-xs font-medium">
-        Thuộc tính đích
-        <select aria-label="Binding target" className="mt-1 w-full" value={target}
+    <fieldset className="space-y-3 rounded-lg border border-indigo-200 p-3" aria-label={t('builder.builder_binding_fields.legend')}>
+      <legend className="px-1 text-sm font-semibold text-indigo-900">{t('builder.builder_binding_fields.legend')}</legend>
+      <p className="text-xs text-slate-600">{t('builder.builder_binding_fields.description')}</p>
+      <label className="block text-xs font-medium">{t('builder.builder_binding_fields.target')}
+        <select aria-label={tStatic("feature.common.ui_binding_target")} className="mt-1 w-full" value={target}
           onChange={event => {
             setTarget(event.target.value as BindingTarget);
             setLookupError('');
@@ -221,9 +222,8 @@ export function BuilderBindingFields({
           {targets.map(option => <option value={option.key} key={option.key}>{option.label}</option>)}
         </select>
       </label>
-      <label className="block text-xs font-medium">
-        Loại nội dung
-        <select aria-label="Binding content type" className="mt-1 w-full" value={typeKey}
+      <label className="block text-xs font-medium">{t('builder.builder_binding_fields.type')}
+        <select aria-label={tStatic("feature.common.ui_binding_content_type")} className="mt-1 w-full" value={typeKey}
           onChange={event => {
             setTypeKey(event.target.value);
             setEntrySlug('');
@@ -231,20 +231,19 @@ export function BuilderBindingFields({
             setLookupError('');
             setSavedStatus('');
           }}>
-          <option value="">Chọn Post / Page / CPT</option>
+          <option value="">{t('builder.builder_binding_fields.choose_type')}</option>
           {typeKey && !types.some(item => item.descriptor.key === typeKey)
-            && <option value={typeKey}>{typeKey} (không còn tồn tại)</option>}
+            && <option value={typeKey}>{typeKey}{t('builder.builder_binding_fields.missing')}</option>}
           {types.map(item => <option key={item.descriptor.key} value={item.descriptor.key}
-            disabled={item.status !== 'active'}>{item.descriptor.label} ({item.descriptor.key}){item.status !== 'active' ? ' — ngừng hoạt động' : ''}</option>)}
+            disabled={item.status !== 'active'}>{item.descriptor.label} ({item.descriptor.key}){item.status !== 'active' ? t('builder.builder_binding_fields.inactive') : ''}</option>)}
         </select>
       </label>
       {typeKey && !typeActive && !typesBusy &&
-        <p role="status" className="text-xs text-amber-800">CPT không tồn tại hoặc provider không hoạt động. Binding đã lưu vẫn được giữ.</p>}
+        <p role="status" className="text-xs text-amber-800">{t('builder.builder_binding_fields.inactive_notice')}</p>}
       {localeState.hasMultipleLocales && (
-        <label className="block text-xs font-medium">
-          Ngôn ngữ entry (entry_locale)
+        <label className="block text-xs font-medium">{t('builder.builder_binding_fields.entry_locale')}
           <select
-            aria-label="Binding entry locale"
+            aria-label={tStatic("feature.common.ui_binding_entry_locale")}
             className="mt-1 w-full"
             value={entryLocale}
             onChange={event => {
@@ -254,7 +253,7 @@ export function BuilderBindingFields({
               setSavedStatus('');
             }}
           >
-            <option value="">Theo ngôn ngữ đang render</option>
+            <option value="">{t('builder.builder_binding_fields.render_locale')}</option>
             {localeState.allLocales.map(loc => (
               <option key={loc.code} value={loc.code}>
                 {loc.label} ({loc.code})
@@ -264,55 +263,54 @@ export function BuilderBindingFields({
         </label>
       )}
       <label className="block text-xs font-medium">
-        Entry
-        <select aria-label="Binding entry" className="mt-1 w-full" value={entrySlug}
+        {tStatic("feature.common.ui_entry")}
+        <select aria-label={tStatic("feature.common.ui_binding_entry")} className="mt-1 w-full" value={entrySlug}
           disabled={!typeActive} onChange={event => chooseEntry(event.target.value)}>
-          <option value="">Chọn entry</option>
+          <option value="">{t('builder.builder_binding_fields.choose_entry')}</option>
           {entrySlug && !entries.some(entry => entry.slug === entrySlug)
-            && <option value={entrySlug}>{entrySlug} (không có trong danh sách đã tải)</option>}
+            && <option value={entrySlug}>{entrySlug}{t('builder.builder_binding_fields.not_loaded')}</option>}
           {entries.map(entry => <option key={entry.id} value={entry.slug}>{entry.title} ({entry.slug})</option>)}
         </select>
       </label>
       {hasMore && <button type="button" className="btn-secondary !py-1.5 text-xs" disabled={entriesBusy}
-        onClick={loadMore}>Tải thêm entry</button>}
+        onClick={loadMore}>{t('builder.builder_binding_fields.more')}</button>}
       {entrySlug && !selectedEntry && !entriesBusy &&
-        <p role="status" className="text-xs text-amber-800">Không tìm thấy entry trong danh sách đã tải. Có thể đã đổi slug hoặc bị xóa; không tự xóa binding.</p>}
-      <label className="block text-xs font-medium">
-        Nguồn
-        <select aria-label="Binding source field" className="mt-1 w-full" value={sourceKey}
+        <p role="status" className="text-xs text-amber-800">{t('builder.builder_binding_fields.missing_entry')}</p>}
+      <label className="block text-xs font-medium">{t('builder.builder_binding_fields.source')}
+        <select aria-label={tStatic("feature.common.ui_binding_source_field")} className="mt-1 w-full" value={sourceKey}
           onChange={event => { setSourceKey(event.target.value); setLookupError(''); }}>
-          <option value="">Chọn trường tương thích</option>
+          <option value="">{t('builder.builder_binding_fields.choose_field')}</option>
           {sourceKey && sourceKey !== 'title' && !allowedFields.some(field => 'field:' + field.key === sourceKey)
-            && <option value={sourceKey} disabled>{sourceKey} (field đã mất)</option>}
-          <option value="title" disabled={!canUseTitle}>Tiêu đề entry (title){!canUseTitle ? ' — không tương thích' : ''}</option>
+            && <option value={sourceKey} disabled>{sourceKey}{t('builder.builder_binding_fields.missing_field')}</option>}
+          <option value="title" disabled={!canUseTitle}>{t('builder.builder_binding_fields.entry_title')}{!canUseTitle ? t('builder.builder_binding_fields.incompatible') : ''}</option>
           {allowedFields.map(field => {
             const compatible = allowed(element, target, field.type);
             return <option key={field.key} value={'field:' + field.key} disabled={!compatible}>
-              {field.label} ({field.key}, {field.type}){!compatible ? ' — không tương thích' : ''}
+              {field.label} ({field.key}, {field.type}){!compatible ? t('builder.builder_binding_fields.incompatible') : ''}
             </option>;
           })}
         </select>
       </label>
       {sourceKey && !sourceAllowed &&
-        <p role="status" className="text-xs text-amber-800">Field không tương thích với thuộc tính đích. Không thể áp dụng cấu hình này.</p>}
+        <p role="status" className="text-xs text-amber-800">{t('builder.builder_binding_fields.incompatible_notice')}</p>}
       {imageAltNeedsMedia &&
-        <p role="status" className="text-xs text-amber-800">Binding cho alt yêu cầu chọn Media ID tĩnh hợp lệ trước.</p>}
+        <p role="status" className="text-xs text-amber-800">{t('builder.builder_binding_fields.alt_notice')}</p>}
       {lookupError && <div className="space-y-2">
         <p role="alert" className="text-xs text-rose-700">{lookupError}</p>
         <button type="button" className="btn-secondary !py-1.5 text-xs" onClick={() => {
           setLookupError('');
           setLookupRevision(value => value + 1);
-        }}>Thử tải lại nguồn</button>
+        }}>{t('builder.builder_binding_fields.retry')}</button>
       </div>}
       {savedStatus && <p role="status" className="text-xs text-emerald-800">{savedStatus}</p>}
       <div className="flex flex-wrap gap-2">
         <button type="button" className="btn-secondary !py-1.5 text-xs" disabled={!valid}
-          onClick={apply}>Áp dụng binding</button>
+          onClick={apply}>{t('builder.builder_binding_fields.apply')}</button>
         {existing && <button type="button" className="btn-secondary !py-1.5 text-xs"
           onClick={() => {
             onBindingChange(element.id, null);
-            setSavedStatus('Đã gỡ binding khỏi bản nháp; giá trị tĩnh giữ nguyên.');
-          }}>Gỡ binding</button>}
+            setSavedStatus(t('builder.builder_binding_fields.removed'));
+          }}>{t('builder.builder_binding_fields.remove')}</button>}
       </div>
     </fieldset>
   );

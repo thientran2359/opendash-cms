@@ -1,3 +1,5 @@
+import { formatNumber } from '../../i18n/format.ts';
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import { deleteTaxonomyTerm, getTaxonomyDefinition, listAllTaxonomyTerms,
@@ -56,6 +58,7 @@ export function TaxonomyPage({
   onApiError,
   onNavigateHash,
 }: TaxonomyPageProps) {
+  useI18n();
   const [terms, setTerms] = useState<TaxonomyTerm[]>([]);
   const [definition, setDefinition] = useState<TaxonomyDefinition | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,8 +91,8 @@ export function TaxonomyPage({
       if (signal?.aborted) return;
       setTerms([]);
       setDefinition(null);
-      setError(cause instanceof Error ? cause.message : 'Không thể tải taxonomy.');
-      onApiError(cause, 'Không thể tải taxonomy.');
+      setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.taxonomypage.could_not_load_taxonomy"));
+      onApiError(cause, tStatic("feature.taxonomy.taxonomypage.could_not_load_taxonomy"));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -113,17 +116,17 @@ export function TaxonomyPage({
 
   const remove = async (term: TaxonomyTerm) => {
     if (!admin || !csrfToken || busy) return;
-    if (!window.confirm(`Xóa vĩnh viễn term "${term.name}" (#${term.id}) trong taxonomy ${kind}? Liên kết nội dung hoặc mục con sẽ chặn xóa.`)) return;
+    if (!window.confirm(tStatic("feature.taxonomy.taxonomypage.permanently_delete_term_value_value_in_taxonomy_value_content", { value1: term.name, value2: term.id, value3: kind }))) return;
     setBusy(true); setError(''); setNotice('');
     try {
       await deleteTaxonomyTerm(term.id, term.version, csrfToken);
-      setNotice(`Đã xóa #${term.id}.`);
+      setNotice(tStatic("feature.taxonomy.taxonomypage.deleted_value", { value1: term.id }));
       await refresh();
     } catch (cause) {
       setError(cause instanceof ApiClientError && cause.status === 412
-        ? 'Mục đã thay đổi (412). Hãy tải lại danh sách trước khi xóa.'
-        : cause instanceof Error ? cause.message : 'Không thể xóa term.');
-      onApiError(cause, 'Không thể xóa term.');
+        ? tStatic("feature.taxonomy.taxonomypage.the_item_changed_412_reload_the_list_before_deleting")
+        : cause instanceof Error ? cause.message : tStatic("api.taxonomy.delete_the_term"));
+      onApiError(cause, tStatic("api.taxonomy.delete_the_term"));
     } finally { setBusy(false); }
   };
 
@@ -132,22 +135,22 @@ export function TaxonomyPage({
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-zinc-950">
-            {definition?.label ?? (kind === 'category' ? 'Danh mục' : kind === 'tag' ? 'Thẻ' : kind)} ({terms.length})
+            {definition?.label ?? (kind === 'category' ? tStatic("feature.content.entrylistpage.category") : kind === 'tag' ? tStatic("shell.tags") : kind)} ({terms.length})
           </h2>
           <p className="mt-0.5 text-xs text-zinc-500">
-            {definition?.hierarchical ? 'Taxonomy phân cấp tối đa 8 cấp; có thể chuyển cha mà không đổi ID.' : 'Taxonomy phẳng không có cha; đổi tên hoặc slug không đổi ID.'}
+            {definition?.hierarchical ? tStatic("feature.taxonomy.taxonomypage.hierarchical_taxonomies_support_up_to_8_levels_the_parent") : tStatic("feature.taxonomy.taxonomypage.flat_taxonomies_have_no_parent_changing_the_name_or")}
           </p>
-          {!admin && user && <p className="mt-0.5 text-xs text-zinc-500">Editor có thể chỉnh sửa extension field được cấp quyền; các thuộc tính lõi chỉ Admin sửa.</p>}
+          {!admin && user && <p className="mt-0.5 text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomypage.editors_can_edit_authorized_extension_fields_only_admins_can")}</p>}
           {definition && (definition.provider_status !== 'active' || definition.declaration_state !== 'declared') &&
-            <p className="mt-0.5 text-xs text-amber-700">Taxonomy hiện không hoạt động; vẫn có thể xem term đã lưu.</p>}
+            <p className="mt-0.5 text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomypage.taxonomy_is_inactive_saved_terms_remain_visible")}</p>}
         </div>
         <div className="flex flex-wrap gap-2">
           <AdminButton variant="secondary" size="sm" disabled={busy}
-            onClick={() => onNavigateHash('#/taxonomy/definitions')}>Định nghĩa taxonomy</AdminButton>
+            onClick={() => onNavigateHash('#/taxonomy/definitions')}>{tStatic("feature.taxonomy.taxonomypage.taxonomy_definitions")}</AdminButton>
           <AdminButton variant="secondary" size="sm" disabled={loading || busy}
-            onClick={() => void refresh()}>Làm mới</AdminButton>
+            onClick={() => void refresh()}>{tStatic("feature.users.userspanel.refresh")}</AdminButton>
           {admin && <AdminButton variant="primary" size="sm" disabled={busy || loading || !definition || definition.provider_status !== 'active' || definition.declaration_state !== 'declared'}
-            onClick={() => onNavigateHash(newHash)}>+ Thêm mới</AdminButton>}
+            onClick={() => onNavigateHash(newHash)}>{tStatic("feature.content.entrylistpage.add_new")}</AdminButton>}
         </div>
       </header>
 
@@ -155,17 +158,17 @@ export function TaxonomyPage({
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
       <div className="flex flex-wrap items-end gap-3">
         <label htmlFor="taxonomy-search" className="flex max-w-md flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
-          <span>Tìm theo tên, slug hoặc ID</span>
+          <span>{tStatic("feature.taxonomy.taxonomypage.search_by_name_slug_or_id")}</span>
           <input id="taxonomy-search" type="search" value={search}
             onChange={event => { setSearch(event.target.value); setPage(0); }}
-            placeholder="Nhập tên, slug hoặc ID..."
+            placeholder={tStatic("feature.taxonomy.taxonomypage.enter_name_slug_or_id")}
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900" />
         </label>
         {localeState.hasMultipleLocales && (
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-600">
-            <span>Ngôn ngữ</span>
+            <span>{tStatic("feature.content.entrylistpage.language")}</span>
             <select
-              aria-label="Lọc ngôn ngữ taxonomy"
+              aria-label={tStatic("feature.taxonomy.taxonomypage.filter_taxonomy_language")}
               data-testid="taxonomy-locale-filter"
               value={filterLocale}
               onChange={(event) => {
@@ -174,7 +177,7 @@ export function TaxonomyPage({
               }}
               className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
             >
-              <option value="all">Tất cả ngôn ngữ</option>
+              <option value="all">{tStatic("feature.content.entrylistpage.all_languages")}</option>
               {localeState.allLocales.map((loc) => (
                 <option key={loc.code} value={loc.code}>
                   {loc.label} ({loc.code})
@@ -184,10 +187,10 @@ export function TaxonomyPage({
           </label>
         )}
       </div>
-      {loading && <p role="status" className="text-xs text-zinc-500">Đang tải danh sách...</p>}
+      {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomypage.loading_list")}</p>}
       <div className="space-y-2" aria-busy={loading}>
         {!loading && visible.length === 0 && <p className="rounded-xl border border-zinc-200 p-4 text-sm text-zinc-500">
-          {search ? 'Không tìm thấy mục phù hợp.' : 'Chưa có mục nào.'}
+          {search ? tStatic("feature.taxonomy.taxonomypage.no_matching_items") : tStatic("feature.taxonomy.taxonomypage.no_items_yet")}
         </p>}
         {visible.map(({term, depth}) => (
           <article key={term.id} data-term-id={term.id} className="rounded-xl border border-zinc-200 bg-white px-4 py-3 transition-colors hover:bg-zinc-50/70">
@@ -204,29 +207,29 @@ export function TaxonomyPage({
                 </h3>
                 <p className="break-all text-xs text-zinc-500">/{term.slug} · ID #{term.id} · v{term.version}</p>
                 {definition?.hierarchical && <p className="text-xs text-zinc-500">
-                  {term.parent_id === null ? 'Danh mục gốc' : `Cha: ${byId.get(term.parent_id)?.name ?? `#${term.parent_id}`}`} · Cấp {depth + 1}
+                  {term.parent_id === null ? tStatic("feature.taxonomy.taxonomypage.root_category") : `Cha: ${byId.get(term.parent_id)?.name ?? `#${term.parent_id}`}`} {tStatic("feature.taxonomy.taxonomypage.level")}{' '}{depth + 1}
                 </p>}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <AdminButton variant="secondary" size="sm" disabled={busy}
-                  aria-label={`Mở chỉnh sửa ${term.name}, ID ${term.id}`}
-                  onClick={() => onNavigateHash(editHash(term.id))}>{admin ? 'Sửa' : 'Extensions'}</AdminButton>
+                  aria-label={tStatic("feature.taxonomy.taxonomypage.open_editor_for_value_id_value", { value1: term.name, value2: term.id })}
+                  onClick={() => onNavigateHash(editHash(term.id))}>{admin ? tStatic("multilingual.edit") : 'Extensions'}</AdminButton>
                 {admin && <AdminButton variant="danger" size="sm" disabled={busy}
-                  aria-label={`Xóa ${term.name}, ID ${term.id}`}
-                  onClick={() => void remove(term)}>Xóa</AdminButton>}
+                  aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: term.name, value2: term.id })}
+                  onClick={() => void remove(term)}>{tStatic("multilingual.delete")}</AdminButton>}
               </div>
             </div>
           </article>
         ))}
       </div>
-      <nav aria-label="Phân trang taxonomy" className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
-        <span>Hiển thị {filtered.length ? currentPage * PAGE_SIZE + 1 : 0}–{Math.min(filtered.length, (currentPage + 1) * PAGE_SIZE)} / {filtered.length}</span>
+      <nav aria-label={tStatic("feature.taxonomy.taxonomypage.taxonomy_pagination")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
+        <span>{tStatic("feature.taxonomy.taxonomypage.showing")}{' '}{filtered.length ? currentPage * PAGE_SIZE + 1 : 0}–{Math.min(filtered.length, (currentPage + 1) * PAGE_SIZE)} / {filtered.length}</span>
         <div className="flex items-center gap-2">
           <AdminButton variant="secondary" size="sm" disabled={loading || currentPage === 0}
-            onClick={() => setPage(currentPage - 1)}>Trước</AdminButton>
-          <span className="tabular-nums">Trang {currentPage + 1}/{pages}</span>
+            onClick={() => setPage(currentPage - 1)}>{tStatic("feature.users.userspanel.previous")}</AdminButton>
+          <span className="tabular-nums">{tStatic("feature.common.page_number", { page: formatNumber(currentPage + 1) })}/{formatNumber(pages)}</span>
           <AdminButton variant="secondary" size="sm" disabled={loading || currentPage + 1 >= pages}
-            onClick={() => setPage(currentPage + 1)}>Sau</AdminButton>
+            onClick={() => setPage(currentPage + 1)}>{tStatic("feature.common.next")}</AdminButton>
         </div>
       </nav>
     </section>

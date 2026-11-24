@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useState } from 'react';
 import { ApiClientError } from '../../api/client.ts';
 import {
@@ -27,6 +28,7 @@ export function SeoPanel({
   onApiError,
   localeState = EMPTY_ADMIN_LOCALE_STATE,
 }: SeoPanelProps) {
+  const { t: translate } = useI18n();
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [activeLocale, setActiveLocale] = useState<string>(defaultLocaleCode);
   useEffect(() => {
@@ -95,11 +97,11 @@ export function SeoPanel({
         effectiveLocale,
       );
       setVersion(saved.version);
-      setStatus(`Đã lưu SEO trang chủ (v${saved.version}).`);
+      setStatus(tStatic('feature.seo.seopanel.homepage_seo_saved_v_value1', { value1: saved.version }));
     } catch (error) {
       if (error instanceof ApiClientError && error.status === 412) {
         setStaleConflict(true);
-        setStatus('Phiên bản SEO trang chủ đã thay đổi. Bản nháp của bạn được giữ nguyên.');
+        setStatus(tStatic('feature.seo.seopanel.the_homepage_seo_version_changed_your_draft_has_been_retained'));
       } else {
         onApiError(error);
       }
@@ -109,17 +111,14 @@ export function SeoPanel({
   };
 
   return (
-    <section className="space-y-4" aria-label="SEO trang chủ">
+    <section className="space-y-4" aria-label={translate('feature.seo.seopanel.homepage_seo')}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">SEO trang chủ</h2>
-          <p className="mt-0.5 text-sm text-zinc-600">
-            Metadata công khai cho trang chủ (<code className="text-xs">v{version}</code>).
+          <h2 className="text-base font-semibold text-zinc-950">{translate('feature.seo.seopanel.homepage_seo')}</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">{translate('feature.seo.seopanel.public_metadata_for_the_homepage')}<code className="text-xs">v{version}</code>).
           </p>
         </div>
-        <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={load}>
-          Tải lại
-        </AdminButton>
+        <AdminButton variant="secondary" size="sm" disabled={loading || saving} onClick={load}>{translate('multilingual.reload')}</AdminButton>
       </div>
       <LocaleTabs
         localeState={localeState}
@@ -134,7 +133,7 @@ export function SeoPanel({
       )}
       <form className="max-w-2xl space-y-4" onSubmit={handleSave}>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-800">Tiêu đề SEO (tối đa 120 ký tự)</span>
+          <span className="font-medium text-zinc-800">{translate('feature.seo.seopanel.seo_title_up_to_120_characters')}</span>
           <input
             type="text"
             className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
@@ -145,7 +144,7 @@ export function SeoPanel({
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-800">Mô tả SEO (tối đa 320 ký tự)</span>
+          <span className="font-medium text-zinc-800">{translate('feature.seo.seopanel.seo_description_up_to_320_characters')}</span>
           <textarea
             className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
             rows={2}
@@ -157,7 +156,7 @@ export function SeoPanel({
         </label>
         <div className="grid gap-3 md:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-800">OG Image Media ID (SHA-256)</span>
+            <span className="font-medium text-zinc-800">{translate('feature.seo.seopanel.og_image_media_id_sha_256')}</span>
             <input
               type="text"
               className="h-9 rounded-md border border-zinc-300 bg-white px-3 font-mono text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
@@ -167,7 +166,7 @@ export function SeoPanel({
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-800">Canonical URL tùy chỉnh</span>
+            <span className="font-medium text-zinc-800">{translate('feature.seo.seopanel.custom_canonical_url')}</span>
             <input
               type="url"
               className="h-9 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-od-accent"
@@ -184,11 +183,11 @@ export function SeoPanel({
             disabled={loading || saving}
             onChange={(e) => setNoindex(e.target.checked)}
           />
-          <span>Không cho máy tìm kiếm lập chỉ mục (noindex)</span>
+          <span>{translate('feature.seo.seopanel.prevent_search_engines_from_indexing_noindex')}</span>
         </label>
         <div className="pt-1">
           <AdminButton type="submit" variant="primary" disabled={loading || saving || !csrfToken}>
-            {saving ? 'Đang lưu…' : 'Lưu SEO trang chủ'}
+            {saving ? translate('general.saving') : translate('feature.seo.seopanel.save_homepage_seo')}
           </AdminButton>
         </div>
       </form>
@@ -215,6 +214,7 @@ export function EntryRouteSeoCard({
   onVersionUpdated,
   onApiError,
 }: EntryRouteSeoCardProps) {
+  const { t: translate } = useI18n();
   const [customPath, setCustomPath] = useState('');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -270,7 +270,7 @@ export function EntryRouteSeoCard({
         version: saved.entry_version,
         path: safePublicPath(saved.public_url),
       });
-      setNotice(`Đã lưu đường dẫn tùy chỉnh (v${saved.entry_version}).`);
+      setNotice(tStatic('feature.seo.seopanel.custom_permalink_saved_v_value1', { value1: saved.entry_version }));
     } catch (error) {
       onApiError(error);
     } finally {
@@ -299,7 +299,7 @@ export function EntryRouteSeoCard({
       onVersionUpdated(saved.entry_version);
       setConfirmedRoute(previous => previous && previous.version === entryVersion
         ? { ...previous, version: saved.entry_version } : null);
-      setNotice(`Đã lưu SEO entry (v${saved.entry_version}).`);
+      setNotice(tStatic('feature.seo.seopanel.entry_seo_saved_v_value1', { value1: saved.entry_version }));
     } catch (error) {
       onApiError(error);
     } finally {
@@ -308,18 +308,16 @@ export function EntryRouteSeoCard({
   };
 
   return (
-    <div className="mt-6 rounded border border-slate-200 p-4" aria-label="Đường dẫn và SEO entry">
-      <h4 className="font-semibold text-slate-900">Đường dẫn tùy chỉnh &amp; SEO (v{entryVersion})</h4>
+    <div className="mt-6 rounded border border-slate-200 p-4" aria-label={translate('feature.seo.seopanel.entry_permalink_and_seo')}>
+      <h4 className="font-semibold text-slate-900">{translate('feature.seo.seopanel.custom_permalink_seo_v')}{entryVersion})</h4>
       {notice && <p className="mt-2 text-sm text-emerald-800">{notice}</p>}
       {confirmedRoute?.version === entryVersion && confirmedRoute.path && (
         <a href={confirmedRoute.path} target="_blank" rel="noopener noreferrer"
-          className="mt-2 inline-block text-sm text-sky-700 hover:underline">
-          Xem công khai (đường dẫn máy chủ đã lưu)
-        </a>
+          className="mt-2 inline-block text-sm text-sky-700 hover:underline">{translate('feature.seo.seopanel.view_public_page_saved_server_path')}</a>
       )}
       <div className="mt-3 grid gap-2">
         <label className="grid gap-1 text-sm">
-          <span>Custom path (ví dụ /gioi-thieu)</span>
+          <span>{translate('feature.seo.seopanel.custom_path_e_g_about')}</span>
           <div className="flex gap-2">
             <input
               type="text"
@@ -328,13 +326,11 @@ export function EntryRouteSeoCard({
               disabled={disabled || saving}
               onChange={(e) => setCustomPath(e.target.value)}
             />
-            <button type="button" className="btn-secondary" disabled={disabled || saving || !csrfToken} onClick={saveRoute}>
-              Lưu route
-            </button>
+            <button type="button" className="btn-secondary" disabled={disabled || saving || !csrfToken} onClick={saveRoute}>{translate('feature.seo.seopanel.save_route')}</button>
           </div>
         </label>
         <label className="grid gap-1 text-sm">
-          <span>Tiêu đề SEO</span>
+          <span>{translate('feature.seo.seopanel.seo_title')}</span>
           <input
             type="text"
             className="rounded border border-slate-300 px-3 py-1"
@@ -345,7 +341,7 @@ export function EntryRouteSeoCard({
           />
         </label>
         <label className="grid gap-1 text-sm">
-          <span>Mô tả SEO</span>
+          <span>{translate('feature.seo.seopanel.seo_description')}</span>
           <textarea
             className="rounded border border-slate-300 px-3 py-1"
             rows={2}
@@ -357,7 +353,7 @@ export function EntryRouteSeoCard({
         </label>
         <div className="grid gap-2 md:grid-cols-2">
           <label className="grid gap-1 text-sm">
-            <span>OG Image Media ID</span>
+            <span>{translate('feature.seo.seopanel.og_image_media_id')}</span>
             <input
               type="text"
               className="rounded border border-slate-300 px-3 py-1 font-mono text-xs"
@@ -367,7 +363,7 @@ export function EntryRouteSeoCard({
             />
           </label>
           <label className="grid gap-1 text-sm">
-            <span>Canonical URL</span>
+            <span>{translate('feature.seo.seopanel.canonical_url')}</span>
             <input
               type="url"
               className="rounded border border-slate-300 px-3 py-1"
@@ -384,12 +380,10 @@ export function EntryRouteSeoCard({
             disabled={disabled || saving}
             onChange={(e) => setNoindex(e.target.checked)}
           />
-          <span>Noindex</span>
+          <span>{translate('feature.seo.seopanel.noindex')}</span>
         </label>
         <div>
-          <button type="button" className="btn-secondary" disabled={disabled || saving || !csrfToken} onClick={saveSeo}>
-            Lưu SEO entry
-          </button>
+          <button type="button" className="btn-secondary" disabled={disabled || saving || !csrfToken} onClick={saveSeo}>{translate('feature.seo.seopanel.save_entry_seo')}</button>
         </div>
       </div>
     </div>

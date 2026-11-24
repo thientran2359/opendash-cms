@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useRef, useState } from 'react';
 import type { AuthUser } from '../../types.ts';
 import { ApiClientError } from '../../api/client.ts';
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigateHash, onApiError, onApplied }: Props) {
+  useI18n();
   const [catalog, setCatalog] = useState<LocalTemplateLibrary | null>(null);
   const [patterns, setPatterns] = useState<PatternRecord[]>([]);
   const [overrides, setOverrides] = useState<TypedTemplateOverride[]>([]);
@@ -38,7 +40,7 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
         setPatterns(patternList.items);
       }
     }).catch(error => {
-      if (seq === requestSeq.current) onApiError(error, 'Không tải được thư viện mẫu.');
+      if (seq === requestSeq.current) onApiError(error, tStatic("feature.library.templatelibrarypage.could_not_load_the_template_library"));
     }).finally(() => { if (seq === requestSeq.current) setLoading(false); });
   };
 
@@ -58,7 +60,7 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
         setPatterns(patternList.items);
       }
     }).catch(error => {
-      if (seq === requestSeq.current) onApiError(error, 'Không tải được thư viện mẫu.');
+      if (seq === requestSeq.current) onApiError(error, tStatic("feature.library.templatelibrarypage.could_not_load_the_template_library"));
     }).finally(() => { if (seq === requestSeq.current) setLoading(false); });
     return () => { requestSeq.current += 1; };
   }, [currentAccount, currentRole, csrfToken, themeRevision]);
@@ -70,71 +72,71 @@ export function TemplateLibraryPage({ user, csrfToken, themeRevision, onNavigate
     if (!user || user.role !== 'admin' || !csrfToken || applying) return;
     const seq = requestSeq.current;
     const key = item.canonical_target_key;
-    if (!window.confirm(`Reset site template “${key}” về nguồn theme/core tiếp theo? Bản AST hiện tại sẽ bị xóa và không thể hoàn tác.`)) return;
+    if (!window.confirm(tStatic("feature.library.templatelibrarypage.reset_site_template_value_to_the_next_theme_core", { value1: key }))) return;
     setApplying(key);
     try {
       const result = await resetTemplateOverride(item.id, item.version, csrfToken);
       if (seq !== requestSeq.current) return;
-      setNotice(`Đã reset ${result.canonical_target_key}. Nguồn hiệu lực: ${result.next_effective_source.label}.`);
+      setNotice(tStatic("feature.library.templatelibrarypage.reset_value_effective_source_value", { value1: result.canonical_target_key, value2: result.next_effective_source.label }));
       setOverrides(rows => rows.filter(row => row.id !== item.id));
       onApplied();
     } catch (error) {
       if (seq !== requestSeq.current) return;
       if (error instanceof ApiClientError && error.status === 412) {
-        setNotice('Xung đột 412: bản trên server đã thay đổi; không reset. Hãy mở lại và so sánh.');
-      } else onApiError(error, 'Không thể reset site template override.');
+        setNotice(tStatic("feature.library.templatelibrarypage.conflict_412_the_server_version_changed_reset_canceled_reopen"));
+      } else onApiError(error, tStatic("api.builder.reset_the_site_template_override"));
     } finally { if (seq === requestSeq.current) setApplying(null); }
   };
 
   if (!user || user.role !== 'admin' || !csrfToken) return null;
   return <main className="od-admin-card min-w-0 space-y-5" data-testid="local-template-library">
     <header className="flex flex-wrap items-center justify-between gap-3">
-      <div><h2 className="text-xl font-semibold">Thư viện mẫu cục bộ</h2>
-        <p className="mt-1 text-sm text-slate-600">Pattern dùng chung thuộc website và template role của theme đang kích hoạt.</p></div>
-      <button type="button" className="btn-secondary" disabled={loading || !!applying} onClick={refresh}>Tải lại thư viện</button>
+      <div><h2 className="text-xl font-semibold">{tStatic("feature.library.templatelibrarypage.local_template_library")}</h2>
+        <p className="mt-1 text-sm text-slate-600">{tStatic("feature.library.templatelibrarypage.shared_site_patterns_and_template_roles_of_the_active")}</p></div>
+      <button type="button" className="btn-secondary" disabled={loading || !!applying} onClick={refresh}>{tStatic("feature.library.templatelibrarypage.reload_library")}</button>
     </header>
-    {loading && <p role="status">Đang đọc thư viện…</p>}
+    {loading && <p role="status">{tStatic("feature.library.templatelibrarypage.loading_library")}</p>}
     {notice && <p role="status" className="text-sm text-slate-700">{notice}</p>}
     {catalog && <>
-      <section className="space-y-3" aria-label="Pattern cục bộ">
-        <h3 className="font-semibold">Pattern đồng bộ ({patterns.length})</h3>
-        <p className="text-sm text-slate-600">Thêm block Reusable Pattern từ Visual Builder rồi chọn Pattern cần dùng. Thay đổi bản gốc sẽ cập nhật mọi nơi đang tham chiếu.</p>
+      <section className="space-y-3" aria-label={tStatic("feature.library.templatelibrarypage.local_patterns")}>
+        <h3 className="font-semibold">{tStatic("feature.library.templatelibrarypage.synced_patterns")}{patterns.length})</h3>
+        <p className="text-sm text-slate-600">{tStatic("feature.library.templatelibrarypage.add_a_reusable_pattern_block_from_visual_builder_and")}</p>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {patterns.map(item => <article key={item.id} className="min-w-0 rounded-lg border border-slate-200 p-3">
             <h4 className="break-words font-medium">{item.title}</h4>
-            <p className="mt-1 break-words text-xs text-slate-500">#{item.id} · {item.slug} · {item.referencing_count} nội dung tham chiếu</p>
-            <button type="button" className="btn-secondary mt-3" onClick={() => onNavigateHash(`#/patterns/${item.id}/edit`)}>Mở Pattern</button>
+            <p className="mt-1 break-words text-xs text-slate-500">#{item.id} · {item.slug} · {item.referencing_count} {tStatic("feature.library.templatelibrarypage.content_references")}</p>
+            <button type="button" className="btn-secondary mt-3" onClick={() => onNavigateHash(`#/patterns/${item.id}/edit`)}>{tStatic("feature.library.templatelibrarypage.open_pattern")}</button>
           </article>)}
         </div>
-        {!patterns.length && <p className="text-sm">Chưa có Pattern đồng bộ.</p>}
-        <button type="button" onClick={() => onNavigateHash('#/patterns/new')}>Tạo Pattern mới</button>
+        {!patterns.length && <p className="text-sm">{tStatic("feature.library.templatelibrarypage.no_synced_patterns")}</p>}
+        <button type="button" onClick={() => onNavigateHash('#/patterns/new')}>{tStatic("feature.library.templatelibrarypage.create_pattern")}</button>
       </section>
-      <section className="space-y-3 border-t border-slate-200 pt-4" aria-label="Mẫu theme cục bộ">
-        <h3 className="font-semibold">Mẫu theme đang kích hoạt</h3>
-        <p className="text-sm text-slate-600">Theme: {catalog.active_theme_id ?? 'Không có'} · {catalog.theme_state}</p>
+      <section className="space-y-3 border-t border-slate-200 pt-4" aria-label={tStatic("feature.library.templatelibrarypage.local_theme_templates")}>
+        <h3 className="font-semibold">{tStatic("feature.library.templatelibrarypage.active_theme_templates")}</h3>
+        <p className="text-sm text-slate-600">{tStatic("feature.common.ui_theme")} {catalog.active_theme_id ?? tStatic("feature.library.templatelibrarypage.none")} · {catalog.theme_state}</p>
         {catalog.theme_templates.map(item => <article key={item.role} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
           <div className="min-w-0"><strong>{item.role}</strong>
-            <p className="break-all text-xs text-slate-500">Revision: {item.revision_id} · {item.revision_digest.slice(0, 12)}</p>
+            <p className="break-all text-xs text-slate-500">{tStatic("feature.common.revision")}: {item.revision_id} · {item.revision_digest.slice(0, 12)}</p>
             {item.reason && <p className="text-xs text-amber-800">{item.reason}</p>}
           </div>
-          {item.can_apply && <span className="text-xs text-slate-600">Mẫu thuộc active theme</span>}
+          {item.can_apply && <span className="text-xs text-slate-600">{tStatic("feature.library.templatelibrarypage.active_theme_templates_2")}</span>}
         </article>)}
-        {!catalog.theme_templates.length && <p className="text-sm text-slate-600">Theme không cung cấp mẫu role cục bộ hợp lệ. Pattern CPT được lưu riêng và vẫn được bảo toàn.</p>}
+        {!catalog.theme_templates.length && <p className="text-sm text-slate-600">{tStatic("feature.library.templatelibrarypage.the_theme_does_not_provide_valid_local_role_templates")}</p>}
       </section>
-      <section className="space-y-3 border-t border-slate-200 pt-4" aria-label="Site template overrides">
-        <h3 className="font-semibold">Site template overrides ({overrides.length})</h3>
-        <p className="text-sm text-slate-600">Bản AST thuộc website ưu tiên hơn template của theme ở cùng target. Reset đúng target sẽ hiện nguồn theme/core kế tiếp; không thay đổi các template khác.</p>
+      <section className="space-y-3 border-t border-slate-200 pt-4" aria-label={tStatic("feature.common.site_template_overrides")}>
+        <h3 className="font-semibold">{tStatic("feature.common.site_template_overrides")} ({overrides.length})</h3>
+        <p className="text-sm text-slate-600">{tStatic("feature.library.templatelibrarypage.site_owned_ast_takes_precedence_over_a_theme_template")}</p>
         {overrides.map(item => <article key={item.id} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
           <div className="min-w-0">
             <strong className="break-all">{item.canonical_target_key}</strong>
-            <p className="text-xs text-slate-600">Phiên bản v{item.version} · {item.effective_source?.label ?? 'Site override'}</p>
-            <p className="break-all text-xs text-slate-500">Theme gốc: {item.base_theme_id ?? 'Core'} · {item.base_revision_digest?.slice(0, 12) ?? 'Không có revision'}</p>
+            <p className="text-xs text-slate-600">{tStatic("feature.users.userprofilepanel.version_v")}{item.version} · {item.effective_source?.label ?? 'Site override'}</p>
+            <p className="break-all text-xs text-slate-500">{tStatic("feature.library.templatelibrarypage.original_theme")}{' '}{item.base_theme_id ?? 'Core'} · {item.base_revision_digest?.slice(0, 12) ?? tStatic("feature.library.templatelibrarypage.no_revision")}</p>
           </div>
           <button type="button" className="btn-secondary" disabled={!!applying || loading} onClick={() => void resetSiteOverride(item)}>
-            {applying === item.canonical_target_key ? 'Đang reset…' : 'Reset override'}
+            {applying === item.canonical_target_key ? tStatic("feature.library.templatelibrarypage.resetting") : 'Reset override'}
           </button>
         </article>)}
-        {!overrides.length && <p className="text-sm text-slate-600">Chưa có site-owned override; resolver sử dụng active theme/core theo thứ tự candidate.</p>}
+        {!overrides.length && <p className="text-sm text-slate-600">{tStatic("feature.library.templatelibrarypage.no_site_owned_override_the_resolver_uses_active_theme")}</p>}
       </section>
     </>}
   </main>;

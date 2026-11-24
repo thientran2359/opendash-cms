@@ -1,3 +1,5 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { formatMediaBytes, formatMediaDate } from '../media/library/format.ts';
 import { useCallback, useEffect, useState } from 'react';
 import {
   cancelOperationJob,
@@ -22,13 +24,8 @@ function generateRequestId64Hex(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MiB`;
-}
-
 export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
+  const { t: translate } = useI18n();
   const [data, setData] = useState<BackupListResponse | null>(null);
   const [passphrase, setPassphrase] = useState('');
   const [confirmPassphrase, setConfirmPassphrase] = useState('');
@@ -74,11 +71,11 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
     e.preventDefault();
     setNotice(null);
     if (!csrfToken) {
-      setNotice('Thiếu CSRF token phiên đăng nhập.');
+      setNotice(tStatic('feature.operations.backupspanel.missing_session_csrf_token'));
       return;
     }
     if (passphrase !== confirmPassphrase) {
-      setNotice('Mật khẩu xác nhận không khớp.');
+      setNotice(tStatic('feature.operations.backupspanel.the_confirmation_password_does_not_match'));
       return;
     }
     setBusy(true);
@@ -94,7 +91,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
       setConfirmPassphrase('');
       setReason('');
       setActiveJob(job);
-      setNotice(`Đã khởi tạo tác vụ sao lưu ${job.id.slice(0, 12)}…`);
+      setNotice(tStatic('feature.operations.backupspanel.started_backup_job_value1', { value1: job.id.slice(0, 12) }));
       await refresh();
     } catch (error) {
       onApiError(error);
@@ -109,7 +106,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
     try {
       const updated = await cancelOperationJob(csrfToken, activeJob.id, activeJob.version);
       setActiveJob(updated);
-      setNotice(`Đã hủy tác vụ ${updated.id.slice(0, 12)}…`);
+      setNotice(tStatic('feature.operations.backupspanel.cancelled_job_value1', { value1: updated.id.slice(0, 12) }));
       await refresh();
     } catch (error) {
       onApiError(error);
@@ -123,7 +120,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
     setBusy(true);
     try {
       await deleteBackupArtifact(csrfToken, id);
-      setNotice(`Đã xóa gói sao lưu ${id.slice(0, 12)}…`);
+      setNotice(tStatic('feature.operations.backupspanel.deleted_backup_package_value1', { value1: id.slice(0, 12) }));
       await refresh();
     } catch (error) {
       onApiError(error);
@@ -133,24 +130,22 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
   };
 
   return (
-    <section className="space-y-4" aria-label="Sao lưu mã hóa">
+    <section className="space-y-4" aria-label={translate('feature.operations.backupspanel.encrypted_backup')}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">Sao lưu mã hóa (.odbackup.age)</h2>
+          <h2 className="text-base font-semibold text-zinc-950">{translate('feature.operations.backupspanel.encrypted_backup_odbackup_age')}</h2>
           <p className="mt-0.5 text-sm text-zinc-600">
             {data
-              ? `Đang lưu ${data.active_artifact_count} / ${data.max_artifacts} gói sao lưu · tối đa ${data.max_receipts} biên nhận.`
-              : 'Đang tải thông tin sao lưu…'}
+              ? translate('feature.operations.backupspanel.storing_value1_value2_backup_packages_up_to_value3_receipts', { value1: data.active_artifact_count, value2: data.max_artifacts, value3: data.max_receipts })
+              : translate('feature.operations.backupspanel.loading_backup_information')}
           </p>
         </div>
-        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy}>
-          Làm mới
-        </AdminButton>
+        <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy}>{translate('feature.users.userspanel.refresh')}</AdminButton>
       </div>
 
       <form onSubmit={handleCreateBackup} className="flex max-w-xl flex-col gap-3">
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>Mật khẩu mã hóa (16–128 ký tự, không lưu trên máy chủ)</span>
+          <span>{translate('feature.operations.backupspanel.encryption_passphrase_16_128_characters_not_stored_on_the_server')}</span>
           <input
             type="password"
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
@@ -161,7 +156,7 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
           />
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>Xác nhận mật khẩu mã hóa</span>
+          <span>{translate('feature.operations.backupspanel.confirm_encryption_passphrase')}</span>
           <input
             type="password"
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
@@ -172,22 +167,19 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
           />
         </label>
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>Ghi chú (tùy chọn)</span>
+          <span>{translate('feature.operations.backupspanel.note_optional')}</span>
           <input
             type="text"
             className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm font-normal text-zinc-900"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Ví dụ: Trước khi nâng cấp theme"
+            placeholder={translate('feature.operations.backupspanel.example_before_upgrading_the_theme')}
           />
         </label>
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <AdminButton type="submit" variant="primary" disabled={busy || Boolean(activeJob)}>
-            Tạo bản sao lưu mã hóa
-          </AdminButton>
+          <AdminButton type="submit" variant="primary" disabled={busy || Boolean(activeJob)}>{translate('feature.operations.backupspanel.create_encrypted_backup')}</AdminButton>
           {activeJob && (activeJob.state === 'queued' || activeJob.state === 'running') && (
-            <AdminButton variant="danger" onClick={handleCancel} disabled={busy}>
-              Hủy tác vụ ({activeJob.state})
+            <AdminButton variant="danger" onClick={handleCancel} disabled={busy}>{translate('feature.operations.backupspanel.cancel_job')}{activeJob.state})
             </AdminButton>
           )}
         </div>
@@ -199,32 +191,28 @@ export function BackupsPanel({ csrfToken, onApiError }: BackupsPanelProps) {
         <table className="table">
           <thead>
             <tr>
-              <th>Tệp</th>
-              <th>Kích thước</th>
+              <th>{translate('feature.operations.backupspanel.file')}</th>
+              <th>{translate('feature.operations.backupspanel.size')}</th>
               <th>SHA-256</th>
-              <th>Tạo lúc</th>
-              <th>Thao tác</th>
+              <th>{translate('feature.operations.backupspanel.created_at')}</th>
+              <th>{translate('multilingual.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {data.artifacts.map((art) => (
               <tr key={art.id}>
                 <td>{art.filename}</td>
-                <td>{formatBytes(art.size_bytes)}</td>
+                <td>{formatMediaBytes(art.size_bytes)}</td>
                 <td><code>{art.sha256.slice(0, 16)}…</code></td>
-                <td>{art.created_at}</td>
+                <td>{formatMediaDate(art.created_at)}</td>
                 <td className="row-gap">
-                  <a className="btn-secondary" href={getBackupDownloadUrl(art.id)} download={art.filename}>
-                    Tải xuống
-                  </a>
+                  <a className="btn-secondary" href={getBackupDownloadUrl(art.id)} download={art.filename}>{translate('feature.operations.backupspanel.download')}</a>
                   <button
                     type="button"
                     className="btn-danger"
                     onClick={() => void handleDeleteArtifact(art.id)}
                     disabled={busy}
-                  >
-                    Xóa
-                  </button>
+                  >{translate('multilingual.delete')}</button>
                 </td>
               </tr>
             ))}

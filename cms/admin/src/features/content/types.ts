@@ -1,3 +1,4 @@
+import { tStatic } from '../../i18n/index.tsx';
 /** Wire types for M3–M7 content, field groups, panel registry, and composite save APIs. */
 export type ContentFieldType =
   | 'short_text'
@@ -11,15 +12,15 @@ export type ContentFieldType =
   | 'gallery';
 
 export const CONTENT_FIELD_TYPES: Array<{ value: ContentFieldType; label: string }> = [
-  { value: 'short_text', label: 'Chữ ngắn' },
-  { value: 'long_text', label: 'Chữ dài' },
-  { value: 'rich_text', label: 'Nội dung rich text' },
-  { value: 'number', label: 'Số' },
-  { value: 'boolean', label: 'Bật / tắt' },
-  { value: 'date', label: 'Ngày' },
-  { value: 'select', label: 'Lựa chọn' },
-  { value: 'image', label: 'Ảnh (mã media)' },
-  { value: 'gallery', label: 'Thư viện ảnh (danh sách mã)' },
+  { value: 'short_text', get label() { return tStatic("feature.content.types.short_text"); } },
+  { value: 'long_text', get label() { return tStatic("feature.content.types.long_text"); } },
+  { value: 'rich_text', get label() { return tStatic("feature.content.types.rich_text_content"); } },
+  { value: 'number', get label() { return tStatic("feature.content.types.number"); } },
+  { value: 'boolean', get label() { return tStatic("feature.content.types.on_off"); } },
+  { value: 'date', get label() { return tStatic("feature.content.types.date"); } },
+  { value: 'select', get label() { return tStatic("feature.content.types.choice"); } },
+  { value: 'image', get label() { return tStatic("feature.content.types.image_media_id"); } },
+  { value: 'gallery', get label() { return tStatic("feature.content.types.gallery_list_of_ids"); } },
 ];
 
 export type FieldRole = 'editor' | 'admin';

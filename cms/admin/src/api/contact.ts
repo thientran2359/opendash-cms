@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 import type { NotificationAttemptPublic } from './smtp.ts';
 
@@ -57,7 +58,7 @@ export interface ContactSubmissionDetail {
 
 export function listContactForms(): Promise<ContactFormRecord[]> {
   return requestJson<ContactFormRecord[]>('/api/admin/contact/forms', {
-    defaultErrorMessage: 'Không thể tải danh sách form liên hệ.',
+    defaultErrorMessage: tStatic('api.contact.load_contact_forms'),
   });
 }
 
@@ -70,7 +71,7 @@ export function createContactForm(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể tạo form liên hệ.',
+    defaultErrorMessage: tStatic('api.contact.create_the_contact_form'),
   });
 }
 
@@ -86,7 +87,7 @@ export function updateContactForm(
     contentType: 'application/json',
     ifMatchVersion: version,
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể cập nhật form liên hệ.',
+    defaultErrorMessage: tStatic('api.contact.update_the_contact_form'),
   });
 }
 
@@ -99,7 +100,7 @@ export function deleteContactForm(
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: 'Không thể xóa form liên hệ.',
+    defaultErrorMessage: tStatic('api.contact.delete_the_contact_form'),
   });
 }
 
@@ -111,13 +112,13 @@ export function listContactSubmissions(
   const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) });
   if (formId != null) qs.set('form_id', String(formId));
   return requestJson<ContactSubmissionSummary[]>(`/api/admin/contact/submissions?${qs.toString()}`, {
-    defaultErrorMessage: 'Không thể tải hộp thư liên hệ.',
+    defaultErrorMessage: tStatic('api.contact.load_the_contact_inbox'),
   });
 }
 
 export function getContactSubmission(id: number): Promise<ContactSubmissionDetail> {
   return requestJson<ContactSubmissionDetail>(`/api/admin/contact/submissions/${id}`, {
-    defaultErrorMessage: 'Không thể tải chi tiết thư liên hệ.',
+    defaultErrorMessage: tStatic('api.contact.load_the_contact_message'),
   });
 }
 
@@ -125,6 +126,6 @@ export function deleteContactSubmission(csrfToken: string | null, id: number): P
   return requestJson<void>(`/api/admin/contact/submissions/${id}`, {
     method: 'DELETE',
     csrfToken,
-    defaultErrorMessage: 'Không thể xóa thư liên hệ.',
+    defaultErrorMessage: tStatic('api.contact.delete_the_contact_message'),
   });
 }

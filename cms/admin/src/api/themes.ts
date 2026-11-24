@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import type { BlockFieldSpec } from '../types.ts';
 import { requestJson } from './client.ts';
 
@@ -91,7 +92,7 @@ export interface ThemeOptionsSnapshot {
 
 export function getThemes(): Promise<ThemesSummary> {
   return requestJson('/api/admin/themes', {
-    defaultErrorMessage: 'Không thể tải danh sách theme.',
+    defaultErrorMessage: tStatic('api.themes.load_themes'),
   });
 }
 
@@ -101,7 +102,7 @@ export function installTheme(file: File, csrfToken: string): Promise<ThemeInstal
     body: file,
     contentType: 'application/zip',
     csrfToken,
-    defaultErrorMessage: 'Không thể cài theme ZIP.',
+    defaultErrorMessage: tStatic('api.themes.install_the_theme_zip'),
   });
 }
 
@@ -117,7 +118,7 @@ export interface ThemeLayoutCatalog {
 
 export function getActiveThemeLayouts(): Promise<ThemeLayoutCatalog> {
   return requestJson('/api/admin/themes/active/layouts', {
-    defaultErrorMessage: 'Không thể tải Page Layout và Custom Single Template.',
+    defaultErrorMessage: tStatic('api.themes.load_page_layouts_and_custom_single_templates'),
   });
 }
 
@@ -128,7 +129,7 @@ export function activateThemeRevision(revisionId: string, selectionVersion: numb
     ifMatchVersion: selectionVersion,
     contentType: 'application/json',
     body: JSON.stringify({ revision_id: revisionId }),
-    defaultErrorMessage: 'Không thể kích hoạt revision theme.',
+    defaultErrorMessage: tStatic('api.themes.activate_the_theme_revision'),
   });
 }
 
@@ -138,7 +139,7 @@ export function getThemeOptions(
 ): Promise<ThemeOptionsSnapshot> {
   const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
   return requestJson(`/api/themes/${encodeURIComponent(themeId)}/options${query}`, {
-    defaultErrorMessage: 'Không thể tải tùy chọn theme.',
+    defaultErrorMessage: tStatic('api.themes.load_theme_options'),
   });
 }
 
@@ -156,7 +157,7 @@ export function saveThemeOptions(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify({ values }),
-    defaultErrorMessage: 'Không thể lưu tùy chọn theme.',
+    defaultErrorMessage: tStatic('api.themes.save_theme_options'),
   });
 }
 
@@ -217,7 +218,7 @@ export function dryRunSampleImport(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify({ groups }),
-    defaultErrorMessage: 'Không thể xem trước kế hoạch nhập dữ liệu mẫu.',
+    defaultErrorMessage: tStatic('api.themes.preview_the_sample_data_import_plan'),
   });
 }
 
@@ -238,6 +239,6 @@ export function executeSampleImport(
       expected_versions: plan.expected_versions,
       acknowledge_public_changes: acknowledgePublicChanges,
     }),
-    defaultErrorMessage: 'Không thể thực thi nhập dữ liệu mẫu.',
+    defaultErrorMessage: tStatic('api.themes.import_sample_data'),
   });
 }

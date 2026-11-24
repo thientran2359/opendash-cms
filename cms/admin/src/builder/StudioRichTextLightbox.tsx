@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n/index.tsx';
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -106,6 +107,7 @@ export function stripRichHtmlToPreview(html: string): string {
 export function StudioRichTextLightbox({
   open, title, value, maxBytes, disabled = false, onChange, onClose,
 }: StudioRichTextLightboxProps) {
+  const { t } = useI18n();
   const headingId = useId();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
@@ -173,7 +175,7 @@ export function StudioRichTextLightbox({
   const applyLink = () => {
     const clean = linkUrl.trim();
     if (!isSafeLinkHref(clean)) {
-      setLinkError('URL không hợp lệ (dùng /..., https://..., http://..., #..., mailto: hoặc tel:).');
+      setLinkError(t('builder.studio_rich_text_lightbox.invalid_url'));
       return;
     }
     const el = editorRef.current;
@@ -218,7 +220,7 @@ export function StudioRichTextLightbox({
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-4 py-2.5">
           <div className="min-w-0">
             <h2 id={headingId} className="!m-0 truncate text-sm font-semibold text-zinc-900">
-              Text Editor · {title}
+              {t('builder.studio_rich_text_lightbox.heading', { title })}
             </h2>
           </div>
           <div className="flex items-center gap-2">
@@ -228,16 +230,14 @@ export function StudioRichTextLightbox({
                 onClick={() => setMode('visual')}
                 className={'rounded px-2.5 py-1 font-medium ' +
                   (mode === 'visual' ? 'bg-sky-600 text-white' : 'text-zinc-600 hover:text-zinc-900')}
-              >
-                Trực quan
+              >{t('builder.studio_rich_text_lightbox.visual')}
               </button>
               <button
                 type="button"
                 onClick={() => setMode('html')}
                 className={'rounded px-2.5 py-1 font-medium ' +
                   (mode === 'html' ? 'bg-sky-600 text-white' : 'text-zinc-600 hover:text-zinc-900')}
-              >
-                Mã HTML
+              >{t('builder.studio_rich_text_lightbox.html')}
               </button>
             </div>
             <button
@@ -245,26 +245,25 @@ export function StudioRichTextLightbox({
               onClick={onClose}
               data-testid="studio-richtext-done"
               className="rounded-md bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700"
-            >
-              Xong
+            >{t('builder.studio_rich_text_lightbox.done')}
             </button>
           </div>
         </header>
 
         {mode === 'visual' ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex flex-wrap items-center gap-1.5 border-b border-zinc-200 bg-zinc-50/70 px-3 py-2" role="toolbar" aria-label="Công cụ định dạng văn bản">
-              {toolBtn('B', 'In đậm (Ctrl/Cmd+B)', () => execCmd('bold'))}
-              {toolBtn('I', 'In nghiêng (Ctrl/Cmd+I)', () => execCmd('italic'))}
-              {toolBtn('U', 'Gạch chân (Ctrl/Cmd+U)', () => execCmd('underline'))}
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-zinc-200 bg-zinc-50/70 px-3 py-2" role="toolbar" aria-label={t('builder.studio_rich_text_lightbox.toolbar')}>
+              {toolBtn('B', t('builder.studio_rich_text_lightbox.bold'), () => execCmd('bold'))}
+              {toolBtn('I', t('builder.studio_rich_text_lightbox.italic'), () => execCmd('italic'))}
+              {toolBtn('U', t('builder.studio_rich_text_lightbox.underline'), () => execCmd('underline'))}
               <span className="mx-0.5 h-4 w-px bg-zinc-300" aria-hidden="true" />
-              {toolBtn('¶ Đoạn', 'Đoạn văn bản', () => execCmd('formatBlock', 'p'))}
-              {toolBtn('❝ Trích dẫn', 'Khối trích dẫn', () => execCmd('formatBlock', 'blockquote'))}
-              {toolBtn('• Danh sách', 'Danh sách chấm', () => execCmd('insertUnorderedList'))}
-              {toolBtn('1. Danh sách', 'Danh sách số', () => execCmd('insertOrderedList'))}
+              {toolBtn(t('builder.studio_rich_text_lightbox.paragraph_button'), t('builder.studio_rich_text_lightbox.paragraph'), () => execCmd('formatBlock', 'p'))}
+              {toolBtn(t('builder.studio_rich_text_lightbox.quote_button'), t('builder.studio_rich_text_lightbox.quote'), () => execCmd('formatBlock', 'blockquote'))}
+              {toolBtn(t('builder.studio_rich_text_lightbox.bullet_button'), t('builder.studio_rich_text_lightbox.bullet'), () => execCmd('insertUnorderedList'))}
+              {toolBtn(t('builder.studio_rich_text_lightbox.numbered_button'), t('builder.studio_rich_text_lightbox.numbered'), () => execCmd('insertOrderedList'))}
               <span className="mx-0.5 h-4 w-px bg-zinc-300" aria-hidden="true" />
-              {toolBtn('🔗 Liên kết', 'Chèn liên kết', openLinkBar, showLinkInput)}
-              {toolBtn('✕ Bỏ định dạng', 'Xóa định dạng vùng chọn', () => execCmd('removeFormat'))}
+              {toolBtn(t('builder.studio_rich_text_lightbox.link_button'), t('builder.studio_rich_text_lightbox.insert_link'), openLinkBar, showLinkInput)}
+              {toolBtn(t('builder.studio_rich_text_lightbox.clear_button'), t('builder.studio_rich_text_lightbox.clear'), () => execCmd('removeFormat'))}
             </div>
 
             {showLinkInput && (
@@ -273,22 +272,20 @@ export function StudioRichTextLightbox({
                   type="text"
                   value={linkUrl}
                   onChange={e => setLinkUrl(e.target.value)}
-                  placeholder="https://... hoặc /duong-dan"
+                  placeholder={t('builder.studio_rich_text_lightbox.placeholder')}
                   className="h-7 min-w-0 flex-1 rounded border border-zinc-300 bg-white px-2 text-xs"
                 />
                 <button
                   type="button"
                   onClick={applyLink}
                   className="rounded bg-sky-600 px-2.5 py-1 font-semibold text-white hover:bg-sky-700"
-                >
-                  Chèn link
+                >{t('builder.studio_rich_text_lightbox.insert')}
                 </button>
                 <button
                   type="button"
                   onClick={() => execCmd('unlink')}
                   className="rounded border border-zinc-300 bg-white px-2 py-1 text-zinc-700 hover:bg-zinc-100"
-                >
-                  Gỡ link
+                >{t('builder.studio_rich_text_lightbox.remove')}
                 </button>
                 {linkError && <p className="w-full text-[11px] text-rose-700">{linkError}</p>}
               </div>
@@ -318,7 +315,7 @@ export function StudioRichTextLightbox({
         )}
 
         <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-200 bg-zinc-50 px-4 py-2 text-[11px] text-zinc-500">
-          <span>Hỗ trợ: p, br, strong, em, u, ul, ol, li, blockquote, a</span>
+          <span>{t('builder.studio_rich_text_lightbox.supported')}</span>
           <span className={overLimit ? 'font-semibold text-amber-700' : ''}>
             {byteCount} bytes{maxBytes ? ` / ${maxBytes} bytes` : ''}
           </span>

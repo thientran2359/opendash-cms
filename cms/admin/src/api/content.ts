@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import {
   CompositeEntrySaveInput,
   CompositeEntrySaveResult,
@@ -83,7 +84,7 @@ export function effectiveContentTypeSettings(
 
 export function listContentTypes(): Promise<OwnedContentTypeWithSettings[]> {
   return requestJson('/api/admin/content-types', {
-    defaultErrorMessage: 'Không thể tải loại nội dung.',
+    defaultErrorMessage: tStatic('api.content.load_content_types'),
   });
 }
 
@@ -93,8 +94,8 @@ export function createContentType(input: ContentTypeDefinitionWithSettings, csrf
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể tạo loại nội dung.',
-    oversizeErrorMessage: 'Định nghĩa loại nội dung quá lớn.',
+    defaultErrorMessage: tStatic('api.content.create_the_content_type'),
+    oversizeErrorMessage: tStatic('api.content.the_content_type_definition_is_too_large'),
   });
 }
 
@@ -110,14 +111,14 @@ export function updateContentType(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể cập nhật loại nội dung.',
-    oversizeErrorMessage: 'Định nghĩa loại nội dung quá lớn.',
+    defaultErrorMessage: tStatic('api.content.update_the_content_type'),
+    oversizeErrorMessage: tStatic('api.content.the_content_type_definition_is_too_large'),
   });
 }
 
 export function listFieldGroups(): Promise<FieldGroupRecord[]> {
   return requestJson('/api/admin/content-field-groups', {
-    defaultErrorMessage: 'Không thể tải nhóm trường mở rộng.',
+    defaultErrorMessage: tStatic('api.content.load_custom_field_groups'),
   });
 }
 
@@ -127,7 +128,7 @@ export function createFieldGroup(input: UserFieldGroupInput, csrfToken: string):
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể tạo nhóm trường.',
+    defaultErrorMessage: tStatic('api.content.create_the_field_group'),
   });
 }
 
@@ -143,7 +144,7 @@ export function updateFieldGroup(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể cập nhật nhóm trường.',
+    defaultErrorMessage: tStatic('api.content.update_the_field_group'),
   });
 }
 
@@ -156,13 +157,13 @@ export function deleteFieldGroup(
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: 'Không thể rút nhóm trường.',
+    defaultErrorMessage: tStatic('api.content.withdraw_the_field_group'),
   });
 }
 
 export function getEditorLayout(typeKey: string): Promise<EditorLayoutSnapshot> {
   return requestJson(`${contentTypePath(typeKey)}/editor-layout`, {
-    defaultErrorMessage: 'Không thể tải bố cục màn hình chỉnh sửa.',
+    defaultErrorMessage: tStatic('api.content.load_the_editor_layout'),
   });
 }
 
@@ -178,13 +179,13 @@ export function putEditorLayout(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(layout),
-    defaultErrorMessage: 'Không thể lưu bố cục màn hình chỉnh sửa.',
+    defaultErrorMessage: tStatic('api.content.save_the_editor_layout'),
   });
 }
 
 export function getEffectiveEditorConfig(typeKey: string): Promise<EffectiveEditorConfigWithSettings> {
   return requestJson(`${contentTypePath(typeKey)}/effective-editor-config`, {
-    defaultErrorMessage: 'Không thể tải cấu hình editor hiệu lực.',
+    defaultErrorMessage: tStatic('api.content.load_the_effective_editor_configuration'),
   });
 }
 
@@ -199,7 +200,7 @@ export function listContentEntries(
   appendEntryTermFilters(query, filters);
   if (locale) query.set('locale', locale);
   return requestJson(`${entriesPath(typeKey)}?${query}`, {
-    defaultErrorMessage: 'Không thể tải danh sách nội dung.',
+    defaultErrorMessage: tStatic('api.content.load_entries'),
   });
 }
 
@@ -223,7 +224,7 @@ export function createEntryTranslation(
     ifMatchVersion: expectedSourceVersion,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể tạo bản dịch mới.',
+    defaultErrorMessage: tStatic('api.content.create_a_translation'),
   });
 }
 
@@ -235,14 +236,14 @@ export function queryContentEntryTable(typeKey: string, filter: EntryTableQuery 
   }
   return requestJson(`${contentTypePath(typeKey)}/entry-table?${query}`, {
     signal,
-    defaultErrorMessage: 'Không thể tải bảng nội dung.',
+    defaultErrorMessage: tStatic('api.content.load_the_entry_table'),
   });
 }
 
 export function getEffectiveEntryListConfig(typeKey: string, signal?: AbortSignal): Promise<EffectiveListConfig> {
   return requestJson(`${contentTypePath(typeKey)}/effective-list-config`, {
     signal,
-    defaultErrorMessage: 'Không thể tải cấu hình cột provider hiệu lực.',
+    defaultErrorMessage: tStatic('api.content.load_the_effective_provider_column_configuration'),
   });
 }
 
@@ -256,7 +257,7 @@ export function runEntryProviderAction(
   return requestJson(
     `${entryPath(typeKey, row.id)}/admin-actions/${encodeURIComponent(providerId)}/${encodeURIComponent(actionId)}`,
     { method: 'POST', csrfToken, ifMatchVersion: row.version,
-      defaultErrorMessage: 'Không thể chạy action provider.' },
+      defaultErrorMessage: tStatic('api.content.run_the_provider_action') },
   );
 }
 
@@ -272,7 +273,7 @@ export interface ContentTypeTaxonomyEligibility {
 export function listContentTypeTaxonomyEligibility(typeKey: string, signal?: AbortSignal): Promise<ContentTypeTaxonomyEligibility[]> {
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}`, {
     signal,
-    defaultErrorMessage: 'Không thể kiểm tra taxonomy hiệu lực.',
+    defaultErrorMessage: tStatic('api.content.check_effective_taxonomies'),
   });
 }
 
@@ -280,7 +281,7 @@ export function listContentTypeTaxonomyEligibility(typeKey: string, signal?: Abo
 export function getEffectiveContentTypeTaxonomies(typeKey: string, signal?: AbortSignal): Promise<string[]> {
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/effective`, {
     signal,
-    defaultErrorMessage: 'Không thể tải taxonomy áp dụng cho loại nội dung.',
+    defaultErrorMessage: tStatic('api.content.load_taxonomies_for_the_content_type'),
   });
 }
 
@@ -298,7 +299,7 @@ export function getConfiguredContentTypeTaxonomies(
 ): Promise<ConfiguredContentTypeTaxonomies> {
   return requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
     signal,
-    defaultErrorMessage: 'Không thể tải toàn bộ cấu hình taxonomy đã lưu.',
+    defaultErrorMessage: tStatic('api.content.load_all_saved_taxonomy_settings'),
   });
 }
 
@@ -315,7 +316,7 @@ export function updateContentTypeTaxonomyEligibility(
     csrfToken,
     ifMatchVersion: expectedVersion,
     body: JSON.stringify({ taxonomies, expected_version: expectedVersion }),
-    defaultErrorMessage: 'Không thể cập nhật taxonomy áp dụng.',
+    defaultErrorMessage: tStatic('api.content.update_assigned_taxonomies'),
   });
 }
 
@@ -325,13 +326,13 @@ export function changeContentEntryPublication(
   return requestJson(`${entryPath(typeKey, id)}/publication`, {
     method: 'POST', csrfToken, ifMatchVersion: version,
     contentType: 'application/json', body: JSON.stringify({ status }),
-    defaultErrorMessage: 'Không thể thay đổi trạng thái xuất bản.',
+    defaultErrorMessage: tStatic('api.content.change_the_publication_status'),
   });
 }
 
 export function getContentEntry(typeKey: string, id: number): Promise<ContentEntryRecord> {
   return requestJson(entryPath(typeKey, id), {
-    defaultErrorMessage: 'Không thể tải nội dung.',
+    defaultErrorMessage: tStatic('api.content.load_the_entry'),
   });
 }
 
@@ -345,8 +346,8 @@ export function createContentEntry(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể tạo nội dung.',
-    oversizeErrorMessage: 'Nội dung vượt quá giới hạn 512 KiB.',
+    defaultErrorMessage: tStatic('api.content.create_the_entry'),
+    oversizeErrorMessage: tStatic('api.content.the_entry_exceeds_the_512_kib_limit'),
   });
 }
 
@@ -363,8 +364,8 @@ export function updateContentEntry(
     ifMatchVersion: version,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể lưu nội dung.',
-    oversizeErrorMessage: 'Nội dung vượt quá giới hạn 512 KiB.',
+    defaultErrorMessage: tStatic('api.content.save_the_entry'),
+    oversizeErrorMessage: tStatic('api.content.the_entry_exceeds_the_512_kib_limit'),
   });
 }
 
@@ -378,8 +379,8 @@ export function createEntryComposite(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể tạo nội dung.',
-    oversizeErrorMessage: 'Nội dung vượt quá giới hạn 512 KiB.',
+    defaultErrorMessage: tStatic('api.content.create_the_entry'),
+    oversizeErrorMessage: tStatic('api.content.the_entry_exceeds_the_512_kib_limit'),
   });
 }
 
@@ -394,8 +395,8 @@ export function updateEntryComposite(
     csrfToken,
     contentType: 'application/json',
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể lưu nội dung.',
-    oversizeErrorMessage: 'Nội dung vượt quá giới hạn 512 KiB.',
+    defaultErrorMessage: tStatic('api.content.save_the_entry'),
+    oversizeErrorMessage: tStatic('api.content.the_entry_exceeds_the_512_kib_limit'),
   });
 }
 
@@ -409,6 +410,6 @@ export function deleteContentEntry(
     method: 'DELETE',
     csrfToken,
     ifMatchVersion: version,
-    defaultErrorMessage: 'Không thể xóa nội dung.',
+    defaultErrorMessage: tStatic('api.content.delete_the_entry'),
   }).then(() => undefined);
 }

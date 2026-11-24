@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useState } from 'react';
 import { getEditorLayout, putEditorLayout } from '../../api/content.ts';
 import type {
@@ -19,10 +20,10 @@ interface EditorLayoutConfiguratorProps {
 type RegionKey = 'main_top' | 'main_primary' | 'main_bottom' | 'sidebar';
 
 const REGION_LABELS: Record<RegionKey, string> = {
-  main_top: 'Vùng trên (main_top)',
-  main_primary: 'Vùng chính (main_primary)',
-  main_bottom: 'Vùng dưới (main_bottom)',
-  sidebar: 'Thanh bên (sidebar)',
+  get main_top() { return tStatic("feature.content.editorlayoutconfigurator.top_region_main_top"); },
+  get main_primary() { return tStatic("feature.content.editorlayoutconfigurator.main_region_main_primary"); },
+  get main_bottom() { return tStatic("feature.content.editorlayoutconfigurator.bottom_region_main_bottom"); },
+  get sidebar() { return tStatic("feature.content.editorlayoutconfigurator.sidebar_sidebar"); },
 };
 
 export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> = ({
@@ -31,6 +32,7 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
   csrfToken,
   onApiError,
 }) => {
+  useI18n();
   const [snapshot, setSnapshot] = useState<EditorLayoutSnapshot | null>(null);
   const [layout, setLayout] = useState<EditorLayoutConfigV1 | null>(null);
   const [newSliceKey, setNewSliceKey] = useState('');
@@ -46,7 +48,7 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
       setSnapshot(data);
       setLayout(data.layout);
     } catch (err) {
-      onApiError(err, 'Không thể tải cấu hình bố cục editor.');
+      onApiError(err, tStatic("feature.content.editorlayoutconfigurator.could_not_load_editor_layout_configuration"));
     }
   };
 
@@ -56,7 +58,7 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
   }, [typeKey]);
 
   if (!snapshot || !layout) {
-    return <p className="text-sm text-zinc-600">Đang tải cấu hình bố cục...</p>;
+    return <p className="text-sm text-zinc-600">{tStatic("feature.content.editorlayoutconfigurator.loading_editor_layout_configuration")}</p>;
   }
 
   const movePanelToRegion = (panelId: string, from: RegionKey, to: RegionKey) => {
@@ -153,9 +155,9 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
       const updated = await putEditorLayout(typeKey, snapshot.version, layout, csrfToken);
       setSnapshot(updated);
       setLayout(updated.layout);
-      setMessage(`Đã lưu bố cục màn hình chỉnh sửa (v${updated.version}).`);
+      setMessage(tStatic("feature.content.editorlayoutconfigurator.editor_layout_saved_vvalue", { value1: updated.version }));
     } catch (err) {
-      onApiError(err, 'Không thể lưu bố cục màn hình chỉnh sửa.');
+      onApiError(err, tStatic("api.content.save_the_editor_layout"));
     } finally {
       setSaving(false);
     }
@@ -166,15 +168,15 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-zinc-100 pb-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold text-zinc-950">Bố cục màn hình Single Edit</h3>
+            <h3 className="text-base font-semibold text-zinc-950">{tStatic("feature.content.editorlayoutconfigurator.single_edit_layout")}</h3>
             <AdminBadge tone="neutral">v{snapshot.version}</AdminBadge>
           </div>
           <p className="mt-0.5 text-xs text-zinc-500">
-            Chia nhóm trường cơ bản (<code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">base_field_panels</code>) và sắp xếp panel vào 4 vùng nội dung.
+            {tStatic("feature.content.editorlayoutconfigurator.divide_base_fields")}<code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-zinc-700">base_field_panels</code>{tStatic("feature.content.editorlayoutconfigurator.and_arrange_panels_in_four_content_regions")}
           </p>
         </div>
         <AdminButton variant="primary" size="md" onClick={() => void handleSave()} disabled={saving || !csrfToken}>
-          {saving ? 'Đang lưu bố cục...' : 'Lưu bố cục'}
+          {saving ? tStatic("feature.content.editorlayoutconfigurator.saving_layout") : tStatic("feature.content.editorlayoutconfigurator.save_layout")}
         </AdminButton>
       </div>
 
@@ -202,10 +204,10 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
                           checked={pl.enabled}
                           onChange={() => togglePanelEnabled(pl.panel_id, region)}
                         />
-                        Hiện
+                        {tStatic("feature.content.editorlayoutconfigurator.show")}
                       </label>
                       <select
-                        aria-label={`Vùng cho ${pl.panel_id}`}
+                        aria-label={tStatic("feature.content.editorlayoutconfigurator.region_for_value", { value1: pl.panel_id })}
                         className="h-7 rounded border border-zinc-300 bg-white px-1.5 text-xs text-zinc-800 focus-visible:outline-2 focus-visible:outline-od-accent"
                         value={region}
                         onChange={e => movePanelToRegion(pl.panel_id, region, e.target.value as RegionKey)}
@@ -216,7 +218,7 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
                       </select>
                       {pl.panel_id.startsWith('layout:') && (
                         <AdminButton variant="danger" size="sm" className="h-7 px-2 text-xs" onClick={() => removeBaseSlicePanel(pl.panel_id)}>
-                          Xóa
+                          {tStatic("multilingual.delete")}
                         </AdminButton>
                       )}
                     </div>
@@ -231,12 +233,12 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
       {baseFields.length > 0 && (
         <form onSubmit={addBaseSlicePanel} className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50/50 p-4">
           <div className="text-sm font-semibold text-zinc-900">
-            Tạo nhóm phân hoạch trường cơ bản (<code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">base_field_panels</code>)
+            {tStatic("feature.content.editorlayoutconfigurator.create_a_base_field_slice")}<code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-xs text-zinc-700">base_field_panels</code>)
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <input
               type="text"
-              placeholder="slice_key (vd: project_info)"
+              placeholder={tStatic("feature.common.ui_slice_key_vd_project_info")}
               className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
               value={newSliceKey}
               onChange={e => setNewSliceKey(e.target.value)}
@@ -244,7 +246,7 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
             />
             <input
               type="text"
-              placeholder="Tiêu đề panel"
+              placeholder={tStatic("feature.content.editorlayoutconfigurator.panel_title")}
               className="h-9 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-od-accent"
               value={newSliceTitle}
               onChange={e => setNewSliceTitle(e.target.value)}
@@ -277,7 +279,7 @@ export const EditorLayoutConfigurator: React.FC<EditorLayoutConfiguratorProps> =
             ))}
           </div>
           <AdminButton type="submit" variant="secondary" size="sm">
-            Thêm panel vào bố cục (nhớ bấm Lưu bố cục)
+            {tStatic("feature.content.editorlayoutconfigurator.add_panel_to_layout_remember_to_save_the_layout")}
           </AdminButton>
         </form>
       )}

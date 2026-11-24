@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 import * as api from '../api/index.ts';
 import * as builderApi from '../api/builder.ts';
@@ -99,6 +100,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   onApiError,
   onSavedSettingsOrTheme,
 }) => {
+  const { t } = useI18n();
   const isMode2 = route.view === 'studio-entry';
   const entryTypeKey = isMode2 ? (route.typeKey ?? '') : '';
   const entryId = isMode2 ? (route.entryId ?? null) : null;
@@ -126,7 +128,17 @@ export const StudioWorkspace: React.FC<Props> = ({
   // Mode 1 state
   const [panel, setPanel] = useState<StudioPanelId>(route.studioPanel ?? 'root');
   const [previewLocale, setPreviewLocale] = useState<string>('');
-  const effectivePreviewLocale = previewLocale || localeState.defaultLocale?.code || '';
+  const previewLocaleInvalid = Boolean(previewLocale && localeState.allLocales.length > 0
+    && previewLocale !== localeState.defaultLocale?.code
+    && (!localeState.multilingualEnabled || !localeState.enabledLocales.some(loc => loc.code === previewLocale)));
+  const effectivePreviewLocale = (previewLocaleInvalid ? '' : previewLocale) || localeState.defaultLocale?.code || '';
+  const [localeDraftConflict, setLocaleDraftConflict] = useState<string | null>(null);
+  const [localeReloadPending, setLocaleReloadPending] = useState(false);
+  const [hydratedPreviewLocale, setHydratedPreviewLocale] = useState<string | null>(null);
+  const localeBaselineMismatch = Boolean(hydratedPreviewLocale && effectivePreviewLocale
+    && hydratedPreviewLocale !== effectivePreviewLocale);
+  // A failed locale load must never leave the old draft eligible for a new locale's CAS.
+  const localeDraftBlocked = !isMode2 && Boolean(localeDraftConflict || previewLocaleInvalid || localeReloadPending || localeBaselineMismatch);
   const [activeThemeId, setActiveThemeId] = useState<string | null>(null);
   const [activeThemeName, setActiveThemeName] = useState<string | null>(null);
   const [targets, setTargets] = useState<StudioTargetItem[]>([]);
@@ -190,7 +202,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   const previewSeqRef = useRef(0);
   const previewAbortRef = useRef<AbortController | null>(null);
 
-  const authority = JSON.stringify([route.view, entryTypeKey, entryId, user?.id, user?.role, csrfToken, resetToken, active]);
+  const authority = JSON.stringify([route.view, entryTypeKey, entryId, user?.id, user?.role, csrfToken, resetToken, active, isMode2 ? null : effectivePreviewLocale]);
   const authorityRef = useRef(authority);
   authorityRef.current = authority;
 
@@ -215,6 +227,9 @@ export const StudioWorkspace: React.FC<Props> = ({
     previewAbortRef.current = null;
     setPreviewHtml('');
     setConflict(false);
+    setLocaleDraftConflict(null);
+    setLocaleReloadPending(false);
+    setHydratedPreviewLocale(null);
     resetHistory();
     mode1LoadedRef.current = false;
     mode2LoadedKeyRef.current = null;
@@ -277,6 +292,28 @@ export const StudioWorkspace: React.FC<Props> = ({
   useEffect(() => {
     onDirtyChange(totalDirty);
   }, [totalDirty, onDirtyChange]);
+
+  // A disabled/deleted preview locale or a changed default invalidates its loaded CAS baseline.
+  useEffect(() => {
+    if (isMode2 || savingRef.current || localeDraftConflict) return;
+    if (!previewLocaleInvalid && (!localeBaselineMismatch || localeReloadPending)) return;
+    loadSeqRef.current += 1;
+    previewSeqRef.current += 1;
+    previewAbortRef.current?.abort();
+    if (previewLocaleInvalid) setPreviewLocale('');
+    setPreviewHtml('');
+    setLocaleReloadPending(true);
+    setLoading(false);
+    if (mode1Dirty && !localeReloadPending) {
+      setLocaleDraftConflict(hydratedPreviewLocale || previewLocale);
+      setStatus(t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale"), true);
+    } else {
+      mode1ForceReloadRef.current = true;
+      mode1LoadedRef.current = false;
+      setLoading(true);
+      setMode1ReloadSeq(v => v + 1);
+    }
+  }, [isMode2, previewLocaleInvalid, localeBaselineMismatch, localeReloadPending, localeDraftConflict, hydratedPreviewLocale, previewLocale, saving, mode1Dirty, t]);
 
   // Keep route-driven Mode 1 panel/target synchronized cleanly on navigation.
   useEffect(() => {
@@ -348,12 +385,13 @@ export const StudioWorkspace: React.FC<Props> = ({
     const reqAuthority = authority;
 
     if (!isMode2) {
+      if (!effectivePreviewLocale || previewLocaleInvalid || localeDraftConflict || (localeBaselineMismatch && !localeReloadPending)) return;
       if (mode1LoadedRef.current && !conflict) {
         return;
       }
       let alive = true;
       setLoading(true);
-      setStatus('Đang tải không gian Tùy chỉnh giao diện...');
+      setStatus(t("studio.loading_appearance_customization"));
       Promise.all([
         getStudioTargets(),
         getGeneralSettings(undefined, effectivePreviewLocale || undefined),
@@ -386,6 +424,10 @@ export const StudioWorkspace: React.FC<Props> = ({
           globalOptsRes,
         ]) => {
           if (!alive || seq !== loadSeqRef.current || authorityRef.current !== reqAuthority) return;
+          if ((generalRes.locale && generalRes.locale !== effectivePreviewLocale)
+              || (readingRes.locale && readingRes.locale !== effectivePreviewLocale)) {
+            throw new Error(t("studio.reload_preview_locale_before_saving"));
+          }
           let slotsRes: MenuSlotsSnapshot | null = null;
           if (targetsRes.active_theme_id) {
             slotsRes = await getMenuSlots(targetsRes.active_theme_id, undefined, effectivePreviewLocale || undefined).catch(() => null);
@@ -427,6 +469,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           if (forceReload) {
             setThemeOptionsDraft(null);
             setThemeOptionsDirty(false);
+            setThemeOptionsVersion(null);
             setThemeOptionsReloadToken(v => v + 1);
           }
 
@@ -439,13 +482,15 @@ export const StudioWorkspace: React.FC<Props> = ({
             hydrateTemplateTarget(initialKey, targetsRes.items, byKey);
           }
           mode1LoadedRef.current = true;
+          setHydratedPreviewLocale(effectivePreviewLocale);
+          setLocaleReloadPending(false);
           setConflict(false);
-          setStatus('Sẵn sàng tùy biến Website & dựng Template.');
+          setStatus(t("studio.ready_to_customize_the_website_and_build_templates"));
         })
         .catch(cause => {
           if (alive && seq === loadSeqRef.current && authorityRef.current === reqAuthority) {
-            setStatus('Không thể tải dữ liệu Tùy chỉnh giao diện.', true);
-            onApiError(cause, 'Không thể mở Tùy chỉnh giao diện.');
+            setStatus(t("studio.cannot_load_appearance_customization_data"), true);
+            onApiError(cause, t("studio.cannot_open_appearance_customization"));
           }
         })
         .finally(() => {
@@ -459,7 +504,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     const retainingEntryDraft = mode2LoadedKeyRef.current === entryIdentity && entryDirty;
     let alive = true;
     setLoading(true);
-    setStatus('Đang tải trình dựng nội dung Trình dựng trang...');
+    setStatus(t("studio.loading_the_page_builder"));
     Promise.all([
       builderApi.getEntryBuilder(entryTypeKey, entryId),
       getContentEntry(entryTypeKey, entryId),
@@ -486,24 +531,24 @@ export const StudioWorkspace: React.FC<Props> = ({
           setEntrySelectedNodeId(visibleNodesInTree(serverDoc)[0]?.node.id ?? null);
           resetHistory();
           setConflict(false);
-          setStatus(`Đang sửa ${entryRec.title} (v${opened.version}).`);
+          setStatus(t("studio.editing_title_v_version", { title: entryRec.title, version: opened.version }));
         } else {
           setConflict(entryVersion !== opened.version);
-          setStatus('Đã khôi phục nháp Trình dựng trang chưa lưu từ phiên trước.');
+          setStatus(t("studio.restored_the_unsaved_page_builder_draft_from_the_previous_session"));
         }
         mode2LoadedKeyRef.current = entryIdentity;
       })
       .catch(cause => {
         if (alive && seq === loadSeqRef.current && authorityRef.current === reqAuthority) {
-          setStatus('Không thể mở trình dựng Trình dựng trang cho nội dung này.', true);
-          onApiError(cause, 'Không thể mở Trình dựng trang.');
+          setStatus(t("studio.cannot_open_the_page_builder_for_this_content"), true);
+          onApiError(cause, t("studio.cannot_open_the_page_builder"));
         }
       })
       .finally(() => {
         if (alive && seq === loadSeqRef.current) setLoading(false);
       });
     return () => { alive = false; };
-  }, [active, isMode2, entryTypeKey, entryId, user?.id, user?.role, csrfToken, resetToken, themeRevision, mode1ReloadSeq]);
+  }, [active, isMode2, entryTypeKey, entryId, user?.id, user?.role, csrfToken, resetToken, themeRevision, mode1ReloadSeq, isMode2 ? null : effectivePreviewLocale, previewLocaleInvalid, localeDraftConflict]);
 
   const activeDoc = isMode2 ? entryDoc : templateDoc;
   const activeSelectedId = isMode2 ? entrySelectedNodeId : templateSelectedNodeId;
@@ -538,7 +583,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     redoStackRef.current = [];
     setHistoryCounts({ undo: undoStackRef.current.length, redo: 0 });
     setActiveDocAndSelection(nextDoc, nextSelected);
-    setStatus('Có thay đổi chưa lưu.');
+    setStatus(t("studio.there_are_unsaved_changes"));
     return true;
   };
 
@@ -597,7 +642,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   useEffect(() => {
     if (!active || !user || !csrfToken) return;
-    if (!isMode2 && !previewTargetCandidate) return;
+    if (!isMode2 && (!previewTargetCandidate || !effectivePreviewLocale || previewLocaleInvalid || ((localeReloadPending || localeBaselineMismatch) && !localeDraftConflict))) return;
     if (isMode2 && (!entryTypeKey || entryId === null || entryVersion === null)) return;
 
     const seq = ++previewSeqRef.current;
@@ -615,17 +660,17 @@ export const StudioWorkspace: React.FC<Props> = ({
           })
           .catch(cause => {
             if (controller.signal.aborted || seq !== previewSeqRef.current) return;
-            onApiError(cause, 'Không thể tạo bản xem trước Trình dựng trang.');
+            onApiError(cause, t("studio.cannot_create_a_page_builder_preview"));
           });
         return;
       }
 
       if (!previewTargetCandidate) return;
       const transient: TransientStudioOverrides = {};
-      if (generalDirty && generalDraft) transient.general = generalDraft;
-      if (globalOptionsDirty && globalOptionsDraft) transient.global_options = globalOptionsDraft;
-      if (themeOptionsDirty && themeOptionsDraft) transient.theme_options = themeOptionsDraft;
-      if (menuSlotsDirty && menuSlotsDraft) transient.menu_slots = menuSlotsDraft;
+      if (!localeDraftConflict && generalDirty && generalDraft) transient.general = generalDraft;
+      if (!localeDraftConflict && globalOptionsDirty && globalOptionsDraft) transient.global_options = globalOptionsDraft;
+      if (!localeDraftConflict && themeOptionsDirty && themeOptionsDraft) transient.theme_options = themeOptionsDraft;
+      if (!localeDraftConflict && menuSlotsDirty && menuSlotsDraft) transient.menu_slots = menuSlotsDraft;
 
       const editingSelectedTemplate = Boolean(panel === 'templates' && selectedTarget && templateEditingEnabled);
       void postStudioPreview(
@@ -648,7 +693,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           if (cause instanceof api.ApiClientError && cause.status === 412) {
             setConflict(true);
           } else {
-            onApiError(cause, 'Không thể xem trước Tùy chỉnh giao diện.');
+            onApiError(cause, t("studio.cannot_preview_appearance_customization"));
           }
         });
     }, 250);
@@ -679,11 +724,15 @@ export const StudioWorkspace: React.FC<Props> = ({
     menuSlotsDraft,
     menuPreviewSeq,
     effectivePreviewLocale,
+    previewLocaleInvalid,
+    localeDraftConflict,
+    localeReloadPending,
+    localeBaselineMismatch,
   ]);
 
   const handleSelectTarget = (nextKey: string | null) => {
     if (templateDirty && nextKey !== selectedTargetKey) {
-      if (!window.confirm('Template đang chỉnh có thay đổi chưa lưu. Bỏ thay đổi và chuyển target khác?')) {
+      if (!window.confirm(t("studio.the_current_template_has_unsaved_changes_discard_them_and_switch_targets"))) {
         return;
       }
     }
@@ -697,26 +746,26 @@ export const StudioWorkspace: React.FC<Props> = ({
     setMenuRequest(null);
     setPanel(nextPanel);
     if (nextPanel !== 'templates' && templateDirty) {
-      setStatus('Các thay đổi Template chưa lưu vẫn được giữ trong phiên hiện tại.');
+      setStatus(t("studio.unsaved_template_changes_are_retained_in_the_current_session"));
     }
   };
 
   const handleSaveMode1 = async () => {
-    if (!active || !user || !csrfToken || savingRef.current || !mode1Dirty) return;
+    if (!active || !user || !csrfToken || loading || savingRef.current || !mode1Dirty || localeDraftBlocked || !hydratedPreviewLocale || hydratedPreviewLocale !== effectivePreviewLocale) return;
 
     if (readingDirty && readingDraft && readingDraft.homepage_page_id !== null &&
         readingDraft.homepage_page_id === readingDraft.posts_page_id) {
-      setStatus('Trang chủ và Trang bài viết không thể trùng cùng một Page.', true);
+      setStatus(t("studio.the_homepage_and_posts_page_cannot_be_the_same_page"), true);
       return;
     }
 
     if (templateDirty && selectedTarget) {
       if (selectedTarget.requires_content_slot && countElementsByType(templateDoc, 'core/content_slot') !== 1) {
-        setStatus('Template này bắt buộc có đúng 1 core/content_slot.', true);
+        setStatus(t("studio.this_template_requires_exactly_one_core_content_slot"), true);
         return;
       }
       if (selectedTarget.forbids_content_slot && countElementsByType(templateDoc, 'core/content_slot') > 0) {
-        setStatus('Template này không được chứa core/content_slot.', true);
+        setStatus(t("studio.this_template_must_not_contain_core_content_slot"), true);
         return;
       }
       const badPart = allNodes(templateDoc).some(
@@ -726,7 +775,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           !VALID_TEMPLATE_PART_KEY.test(String((n.node as BuilderElement).props.part_key ?? '')),
       );
       if (badPart) {
-        setStatus('Có Template Part chứa part_key không hợp lệ.', true);
+        setStatus(t("studio.a_template_part_has_an_invalid_part_key"), true);
         return;
       }
     }
@@ -740,25 +789,25 @@ export const StudioWorkspace: React.FC<Props> = ({
         const res = await saveGeneralSettings(generalDraft, generalSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setGeneralSaved(res);
         setGeneralDraft({ site_title: res.site_title, tagline: res.tagline, timezone: res.timezone });
-        savedNames.push('Nhận diện Site');
+        savedNames.push(t("studio.site_identity"));
       }
       if (readingDirty && readingSaved && readingDraft) {
         const res = await saveReadingSettings(readingDraft, readingSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setReadingSaved(res);
         setReadingDraft({ homepage_page_id: res.homepage_page_id, posts_page_id: res.posts_page_id });
-        savedNames.push('Trang chủ & Đọc');
+        savedNames.push(t("studio.homepage_and_reading"));
       }
       if (menuSlotsDirty && menuSlotsSaved && menuSlotsDraft) {
         const res = await putMenuSlots(menuSlotsSaved.theme_id, menuSlotsDraft, menuSlotsSaved.version, csrfToken, effectivePreviewLocale || undefined);
         setMenuSlotsSaved(res);
         setMenuSlotsDraft(buildSlotAssignmentsMap(res));
-        savedNames.push('Vị trí Menu');
+        savedNames.push(t("studio.menu_locations"));
       }
       if (globalOptionsDirty && globalOptionsSaved && globalOptionsDraft) {
         const res = await saveGlobalSiteOptions(globalOptionsDraft, globalOptionsSaved.version, csrfToken);
         setGlobalOptionsSaved(res);
         setGlobalOptionsDraft(res.values);
-        savedNames.push('Tùy chọn toàn trang');
+        savedNames.push(t("studio.global_site_options"));
       }
       if (themeOptionsDirty && activeThemeId && themeOptionsDraft && themeOptionsVersion !== null) {
         const res = await saveThemeOptions(activeThemeId, themeOptionsDraft, themeOptionsVersion, csrfToken, effectivePreviewLocale || undefined);
@@ -766,7 +815,7 @@ export const StudioWorkspace: React.FC<Props> = ({
         setThemeOptionsDraft(res.values);
         setThemeOptionsDirty(false);
         setThemeOptionsReloadToken(v => v + 1);
-        savedNames.push('Tùy chọn Giao diện');
+        savedNames.push(t("studio.appearance_options"));
       }
       if (templateDirty && selectedTarget) {
         const res = await builderApi.putTemplateOverride(
@@ -786,20 +835,20 @@ export const StudioWorkspace: React.FC<Props> = ({
 
       if (savedNames.length > 0) {
         onSavedSettingsOrTheme?.();
-        setStatus(`Đã lưu: ${savedNames.join(', ')}.`);
+        setStatus(t("studio.saved_names", { names: savedNames.join(", ") }));
       }
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        setStatus('Dữ liệu đã thay đổi ở phiên khác (412). Các thay đổi chưa lưu của bạn vẫn được giữ.', true);
+        setStatus(t("studio.data_changed_in_another_session_412_your_unsaved_changes_are_retained"), true);
       } else {
         setStatus(
           savedNames.length > 0
-            ? `Đã lưu ${savedNames.join(', ')}, nhưng bước kế tiếp thất bại; phần còn lại được giữ nguyên.`
-            : 'Lưu thay đổi thất bại; nháp vẫn được giữ.',
+            ? t("studio.saved_names_but_the_next_step_failed_remaining_changes_are_retained", { names: savedNames.join(", ") })
+            : t("studio.saving_failed_drafts_are_retained"),
           true,
         );
-        onApiError(cause, 'Không thể lưu Tùy chỉnh giao diện.');
+        onApiError(cause, t("studio.cannot_save_appearance_customization"));
       }
     } finally {
       savingRef.current = false;
@@ -808,8 +857,8 @@ export const StudioWorkspace: React.FC<Props> = ({
   };
 
   const handleResetTemplate = async () => {
-    if (!active || !csrfToken || savingRef.current || !selectedTarget?.override_id || !templateSavedVersion) return;
-    if (!window.confirm(`Reset template "${selectedTarget.label}" về mẫu mặc định của theme/core?`)) return;
+    if (!active || !csrfToken || savingRef.current || localeDraftBlocked || !selectedTarget?.override_id || !templateSavedVersion) return;
+    if (!window.confirm(t("studio.reset_template_label_to_the_theme_core_default", { label: selectedTarget.label }))) return;
     savingRef.current = true;
     setSaving(true);
     try {
@@ -823,10 +872,10 @@ export const StudioWorkspace: React.FC<Props> = ({
       hydrateTemplateTarget(selectedTarget.canonical_target_key, freshTargets.items, byKey);
       setClipboard(null);
       onSavedSettingsOrTheme?.();
-      setStatus(`Đã reset template. Nguồn hiện tại: ${res.next_effective_source.label}`);
+      setStatus(t("studio.template_reset_current_source_label", { label: res.next_effective_source.label }));
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) setConflict(true);
-      onApiError(cause, 'Không thể reset template override.');
+      onApiError(cause, t("studio.cannot_reset_template_override"));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -840,11 +889,11 @@ export const StudioWorkspace: React.FC<Props> = ({
       .filter(node => node.kind === 'element' && isElement(node.node) && node.node.type === 'core/pattern_ref')
       .map(node => Number((node.node as BuilderElement).props.pattern_id));
     if (refs.some(id => !Number.isSafeInteger(id) || id <= 0) || new Set(refs).size > 16) {
-      setStatus('Mỗi Reusable Pattern cần chọn một Pattern hợp lệ (tối đa 16 Pattern/trang).', true);
+      setStatus(t("studio.each_reusable_pattern_requires_a_valid_pattern_up_to_16_patterns_per_page"), true);
       return;
     }
     if (patternsLoaded && refs.some(id => !patterns.some(p => p.id === id))) {
-      setStatus('Một Pattern tham chiếu đã bị xóa. Hãy chọn Pattern khác trước khi lưu.', true);
+      setStatus(t("studio.a_referenced_pattern_was_deleted_select_another_pattern_before_saving"), true);
       return;
     }
 
@@ -890,16 +939,16 @@ export const StudioWorkspace: React.FC<Props> = ({
       setEntryPublicationStatus(currentStatus);
       setStatus(
         entryPublicationPolicy === 'draft_publish' && currentStatus === 'draft'
-          ? `Đã lưu bản nháp Trình dựng trang (v${currentVersion}). Nội dung vẫn ở trạng thái draft.`
-          : `Đã lưu và cập nhật công khai (v${currentVersion}).`,
+          ? t("studio.saved_page_builder_draft_v_version_content_remains_a_draft", { version: currentVersion })
+          : t("studio.saved_and_published_changes_v_version", { version: currentVersion }),
       );
     } catch (cause) {
       if (cause instanceof api.ApiClientError && cause.status === 412) {
         setConflict(true);
-        setStatus('Nội dung đã thay đổi ở phiên khác (412). Nháp Trình dựng trang của bạn vẫn còn.', true);
+        setStatus(t("studio.content_changed_in_another_session_412_your_page_builder_draft_is_retained"), true);
       } else {
-        setStatus('Lưu Trình dựng trang thất bại; nháp của bạn vẫn được giữ.', true);
-        onApiError(cause, 'Không thể lưu Trình dựng trang.');
+        setStatus(t("studio.could_not_save_the_page_builder_your_draft_is_retained"), true);
+        onApiError(cause, t("studio.cannot_save_the_page_builder"));
       }
     } finally {
       savingRef.current = false;
@@ -909,7 +958,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   const handleReloadMode2 = () => {
     if (!isMode2 || !entryTypeKey || entryId === null) return;
-    if (entryDirty && !window.confirm('Tải lại bản trên server sẽ bỏ nháp Trình dựng trang hiện tại. Tiếp tục?')) return;
+    if (entryDirty && !window.confirm(t("studio.reloading_the_server_version_discards_the_current_page_builder_draft_continue"))) return;
     mode2LoadedKeyRef.current = null;
     setConflict(false);
     const seq = ++loadSeqRef.current;
@@ -931,8 +980,8 @@ export const StudioWorkspace: React.FC<Props> = ({
       setAddTargetParentId(null);
       setClipboard(null);
       setMenuRequest(null);
-      setStatus(`Đã tải bản mới nhất v${opened.version}.`);
-    }).catch(cause => onApiError(cause, 'Không thể tải lại Trình dựng trang.'))
+      setStatus(t("studio.loaded_latest_version_v_version", { version: opened.version }));
+    }).catch(cause => onApiError(cause, t("studio.cannot_reload_the_page_builder")))
       .finally(() => { if (seq === loadSeqRef.current) setLoading(false); });
   };
 
@@ -953,7 +1002,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     if (!user || !csrfToken) return;
     listPatterns()
       .then(res => { setPatterns(res.items); setPatternsLoaded(true); })
-      .catch(cause => onApiError(cause, 'Không thể tải lại danh sách Pattern.'));
+      .catch(cause => onApiError(cause, t("studio.cannot_reload_the_pattern_list")));
   };
 
   const handleMenusMutated = async () => {
@@ -962,7 +1011,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       setMenusList(res.items);
       setMenuPreviewSeq(v => v + 1);
     } catch (cause) {
-      onApiError(cause, 'Không thể tải lại danh sách Menu.');
+      onApiError(cause, t("studio.cannot_reload_the_menu_list"));
     }
   };
 
@@ -984,7 +1033,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     mode: StudioMenuRequest['mode'],
     anchor?: { x: number; y: number } | null,
   ) => {
-    if (loading || saving || !csrfToken || !builderActive || !locate(activeDoc, id)) return;
+    if (loading || saving || localeDraftBlocked || !csrfToken || !builderActive || !locate(activeDoc, id)) return;
     if (isMode2) setEntrySelectedNodeId(id);
     else setTemplateSelectedNodeId(id);
     setAddTargetParentId(null);
@@ -992,7 +1041,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setMenuRequest({ nodeId: id, mode, seq: ++menuRequestSeqRef.current, anchor });
   };
   const handleCanvasEdit = (id: string) => {
-    if (loading || saving || !csrfToken || !builderActive || !locate(activeDoc, id)) return;
+    if (loading || saving || localeDraftBlocked || !csrfToken || !builderActive || !locate(activeDoc, id)) return;
     if (isMode2) setEntrySelectedNodeId(id);
     else setTemplateSelectedNodeId(id);
     setAddTargetParentId(null);
@@ -1009,17 +1058,17 @@ export const StudioWorkspace: React.FC<Props> = ({
     ? entryTitle || `${entryTypeKey} #${entryId}`
     : selectedTarget && panel === 'templates'
       ? selectedTarget.label
-      : ({ root: activeThemeName ?? activeThemeId ?? 'Theme mặc định',
-          identity: 'Nhận diện Site', 'theme-options': 'Tùy chọn Giao diện',
-          menus: 'Menu & Vị trí', reading: 'Trang chủ & Đọc', templates: 'Dựng Template' } as Record<string, string>)[panel];
+      : ({ root: activeThemeName ?? activeThemeId ?? t("studio.default_theme"),
+          identity: t("studio.site_identity"), 'theme-options': t("studio.appearance_options"),
+          menus: t("studio.menus_and_locations"), reading: t("studio.homepage_and_reading"), templates: t("studio.build_templates") } as Record<string, string>)[panel];
   const contextBadge = isMode2
-    ? (entryTypeKey === 'page' ? 'Page' : entryTypeKey === 'post' ? 'Post' : entryTypeKey)
-    : selectedTarget && panel === 'templates' ? 'Template' : panel === 'root' ? 'Theme' : undefined;
+    ? (entryTypeKey === 'page' ? t("studio.page") : entryTypeKey === 'post' ? t("studio.post") : entryTypeKey)
+    : selectedTarget && panel === 'templates' ? t("studio.template") : panel === 'root' ? t("studio.theme") : undefined;
   const contextBack = isMode2
     ? undefined
     : panel === 'root'
       ? undefined
-      : panel === 'templates' && selectedTarget ? 'Danh sách Template' : 'Tùy biến';
+      : panel === 'templates' && selectedTarget ? t("studio.template_list") : t("studio.customize");
   const handleContextBack = () => {
     if (panel === 'templates' && selectedTarget) handleSelectTarget(null);
     else handlePanelChange('root');
@@ -1029,9 +1078,13 @@ export const StudioWorkspace: React.FC<Props> = ({
       handleReloadMode2();
       return;
     }
-    if (mode1Dirty && !window.confirm('Tải lại từ server sẽ bỏ các thay đổi chưa lưu trong Studio. Tiếp tục?')) {
+    if (loading || savingRef.current) return;
+    if (mode1Dirty && !window.confirm(t("studio.reloading_from_the_server_discards_unsaved_studio_changes_continue"))) {
       return;
     }
+    setLocaleDraftConflict(null);
+    setLocaleReloadPending(true);
+    setLoading(true);
     mode1ForceReloadRef.current = true;
     mode1LoadedRef.current = false;
     setConflict(false);
@@ -1047,7 +1100,7 @@ export const StudioWorkspace: React.FC<Props> = ({
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside
           className="flex max-h-[50vh] w-full shrink-0 flex-col overflow-hidden border-b border-zinc-200 bg-white md:max-h-none md:h-full md:w-[320px] md:border-r md:border-b-0"
-          aria-label={isMode2 ? 'Bảng dựng nội dung Trình dựng trang' : 'Bảng tùy biến Studio'}
+          aria-label={isMode2 ? t("studio.page_builder_content_panel") : t("studio.studio_customization_panel")}
         >
           <StudioSidebarHeader
             mode={isMode2 ? 'entry' : 'customizer'}
@@ -1059,28 +1112,28 @@ export const StudioWorkspace: React.FC<Props> = ({
             backLabel={contextBack}
             onBack={contextBack ? handleContextBack : undefined}
             canReset={canResetStudio && builderActive}
-            resetLabel="Khôi phục mặc định Theme"
+            resetLabel={t("studio.restore_theme_defaults")}
             onReset={() => void handleResetTemplate()}
-            conflict={conflict}
+            conflict={conflict || localeDraftBlocked}
             onReloadConflict={handleReloadConflict}
           />
-          {!isMode2 && localeState.hasMultipleLocales && (
+          {!isMode2 && localeState.hasMultiplePublicLocales && (
             <div className="flex items-center justify-between gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2" data-testid="studio-preview-locale-bar">
               <label htmlFor="studio-preview-locale" className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
-                Preview Locale
+                {t("studio.preview_locale")}
               </label>
               <select
                 id="studio-preview-locale"
                 data-testid="studio-preview-locale-select"
                 className="h-7 rounded border border-zinc-300 bg-white px-2 text-xs text-zinc-900"
                 value={effectivePreviewLocale}
-                disabled={saving || loading}
+                disabled={saving || loading || localeDraftBlocked}
                 onChange={e => {
                   const next = e.target.value;
                   if (next === effectivePreviewLocale) return;
-                  const hasTransient = generalDirty || readingDirty || menuSlotsDirty || globalOptionsDirty || themeOptionsDirty;
+                  const hasTransient = mode1Dirty;
                   if (hasTransient) {
-                    if (!window.confirm('Đang có thay đổi chưa lưu ở ngôn ngữ hiện tại. Bỏ thay đổi chưa lưu để chuyển Preview Locale?')) {
+                    if (!window.confirm(t("studio.there_are_unsaved_changes_in_the_current_language_discard_them_to_switch_preview_locale"))) {
                       return;
                     }
                     setGeneralDraft(generalSaved ? { site_title: generalSaved.site_title, tagline: generalSaved.tagline, timezone: generalSaved.timezone } : null);
@@ -1091,12 +1144,14 @@ export const StudioWorkspace: React.FC<Props> = ({
                     setThemeOptionsDirty(false);
                   }
                   setPreviewLocale(next);
+                  setLocaleReloadPending(true);
+                  setLoading(true);
                   mode1ForceReloadRef.current = true;
                   mode1LoadedRef.current = false;
                   setMode1ReloadSeq(v => v + 1);
                 }}
               >
-                {localeState.allLocales.map(loc => (
+                {localeState.enabledLocales.map(loc => (
                   <option key={loc.code} value={loc.code}>
                     {loc.label} ({loc.code}){loc.is_default ? ' ★' : ''}
                   </option>
@@ -1104,22 +1159,23 @@ export const StudioWorkspace: React.FC<Props> = ({
               </select>
             </div>
           )}
-          {(error || conflict) && (
+          {(error || conflict || localeDraftBlocked) && (
             <div
               role="alert"
               data-testid="studio-sidebar-alert"
               className="flex items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800"
             >
-              <span className="min-w-0 flex-1 truncate" title={notice || 'Xung đột phiên bản dữ liệu.'}>
-                {error && notice ? notice : 'Dữ liệu đã thay đổi trên server (412).'}
+              <span className="min-w-0 flex-1 truncate" title={localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : notice || t("studio.data_version_conflict")}>
+                {localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : error && notice ? notice : t("studio.data_changed_on_the_server_412")}
               </span>
-              {conflict && (
+              {(conflict || localeDraftBlocked) && (
                 <button
                   type="button"
                   onClick={handleReloadConflict}
+                  disabled={loading || saving}
                   className="shrink-0 rounded border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100"
                 >
-                  Tải lại
+                  {t("studio.reload")}
                 </button>
               )}
             </div>
@@ -1179,7 +1235,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               panel={panel}
               onPanelChange={handlePanelChange}
               localeState={localeState}
-              previewLocale={effectivePreviewLocale}
+              previewLocale={localeDraftConflict ?? (localeBaselineMismatch ? hydratedPreviewLocale! : previewLocaleInvalid ? previewLocale : effectivePreviewLocale)}
               activeThemeId={activeThemeId}
               generalDraft={generalDraft}
               generalDirty={generalDirty}
@@ -1194,6 +1250,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               themeOptionsDirty={themeOptionsDirty}
               themeOptionsReloadToken={themeOptionsReloadToken}
               onThemeOptionsChange={(vals, meta) => {
+                if (localeDraftBlocked || !hydratedPreviewLocale || hydratedPreviewLocale !== effectivePreviewLocale) return;
                 setThemeOptionsDraft(vals);
                 setThemeOptionsVersion(meta.version);
                 setThemeOptionsDirty(meta.dirty);
@@ -1217,7 +1274,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               templateEditingEnabled={templateEditingEnabled}
               onInitializeTemplateOverride={() => {
                 setTemplateEditingEnabled(true);
-                setStatus(`Đã khởi tạo bản dựng Trình dựng trang cho "${selectedTarget?.label ?? ''}". Chưa lưu lên CSDL.`);
+                setStatus(t("studio.initialized_the_page_builder_for_label_not_yet_saved_to_the_database", { label: selectedTarget?.label ?? "" }));
               }}
               templateDoc={templateDoc}
               templateSelectedNodeId={templateSelectedNodeId}
@@ -1233,7 +1290,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               availablePartKeys={availablePartKeys}
               onBuilderMessage={(msg, failed) => setStatus(msg, Boolean(failed))}
               onApiError={onApiError}
-              disabled={loading || saving || !csrfToken}
+              disabled={loading || saving || !csrfToken || localeDraftBlocked}
             />
           )}
           </div>
@@ -1250,7 +1307,7 @@ export const StudioWorkspace: React.FC<Props> = ({
             savePolicy={isMode2
               ? { mode: 'entry', publicationPolicy: entryPublicationPolicy, publicationStatus: entryPublicationStatus }
               : { mode: 'customizer' }}
-            canSave={isMode2 ? canSaveMode2 : mode1Dirty}
+            canSave={isMode2 ? canSaveMode2 : mode1Dirty && !localeDraftBlocked}
             onSaveCustomizer={() => void handleSaveMode1()}
             onSaveEntry={intent => void handleSaveMode2(intent)}
             showPatternButton={isMode2 || templateCanShowPattern}
@@ -1272,7 +1329,7 @@ export const StudioWorkspace: React.FC<Props> = ({
                 onEditNode={handleCanvasEdit}
                 onOpenNodeMenu={handleCanvasMenu}
                 onApiError={onApiError}
-                title={isMode2 ? 'Xem trước nội dung Tùy chỉnh giao diện' : 'Xem trước Website Tùy chỉnh giao diện'}
+                title={isMode2 ? t("studio.content_preview") : t("studio.website_preview")}
                 className="h-full w-full"
                 frameClassName={
                   viewport === 'desktop'
@@ -1282,7 +1339,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               />
             ) : (
               <div className="flex h-full min-h-[360px] items-center justify-center bg-white p-8 text-center text-sm text-zinc-500">
-                {loading ? 'Đang chuẩn bị bản xem trước trực tiếp…' : 'Chưa có nội dung xem trước cho target này.'}
+                {loading ? t("studio.preparing_live_preview") : t("studio.no_preview_content_for_this_target_yet")}
               </div>
             )}
           </div>

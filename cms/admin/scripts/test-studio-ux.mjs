@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
-import { transform } from 'esbuild';
+import { build, transform } from 'esbuild';
 
-const source = await readFile(new URL('../src/builder/document.ts', import.meta.url), 'utf8');
-const { code } = await transform(source, { loader: 'ts', format: 'esm', target: 'es2022' });
+const { outputFiles: [{ text: code }] } = await build({
+  entryPoints: [fileURLToPath(new URL('../src/builder/document.ts', import.meta.url))],
+  bundle: true, write: false, platform: 'node', format: 'esm', target: 'es2022',
+});
 const {
   allNodes, appendFreeformElement, appendRowWithColumns, canPasteOptions, copyNodeOptions, duplicateNode,
   isLockedElement, locate, nodeTitle, pasteNodeOptions, patchNodeFields, preservesAnchors, removeNode,

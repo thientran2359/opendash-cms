@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   listAllTaxonomyTerms,
@@ -113,8 +114,8 @@ function useTermOptions(userId: number | null, typeKey: string | undefined,
       })
       .catch(cause => {
         if (controller.signal.aborted) return;
-        setError(cause instanceof Error ? cause.message : 'Không thể tải taxonomy được áp dụng.');
-        onErrorRef.current(cause, 'Không thể tải taxonomy được áp dụng.');
+        setError(cause instanceof Error ? cause.message : tStatic("feature.taxonomy.termpicker.could_not_load_applicable_taxonomies"));
+        onErrorRef.current(cause, tStatic("feature.taxonomy.termpicker.could_not_load_applicable_taxonomies"));
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -128,6 +129,7 @@ function useTermOptions(userId: number | null, typeKey: string | undefined,
 /** Native checkboxes preserve keyboard navigation and leave unknown saved IDs removable. */
 export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onChange,
   primaryCategoryTermId = null, onPrimaryCategoryChange, onApiError, allowedKinds, variant = 'default' }: TermPickerProps) {
+  useI18n();
   const { definitions, byKind, loading, error, reload } = useTermOptions(userId, typeKey, onApiError, allowedKinds, locale);
   const searchId = useId();
   const [search, setSearch] = useState('');
@@ -152,16 +154,16 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
     const term = known.get(id);
     if (checked && term) {
       if (unknownIds.length > 0) {
-        setSelectionError('Có term đã lưu không còn khả dụng. Hãy bỏ các ID đó trước khi chọn thêm term khác.');
+        setSelectionError(tStatic("feature.taxonomy.termpicker.some_saved_terms_are_unavailable_remove_those_ids_before"));
         return;
       }
       if (selected.size >= 96) {
-        setSelectionError('Một nội dung chỉ được gắn tối đa 96 term tổng cộng.');
+        setSelectionError(tStatic("feature.taxonomy.termpicker.content_supports_up_to_96_terms_in_total"));
         return;
       }
       const count = counts[term.kind] ?? 0;
       if (count >= maxTerms(term.kind)) {
-        setSelectionError(`Tối đa ${maxTerms(term.kind)} term của taxonomy ${term.kind} cho một nội dung.`);
+        setSelectionError(tStatic("feature.taxonomy.termpicker.up_to_value_terms_of_taxonomy_value_per_content", { value1: maxTerms(term.kind), value2: term.kind }));
         return;
       }
     }
@@ -183,17 +185,17 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
 
   if (variant === 'cards') {
     return (
-      <div className="min-w-0 space-y-4" aria-label="Gắn taxonomy cho nội dung">
+      <div className="min-w-0 space-y-4" aria-label={tStatic("feature.taxonomy.termpicker.assign_taxonomies_to_content")}>
         {loading && (
           <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-2xs">
-            <p role="status" className="text-xs text-zinc-500">Đang tải phân loại…</p>
+            <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.termpicker.loading_classifications")}</p>
           </div>
         )}
         {error && (
           <div role="alert" className="space-y-2 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800">
-            <p>{error} Các ID đã chọn vẫn được giữ trong bản nháp.</p>
+            <p>{error} {tStatic("feature.taxonomy.termpicker.selected_ids_are_retained_in_the_draft")}</p>
             <button type="button" className="inline-flex h-7 items-center rounded-md border border-rose-300 bg-white px-2.5 text-xs font-medium text-rose-800 hover:bg-rose-50" onClick={reload} disabled={disabled}>
-              Thử tải lại
+              {tStatic("permalink.retry")}
             </button>
           </div>
         )}
@@ -225,7 +227,7 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                   onClick={() => setCollapsedKinds(prev => ({ ...prev, [group.kind]: !prev[group.kind] }))}
                   className="rounded border-0 bg-transparent px-2 py-1 text-xs font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"
                 >
-                  {isCollapsed ? 'Mở rộng' : 'Thu gọn'}
+                  {isCollapsed ? tStatic("feature.editor.panelregionrenderer.expand") : tStatic("feature.editor.panelregionrenderer.collapse")}
                 </button>
               </div>
               {!isCollapsed && (
@@ -233,22 +235,22 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                   {group.terms.length > 5 && (
                     <input
                       type="search"
-                      aria-label={`Tìm trong ${group.title}`}
+                      aria-label={tStatic("feature.taxonomy.termpicker.search_in_value", { value1: group.title })}
                       value={searchByKind[group.kind] ?? ''}
                       onChange={event => setSearchByKind(prev => ({ ...prev, [group.kind]: event.target.value }))}
-                      placeholder={`Tìm ${group.title.toLowerCase()}...`}
+                      placeholder={tStatic("feature.taxonomy.termpicker.search_value", { value1: group.title.toLowerCase() })}
                       disabled={disabled}
                       className="h-8 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2.5 text-xs text-zinc-900 placeholder:text-zinc-400 focus-visible:outline-2 focus-visible:outline-od-accent disabled:opacity-50"
                     />
                   )}
                   {!group.hierarchical && pickedInGroup.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5" role="list" aria-label={`${group.title} đã chọn`}>
+                    <div className="flex flex-wrap gap-1.5" role="list" aria-label={tStatic("feature.taxonomy.termpicker.value_selected", { value1: group.title })}>
                       {pickedInGroup.map(({ term }) => (
                         <span key={term.id} role="listitem" className="inline-flex items-center gap-1 rounded-full bg-od-accent-soft px-2 py-0.5 text-xs font-medium text-od-accent">
                           <span>{term.name}</span>
                           <button
                             type="button"
-                            aria-label={`Bỏ ${term.name}`}
+                            aria-label={tStatic("feature.taxonomy.termpicker.remove_value", { value1: term.name })}
                             disabled={disabled}
                             className="rounded-full px-0.5 font-bold hover:bg-white/60 disabled:opacity-50"
                             onClick={() => toggle(term.id, false)}
@@ -283,13 +285,13 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                             onClick={() => onPrimaryCategoryChange(term.id)}
                             className="shrink-0 rounded-md border border-zinc-200 px-2 py-0.5 text-[11px] font-medium text-od-accent hover:bg-od-accent-soft disabled:opacity-50"
                           >
-                            {primaryCategoryTermId === term.id ? 'Chính' : 'Đặt làm chính'}
+                            {primaryCategoryTermId === term.id ? tStatic("feature.taxonomy.termpicker.primary") : tStatic("feature.taxonomy.termpicker.set_as_primary")}
                           </button>
                         )}
                       </div>
                     ))}
                     {!loading && visible.length === 0 && (
-                      <p className="py-1 text-xs text-zinc-500">{q ? 'Không có mục khớp tìm kiếm.' : 'Chưa có mục nào.'}</p>
+                      <p className="py-1 text-xs text-zinc-500">{q ? tStatic("feature.taxonomy.termpicker.no_matching_items") : tStatic("feature.taxonomy.taxonomypage.no_items_yet")}</p>
                     )}
                   </div>
                 </div>
@@ -300,10 +302,10 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
         {unknownIds.length > 0 && (
           <section className="rounded-xl border border-amber-300 bg-amber-50/70 p-4 text-xs text-amber-950">
             <h3 className="font-semibold">
-              {loading ? 'ID đã chọn (đang tải danh sách)' : 'ID phân loại chưa tìm thấy'}
+              {loading ? tStatic("feature.taxonomy.termpicker.selected_id_loading_list") : tStatic("feature.taxonomy.termpicker.classification_id_not_found")}
             </h3>
             <p className="mt-1">
-              {loading ? 'Lựa chọn của bạn được giữ nguyên trong khi tải.' : 'Mục có thể đã bị xóa hoặc không còn truy cập được. Bỏ chọn để gỡ.'}
+              {loading ? tStatic("feature.taxonomy.termpicker.your_selection_is_retained_while_loading") : tStatic("feature.taxonomy.termpicker.the_item_may_have_been_deleted_or_become_inaccessible")}
             </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {unknownIds.map(id => (
@@ -320,32 +322,32 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
   }
 
   return (
-    <section className="min-w-0 space-y-3" aria-label="Gắn taxonomy cho nội dung">
+    <section className="min-w-0 space-y-3" aria-label={tStatic("feature.taxonomy.termpicker.assign_taxonomies_to_content")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-slate-600">Chọn tối đa 32 category hoặc 64 term mỗi taxonomy khác được cho phép.</p>
+        <p className="text-xs text-slate-600">{tStatic("feature.taxonomy.termpicker.select_up_to_32_categories_or_64_terms_for")}</p>
         <button type="button" className="btn-secondary" onClick={reload} disabled={disabled || loading}>
-          Tải lại taxonomy
+          {tStatic("feature.taxonomy.termpicker.reload_taxonomies")}
         </button>
       </div>
       <div>
-        <label htmlFor={searchId} className="mb-1 block text-sm font-medium text-slate-700">Tìm term</label>
+        <label htmlFor={searchId} className="mb-1 block text-sm font-medium text-slate-700">{tStatic("feature.taxonomy.termpicker.search_terms")}</label>
         <input id={searchId} type="search" value={search} onChange={event => setSearch(event.target.value)}
-          placeholder="Tìm theo tên hoặc slug" disabled={disabled} className={fieldClass} />
+          placeholder={tStatic("feature.taxonomy.termpicker.search_by_name_or_slug")} disabled={disabled} className={fieldClass} />
       </div>
-      {loading && <p role="status" className="text-sm text-slate-600">Đang tải taxonomy được áp dụng…</p>}
+      {loading && <p role="status" className="text-sm text-slate-600">{tStatic("feature.taxonomy.termpicker.loading_applicable_taxonomies")}</p>}
       {error && (
         <div role="alert" className="space-y-2 text-sm text-red-700">
-          <p>{error} Các ID đã chọn vẫn được giữ trong bản nháp.</p>
-          <button type="button" className="btn-secondary" onClick={reload} disabled={disabled}>Thử tải lại</button>
+          <p>{error} {tStatic("feature.taxonomy.termpicker.selected_ids_are_retained_in_the_draft")}</p>
+          <button type="button" className="btn-secondary" onClick={reload} disabled={disabled}>{tStatic("permalink.retry")}</button>
         </div>
       )}
       {selectionError && <p role="alert" className="text-sm text-red-700">{selectionError}</p>}
       {selectedTags.length > 0 && (
-        <div className="flex flex-wrap gap-2" role="list" aria-label="Thẻ đã chọn">
+        <div className="flex flex-wrap gap-2" role="list" aria-label={tStatic("feature.taxonomy.termpicker.selected_tags")}>
           {selectedTags.map(tag => (
             <div key={tag.id} role="listitem" className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-1 text-xs text-sky-900">
               <span>{tag.name}</span>
-              <button type="button" aria-label={`Bỏ thẻ ${tag.name}`} disabled={disabled}
+              <button type="button" aria-label={tStatic("feature.taxonomy.termpicker.remove_tag_value", { value1: tag.name })} disabled={disabled}
                 className="rounded-full px-1 font-bold hover:bg-sky-100 disabled:opacity-50"
                 onClick={() => toggle(tag.id, false)}>×</button>
             </div>
@@ -374,7 +376,7 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
                   </label>
                 ))}
                 {!loading && visible.length === 0 && (
-                  <p className="text-sm text-slate-500">{normalizedSearch ? 'Không có mục khớp tìm kiếm.' : 'Chưa có mục nào.'}</p>
+                  <p className="text-sm text-slate-500">{normalizedSearch ? tStatic("feature.taxonomy.termpicker.no_matching_items") : tStatic("feature.taxonomy.taxonomypage.no_items_yet")}</p>
                 )}
               </div>
             </fieldset>
@@ -384,10 +386,10 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
       {unknownIds.length > 0 && (
         <fieldset disabled={disabled} className="min-w-0 rounded-lg border border-amber-300 p-3">
           <legend className="px-1 text-sm font-medium text-amber-900">
-            {loading ? 'ID đã chọn (đang tải danh sách)' : 'ID đã lưu chưa tìm thấy'}
+            {loading ? tStatic("feature.taxonomy.termpicker.selected_id_loading_list") : tStatic("feature.taxonomy.termpicker.saved_id_not_found")}
           </legend>
           <p className="mb-2 text-xs text-amber-900">
-            {loading ? 'Lựa chọn của bạn được giữ nguyên trong khi tải.' : 'Mục có thể đã bị xóa hoặc không còn truy cập được. Bỏ chọn nếu không cần liên kết này.'}
+            {loading ? tStatic("feature.taxonomy.termpicker.your_selection_is_retained_while_loading") : tStatic("feature.taxonomy.termpicker.the_item_may_have_been_deleted_or_become_inaccessible_2")}
           </p>
           <div className="flex flex-wrap gap-3">
             {unknownIds.map(id => (
@@ -399,13 +401,14 @@ export function TermPicker({ userId, typeKey, locale, disabled, selectedIds, onC
           </div>
         </fieldset>
       )}
-      <p className="text-xs text-slate-600">Chỉ gắn mục đã có. Mục chưa lưu sẽ không đổi dữ liệu trên website cho tới khi bạn bấm Lưu.</p>
+      <p className="text-xs text-slate-600">{tStatic("feature.taxonomy.termpicker.only_existing_items_can_be_associated_unsaved_selections_do")}</p>
     </section>
   );
 }
 
 /** Same filter controls for Post, Page and CPT; the API applies them before LIMIT/OFFSET. */
 export function TermFilters({ userId, typeKey, disabled, value, onChange, onApiError }: TermFiltersProps) {
+  useI18n();
   const { categories, tags, definitions, byKind, loading, error, reload } = useTermOptions(userId, typeKey, onApiError);
   const categoryId = useId();
   const tagId = useId();
@@ -420,62 +423,62 @@ export function TermFilters({ userId, typeKey, disabled, value, onChange, onApiE
   const genericRows = genericDefinition?.hierarchical
     ? termTree(genericTerms) : [...genericTerms].sort(sortTerms).map(term => ({term, depth: 0}));
   return (
-    <div className="min-w-0 space-y-2" aria-label="Bộ lọc danh mục và thẻ">
+    <div className="min-w-0 space-y-2" aria-label={tStatic("feature.taxonomy.termpicker.category_and_tag_filters")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs text-slate-600">Lọc kết quả trên máy chủ trước khi phân trang.</span>
+        <span className="text-xs text-slate-600">{tStatic("feature.taxonomy.termpicker.filter_results_on_the_server_before_pagination")}</span>
         <button type="button" className="btn-secondary" onClick={reload} disabled={disabled || loading}>
-          Tải lại taxonomy
+          {tStatic("feature.taxonomy.termpicker.reload_taxonomies")}
         </button>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label htmlFor={categoryId} className="block min-w-0 text-sm font-medium text-slate-700">
-          Danh mục
+          {tStatic("feature.content.entrylistpage.category")}
           <select id={categoryId} className={`mt-1 ${fieldClass}`} value={value.categoryId ?? ''}
             disabled={disabled || loading} onChange={event => onChange({
               ...value, taxonomyKey: null, termId: null,
               categoryId: event.target.value ? Number(event.target.value) : null,
               includeDescendants: event.target.value ? value.includeDescendants : false,
             })}>
-            <option value="">Tất cả danh mục</option>
-            {missingCategory && <option value={value.categoryId!}>ID #{value.categoryId} (không còn trong danh sách)</option>}
+            <option value="">{tStatic("feature.taxonomy.termpicker.all_categories")}</option>
+            {missingCategory && <option value={value.categoryId!}>ID #{value.categoryId} {tStatic("feature.taxonomy.termpicker.no_longer_in_list")}</option>}
             {ordered.map(({ term, depth }) => (
               <option key={term.id} value={term.id}>{'— '.repeat(Math.min(depth, 8))}{term.name} ({term.slug})</option>
             ))}
           </select>
         </label>
         <label htmlFor={tagId} className="block min-w-0 text-sm font-medium text-slate-700">
-          Thẻ
+          {tStatic("shell.tags")}
           <select id={tagId} className={`mt-1 ${fieldClass}`} value={value.tagId ?? ''}
             disabled={disabled || loading} onChange={event => onChange({
               ...value, taxonomyKey: null, termId: null,
               tagId: event.target.value ? Number(event.target.value) : null,
             })}>
-            <option value="">Tất cả thẻ</option>
-            {missingTag && <option value={value.tagId!}>ID #{value.tagId} (không còn trong danh sách)</option>}
+            <option value="">{tStatic("feature.taxonomy.termpicker.all_tags")}</option>
+            {missingTag && <option value={value.tagId!}>ID #{value.tagId} {tStatic("feature.taxonomy.termpicker.no_longer_in_list")}</option>}
             {[...tags].sort(sortTerms).map(term => <option key={term.id} value={term.id}>{term.name} ({term.slug})</option>)}
           </select>
         </label>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <label htmlFor={genericTaxonomyId} className="block min-w-0 text-sm font-medium text-slate-700">
-          Taxonomy tùy chỉnh
+          {tStatic("shell.taxonomy_definitions")}
           <select id={genericTaxonomyId} className={`mt-1 ${fieldClass}`}
             value={value.taxonomyKey ?? ''} disabled={disabled || loading}
             onChange={event => onChange({ taxonomyKey: event.target.value || null, termId: null, includeDescendants: false })}>
-            <option value="">Không dùng bộ lọc tùy chỉnh</option>
+            <option value="">{tStatic("feature.taxonomy.termpicker.no_custom_filter")}</option>
             {definitions.filter(item => item.key !== 'category' && item.key !== 'tag').map(item =>
               <option key={item.key} value={item.key}>{item.label} ({item.key})</option>)}
-            {value.taxonomyKey && !genericDefinition && <option value={value.taxonomyKey}>Taxonomy không còn hiệu lực ({value.taxonomyKey})</option>}
+            {value.taxonomyKey && !genericDefinition && <option value={value.taxonomyKey}>{tStatic("feature.taxonomy.termpicker.taxonomy_no_longer_active")}{value.taxonomyKey})</option>}
           </select>
         </label>
         {value.taxonomyKey && <label htmlFor={genericTermId} className="block min-w-0 text-sm font-medium text-slate-700">
-          Term
+          {tStatic("feature.common.ui_term")}
           <select id={genericTermId} className={`mt-1 ${fieldClass}`}
             value={value.termId ?? ''} disabled={disabled || loading || !genericDefinition}
             onChange={event => onChange({ ...value, termId: event.target.value ? Number(event.target.value) : null })}>
-            <option value="">Chọn term</option>
+            <option value="">{tStatic("feature.content.entrylistpage.choose_term")}</option>
             {value.termId != null && !genericTerms.some(term => term.id === value.termId) &&
-              <option value={value.termId}>ID #{value.termId} (không còn khả dụng)</option>}
+              <option value={value.termId}>ID #{value.termId} {tStatic("feature.taxonomy.termpicker.no_longer_available")}</option>}
             {genericRows.map(({ term, depth }) =>
               <option key={term.id} value={term.id}>{'— '.repeat(Math.min(depth, 8))}{term.name} ({term.slug})</option>)}
           </select>
@@ -486,12 +489,12 @@ export function TermFilters({ userId, typeKey, disabled, value, onChange, onApiE
           checked={Boolean(value.includeDescendants && (value.categoryId != null || (value.termId != null && genericDefinition?.hierarchical)))}
           disabled={disabled || (value.categoryId == null && !(value.termId != null && genericDefinition?.hierarchical))}
           onChange={event => onChange({ ...value, includeDescendants: event.target.checked })} />
-        Bao gồm term con (taxonomy phân cấp)
+        {tStatic("feature.taxonomy.termpicker.include_child_terms_hierarchical_taxonomy")}
       </label>
-      {loading && <p role="status" className="text-xs text-slate-500">Đang tải bộ lọc…</p>}
+      {loading && <p role="status" className="text-xs text-slate-500">{tStatic("feature.taxonomy.termpicker.loading_filters")}</p>}
       {error && (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-xs text-red-700">
-          {error} <button type="button" className="btn-secondary" onClick={reload} disabled={disabled}>Thử tải lại</button>
+          {error} <button type="button" className="btn-secondary" onClick={reload} disabled={disabled}>{tStatic("permalink.retry")}</button>
         </div>
       )}
     </div>

@@ -1,3 +1,5 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
+import { formatDateTime, formatNumber } from '../../i18n/format.ts';
 import React, { useEffect, useRef, useState } from 'react';
 import type { AuthUser } from '../../types.ts';
 import type { ContentEntryInput } from '../content/types.ts';
@@ -35,7 +37,7 @@ interface Props {
 }
 
 function slugify(value: string): string {
-  return value.trim().replace(/đ/g, 'd').replace(/Đ/g, 'D')
+  return value.trim().replace(/\u0111/g, 'd').replace(/\u0110/g, 'D')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').slice(0, 64).replace(/-+$/g, '');
 }
@@ -69,15 +71,15 @@ function formSnapshot(draft: EditorDraft): string {
 
 function showDate(value: string): string {
   const date = new Date(value.includes('T') ? value : value.replace(' ', 'T') + 'Z');
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('vi-VN');
+  return Number.isNaN(date.getTime()) ? value : formatDateTime(date, { dateStyle: 'short', timeStyle: 'medium' });
 }
 
 function errorMessage(cause: unknown, fallback: string): string {
   if (cause instanceof ApiClientError && cause.status === 412) {
-    return 'Nội dung đã được thay đổi ở phiên khác (412). Bản nhập của bạn vẫn còn; chọn “Tải bản mới” để xử lý xung đột.';
+    return tStatic("feature.posts.postpageworkspace.content_was_changed_in_another_session_412_your_input");
   }
   if (cause instanceof ApiClientError && cause.status === 401) {
-    return 'Phiên đăng nhập hết hạn (401). Đăng nhập lại bằng cùng tài khoản để giữ bản nhập chưa lưu.';
+    return tStatic("feature.posts.postpageworkspace.your_session_expired_401_sign_in_again_with_the");
   }
   return cause instanceof Error ? cause.message : fallback;
 }
@@ -85,7 +87,8 @@ function errorMessage(cause: unknown, fallback: string): string {
 export const PostPageWorkspace: React.FC<Props> = ({
   type, user, csrfToken, onApiError, onDirtyChange,
 }) => {
-  const label = type === 'post' ? 'Bài viết' : 'Trang';
+  useI18n();
+  const label = type === 'post' ? tStatic("feature.common.post") : tStatic("feature.common.page");
   const [items, setItems] = useState<PostPageRecord[]>([]);
   const [offset, setOffset] = useState(0);
   const [filters, setFilters] = useState<EntryTermFilters>({});
@@ -138,8 +141,8 @@ export const PostPageWorkspace: React.FC<Props> = ({
       })
       .catch(cause => {
         if (!active) return;
-        setError(errorMessage(cause, 'Không thể tải danh sách.'));
-        onApiError(cause, 'Không thể tải danh sách ' + label.toLowerCase() + '.');
+        setError(errorMessage(cause, tStatic("api.postPage.load_the_list")));
+        onApiError(cause, tStatic("feature.posts.postpageworkspace.could_not_load_list_of") + label.toLowerCase() + '.');
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -152,7 +155,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
   };
 
   const confirmDiscard = (): boolean =>
-    !dirty || window.confirm('Bạn có thay đổi chưa lưu. Bỏ bản nhập hiện tại?');
+    !dirty || window.confirm(tStatic("feature.posts.postpageworkspace.you_have_unsaved_changes_discard_current_input"));
 
   const startNew = () => {
     if (busy || !confirmDiscard()) return;
@@ -178,7 +181,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
       setNotice('');
       setConflict(false);
     } catch (cause) {
-      if (epoch === accountEpoch.current) reportError(cause, 'Không thể mở nội dung.');
+      if (epoch === accountEpoch.current) reportError(cause, tStatic("feature.posts.postpageworkspace.could_not_open_content"));
     } finally {
       setBusy(false);
     }
@@ -207,11 +210,11 @@ export const PostPageWorkspace: React.FC<Props> = ({
     if (!editor || !user || !csrfToken || busy) return;
     const input = entryInput(editor);
     if (!input.title || !input.slug) {
-      setError('Vui lòng nhập tiêu đề và đường dẫn (slug).');
+      setError(tStatic("feature.posts.postpageworkspace.enter_a_title_and_slug"));
       return;
     }
     if (!/^[a-z][a-z0-9-]{0,63}$/.test(input.slug)) {
-      setError('Slug phải bắt đầu bằng chữ thường a-z, chỉ chứa chữ thường, số và dấu -, tối đa 64 ký tự.');
+      setError(tStatic("feature.posts.postpageworkspace.the_slug_must_start_with_a_lowercase_letter_a"));
       return;
     }
     const isNew = editor.id === null;
@@ -229,12 +232,12 @@ export const PostPageWorkspace: React.FC<Props> = ({
       setBaseline(formSnapshot(next));
       setConflict(false);
       setNotice(next.status === 'draft'
-        ? 'Đã lưu bản nháp. Nội dung vẫn chưa công khai.'
-        : 'Đã lưu nội dung. Trạng thái xuất bản được giữ nguyên.');
+        ? tStatic("feature.posts.postpageworkspace.draft_saved_content_is_not_public_yet")
+        : tStatic("feature.posts.postpageworkspace.content_saved_publication_status_is_unchanged"));
       if (isNew) setOffset(0);
       setRevision(previous => previous + 1);
     } catch (cause) {
-      if (epoch === accountEpoch.current) reportError(cause, 'Không thể lưu nội dung.');
+      if (epoch === accountEpoch.current) reportError(cause, tStatic("api.postPage.save_the_entry"));
     } finally {
       setBusy(false);
     }
@@ -243,7 +246,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
   const publish = async (status: PublicationStatus) => {
     if (!editor || editor.id === null || editor.version === null || !csrfToken || busy) return;
     if (dirty) {
-      setError('Hãy lưu thay đổi trước khi xuất bản hoặc hủy xuất bản; thao tác này chỉ áp dụng cho bản đã lưu.');
+      setError(tStatic("feature.posts.postpageworkspace.save_changes_before_publishing_or_unpublishing_this_action_applies"));
       return;
     }
     setBusy(true);
@@ -256,10 +259,10 @@ export const PostPageWorkspace: React.FC<Props> = ({
       setEditor(next);
       setBaseline(formSnapshot(next));
       setConflict(false);
-      setNotice(status === 'published' ? 'Đã xuất bản nội dung.' : 'Đã hủy xuất bản. Nội dung không còn công khai.');
+      setNotice(status === 'published' ? tStatic("feature.posts.postpageworkspace.content_published") : tStatic("feature.posts.postpageworkspace.content_unpublished_it_is_no_longer_public"));
       setRevision(previous => previous + 1);
     } catch (cause) {
-      if (epoch === accountEpoch.current) reportError(cause, 'Không thể thay đổi trạng thái.');
+      if (epoch === accountEpoch.current) reportError(cause, tStatic("feature.posts.postpageworkspace.could_not_change_publication_status"));
     } finally {
       setBusy(false);
     }
@@ -267,7 +270,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
 
   const reloadSaved = async () => {
     if (!editor || editor.id === null || busy) return;
-    if (dirty && !window.confirm('Tải lại sẽ bỏ bản nhập chưa lưu. Tiếp tục?')) return;
+    if (dirty && !window.confirm(tStatic("feature.posts.postpageworkspace.reloading_discards_unsaved_input_continue"))) return;
     setBusy(true);
     const epoch = accountEpoch.current;
     try {
@@ -278,9 +281,9 @@ export const PostPageWorkspace: React.FC<Props> = ({
       setBaseline(formSnapshot(next));
       setError('');
       setConflict(false);
-      setNotice('Đã tải bản lưu mới nhất.');
+      setNotice(tStatic("feature.posts.postpageworkspace.loaded_latest_saved_version"));
     } catch (cause) {
-      if (epoch === accountEpoch.current) reportError(cause, 'Không thể tải lại bản lưu.');
+      if (epoch === accountEpoch.current) reportError(cause, tStatic("feature.posts.postpageworkspace.could_not_reload_saved_version"));
     } finally {
       setBusy(false);
     }
@@ -288,7 +291,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
 
   const remove = async () => {
     if (!editor || editor.id === null || editor.version === null || !csrfToken || busy) return;
-    if (!window.confirm('Xóa vĩnh viễn ' + label.toLowerCase() + ' “' + editor.title + '”?')) return;
+    if (!window.confirm(tStatic("feature.posts.postpageworkspace.permanently_delete") + label.toLowerCase() + ' “' + editor.title + '”?')) return;
     setBusy(true);
     setError('');
     const epoch = accountEpoch.current;
@@ -298,10 +301,10 @@ export const PostPageWorkspace: React.FC<Props> = ({
       setEditor(null);
       setBaseline('');
       setConflict(false);
-      setNotice('Đã xóa ' + label.toLowerCase() + '.');
+      setNotice(tStatic("feature.posts.postpageworkspace.deleted") + label.toLowerCase() + '.');
       setRevision(previous => previous + 1);
     } catch (cause) {
-      if (epoch === accountEpoch.current) reportError(cause, 'Không thể xóa nội dung.');
+      if (epoch === accountEpoch.current) reportError(cause, tStatic("api.postPage.delete_the_entry"));
     } finally {
       setBusy(false);
     }
@@ -312,7 +315,7 @@ export const PostPageWorkspace: React.FC<Props> = ({
     // Opening synchronously avoids browsers blocking a popup after the auth check.
     const previewTab = window.open('about:blank', '_blank');
     if (!previewTab) {
-      setError('Trình duyệt chặn tab xem trước. Hãy cho phép mở tab mới rồi thử lại.');
+      setError(tStatic("feature.posts.postpageworkspace.the_browser_blocked_the_preview_tab_allow_new_tabs"));
       return;
     }
     previewTab.opener = null;
@@ -323,10 +326,10 @@ export const PostPageWorkspace: React.FC<Props> = ({
       await checkPostPagePreview(type, editor.id);
       if (epoch !== accountEpoch.current) { previewTab.close(); return; }
       previewTab.location.replace(postPagePreviewUrl(type, editor.id));
-      if (dirty) setNotice('Preview hiển thị bản đã lưu. Thay đổi chưa lưu chưa xuất hiện.');
+      if (dirty) setNotice(tStatic("feature.posts.postpageworkspace.preview_shows_the_saved_version_unsaved_changes_are_not"));
     } catch (cause) {
       previewTab.close();
-      if (epoch === accountEpoch.current) reportError(cause, 'Không thể xem trước nội dung.');
+      if (epoch === accountEpoch.current) reportError(cause, tStatic("feature.posts.postpageworkspace.could_not_preview_content"));
     } finally {
       setBusy(false);
     }
@@ -335,16 +338,16 @@ export const PostPageWorkspace: React.FC<Props> = ({
   if (!user || accountChanged) return null;
 
   return (
-    <main className="od-posts" aria-label={'Quản lý ' + label}>
+    <main className="od-posts" aria-label={tStatic("feature.posts.postpageworkspace.manage") + label}>
       <div className="od-posts-heading">
         <div>
-          <p className="od-posts-eyebrow">Nội dung / {label}</p>
-          <h2>{editor ? (editor.id === null ? 'Thêm ' + label.toLowerCase() : 'Chỉnh sửa ' + label.toLowerCase()) : 'Tất cả ' + label.toLowerCase()}</h2>
-          <p className="od-posts-subtitle">Lưu bản nháp và xuất bản là hai thao tác riêng biệt.</p>
+          <p className="od-posts-eyebrow">{tStatic("feature.posts.postpageworkspace.content")}{' '}{label}</p>
+          <h2>{editor ? (editor.id === null ? tStatic("feature.posts.postpageworkspace.add") + label.toLowerCase() : tStatic("feature.posts.postpageworkspace.edit") + label.toLowerCase()) : tStatic("feature.posts.postpageworkspace.all") + label.toLowerCase()}</h2>
+          <p className="od-posts-subtitle">{tStatic("feature.posts.postpageworkspace.saving_a_draft_and_publishing_are_separate_actions")}</p>
         </div>
         {editor
-          ? <button type="button" className="btn-secondary" onClick={leaveEditor} disabled={busy}>← Danh sách</button>
-          : <button type="button" className="od-posts-primary" onClick={startNew} disabled={busy}>+ Thêm {label.toLowerCase()}</button>}
+          ? <button type="button" className="btn-secondary" onClick={leaveEditor} disabled={busy}>{tStatic("feature.posts.postpageworkspace.list")}</button>
+          : <button type="button" className="od-posts-primary" onClick={startNew} disabled={busy}>{tStatic("feature.posts.postpageworkspace.add_2")}{' '}{label.toLowerCase()}</button>}
       </div>
       {error && <div className="content-alert error" role="alert">{error}</div>}
       {notice && <div className="content-alert success" role="status">{notice}</div>}
@@ -353,10 +356,10 @@ export const PostPageWorkspace: React.FC<Props> = ({
         <section className="od-posts-card">
           <div className="od-posts-list-header">
             <div>
-              <h3>Danh sách {label.toLowerCase()}</h3>
-              <p>Trang {offset / PAGE_SIZE + 1} · {PAGE_SIZE} mục mỗi trang</p>
+              <h3>{tStatic("shell.list")}{' '}{label.toLowerCase()}</h3>
+              <p>{tStatic("feature.common.page_number", { page: formatNumber(offset / PAGE_SIZE + 1) })} · {PAGE_SIZE} {tStatic("feature.posts.postpageworkspace.items_per_page")}</p>
             </div>
-            <button type="button" className="btn-secondary" onClick={() => setRevision(previous => previous + 1)} disabled={busy || loading}>Tải lại</button>
+            <button type="button" className="btn-secondary" onClick={() => setRevision(previous => previous + 1)} disabled={busy || loading}>{tStatic("reading.reload")}</button>
           </div>
           <div className="mb-4 rounded-lg border border-slate-200 p-3">
             <TermFilters
@@ -371,8 +374,8 @@ export const PostPageWorkspace: React.FC<Props> = ({
               }}
             />
           </div>
-          {loading && <p className="od-posts-placeholder" role="status">Đang tải danh sách…</p>}
-          {!loading && items.length === 0 && <p className="od-posts-placeholder">Chưa có {label.toLowerCase()} nào. Chọn “Thêm {label.toLowerCase()}” để bắt đầu.</p>}
+          {loading && <p className="od-posts-placeholder" role="status">{tStatic("feature.posts.postpageworkspace.loading_list")}</p>}
+          {!loading && items.length === 0 && <p className="od-posts-placeholder">{tStatic("feature.content.contenttypeschemasettings.none")}{' '}{label.toLowerCase()} {tStatic("feature.posts.postpageworkspace.yet_select_add")}{' '}{label.toLowerCase()}{tStatic("feature.posts.postpageworkspace.to_get_started")}</p>}
           {!loading && items.length > 0 && (
             <ul className="od-posts-list">
               {items.map(item => (
@@ -383,9 +386,9 @@ export const PostPageWorkspace: React.FC<Props> = ({
                       <span className="od-posts-slug">/{item.slug}</span>
                     </span>
                     <span className={'od-posts-status ' + (item.publication_status === 'published' ? 'is-published' : 'is-draft')}>
-                      {item.publication_status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
+                      {item.publication_status === 'published' ? tStatic("reading.published") : tStatic("feature.content.entrylistpage.draft")}
                     </span>
-                    <span className="od-posts-list-date">Cập nhật {showDate(item.updated_at)}</span>
+                    <span className="od-posts-list-date">{tStatic("feature.editor.panelregionrenderer.update")}{' '}{showDate(item.updated_at)}</span>
                     <span className="od-posts-list-arrow" aria-hidden="true">›</span>
                   </button>
                 </li>
@@ -393,9 +396,9 @@ export const PostPageWorkspace: React.FC<Props> = ({
             </ul>
           )}
           <div className="od-posts-pagination">
-            <button type="button" className="btn-secondary" disabled={busy || loading || offset === 0} onClick={() => setOffset(previous => Math.max(0, previous - PAGE_SIZE))}>← Trang trước</button>
-            <span>Trang {offset / PAGE_SIZE + 1}</span>
-            <button type="button" className="btn-secondary" disabled={busy || loading || items.length < PAGE_SIZE} onClick={() => setOffset(previous => previous + PAGE_SIZE)}>Trang sau →</button>
+            <button type="button" className="btn-secondary" disabled={busy || loading || offset === 0} onClick={() => setOffset(previous => Math.max(0, previous - PAGE_SIZE))}>{tStatic("feature.media.medialibrarypage.previous_page")}</button>
+            <span>{tStatic("feature.common.page_number", { page: formatNumber(offset / PAGE_SIZE + 1) })}</span>
+            <button type="button" className="btn-secondary" disabled={busy || loading || items.length < PAGE_SIZE} onClick={() => setOffset(previous => previous + PAGE_SIZE)}>{tStatic("feature.common.next_page_arrow")}</button>
           </div>
         </section>
       )}
@@ -404,21 +407,21 @@ export const PostPageWorkspace: React.FC<Props> = ({
         <form onSubmit={save} className="od-posts-editor">
           <div className="od-posts-card od-posts-fields">
             <label className="od-posts-field">
-              <span>Tiêu đề <span aria-hidden="true">*</span></span>
-              <input type="text" required maxLength={200} value={editor.title} onChange={event => editTitle(event.target.value)} disabled={busy} placeholder={'Nhập tiêu đề ' + label.toLowerCase()} />
+              <span>{tStatic("feature.contact.contactpanel.title")}{' '}<span aria-hidden="true">*</span></span>
+              <input type="text" required maxLength={200} value={editor.title} onChange={event => editTitle(event.target.value)} disabled={busy} placeholder={tStatic("feature.posts.postpageworkspace.enter_title_for") + label.toLowerCase()} />
             </label>
             <label className="od-posts-field">
-              <span>Đường dẫn (slug) <span aria-hidden="true">*</span></span>
-              <input type="text" required maxLength={64} value={editor.slug} onChange={event => setEditor(previous => previous && { ...previous, slug: event.target.value })} disabled={busy} placeholder="duong-dan-noi-dung" pattern="[a-z](?:[a-z0-9]|-){0,63}" title="Bắt đầu bằng chữ thường a-z, sau đó là chữ thường, số hoặc dấu gạch ngang" />
-              <small>Chữ thường không dấu, số và dấu gạch ngang. Slug phải duy nhất trong {label.toLowerCase()}.</small>
+              <span>{tStatic("feature.posts.postpageworkspace.permalink_slug")}{' '}<span aria-hidden="true">*</span></span>
+              <input type="text" required maxLength={64} value={editor.slug} onChange={event => setEditor(previous => previous && { ...previous, slug: event.target.value })} disabled={busy} placeholder="duong-dan-noi-dung" pattern="[a-z](?:[a-z0-9]|-){0,63}" title={tStatic("feature.posts.postpageworkspace.start_with_a_lowercase_letter_a_z_followed_by")} />
+              <small>{tStatic("feature.posts.postpageworkspace.use_lowercase_ascii_letters_digits_and_hyphens_the_slug")}{' '}{label.toLowerCase()}.</small>
             </label>
             <label className="od-posts-field">
-              <span>Nội dung</span>
-              <textarea rows={14} value={editor.body} onChange={event => setEditor(previous => previous && { ...previous, body: event.target.value })} disabled={busy} placeholder="Viết nội dung tại đây…" />
-              <small>Hiện hỗ trợ văn bản. Nội dung HTML được hiển thị dưới dạng văn bản an toàn.</small>
+              <span>{tStatic("feature.menus.menuspanel.entry")}</span>
+              <textarea rows={14} value={editor.body} onChange={event => setEditor(previous => previous && { ...previous, body: event.target.value })} disabled={busy} placeholder={tStatic("feature.posts.postpageworkspace.write_content_here")} />
+              <small>{tStatic("feature.posts.postpageworkspace.plain_text_is_currently_supported_html_is_displayed_safely")}</small>
             </label>
             <div className="min-w-0">
-              <h3 className="mb-3 text-base font-semibold">Danh mục &amp; Thẻ</h3>
+              <h3 className="mb-3 text-base font-semibold">{tStatic("feature.content.contentworkspace.categories_tags")}</h3>
               <TermPicker
                 userId={user.id}
                 selectedIds={editor.termIds}
@@ -430,40 +433,40 @@ export const PostPageWorkspace: React.FC<Props> = ({
           </div>
           <aside className="od-posts-aside">
             <section className="od-posts-card">
-              <h3>Xuất bản</h3>
+              <h3>{tStatic("feature.posts.postpageworkspace.publish")}</h3>
               <div className="od-posts-meta">
-                <span>Trạng thái</span>
+                <span>{tStatic("multilingual.status")}</span>
                 <strong className={'od-posts-status ' + (editor.status === 'published' ? 'is-published' : 'is-draft')}>
-                  {editor.status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
+                  {editor.status === 'published' ? tStatic("reading.published") : tStatic("feature.content.entrylistpage.draft")}
                 </strong>
               </div>
-              {editor.id !== null && <p className="od-posts-id">ID #{editor.id} · Phiên bản {editor.version}</p>}
-              {dirty && <p className="od-posts-unsaved" role="status">● Có thay đổi chưa lưu</p>}
+              {editor.id !== null && <p className="od-posts-id">ID #{editor.id} {tStatic("feature.posts.postpageworkspace.version")}{' '}{editor.version}</p>}
+              {dirty && <p className="od-posts-unsaved" role="status">{tStatic("shell.unsaved")}</p>}
               {conflict && editor.id !== null && (
-                <button type="button" className="btn-secondary od-posts-full" onClick={() => void reloadSaved()} disabled={busy}>Tải bản mới để giải quyết xung đột</button>
+                <button type="button" className="btn-secondary od-posts-full" onClick={() => void reloadSaved()} disabled={busy}>{tStatic("feature.posts.postpageworkspace.load_latest_version_to_resolve_conflict")}</button>
               )}
-              <button type="submit" className="od-posts-primary od-posts-full" disabled={busy || !csrfToken}>{busy ? 'Đang xử lý…' : editor.id === null ? 'Lưu bản nháp' : 'Lưu thay đổi'}</button>
+              <button type="submit" className="od-posts-primary od-posts-full" disabled={busy || !csrfToken}>{busy ? tStatic("feature.posts.postpageworkspace.processing") : editor.id === null ? tStatic("feature.posts.postpageworkspace.save_draft") : tStatic("feature.users.userspanel.save_changes")}</button>
               {editor.id !== null && (
                 <>
-                  <button type="button" className="btn-secondary od-posts-full" onClick={() => void preview()} disabled={busy}>Xem trước bản đã lưu ↗</button>
+                  <button type="button" className="btn-secondary od-posts-full" onClick={() => void preview()} disabled={busy}>{tStatic("feature.posts.postpageworkspace.preview_saved_version")}</button>
                   {editor.status === 'draft'
-                    ? <button type="button" className="od-posts-publish od-posts-full" onClick={() => void publish('published')} disabled={busy}>Xuất bản</button>
-                    : <button type="button" className="btn-secondary od-posts-full" onClick={() => void publish('draft')} disabled={busy}>Hủy xuất bản</button>}
+                    ? <button type="button" className="od-posts-publish od-posts-full" onClick={() => void publish('published')} disabled={busy}>{tStatic("feature.posts.postpageworkspace.publish")}</button>
+                    : <button type="button" className="btn-secondary od-posts-full" onClick={() => void publish('draft')} disabled={busy}>{tStatic("feature.posts.postpageworkspace.unpublish")}</button>}
                   {editor.status === 'published' && (
-                    <a className="od-posts-public-link" href={'/content/' + type + '/' + encodeURIComponent(editor.slug)} target="_blank" rel="noopener noreferrer">Xem trang công khai ↗</a>
+                    <a className="od-posts-public-link" href={'/content/' + type + '/' + encodeURIComponent(editor.slug)} target="_blank" rel="noopener noreferrer">{tStatic("feature.posts.postpageworkspace.view_public_page")}</a>
                   )}
-                  <button type="button" className="od-posts-danger od-posts-full" onClick={() => void remove()} disabled={busy}>Xóa {label.toLowerCase()}</button>
+                  <button type="button" className="od-posts-danger od-posts-full" onClick={() => void remove()} disabled={busy}>{tStatic("multilingual.delete")}{' '}{label.toLowerCase()}</button>
                 </>
               )}
-              <p className="od-posts-helper">Xuất bản chỉ áp dụng cho phiên bản đã lưu. Bản nháp không xuất hiện trên website công khai.</p>
+              <p className="od-posts-helper">{tStatic("feature.posts.postpageworkspace.publishing_applies_only_to_the_saved_version_drafts_do")}</p>
             </section>
             <section className="od-posts-card">
-              <h3>Ảnh đại diện</h3>
+              <h3>{tStatic("feature.editor.panelregionrenderer.featured_image")}</h3>
               {editor.featuredImage
-                ? <img className="od-posts-featured" src={mediaThumbnailUrl(editor.featuredImage)} alt="Ảnh đại diện đã chọn" />
-                : <div className="od-posts-featured-empty">Chưa chọn ảnh đại diện</div>}
-              <button type="button" className="btn-secondary od-posts-full" disabled={busy || !csrfToken} onClick={() => setPickerOpen(true)}>Chọn từ thư viện</button>
-              {editor.featuredImage && <button type="button" className="od-posts-text-button" disabled={busy} onClick={() => setEditor(previous => previous && { ...previous, featuredImage: null })}>Bỏ ảnh đại diện</button>}
+                ? <img className="od-posts-featured" src={mediaThumbnailUrl(editor.featuredImage)} alt={tStatic("feature.posts.postpageworkspace.selected_featured_image")} />
+                : <div className="od-posts-featured-empty">{tStatic("feature.posts.postpageworkspace.no_featured_image_selected")}</div>}
+              <button type="button" className="btn-secondary od-posts-full" disabled={busy || !csrfToken} onClick={() => setPickerOpen(true)}>{tStatic("feature.posts.postpageworkspace.choose_from_library")}</button>
+              {editor.featuredImage && <button type="button" className="od-posts-text-button" disabled={busy} onClick={() => setEditor(previous => previous && { ...previous, featuredImage: null })}>{tStatic("feature.posts.postpageworkspace.remove_featured_image")}</button>}
             </section>
           </aside>
         </form>

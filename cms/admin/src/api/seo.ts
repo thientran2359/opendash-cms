@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import { requestJson } from './client.ts';
 
 export interface EntryRouteSnapshot {
@@ -26,7 +27,7 @@ export interface HomeSeoSnapshot extends SeoMetadataInput {
 export function getEntryRoute(typeKey: string, id: number): Promise<EntryRouteSnapshot> {
   return requestJson<EntryRouteSnapshot>(
     `/api/admin/content-types/${encodeURIComponent(typeKey)}/entries/${id}/route`,
-    { defaultErrorMessage: 'Không thể tải đường dẫn tùy chỉnh.' },
+    { defaultErrorMessage: tStatic('api.seo.load_the_custom_permalink') },
   );
 }
 
@@ -45,7 +46,7 @@ export function putEntryRoute(
       contentType: 'application/json',
       ifMatchVersion: expectedVersion,
       body: JSON.stringify({ custom_path: customPath }),
-      defaultErrorMessage: 'Không thể lưu đường dẫn tùy chỉnh.',
+      defaultErrorMessage: tStatic('api.seo.save_the_custom_permalink'),
     },
   );
 }
@@ -53,7 +54,7 @@ export function putEntryRoute(
 export function getEntrySeo(typeKey: string, id: number): Promise<EntrySeoSnapshot> {
   return requestJson<EntrySeoSnapshot>(
     `/api/admin/content-types/${encodeURIComponent(typeKey)}/entries/${id}/seo`,
-    { defaultErrorMessage: 'Không thể tải SEO entry.' },
+    { defaultErrorMessage: tStatic('api.seo.load_entry_seo') },
   );
 }
 
@@ -72,7 +73,7 @@ export function putEntrySeo(
       contentType: 'application/json',
       ifMatchVersion: expectedVersion,
       body: JSON.stringify(input),
-      defaultErrorMessage: 'Không thể lưu SEO entry.',
+      defaultErrorMessage: tStatic('api.seo.save_entry_seo'),
     },
   );
 }
@@ -80,7 +81,7 @@ export function putEntrySeo(
 export function getHomeSeo(locale?: string | null): Promise<HomeSeoSnapshot> {
   const query = locale ? `?locale=${encodeURIComponent(locale)}` : '';
   return requestJson<HomeSeoSnapshot>(`/api/admin/seo/home${query}`, {
-    defaultErrorMessage: 'Không thể tải SEO trang chủ.',
+    defaultErrorMessage: tStatic('api.seo.load_homepage_seo'),
   });
 }
 
@@ -97,6 +98,6 @@ export function putHomeSeo(
     contentType: 'application/json',
     ifMatchVersion: expectedVersion,
     body: JSON.stringify(input),
-    defaultErrorMessage: 'Không thể lưu SEO trang chủ.',
+    defaultErrorMessage: tStatic('api.seo.save_homepage_seo'),
   });
 }

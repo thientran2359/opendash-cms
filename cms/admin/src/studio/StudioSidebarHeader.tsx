@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n/index.tsx';
 import React, { useEffect, useRef, useState } from 'react';
 
 interface Props {
@@ -16,12 +17,13 @@ interface Props {
   onReloadConflict?: () => void;
 }
 
-/** Breathable Studio header with optional back arrow (Mode 1 sub-panels) and right-aligned `Thoát` button. */
+/** Breathable Studio header with optional back arrow (Mode 1 sub-panels) and right-aligned exit button. */
 export const StudioSidebarHeader: React.FC<Props> = ({
   mode, title, badge, dirty, saving, onExit, backLabel, onBack,
-  canReset = false, resetLabel = 'Khôi phục mặc định Theme', onReset,
+  canReset = false, resetLabel, onReset,
   conflict = false, onReloadConflict,
 }) => {
+  const { t } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -82,13 +84,13 @@ export const StudioSidebarHeader: React.FC<Props> = ({
           {dirty && (
             <span
               data-testid="studio-dirty-badge"
-              title="Có thay đổi chưa lưu"
+              title={t("studio.unsaved_changes")}
               className="inline-block size-2 shrink-0 rounded-full bg-amber-500"
             />
           )}
         </div>
         <p className="mt-0.5 truncate text-[11px] leading-tight text-zinc-500">
-          Tùy chỉnh giao diện{badge ? ` · ${badge}` : ''}
+          {t("studio.appearance_customization")}{badge ? ` · ${badge}` : ''}
         </p>
       </div>
 
@@ -100,10 +102,10 @@ export const StudioSidebarHeader: React.FC<Props> = ({
             disabled={saving}
             onClick={() => setMenuOpen(open => !open)}
             data-testid="studio-more-menu-btn"
-            aria-label="Tùy chọn nâng cao"
+            aria-label={t("studio.advanced_options")}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            title="Tùy chọn nâng cao"
+            title={t("studio.advanced_options")}
             className="flex size-7 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -119,10 +121,10 @@ export const StudioSidebarHeader: React.FC<Props> = ({
           onClick={onExit}
           disabled={saving}
           data-testid="studio-exit-btn"
-          title={mode === 'entry' ? 'Đóng Studio (về trang chỉnh sửa)' : 'Thoát Studio'}
+          title={mode === 'entry' ? t("studio.close_studio_return_to_editor") : t("studio.exit_studio")}
           className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-700 transition-colors hover:bg-zinc-100 hover:text-zinc-950 disabled:opacity-50"
         >
-          Thoát
+          {t("studio.exit")}
         </button>
       </div>
 
@@ -130,7 +132,7 @@ export const StudioSidebarHeader: React.FC<Props> = ({
         <div
           ref={menuRef}
           role="menu"
-          aria-label="Tùy chọn nâng cao"
+          aria-label={t("studio.advanced_options")}
           style={{ right: 8, top: 52 }}
           className="absolute z-40 w-56 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg ring-1 ring-black/5"
         >
@@ -145,7 +147,7 @@ export const StudioSidebarHeader: React.FC<Props> = ({
               }}
               className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-xs font-medium text-zinc-800 hover:bg-zinc-100 disabled:opacity-50"
             >
-              Tải lại bản mới nhất từ server
+              {t("studio.reload_latest_server_version")}
             </button>
           )}
           {canReset && onReset && (
@@ -160,7 +162,7 @@ export const StudioSidebarHeader: React.FC<Props> = ({
               }}
               className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
             >
-              {resetLabel}
+              {resetLabel ?? t("studio.restore_theme_defaults")}
             </button>
           )}
         </div>

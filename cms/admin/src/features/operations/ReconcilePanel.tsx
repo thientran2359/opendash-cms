@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useState } from 'react';
 import {
   applyReconcile,
@@ -15,6 +16,7 @@ interface ReconcilePanelProps {
 }
 
 export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApiError }) => {
+  const { t: translate } = useI18n();
   const [diagnostics, setDiagnostics] = useState<OperationsDiagnostics | null>(null);
   const [plan, setPlan] = useState<ReconcilePlan | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,7 +42,7 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
     try {
       const next = await planReconcile(csrfToken);
       setPlan(next);
-      setNotice(`Đã lập kế hoạch đối soát (generation ${next.generation}, ${next.orphan_candidates.length} tệp mồ côi >= 24h).`);
+      setNotice(tStatic('feature.operations.reconcilepanel.reconciliation_plan_created_generation_value1_value2_orphaned_files_24h', { value1: next.generation, value2: next.orphan_candidates.length }));
       await loadDiagnostics();
     } catch (err) {
       onApiError(err);
@@ -51,7 +53,7 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
 
   const handleApply = async () => {
     if (!csrfToken || !plan) return;
-    if (!window.confirm(`Xác nhận chuyển ${plan.orphan_candidates.length} tệp mồ côi vào vùng cách ly?`)) {
+    if (!window.confirm(tStatic('feature.operations.reconcilepanel.confirm_moving_value1_orphaned_files_to_quarantine', { value1: plan.orphan_candidates.length }))) {
       return;
     }
     setBusy(true);
@@ -59,7 +61,7 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
     try {
       const res = await applyReconcile(csrfToken, plan);
       setPlan(null);
-      setNotice(`Đã cách ly ${res.quarantined_files} tệp (generation ${res.generation}).`);
+      setNotice(tStatic('feature.operations.reconcilepanel.quarantined_value1_files_generation_value2', { value1: res.quarantined_files, value2: res.generation }));
       await loadDiagnostics();
     } catch (err) {
       onApiError(err);
@@ -70,7 +72,7 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
 
   const handlePurge = async () => {
     if (!csrfToken) return;
-    if (!window.confirm('Xác nhận xóa vĩnh viễn các thư mục cách ly và secret mồ côi đã quá 7 ngày?')) {
+    if (!window.confirm(tStatic('feature.operations.reconcilepanel.confirm_permanently_deleting_quarantine_directories_and_orphaned_secrets_older_t'))) {
       return;
     }
     setBusy(true);
@@ -78,7 +80,7 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
     try {
       const res = await purgeQuarantine(csrfToken);
       setNotice(
-        `Đã dọn ${res.purged_quarantine_dirs} thư mục cách ly, ${res.purged_secret_blobs} secret mồ côi (bỏ qua ${res.skipped_under_grace} mục chưa đủ 7 ngày).`,
+        tStatic('feature.operations.reconcilepanel.purged_value1_quarantine_directories_and_value2_orphaned_secrets_skipped_value3_', { value1: res.purged_quarantine_dirs, value2: res.purged_secret_blobs, value3: res.skipped_under_grace }),
       );
       await loadDiagnostics();
     } catch (err) {
@@ -92,26 +94,18 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
     <section className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">Đối soát lưu trữ &amp; Vùng cách ly</h2>
-          <p className="mt-0.5 text-sm text-zinc-600">
-            Quét thủ công tệp mồ côi (&ge; 24 giờ), tệp thiếu, secret mồ côi và dọn vùng cách ly (&ge; 7 ngày).
-          </p>
+          <h2 className="text-base font-semibold text-zinc-950">{translate('feature.operations.reconcilepanel.storage_reconciliation_quarantine')}</h2>
+          <p className="mt-0.5 text-sm text-zinc-600">{translate('feature.operations.reconcilepanel.manually_scan_orphaned_files_24_hours_missing_files_and_orphaned_secrets_purge_q')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <AdminButton variant="secondary" size="sm" disabled={busy || !csrfToken} onClick={handlePlan}>
-            Quét &amp; Lập kế hoạch
-          </AdminButton>
+          <AdminButton variant="secondary" size="sm" disabled={busy || !csrfToken} onClick={handlePlan}>{translate('feature.operations.reconcilepanel.scan_plan')}</AdminButton>
           <AdminButton
             variant="primary"
             size="sm"
             disabled={busy || !csrfToken || !plan || plan.orphan_candidates.length === 0}
             onClick={handleApply}
-          >
-            Áp dụng cách ly
-          </AdminButton>
-          <AdminButton variant="danger" size="sm" disabled={busy || !csrfToken} onClick={handlePurge}>
-            Dọn cách ly (&ge; 7 ngày)
-          </AdminButton>
+          >{translate('feature.operations.reconcilepanel.apply_quarantine')}</AdminButton>
+          <AdminButton variant="danger" size="sm" disabled={busy || !csrfToken} onClick={handlePurge}>{translate('feature.operations.reconcilepanel.purge_quarantine_7_days')}</AdminButton>
         </div>
       </div>
 
@@ -120,21 +114,21 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
       {diagnostics && (
         <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
-            <div className="text-xs font-medium text-zinc-500">Generation</div>
+            <div className="text-xs font-medium text-zinc-500">{translate('feature.operations.reconcilepanel.generation')}</div>
             <div className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">{diagnostics.maintenance_generation}</div>
           </div>
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
-            <div className="text-xs font-medium text-zinc-500">Xóa đang chờ</div>
+            <div className="text-xs font-medium text-zinc-500">{translate('feature.operations.reconcilepanel.pending_deletions')}</div>
             <div className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">{diagnostics.pending_delete_jobs.length}</div>
           </div>
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
-            <div className="text-xs font-medium text-zinc-500">Cách ly (đủ 7d / giữ lại)</div>
+            <div className="text-xs font-medium text-zinc-500">{translate('feature.operations.reconcilepanel.quarantine_eligible_after_7d_retained')}</div>
             <div className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">
               {diagnostics.purgeable_quarantine_dirs} / {diagnostics.retained_quarantine_dirs}
             </div>
           </div>
           <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3.5">
-            <div className="text-xs font-medium text-zinc-500">Secret mồ côi (đủ 7d)</div>
+            <div className="text-xs font-medium text-zinc-500">{translate('feature.operations.reconcilepanel.orphaned_secrets_eligible_after_7d')}</div>
             <div className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">
               {diagnostics.orphan_secret_blobs} ({diagnostics.purgeable_secret_blobs})
             </div>
@@ -143,10 +137,9 @@ export const ReconcilePanel: React.FC<ReconcilePanelProps> = ({ csrfToken, onApi
       )}
 
       {plan && (
-        <AdminAlert tone="warning">
-          Kế hoạch <code className="font-mono text-xs">{plan.plan_id.slice(0, 12)}...</code> — Quét {plan.scanned_records} bản ghi,{' '}
-          {plan.scanned_files} tệp; thiếu file: {plan.missing_canonical_files.length}; mồ côi &ge; 24h:{' '}
-          {plan.orphan_candidates.length}; mồ côi mới (&lt; 24h): {plan.recent_orphans_under_grace}.
+        <AdminAlert tone="warning">{translate('feature.operations.reconcilepanel.plan')}{' '}<code className="font-mono text-xs">{plan.plan_id.slice(0, 12)}...</code>{' '}{translate('feature.operations.reconcilepanel.scan')}{' '}{plan.scanned_records}{' '}{translate('feature.operations.reconcilepanel.records')}{' '}
+          {plan.scanned_files}{' '}{translate('feature.operations.reconcilepanel.files_missing_files')}{' '}{plan.missing_canonical_files.length}{translate('feature.operations.reconcilepanel.orphaned_24h')}{' '}
+          {plan.orphan_candidates.length}{translate('feature.operations.reconcilepanel.new_orphans_24h')}{' '}{plan.recent_orphans_under_grace}.
         </AdminAlert>
       )}
     </section>

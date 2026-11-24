@@ -1,3 +1,4 @@
+import { tStatic } from '../i18n/index.tsx';
 import type { BlockRegistry, BlockCatalogItemDto } from '../types.ts';
 import type { ContentMode } from '../features/content/types.ts';
 import type { BuilderDocument } from '../builder/document.ts';
@@ -75,7 +76,7 @@ export interface TypedTemplateOverride {
 
 export function getTemplateOverrides(): Promise<{ items: TypedTemplateOverride[] }> {
   return requestJson('/api/admin/template-overrides', {
-    defaultErrorMessage: 'Không thể tải site template overrides.',
+    defaultErrorMessage: tStatic('api.builder.load_site_template_overrides'),
   });
 }
 
@@ -89,7 +90,7 @@ export function putTemplateOverride(
     method: 'PUT', csrfToken, contentType: 'application/json',
     ifMatchVersion: expectedVersion,
     body: JSON.stringify({ target, document }),
-    defaultErrorMessage: 'Không thể lưu site template override.',
+    defaultErrorMessage: tStatic('api.builder.save_the_site_template_override'),
   });
 }
 
@@ -110,7 +111,7 @@ export function previewTemplateOverride(
     method: 'POST', csrfToken, contentType: 'application/json',
     ifMatchVersion: expectedVersion, signal,
     body: JSON.stringify({ target, document, preview_entry: previewEntry }),
-    defaultErrorMessage: 'Không thể xem trước template dùng chung.',
+    defaultErrorMessage: tStatic('api.builder.preview_the_shared_template'),
   });
 }
 
@@ -123,7 +124,7 @@ export interface TypedTemplateResetResult {
 export function resetTemplateOverride(id: number, version: number, csrfToken: string): Promise<TypedTemplateResetResult> {
   return requestJson(`/api/admin/template-overrides/${encodeURIComponent(id)}/reset`, {
     method: 'POST', csrfToken, ifMatchVersion: version,
-    defaultErrorMessage: 'Không thể reset site template override.',
+    defaultErrorMessage: tStatic('api.builder.reset_the_site_template_override'),
   });
 }
 
@@ -132,7 +133,7 @@ const entryBuilderPath = (typeKey: string, id: number): string =>
 
 export function getEntryBuilder(typeKey: string, id: number): Promise<EntryBuilderOpen> {
   return requestJson(entryBuilderPath(typeKey, id), {
-    defaultErrorMessage: 'Không thể mở Builder của nội dung.',
+    defaultErrorMessage: tStatic('api.builder.open_the_entry_builder'),
   });
 }
 
@@ -142,7 +143,7 @@ export function previewEntryBuilder(
   return requestJson(entryBuilderPath(typeKey, id) + '/preview', {
     method: 'POST', csrfToken, contentType: 'application/json',
     body: JSON.stringify(document), signal,
-    defaultErrorMessage: 'Không thể xem trước Builder của nội dung.',
+    defaultErrorMessage: tStatic('api.builder.preview_the_entry_builder'),
   });
 }
 
@@ -152,7 +153,7 @@ export function saveEntryBuilder(
   return requestJson(entryBuilderPath(typeKey, id), {
     method: 'PUT', csrfToken, contentType: 'application/json', ifMatchVersion: version,
     body: JSON.stringify(document),
-    defaultErrorMessage: 'Không thể lưu Builder của nội dung.',
+    defaultErrorMessage: tStatic('api.builder.save_the_entry_builder'),
   });
 }
 
@@ -162,14 +163,14 @@ export function resetEntryBuilder(
   return requestJson(entryBuilderPath(typeKey, id) + '/reset', {
     method: 'POST', csrfToken, contentType: 'application/json', ifMatchVersion: version,
     body: JSON.stringify({ confirm: true }),
-    defaultErrorMessage: 'Không thể reset Builder của nội dung.',
+    defaultErrorMessage: tStatic('api.builder.reset_the_entry_builder'),
   });
 }
 
 export async function getRegistry(): Promise<BlockRegistry> {
   return requestJson<BlockRegistry>('/registry', {
     method: 'GET',
-    defaultErrorMessage: 'Không thể tải danh sách block.',
+    defaultErrorMessage: tStatic('api.builder.load_blocks'),
   });
 }
 
@@ -177,7 +178,7 @@ export async function getRegistry(): Promise<BlockRegistry> {
 export async function getBlockSchemas(): Promise<BlockCatalogItemDto[]> {
   const response = await requestJson<{ items: BlockCatalogItemDto[] }>('/api/admin/builder/blocks', {
     method: 'GET',
-    defaultErrorMessage: 'Không thể tải danh sách block cho Trình dựng trang.',
+    defaultErrorMessage: tStatic('api.builder.load_blocks_for_the_page_builder'),
   });
   return response.items;
 }
@@ -185,6 +186,6 @@ export async function getBlockSchemas(): Promise<BlockCatalogItemDto[]> {
 export function getPrivatePreviewMedia(path: string, signal: AbortSignal): Promise<Blob> {
   return requestBlob(path, {
     signal,
-    defaultErrorMessage: 'Không tải được ảnh riêng tư cho Preview.',
+    defaultErrorMessage: tStatic('api.builder.load_the_private_preview_image'),
   });
 }

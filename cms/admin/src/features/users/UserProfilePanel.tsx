@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import React, { useEffect, useState } from 'react';
 import { getProfile, updateProfile, type UserProfile } from '../../api/users.ts';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
@@ -17,6 +18,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
   onApiError,
   onProfileUpdated,
 }) => {
+  const { t: translate } = useI18n();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [username, setUsername] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -33,7 +35,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
         setProfile(data);
         setUsername(data.username);
       })
-      .catch(err => onApiError(err, 'Không thể tải hồ sơ cá nhân.'));
+      .catch(err => onApiError(err, tStatic('api.users.load_your_profile')));
     return () => {
       active = false;
     };
@@ -59,7 +61,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
         payload.new_password = newPassword;
       }
       if (!payload.username && !payload.new_password) {
-        setErrorMsg('Không có thay đổi nào để lưu.');
+        setErrorMsg(tStatic('feature.users.userprofilepanel.there_are_no_changes_to_save'));
         setSaving(false);
         return;
       }
@@ -68,10 +70,10 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
       setUsername(updated.username);
       setCurrentPassword('');
       setNewPassword('');
-      setMessage('Đã cập nhật hồ sơ cá nhân.');
+      setMessage(tStatic('feature.users.userprofilepanel.your_profile_has_been_updated'));
       onProfileUpdated?.(updated);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Không thể cập nhật hồ sơ cá nhân.';
+      const msg = err instanceof Error ? err.message : tStatic('api.users.update_your_profile');
       setErrorMsg(msg);
       onApiError(err, msg);
     } finally {
@@ -80,15 +82,15 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
   };
 
   if (!profile) {
-    return <p className="text-sm text-zinc-500">Đang tải hồ sơ...</p>;
+    return <p className="text-sm text-zinc-500">{translate('feature.users.userprofilepanel.loading_profile')}</p>;
   }
 
   return (
     <section className="max-w-xl space-y-5" data-testid="user-profile-panel">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold text-zinc-950">Hồ sơ của tôi</h2>
-          <p className="mt-0.5 text-xs text-zinc-500">Phiên bản v{profile.version}</p>
+          <h2 className="text-base font-semibold text-zinc-950">{translate('shell.profile')}</h2>
+          <p className="mt-0.5 text-xs text-zinc-500">{translate('feature.users.userprofilepanel.version_v')}{profile.version}</p>
         </div>
         <AdminBadge tone={profile.role === 'admin' ? 'success' : 'neutral'} className="uppercase">
           {profile.role}
@@ -98,7 +100,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
       {errorMsg && <AdminAlert tone="error">{errorMsg}</AdminAlert>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-          <span>Tên đăng nhập / Hiển thị</span>
+          <span>{translate('feature.users.userprofilepanel.username_display_name')}</span>
           <input
             type="text"
             className={INPUT_CLASS}
@@ -109,11 +111,11 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
         </label>
         <div className="space-y-3 border-t border-zinc-200 pt-4">
           <div>
-            <h3 className="text-sm font-semibold text-zinc-900">Đổi mật khẩu (tùy chọn)</h3>
-            <p className="mt-0.5 text-xs text-zinc-500">Bắt buộc nhập mật khẩu hiện tại khi đổi mật khẩu.</p>
+            <h3 className="text-sm font-semibold text-zinc-900">{translate('feature.users.userprofilepanel.change_password_optional')}</h3>
+            <p className="mt-0.5 text-xs text-zinc-500">{translate('feature.users.userprofilepanel.your_current_password_is_required_when_changing_your_password')}</p>
           </div>
           <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-            <span>Mật khẩu hiện tại</span>
+            <span>{translate('feature.users.userprofilepanel.current_password')}</span>
             <input
               type="password"
               className={INPUT_CLASS}
@@ -123,7 +125,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
             />
           </label>
           <label className="flex flex-col gap-1 text-sm font-medium text-zinc-800">
-            <span>Mật khẩu mới</span>
+            <span>{translate('feature.users.userprofilepanel.new_password')}</span>
             <input
               type="password"
               className={INPUT_CLASS}
@@ -134,7 +136,7 @@ export const UserProfilePanel: React.FC<UserProfilePanelProps> = ({
           </label>
         </div>
         <AdminButton type="submit" variant="primary" disabled={saving || !csrfToken}>
-          {saving ? 'Đang lưu...' : 'Lưu hồ sơ'}
+          {saving ? translate('feature.users.userprofilepanel.saving') : translate('feature.users.userprofilepanel.save_profile')}
         </AdminButton>
       </form>
     </section>

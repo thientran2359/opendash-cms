@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { AdminAlert, AdminButton } from '../../components/AdminPrimitives.tsx';
 import { LocaleTabs } from '../../components/LocaleTabs.tsx';
@@ -60,7 +61,7 @@ interface DraftItem {
 }
 
 function messageFor(error: unknown): string {
-  return error instanceof Error ? error.message : 'Đã xảy ra lỗi khi thao tác menu.';
+  return error instanceof Error ? error.message : tStatic('feature.menus.menuspanel.an_error_occurred_while_managing_the_menu');
 }
 
 function buildItemInputs(drafts: DraftItem[]): MenuItemInput[] {
@@ -92,7 +93,8 @@ function buildItemInputs(drafts: DraftItem[]): MenuItemInput[] {
 }
 
 function PreviewTree({ items }: { items: MenuItemView[] }) {
-  if (items.length === 0) return <p className="text-xs text-slate-500">Không có mục công khai nào hiển thị.</p>;
+  const { t: translate } = useI18n();
+  if (items.length === 0) return <p className="text-xs text-slate-500">{translate('feature.menus.menuspanel.there_are_no_visible_public_items')}</p>;
   return (
     <ul className="list-disc pl-5 space-y-1 text-sm text-slate-800">
       {items.map((item) => (
@@ -112,6 +114,7 @@ export function MenusPanel({
   localeState = EMPTY_ADMIN_LOCALE_STATE,
   onApiError,
 }: Props) {
+  const { t: translate } = useI18n();
   const defaultLocaleCode = localeState.defaultLocale?.code ?? '';
   const [activeSlotLocale, setActiveSlotLocale] = useState<string>(defaultLocaleCode);
   useEffect(() => {
@@ -274,7 +277,7 @@ export function MenusPanel({
       const created = await createMenu(newKey.trim(), newTitle.trim(), csrfToken);
       setNewKey('');
       setNewTitle('');
-      setNotice(`Đã tạo menu "${created.menu.title}".`);
+      setNotice(tStatic('feature.menus.menuspanel.created_menu_value1', { value1: created.menu.title }));
       await loadMenusAndRefs();
       await openMenu(created.menu.id);
     } catch (reason) {
@@ -314,11 +317,11 @@ export function MenusPanel({
           external_url: item.external_url ?? '',
         })),
       );
-      setNotice('Đã lưu menu.');
+      setNotice(tStatic('feature.menus.menuspanel.menu_saved'));
       await loadMenusAndRefs();
     } catch (reason) {
       if (reason instanceof ApiClientError && reason.status === 412) {
-        setError('Menu đã thay đổi ở tab khác. Bản nháp chưa lưu vẫn được giữ lại.');
+        setError(tStatic('feature.menus.menuspanel.the_menu_has_changed_in_another_tab_your_unsaved_draft_has_been_retained'));
       } else {
         setError(messageFor(reason));
       }
@@ -339,7 +342,7 @@ export function MenusPanel({
       setLoadedMenu(null);
       setItemsDraft([]);
       setPreview(null);
-      setNotice('Đã xóa menu.');
+      setNotice(tStatic('feature.menus.menuspanel.menu_deleted'));
       await loadMenusAndRefs();
     } catch (reason) {
       setError(messageFor(reason));
@@ -383,10 +386,10 @@ export function MenusPanel({
         effectiveSlotLocale,
       );
       setSlots(updated);
-      setNotice('Đã lưu gắn slot menu.');
+      setNotice(tStatic('feature.menus.menuspanel.menu_slot_assignments_saved'));
     } catch (reason) {
       if (reason instanceof ApiClientError && (reason.status === 412 || reason.status === 409)) {
-        setError('Slot menu hoặc theme đang kích hoạt đã thay đổi. Vui lòng tải lại trước khi lưu.');
+        setError(tStatic('feature.menus.menuspanel.the_menu_slots_or_active_theme_have_changed_reload_before_saving'));
       } else {
         setError(messageFor(reason));
       }
@@ -404,7 +407,7 @@ export function MenusPanel({
         localKey: key,
         id: null,
         parentLocalKey: null,
-        label: 'Mục mới',
+        label: tStatic('feature.menus.menuspanel.new_item'),
         target_kind: 'external',
         target_entry_id: entries[0]?.id ?? null,
         target_term_id: terms[0]?.id ?? null,
@@ -424,30 +427,28 @@ export function MenusPanel({
   return (
     <section className="space-y-5" data-testid="menus-panel">
       <div>
-        <h2 className="text-base font-semibold text-zinc-950">Quản lý Menu &amp; Slot</h2>
-        <p className="mt-0.5 text-sm text-zinc-600">
-          Tạo, sắp xếp, preview và gắn menu vào slot của theme đang kích hoạt (tối đa 200 mục, 8 cấp).
-        </p>
+        <h2 className="text-base font-semibold text-zinc-950">{translate('feature.menus.menuspanel.manage_menus_slots')}</h2>
+        <p className="mt-0.5 text-sm text-zinc-600">{translate('feature.menus.menuspanel.create_arrange_preview_and_assign_menus_to_active_theme_slots_up_to_200_items_8_')}</p>
       </div>
       {error && <AdminAlert tone="error">{error}</AdminAlert>}
       {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
 
       <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => void handleCreateMenu(e)}>
         <label htmlFor="od-menu-new-key" className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-          <span>Menu key</span>
+          <span>{translate('feature.menus.menuspanel.menu_key')}</span>
           <input
             id="od-menu-new-key" value={newKey} onChange={(e) => setNewKey(e.target.value)} required
             placeholder="primary" className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
           />
         </label>
         <label htmlFor="od-menu-new-title" className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-          <span>Tiêu đề menu</span>
+          <span>{translate('feature.menus.menuspanel.menu_title')}</span>
           <input
             id="od-menu-new-title" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} required
-            placeholder="Menu chính" className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
+            placeholder={translate('feature.menus.menuspanel.primary_menu')} className="h-9 rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900"
           />
         </label>
-        <AdminButton type="submit" variant="primary" disabled={!csrfToken || busy}>Tạo menu</AdminButton>
+        <AdminButton type="submit" variant="primary" disabled={!csrfToken || busy}>{translate('feature.menus.menuspanel.create_menu')}</AdminButton>
       </form>
 
       <div className="flex flex-wrap gap-2">
@@ -467,8 +468,7 @@ export function MenusPanel({
         <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-4" data-testid="menu-editor">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex-1 min-w-[200px]">
-              <label htmlFor="od-menu-edit-title" className="mb-1 block text-xs font-medium text-slate-700">
-                Tiêu đề ({loadedMenu.menu.menu_key} · v{loadedMenu.menu.version})
+              <label htmlFor="od-menu-edit-title" className="mb-1 block text-xs font-medium text-slate-700">{translate('feature.menus.menuspanel.title')}{loadedMenu.menu.menu_key} · v{loadedMenu.menu.version})
               </label>
               <input
                 id="od-menu-edit-title"
@@ -478,28 +478,20 @@ export function MenusPanel({
               />
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={addItem} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm">
-                + Thêm mục
-              </button>
-              <button type="button" onClick={() => void handlePreviewMenu()} disabled={!csrfToken || busy} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm">
-                Preview
-              </button>
-              <button type="button" onClick={() => void handleSaveMenu()} disabled={!csrfToken || busy} className="od-primary-action">
-                Lưu menu
-              </button>
-              <button type="button" onClick={() => void handleDeleteMenu()} disabled={!csrfToken || busy} className="rounded-lg border border-rose-300 px-3 py-1.5 text-sm text-rose-700">
-                Xóa menu
-              </button>
+              <button type="button" onClick={addItem} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm">{translate('feature.menus.menuspanel.add_item')}</button>
+              <button type="button" onClick={() => void handlePreviewMenu()} disabled={!csrfToken || busy} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm">{translate('feature.menus.menuspanel.preview')}</button>
+              <button type="button" onClick={() => void handleSaveMenu()} disabled={!csrfToken || busy} className="od-primary-action">{translate('feature.menus.menuspanel.save_menu')}</button>
+              <button type="button" onClick={() => void handleDeleteMenu()} disabled={!csrfToken || busy} className="rounded-lg border border-rose-300 px-3 py-1.5 text-sm text-rose-700">{translate('feature.menus.menuspanel.delete_menu')}</button>
             </div>
           </div>
 
           <div className="space-y-3">
             {Object.keys(entryNextOffsets).length > 0 && (
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
-                <span>Đã tải {entries.length} mục nội dung đã xuất bản. Còn trang kết quả khác.</span>
+                <span>{translate('feature.menus.menuspanel.loaded')}{' '}{entries.length}{' '}{translate('feature.menus.menuspanel.published_entries_more_results_are_available')}</span>
                 <button type="button" onClick={() => void loadMoreEntryOptions()} disabled={loadingMoreEntries}
                   className="rounded border border-slate-300 bg-white px-2 py-1 text-slate-800">
-                  {loadingMoreEntries ? 'Đang tải…' : 'Tải thêm bài/trang/CPT'}
+                  {loadingMoreEntries ? translate('reading.loading') : translate('feature.menus.menuspanel.load_more_posts_pages_and_custom_content')}
                 </button>
               </div>
             )}
@@ -507,7 +499,7 @@ export function MenusPanel({
               <div key={item.localKey} className="rounded border border-slate-200 bg-slate-50 p-3 space-y-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <input
-                    aria-label="Nhãn mục menu"
+                    aria-label={translate('feature.menus.menuspanel.menu_item_label')}
                     value={item.label}
                     onChange={(e) => {
                       const next = [...itemsDraft];
@@ -517,7 +509,7 @@ export function MenusPanel({
                     className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                   />
                   <select
-                    aria-label="Loại đích"
+                    aria-label={translate('feature.menus.menuspanel.target_type')}
                     value={item.target_kind}
                     onChange={(e) => {
                       const next = [...itemsDraft];
@@ -526,13 +518,13 @@ export function MenusPanel({
                     }}
                     className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                   >
-                    <option value="external">External URL</option>
-                    <option value="entry">Entry</option>
-                    <option value="term">Term</option>
+                    <option value="external">{translate('feature.menus.menuspanel.external_url')}</option>
+                    <option value="entry">{translate('feature.menus.menuspanel.entry')}</option>
+                    <option value="term">{translate('feature.menus.menuspanel.term')}</option>
                   </select>
                   {item.target_kind === 'external' && (
                     <input
-                      aria-label="URL đích"
+                      aria-label={translate('feature.menus.menuspanel.target_url')}
                       value={item.external_url}
                       onChange={(e) => {
                         const next = [...itemsDraft];
@@ -545,7 +537,7 @@ export function MenusPanel({
                   )}
                   {item.target_kind === 'entry' && (
                     <select
-                      aria-label="Chọn bài/trang"
+                      aria-label={translate('feature.menus.menuspanel.select_post_page')}
                       value={item.target_entry_id ?? ''}
                       onChange={(e) => {
                         const next = [...itemsDraft];
@@ -554,9 +546,9 @@ export function MenusPanel({
                       }}
                       className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                     >
-                      <option value="">-- Chọn entry --</option>
+                      <option value="">{translate('feature.menus.menuspanel.select_entry')}</option>
                       {item.target_entry_id !== null && !entries.some((entry) => entry.id === item.target_entry_id) && (
-                        <option value={item.target_entry_id}>#{item.target_entry_id} (đích đã lưu; chưa tải trong danh sách)</option>
+                        <option value={item.target_entry_id}>#{item.target_entry_id}{' '}{translate('feature.menus.menuspanel.saved_target_not_loaded_in_the_list')}</option>
                       )}
                       {entries.map((entry) => (
                         <option key={entry.id} value={entry.id}>
@@ -567,7 +559,7 @@ export function MenusPanel({
                   )}
                   {item.target_kind === 'term' && (
                     <select
-                      aria-label="Chọn taxonomy term"
+                      aria-label={translate('feature.menus.menuspanel.select_taxonomy_term')}
                       value={item.target_term_id ?? ''}
                       onChange={(e) => {
                         const next = [...itemsDraft];
@@ -576,11 +568,10 @@ export function MenusPanel({
                       }}
                       className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                     >
-                      <option value="">-- Chọn term --</option>
+                      <option value="">{translate('feature.menus.menuspanel.select_term')}</option>
                       {item.target_term_id !== null && !terms.some(term => term.id === item.target_term_id) && (
                         <option value={item.target_term_id}>
-                          #{item.target_term_id} (đích đã lưu; chưa khả dụng)
-                        </option>
+                          #{item.target_term_id}{' '}{translate('feature.menus.menuspanel.saved_target_not_available')}</option>
                       )}
                       {terms.map((term) => (
                         <option key={term.id} value={term.id}>
@@ -590,7 +581,7 @@ export function MenusPanel({
                     </select>
                   )}
                   <select
-                    aria-label="Mục cha"
+                    aria-label={translate('feature.menus.menuspanel.parent_item')}
                     value={item.parentLocalKey ?? ''}
                     onChange={(e) => {
                       const next = [...itemsDraft];
@@ -599,12 +590,11 @@ export function MenusPanel({
                     }}
                     className="rounded border border-slate-300 bg-white px-2 py-1 text-sm"
                   >
-                    <option value="">(Cấp gốc)</option>
+                    <option value="">{translate('feature.menus.menuspanel.root_level')}</option>
                     {itemsDraft
                       .filter((other) => other.localKey !== item.localKey)
                       .map((other) => (
-                        <option key={other.localKey} value={other.localKey}>
-                          Con của: {other.label}
+                        <option key={other.localKey} value={other.localKey}>{translate('feature.menus.menuspanel.child_of')}{' '}{other.label}
                         </option>
                       ))}
                   </select>
@@ -614,9 +604,7 @@ export function MenusPanel({
                     type="button"
                     onClick={() => setItemsDraft(itemsDraft.filter((_, i) => i !== idx))}
                     className="rounded border border-rose-200 px-2 py-1 text-xs text-rose-700"
-                  >
-                    Xóa
-                  </button>
+                  >{translate('multilingual.delete')}</button>
                 </div>
               </div>
             ))}
@@ -624,7 +612,7 @@ export function MenusPanel({
 
           {preview && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2" data-testid="menu-preview">
-              <h4 className="text-sm font-semibold text-slate-900">Preview: {preview.title}</h4>
+              <h4 className="text-sm font-semibold text-slate-900">{translate('feature.menus.menuspanel.preview_2')}{' '}{preview.title}</h4>
               <PreviewTree items={preview.items} />
               {preview.diagnostics.length > 0 && (
                 <ul className="text-xs text-amber-800 space-y-1">
@@ -640,8 +628,7 @@ export function MenusPanel({
 
       {slots && (
         <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3" data-testid="menu-slots">
-          <h3 className="text-base font-semibold text-slate-900">
-            Slot menu của theme đang kích hoạt ({slots.theme_id} · v{slots.version})
+          <h3 className="text-base font-semibold text-slate-900">{translate('feature.menus.menuspanel.active_theme_menu_slots')}{slots.theme_id} · v{slots.version})
           </h3>
           <LocaleTabs
             localeState={localeState}
@@ -650,7 +637,7 @@ export function MenusPanel({
             testId="menu-slots-locale-tabs"
           />
           {slots.available_slots.length === 0 ? (
-            <p className="text-sm text-slate-500">Theme hiện tại không khai báo slot menu nào.</p>
+            <p className="text-sm text-slate-500">{translate('feature.menus.menuspanel.the_current_theme_does_not_declare_any_menu_slots')}</p>
           ) : (
             <div className="space-y-2">
               {slots.available_slots.map((slotKey) => (
@@ -664,16 +651,14 @@ export function MenusPanel({
                     }
                     className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
                   >
-                    <option value="">-- Không gắn --</option>
+                    <option value="">{translate('feature.menus.menuspanel.unassigned')}</option>
                     {menus.map((m) => (
                       <option key={m.id} value={m.id}>{m.title} ({m.menu_key})</option>
                     ))}
                   </select>
                 </div>
               ))}
-              <button type="button" onClick={() => void handleSaveSlots()} disabled={!csrfToken || busy} className="od-primary-action">
-                Lưu gắn slot
-              </button>
+              <button type="button" onClick={() => void handleSaveSlots()} disabled={!csrfToken || busy} className="od-primary-action">{translate('feature.menus.menuspanel.save_slot_assignments')}</button>
             </div>
           )}
         </div>

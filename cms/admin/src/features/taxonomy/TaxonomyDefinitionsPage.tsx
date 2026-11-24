@@ -1,3 +1,4 @@
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { listContentTypes } from '../../api/content.ts';
 import type { OwnedContentTypeWithSettings } from '../../api/content.ts';
@@ -52,11 +53,11 @@ interface ConfiguredTaxonomies {
 }
 const getConfiguredTaxonomies = async (typeKey: string, signal?: AbortSignal): Promise<ConfiguredTaxonomies> => {
   const configured: ConfiguredTaxonomies = await requestJson(`/api/admin/taxonomy/eligibility/${encodeURIComponent(typeKey)}/configured`, {
-    signal, defaultErrorMessage: 'Không thể tải cấu hình taxonomy đã lưu.',
+    signal, defaultErrorMessage: tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_saved_taxonomy_configuration"),
   });
   // Fail closed if the server has not deployed the atomic snapshot contract.
   if (!Number.isSafeInteger(configured.type_version) || configured.type_version < 1) {
-    throw new Error('Server chưa trả type_version của cùng snapshot taxonomy; không thể lưu an toàn.');
+    throw new Error(tStatic("feature.taxonomy.taxonomydefinitionspage.the_server_did_not_return_type_version_from_the"));
   }
   return configured;
 };
@@ -76,9 +77,9 @@ const buttonClass = 'inline-flex h-8 items-center rounded-md border border-zinc-
 
 function failure(cause: unknown, fallback: string): string {
   if (cause instanceof ApiClientError) {
-    if (cause.status === 401) return 'Phiên đăng nhập hết hạn (401); bản nhập vẫn được giữ.';
-    if (cause.status === 412) return 'Cấu hình đã thay đổi (412); giữ bản nhập và tải lại trước khi lưu.';
-    if (cause.status === 409) return `Không thể thay đổi cấu hình (409): ${cause.message}`;
+    if (cause.status === 401) return tStatic("feature.taxonomy.taxonomydefinitionspage.your_session_expired_401_input_is_retained");
+    if (cause.status === 412) return tStatic("feature.taxonomy.taxonomydefinitionspage.configuration_changed_412_retain_input_and_reload_before_saving");
+    if (cause.status === 409) return tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_change_configuration_409_value", { value1: cause.message });
   }
   return cause instanceof Error ? cause.message : fallback;
 }
@@ -91,6 +92,7 @@ function termsHash(key: string): string {
 
 /** Definitions and membership configuration live alongside content schema, away from the term editor. */
 export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApiError, onDirtyChange, onNavigateHash }: Props) {
+  useI18n();
   const scope = draftScope(siteInstanceId, user);
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -190,8 +192,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       if (!typeKey) setTypeKey(nextTypes.find(item => item.descriptor.key !== 'section')?.descriptor.key ?? '');
     } catch (cause) {
       if (signal?.aborted) return;
-      setError(failure(cause, 'Không thể tải danh sách taxonomy.'));
-      onErrorRef.current(cause, 'Không thể tải danh sách taxonomy.');
+      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_the_taxonomy_list")));
+      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_the_taxonomy_list"));
     } finally { if (!signal?.aborted) setLoading(false); }
   };
 
@@ -234,8 +236,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       if (controller.signal.aborted || !mountedRef.current ||
           requestEpoch !== eligibilityRequestEpochRef.current) return;
       setEligibilityConflict(true);
-      setError(failure(cause, 'Không thể tải taxonomy của loại nội dung.'));
-      onErrorRef.current(cause, 'Không thể tải taxonomy của loại nội dung.');
+      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_content_type_taxonomies")));
+      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_content_type_taxonomies"));
     }).finally(() => {
       if (!controller.signal.aborted && mountedRef.current &&
           requestEpoch === eligibilityRequestEpochRef.current) setEligibilityLoading(false);
@@ -245,7 +247,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
 
   const choose = (next: string) => {
     if (next === activeKey) return;
-    if (configDirty && !window.confirm('Bỏ thay đổi của định nghĩa đang sửa để chuyển sang mục khác?')) return;
+    if (configDirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.discard_changes_to_the_current_definition_and_switch_to"))) return;
     recoveredRef.current = null;
     const definition = definitions.find(item => item.key === next);
     setActiveKey(next);
@@ -266,7 +268,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
           form[field] !== baseline[field]);
       const overlaps = changed.filter(field => server[field] !== baseline[field]);
       if (overlaps.length && !window.confirm(
-        `Máy chủ cũng đã thay đổi ${overlaps.join(', ')}. Giữ giá trị đang nhập và thử lưu trên phiên bản mới?`,
+        tStatic("feature.taxonomy.taxonomydefinitionspage.the_server_also_changed_value_keep_current_values_and", { value1: overlaps.join(', ') }),
       )) return;
       const next = { ...server };
       for (const field of changed) {
@@ -276,12 +278,12 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       }
       setDefinitions(previous => [...previous.filter(item => item.key !== activeKey), latest]);
       setBaseline(server); setForm(next); setConflict(false);
-      setNotice(`Đã đối chiếu bản v${latest.version}. Những trường đã sửa được giữ lại; kiểm tra trước khi Lưu.`);
+      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.reviewed_vvalue_edited_fields_are_retained_review_before_saving", { value1: latest.version }));
       recoveredRef.current = null;
     } catch (cause) {
       if (!mountedRef.current) return;
-      setError(failure(cause, 'Không thể tải phiên bản mới của taxonomy.'));
-      onErrorRef.current(cause, 'Không thể tải phiên bản mới của taxonomy.');
+      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_latest_taxonomy_version")));
+      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_load_latest_taxonomy_version"));
     } finally { setBusy(false); }
   };
 
@@ -305,11 +307,11 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       const latestType = nextTypes.find(item => item.descriptor.key === typeKey);
       if (!latestType) {
         setEligibilityConflict(true);
-        setError('Loại nội dung không còn tồn tại; bản chọn vẫn được giữ.'); return;
+        setError(tStatic("feature.taxonomy.taxonomydefinitionspage.content_type_no_longer_exists_selections_are_retained")); return;
       }
       if (latestType.version !== configured.type_version) {
         setEligibilityConflict(true);
-        setError('Version trong danh sách CPT không khớp snapshot taxonomy. Bản chọn vẫn giữ nguyên; đối chiếu lại để tránh mất liên kết.');
+        setError(tStatic("feature.taxonomy.taxonomydefinitionspage.the_cpt_list_version_differs_from_the_taxonomy_snapshot"));
         return;
       }
       setTypes(nextTypes);
@@ -318,12 +320,12 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       setEligible(next);
       setEligibilityTypeVersion(configured.type_version);
       setEligibilityConflict(false);
-      setNotice('Đã đối chiếu cấu hình taxonomy mới; các lựa chọn đang sửa được áp dụng lại, hãy kiểm tra trước khi Lưu.');
+      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.reviewed_the_latest_taxonomy_configuration_your_changed_selections_are"));
       recoveredRef.current = null;
     } catch (cause) {
       if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
-      setError(failure(cause, 'Không thể đối chiếu cấu hình taxonomy.'));
-      onErrorRef.current(cause, 'Không thể đối chiếu cấu hình taxonomy.');
+      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_review_taxonomy_configuration")));
+      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_review_taxonomy_configuration"));
     } finally { setBusy(false); }
   };
 
@@ -332,10 +334,10 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     if (!csrfToken || !canEdit || busy || loading || conflict) return;
     const label = form.label.trim();
     if (!label || [...label].length > 100 || /[\u0000-\u001f\u007f]/.test(label)) {
-      setError('Tên taxonomy phải từ 1 đến 100 ký tự, không chứa ký tự điều khiển.'); return;
+      setError(tStatic("feature.taxonomy.taxonomydefinitionspage.taxonomy_name_must_be_1_to_100_characters_without")); return;
     }
     if (isNew && (form.key.length > 64 || !/^[a-z][a-z0-9_]*$/.test(form.key))) {
-      setError('Khóa taxonomy phải là định danh chữ thường hợp lệ.'); return;
+      setError(tStatic("feature.taxonomy.taxonomydefinitionspage.taxonomy_key_must_be_a_valid_lowercase_identifier")); return;
     }
     const changes = {
       ...(label !== baseline.label ? { label } : {}),
@@ -345,7 +347,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     };
     if (!isNew && Object.keys(changes).length === 0) {
       setForm(baseline);
-      setNotice('Không có thay đổi cần lưu.');
+      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.no_changes_to_save"));
       return;
     }
     setBusy(true); setError(''); setNotice('');
@@ -356,7 +358,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       if (!mountedRef.current) return;
       setActiveKey(updated.key); setBaseline(fromDefinition(updated)); setForm(fromDefinition(updated));
       setDefinitions(previous => [...previous.filter(item => item.key !== updated.key), updated]);
-      setNotice(`Đã lưu taxonomy ${updated.key} (v${updated.version}).`);
+      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.saved_taxonomy_value_vvalue", { value1: updated.key, value2: updated.version }));
       setConflict(false);
       recoveredRef.current = null;
       if (scope) {
@@ -371,21 +373,21 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setConflict(true);
-      setError(failure(cause, 'Không thể lưu taxonomy.'));
-      onErrorRef.current(cause, 'Không thể lưu taxonomy.');
+      setError(failure(cause, tStatic("feature.content.contenttypeschemasettings.could_not_save_taxonomies")));
+      onErrorRef.current(cause, tStatic("feature.content.contenttypeschemasettings.could_not_save_taxonomies"));
     } finally { setBusy(false); }
   };
 
   const remove = async () => {
     if (!active || !canDelete || !csrfToken || busy) return;
-    if (!window.confirm(`Xóa taxonomy ${active.label} (${active.key})? Các term, liên kết và provider đang dùng sẽ chặn thao tác.`)) return;
+    if (!window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.delete_taxonomy_value_value_existing_terms_associations_and_active", { value1: active.label, value2: active.key }))) return;
     setBusy(true); setError(''); setNotice('');
     try {
       await deleteTaxonomyDefinition(active.key, active.version, csrfToken);
       if (!mountedRef.current) return;
       setDefinitions(previous => previous.filter(item => item.key !== active.key));
       setActiveKey(''); setForm(blank()); setBaseline(blank());
-      setNotice(`Đã xóa taxonomy ${active.key}.`);
+      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.deleted_taxonomy_value", { value1: active.key }));
       recoveredRef.current = null;
       if (scope) {
         if (eligibleDirty) definitionDrafts.set(scope, {
@@ -398,8 +400,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setConflict(true);
-      setError(failure(cause, 'Không thể xóa taxonomy.'));
-      onErrorRef.current(cause, 'Không thể xóa taxonomy.');
+      setError(failure(cause, tStatic("api.taxonomy.delete_the_taxonomy")));
+      onErrorRef.current(cause, tStatic("api.taxonomy.delete_the_taxonomy"));
     } finally { setBusy(false); }
   };
 
@@ -416,7 +418,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       if (latest.type_version !== eligibilityTypeVersion ||
           !keysEqual(selectedKeys(latest), eligibilityBaseline)) {
         setEligibilityConflict(true);
-        setError('Schema/eligibility đã thay đổi từ khi bắt đầu chỉnh sửa. Giữ lựa chọn và đối chiếu trước khi lưu.');
+        setError(tStatic("feature.taxonomy.taxonomydefinitionspage.schema_eligibility_changed_since_editing_began_retain_selections_and"));
         return;
       }
       const submitted = [...eligible];
@@ -432,7 +434,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
       // The pre-PUT `latest.effective` describes the old selection instead.
       setConfiguredEffective(submitted.filter(key => definitions.some(item =>
         item.key === key && item.provider_status === 'active' && item.declaration_state === 'declared')));
-      setNotice(`Đã cập nhật taxonomy áp dụng cho ${typeKey}.`);
+      setNotice(tStatic("feature.taxonomy.taxonomydefinitionspage.updated_applicable_taxonomies_for_value", { value1: typeKey }));
       recoveredRef.current = null;
       if (scope) {
         if (configDirty) definitionDrafts.set(scope, {
@@ -447,8 +449,8 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
     } catch (cause) {
       if (!mountedRef.current) return;
       if (cause instanceof ApiClientError && cause.status === 412) setEligibilityConflict(true);
-      setError(failure(cause, 'Không thể cập nhật taxonomy được áp dụng.'));
-      onErrorRef.current(cause, 'Không thể cập nhật taxonomy được áp dụng.');
+      setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_update_applicable_taxonomies")));
+      onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_update_applicable_taxonomies"));
     } finally { setBusy(false); }
   };
 
@@ -456,12 +458,12 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
   return <section className="w-full min-w-0 space-y-5" data-testid="taxonomy-definitions-page">
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">Nội dung / Cấu hình</p>
-        <h2 className="mt-1 text-2xl font-bold">Taxonomy</h2>
-        <p className="text-sm text-slate-600">Tạo loại phân nhóm, quản lý term và chỉ định loại nội dung được sử dụng.</p>
+        <p className="text-xs font-semibold uppercase tracking-widest text-sky-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.content_configuration")}</p>
+        <h2 className="mt-1 text-2xl font-bold">{tStatic("feature.common.ui_taxonomy")}</h2>
+        <p className="text-sm text-slate-600">{tStatic("feature.taxonomy.taxonomydefinitionspage.create_grouping_types_manage_terms_and_select_applicable_content")}</p>
       </div>
       <button className={buttonClass} type="button" disabled={busy || loading} onClick={() => {
-        if (dirty && !window.confirm('Bỏ thay đổi chưa lưu và tải lại?')) return;
+        if (dirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.discard_unsaved_changes_and_reload"))) return;
         const requestEpoch = ++eligibilityRequestEpochRef.current;
         if (scope) definitionDrafts.delete(scope);
         recoveredRef.current = null;
@@ -475,87 +477,87 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
         }).catch(cause => {
           if (!mountedRef.current || requestEpoch !== eligibilityRequestEpochRef.current) return;
           setEligibilityConflict(true);
-          setError(failure(cause, 'Không thể tải lại taxonomy.'));
-          onErrorRef.current(cause, 'Không thể tải lại taxonomy.');
+          setError(failure(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_reload_taxonomies")));
+          onErrorRef.current(cause, tStatic("feature.taxonomy.taxonomydefinitionspage.could_not_reload_taxonomies"));
         }).finally(() => {
           if (mountedRef.current && requestEpoch === eligibilityRequestEpochRef.current)
             setEligibilityLoading(false);
         }); }
-      }}>Tải lại</button>
+      }}>{tStatic("reading.reload")}</button>
     </header>
     {error && <AdminAlert tone="error">{error}</AdminAlert>}
     {notice && <AdminAlert tone="success">{notice}</AdminAlert>}
     {missingDefinition && <AdminAlert tone="warning" role="alert">
-      Taxonomy {activeKey} đã bị xóa hoặc không còn truy cập được. Bản nhập của bạn vẫn hiển thị bên dưới để sao chép; không thể lưu lên định nghĩa đã mất.
+      {tStatic("feature.common.ui_taxonomy")} {activeKey} {tStatic("feature.taxonomy.taxonomydefinitionspage.was_deleted_or_is_no_longer_accessible_your_input")}
     </AdminAlert>}
-    {loading && <p role="status" className="text-xs text-zinc-500">Đang tải taxonomy…</p>}
+    {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.loading_taxonomies")}</p>}
     <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold text-zinc-950">Định nghĩa ({definitions.length}/64)</h3>
+          <h3 className="text-sm font-semibold text-zinc-950">{tStatic("feature.taxonomy.taxonomydefinitionspage.definitions")}{definitions.length}/64)</h3>
           {user.role === 'admin' && <AdminButton variant="primary" size="sm" disabled={busy || definitions.length >= 64}
-            onClick={() => choose('__new__')}>+ Thêm taxonomy</AdminButton>}
+            onClick={() => choose('__new__')}>{tStatic("feature.taxonomy.taxonomydefinitionspage.add_taxonomy")}</AdminButton>}
         </div>
         {ordered.map(item => <div key={item.key} className={`rounded-xl border p-3.5 transition-colors ${activeKey === item.key ? 'border-od-accent bg-blue-50/50' : 'border-zinc-200 bg-white'}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="break-words text-sm font-semibold text-zinc-950">{item.label} <span className="font-normal text-zinc-500">({item.key})</span></p>
-              <p className="mt-0.5 text-xs text-zinc-500">{item.hierarchical ? 'Phân cấp' : 'Phẳng'} · {item.public ? 'Công khai' : 'Riêng tư'} · {item.owner.kind} · v{item.version}</p>
+              <p className="mt-0.5 text-xs text-zinc-500">{item.hierarchical ? tStatic("feature.content.contenttypeschemasettings.hierarchical") : tStatic("feature.taxonomy.taxonomydefinitionspage.flat")} · {item.public ? tStatic("feature.editor.panelregionrenderer.public") : tStatic("feature.editor.panelregionrenderer.private")} · {item.owner.kind} · v{item.version}</p>
               {item.provider_status !== 'active' || item.declaration_state !== 'declared' ?
-                <p className="mt-0.5 text-xs text-amber-800">Provider {item.provider_status}, khai báo {item.declaration_state}; dữ liệu vẫn được giữ.</p> : null}
+                <p className="mt-0.5 text-xs text-amber-800">{tStatic("feature.common.ui_provider")} {item.provider_status}{tStatic("feature.taxonomy.taxonomydefinitionspage.declaration")}{' '}{item.declaration_state}{tStatic("feature.taxonomy.taxonomydefinitionspage.data_is_retained")}</p> : null}
             </div>
             <div className="flex gap-1.5">
-              <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => choose(item.key)}>Cấu hình</AdminButton>
+              <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => choose(item.key)}>{tStatic("feature.taxonomy.taxonomydefinitionspage.configuration")}</AdminButton>
               <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => {
-                if (dirty && !window.confirm('Có thay đổi chưa lưu. Rời trang?')) return;
+                if (dirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.there_are_unsaved_changes_leave_this_page"))) return;
                 onNavigateHash(termsHash(item.key));
-              }}>Term</AdminButton>
+              }}>{tStatic("feature.common.ui_term")}</AdminButton>
             </div>
           </div>
         </div>)}
       </div>
       <div className="min-w-0 space-y-4">
         {(isNew || active || missingDefinition) && <form onSubmit={event => void saveDefinition(event)} className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4">
-          <h3 className="text-sm font-semibold text-zinc-950">{isNew ? 'Tạo định nghĩa' : `Chỉnh sửa ${active?.key ?? activeKey}`}</h3>
-          <label className="block text-xs font-medium text-zinc-700">Khóa *
+          <h3 className="text-sm font-semibold text-zinc-950">{isNew ? tStatic("feature.taxonomy.taxonomydefinitionspage.create_definition") : tStatic("feature.taxonomy.taxonomydefinitionspage.edit_value", { value1: active?.key ?? activeKey })}</h3>
+          <label className="block text-xs font-medium text-zinc-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.key")}
             <input className={fieldClass} value={form.key} maxLength={64} required disabled={!isNew || busy || !canEdit}
               onChange={event => setForm(previous => ({ ...previous, key: event.target.value }))}/>
-            <span className="mt-1 block text-xs font-normal text-zinc-500">Dùng chữ thường, số và dấu gạch dưới; khóa không thể đổi sau khi tạo.</span>
+            <span className="mt-1 block text-xs font-normal text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.use_lowercase_letters_digits_and_underscores_the_key_cannot")}</span>
           </label>
-          <label className="block text-xs font-medium text-zinc-700">Tên hiển thị *
+          <label className="block text-xs font-medium text-zinc-700">{tStatic("feature.content.contenttypeform.display_name")}
             <input className={fieldClass} value={form.label} maxLength={100} required disabled={busy || !canEdit}
               onChange={event => setForm(previous => ({ ...previous, label: event.target.value }))}/>
           </label>
           <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.hierarchical}
             disabled={busy || !canEdit || active?.owner.kind === 'core'} onChange={event => setForm(previous => ({ ...previous, hierarchical: event.target.checked }))}/>
-            Cho phép phân cấp cha/con (tối đa 8 cấp)</label>
+            {tStatic("feature.taxonomy.taxonomydefinitionspage.allow_parent_child_hierarchy_up_to_8_levels")}</label>
           <label className="flex items-center gap-2 text-sm text-zinc-800"><input type="checkbox" checked={form.public}
             disabled={busy || !canEdit} onChange={event => setForm(previous => ({ ...previous, public: event.target.checked }))}/>
-            Cho phép hiển thị công khai</label>
+            {tStatic("feature.taxonomy.taxonomydefinitionspage.allow_public_visibility")}</label>
           {active && active.owner.kind !== 'user' && <p className="text-xs text-zinc-500">{active.owner.kind === 'core'
-            ? 'Taxonomy Core giữ nguyên khóa và chế độ phân cấp.'
-            : 'Định nghĩa do provider quản lý. Chỉ provider được sửa hoặc xóa.'}</p>}
+            ? tStatic("feature.taxonomy.taxonomydefinitionspage.core_taxonomies_retain_their_key_and_hierarchy_mode")
+            : tStatic("feature.taxonomy.taxonomydefinitionspage.the_definition_is_provider_managed_only_the_provider_can")}</p>}
           {conflict && <AdminAlert tone="warning" role="alert" className="space-y-2">
-            <p>Phiên bản đã cũ. Bản nhập được giữ; đối chiếu bản mới trước khi lưu.</p>
+            <p>{tStatic("feature.taxonomy.taxonomydefinitionspage.version_is_stale_your_input_is_retained_review_the")}</p>
             <AdminButton variant="secondary" size="sm" disabled={busy || !active}
-              onClick={() => void rebaseDefinition()}>Đối chiếu phiên bản mới, giữ các trường đang sửa</AdminButton>
+              onClick={() => void rebaseDefinition()}>{tStatic("feature.taxonomy.taxonomydefinitionspage.review_latest_version_and_retain_edited_fields")}</AdminButton>
           </AdminAlert>}
           <div className="flex flex-wrap gap-2">
             <AdminButton type="submit" variant="primary" disabled={busy || !csrfToken || !canEdit || conflict || (!isNew && !configDirty)}>
-              {busy ? 'Đang lưu…' : 'Lưu định nghĩa'}</AdminButton>
-            {canDelete && <AdminButton variant="danger" disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>Xóa</AdminButton>}
+              {busy ? tStatic("reading.saving") : tStatic("feature.taxonomy.taxonomydefinitionspage.save_definition")}</AdminButton>
+            {canDelete && <AdminButton variant="danger" disabled={busy || !csrfToken || conflict} onClick={() => void remove()}>{tStatic("multilingual.delete")}</AdminButton>}
             {missingDefinition && <AdminButton variant="secondary" onClick={() => choose('')}>
-              Bỏ bản nhập không còn đích lưu
+              {tStatic("feature.taxonomy.taxonomydefinitionspage.discard_input_whose_save_target_no_longer_exists")}
             </AdminButton>}
           </div>
         </form>}
         <div className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4">
-          <h3 className="text-sm font-semibold text-zinc-950">Gắn taxonomy với loại nội dung</h3>
+          <h3 className="text-sm font-semibold text-zinc-950">{tStatic("feature.taxonomy.taxonomydefinitionspage.associate_taxonomies_with_content_types")}</h3>
           <label className="flex flex-col gap-1 text-xs font-medium text-zinc-700">
-            <span>Loại nội dung</span>
+            <span>{tStatic("feature.taxonomy.taxonomydefinitionspage.content_type")}</span>
             <select className="h-9 w-full max-w-md rounded-md border border-zinc-300 bg-white px-2.5 text-sm text-zinc-900 disabled:opacity-50" value={typeKey} disabled={busy || eligibilityLoading || loading}
               onChange={event => {
-                if (eligibleDirty && !window.confirm('Bỏ thay đổi taxonomy chưa lưu?')) return;
+                if (eligibleDirty && !window.confirm(tStatic("feature.taxonomy.taxonomydefinitionspage.discard_unsaved_taxonomy_changes"))) return;
                 recoveredRef.current = null;
                 setTypeKey(event.target.value); setError('');
               }}>
@@ -563,7 +565,7 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
                 <option key={item.descriptor.key} value={item.descriptor.key}>{item.descriptor.label} ({item.descriptor.key})</option>)}
             </select>
           </label>
-          {eligibilityLoading && <p role="status" className="text-xs text-zinc-500">Đang tải cấu hình áp dụng…</p>}
+          {eligibilityLoading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.loading_eligibility_configuration")}</p>}
           {!eligibilityLoading && definitions.map(item => <label key={item.key} className="flex items-start gap-2 text-sm text-zinc-800">
             <input type="checkbox" className="mt-1" checked={eligible.includes(item.key)}
               disabled={!typeEditable || busy || eligibilityLoading || eligibilityConflict}
@@ -571,22 +573,22 @@ export function TaxonomyDefinitionsPage({ user, siteInstanceId, csrfToken, onApi
                 ? [...previous, item.key] : previous.filter(key => key !== item.key))}/>
             <span>{item.label} ({item.key})
               {(item.provider_status !== 'active' || item.declaration_state !== 'declared') &&
-                <span className="block text-xs text-amber-700">Provider không hoạt động hoặc đã rút khai báo; liên kết đã cấu hình được giữ.</span>}
+                <span className="block text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.provider_inactive_or_declaration_withdrawn_configured_associations_are_retained")}</span>}
             </span>
           </label>)}
           {(eligibilityConflict || eligibilityVersionMismatch) && <AdminAlert tone="warning" role="alert" className="space-y-2">
-            <p>Version CPT không khớp với snapshot taxonomy hoặc schema đã thay đổi. Bản chọn được giữ; đối chiếu trước khi lưu.</p>
+            <p>{tStatic("feature.taxonomy.taxonomydefinitionspage.cpt_version_differs_from_the_taxonomy_snapshot_or_the")}</p>
             <AdminButton variant="secondary" size="sm" disabled={busy || eligibilityLoading}
-              onClick={() => void rebaseEligibility()}>Đối chiếu schema mới, giữ lựa chọn đã sửa</AdminButton>
+              onClick={() => void rebaseEligibility()}>{tStatic("feature.taxonomy.taxonomydefinitionspage.review_latest_schema_and_retain_changed_selections")}</AdminButton>
           </AdminAlert>}
           {eligible.some(key => !definitions.some(item => item.key === key)) &&
-            <p role="status" className="text-xs text-amber-700">Có taxonomy cấu hình nhưng không còn trong danh sách. Chúng được giữ để tránh mất liên kết ngoài ý muốn.</p>}
+            <p role="status" className="text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.configured_taxonomies_are_missing_from_the_list_they_are")}</p>}
           {definitions.some(item => eligible.includes(item.key) && !configuredEffective.includes(item.key)) &&
-            <p role="status" className="text-xs text-amber-700">Taxonomy chưa hiệu lực sẽ không hiện trong picker, nhưng vẫn giữ cấu hình để phục hồi khi provider hoạt động trở lại.</p>}
+            <p role="status" className="text-xs text-amber-700">{tStatic("feature.taxonomy.taxonomydefinitionspage.inactive_taxonomies_do_not_appear_in_the_picker_but")}</p>}
           <AdminButton variant="primary" onClick={() => void saveEligibility()}
             disabled={!typeEditable || !csrfToken || !eligibleDirty || busy || eligibilityLoading ||
-              eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>Lưu loại được áp dụng</AdminButton>
-          {!typeEditable && typeKey && <p className="text-xs text-zinc-500">Chỉ Admin được chỉnh sửa taxonomy áp dụng cho CPT hợp lệ (trừ Section).</p>}
+              eligibilityConflict || eligibilityTypeVersion === null || eligibilityVersionMismatch}>{tStatic("feature.taxonomy.taxonomydefinitionspage.save_applicable_types")}</AdminButton>
+          {!typeEditable && typeKey && <p className="text-xs text-zinc-500">{tStatic("feature.taxonomy.taxonomydefinitionspage.only_admins_can_edit_applicable_taxonomies_for_valid_cpts")}</p>}
         </div>
       </div>
     </div>

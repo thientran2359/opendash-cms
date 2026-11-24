@@ -1,7 +1,9 @@
+import { formatDateTime, formatNumber } from '../../../i18n/format.ts';
+
 export function formatMediaBytes(value: number): string {
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  return `${(value / (1024 * 1024)).toFixed(2)} MiB`;
+  if (value < 1024) return `${formatNumber(value)} B`;
+  if (value < 1024 * 1024) return `${formatNumber(value / 1024, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} KiB`;
+  return `${formatNumber(value / (1024 * 1024), { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MiB`;
 }
 
 export function formatMediaDate(value: string): string {
@@ -11,7 +13,7 @@ export function formatMediaDate(value: string): string {
     : value;
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat('vi-VN', {
+  return formatDateTime(date, {
     year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
-  }).format(date);
+  });
 }

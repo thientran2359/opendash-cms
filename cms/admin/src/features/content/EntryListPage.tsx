@@ -1,3 +1,5 @@
+import { formatNumber } from '../../i18n/format.ts';
+import { tStatic, useI18n } from '../../i18n/index.tsx';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   changeContentEntryPublication, deleteContentEntry, getEffectiveContentTypeTaxonomies,
@@ -109,16 +111,17 @@ export function safePublicPath(path: string | null | undefined): string | null {
 }
 
 function readableError(cause: unknown): string {
-  if (cause instanceof ApiClientError && cause.status === 412) return '412 — Mục đã thay đổi. Vui lòng tải lại danh sách để lấy phiên bản mới.';
-  if (cause instanceof ApiClientError && cause.status === 403) return '403 — Không có quyền thực hiện thao tác này.';
-  if (cause instanceof ApiClientError && cause.status === 401) return '401 — Phiên đăng nhập không còn hiệu lực.';
-  return cause instanceof Error ? cause.message : 'Yêu cầu không hoàn tất.';
+  if (cause instanceof ApiClientError && cause.status === 412) return tStatic("feature.content.entrylistpage.412_the_item_changed_reload_the_list_to_get");
+  if (cause instanceof ApiClientError && cause.status === 403) return tStatic("feature.content.entrylistpage.403_you_do_not_have_permission_to_perform_this");
+  if (cause instanceof ApiClientError && cause.status === 401) return tStatic("feature.content.entrylistpage.401_your_session_is_no_longer_valid");
+  return cause instanceof Error ? cause.message : tStatic("feature.content.entrylistpage.the_request_did_not_complete");
 }
 
 export function EntryListPage({
   typeKey, user, siteInstanceId, authGeneration, csrfToken, routeHash,
   localeState = EMPTY_ADMIN_LOCALE_STATE, onNavigateHash, onApiError,
 }: Props) {
+  useI18n();
   const base = rootHash(typeKey);
   const filters = useMemo(() => parseEntryTableHash(routeHash), [routeHash]);
   const queryHash = entryTableHash(base, filters);
@@ -179,6 +182,16 @@ export function EntryListPage({
   };
 
   useEffect(() => {
+    if (!filters.locale || localeState.allLocales.length === 0) return;
+    if (localeState.allLocales.some(locale => locale.code === filters.locale)) return;
+    const next = { ...filters };
+    delete next.locale;
+    delete next.offset;
+    const nextHash = entryTableHash(base, next);
+    if (nextHash !== routeHash) onNavigateHash(nextHash);
+  }, [base, filters, localeState.allLocales, routeHash, onNavigateHash]);
+
+  useEffect(() => {
     setSearchInput(filters.q ?? '');
     setSelected(new Set());
     setBulkResults([]);
@@ -203,7 +216,7 @@ export function EntryListPage({
       .catch(cause => {
         if (!active || controller.signal.aborted || scopeRef.current !== scope) return;
         setErrorState({ scope, message: readableError(cause) });
-        if (cause instanceof ApiClientError && cause.status === 401) onApiError(cause, 'Phiên đăng nhập hết hạn.');
+        if (cause instanceof ApiClientError && cause.status === 401) onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired"));
       })
       .finally(() => { if (active && scopeRef.current === scope) setLoadingScope(null); });
     return () => { active = false; controller.abort(); };
@@ -237,7 +250,7 @@ export function EntryListPage({
         if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
         setTermsState({ accountScope, categoryEnabled: false, tagEnabled: false,
           definitions: [], byKind: {} });
-        onApiError(cause, 'Không thể tải bộ lọc taxonomy.');
+        onApiError(cause, tStatic("feature.content.entrylistpage.could_not_load_taxonomy_filters"));
       }
     })();
     return () => {
@@ -263,7 +276,7 @@ export function EntryListPage({
       if (controller.signal.aborted || accountScopeRef.current !== accountScope) return;
       if (cause instanceof ApiClientError && cause.status === 401) {
         controller.abort();
-        onApiError(cause, 'Phiên đăng nhập hết hạn khi tải bộ lọc taxonomy.');
+        onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_loading_taxonomy_filters"));
       } else {
         setTermLoadErrors(previous => [...previous.filter(error => !error.startsWith(`${kind}: `)),
           `${kind}: ${readableError(cause)}`]);
@@ -308,7 +321,7 @@ export function EntryListPage({
             if (!authReported) {
               authReported = true;
               controller.abort();
-              onApiError(cause, 'Phiên đăng nhập hết hạn khi tải tên term.');
+              onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_loading_term_names"));
             }
             return;
           }
@@ -340,7 +353,7 @@ export function EntryListPage({
         if (!active || controller.signal.aborted || accountScopeRef.current !== accountScope) return;
         setProviderError(readableError(cause));
         if (cause instanceof ApiClientError && cause.status === 401) {
-          onApiError(cause, 'Phiên đăng nhập hết hạn khi tải cột provider.');
+          onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_loading_provider_columns"));
         }
       });
     return () => { active = false; controller.abort(); };
@@ -363,9 +376,9 @@ export function EntryListPage({
   const performBulk = async (kind: BulkAction) => {
     if (!csrfToken || bulkBusyRef.current || !selectedRows.length) return;
     if (kind !== 'delete' && !isBuiltIn) return;
-    const noun = kind === 'delete' ? 'xóa vĩnh viễn'
-      : kind === 'published' ? 'xuất bản' : 'chuyển về nháp';
-    if (!window.confirm(`Bạn có chắc muốn ${noun} ${selectedRows.length} mục đã chọn? Mỗi mục được xử lý riêng, có thể xung đột phiên bản.`)) return;
+    const noun = kind === 'delete' ? tStatic("feature.content.entrylistpage.permanently_delete")
+      : kind === 'published' ? tStatic("feature.content.entrylistpage.publish") : tStatic("feature.content.entrylistpage.move_to_draft");
+    if (!window.confirm(tStatic("feature.content.entrylistpage.are_you_sure_you_want_to_value_value_selected", { value1: noun, value2: formatNumber(selectedRows.length) }))) return;
     const startingScope = scope;
     const captured = [...selectedRows];
     bulkBusyRef.current = true;
@@ -382,11 +395,11 @@ export function EntryListPage({
           } else {
             await changeContentEntryPublication(typeKey, row.id, row.version, kind, csrfToken);
           }
-          reports.push({ id: row.id, message: `#${row.id}: ${noun} thành công.`, ok: true });
+          reports.push({ id: row.id, message: tStatic("feature.content.entrylistpage.value_value_succeeded", { value1: row.id, value2: noun }), ok: true });
         } catch (cause) {
           reports.push({ id: row.id, message: `#${row.id}: ${readableError(cause)}`, ok: false });
           if (cause instanceof ApiClientError && cause.status === 401) {
-            onApiError(cause, 'Phiên đăng nhập hết hạn khi cập nhật hàng loạt.');
+            onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_during_the_bulk_update"));
             break;
           }
         }
@@ -405,7 +418,7 @@ export function EntryListPage({
   const performProviderAction = async (column: ProviderColumn, row: EntryTableRow) => {
     if (providerBusyRef.current || bulkBusyRef.current || !csrfToken || !column.action_id ||
       column.owner_kind !== 'plugin') return;
-    if (!window.confirm(`Chạy action ${column.label} cho ${row.title} (#${row.id})? Action có thể thay đổi dữ liệu.`)) return;
+    if (!window.confirm(tStatic("feature.content.entrylistpage.run_action_value_for_value_value_this_action_may", { value1: column.label, value2: row.title, value3: row.id }))) return;
     const startingScope = scope;
     providerBusyRef.current = true;
     setProviderBusy(true);
@@ -415,13 +428,13 @@ export function EntryListPage({
         typeKey, row, column.owner_id, column.action_id, csrfToken,
       );
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
-      setProviderNotice(response.success ? `Đã chạy action cho #${row.id}.` : 'Action không thành công.');
+      setProviderNotice(response.success ? tStatic("feature.content.entrylistpage.action_completed_for_value", { value1: row.id }) : tStatic("feature.content.entrylistpage.the_action_failed"));
       setRetry(old => old + 1);
     } catch (cause) {
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
       setProviderNotice(`#${row.id}: ${readableError(cause)}`);
       if (cause instanceof ApiClientError && cause.status === 401)
-        onApiError(cause, 'Phiên đăng nhập hết hạn khi chạy action.');
+        onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_running_the_action"));
     } finally {
       providerBusyRef.current = false;
       if (aliveRef.current) setProviderBusy(false);
@@ -444,7 +457,7 @@ export function EntryListPage({
   };
   const deleteSingleRow = async (row: EntryTableRow) => {
     if (bulkBusyRef.current || !csrfToken) return;
-    if (!window.confirm(`Xóa vĩnh viễn "${row.title}" (#${row.id})? Hành động này không thể hoàn tác.`)) return;
+    if (!window.confirm(tStatic("feature.content.entrylistpage.permanently_delete_value_value_this_cannot_be_undone", { value1: row.title, value2: row.id }))) return;
     const startingScope = scope;
     bulkBusyRef.current = true;
     setBulkBusy(true);
@@ -460,7 +473,7 @@ export function EntryListPage({
     } catch (cause) {
       if (!aliveRef.current || scopeRef.current !== startingScope) return;
       if (cause instanceof ApiClientError && cause.status === 401) {
-        onApiError(cause, 'Phiên đăng nhập hết hạn khi xóa mục.');
+        onApiError(cause, tStatic("feature.content.entrylistpage.your_session_expired_while_deleting_the_item"));
       } else {
         setBulkResults([{ id: row.id, message: `#${row.id}: ${readableError(cause)}`, ok: false }]);
       }
@@ -473,7 +486,7 @@ export function EntryListPage({
   const editSuffix = queryHash.includes('?') ? queryHash.slice(queryHash.indexOf('?')) : '';
   const renderTermsCell = (row: EntryTableRow, kind: string) => {
     if (!row.term_ids.length) return <span className="text-zinc-400">—</span>;
-    if (!resolved) return <span className="text-xs text-zinc-400">Đang tải…</span>;
+    if (!resolved) return <span className="text-xs text-zinc-400">{tStatic("reading.loading")}</span>;
     const matched = row.term_ids
       .map(id => {
         const term = resolved.labels.get(id);
@@ -481,7 +494,7 @@ export function EntryListPage({
       })
       .filter((item): item is { id: number; name: string } => item !== null);
     if (!matched.length) {
-      return <span className="text-zinc-400">{resolved.failed ? 'Không tải được' : '—'}</span>;
+      return <span className="text-zinc-400">{resolved.failed ? tStatic("feature.content.entrylistpage.could_not_load") : '—'}</span>;
     }
     return (
       <span className="inline-flex flex-wrap items-center gap-x-1 gap-y-0.5">
@@ -517,7 +530,7 @@ export function EntryListPage({
                 }
               }}
               className="text-left text-zinc-700 hover:text-od-accent hover:underline disabled:opacity-50"
-              title={`Lọc theo ${term.name}`}
+              title={tStatic("feature.content.entrylistpage.filter_by_value", { value1: term.name })}
             >
               {term.name}
             </button>
@@ -544,10 +557,10 @@ export function EntryListPage({
   return (
     <section className="w-full min-w-0 space-y-3.5" data-testid={`entry-list-${typeKey}`} data-type-key={typeKey}>
       <div className="flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex flex-wrap items-center gap-1.5" aria-label="Lọc trạng thái" role="group">
+        <div className="flex flex-wrap items-center gap-1.5" aria-label={tStatic("feature.content.entrylistpage.filter_status")} role="group">
           {statuses.map(status => {
             const count = data?.status_counts[status] ?? 0;
-            const label = status === 'all' ? 'Tất cả' : status === 'draft' ? 'Bản nháp' : 'Đã xuất bản';
+            const label = status === 'all' ? tStatic("feature.media.mediapicker.all") : status === 'draft' ? tStatic("feature.content.entrylistpage.draft") : tStatic("reading.published");
             const active = (filters.status ?? 'all') === status;
             return (
               <AdminButton
@@ -558,7 +571,7 @@ export function EntryListPage({
                 disabled={bulkBusy}
                 onClick={() => updateFilter({ status })}
               >
-                {label} <span className={active ? 'opacity-80' : 'text-zinc-500'}>({count})</span>
+                {label} <span className={active ? 'opacity-80' : 'text-zinc-500'}>({formatNumber(count)})</span>
               </AdminButton>
             );
           })}
@@ -570,7 +583,7 @@ export function EntryListPage({
             disabled={bulkBusy || loading}
             onClick={() => setRetry(prev => prev + 1)}
           >
-            Tải lại
+            {tStatic("reading.reload")}
           </AdminButton>
           <AdminButton
             variant="primary"
@@ -578,7 +591,7 @@ export function EntryListPage({
             disabled={bulkBusy}
             onClick={() => onNavigateHash(`${base}/new${editSuffix}`)}
           >
-            + Thêm mới
+            {tStatic("feature.content.entrylistpage.add_new")}
           </AdminButton>
         </div>
       </div>
@@ -592,20 +605,20 @@ export function EntryListPage({
               updateFilter({ q: q || undefined });
             }}>
             <label htmlFor={`entry-table-search-${typeKey}`} className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-zinc-600">
-              <span>Tìm tiêu đề hoặc slug</span>
+              <span>{tStatic("feature.content.entrylistpage.search_title_or_slug")}</span>
               <input id={`entry-table-search-${typeKey}`} type="search" className={`${control} w-full`}
                 value={searchInput} maxLength={200} disabled={bulkBusy}
                 onChange={event => setSearchInput(event.target.value)}
-                placeholder="Nhập từ khóa…" />
+                placeholder={tStatic("feature.content.entrylistpage.enter_keywords")} />
             </label>
-            <AdminButton type="submit" variant="secondary" disabled={bulkBusy}>Tìm kiếm</AdminButton>
+            <AdminButton type="submit" variant="secondary" disabled={bulkBusy}>{tStatic("feature.content.entrylistpage.search")}</AdminButton>
           </form>
 
           {localeState.hasMultipleLocales && (
             <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-              <span>Ngôn ngữ</span>
+              <span>{tStatic("feature.content.entrylistpage.language")}</span>
               <select
-                aria-label="Lọc ngôn ngữ"
+                aria-label={tStatic("feature.content.entrylistpage.filter_language")}
                 data-testid="entry-locale-filter"
                 className={`${control} w-full`}
                 value={filters.locale ?? 'all'}
@@ -616,7 +629,7 @@ export function EntryListPage({
                   })
                 }
               >
-                <option value="all">Tất cả ngôn ngữ</option>
+                <option value="all">{tStatic("feature.content.entrylistpage.all_languages")}</option>
                 {localeState.allLocales.map((loc) => (
                   <option key={loc.code} value={loc.code}>
                     {loc.label} ({loc.code})
@@ -627,8 +640,8 @@ export function EntryListPage({
           )}
 
           {terms?.categoryEnabled && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-            <span>Danh mục</span>
-            <select aria-label="Lọc danh mục" className={`${control} w-full`}
+            <span>{tStatic("feature.content.entrylistpage.category")}</span>
+            <select aria-label={tStatic("feature.content.entrylistpage.filter_category")} className={`${control} w-full`}
               value={filters.category_id ?? ''} disabled={bulkBusy}
               onFocus={() => loadFilterOptions('category')}
               onChange={event => updateFilter({
@@ -636,17 +649,17 @@ export function EntryListPage({
                 taxonomy_key: undefined, term_id: undefined,
                 include_descendants: false,
               })}>
-              <option value="">Mọi danh mục</option>
+              <option value="">{tStatic("feature.content.entrylistpage.all_categories")}</option>
               {filters.category_id && !terms.byKind.category?.some(term => term.id === filters.category_id) &&
                 <option value={filters.category_id}>{selectedOptionLabel('category', filters.category_id)}</option>}
               {terms.byKind.category?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
-              {!terms.byKind.category && <option disabled>Chạm để tải danh mục…</option>}
+              {!terms.byKind.category && <option disabled>{tStatic("feature.content.entrylistpage.tap_to_load_categories")}</option>}
             </select>
           </label>}
 
           {terms?.tagEnabled && <label className="flex min-w-[130px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-            <span>Thẻ</span>
-            <select aria-label="Lọc thẻ" className={`${control} w-full`}
+            <span>{tStatic("shell.tags")}</span>
+            <select aria-label={tStatic("feature.content.entrylistpage.filter_tags")} className={`${control} w-full`}
               value={filters.tag_id ?? ''} disabled={bulkBusy}
               onFocus={() => loadFilterOptions('tag')}
               onChange={event => updateFilter({ tag_id: event.target.value ? Number(event.target.value) : undefined,
@@ -654,31 +667,31 @@ export function EntryListPage({
                 // A tag is an AND filter, not a reset of the selected category
                 // subtree. Preserve descendants only when a category is active.
                 include_descendants: Boolean(filters.category_id && filters.include_descendants) })}>
-              <option value="">Mọi thẻ</option>
+              <option value="">{tStatic("feature.content.entrylistpage.all_tags")}</option>
               {filters.tag_id && !terms.byKind.tag?.some(term => term.id === filters.tag_id) &&
                 <option value={filters.tag_id}>{selectedOptionLabel('tag', filters.tag_id)}</option>}
               {terms.byKind.tag?.map(term => <option key={term.id} value={term.id}>{term.name}</option>)}
-              {!terms.byKind.tag && <option disabled>Chạm để tải thẻ…</option>}
+              {!terms.byKind.tag && <option disabled>{tStatic("feature.content.entrylistpage.tap_to_load_tags")}</option>}
             </select>
           </label>}
 
           {customDefinitions.length > 0 && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-            <span>Taxonomy</span>
-            <select aria-label="Chọn taxonomy để lọc" className={`${control} w-full`}
+            <span>{tStatic("feature.common.ui_taxonomy")}</span>
+            <select aria-label={tStatic("feature.content.entrylistpage.choose_taxonomy_to_filter")} className={`${control} w-full`}
               disabled={bulkBusy} value={selectedTaxonomy}
               onChange={event => {
                 setTaxonomyChoice(event.target.value);
                 updateFilter({ taxonomy_key: undefined,
                   term_id: undefined, category_id: undefined, tag_id: undefined, include_descendants: false });
               }}>
-              <option value="">Tất cả taxonomy</option>
+              <option value="">{tStatic("feature.content.entrylistpage.all_taxonomies")}</option>
               {customDefinitions.map(def => <option key={def.key} value={def.key}>{def.label}</option>)}
             </select>
           </label>}
 
           {chosenDefinition && <label className="flex min-w-[140px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
             <span>{chosenDefinition.label}</span>
-            <select aria-label={`Lọc theo ${chosenDefinition.label}`} className={`${control} w-full`}
+            <select aria-label={tStatic("feature.content.entrylistpage.filter_by_value", { value1: chosenDefinition.label })} className={`${control} w-full`}
               disabled={bulkBusy} value={filters.term_id ?? ''}
               onFocus={() => loadFilterOptions(chosenDefinition.key)}
               onChange={event => {
@@ -687,25 +700,25 @@ export function EntryListPage({
                   term_id: event.target.value ? Number(event.target.value) : undefined,
                   include_descendants: false });
               }}>
-              <option value="">Chọn term</option>
+              <option value="">{tStatic("feature.content.entrylistpage.choose_term")}</option>
               {filters.term_id && !terms?.byKind[chosenDefinition.key]?.some(term => term.id === filters.term_id) &&
                 <option value={filters.term_id}>{selectedOptionLabel(chosenDefinition.key, filters.term_id)}</option>}
               {(terms?.byKind[chosenDefinition.key] ?? []).map(term =>
                 <option key={term.id} value={term.id}>{term.name}</option>)}
-              {!terms?.byKind[chosenDefinition.key] && <option disabled>Chạm để tải term…</option>}
+              {!terms?.byKind[chosenDefinition.key] && <option disabled>{tStatic("feature.content.entrylistpage.tap_to_load_terms")}</option>}
             </select>
           </label>}
 
           <label className="flex min-w-[145px] flex-1 flex-col gap-1 text-xs font-medium text-zinc-600 sm:flex-none">
-            <span>Tháng (UTC)</span>
-            <input type="month" aria-label="Lọc tháng cập nhật" className={`${control} w-full`}
+            <span>{tStatic("feature.content.entrylistpage.month_utc")}</span>
+            <input type="month" aria-label={tStatic("feature.content.entrylistpage.filter_by_update_month")} className={`${control} w-full`}
               value={filters.updated_month ?? ''} disabled={bulkBusy}
               onChange={event => updateFilter({ updated_month: event.target.value || undefined })} />
           </label>
 
           <label className="flex w-[88px] flex-col gap-1 text-xs font-medium text-zinc-600">
-            <span>Mỗi trang</span>
-            <select aria-label="Số mục mỗi trang" className={`${control} w-full`}
+            <span>{tStatic("feature.content.entrylistpage.per_page")}</span>
+            <select aria-label={tStatic("feature.content.entrylistpage.items_per_page")} className={`${control} w-full`}
               value={pageSize} disabled={bulkBusy}
               onChange={event => updateFilter({ limit: Number(event.target.value) })}>
               {[10, 20, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
@@ -718,49 +731,49 @@ export function EntryListPage({
             {filters.category_id && terms?.categoryEnabled && <label className="flex items-center gap-2 text-xs text-zinc-700">
               <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
                 onChange={event => updateFilter({ include_descendants: event.target.checked })} />
-              Gồm danh mục con
+              {tStatic("feature.content.entrylistpage.include_child_categories")}
             </label>}
             {filters.term_id && chosenDefinition?.hierarchical && <label className="flex items-center gap-2 text-xs text-zinc-700">
               <input type="checkbox" checked={Boolean(filters.include_descendants)} disabled={bulkBusy}
                 onChange={event => updateFilter({ include_descendants: event.target.checked })} />
-              Gồm các term con của {chosenDefinition.label}
+              {tStatic("feature.content.entrylistpage.include_child_terms_of")}{' '}{chosenDefinition.label}
             </label>}
           </div>
         ) : null}
 
         <div className="flex flex-wrap items-center justify-between gap-2.5 border-t border-zinc-100 pt-2.5">
-          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Thao tác hàng loạt">
-            <span className="text-xs font-medium text-zinc-500">{selectedRows.length} đã chọn</span>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={tStatic("feature.content.entrylistpage.bulk_actions")}>
+            <span className="text-xs font-medium text-zinc-500">{formatNumber(selectedRows.length)} {tStatic("feature.content.entrylistpage.selected")}</span>
             {isBuiltIn && <>
               <AdminButton variant="secondary" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                onClick={() => void performBulk('published')}>Xuất bản đã chọn</AdminButton>
+                onClick={() => void performBulk('published')}>{tStatic("feature.content.entrylistpage.publish_selected")}</AdminButton>
               <AdminButton variant="secondary" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-                onClick={() => void performBulk('draft')}>Chuyển về nháp</AdminButton>
+                onClick={() => void performBulk('draft')}>{tStatic("feature.content.entrylistpage.move_to_draft_2")}</AdminButton>
             </>}
             <AdminButton variant="danger" size="sm" disabled={bulkBusy || !csrfToken || !selectedRows.length}
-              onClick={() => void performBulk('delete')}>Xóa đã chọn</AdminButton>
-            {bulkBusy && <span role="status" className="text-xs text-zinc-600">Đang xử lý riêng từng mục…</span>}
+              onClick={() => void performBulk('delete')}>{tStatic("feature.content.entrylistpage.delete_selected")}</AdminButton>
+            {bulkBusy && <span role="status" className="text-xs text-zinc-600">{tStatic("feature.content.entrylistpage.processing_each_item_separately")}</span>}
           </div>
           <div className="flex flex-wrap items-center gap-2.5 text-xs">
-            <span className="text-zinc-500" role="status">{data ? `Tổng: ${data.total} mục` : 'Đang lấy số lượng…'}</span>
+            <span className="text-zinc-500" role="status">{data ? tStatic("feature.content.entrylistpage.total_value_items", { value1: formatNumber(data.total) }) : tStatic("feature.content.entrylistpage.loading_counts")}</span>
             <AdminButton variant="ghost" size="sm" disabled={bulkBusy}
               onClick={() => { setSearchInput(''); setTaxonomyChoice(''); onNavigateHash(base); }}>
-              Xóa bộ lọc
+              {tStatic("feature.content.entrylistpage.clear_filters")}
             </AdminButton>
           </div>
         </div>
       </div>
 
       {termLoadErrors.length > 0 && <AdminAlert tone="warning" role="alert">
-        Không tải được một số term: {termLoadErrors.join('; ')}. Các bộ lọc khác vẫn sử dụng được.
+        {tStatic("feature.content.entrylistpage.could_not_load_some_terms")}{' '}{termLoadErrors.join('; ')}{tStatic("feature.content.entrylistpage.other_filters_remain_available")}
       </AdminAlert>}
       {resolved?.failed && <AdminAlert tone="warning" role="alert">
-        Không tải được tên của một số term trên trang. Thử Tải lại để hiển thị đầy đủ.
+        {tStatic("feature.content.entrylistpage.could_not_load_some_term_names_on_this_page")}
       </AdminAlert>}
 
       {bulkResults.length > 0 && (
-        <div className="rounded-lg border border-zinc-200 bg-white p-3" aria-label="Kết quả hàng loạt">
-          <p className="mb-1.5 text-xs font-semibold text-zinc-900">Kết quả: {bulkResults.filter(row => row.ok).length} thành công / {bulkResults.length} đã thử</p>
+        <div className="rounded-lg border border-zinc-200 bg-white p-3" aria-label={tStatic("feature.content.entrylistpage.bulk_results")}>
+          <p className="mb-1.5 text-xs font-semibold text-zinc-900">{tStatic("feature.content.entrylistpage.results")}{' '}{bulkResults.filter(row => row.ok).length} {tStatic("feature.content.entrylistpage.successful")}{' '}{bulkResults.length} {tStatic("feature.content.entrylistpage.attempted")}</p>
           <ul className="space-y-1 text-xs">
             {bulkResults.map(result => <li key={result.id} data-bulk-id={result.id}
               role={result.ok ? 'status' : 'alert'}
@@ -771,16 +784,16 @@ export function EntryListPage({
 
       {providerNotice && <AdminAlert tone="info" data-testid="provider-action-result">{providerNotice}</AdminAlert>}
       {providerError && <AdminAlert tone="error" className="flex flex-wrap items-center gap-2">
-        <span>Không thể tải cột mở rộng: {providerError}</span>
-        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>Thử lại</AdminButton>
+        <span>{tStatic("feature.content.entrylistpage.could_not_load_extension_columns")}{' '}{providerError}</span>
+        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(n => n + 1)}>{tStatic("feature.dashboard.dashboardpage.retry")}</AdminButton>
       </AdminAlert>}
 
       {error && <AdminAlert tone="error" className="flex flex-wrap items-center gap-2">
         <span>{error}</span>
-        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(prev => prev + 1)}>Thử lại</AdminButton>
+        <AdminButton variant="ghost" size="sm" onClick={() => setRetry(prev => prev + 1)}>{tStatic("feature.dashboard.dashboardpage.retry")}</AdminButton>
       </AdminAlert>}
 
-      {loading && <p role="status" className="text-xs text-zinc-500">Đang tải danh sách từ máy chủ…</p>}
+      {loading && <p role="status" className="text-xs text-zinc-500">{tStatic("feature.content.entrylistpage.loading_list_from_server")}</p>}
 
       <div
         role="region"
@@ -790,11 +803,11 @@ export function EntryListPage({
         aria-busy={loading}
       >
         <table className="w-full min-w-[780px] table-auto text-left text-sm" data-testid="entry-table">
-          <caption id={captionId} className="sr-only">Bảng nội dung {typeKey}; tìm kiếm, trạng thái và phân trang từ máy chủ</caption>
+          <caption id={captionId} className="sr-only">{tStatic("feature.content.entrylistpage.content_table")}{' '}{typeKey}{tStatic("feature.content.entrylistpage.server_side_search_status_and_pagination")}</caption>
           <thead className="border-b border-zinc-200 bg-zinc-50 text-xs font-semibold uppercase tracking-wider text-zinc-600">
             <tr>
               <th scope="col" className="w-10 px-3 py-2.5">
-                <input type="checkbox" aria-label="Chọn tất cả trên trang" checked={allSelected}
+                <input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_all_on_page")} checked={allSelected}
                   disabled={!currentRows.length || bulkBusy || loading}
                   onChange={event => setSelected(prev => {
                     const next = new Set(prev);
@@ -802,24 +815,24 @@ export function EntryListPage({
                     return next;
                   })} />
               </th>
-              <th scope="col" className="w-14 px-2 py-2.5 text-center">Ảnh</th>
+              <th scope="col" className="w-14 px-2 py-2.5 text-center">{tStatic("feature.media.mediapicker.images")}</th>
               <th scope="col" aria-sort={ariaSortFor('title')} className="min-w-[220px] px-3 py-2.5">
                 <button type="button" data-testid="sort-title" className={sortButton}
                   disabled={bulkBusy} onClick={() => sortBy('title')}>
-                  <span>Tiêu đề</span>
+                  <span>{tStatic("feature.contact.contactpanel.title")}</span>
                   {activeSort === 'title' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
                 </button>
               </th>
-              <th scope="col" className="whitespace-nowrap px-3 py-2.5">Trạng thái</th>
-              {terms?.categoryEnabled && <th scope="col" className="px-3 py-2.5">Danh mục</th>}
-              {terms?.tagEnabled && <th scope="col" className="px-3 py-2.5">Thẻ</th>}
+              <th scope="col" className="whitespace-nowrap px-3 py-2.5">{tStatic("multilingual.status")}</th>
+              {terms?.categoryEnabled && <th scope="col" className="px-3 py-2.5">{tStatic("feature.content.entrylistpage.category")}</th>}
+              {terms?.tagEnabled && <th scope="col" className="px-3 py-2.5">{tStatic("shell.tags")}</th>}
               {customDefinitions.map(def => <th key={def.key} scope="col" className="px-3 py-2.5">{def.label}</th>)}
               {providerColumns.map(column => <th key={column.key} scope="col"
                 className="min-w-[120px] px-3 py-2.5">{column.label}</th>)}
               <th scope="col" aria-sort={ariaSortFor('updated_at')} className="min-w-[140px] whitespace-nowrap px-3 py-2.5">
                 <button type="button" data-testid="sort-updated" className={sortButton}
                   disabled={bulkBusy} onClick={() => sortBy('updated_at')}>
-                  <span>Ngày cập nhật</span>
+                  <span>{tStatic("feature.content.entrylistpage.updated_date")}</span>
                   {activeSort === 'updated_at' && <span aria-hidden="true">{activeOrder === 'asc' ? '↑' : '↓'}</span>}
                 </button>
               </th>
@@ -829,14 +842,14 @@ export function EntryListPage({
             {!loading && !error && currentRows.length === 0 && <tr>
               <td colSpan={5 + (terms?.definitions.length ?? 0) + providerColumns.length}
                 className="px-4 py-8 text-center text-sm text-zinc-500">
-                {data?.total === 0 ? 'Không tìm thấy nội dung phù hợp. Có thể xóa bộ lọc để xem lại.' : 'Không có mục trên trang này.'}
+                {data?.total === 0 ? tStatic("feature.content.entrylistpage.no_matching_content_clear_filters_to_see_more") : tStatic("feature.content.entrylistpage.no_items_on_this_page")}
               </td>
             </tr>}
             {currentRows.map(row => {
               const path = row.publication_status === 'published' ? safePublicPath(row.public_url) : null;
               const thumbId = typeof row.fields?.featured_image === 'string' ? row.fields.featured_image.trim() : '';
               return <tr key={row.id} data-entry-id={row.id} className="align-middle transition-colors hover:bg-zinc-50/70">
-                <td className="px-3 py-2.5"><input type="checkbox" aria-label={`Chọn mục #${row.id}`}
+                <td className="px-3 py-2.5"><input type="checkbox" aria-label={tStatic("feature.content.entrylistpage.select_item_value", { value1: row.id })}
                   checked={selected.has(row.id)} disabled={bulkBusy}
                   onChange={event => toggleRow(row.id, event.target.checked)} /></td>
                 <td className="w-14 px-2 py-2.5">
@@ -884,10 +897,10 @@ export function EntryListPage({
                       type="button"
                       className="font-medium text-od-accent hover:underline"
                       disabled={bulkBusy}
-                      aria-label={`Chỉnh sửa ${row.title}, ID ${row.id}`}
+                      aria-label={tStatic("feature.content.entrylistpage.edit_value_id_value", { value1: row.title, value2: row.id })}
                       onClick={() => onNavigateHash(`${base}/${row.id}/edit${editSuffix}`)}
                     >
-                      Chỉnh sửa
+                      {tStatic("shell.edit")}
                     </button>
                     {path && (
                       <>
@@ -897,9 +910,9 @@ export function EntryListPage({
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
-                          aria-label={`Xem công khai ${row.title}`}
+                          aria-label={tStatic("feature.content.entrylistpage.view_public_value", { value1: row.title })}
                         >
-                          Xem
+                          {tStatic("feature.common.view")}
                         </a>
                       </>
                     )}
@@ -911,9 +924,9 @@ export function EntryListPage({
                           target="_blank"
                           rel="noopener noreferrer"
                           className="font-medium text-zinc-600 hover:text-zinc-950 hover:underline"
-                          aria-label={`Xem trước bản nháp đã lưu ${row.title}`}
+                          aria-label={tStatic("feature.content.entrylistpage.preview_saved_draft_value", { value1: row.title })}
                         >
-                          Xem trước
+                          {tStatic("feature.menus.menuspanel.preview")}
                         </a>
                       </>
                     )}
@@ -924,10 +937,10 @@ export function EntryListPage({
                           type="button"
                           className="font-medium text-rose-600 hover:text-rose-700 hover:underline disabled:opacity-50"
                           disabled={bulkBusy}
-                          aria-label={`Xóa ${row.title}, ID ${row.id}`}
+                          aria-label={tStatic("feature.content.entrylistpage.delete_value_id_value", { value1: row.title, value2: row.id })}
                           onClick={() => void deleteSingleRow(row)}
                         >
-                          Xóa
+                          {tStatic("multilingual.delete")}
                         </button>
                       </>
                     )}
@@ -935,7 +948,7 @@ export function EntryListPage({
                 </td>
                 <td className="whitespace-nowrap px-3 py-2.5">
                   <AdminBadge tone={row.publication_status === 'published' ? 'success' : 'neutral'}>
-                    {row.publication_status === 'published' ? 'Đã xuất bản' : 'Bản nháp'}
+                    {row.publication_status === 'published' ? tStatic("reading.published") : tStatic("feature.content.entrylistpage.draft")}
                   </AdminBadge>
                 </td>
                 {terms?.categoryEnabled && <td className="break-words px-3 py-2.5 text-zinc-700">{renderTermsCell(row, 'category')}</td>}
@@ -951,15 +964,15 @@ export function EntryListPage({
           </tbody>
         </table>
       </div>
-      <nav aria-label="Phân trang nội dung" className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
-        <span data-testid="entry-table-page-info">{data ? `Hiển thị ${data.total ? offset + 1 : 0}–${Math.min(offset + currentRows.length, data.total)} / ${data.total}` : 'Chưa tải trang'}</span>
+      <nav aria-label={tStatic("feature.content.entrylistpage.content_pagination")} className="flex flex-wrap items-center justify-between gap-3 text-xs text-zinc-600">
+        <span data-testid="entry-table-page-info">{data ? tStatic("feature.content.entrylistpage.showing_value_value_value", { value1: formatNumber(data.total ? offset + 1 : 0), value2: formatNumber(Math.min(offset + currentRows.length, data.total)), value3: formatNumber(data.total) }) : tStatic("feature.content.entrylistpage.page_not_loaded")}</span>
         <div className="flex items-center gap-2">
           <AdminButton variant="secondary" size="sm" disabled={bulkBusy || loading || offset === 0}
-            onClick={() => updateFilter({ offset: Math.max(0, offset - pageSize) }, false)}>Trang trước</AdminButton>
-          <span className="tabular-nums">Trang {Math.floor(offset / pageSize) + 1}{data ? ` / ${Math.max(1, Math.ceil(data.total / pageSize))}` : ''}</span>
+            onClick={() => updateFilter({ offset: Math.max(0, offset - pageSize) }, false)}>{tStatic("feature.content.contentworkspace.previous_page")}</AdminButton>
+          <span className="tabular-nums">{tStatic("feature.common.page_number", { page: formatNumber(Math.floor(offset / pageSize) + 1) })}{data ? ` / ${formatNumber(Math.max(1, Math.ceil(data.total / pageSize)))}` : ''}</span>
           <AdminButton variant="secondary" size="sm"
             disabled={bulkBusy || loading || !data || offset + pageSize >= data.total || offset + pageSize > 1000000}
-            onClick={() => updateFilter({ offset: offset + pageSize }, false)}>Trang sau</AdminButton>
+            onClick={() => updateFilter({ offset: offset + pageSize }, false)}>{tStatic("feature.common.next_page")}</AdminButton>
         </div>
       </nav>
     </section>

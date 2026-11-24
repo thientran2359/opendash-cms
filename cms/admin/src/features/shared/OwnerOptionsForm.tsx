@@ -1,3 +1,4 @@
+import { useI18n } from '../../i18n/index.tsx';
 import React, { useMemo } from 'react';
 import type { ThemeOptionDef } from '../../api/themes.ts';
 import { BlockSchemaForm } from '../../builder/BlockSchemaForm.tsx';
@@ -203,6 +204,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
   onSubmit,
   onApiError,
 }) => {
+  const { t: translate } = useI18n();
   const blockSchema: BlockSchemaV1 = useMemo(() => {
     const resolvedFields =
       fields ??
@@ -266,13 +268,13 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
                     )}
                   </label>
                   {clearing ? (
-                    <AdminBadge tone="warning">Sẽ xóa khi lưu</AdminBadge>
+                    <AdminBadge tone="warning">{translate('feature.shared.owneroptionsform.will_be_cleared_on_save')}</AdminBadge>
                   ) : pendingPlaintext.length > 0 ? (
-                    <AdminBadge tone="warning">Sẽ cập nhật khi lưu</AdminBadge>
+                    <AdminBadge tone="warning">{translate('feature.shared.owneroptionsform.will_be_updated_on_save')}</AdminBadge>
                   ) : configured ? (
-                    <AdminBadge tone="success">Đã cấu hình</AdminBadge>
+                    <AdminBadge tone="success">{translate('feature.shared.owneroptionsform.configured')}</AdminBadge>
                   ) : (
-                    <AdminBadge tone="neutral">Chưa cấu hình</AdminBadge>
+                    <AdminBadge tone="neutral">{translate('feature.shared.owneroptionsform.not_configured')}</AdminBadge>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -284,10 +286,10 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
                     value={pendingPlaintext}
                     placeholder={
                       clearing
-                        ? 'Bí mật sẽ bị xóa khi bấm Lưu'
+                        ? translate('feature.shared.owneroptionsform.the_secret_will_be_cleared_when_you_save')
                         : configured
-                          ? '•••••••• (để trống để giữ nguyên)'
-                          : 'Nhập bí mật mới...'
+                          ? translate('feature.shared.owneroptionsform.leave_blank_to_keep_unchanged')
+                          : translate('feature.shared.owneroptionsform.enter_a_new_secret')
                     }
                     onChange={(event) => {
                       const nextText = event.currentTarget.value;
@@ -307,9 +309,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
                       size="sm"
                       disabled={saving}
                       onClick={() => onChange({ ...values, [field.key]: { clear: true } })}
-                    >
-                      Xóa bí mật
-                    </AdminButton>
+                    >{translate('feature.shared.owneroptionsform.clear_secret')}</AdminButton>
                   )}
                   {hasPendingChange && (
                     <AdminButton
@@ -322,14 +322,10 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
                           [field.key]: baselineVal ?? { configured: false },
                         })
                       }
-                    >
-                      Hoàn tác
-                    </AdminButton>
+                    >{translate('feature.shared.owneroptionsform.undo')}</AdminButton>
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500">
-                  Giá trị bí mật được lưu dạng write-only; để trống nếu không muốn thay đổi.
-                </p>
+                <p className="text-[11px] text-zinc-500">{translate('feature.shared.owneroptionsform.the_secret_is_write_only_leave_blank_to_keep_it_unchanged')}</p>
               </div>
             );
           })}
@@ -378,7 +374,7 @@ export const OwnerOptionsForm: React.FC<OwnerOptionsFormProps> = ({
       {afterFields}
       <div className="pt-1">
         <AdminButton type="submit" variant="primary" size="md" disabled={!csrfToken || saving}>
-          {submitLabel ?? (saving ? 'Đang lưu…' : 'Lưu cài đặt')}
+          {submitLabel ?? (saving ? translate('general.saving') : translate('general.save'))}
         </AdminButton>
       </div>
     </form>
