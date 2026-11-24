@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/opendash-core",
     "crates/opendash-server",
+    "crates/opendash-plugin-sdk",
 ]
 
 [workspace.dependencies]
