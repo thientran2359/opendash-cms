@@ -615,6 +615,40 @@ pub async fn canonical_term_path_in_tx(
     .map_err(Into::into)
 }
 
+pub async fn batch_canonical_term_paths_in_tx(
+    conn: &mut SqliteConnection,
+    term_ids: &[i64],
+) -> ApiResult<BTreeMap<i64, String>> {
+    let mut out = BTreeMap::new();
+    if term_ids.is_empty() {
+        return Ok(out);
+    }
+    for chunk in term_ids.chunks(500) {
+        let ids_json = serde_json::to_string(chunk)?;
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT t.id, c.path
+               FROM permalink_route_claims c
+               JOIN taxonomy_terms t
+                 ON c.target_kind = 'term'
+                AND c.target_id = CAST(t.id AS TEXT)
+                AND c.locale = t.locale
+               JOIN site_locales sl ON sl.code = t.locale AND sl.enabled = 1
+               JOIN taxonomy_definitions d ON d.key = t.kind
+              WHERE t.id IN (SELECT value FROM json_each(?))
+                AND d.public = 1
+                AND d.provider_status = 'active'
+                AND d.declaration_state = 'declared'",
+        )
+        .bind(ids_json)
+        .fetch_all(&mut *conn)
+        .await?;
+        for (tid, path) in rows {
+            out.insert(tid, path);
+        }
+    }
+    Ok(out)
+}
+
 pub async fn canonical_archive_path_in_tx(
     conn: &mut SqliteConnection,
     key: &str,

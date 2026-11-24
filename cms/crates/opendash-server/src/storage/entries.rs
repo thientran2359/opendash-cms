@@ -270,6 +270,7 @@ pub struct ContentEntryRecord {
     pub version: i64,
     pub created_at: String,
     pub updated_at: String,
+    pub published_at: Option<String>,
     pub translations: Vec<TranslationLinkSummary>,
 }
 
@@ -283,6 +284,7 @@ pub(super) type EntryRow = (
     i64,
     String,
     String,
+    Option<String>,
 );
 
 pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
@@ -296,6 +298,7 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
         version,
         created_at,
         updated_at,
+        published_at,
     ) = row;
     let values: BTreeMap<String, Value> = serde_json::from_str(&json)
         .map_err(|_| ApiError::internal("Dữ liệu custom fields không hợp lệ."))?;
@@ -316,6 +319,7 @@ pub(super) fn decode_row(row: EntryRow) -> ApiResult<ContentEntryRecord> {
         version,
         created_at,
         updated_at,
+        published_at,
         translations: Vec::new(),
     })
 }
@@ -430,6 +434,32 @@ pub(super) async fn decoded_with_terms(
     Ok(record)
 }
 
+pub(crate) async fn batch_load_term_ids_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    entry_ids: &[i64],
+) -> ApiResult<BTreeMap<i64, Vec<i64>>> {
+    let mut out = BTreeMap::<i64, Vec<i64>>::new();
+    if entry_ids.is_empty() {
+        return Ok(out);
+    }
+    for chunk in entry_ids.chunks(500) {
+        let ids_json = serde_json::to_string(chunk)?;
+        let rows: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT et.entry_id, et.term_id
+               FROM entry_terms et
+              WHERE et.entry_id IN (SELECT value FROM json_each(?))
+              ORDER BY et.entry_id ASC, et.term_id ASC",
+        )
+        .bind(ids_json)
+        .fetch_all(&mut *conn)
+        .await?;
+        for (entry_id, term_id) in rows {
+            out.entry(entry_id).or_default().push(term_id);
+        }
+    }
+    Ok(out)
+}
+
 pub(crate) async fn batch_translations_by_group_in_tx(
     conn: &mut sqlx::SqliteConnection,
     type_key: &str,
@@ -439,29 +469,31 @@ pub(crate) async fn batch_translations_by_group_in_tx(
     if group_ids.is_empty() {
         return Ok(out);
     }
-    let ids_json = serde_json::to_string(group_ids)?;
-    let rows: Vec<(String, i64, String, String, String, String)> = sqlx::query_as(
-        "SELECT e.translation_group_id, e.id, e.locale, e.slug, e.title, e.publication_status
-           FROM content_entries e
-           JOIN site_locales sl ON sl.code = e.locale
-          WHERE e.content_type_key = ?
-            AND e.translation_group_id IN (SELECT value FROM json_each(?))
-          ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
-    )
-    .bind(type_key)
-    .bind(ids_json)
-    .fetch_all(conn)
-    .await?;
-    for (group_id, id, locale, slug, title, publication_status) in rows {
-        out.entry(group_id)
-            .or_default()
-            .push(TranslationLinkSummary {
-                id,
-                locale,
-                slug,
-                title,
-                publication_status,
-            });
+    for chunk in group_ids.chunks(500) {
+        let ids_json = serde_json::to_string(chunk)?;
+        let rows: Vec<(String, i64, String, String, String, String)> = sqlx::query_as(
+            "SELECT e.translation_group_id, e.id, e.locale, e.slug, e.title, e.publication_status
+               FROM content_entries e
+               JOIN site_locales sl ON sl.code = e.locale
+              WHERE e.content_type_key = ?
+                AND e.translation_group_id IN (SELECT value FROM json_each(?))
+              ORDER BY sl.is_default DESC, sl.position ASC, sl.code ASC",
+        )
+        .bind(type_key)
+        .bind(ids_json)
+        .fetch_all(&mut *conn)
+        .await?;
+        for (group_id, id, locale, slug, title, publication_status) in rows {
+            out.entry(group_id)
+                .or_default()
+                .push(TranslationLinkSummary {
+                    id,
+                    locale,
+                    slug,
+                    title,
+                    publication_status,
+                });
+        }
     }
     Ok(out)
 }
@@ -680,7 +712,7 @@ pub(super) async fn get_entry_in_tx(
     id: i64,
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<EntryRow> = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
@@ -966,6 +998,103 @@ pub(crate) async fn validate_filter_in_tx(
     Ok(())
 }
 
+const FILTERED_ENTRIES_CTE_AND_FROM: &str = "WITH RECURSIVE category_scope(id, depth) AS (
+     SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = 'category'
+     UNION ALL
+     SELECT child.id, category_scope.depth + 1
+     FROM taxonomy_terms child JOIN category_scope ON child.parent_id = category_scope.id
+     WHERE category_scope.depth < 8 AND ? = 1
+ ), generic_scope(id, depth) AS (
+     SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = ?
+     UNION ALL
+     SELECT child.id, generic_scope.depth+1 FROM taxonomy_terms child
+     JOIN generic_scope ON child.parent_id=generic_scope.id
+     WHERE generic_scope.depth < 8 AND ? = 1
+ )";
+
+const FILTERED_ENTRIES_WHERE: &str = "FROM content_entries e
+   JOIN content_types t ON t.key = e.content_type_key
+  WHERE e.content_type_key = ?
+    AND (? = 0 OR (e.publication_status = 'published'
+         AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
+         AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1))
+    AND (? IS NULL OR EXISTS (
+        SELECT 1 FROM entry_terms et
+         WHERE et.entry_id = e.id AND et.term_id IN (SELECT id FROM category_scope)
+    ))
+    AND (? IS NULL OR EXISTS (
+        SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id AND et.term_id = ?
+    ))
+    AND (? IS NULL OR EXISTS (
+        SELECT 1 FROM entry_terms et WHERE et.entry_id=e.id
+          AND et.term_id IN (SELECT id FROM generic_scope)
+    ))
+    AND (? IS NULL OR e.locale = ?)";
+
+#[derive(sqlx::FromRow)]
+struct FullEntryDbRow {
+    id: i64,
+    content_type_key: String,
+    slug: String,
+    title: String,
+    values_json: String,
+    publication_status: String,
+    version: i64,
+    created_at: String,
+    updated_at: String,
+    published_at: Option<String>,
+    page_layout_key: Option<String>,
+    custom_template_key: Option<String>,
+    content_mode: String,
+    primary_category_term_id: Option<i64>,
+    locale: String,
+    translation_group_id: String,
+}
+
+pub(crate) async fn count_entries_filtered_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    filters: &EntryFilters,
+    published_only: bool,
+) -> ApiResult<i64> {
+    let statement =
+        format!("{FILTERED_ENTRIES_CTE_AND_FROM} SELECT COUNT(*) {FILTERED_ENTRIES_WHERE}");
+    let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(statement))
+        .bind(filters.category_id)
+        .bind(i64::from(filters.include_descendants))
+        .bind(filters.term_id)
+        .bind(&filters.taxonomy_key)
+        .bind(i64::from(filters.include_descendants))
+        .bind(type_key)
+        .bind(i64::from(published_only))
+        .bind(filters.category_id)
+        .bind(filters.tag_id)
+        .bind(filters.tag_id)
+        .bind(filters.term_id)
+        .bind(&filters.locale)
+        .bind(&filters.locale)
+        .fetch_one(&mut **tx)
+        .await?;
+    Ok(total)
+}
+
+pub(crate) async fn list_published_filtered_with_total_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    type_key: &str,
+    limit: i64,
+    offset: i64,
+    filters: EntryFilters,
+    sort: PublishedListSort,
+) -> ApiResult<(Vec<ContentEntryRecord>, i64)> {
+    if type_key == "pattern" {
+        return Err(ApiError::not_found("Pattern là nội dung riêng tư."));
+    }
+    validate_filter_in_tx(tx, type_key, &filters, true).await?;
+    let total = count_entries_filtered_in_tx(tx, type_key, &filters, true).await?;
+    let entries = query_entries_filtered(tx, type_key, limit, offset, filters, true, sort).await?;
+    Ok((entries, total))
+}
+
 /// Shared category/tag AND predicates for the old archives and new list
 /// blocks. Only an internal enum can select the ORDER BY direction.
 async fn query_entries_filtered(
@@ -984,42 +1113,15 @@ async fn query_entries_filtered(
     // Audited dynamic SQL: direction is a closed Rust enum mapped to one of
     // two literal keywords; all user-controlled values remain bound params.
     let statement = format!(
-        "WITH RECURSIVE category_scope(id, depth) AS (
-             SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = 'category'
-             UNION ALL
-             SELECT child.id, category_scope.depth + 1
-             FROM taxonomy_terms child JOIN category_scope ON child.parent_id = category_scope.id
-             WHERE category_scope.depth < 8 AND ? = 1
-         ), generic_scope(id, depth) AS (
-             SELECT id, 1 FROM taxonomy_terms WHERE id = ? AND kind = ?
-             UNION ALL
-             SELECT child.id, generic_scope.depth+1 FROM taxonomy_terms child
-             JOIN generic_scope ON child.parent_id=generic_scope.id
-             WHERE generic_scope.depth < 8 AND ? = 1
-         )
+        "{FILTERED_ENTRIES_CTE_AND_FROM}
          SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json, e.publication_status,
-                e.version, e.created_at, e.updated_at
-           FROM content_entries e
-           JOIN content_types t ON t.key = e.content_type_key
-          WHERE e.content_type_key = ?
-            AND (? = 0 OR (e.publication_status = 'published'
-                 AND e.content_type_key != 'pattern' AND t.provider_status = 'active'
-                 AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1))
-            AND (? IS NULL OR EXISTS (
-                SELECT 1 FROM entry_terms et
-                 WHERE et.entry_id = e.id AND et.term_id IN (SELECT id FROM category_scope)
-            ))
-            AND (? IS NULL OR EXISTS (
-                SELECT 1 FROM entry_terms et WHERE et.entry_id = e.id AND et.term_id = ?
-            ))
-            AND (? IS NULL OR EXISTS (
-                SELECT 1 FROM entry_terms et WHERE et.entry_id=e.id
-                  AND et.term_id IN (SELECT id FROM generic_scope)
-            ))
-            AND (? IS NULL OR e.locale = ?)
+                e.version, e.created_at, e.updated_at, e.published_at,
+                e.page_layout_key, e.custom_template_key, e.content_mode,
+                e.primary_category_term_id, e.locale, e.translation_group_id
+          {FILTERED_ENTRIES_WHERE}
           ORDER BY e.id {direction} LIMIT ? OFFSET ?"
     );
-    let rows: Vec<EntryRow> = sqlx::query_as(sqlx::AssertSqlSafe(statement))
+    let rows: Vec<FullEntryDbRow> = sqlx::query_as(sqlx::AssertSqlSafe(statement))
         .bind(filters.category_id)
         .bind(i64::from(filters.include_descendants))
         .bind(filters.term_id)
@@ -1037,9 +1139,50 @@ async fn query_entries_filtered(
         .bind(offset)
         .fetch_all(&mut **tx)
         .await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let entry_ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+    let mut terms_by_entry = batch_load_term_ids_in_conn(&mut **tx, &entry_ids).await?;
+    let group_ids: Vec<String> = rows
+        .iter()
+        .map(|r| r.translation_group_id.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let translations_by_group =
+        batch_translations_by_group_in_tx(&mut **tx, type_key, &group_ids).await?;
+
     let mut entries = Vec::with_capacity(rows.len());
     for row in rows {
-        entries.push(decoded_with_terms(tx, row).await?);
+        let mut record = decode_row((
+            row.id,
+            row.content_type_key,
+            row.slug,
+            row.title,
+            row.values_json,
+            row.publication_status,
+            row.version,
+            row.created_at,
+            row.updated_at,
+            row.published_at,
+        ))?;
+        record.locale = row.locale;
+        record.page_layout_key = row.page_layout_key;
+        record.custom_template_key = row.custom_template_key;
+        record.primary_category_term_id = row.primary_category_term_id;
+        record.content_mode = match row.content_mode.as_str() {
+            "editor" => ContentMode::Editor,
+            "builder" => ContentMode::Builder,
+            _ => return Err(ApiError::internal("Chế độ nội dung không hợp lệ.")),
+        };
+        record.term_ids = terms_by_entry.remove(&record.id).unwrap_or_default();
+        record.translations = translations_by_group
+            .get(&row.translation_group_id)
+            .cloned()
+            .unwrap_or_default();
+        record.translation_group_id = row.translation_group_id;
+        entries.push(record);
     }
     Ok(entries)
 }
@@ -1087,8 +1230,8 @@ pub async fn create_entry_with_fence(
         "published"
     };
     let result = sqlx::query(
-        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, published_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'published' THEN datetime('now') ELSE NULL END)",
     )
     .bind(type_key)
     .bind(&entry_locale)
@@ -1096,6 +1239,7 @@ pub async fn create_entry_with_fence(
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
+    .bind(status)
     .bind(status)
     .execute(&mut *tx)
     .await;
@@ -1110,7 +1254,7 @@ pub async fn create_entry_with_fence(
     }
     sync_entry_body_refs_in_conn(&mut *tx, id, &effective, &input.values, None).await?;
     let row: EntryRow = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
@@ -1220,7 +1364,7 @@ pub async fn update_entry_with_fence(
             )
             .await?;
             let row: EntryRow = sqlx::query_as(
-                "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+                "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",
             )
             .bind(type_key)
@@ -1297,8 +1441,8 @@ pub async fn create_entry_with_schema_fence(
         "published"
     };
     let result = sqlx::query(
-        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, published_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'published' THEN datetime('now') ELSE NULL END)",
     )
     .bind(type_key)
     .bind(&entry_locale)
@@ -1306,6 +1450,7 @@ pub async fn create_entry_with_schema_fence(
     .bind(&input.slug)
     .bind(&input.title)
     .bind(json)
+    .bind(status)
     .bind(status)
     .execute(&mut *tx)
     .await;
@@ -1320,7 +1465,7 @@ pub async fn create_entry_with_schema_fence(
     }
     sync_entry_body_refs_in_conn(&mut *tx, id, &effective, &input.values, None).await?;
     let row: EntryRow = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
@@ -1400,7 +1545,7 @@ pub async fn update_entry_with_schema_fence(
             )
             .await?;
             let row: EntryRow = sqlx::query_as(
-                "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+                "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
                  FROM content_entries WHERE content_type_key = ? AND id = ?",
             )
             .bind(type_key)
@@ -2343,8 +2488,8 @@ pub async fn commit_composite_entry_save(
                 "published"
             };
             let res = sqlx::query(
-                "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')))",
+                "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id, created_at, updated_at, published_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'editor'), ?, ?, ?, COALESCE(?, datetime('now')), COALESCE(?, ?, datetime('now')), CASE WHEN ? = 'published' THEN datetime('now') ELSE NULL END)",
             )
             .bind(type_key)
             .bind(&entry_locale)
@@ -2360,6 +2505,7 @@ pub async fn commit_composite_entry_save(
             .bind(custom_created_at.as_deref())
             .bind(custom_updated_at.as_deref())
             .bind(custom_created_at.as_deref())
+            .bind(status_clause)
             .execute(&mut *tx)
             .await;
             let new_id = match res {
@@ -2372,8 +2518,10 @@ pub async fn commit_composite_entry_save(
                 // Initial create remains v1; this is one logical atomic Save,
                 // not a separate publication/CAS transition.
                 sqlx::query(
-                    "UPDATE content_entries SET publication_status = 'published'
-                     WHERE id = ? AND content_type_key = ? AND publication_status = 'draft'",
+                    "UPDATE content_entries
+                        SET publication_status = 'published',
+                            published_at = COALESCE(published_at, datetime('now'))
+                      WHERE id = ? AND content_type_key = ? AND publication_status = 'draft'",
                 )
                 .bind(new_id)
                 .bind(type_key)
@@ -2397,6 +2545,11 @@ pub async fn commit_composite_entry_save(
                 "UPDATE content_entries
                  SET slug = ?, title = ?, values_json = ?,
                      publication_status = COALESCE(?, publication_status),
+                     published_at = CASE
+                         WHEN COALESCE(?, publication_status) = 'published'
+                         THEN COALESCE(published_at, datetime('now'))
+                         ELSE published_at
+                     END,
                      page_layout_key = ?, custom_template_key = ?,
                      primary_category_term_id = ?,
                      content_mode = COALESCE(?, content_mode),
@@ -2408,6 +2561,7 @@ pub async fn commit_composite_entry_save(
             .bind(&resolved_slug)
             .bind(&plan.merged_input.title)
             .bind(&values_json)
+            .bind(plan.publication_status.as_deref())
             .bind(plan.publication_status.as_deref())
             .bind(page_layout_key.as_deref())
             .bind(custom_template_key.as_deref())
@@ -2449,7 +2603,7 @@ pub async fn commit_composite_entry_save(
     .await?;
 
     let row: EntryRow = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
@@ -2919,8 +3073,8 @@ pub async fn commit_entry_translation(
         };
     let values_json = serde_json::to_string(&plan.values)?;
     let res = sqlx::query(
-        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, content_mode, page_layout_key, custom_template_key, primary_category_term_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, published_at, content_mode, page_layout_key, custom_template_key, primary_category_term_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'published' THEN datetime('now') ELSE NULL END, ?, ?, ?, ?)",
     )
     .bind(type_key)
     .bind(&plan.target_locale)
@@ -2928,6 +3082,7 @@ pub async fn commit_entry_translation(
     .bind(&resolved_slug)
     .bind(&plan.title)
     .bind(&values_json)
+    .bind(status)
     .bind(status)
     .bind(plan.content_mode.as_str())
     .bind(plan.page_layout_key.as_deref())
@@ -2973,7 +3128,7 @@ pub async fn commit_entry_translation(
     crate::storage::permalinks::sync_claims_in_tx(&mut tx).await?;
 
     let row: EntryRow = sqlx::query_as(
-        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at
+        "SELECT id, content_type_key, slug, title, values_json, publication_status, version, created_at, updated_at, published_at
          FROM content_entries WHERE content_type_key = ? AND id = ?",
     )
     .bind(type_key)
@@ -3046,9 +3201,13 @@ pub async fn set_publication_status(
     }
     let result = sqlx::query(
         "UPDATE content_entries
-         SET publication_status = ?, version = version + 1, updated_at = datetime('now')
+         SET publication_status = ?,
+             published_at = CASE WHEN ? = 'published' THEN COALESCE(published_at, datetime('now')) ELSE published_at END,
+             version = version + 1,
+             updated_at = datetime('now')
          WHERE content_type_key = ? AND id = ? AND version = ?",
     )
+    .bind(status)
     .bind(status)
     .bind(type_key)
     .bind(id)

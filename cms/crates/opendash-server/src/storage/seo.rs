@@ -137,24 +137,51 @@ pub async fn resolve_public_entry_path_in_tx(
     crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
+pub async fn resolve_public_entry_paths_by_entry_ids_in_conn(
+    conn: &mut SqliteConnection,
+    ids: &[i64],
+) -> ApiResult<BTreeMap<i64, String>> {
+    let mut out = BTreeMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    for chunk in ids.chunks(500) {
+        let ids_json = serde_json::to_string(chunk)?;
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT e.id, c.path
+               FROM content_entries e
+               JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+               JOIN content_types t ON t.key = e.content_type_key
+               JOIN permalink_route_claims c
+                 ON c.target_kind = 'entry'
+                AND c.target_id = CAST(e.id AS TEXT)
+                AND c.locale = e.locale
+              WHERE e.id IN (SELECT value FROM json_each(?))
+                AND e.publication_status = 'published'
+                AND e.content_type_key NOT IN ('pattern', 'section')
+                AND t.provider_status = 'active'
+                AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1",
+        )
+        .bind(ids_json)
+        .fetch_all(&mut *conn)
+        .await?;
+        for (eid, path) in rows {
+            out.insert(eid, path);
+        }
+    }
+    Ok(out)
+}
+
 pub async fn resolve_public_entry_paths_by_ids(
     db: &SqlitePool,
     entries: &[ContentEntryRecord],
 ) -> ApiResult<BTreeMap<i64, String>> {
-    let mut out = BTreeMap::new();
     if entries.is_empty() {
-        return Ok(out);
+        return Ok(BTreeMap::new());
     }
+    let ids: Vec<i64> = entries.iter().map(|e| e.id).collect();
     let mut conn = db.acquire().await?;
-    for e in entries {
-        // Even a stale caller must not construct a public URL for a private CPT.
-        // Only resolve the bounded page supplied by the caller, never scan every
-        // custom path in the database.
-        if let Some(url) = resolve_public_entry_path_in_tx(&mut conn, e.id).await? {
-            out.insert(e.id, url);
-        }
-    }
-    Ok(out)
+    resolve_public_entry_paths_by_entry_ids_in_conn(&mut conn, &ids).await
 }
 
 /// Validates a custom path claim atomically inside an open transaction.

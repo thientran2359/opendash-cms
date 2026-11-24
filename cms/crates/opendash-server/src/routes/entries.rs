@@ -21,7 +21,8 @@ use crate::{
     hooks::HookDispatcher,
     storage::{
         content::load_content_type_definition, entries as entry_storage, entry_table,
-        media as media_storage, page::active_content_templates,
+        media as media_storage, page::active_content_templates, permalinks, public_content,
+        settings,
     },
 };
 
@@ -602,6 +603,70 @@ pub async fn entry_publication(
     Ok(([(header::ETAG, etag(record.version))], Json(record)).into_response())
 }
 
+pub(crate) async fn render_admin_single_fallback_html(
+    db: &SqlitePool,
+    record: &entry_storage::ContentEntryRecord,
+    effective: &opendash_core::content::EffectiveContentSchema,
+    actor_role: opendash_core::content::FieldRole,
+    selected_template: Option<&str>,
+) -> ApiResult<String> {
+    let type_key = &record.content_type_key;
+    let eligible =
+        public_content::batch_load_eligible_public_taxonomies(db, std::slice::from_ref(type_key))
+            .await?
+            .remove(type_key)
+            .unwrap_or_default();
+    let terms = public_content::batch_load_public_entry_terms(db, &[(record.id, type_key.clone())])
+        .await?
+        .remove(&record.id)
+        .unwrap_or_default();
+    let view = content_render::authenticated_preview_view_with_context(
+        record, effective, None, &terms, &eligible, actor_role,
+    );
+    let archive_url = {
+        let mut conn = db.acquire().await?;
+        permalinks::canonical_archive_path_in_tx(&mut conn, type_key, &record.locale).await?
+    };
+    let general = settings::get_general_for_locale(db, Some(&record.locale)).await?;
+    let pub_settings = settings::get_public(db).await?;
+    let site_ctx = content_render::SiteContext {
+        title: &general.site_title,
+        tagline: &general.tagline,
+        timezone: &general.timezone,
+        origin: pub_settings
+            .public_origin
+            .as_deref()
+            .map(|s| s.trim().trim_end_matches('/'))
+            .unwrap_or(""),
+        current_year: content_render::current_year_in_timezone(&general.timezone),
+    };
+    let fmt_cfg = crate::template_sec::RenderFormattingConfig {
+        timezone: general.timezone.clone(),
+    };
+    let definition = &effective.base.descriptor;
+    let breadcrumbs = content_render::single_breadcrumbs(
+        content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+        Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+        type_key,
+        &definition.label,
+        definition.settings.has_archive,
+        archive_url.clone(),
+        view.primary_category.as_ref(),
+        &view.title,
+        view.url.clone(),
+    );
+    content_render::render_single_with_context_for_locale(
+        definition,
+        &view,
+        selected_template,
+        &site_ctx,
+        archive_url.as_deref(),
+        &breadcrumbs,
+        &fmt_cfg,
+        &record.locale,
+    )
+}
+
 /// Persisted entry preview is private and never shares the public reader.
 pub async fn entry_preview(
     State(db): State<SqlitePool>,
@@ -615,14 +680,10 @@ pub async fn entry_preview(
             "Preview không hỗ trợ Pattern/Section.",
         ));
     }
-    let mut schema = content_schema(&db, &type_key).await?;
-    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key).await?;
-    if let Some(eff) = &effective
-        && !schema.fields.iter().any(|f| f.key == "body")
-        && let Some(body_fe) = eff.effective_fields.get("body")
-    {
-        schema.fields.push(body_fe.definition.clone());
-    }
+    let effective = crate::storage::content::load_effective_content_schema(&db, &type_key)
+        .await?
+        .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let schema = &effective.base.descriptor;
     let supports_builder = schema
         .settings
         .supports(opendash_core::content::ContentSupport::Builder);
@@ -638,14 +699,11 @@ pub async fn entry_preview(
         crate::auth::Role::Admin => opendash_core::content::FieldRole::Admin,
         crate::auth::Role::Editor => opendash_core::content::FieldRole::Editor,
     };
-    if let Some(eff) = &effective {
-        entry_storage::filter_entry_values_for_role(&mut entry, eff, actor_role);
-    }
-    let body_view_allowed = effective.as_ref().is_none_or(|eff| {
-        eff.effective_fields
-            .get("body")
-            .is_none_or(|fe| actor_role >= fe.definition.min_view_role)
-    });
+    entry_storage::filter_entry_values_for_role(&mut entry, &effective, actor_role);
+    let body_view_allowed = effective
+        .effective_fields
+        .get("body")
+        .is_none_or(|fe| actor_role >= fe.definition.min_view_role);
     let has_blocks = entry
         .values
         .get("body")
@@ -660,14 +718,26 @@ pub async fn entry_preview(
         {
             rendered.html
         } else {
-            let view = content_render::authenticated_preview_view(entry, &schema);
             let (_, selected_template) = active_content_templates(&db).await?;
-            content_render::render_single(&schema, &view, selected_template.as_deref())?
+            render_admin_single_fallback_html(
+                &db,
+                &entry,
+                &effective,
+                actor_role,
+                selected_template.as_deref(),
+            )
+            .await?
         }
     } else {
-        let view = content_render::authenticated_preview_view(entry, &schema);
         let (_, selected_template) = active_content_templates(&db).await?;
-        content_render::render_single(&schema, &view, selected_template.as_deref())?
+        render_admin_single_fallback_html(
+            &db,
+            &entry,
+            &effective,
+            actor_role,
+            selected_template.as_deref(),
+        )
+        .await?
     };
     let html = content_render::compose_document_with_seo(None, &raw_html, None, &seo_view)?;
     Ok((

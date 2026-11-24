@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Sqlite, SqliteConnection, SqlitePool, Transaction};
 
 use crate::{
-    auth::SessionContext,
-    content_render::{self, SiteContext},
+    auth::{Role, SessionContext},
+    content_render::{self, EntryView, PaginationView, PublicThemeContextInput, SiteContext},
     error::{ApiError, ApiResult},
     page::{self, RenderAnnotationScope, RenderedLayout},
     storage::{
@@ -28,7 +28,7 @@ use crate::{
             resolve_lists_in_tx,
         },
         builder_binding::{self, BindingResults},
-        content, entries, menu, settings, theme,
+        content, entries, menu, permalinks, public_content, settings, theme,
         theme::ActiveThemeV3,
     },
     template_sec::{self, PreviewCompositionBudget},
@@ -1408,13 +1408,293 @@ async fn render_preview_part(
     }
 }
 
+fn actor_field_role(actor: &SessionContext) -> FieldRole {
+    match actor.user.role {
+        Role::Admin => FieldRole::Admin,
+        Role::Editor => FieldRole::Editor,
+    }
+}
+
+fn normalized_origin(public_origin: Option<&str>) -> &str {
+    public_origin
+        .map(|s| s.trim().trim_end_matches('/'))
+        .unwrap_or("")
+}
+
+fn route_kind_for_candidate(kind: TemplateCandidateKind) -> &'static str {
+    match kind {
+        TemplateCandidateKind::Home => "home",
+        TemplateCandidateKind::Page | TemplateCandidateKind::PageLayout => "page",
+        TemplateCandidateKind::Single
+        | TemplateCandidateKind::SingleCustom
+        | TemplateCandidateKind::Singular => "single",
+        TemplateCandidateKind::Archive => "archive",
+        TemplateCandidateKind::Taxonomy => "taxonomy",
+        TemplateCandidateKind::Index => "index",
+        TemplateCandidateKind::NotFound => "not_found",
+        TemplateCandidateKind::Part => "part",
+    }
+}
+
+fn build_placeholder_preview_entry(type_key: &str) -> EntryView {
+    let mut terms = BTreeMap::new();
+    terms.insert("category".to_owned(), Vec::new());
+    terms.insert("tag".to_owned(), Vec::new());
+    EntryView {
+        id: 0,
+        type_key: type_key.to_owned(),
+        title: "Nội dung xem trước".to_owned(),
+        slug: "preview".to_owned(),
+        url: Some("/".to_owned()),
+        created_at: String::new(),
+        updated_at: String::new(),
+        published_at: None,
+        excerpt: String::new(),
+        reading_time_minutes: 0,
+        values: BTreeMap::new(),
+        fields: Vec::new(),
+        cover_url: None,
+        terms,
+        all_terms: Vec::new(),
+        primary_category: None,
+    }
+}
+
+struct BuiltEntryPreviewContext {
+    view: EntryView,
+    archive_url: Option<String>,
+    breadcrumbs: Vec<content_render::BreadcrumbItem>,
+    theme_context: serde_json::Value,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn build_entry_preview_context_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    record: &entries::ContentEntryRecord,
+    effective_schema: &EffectiveContentSchema,
+    actor_role: FieldRole,
+    active: Option<&ActiveThemeV3>,
+    site: &SiteContext<'_>,
+    options: &BTreeMap<String, serde_json::Value>,
+    menus: &BTreeMap<String, menu::MenuViewModel>,
+    route_kind: &str,
+) -> ApiResult<BuiltEntryPreviewContext> {
+    let definition = &effective_schema.base.descriptor;
+    let eligible = public_content::load_eligible_public_taxonomies_in_conn(
+        &mut **tx,
+        &record.content_type_key,
+    )
+    .await?;
+    let mut terms_map = public_content::batch_load_public_entry_terms_in_conn(
+        &mut **tx,
+        &[(record.id, record.content_type_key.clone())],
+    )
+    .await?;
+    let terms = terms_map.remove(&record.id).unwrap_or_default();
+    let view = content_render::authenticated_preview_view_with_context(
+        record,
+        effective_schema,
+        None,
+        &terms,
+        &eligible,
+        actor_role,
+    );
+    let archive_url = permalinks::canonical_archive_path_in_tx(
+        &mut **tx,
+        &record.content_type_key,
+        &record.locale,
+    )
+    .await?;
+    let breadcrumbs = content_render::single_breadcrumbs(
+        content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+        Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+        &record.content_type_key,
+        &definition.label,
+        definition.settings.has_archive,
+        archive_url.clone(),
+        view.primary_category.as_ref(),
+        &view.title,
+        view.url.clone(),
+    );
+    let ct_value = serde_json::to_value(definition)?;
+    let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
+    let empty_entries = Vec::new();
+    let pagination = PaginationView::empty();
+    let theme_context = content_render::build_public_theme_context(PublicThemeContextInput {
+        site,
+        options,
+        theme_assets: &theme_assets,
+        menus,
+        route_kind,
+        route_path: None,
+        breadcrumbs: &breadcrumbs,
+        pagination: &pagination,
+        archive_url: archive_url.as_deref(),
+        previous_url: None,
+        next_url: None,
+        entries: &empty_entries,
+        related_entries: &empty_entries,
+        recent_posts: &empty_entries,
+        taxonomy: None,
+        content_type: Some(&ct_value),
+        entry: Some(&view),
+    })?;
+    Ok(BuiltEntryPreviewContext {
+        view,
+        archive_url,
+        breadcrumbs,
+        theme_context,
+    })
+}
+
+fn build_placeholder_preview_theme_context(
+    target: &TemplateCandidate,
+    active: Option<&ActiveThemeV3>,
+    site: &SiteContext<'_>,
+    options: &BTreeMap<String, serde_json::Value>,
+    menus: &BTreeMap<String, menu::MenuViewModel>,
+) -> ApiResult<serde_json::Value> {
+    use TemplateCandidateKind as K;
+    let route_kind = route_kind_for_candidate(target.kind);
+    let theme_assets = active.map(ActiveThemeV3::asset_url_map).unwrap_or_default();
+    let empty_entries = Vec::new();
+    let pagination = PaginationView::empty();
+
+    let archive_url: Option<&str> = match target.kind {
+        K::Single | K::SingleCustom | K::Singular | K::Index | K::Archive => Some("/posts"),
+        K::Home | K::Page | K::PageLayout | K::Taxonomy | K::NotFound | K::Part => None,
+    };
+
+    let placeholder_entry = matches!(
+        target.kind,
+        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
+    )
+    .then(|| {
+        let ct_key = target.content_type.as_deref().unwrap_or(
+            if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+                "page"
+            } else {
+                "post"
+            },
+        );
+        build_placeholder_preview_entry(ct_key)
+    });
+
+    let ct_value: Option<serde_json::Value> = if matches!(
+        target.kind,
+        K::Home | K::Page | K::PageLayout | K::Single | K::SingleCustom | K::Singular | K::Index
+    ) {
+        let ct_key = target.content_type.as_deref().unwrap_or(
+            if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+                "page"
+            } else {
+                "post"
+            },
+        );
+        let label = if matches!(target.kind, K::Home | K::Page | K::PageLayout) {
+            "Trang"
+        } else {
+            "Bài viết"
+        };
+        Some(serde_json::json!({ "key": ct_key, "label": label }))
+    } else if target.kind == K::Archive {
+        let ct_key = target.content_type.as_deref().unwrap_or("post");
+        Some(serde_json::json!({ "key": ct_key, "label": ct_key }))
+    } else {
+        None
+    };
+
+    let taxonomy_value: Option<serde_json::Value> = if target.kind == K::Taxonomy {
+        let tax_key = target.taxonomy.as_deref().unwrap_or("category");
+        Some(serde_json::json!({
+            "key": tax_key,
+            "id": 0,
+            "slug": "sample-term",
+            "name": "Chuyên mục mẫu",
+        }))
+    } else {
+        None
+    };
+
+    let breadcrumbs = match target.kind {
+        K::Home => content_render::home_breadcrumbs(
+            content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+            Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+        ),
+        K::Archive => {
+            let ct_key = target.content_type.as_deref().unwrap_or("post");
+            content_render::archive_breadcrumbs(
+                content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+                Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+                ct_key,
+                archive_url.map(str::to_owned),
+            )
+        }
+        K::Taxonomy => content_render::taxonomy_breadcrumbs(
+            content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+            Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+            Vec::new(),
+            "Chuyên mục mẫu",
+            None,
+        ),
+        K::NotFound => content_render::not_found_breadcrumbs(
+            content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+            Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+            content_render::DEFAULT_BREADCRUMB_NOT_FOUND_LABEL,
+        ),
+        K::Part => Vec::new(),
+        _ => {
+            let ct_key = target.content_type.as_deref().unwrap_or("page");
+            content_render::single_breadcrumbs(
+                content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+                Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+                ct_key,
+                if matches!(target.kind, K::Page | K::PageLayout) {
+                    "Trang"
+                } else {
+                    "Bài viết"
+                },
+                archive_url.is_some(),
+                archive_url.map(str::to_owned),
+                None,
+                placeholder_entry
+                    .as_ref()
+                    .map(|e| e.title.as_str())
+                    .unwrap_or("Nội dung xem trước"),
+                placeholder_entry.as_ref().and_then(|e| e.url.clone()),
+            )
+        }
+    };
+
+    content_render::build_public_theme_context(PublicThemeContextInput {
+        site,
+        options,
+        theme_assets: &theme_assets,
+        menus,
+        route_kind,
+        route_path: None,
+        breadcrumbs: &breadcrumbs,
+        pagination: &pagination,
+        archive_url,
+        previous_url: None,
+        next_url: None,
+        entries: &empty_entries,
+        related_entries: &empty_entries,
+        recent_posts: &empty_entries,
+        taxonomy: taxonomy_value.as_ref(),
+        content_type: ct_value.as_ref(),
+        entry: placeholder_entry.as_ref(),
+    })
+}
+
 async fn resolve_preview_entry(
     tx: &mut Transaction<'_, Sqlite>,
     target: &TemplateCandidate,
     sample: Option<&TemplatePreviewEntry>,
     active: Option<&ActiveThemeV3>,
     preview_locale: &str,
-) -> ApiResult<Option<(entries::ContentEntryRecord, ContentTypeDefinition)>> {
+    actor_role: FieldRole,
+) -> ApiResult<Option<(entries::ContentEntryRecord, EffectiveContentSchema)>> {
     use TemplateCandidateKind as K;
     let selected = if let Some(sample) = sample {
         if sample.entry_id <= 0 || !valid_content_type_key(&sample.type_key) {
@@ -1493,8 +1773,8 @@ async fn resolve_preview_entry(
                 && s.base.declaration_state == DeclarationState::Declared
         })
         .ok_or_else(|| ApiError::not_found("Preview entry type not available."))?;
-    entries::filter_entry_values_for_role(&mut entry, &schema, FieldRole::Admin);
-    Ok(Some((entry, schema.base.descriptor)))
+    entries::filter_entry_values_for_role(&mut entry, &schema, actor_role);
+    Ok(Some((entry, schema)))
 }
 
 pub async fn preview_typed_override(
@@ -1575,16 +1855,19 @@ pub async fn preview_typed_override_with_cache_and_locale(
     let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut budget = PreviewCompositionBudget::new();
     let graph = preview_part_graph(&mut tx, target, document, active.as_ref(), &mut budget).await?;
+    let actor_role = actor_field_role(actor);
     let entry = resolve_preview_entry(
         &mut tx,
         target,
         preview_entry,
         active.as_ref(),
         &effective_locale,
+        actor_role,
     )
     .await?;
     let general =
         settings::get_general_in_conn_for_locale(&mut *tx, Some(&effective_locale)).await?;
+    let pub_settings = settings::get_public_in_conn(&mut *tx).await?;
     state.timezone = general.timezone.clone();
     let fmt_cfg = template_sec::RenderFormattingConfig {
         timezone: state.timezone.clone(),
@@ -1592,6 +1875,9 @@ pub async fn preview_typed_override_with_cache_and_locale(
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
+        timezone: &general.timezone,
+        origin: normalized_origin(pub_settings.public_origin.as_deref()),
+        current_year: content_render::current_year_in_timezone(&general.timezone),
     };
     let manifest_json = active
         .as_ref()
@@ -1621,20 +1907,29 @@ pub async fn preview_typed_override_with_cache_and_locale(
     } else {
         BTreeMap::new()
     };
-    let mut theme_context = serde_json::json!({ "site": site, "options": options, "theme_options": options, "menus": menus });
     let mut body_diagnostics = Vec::new();
     let mut route = None;
-    let body = if let Some((record, definition)) = &entry {
+    let (theme_context, body) = if let Some((record, effective_schema)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
-        let view = content_render::authenticated_preview_view(record.clone(), definition);
-        theme_context["entry"] = serde_json::to_value(&view)?;
-        theme_context["content_type"] = serde_json::to_value(definition)?;
+        let built = build_entry_preview_context_in_tx(
+            &mut tx,
+            record,
+            effective_schema,
+            actor_role,
+            active.as_ref(),
+            &site,
+            &options,
+            &menus,
+            route_kind_for_candidate(target.kind),
+        )
+        .await?;
+        let definition = &effective_schema.base.descriptor;
         let raw_body_has_blocks = record
             .values
             .get("body")
             .and_then(serde_json::Value::as_str)
             .is_some_and(opendash_core::builder_blocks::contains_blocks);
-        if raw_body_has_blocks
+        let body = if raw_body_has_blocks
             && definition.settings.supports(ContentSupport::Builder)
             && record.content_type_key != "pattern"
         {
@@ -1662,15 +1957,33 @@ pub async fn preview_typed_override_with_cache_and_locale(
         }
         .map(Ok)
         .unwrap_or_else(|| {
-            let html = content_render::render_single_with_site_and_archive(
-                definition, &view, None, &site, None,
+            let html = content_render::render_single_with_context_for_locale(
+                definition,
+                &built.view,
+                None,
+                &site,
+                built.archive_url.as_deref(),
+                &built.breadcrumbs,
+                &fmt_cfg,
+                &effective_locale,
             )?;
             crate::document::normalize_public_document(&html)
                 .map(|doc| doc.body_fragment)
                 .map_err(|_| ApiError::bad_request("Invalid preview body."))
-        })?
+        })?;
+        (built.theme_context, body)
     } else {
-        "<div data-template-preview-placeholder>Preview content</div>".to_owned()
+        let theme_context = build_placeholder_preview_theme_context(
+            target,
+            active.as_ref(),
+            &site,
+            &options,
+            &menus,
+        )?;
+        (
+            theme_context,
+            "<div data-template-preview-placeholder>Preview content</div>".to_owned(),
+        )
     };
     if body.len() > template_sec::MAX_RENDERED_HTML_BYTES {
         return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
@@ -2160,6 +2473,322 @@ pub async fn render_resolved_public_builder_with_cache_for_locale(
     Ok(rendered)
 }
 
+#[derive(Debug, Default)]
+pub struct PrecompiledPublicShell {
+    pub header: Option<template_sec::CompiledCsecComposition>,
+    pub footer: Option<template_sec::CompiledCsecComposition>,
+}
+
+pub struct PublicSurfaceInspection {
+    pub precompiled_body: Option<template_sec::CompiledCsecComposition>,
+    pub precompiled_shell: PrecompiledPublicShell,
+    pub uses_related_entries: bool,
+    pub uses_recent_posts: bool,
+    pub has_shell_or_theme: bool,
+}
+
+fn csec_content_kind_for_target_key(target_key: &str) -> template_sec::CsecContentKind {
+    if target_key == "index" {
+        template_sec::CsecContentKind::Index
+    } else if matches!(target_key, "home" | "page" | "singular" | "single")
+        || target_key.starts_with("single:")
+        || target_key.starts_with("single_custom:")
+        || target_key.starts_with("page_layout:")
+    {
+        template_sec::CsecContentKind::Entry
+    } else {
+        template_sec::CsecContentKind::NonEntry
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn inspect_part_slot_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    key: &str,
+    depth: usize,
+    stack: &[String],
+    active: Option<&ActiveThemeV3>,
+    url_policy: &template_sec::ThemeUrlPolicy,
+    uses_related_entries: &mut bool,
+    uses_recent_posts: &mut bool,
+) -> ApiResult<(bool, Option<template_sec::CompiledCsecComposition>)> {
+    let target = TemplateCandidate {
+        part_key: Some(key.to_owned()),
+        ..candidate(TemplateCandidateKind::Part)
+    };
+    let canonical = target.canonical_key().map_err(ApiError::internal)?;
+    if stack.contains(&canonical) || depth > 3 {
+        return Err(ApiError::internal("Template part cycle or depth limit."));
+    }
+    if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+        let (_, slots) = document_parts_and_slot_count(&row.document)?;
+        validate_content_slots(&target, slots)?;
+        let mut next_stack = stack.to_vec();
+        next_stack.push(canonical);
+        Box::pin(inspect_db_document_surfaces_in_tx(
+            tx,
+            &row.document,
+            depth,
+            &next_stack,
+            active,
+            url_policy,
+            uses_related_entries,
+            uses_recent_posts,
+        ))
+        .await?;
+        return Ok((true, None));
+    }
+    let Some(active) = active else {
+        return Ok((false, None));
+    };
+    let Some(source) = active.parts.get(key) else {
+        return Ok((false, None));
+    };
+    check_theme_part_depth(key, &active.parts, depth, url_policy)?;
+    let compiled = template_sec::validate_and_compile_csec_composition_with_theme_urls(
+        &canonical,
+        source,
+        &active.parts,
+        template_sec::CsecContentKind::NonEntry,
+        url_policy,
+    )
+    .map_err(ApiError::internal)?;
+    *uses_related_entries |= compiled.uses_related_entries;
+    *uses_recent_posts |= compiled.uses_recent_posts;
+    Ok((true, Some(compiled)))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn inspect_db_document_surfaces_in_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    document: &BuilderDocument,
+    depth: usize,
+    stack: &[String],
+    active: Option<&ActiveThemeV3>,
+    url_policy: &template_sec::ThemeUrlPolicy,
+    uses_related_entries: &mut bool,
+    uses_recent_posts: &mut bool,
+) -> ApiResult<()> {
+    for key in document_parts_and_slot_count(document)?.0 {
+        Box::pin(inspect_part_slot_in_tx(
+            tx,
+            &key,
+            depth + 1,
+            stack,
+            active,
+            url_policy,
+            uses_related_entries,
+            uses_recent_posts,
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+pub async fn inspect_public_surfaces_and_precompile(
+    db: &SqlitePool,
+    resolution: &TemplateResolution,
+    active: Option<&ActiveThemeV3>,
+    url_policy: &template_sec::ThemeUrlPolicy,
+) -> ApiResult<PublicSurfaceInspection> {
+    let mut tx = db.begin().await?;
+    let mut precompiled_body = None;
+    let mut precompiled_shell = PrecompiledPublicShell::default();
+    let mut uses_related_entries = false;
+    let mut uses_recent_posts = false;
+
+    let body_canvas_layout = match resolution {
+        TemplateResolution::DbOverride(record) => {
+            let stack = vec![record.canonical_target_key.clone()];
+            inspect_db_document_surfaces_in_tx(
+                &mut tx,
+                &record.document,
+                0,
+                &stack,
+                active,
+                url_policy,
+                &mut uses_related_entries,
+                &mut uses_recent_posts,
+            )
+            .await?;
+            record.target.kind == TemplateCandidateKind::PageLayout
+        }
+        TemplateResolution::ActiveTheme { target_key, html } => {
+            let empty_parts = BTreeMap::new();
+            let parts = active.map(|a| &a.parts).unwrap_or(&empty_parts);
+            let compiled = template_sec::validate_and_compile_csec_composition_with_theme_urls(
+                target_key,
+                html,
+                parts,
+                csec_content_kind_for_target_key(target_key),
+                url_policy,
+            )
+            .map_err(ApiError::internal)?;
+            uses_related_entries |= compiled.uses_related_entries;
+            uses_recent_posts |= compiled.uses_recent_posts;
+            precompiled_body = Some(compiled);
+            target_key.starts_with("page_layout:")
+        }
+        TemplateResolution::CoreFallback => false,
+    };
+
+    let mut shell_part_present = false;
+    if !body_canvas_layout {
+        let (has_header, compiled_header) = inspect_part_slot_in_tx(
+            &mut tx,
+            "header",
+            0,
+            &[],
+            active,
+            url_policy,
+            &mut uses_related_entries,
+            &mut uses_recent_posts,
+        )
+        .await?;
+        let (has_footer, compiled_footer) = inspect_part_slot_in_tx(
+            &mut tx,
+            "footer",
+            0,
+            &[],
+            active,
+            url_policy,
+            &mut uses_related_entries,
+            &mut uses_recent_posts,
+        )
+        .await?;
+        shell_part_present = has_header || has_footer;
+        precompiled_shell.header = compiled_header;
+        precompiled_shell.footer = compiled_footer;
+    }
+
+    tx.commit().await?;
+    let has_shell_or_theme =
+        !matches!(resolution, TemplateResolution::CoreFallback) || shell_part_present;
+    Ok(PublicSurfaceInspection {
+        precompiled_body,
+        precompiled_shell,
+        uses_related_entries,
+        uses_recent_posts,
+        has_shell_or_theme,
+    })
+}
+
+pub async fn resolve_and_render_header_footer_with_context(
+    db: &SqlitePool,
+    active_v3: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    precompiled_shell: &PrecompiledPublicShell,
+    fmt_cfg: &template_sec::RenderFormattingConfig,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
+    resolve_and_render_header_footer_with_context_for_locale(
+        db,
+        active_v3,
+        theme_context,
+        precompiled_shell,
+        None,
+        fmt_cfg,
+        budget,
+        cache,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn resolve_and_render_header_footer_with_context_for_locale(
+    db: &SqlitePool,
+    active_v3: Option<&ActiveThemeV3>,
+    theme_context: &serde_json::Value,
+    precompiled_shell: &PrecompiledPublicShell,
+    locale: Option<&str>,
+    fmt_cfg: &template_sec::RenderFormattingConfig,
+    budget: &mut PublicCompositionBudget,
+    cache: &page::BlockTemplateCache,
+) -> ApiResult<(Option<String>, Option<String>, bool)> {
+    let mut tx = db.begin().await?;
+    let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
+    let state = builder::read_home_tx(&mut tx).await?;
+    let url_policy = active_theme_url_policy(active_v3)?;
+    let context = PublicBuilderContext {
+        state: &state,
+        active: active_v3,
+        theme_context,
+        route_entry: None,
+        render_locale: &effective_locale,
+        cache,
+        url_policy: &url_policy,
+        fmt_cfg,
+    };
+
+    async fn render_shell_slot(
+        tx: &mut Transaction<'_, Sqlite>,
+        slot_key: &str,
+        precompiled: Option<&template_sec::CompiledCsecComposition>,
+        context: &PublicBuilderContext<'_>,
+        budget: &mut PublicCompositionBudget,
+    ) -> ApiResult<Option<RenderedLayout>> {
+        let target = TemplateCandidate {
+            part_key: Some(slot_key.to_owned()),
+            ..candidate(TemplateCandidateKind::Part)
+        };
+        let canonical = target.canonical_key().map_err(ApiError::internal)?;
+        if let Some(row) = get_typed_override_on_connection(&mut **tx, &canonical).await? {
+            let (_, slots) = document_parts_and_slot_count(&row.document)?;
+            validate_content_slots(&target, slots)?;
+            let scope = part_scope_prefix(slot_key, budget.expansions);
+            return Ok(Some(
+                Box::pin(render_public_builder(
+                    tx,
+                    &row.document,
+                    None,
+                    0,
+                    &[canonical],
+                    context,
+                    budget,
+                    &scope,
+                ))
+                .await?,
+            ));
+        }
+        if let Some(compiled) = precompiled {
+            let html = budget.render_theme_with_config(
+                compiled,
+                context.theme_context,
+                None,
+                context.fmt_cfg,
+            )?;
+            return Ok(Some(RenderedLayout {
+                html,
+                diagnostics: Vec::new(),
+                has_active_contact_form: false,
+            }));
+        }
+        render_public_part(tx, slot_key, 0, &[], context, budget).await
+    }
+
+    let header = render_shell_slot(
+        &mut tx,
+        "header",
+        precompiled_shell.header.as_ref(),
+        &context,
+        budget,
+    )
+    .await?;
+    let footer = render_shell_slot(
+        &mut tx,
+        "footer",
+        precompiled_shell.footer.as_ref(),
+        &context,
+        budget,
+    )
+    .await?;
+    let has_form = header.as_ref().is_some_and(|r| r.has_active_contact_form)
+        || footer.as_ref().is_some_and(|r| r.has_active_contact_form);
+    tx.commit().await?;
+    Ok((header.map(|r| r.html), footer.map(|r| r.html), has_form))
+}
+
 pub async fn resolve_and_render_header_footer(
     db: &SqlitePool,
     active_v3: Option<&ActiveThemeV3>,
@@ -2214,33 +2843,46 @@ pub async fn resolve_and_render_header_footer_with_cache_for_locale(
     budget: &mut PublicCompositionBudget,
     cache: &page::BlockTemplateCache,
 ) -> ApiResult<(Option<String>, Option<String>, bool)> {
-    let menus = crate::storage::menu::resolve_active_slot_menus_for_locale(db, locale).await?;
-    let part_context = serde_json::json!({
-        "site": site_ctx, "options": theme_opts, "theme_options": theme_opts, "menus": menus,
-    });
-    let mut tx = db.begin().await?;
-    let effective_locale = settings::resolve_requested_locale_in_conn(&mut *tx, locale).await?;
-    let state = builder::read_home_tx(&mut tx).await?;
-    let url_policy = active_theme_url_policy(active_v3)?;
+    let menus = crate::storage::menu::resolve_active_slot_menus_for_path(db, None, locale).await?;
+    let theme_assets = active_v3
+        .map(ActiveThemeV3::asset_url_map)
+        .unwrap_or_default();
+    let pagination = PaginationView::empty();
+    let empty_entries = Vec::new();
+    let part_context = content_render::build_public_theme_context(PublicThemeContextInput {
+        site: site_ctx,
+        options: theme_opts,
+        theme_assets: &theme_assets,
+        menus: &menus,
+        route_kind: "part",
+        route_path: None,
+        breadcrumbs: &[],
+        pagination: &pagination,
+        archive_url: None,
+        previous_url: None,
+        next_url: None,
+        entries: &empty_entries,
+        related_entries: &empty_entries,
+        recent_posts: &empty_entries,
+        taxonomy: None,
+        content_type: None,
+        entry: None,
+    })?;
     let fmt_cfg = template_sec::RenderFormattingConfig {
-        timezone: state.timezone.clone(),
+        timezone: site_ctx.timezone.to_owned(),
     };
-    let context = PublicBuilderContext {
-        state: &state,
-        active: active_v3,
-        theme_context: &part_context,
-        route_entry: None,
-        render_locale: &effective_locale,
+    let empty_shell = PrecompiledPublicShell::default();
+    resolve_and_render_header_footer_with_context_for_locale(
+        db,
+        active_v3,
+        &part_context,
+        &empty_shell,
+        locale,
+        &fmt_cfg,
+        budget,
         cache,
-        url_policy: &url_policy,
-        fmt_cfg: &fmt_cfg,
-    };
-    let header = render_public_part(&mut tx, "header", 0, &[], &context, budget).await?;
-    let footer = render_public_part(&mut tx, "footer", 0, &[], &context, budget).await?;
-    let has_form = header.as_ref().is_some_and(|r| r.has_active_contact_form)
-        || footer.as_ref().is_some_and(|r| r.has_active_contact_form);
-    tx.commit().await?;
-    Ok((header.map(|r| r.html), footer.map(|r| r.html), has_form))
+    )
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -2502,10 +3144,12 @@ async fn build_preview_context_in_tx(
     locale: &str,
 ) -> ApiResult<(
     settings::GeneralSettings,
+    settings::PublicSiteSettings,
     BTreeMap<String, serde_json::Value>,
     BTreeMap<String, menu::MenuViewModel>,
 )> {
     let mut general = settings::get_general_in_conn_for_locale(&mut **tx, Some(locale)).await?;
+    let pub_settings = settings::get_public_in_conn(&mut **tx).await?;
     if let Some(g) = transient.and_then(|t| t.general.as_ref()) {
         let valid = settings::GeneralSettingsInput {
             site_title: g.site_title.clone(),
@@ -2570,7 +3214,7 @@ async fn build_preview_context_in_tx(
             }
         }
         for (slot_key, menu_id) in assignments {
-            if let Some(view) = menu::resolve_menu_view_in_tx(tx, menu_id).await? {
+            if let Some(view) = menu::resolve_menu_view_for_path_in_tx(tx, menu_id, None).await? {
                 menus.insert(slot_key, view);
             }
         }
@@ -2582,7 +3226,7 @@ async fn build_preview_context_in_tx(
             "Không có theme v3 đang kích hoạt để xem trước menu_slots.",
         ));
     }
-    Ok((general, options, menus))
+    Ok((general, pub_settings, options, menus))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2779,7 +3423,7 @@ pub async fn preview_studio_with_cache_and_locale(
     let active = theme::load_active_theme_v3_in_conn(&mut tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut state = builder::read_home_tx(&mut tx).await?;
-    let (general, options, menus) =
+    let (general, pub_settings, options, menus) =
         build_preview_context_in_tx(&mut tx, active.as_ref(), transient, &effective_locale).await?;
     state.site_options = options.clone();
     state.timezone = general.timezone.clone();
@@ -2789,6 +3433,9 @@ pub async fn preview_studio_with_cache_and_locale(
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
+        timezone: &general.timezone,
+        origin: normalized_origin(pub_settings.public_origin.as_deref()),
+        current_year: content_render::current_year_in_timezone(&general.timezone),
     };
 
     let default_home_entry: Option<TemplatePreviewEntry> = if preview_entry.is_none()
@@ -2816,36 +3463,42 @@ pub async fn preview_studio_with_cache_and_locale(
         None
     };
     let effective_sample = preview_entry.or(default_home_entry.as_ref());
+    let actor_role = actor_field_role(actor);
     let entry = resolve_preview_entry(
         &mut tx,
         target,
         effective_sample,
         active.as_ref(),
         &effective_locale,
+        actor_role,
     )
     .await?;
 
-    let mut theme_context = serde_json::json!({
-        "site": site,
-        "options": options,
-        "theme_options": options,
-        "menus": menus,
-    });
     let mut diagnostics = Vec::new();
     let mut has_active_contact_form = false;
     let mut route = None;
     let mut shared_rb = page::RenderBudget::new();
-    let body = if let Some((record, definition)) = &entry {
+    let (mut theme_context, body) = if let Some((record, effective_schema)) = &entry {
         route = Some((record.content_type_key.as_str(), record.slug.as_str()));
-        let view = content_render::authenticated_preview_view(record.clone(), definition);
-        theme_context["entry"] = serde_json::to_value(&view)?;
-        theme_context["content_type"] = serde_json::to_value(definition)?;
+        let built = build_entry_preview_context_in_tx(
+            &mut tx,
+            record,
+            effective_schema,
+            actor_role,
+            active.as_ref(),
+            &site,
+            &options,
+            &menus,
+            route_kind_for_candidate(target.kind),
+        )
+        .await?;
+        let definition = &effective_schema.base.descriptor;
         let raw_body_has_blocks = record
             .values
             .get("body")
             .and_then(serde_json::Value::as_str)
             .is_some_and(opendash_core::builder_blocks::contains_blocks);
-        if raw_body_has_blocks
+        let body = if raw_body_has_blocks
             && definition.settings.supports(ContentSupport::Builder)
             && record.content_type_key != "pattern"
         {
@@ -2872,47 +3525,33 @@ pub async fn preview_studio_with_cache_and_locale(
         }
         .map(Ok)
         .unwrap_or_else(|| {
-            let html = content_render::render_single_with_site_and_archive(
-                definition, &view, None, &site, None,
+            let html = content_render::render_single_with_context_for_locale(
+                definition,
+                &built.view,
+                None,
+                &site,
+                built.archive_url.as_deref(),
+                &built.breadcrumbs,
+                &fmt_cfg,
+                &effective_locale,
             )?;
             crate::document::normalize_public_document(&html)
                 .map(|doc| doc.body_fragment)
                 .map_err(|_| ApiError::bad_request("Invalid preview body."))
-        })?
+        })?;
+        (built.theme_context, body)
     } else {
-        if matches!(
-            target.kind,
-            K::Home
-                | K::Page
-                | K::PageLayout
-                | K::Single
-                | K::SingleCustom
-                | K::Singular
-                | K::Index
-        ) {
-            theme_context["entry"] = serde_json::json!({
-                "title": "Nội dung xem trước",
-                "slug": "preview",
-                "url": "/",
-                "excerpt": "",
-                "values": {},
-                "fields": {},
-            });
-            theme_context["content_type"] = serde_json::json!({
-                "key": target.content_type.as_deref().unwrap_or("page"),
-                "label": "Trang",
-            });
-        } else if target.kind == K::Archive {
-            let ct_key = target.content_type.as_deref().unwrap_or("post");
-            theme_context["content_type"] = serde_json::json!({
-                "key": ct_key,
-                "label": ct_key,
-            });
-            theme_context["entries"] = serde_json::json!([]);
-            theme_context["previous_url"] = serde_json::Value::Null;
-            theme_context["next_url"] = serde_json::Value::Null;
-        }
-        "<div data-template-preview-placeholder>Preview content</div>".to_owned()
+        let theme_context = build_placeholder_preview_theme_context(
+            target,
+            active.as_ref(),
+            &site,
+            &options,
+            &menus,
+        )?;
+        (
+            theme_context,
+            "<div data-template-preview-placeholder>Preview content</div>".to_owned(),
+        )
     };
     if body.len() > template_sec::MAX_RENDERED_HTML_BYTES {
         return Err(ApiError::bad_request("Preview output exceeds 512 KiB."));
@@ -3148,11 +3787,10 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
         .await?
         .ok_or_else(|| ApiError::not_found("Content entry not found."))?;
     entries::filter_entry_values_for_role(&mut record, schema, actor_role);
-    let definition = &schema.base.descriptor;
     let active = theme::load_active_theme_v3_in_conn(&mut **tx, themes_root).await?;
     let url_policy = active_theme_url_policy(active.as_ref())?;
     let mut state = builder::read_home_tx(tx).await?;
-    let (general, options, menus) =
+    let (general, pub_settings, options, menus) =
         build_preview_context_in_tx(tx, active.as_ref(), None, &record.locale).await?;
     state.site_options = options.clone();
     state.timezone = general.timezone.clone();
@@ -3162,16 +3800,28 @@ pub(super) async fn wrap_entry_body_in_preview_shell_in_tx_with_budget(
     let site = SiteContext {
         title: &general.site_title,
         tagline: &general.tagline,
+        timezone: &general.timezone,
+        origin: normalized_origin(pub_settings.public_origin.as_deref()),
+        current_year: content_render::current_year_in_timezone(&general.timezone),
     };
-    let view = content_render::authenticated_preview_view(record.clone(), definition);
-    let mut theme_context = serde_json::json!({
-        "site": site,
-        "options": options,
-        "theme_options": options,
-        "menus": menus,
-        "entry": view,
-        "content_type": definition,
-    });
+    let shell_route_kind = if schema.base.descriptor.key == "page" {
+        "page"
+    } else {
+        "single"
+    };
+    let built = build_entry_preview_context_in_tx(
+        tx,
+        &record,
+        schema,
+        actor_role,
+        active.as_ref(),
+        &site,
+        &options,
+        &menus,
+        shell_route_kind,
+    )
+    .await?;
+    let mut theme_context = built.theme_context;
     let ctx_target = if schema.base.descriptor.key == "page" {
         PublicTemplateContext::Page {
             page_layout_key: page_layout_key.map(ToOwned::to_owned),
