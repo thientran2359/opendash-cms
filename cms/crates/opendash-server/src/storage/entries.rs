@@ -1402,12 +1402,12 @@ pub(super) async fn verify_schema_token_in_tx(
         crate::storage::content::load_effective_content_schema_in_tx(tx, type_key).await?
     else {
         return Err(ApiError::not_found(format!(
-            "Kh?ng t?m th?y lo?i n?i dung '{type_key}'."
+            "Không tìm thấy loại nội dung '{type_key}'."
         )));
     };
     if eff.schema_token != expected_schema_token {
         return Err(ApiError::conflict(format!(
-            "schema_version_conflict: schema_token hi?n t?i l? '{}', kh?ng kh?p '{}'.",
+            "schema_version_conflict: schema_token hiện tại là '{}', không khớp '{}'.",
             eff.schema_token, expected_schema_token
         )));
     }
@@ -1456,7 +1456,7 @@ pub async fn create_entry_with_schema_fence(
     .await;
     let id = match result {
         Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
-            return Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."));
+            return Err(ApiError::conflict("Slug đã tồn tại trong loại nội dung."));
         }
         other => other?.last_insert_rowid(),
     };
@@ -1525,12 +1525,12 @@ pub async fn update_entry_with_schema_fence(
     .await;
     match result {
         Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
-            Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."))
+            Err(ApiError::conflict("Slug đã tồn tại trong loại nội dung."))
         }
         other => {
             if other?.rows_affected() == 0 {
                 return Err(ApiError::precondition_failed(
-                    "Phi?n b?n n?i dung ?? thay ??i. H?y t?i l?i tr??c khi l?u.",
+                    "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
                 ));
             }
             if let Some(ids) = &input.term_ids {
@@ -1803,39 +1803,39 @@ pub async fn prepare_composite_entry_save(
         .ok_or_else(|| {
             ApiError(
                 axum::http::StatusCode::PRECONDITION_REQUIRED,
-                "missing_schema_token: Thi?u expected_schema_token.".into(),
+                "missing_schema_token: Thiếu expected_schema_token.".into(),
             )
         })?;
 
     let effective = crate::storage::content::load_effective_content_schema(db, type_key)
         .await?
         .ok_or_else(|| {
-            ApiError::not_found(format!("Kh?ng t?m th?y lo?i n?i dung '{type_key}'."))
+            ApiError::not_found(format!("Không tìm thấy loại nội dung '{type_key}'."))
         })?;
 
     if client_token != effective.schema_token {
         return Err(ApiError::conflict(format!(
-            "schema_version_conflict: schema_token hi?n t?i l? '{}'.",
+            "schema_version_conflict: schema_token hiện tại là '{}'.",
             effective.schema_token
         )));
     }
 
     if entry_id.is_none() && input.expected_version.is_some() {
         return Err(ApiError::bad_request(
-            "unexpected_version_on_create: Kh?ng truy?n expected_version khi t?o m?i.",
+            "unexpected_version_on_create: Không truyền expected_version khi tạo mới.",
         ));
     }
     if entry_id.is_some() && input.expected_version.is_none() {
         return Err(ApiError(
             axum::http::StatusCode::PRECONDITION_REQUIRED,
-            "missing_expected_version: Thi?u expected_version khi c?p nh?t.".into(),
+            "missing_expected_version: Thiếu expected_version khi cập nhật.".into(),
         ));
     }
 
     if let Some(status) = &input.publication_status {
         if status != "draft" && status != "published" {
             return Err(ApiError::unprocessable(
-                "publication_status ch? h? tr? 'draft' ho?c 'published'.",
+                "publication_status chỉ hỗ trợ 'draft' hoặc 'published'.",
             ));
         }
         if effective.base.descriptor.settings.publication == ContentPublication::Immediate
@@ -1853,12 +1853,12 @@ pub async fn prepare_composite_entry_save(
     for key in input.values.keys() {
         let Some(fe) = effective.effective_fields.get(key) else {
             return Err(ApiError::unprocessable(format!(
-                "unknown_field_key: Tr??ng '{key}' kh?ng thu?c lo?i n?i dung '{type_key}'."
+                "unknown_field_key: Trường '{key}' không thuộc loại nội dung '{type_key}'."
             )));
         };
         if caller_role < fe.definition.min_edit_role {
             return Err(ApiError::forbidden(format!(
-                "field_edit_forbidden: Vai tr? hi?n t?i kh?ng c? quy?n s?a tr??ng '{key}'."
+                "field_edit_forbidden: Vai trò hiện tại không có quyền sửa trường '{key}'."
             )));
         }
     }
@@ -1950,10 +1950,10 @@ pub async fn prepare_composite_entry_save(
             let expected_ver = input.expected_version.unwrap();
             let existing = get_entry(db, type_key, id)
                 .await?
-                .ok_or_else(|| ApiError::not_found("Kh?ng t?m th?y n?i dung."))?;
+                .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
             if existing.version != expected_ver {
                 return Err(ApiError::precondition_failed(
-                    "Phi?n b?n n?i dung ?? thay ??i. H?y t?i l?i tr??c khi l?u.",
+                    "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
                 ));
             }
             let mut conn = db.acquire().await?;
@@ -2510,7 +2510,7 @@ pub async fn commit_composite_entry_save(
             .await;
             let new_id = match res {
                 Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
-                    return Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."));
+                    return Err(ApiError::conflict("Slug đã tồn tại trong loại nội dung."));
                 }
                 other => other?.last_insert_rowid(),
             };
@@ -2576,12 +2576,12 @@ pub async fn commit_composite_entry_save(
             .await;
             match res {
                 Err(sqlx::Error::Database(e)) if e.is_unique_violation() => {
-                    return Err(ApiError::conflict("Slug ?? t?n t?i trong lo?i n?i dung."));
+                    return Err(ApiError::conflict("Slug đã tồn tại trong loại nội dung."));
                 }
                 other => {
                     if other?.rows_affected() == 0 {
                         return Err(ApiError::precondition_failed(
-                            "Phi?n b?n n?i dung ?? thay ??i. H?y t?i l?i tr??c khi l?u.",
+                            "Phiên bản nội dung đã thay đổi. Hãy tải lại trước khi lưu.",
                         ));
                     }
                 }

@@ -77,6 +77,7 @@ use crate::{
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
+    pub ui_locale: Arc<std::sync::atomic::AtomicU8>,
     pub plugin_manager: Arc<PluginManager>,
     pub hooks: Arc<HookDispatcher>,
     pub media_store: Arc<MediaStore>,
@@ -91,6 +92,9 @@ pub struct AppState {
     pub recovery: crate::config::RecoveryState,
     pub runtime_config: crate::config::RuntimeConfigV1,
 }
+
+#[derive(Clone, Copy)]
+pub(crate) struct HostOriginRejected;
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
     fn from_ref(state: &AppState) -> Self {
@@ -176,6 +180,7 @@ pub fn build_router_with_themes_root(
         .route("/media/{id}/thumbnail", get(media_thumb))
         .route("/theme/{revision_digest}/{*path}", get(theme_asset))
         .route("/api/health", get(crate::routes::health::status))
+        .route("/api/i18n/admin", get(crate::routes::settings::admin_i18n_bootstrap))
         .route("/api/public/contact/received", get(crate::routes::contact::public_received))
         .route(
             "/api/public/contact/{id}",
@@ -741,14 +746,19 @@ pub fn build_router_with_themes_root(
             }
             async move {
                 if !valid_host {
-                    StatusCode::BAD_REQUEST.into_response()
+                    let mut response = StatusCode::BAD_REQUEST.into_response();
+                    response.extensions_mut().insert(HostOriginRejected);
+                    response
                 } else if !origin_valid {
-                    (StatusCode::FORBIDDEN, "Origin không hợp lệ.").into_response()
+                    let mut response = (StatusCode::FORBIDDEN, "Origin không hợp lệ.").into_response();
+                    response.extensions_mut().insert(HostOriginRejected);
+                    response
                 } else {
                     next.run(request).await
                 }
             }
         }))
+        .layer(middleware::from_fn_with_state(state.clone(), crate::i18n::localize_error_response))
         .fallback(crate::routes::seo::public_fallback)
         .layer(middleware::from_fn(move |request: Request, next: Next| {
             let recovery = recovery_for_mw.clone();

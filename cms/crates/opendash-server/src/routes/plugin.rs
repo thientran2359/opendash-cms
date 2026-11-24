@@ -765,6 +765,7 @@ mod declarative_ui_tests {
         let runtime_config = crate::config::RuntimeConfigV1::load(&paths).unwrap();
         let state = crate::app::AppState {
             db: db.clone(),
+            ui_locale: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             plugin_manager: plugin_manager.clone(),
             hooks,
             media_store: Arc::new(crate::media::MediaStore::new(paths.uploads_dir())),

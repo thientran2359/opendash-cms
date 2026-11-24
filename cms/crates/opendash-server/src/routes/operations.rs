@@ -1168,6 +1168,7 @@ mod tests {
 
         let state = AppState {
             db,
+            ui_locale: Arc::new(std::sync::atomic::AtomicU8::new(0)),
             plugin_manager,
             hooks,
             media_store: Arc::new(crate::media::MediaStore::new(paths.uploads_dir())),
