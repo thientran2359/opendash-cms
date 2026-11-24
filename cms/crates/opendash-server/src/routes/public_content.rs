@@ -1,7 +1,10 @@
 //! Public CPT archive/single routes and referenced-only media delivery.
 //! Legacy CPT Save stays live; core post/page draft data is never served here.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 use axum::{
     Extension,
@@ -9,11 +12,11 @@ use axum::{
     http::{HeaderMap, Method, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use opendash_core::content::ContentTypeDefinition;
+use opendash_core::content::{ContentTypeDefinition, FieldRole};
 use sqlx::SqlitePool;
 
 use crate::{
-    content_render::{self, SiteContext, entry_view_with_url},
+    content_render::{self, PaginationView, PublicThemeContextInput, SiteContext},
     error::{ApiError, ApiResult},
     media::MediaStore,
     public_context::{
@@ -22,7 +25,7 @@ use crate::{
     },
     routes::themes::ThemeStoreRoot,
     storage::{
-        content::load_content_type_definition,
+        content as content_storage,
         entries::EntryFilters,
         media,
         overrides::{self, PublicTemplateContext, TemplateResolution},
@@ -33,12 +36,36 @@ use crate::{
     },
 };
 
-struct ResolvedPublicHtml {
-    html: String,
-    has_active_contact_form: bool,
+fn normalized_origin(public_origin: Option<&str>) -> &str {
+    public_origin
+        .map(|s| s.trim().trim_end_matches('/'))
+        .unwrap_or("")
+}
+
+struct PublicRouteContext<'a> {
+    route_kind: &'a str,
+    route_path: Option<&'a str>,
+    entry_id: Option<i64>,
+    entry_type_key: Option<&'a str>,
+    breadcrumbs: &'a [content_render::BreadcrumbItem],
+    pagination: &'a content_render::PaginationView,
+    archive_url: Option<&'a str>,
+    previous_url: Option<&'a str>,
+    next_url: Option<&'a str>,
+    entries: &'a [content_render::EntryView],
+    taxonomy: Option<&'a serde_json::Value>,
+    content_type: Option<&'a serde_json::Value>,
+    entry: Option<&'a content_render::EntryView>,
+}
+
+pub struct ResolvedPublicHtml {
+    pub html: String,
+    pub has_active_contact_form: bool,
     /// Page Layouts own their canvas; wrapping them in the site's default
     /// header/footer would violate the layout choice.
-    canvas_layout: bool,
+    pub canvas_layout: bool,
+    pub theme_context: serde_json::Value,
+    pub precompiled_shell: overrides::PrecompiledPublicShell,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -51,8 +78,9 @@ async fn resolve_public_template_html(
     locale: Option<&str>,
     fallback_html: &str,
     route_entry: Option<(&str, &str)>,
-    route_context: serde_json::Value,
+    route_ctx: PublicRouteContext<'_>,
     budget: &mut overrides::PublicCompositionBudget,
+    cache: &crate::page::BlockTemplateCache,
 ) -> ApiResult<ResolvedPublicHtml> {
     let resolution = overrides::resolve_template_2axis(
         db,
@@ -71,8 +99,9 @@ async fn resolve_public_template_html(
         locale,
         fallback_html,
         route_entry,
-        route_context,
+        route_ctx,
         budget,
+        cache,
     )
     .await
 }
@@ -87,30 +116,69 @@ async fn render_resolved_public_template_html(
     locale: Option<&str>,
     fallback_html: &str,
     route_entry: Option<(&str, &str)>,
-    route_context: serde_json::Value,
+    route_ctx: PublicRouteContext<'_>,
     budget: &mut overrides::PublicCompositionBudget,
+    cache: &crate::page::BlockTemplateCache,
 ) -> ApiResult<ResolvedPublicHtml> {
-    let context = if matches!(&resolution, TemplateResolution::CoreFallback) {
-        serde_json::Value::Null
-    } else {
-        let menus = crate::storage::menu::resolve_active_slot_menus_for_locale(db, locale).await?;
-        let mut context = serde_json::json!({
-            "site": site_ctx,
-            "options": theme_opts,
-            "theme_options": theme_opts,
-            "menus": menus,
+    let url_policy = overrides::active_theme_url_policy(active)?;
+    let inspection =
+        overrides::inspect_public_surfaces_and_precompile(db, &resolution, active, &url_policy)
+            .await?;
+
+    if !inspection.has_shell_or_theme && matches!(&resolution, TemplateResolution::CoreFallback) {
+        return Ok(ResolvedPublicHtml {
+            html: fallback_html.to_owned(),
+            has_active_contact_form: false,
+            canvas_layout: false,
+            theme_context: serde_json::Value::Null,
+            precompiled_shell: overrides::PrecompiledPublicShell::default(),
         });
-        // Values are generated from the ACL-filtered public route view; theme
-        // source may only render them through C-SEC escaping.
-        if let (Some(base), Some(extra)) = (context.as_object_mut(), route_context.as_object()) {
-            base.extend(
-                extra
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone())),
-            );
-        }
-        context
+    }
+
+    let menus =
+        crate::storage::menu::resolve_active_slot_menus_for_path(db, route_ctx.route_path, locale)
+            .await?;
+    let related_entries = if inspection.uses_related_entries
+        && let (Some(eid), Some(tkey)) = (route_ctx.entry_id, route_ctx.entry_type_key)
+    {
+        public_content::query_related_entries(db, eid, tkey, 6).await?
+    } else {
+        Vec::new()
     };
+    let exclude_post_id = (route_ctx.entry_type_key == Some("post"))
+        .then_some(route_ctx.entry_id)
+        .flatten();
+    let recent_posts = if inspection.uses_recent_posts {
+        public_content::query_recent_posts(db, exclude_post_id, locale, 6).await?
+    } else {
+        Vec::new()
+    };
+    let theme_assets = active
+        .map(theme_storage::ActiveThemeV3::asset_url_map)
+        .unwrap_or_default();
+    let context = content_render::build_public_theme_context(PublicThemeContextInput {
+        site: site_ctx,
+        options: theme_opts,
+        theme_assets: &theme_assets,
+        menus: &menus,
+        route_kind: route_ctx.route_kind,
+        route_path: route_ctx.route_path,
+        breadcrumbs: route_ctx.breadcrumbs,
+        pagination: route_ctx.pagination,
+        archive_url: route_ctx.archive_url,
+        previous_url: route_ctx.previous_url,
+        next_url: route_ctx.next_url,
+        entries: route_ctx.entries,
+        related_entries: &related_entries,
+        recent_posts: &recent_posts,
+        taxonomy: route_ctx.taxonomy,
+        content_type: route_ctx.content_type,
+        entry: route_ctx.entry,
+    })?;
+    let fmt_cfg = crate::template_sec::RenderFormattingConfig {
+        timezone: site_ctx.timezone.to_owned(),
+    };
+
     // A fallback renderer can return a complete HTML document. Only its
     // normalized body fragment and authorized styles may enter a typed slot;
     // injecting a second document envelope would invalidate the whole page.
@@ -130,6 +198,8 @@ async fn render_resolved_public_template_html(
                     html: fallback_html.to_owned(),
                     has_active_contact_form: false,
                     canvas_layout: false,
+                    theme_context: context,
+                    precompiled_shell: inspection.precompiled_shell,
                 });
             }
         }
@@ -139,11 +209,13 @@ async fn render_resolved_public_template_html(
             html: fallback_html.to_owned(),
             has_active_contact_form: false,
             canvas_layout: false,
+            theme_context: context,
+            precompiled_shell: inspection.precompiled_shell,
         }),
         TemplateResolution::DbOverride(record) => {
             let canvas_layout =
                 record.target.kind == opendash_core::theme::TemplateCandidateKind::PageLayout;
-            let rendered = overrides::render_resolved_public_builder_for_locale(
+            let rendered = overrides::render_resolved_public_builder_with_cache_for_locale(
                 db,
                 &record,
                 active,
@@ -152,53 +224,55 @@ async fn render_resolved_public_template_html(
                 locale,
                 Some(&slot_html),
                 budget,
+                cache,
             )
             .await?;
             Ok(ResolvedPublicHtml {
                 html: rendered.html,
                 has_active_contact_form: rendered.has_active_contact_form,
                 canvas_layout,
+                theme_context: context,
+                precompiled_shell: inspection.precompiled_shell,
             })
         }
         TemplateResolution::ActiveTheme { target_key, html } => {
-            use crate::template_sec::{
-                CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
-            };
-            // The last candidate can be `index` even for a Single/Archive
-            // route. Validate the selected template's own slot contract, not
-            // the request's most-specific (and possibly absent) candidate.
-            let kind = if target_key == "index" {
-                CsecContentKind::Index
-            } else if matches!(target_key.as_str(), "home" | "page" | "singular" | "single")
-                || target_key.starts_with("single:")
-                || target_key.starts_with("single_custom:")
-                || target_key.starts_with("page_layout:")
-            {
-                CsecContentKind::Entry
-            } else {
-                CsecContentKind::NonEntry
-            };
-            let parts = active.map(|v| &v.parts).cloned().unwrap_or_default();
-            let url_policy = if let Some(active) = active {
-                let manifest_json = serde_json::to_string(&active.manifest)?;
-                crate::storage::settings::theme_url_policy(&manifest_json)
+            let compiled = match inspection.precompiled_body {
+                Some(compiled) => compiled,
+                None => {
+                    use crate::template_sec::{
+                        CsecContentKind, validate_and_compile_csec_composition_with_theme_urls,
+                    };
+                    let kind = if target_key == "index" {
+                        CsecContentKind::Index
+                    } else if matches!(target_key.as_str(), "home" | "page" | "singular" | "single")
+                        || target_key.starts_with("single:")
+                        || target_key.starts_with("single_custom:")
+                        || target_key.starts_with("page_layout:")
+                    {
+                        CsecContentKind::Entry
+                    } else {
+                        CsecContentKind::NonEntry
+                    };
+                    let empty_parts = BTreeMap::new();
+                    let parts = active.map(|v| &v.parts).unwrap_or(&empty_parts);
+                    validate_and_compile_csec_composition_with_theme_urls(
+                        &target_key,
+                        &html,
+                        parts,
+                        kind,
+                        &url_policy,
+                    )
                     .map_err(ApiError::internal)?
-            } else {
-                crate::template_sec::ThemeUrlPolicy::default()
+                }
             };
-            let composition = validate_and_compile_csec_composition_with_theme_urls(
-                &target_key,
-                &html,
-                &parts,
-                kind,
-                &url_policy,
-            )
-            .map_err(ApiError::internal)?;
-            let html = budget.render_theme(&composition, &context, Some(&slot_html))?;
+            let html =
+                budget.render_theme_with_config(&compiled, &context, Some(&slot_html), &fmt_cfg)?;
             Ok(ResolvedPublicHtml {
                 html,
                 has_active_contact_form: false,
                 canvas_layout: target_key.starts_with("page_layout:"),
+                theme_context: context,
+                precompiled_shell: inspection.precompiled_shell,
             })
         }
     }
@@ -234,11 +308,18 @@ pub(crate) async fn render_not_found_response_for_locale(
         None => None,
     };
     let site = settings::get_general_for_locale(db, locale).await?;
+    let pub_settings = settings::get_public(db).await?;
     let opts = settings::get_active_public_theme_options_for_locale(db, locale).await?;
     let (resolved_locale, bcp47_tag, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
+        timezone: &site.timezone,
+        origin: normalized_origin(pub_settings.public_origin.as_deref()),
+        current_year: content_render::current_year_in_timezone(&site.timezone),
+    };
+    let fmt_cfg = crate::template_sec::RenderFormattingConfig {
+        timezone: site.timezone.clone(),
     };
     let mut budget = overrides::PublicCompositionBudget::default();
     let locale_ctx =
@@ -246,6 +327,14 @@ pub(crate) async fn render_not_found_response_for_locale(
             .await?;
     budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
     let l10n = content_render::core_l10n(&resolved_locale);
+    let breadcrumbs = content_render::not_found_breadcrumbs(
+        content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+        Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+        content_render::DEFAULT_BREADCRUMB_NOT_FOUND_LABEL,
+    );
+    let pagination = PaginationView::empty();
+    let empty_entries = Vec::new();
+    let cache = crate::page::BlockTemplateCache::global();
     let body = resolve_public_template_html(
         db,
         &overrides::build_candidates(&PublicTemplateContext::NotFound)?,
@@ -255,27 +344,49 @@ pub(crate) async fn render_not_found_response_for_locale(
         locale,
         &format!("<main><h1>{}</h1></main>", l10n.not_found_title),
         None,
-        serde_json::json!({ "route": { "kind": "not_found" } }),
+        PublicRouteContext {
+            route_kind: "not_found",
+            route_path: None,
+            entry_id: None,
+            entry_type_key: None,
+            breadcrumbs: &breadcrumbs,
+            pagination: &pagination,
+            archive_url: None,
+            previous_url: None,
+            next_url: None,
+            entries: &empty_entries,
+            taxonomy: None,
+            content_type: None,
+            entry: None,
+        },
         &mut budget,
+        cache,
     )
     .await?;
     let (header_html, footer_html, shell_has_form) =
-        overrides::resolve_and_render_header_footer_for_locale(
-            db,
-            active.as_ref(),
-            &site_ctx,
-            &opts,
-            locale,
-            &mut budget,
-        )
-        .await?;
+        if body.canvas_layout || body.theme_context.is_null() {
+            (None, None, false)
+        } else {
+            overrides::resolve_and_render_header_footer_with_context_for_locale(
+                db,
+                active.as_ref(),
+                &body.theme_context,
+                &body.precompiled_shell,
+                locale,
+                &fmt_cfg,
+                &mut budget,
+                cache,
+            )
+            .await?
+        };
     let view =
         crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, l10n.not_found_title);
-    let html = content_render::compose_document_with_seo(
+    let html = content_render::compose_document_with_seo_with_body_classes(
         header_html.as_deref(),
         &body.html,
         footer_html.as_deref(),
         &view,
+        &["od-route-not-found"],
     )?;
     let mut response = crate::routes::public::rendered_layout_with_form_csp(
         html,
@@ -329,20 +440,39 @@ pub(crate) async fn render_canonical_archive(
         include_descendants: query.filters.descendants,
         locale: Some(locale.clone()),
     };
-    let schema = load_content_type_definition(&db, &type_key)
+    let effective_schema = content_storage::load_effective_content_schema(&db, &type_key)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
+    let schema = &effective_schema.base.descriptor;
     let offset = (page - 1) * ARCHIVE_SIZE;
-    let mut records =
-        public_content::list_published(&db, &type_key, ARCHIVE_SIZE + 1, offset, filters).await?;
-    let has_more = records.len() > ARCHIVE_SIZE as usize;
-    records.truncate(ARCHIVE_SIZE as usize);
+    let (records, total_items) =
+        public_content::list_published_with_total(&db, &type_key, ARCHIVE_SIZE, offset, filters)
+            .await?;
+    let has_more = offset.saturating_add(ARCHIVE_SIZE) < total_items;
     let entry_urls = crate::storage::seo::resolve_public_entry_paths_by_ids(&db, &records).await?;
+    let pairs: Vec<(i64, String)> = records
+        .iter()
+        .map(|r| (r.id, r.content_type_key.clone()))
+        .collect();
+    let mut terms_map = public_content::batch_load_public_entry_terms(&db, &pairs).await?;
+    let eligible_taxonomies =
+        public_content::batch_load_eligible_public_taxonomies(&db, std::slice::from_ref(&type_key))
+            .await?
+            .remove(&type_key)
+            .unwrap_or_default();
     let entries: Vec<_> = records
         .into_iter()
         .map(|record| {
             let u = entry_urls.get(&record.id).cloned();
-            entry_view_with_url(record, &schema, u)
+            let terms = terms_map.remove(&record.id).unwrap_or_default();
+            content_render::entry_view_with_context(
+                &record,
+                &effective_schema,
+                u,
+                &terms,
+                &eligible_taxonomies,
+                FieldRole::Editor,
+            )
         })
         .collect();
     let previous = (page > 1)
@@ -369,25 +499,59 @@ pub(crate) async fn render_canonical_archive(
             ))
         })
         .flatten();
+    let pagination = PaginationView::compute(
+        page,
+        ARCHIVE_SIZE,
+        total_items,
+        previous.clone(),
+        next.clone(),
+        |p| {
+            Some(CanonicalUrlBuilder::with_query(
+                canonical_base.clone(),
+                PublicQuery {
+                    page: p,
+                    ..query.clone()
+                },
+                QueryScope::ContentArchive,
+            ))
+        },
+    );
+    let breadcrumbs = content_render::archive_breadcrumbs(
+        content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+        Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+        &schema.label,
+        Some(canonical_base.clone()),
+    );
     let active_v3 = match themes_root {
         Some(Extension(root)) => theme_storage::load_active_theme_v3(&db, &root.0).await?,
         None => None,
     };
     let (list_template, _) = active_content_templates(&db).await?;
     let site = settings::get_general_for_locale(&db, Some(&locale)).await?;
+    let pub_settings = settings::get_public(&db).await?;
     let theme_opts =
         settings::get_active_public_theme_options_for_locale(&db, Some(&locale)).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
+        timezone: &site.timezone,
+        origin: normalized_origin(pub_settings.public_origin.as_deref()),
+        current_year: content_render::current_year_in_timezone(&site.timezone),
     };
-    let fallback_html = content_render::render_archive_with_site_for_locale(
-        &schema,
+    let fmt_cfg = crate::template_sec::RenderFormattingConfig {
+        timezone: site.timezone.clone(),
+    };
+    let fallback_html = content_render::render_archive_with_site_and_config_for_locale(
+        schema,
         &entries,
         previous.as_deref(),
         next.as_deref(),
+        &pagination,
+        &breadcrumbs,
+        None,
         list_template.as_deref(),
         &site_ctx,
+        &fmt_cfg,
         &locale,
     )?;
     let candidates = overrides::build_candidates(&PublicTemplateContext::Archive {
@@ -403,6 +567,11 @@ pub(crate) async fn render_canonical_archive(
     )
     .await?;
     budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
+    // Do not export ContentTypeDefinition fields/settings/defaults to a
+    // public theme: field-level access is represented exclusively by
+    // exposure-filtered EntryView values.
+    let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
+    let cache = crate::page::BlockTemplateCache::global();
     let body = resolve_public_template_html(
         &db,
         &candidates,
@@ -412,28 +581,40 @@ pub(crate) async fn render_canonical_archive(
         Some(&locale),
         &fallback_html,
         None,
-        serde_json::json!({
-            // Do not export ContentTypeDefinition fields/settings/defaults to a
-            // public theme: field-level access is represented exclusively by
-            // exposure-filtered EntryView values.
-            "content_type": {"key": schema.key, "label": schema.label},
-            "entries": entries,
-            "previous_url": previous,
-            "next_url": next,
-            "route": {"kind":"archive", "path":canonical_base},
-        }),
+        PublicRouteContext {
+            route_kind: "archive",
+            route_path: Some(&canonical_base),
+            entry_id: None,
+            entry_type_key: None,
+            breadcrumbs: &breadcrumbs,
+            pagination: &pagination,
+            archive_url: Some(&canonical_base),
+            previous_url: previous.as_deref(),
+            next_url: next.as_deref(),
+            entries: &entries,
+            taxonomy: None,
+            content_type: Some(&ct_value),
+            entry: None,
+        },
         &mut budget,
+        cache,
     )
     .await?;
-    let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer_for_locale(
-        &db,
-        active_v3.as_ref(),
-        &site_ctx,
-        &theme_opts,
-        Some(&locale),
-        &mut budget,
-    )
-    .await?;
+    let (header, footer, shell_has_form) = if body.canvas_layout || body.theme_context.is_null() {
+        (None, None, false)
+    } else {
+        overrides::resolve_and_render_header_footer_with_context_for_locale(
+            &db,
+            active_v3.as_ref(),
+            &body.theme_context,
+            &body.precompiled_shell,
+            Some(&locale),
+            &fmt_cfg,
+            &mut budget,
+            cache,
+        )
+        .await?
+    };
     let seo_view = seo::build_archive_seo_view_for_locale(
         &db,
         &type_key,
@@ -443,12 +624,14 @@ pub(crate) async fn render_canonical_archive(
         &query,
     )
     .await?;
+    let type_class = format!("od-type-{type_key}");
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo(
+        content_render::compose_document_with_seo_with_body_classes(
             header.as_deref(),
             &body.html,
             footer.as_deref(),
             &seo_view,
+            &["od-route-archive", &type_class],
         )?,
         body.has_active_contact_form || shell_has_form,
     ))
@@ -533,12 +716,15 @@ async fn render_entry_response_with_cache(
     let public_content::PublicEntryRenderSnapshot {
         entry,
         locale: entry_locale,
-        schema,
+        effective_schema,
+        eligible_public_taxonomies,
+        terms,
         active: active_v3,
         mut resolution,
         body: entry_body,
         budget: mut entry_render_budget,
     } = snapshot;
+    let schema = &effective_schema.base.descriptor;
     if is_home {
         let page_layout_key = entry
             .page_layout_key
@@ -586,27 +772,62 @@ async fn render_entry_response_with_cache(
     };
     let (_, single_template) = active_content_templates(&db).await?;
     let site = settings::get_general_for_locale(&db, Some(&entry_locale)).await?;
+    let pub_settings = settings::get_public(&db).await?;
     let theme_opts =
         settings::get_active_public_theme_options_for_locale(&db, Some(&entry_locale)).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
+        timezone: &site.timezone,
+        origin: normalized_origin(pub_settings.public_origin.as_deref()),
+        current_year: content_render::current_year_in_timezone(&site.timezone),
+    };
+    let fmt_cfg = crate::template_sec::RenderFormattingConfig {
+        timezone: site.timezone.clone(),
     };
     let archive_path = {
         let mut conn = db.acquire().await?;
         permalinks::canonical_archive_path_in_tx(&mut conn, &type_key, &entry_locale).await?
+    };
+    let view = content_render::entry_view_with_context(
+        &entry,
+        &effective_schema,
+        Some(canonical_path_for_seo.clone()),
+        &terms,
+        &eligible_public_taxonomies,
+        FieldRole::Editor,
+    );
+    let breadcrumbs = if is_home {
+        content_render::home_breadcrumbs(
+            content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+            Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+        )
+    } else {
+        content_render::single_breadcrumbs(
+            content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+            Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+            &type_key,
+            &schema.label,
+            schema.settings.has_archive,
+            archive_path.clone(),
+            view.primary_category.as_ref(),
+            &view.title,
+            Some(canonical_path_for_seo.clone()),
+        )
     };
     let entry_has_form = entry_body
         .as_ref()
         .is_some_and(|body| body.has_active_contact_form);
     let fallback_html = match entry_body {
         Some(body) => body.html,
-        None => content_render::render_single_with_site_and_archive_for_locale(
-            &schema,
-            &entry_view_with_url(entry.clone(), &schema, Some(canonical_path)),
+        None => content_render::render_single_with_context_for_locale(
+            schema,
+            &view,
             single_template.as_deref(),
             &site_ctx,
             archive_path.as_deref(),
+            &breadcrumbs,
+            &fmt_cfg,
             &entry_locale,
         )?,
     };
@@ -623,6 +844,9 @@ async fn render_entry_response_with_cache(
     )
     .await?;
     budget.set_locale_context(active_v3.as_ref(), &entry_locale, locale_ctx);
+    let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
+    let pagination = PaginationView::empty();
+    let empty_entries = Vec::new();
     let body = render_resolved_public_template_html(
         &db,
         resolution,
@@ -632,24 +856,35 @@ async fn render_entry_response_with_cache(
         Some(&entry_locale),
         &fallback_html,
         Some((&type_key, &entry.slug)),
-        serde_json::json!({
-            "content_type": {"key": schema.key, "label": schema.label},
-            "entry": entry_view_with_url(entry.clone(), &schema, Some(canonical_path_for_seo.clone())),
-            "archive_url": archive_path,
-            "route": {"kind":if is_home { "home" } else { "single" }, "path":canonical_path_for_seo},
-        }),
+        PublicRouteContext {
+            route_kind: if is_home { "home" } else { "single" },
+            route_path: Some(&canonical_path_for_seo),
+            entry_id: Some(entry.id),
+            entry_type_key: Some(&type_key),
+            breadcrumbs: &breadcrumbs,
+            pagination: &pagination,
+            archive_url: archive_path.as_deref(),
+            previous_url: None,
+            next_url: None,
+            entries: &empty_entries,
+            taxonomy: None,
+            content_type: Some(&ct_value),
+            entry: Some(&view),
+        },
         &mut budget,
+        cache,
     )
     .await?;
-    let (header, footer, shell_has_form) = if body.canvas_layout {
+    let (header, footer, shell_has_form) = if body.canvas_layout || body.theme_context.is_null() {
         (None, None, false)
     } else {
-        overrides::resolve_and_render_header_footer_with_cache_for_locale(
+        overrides::resolve_and_render_header_footer_with_context_for_locale(
             &db,
             active_v3.as_ref(),
-            &site_ctx,
-            &theme_opts,
+            &body.theme_context,
+            &body.precompiled_shell,
             Some(&entry_locale),
+            &fmt_cfg,
             &mut budget,
             cache,
         )
@@ -668,12 +903,19 @@ async fn render_entry_response_with_cache(
         )
         .await?
     };
+    let type_class = format!("od-type-{type_key}");
+    let body_classes: &[&str] = if is_home {
+        &["od-route-home"]
+    } else {
+        &["od-route-single", &type_class]
+    };
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo(
+        content_render::compose_document_with_seo_with_body_classes(
             header.as_deref(),
             &body.html,
             footer.as_deref(),
             &seo_view,
+            body_classes,
         )?,
         body.has_active_contact_form || entry_has_form || shell_has_form,
     ))
@@ -782,19 +1024,45 @@ pub(crate) async fn render_canonical_taxonomy(
     };
     let entry_urls =
         crate::storage::seo::resolve_public_entry_paths_by_ids(db, &page.entries).await?;
+    let pairs: Vec<(i64, String)> = page
+        .entries
+        .iter()
+        .map(|r| (r.id, r.content_type_key.clone()))
+        .collect();
+    let distinct_types: Vec<String> = page
+        .entries
+        .iter()
+        .map(|r| r.content_type_key.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let mut terms_map = public_content::batch_load_public_entry_terms(db, &pairs).await?;
+    let eligible_map =
+        public_content::batch_load_eligible_public_taxonomies(db, &distinct_types).await?;
     let mut schemas = BTreeMap::new();
-    let mut entries = Vec::new();
+    for tk in &distinct_types {
+        let eff = content_storage::load_effective_content_schema(db, tk)
+            .await?
+            .ok_or_else(|| ApiError::internal("Không tìm thấy schema nội dung."))?;
+        schemas.insert(tk.clone(), eff);
+    }
+    let mut entries = Vec::with_capacity(page.entries.len());
     for record in page.entries {
-        let type_key = record.content_type_key.clone();
-        if !schemas.contains_key(&type_key) {
-            let schema = load_content_type_definition(db, &type_key)
-                .await?
-                .ok_or_else(|| ApiError::internal("Không tìm thấy schema nội dung."))?;
-            schemas.insert(type_key.clone(), schema);
-        }
-        if let Some(schema) = schemas.get(&type_key) {
+        if let Some(eff) = schemas.get(&record.content_type_key) {
             let u = entry_urls.get(&record.id).cloned();
-            entries.push(entry_view_with_url(record, schema, u));
+            let terms = terms_map.remove(&record.id).unwrap_or_default();
+            let eligible = eligible_map
+                .get(&record.content_type_key)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            entries.push(content_render::entry_view_with_context(
+                &record,
+                eff,
+                u,
+                &terms,
+                eligible,
+                FieldRole::Editor,
+            ));
         }
     }
     let previous = (query.page > 1)
@@ -821,7 +1089,36 @@ pub(crate) async fn render_canonical_taxonomy(
             ))
         })
         .flatten();
+    let pagination = PaginationView::compute(
+        query.page,
+        ARCHIVE_SIZE,
+        page.total,
+        previous.clone(),
+        next.clone(),
+        |p| {
+            Some(CanonicalUrlBuilder::with_query(
+                canonical_base.clone(),
+                PublicQuery {
+                    page: p,
+                    ..query.clone()
+                },
+                QueryScope::TaxonomyArchive(kind),
+            ))
+        },
+    );
+    let ancestors = {
+        let mut conn = db.acquire().await?;
+        public_content::load_term_ancestor_chain_in_conn(&mut conn, term_id, &kind_key).await?
+    };
+    let breadcrumbs = content_render::taxonomy_breadcrumbs(
+        content_render::DEFAULT_BREADCRUMB_HOME_LABEL,
+        Some(content_render::DEFAULT_BREADCRUMB_HOME_URL),
+        ancestors,
+        &term.name,
+        Some(canonical_base.clone()),
+    );
     let site = settings::get_general_for_locale(db, Some(&locale)).await?;
+    let pub_settings = settings::get_public(db).await?;
     let theme_opts =
         settings::get_active_public_theme_options_for_locale(db, Some(&locale)).await?;
     // Until S03 role composition, use the core archive template for mixed CPTs.
@@ -839,14 +1136,25 @@ pub(crate) async fn render_canonical_taxonomy(
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
+        timezone: &site.timezone,
+        origin: normalized_origin(pub_settings.public_origin.as_deref()),
+        current_year: content_render::current_year_in_timezone(&site.timezone),
     };
-    let fallback_html = content_render::render_archive_with_site_for_locale(
+    let fmt_cfg = crate::template_sec::RenderFormattingConfig {
+        timezone: site.timezone.clone(),
+    };
+    let tax_value = serde_json::json!({ "key": schema.key, "id": term_id, "slug": term.slug, "name": schema.label });
+    let fallback_html = content_render::render_archive_with_site_and_config_for_locale(
         &schema,
         &entries,
         previous.as_deref(),
         next.as_deref(),
+        &pagination,
+        &breadcrumbs,
+        Some(&tax_value),
         None,
         &site_ctx,
+        &fmt_cfg,
         &locale,
     )?;
     let candidates = overrides::build_candidates(&PublicTemplateContext::Taxonomy {
@@ -862,6 +1170,8 @@ pub(crate) async fn render_canonical_taxonomy(
     )
     .await?;
     budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
+    let ct_value = serde_json::json!({ "key": schema.key, "label": schema.label });
+    let cache = crate::page::BlockTemplateCache::global();
     let body = resolve_public_template_html(
         db,
         &candidates,
@@ -871,26 +1181,40 @@ pub(crate) async fn render_canonical_taxonomy(
         Some(&locale),
         &fallback_html,
         None,
-        serde_json::json!({
-            "content_type": {"key": schema.key, "label": schema.label},
-            "entries": entries,
-            "taxonomy": {"key":schema.key, "id":term_id, "slug":term.slug, "name":schema.label},
-            "previous_url": previous,
-            "next_url": next,
-            "route": {"kind":"taxonomy", "path":canonical_base},
-        }),
+        PublicRouteContext {
+            route_kind: "taxonomy",
+            route_path: Some(&canonical_base),
+            entry_id: None,
+            entry_type_key: None,
+            breadcrumbs: &breadcrumbs,
+            pagination: &pagination,
+            archive_url: None,
+            previous_url: previous.as_deref(),
+            next_url: next.as_deref(),
+            entries: &entries,
+            taxonomy: Some(&tax_value),
+            content_type: Some(&ct_value),
+            entry: None,
+        },
         &mut budget,
+        cache,
     )
     .await?;
-    let (header, footer, shell_has_form) = overrides::resolve_and_render_header_footer_for_locale(
-        db,
-        active_v3.as_ref(),
-        &site_ctx,
-        &theme_opts,
-        Some(&locale),
-        &mut budget,
-    )
-    .await?;
+    let (header, footer, shell_has_form) = if body.canvas_layout || body.theme_context.is_null() {
+        (None, None, false)
+    } else {
+        overrides::resolve_and_render_header_footer_with_context_for_locale(
+            db,
+            active_v3.as_ref(),
+            &body.theme_context,
+            &body.precompiled_shell,
+            Some(&locale),
+            &fmt_cfg,
+            &mut budget,
+            cache,
+        )
+        .await?
+    };
     let seo_view = seo::build_term_seo_view_for_locale(
         db,
         term_id,
@@ -900,12 +1224,14 @@ pub(crate) async fn render_canonical_taxonomy(
         &query,
     )
     .await?;
+    let tax_class = format!("od-tax-{}", schema.key);
     Ok(crate::routes::public::rendered_layout_with_form_csp(
-        content_render::compose_document_with_seo(
+        content_render::compose_document_with_seo_with_body_classes(
             header.as_deref(),
             &body.html,
             footer.as_deref(),
             &seo_view,
+            &["od-route-taxonomy", &tax_class],
         )?,
         body.has_active_contact_form || shell_has_form,
     ))

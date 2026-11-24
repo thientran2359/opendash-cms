@@ -103,6 +103,10 @@ pub struct MenuItemView {
     pub id: i64,
     pub label: String,
     pub url: String,
+    pub is_active: bool,
+    pub is_ancestor: bool,
+    pub is_external: bool,
+    pub depth: usize,
     pub children: Vec<MenuItemView>,
 }
 
@@ -778,46 +782,75 @@ pub async fn list_slot_assignments_in_tx(
     list_slot_assignments_for_locale_in_tx(conn, theme_id, &locale).await
 }
 
-async fn resolve_entry_url_in_tx(
-    conn: &mut SqliteConnection,
-    entry_id: i64,
-) -> ApiResult<Option<String>> {
-    // The SEO public guard is authoritative for publication, Section,
-    // provider and CPT visibility; canonical path lookup alone may serve Admin.
-    if crate::storage::seo::resolve_public_entry_path_in_tx(conn, entry_id)
-        .await?
-        .is_none()
-    {
-        return Ok(None);
+pub(crate) fn normalize_menu_path(raw: &str) -> String {
+    let no_frag = raw.split('#').next().unwrap_or("");
+    let no_query = no_frag.split('?').next().unwrap_or("");
+    let trimmed = no_query.trim_end_matches('/');
+    if trimmed.is_empty() {
+        "/".to_owned()
+    } else {
+        trimmed.to_owned()
     }
-    crate::storage::permalinks::canonical_entry_path_in_tx(conn, entry_id).await
 }
 
-async fn resolve_term_url_in_tx(
-    conn: &mut SqliteConnection,
-    term_id: i64,
-) -> ApiResult<Option<String>> {
-    // Term canonical resolution enforces taxonomy declaration, public and
-    // provider guards; do not emit links to withdrawn/private terms.
-    crate::storage::permalinks::canonical_term_path_in_tx(conn, term_id).await
+struct AbstractMenuItem {
+    id: i64,
+    parent_id: Option<i64>,
+    label: String,
+    target_kind: Option<MenuTargetKind>,
+    target_entry_id: Option<i64>,
+    target_term_id: Option<i64>,
+    external_url: Option<String>,
 }
 
-pub async fn resolve_menu_view_in_tx(
+async fn resolve_and_build_menu_view(
     conn: &mut SqliteConnection,
-    menu_id: i64,
-) -> ApiResult<Option<MenuViewModel>> {
-    let Some(with_items) = get_menu_in_tx(conn, menu_id).await? else {
-        return Ok(None);
+    menu: MenuRecord,
+    preview_title: Option<String>,
+    items: Vec<AbstractMenuItem>,
+    current_path: Option<&str>,
+    strict_preview_missing_id: bool,
+) -> ApiResult<MenuViewModel> {
+    let mut entry_ids = Vec::new();
+    let mut term_ids = Vec::new();
+    for item in &items {
+        match item.target_kind {
+            Some(MenuTargetKind::Entry) => {
+                if let Some(eid) = item.target_entry_id {
+                    entry_ids.push(eid);
+                }
+            }
+            Some(MenuTargetKind::Term) => {
+                if let Some(tid) = item.target_term_id {
+                    term_ids.push(tid);
+                }
+            }
+            _ => {}
+        }
+    }
+    let entry_urls = if entry_ids.is_empty() {
+        BTreeMap::new()
+    } else {
+        crate::storage::seo::resolve_public_entry_paths_by_entry_ids_in_conn(conn, &entry_ids)
+            .await?
     };
+    let term_urls = if term_ids.is_empty() {
+        BTreeMap::new()
+    } else {
+        crate::storage::permalinks::batch_canonical_term_paths_in_tx(conn, &term_ids).await?
+    };
+
+    let normalized_current = current_path.map(normalize_menu_path);
     let mut diagnostics = Vec::new();
-    let mut resolved_items: BTreeMap<i64, (Option<i64>, i64, String, String)> = BTreeMap::new();
+    let mut resolved_items: BTreeMap<i64, (String, String, bool)> = BTreeMap::new();
     let mut children_map: BTreeMap<Option<i64>, Vec<i64>> = BTreeMap::new();
 
-    for item in &with_items.items {
-        let url_opt = match item.target_kind.as_str() {
-            "entry" => match item.target_entry_id {
-                Some(eid) => match resolve_entry_url_in_tx(conn, eid).await? {
-                    Some(url) => Some(url),
+    for item in items {
+        let mut is_external = false;
+        let url_opt = match item.target_kind {
+            Some(MenuTargetKind::Entry) => match item.target_entry_id {
+                Some(eid) => match entry_urls.get(&eid) {
+                    Some(url) => Some(url.clone()),
                     None => {
                         diagnostics.push(MenuDiagnostic {
                             item_id: item.id,
@@ -828,17 +861,19 @@ pub async fn resolve_menu_view_in_tx(
                     }
                 },
                 None => {
-                    diagnostics.push(MenuDiagnostic {
-                        item_id: item.id,
-                        code: "menu_target_entry_missing",
-                        message: "Thiếu target_entry_id.".to_string(),
-                    });
+                    if !strict_preview_missing_id {
+                        diagnostics.push(MenuDiagnostic {
+                            item_id: item.id,
+                            code: "menu_target_entry_missing",
+                            message: "Thiếu target_entry_id.".to_string(),
+                        });
+                    }
                     None
                 }
             },
-            "term" => match item.target_term_id {
-                Some(tid) => match resolve_term_url_in_tx(conn, tid).await? {
-                    Some(url) => Some(url),
+            Some(MenuTargetKind::Term) => match item.target_term_id {
+                Some(tid) => match term_urls.get(&tid) {
+                    Some(url) => Some(url.clone()),
                     None => {
                         diagnostics.push(MenuDiagnostic {
                             item_id: item.id,
@@ -849,36 +884,40 @@ pub async fn resolve_menu_view_in_tx(
                     }
                 },
                 None => {
-                    diagnostics.push(MenuDiagnostic {
-                        item_id: item.id,
-                        code: "menu_target_term_missing",
-                        message: "Thiếu target_term_id.".to_string(),
-                    });
+                    if !strict_preview_missing_id {
+                        diagnostics.push(MenuDiagnostic {
+                            item_id: item.id,
+                            code: "menu_target_term_missing",
+                            message: "Thiếu target_term_id.".to_string(),
+                        });
+                    }
                     None
                 }
             },
-            "external" => match item.external_url.as_deref() {
-                Some(raw) => match validate_external_url(raw) {
-                    Ok(url) => Some(url),
-                    Err(_) => {
-                        diagnostics.push(MenuDiagnostic {
-                            item_id: item.id,
-                            code: "menu_target_external_invalid",
-                            message: "External URL không hợp lệ.".to_string(),
-                        });
-                        None
-                    }
-                },
-                None => None,
-            },
-            _ => None,
+            Some(MenuTargetKind::External) => {
+                is_external = true;
+                match item.external_url.as_deref() {
+                    Some(raw) => match validate_external_url(raw) {
+                        Ok(url) => Some(url),
+                        Err(_) => {
+                            if !strict_preview_missing_id {
+                                diagnostics.push(MenuDiagnostic {
+                                    item_id: item.id,
+                                    code: "menu_target_external_invalid",
+                                    message: "External URL không hợp lệ.".to_string(),
+                                });
+                            }
+                            None
+                        }
+                    },
+                    None => None,
+                }
+            }
+            None => None,
         };
 
         if let Some(url) = url_opt {
-            resolved_items.insert(
-                item.id,
-                (item.parent_id, item.position, item.label.clone(), url),
-            );
+            resolved_items.insert(item.id, (item.label, url, is_external));
             children_map
                 .entry(item.parent_id)
                 .or_default()
@@ -888,8 +927,9 @@ pub async fn resolve_menu_view_in_tx(
 
     fn build_tree(
         parent: Option<i64>,
-        resolved: &BTreeMap<i64, (Option<i64>, i64, String, String)>,
+        resolved: &BTreeMap<i64, (String, String, bool)>,
         children_map: &BTreeMap<Option<i64>, Vec<i64>>,
+        normalized_current: Option<&str>,
         depth: usize,
     ) -> Vec<MenuItemView> {
         if depth > MAX_MENU_DEPTH {
@@ -900,12 +940,25 @@ pub async fn resolve_menu_view_in_tx(
         };
         let mut out = Vec::with_capacity(ids.len());
         for &id in ids {
-            if let Some((_, _, label, url)) = resolved.get(&id) {
-                let children = build_tree(Some(id), resolved, children_map, depth + 1);
+            if let Some((label, url, is_external)) = resolved.get(&id) {
+                let children = build_tree(
+                    Some(id),
+                    resolved,
+                    children_map,
+                    normalized_current,
+                    depth + 1,
+                );
+                let is_active = !*is_external
+                    && normalized_current.is_some_and(|cur| normalize_menu_path(url) == cur);
+                let is_ancestor = children.iter().any(|c| c.is_active || c.is_ancestor);
                 out.push(MenuItemView {
                     id,
                     label: label.clone(),
                     url: url.clone(),
+                    is_active,
+                    is_ancestor,
+                    is_external: *is_external,
+                    depth,
                     children,
                 });
             }
@@ -913,45 +966,101 @@ pub async fn resolve_menu_view_in_tx(
         out
     }
 
-    let tree = build_tree(None, &resolved_items, &children_map, 1);
-    Ok(Some(MenuViewModel {
-        menu_id: with_items.menu.id,
-        menu_key: with_items.menu.menu_key,
-        title: with_items.menu.title,
+    let tree = build_tree(
+        None,
+        &resolved_items,
+        &children_map,
+        normalized_current.as_deref(),
+        1,
+    );
+    Ok(MenuViewModel {
+        menu_id: menu.id,
+        menu_key: menu.menu_key,
+        title: preview_title.unwrap_or(menu.title),
         items: tree,
         diagnostics,
-    }))
+    })
+}
+
+pub async fn resolve_menu_view_in_tx(
+    conn: &mut SqliteConnection,
+    menu_id: i64,
+) -> ApiResult<Option<MenuViewModel>> {
+    resolve_menu_view_for_path_in_tx(conn, menu_id, None).await
+}
+
+pub async fn resolve_menu_view_for_path_in_tx(
+    conn: &mut SqliteConnection,
+    menu_id: i64,
+    current_path: Option<&str>,
+) -> ApiResult<Option<MenuViewModel>> {
+    let Some(with_items) = get_menu_in_tx(conn, menu_id).await? else {
+        return Ok(None);
+    };
+    let items = with_items
+        .items
+        .into_iter()
+        .map(|item| AbstractMenuItem {
+            id: item.id,
+            parent_id: item.parent_id,
+            label: item.label,
+            target_kind: MenuTargetKind::parse(&item.target_kind).ok(),
+            target_entry_id: item.target_entry_id,
+            target_term_id: item.target_term_id,
+            external_url: item.external_url,
+        })
+        .collect();
+    let view = resolve_and_build_menu_view(conn, with_items.menu, None, items, current_path, false)
+        .await?;
+    Ok(Some(view))
 }
 
 pub async fn resolve_active_slot_menus(
     db: &SqlitePool,
 ) -> ApiResult<BTreeMap<String, MenuViewModel>> {
-    resolve_active_slot_menus_for_locale(db, None).await
+    resolve_active_slot_menus_for_path(db, None, None).await
 }
 
 pub async fn resolve_active_slot_menus_for_locale(
     db: &SqlitePool,
     locale: Option<&str>,
 ) -> ApiResult<BTreeMap<String, MenuViewModel>> {
+    resolve_active_slot_menus_for_path(db, None, locale).await
+}
+
+pub async fn resolve_active_slot_menus_for_path(
+    db: &SqlitePool,
+    current_path: Option<&str>,
+    locale: Option<&str>,
+) -> ApiResult<BTreeMap<String, MenuViewModel>> {
     let mut tx = db.begin().await?;
+    let out = resolve_active_slot_menus_for_path_in_conn(&mut tx, current_path, locale).await?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+pub async fn resolve_active_slot_menus_for_path_in_conn(
+    conn: &mut SqliteConnection,
+    current_path: Option<&str>,
+    locale: Option<&str>,
+) -> ApiResult<BTreeMap<String, MenuViewModel>> {
     let active_theme_id: Option<String> = sqlx::query_scalar(
         "SELECT r.theme_id
            FROM theme_active_selection a
            JOIN theme_revisions r ON r.revision_id = a.revision_id
           WHERE a.id = 1",
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut *conn)
     .await?;
     let Some(theme_id) = active_theme_id else {
-        tx.commit().await?;
         return Ok(BTreeMap::new());
     };
-    let out = match locale {
-        Some(loc) => resolve_slot_menus_for_locale_in_tx(&mut tx, &theme_id, loc).await?,
-        None => resolve_slot_menus_in_tx(&mut tx, &theme_id).await?,
+    let resolved_locale = match locale {
+        Some(loc) => loc.to_owned(),
+        None => crate::storage::settings::get_default_locale_code_in_conn(&mut *conn).await?,
     };
-    tx.commit().await?;
-    Ok(out)
+    resolve_slot_menus_for_locale_and_path_in_tx(conn, &theme_id, &resolved_locale, current_path)
+        .await
 }
 
 pub(super) async fn resolve_slot_menus_in_tx(
@@ -959,7 +1068,7 @@ pub(super) async fn resolve_slot_menus_in_tx(
     theme_id: &str,
 ) -> ApiResult<BTreeMap<String, MenuViewModel>> {
     let locale = crate::storage::settings::get_default_locale_code_in_conn(&mut **tx).await?;
-    resolve_slot_menus_for_locale_in_tx(tx, theme_id, &locale).await
+    resolve_slot_menus_for_locale_and_path_in_tx(&mut **tx, theme_id, &locale, None).await
 }
 
 pub(super) async fn resolve_slot_menus_for_locale_in_tx(
@@ -967,10 +1076,19 @@ pub(super) async fn resolve_slot_menus_for_locale_in_tx(
     theme_id: &str,
     locale: &str,
 ) -> ApiResult<BTreeMap<String, MenuViewModel>> {
-    let assignments = list_slot_assignments_for_locale_in_tx(tx, theme_id, locale).await?;
+    resolve_slot_menus_for_locale_and_path_in_tx(&mut **tx, theme_id, locale, None).await
+}
+
+pub(super) async fn resolve_slot_menus_for_locale_and_path_in_tx(
+    conn: &mut SqliteConnection,
+    theme_id: &str,
+    locale: &str,
+    current_path: Option<&str>,
+) -> ApiResult<BTreeMap<String, MenuViewModel>> {
+    let assignments = list_slot_assignments_for_locale_in_tx(conn, theme_id, locale).await?;
     let mut out = BTreeMap::new();
     for (slot_key, menu_id) in assignments {
-        if let Some(view) = resolve_menu_view_in_tx(tx, menu_id).await? {
+        if let Some(view) = resolve_menu_view_for_path_in_tx(conn, menu_id, current_path).await? {
             out.insert(slot_key, view);
         }
     }
@@ -1185,98 +1303,37 @@ pub async fn preview_menu(
         synthetic_ids.push(item.id.unwrap_or(-((idx as i64) + 1)));
     }
 
-    let mut diagnostics = Vec::new();
-    let mut resolved_items: BTreeMap<i64, (Option<i64>, i64, String, String)> = BTreeMap::new();
-    let mut children_map: BTreeMap<Option<i64>, Vec<i64>> = BTreeMap::new();
-
-    // Sort by (parent_id, position, synthetic_id) matching DB order.
     let mut ordered_indices: Vec<usize> = (0..items.len()).collect();
     ordered_indices.sort_by_key(|&idx| {
         let p_id = plan.parent_idx[idx].map(|p| synthetic_ids[p]);
         (p_id.unwrap_or(0), items[idx].position, synthetic_ids[idx])
     });
 
+    let mut abstract_items = Vec::with_capacity(items.len());
     for idx in ordered_indices {
         let item = &items[idx];
-        let sid = synthetic_ids[idx];
-        let parent_sid = plan.parent_idx[idx].map(|p| synthetic_ids[p]);
-        let url_opt = match item.target_kind {
-            MenuTargetKind::Entry => match item.target_entry_id {
-                Some(eid) => match resolve_entry_url_in_tx(&mut tx, eid).await? {
-                    Some(url) => Some(url),
-                    None => {
-                        diagnostics.push(MenuDiagnostic {
-                            item_id: sid,
-                            code: "menu_target_entry_unavailable",
-                            message: format!("Entry #{eid} chưa publish hoặc đã bị xóa."),
-                        });
-                        None
-                    }
-                },
-                None => None,
-            },
-            MenuTargetKind::Term => match item.target_term_id {
-                Some(tid) => match resolve_term_url_in_tx(&mut tx, tid).await? {
-                    Some(url) => Some(url),
-                    None => {
-                        diagnostics.push(MenuDiagnostic {
-                            item_id: sid,
-                            code: "menu_target_term_unavailable",
-                            message: format!("Term #{tid} không còn tồn tại."),
-                        });
-                        None
-                    }
-                },
-                None => None,
-            },
-            MenuTargetKind::External => item
-                .external_url
-                .as_deref()
-                .and_then(|raw| validate_external_url(raw).ok()),
-        };
-        if let Some(url) = url_opt {
-            let label = validate_label(&item.label)?;
-            resolved_items.insert(sid, (parent_sid, item.position, label, url));
-            children_map.entry(parent_sid).or_default().push(sid);
-        }
+        abstract_items.push(AbstractMenuItem {
+            id: synthetic_ids[idx],
+            parent_id: plan.parent_idx[idx].map(|p| synthetic_ids[p]),
+            label: validate_label(&item.label)?,
+            target_kind: Some(item.target_kind),
+            target_entry_id: item.target_entry_id,
+            target_term_id: item.target_term_id,
+            external_url: item.external_url.clone(),
+        });
     }
 
-    fn build_preview_tree(
-        parent: Option<i64>,
-        resolved: &BTreeMap<i64, (Option<i64>, i64, String, String)>,
-        children_map: &BTreeMap<Option<i64>, Vec<i64>>,
-        depth: usize,
-    ) -> Vec<MenuItemView> {
-        if depth > MAX_MENU_DEPTH {
-            return Vec::new();
-        }
-        let Some(ids) = children_map.get(&parent) else {
-            return Vec::new();
-        };
-        let mut out = Vec::with_capacity(ids.len());
-        for &id in ids {
-            if let Some((_, _, label, url)) = resolved.get(&id) {
-                let children = build_preview_tree(Some(id), resolved, children_map, depth + 1);
-                out.push(MenuItemView {
-                    id,
-                    label: label.clone(),
-                    url: url.clone(),
-                    children,
-                });
-            }
-        }
-        out
-    }
-
-    let tree = build_preview_tree(None, &resolved_items, &children_map, 1);
+    let view = resolve_and_build_menu_view(
+        &mut tx,
+        menu,
+        Some(preview_title),
+        abstract_items,
+        None,
+        true,
+    )
+    .await?;
     tx.commit().await?;
-    Ok(Some(MenuViewModel {
-        menu_id: menu.id,
-        menu_key: menu.menu_key,
-        title: preview_title,
-        items: tree,
-        diagnostics,
-    }))
+    Ok(Some(view))
 }
 
 pub fn extract_declared_menu_slots(manifest_json: &str) -> Vec<String> {
@@ -1789,6 +1846,129 @@ mod tests {
                 .0,
             axum::http::StatusCode::BAD_REQUEST
         );
+
+        tx.commit().await.unwrap();
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn menu_view_computes_normalize_path_active_bottom_up_ancestor_external_and_depth() {
+        assert_eq!(normalize_menu_path("/"), "/");
+        assert_eq!(normalize_menu_path("///"), "/");
+        assert_eq!(normalize_menu_path("/posts/?page=2#top"), "/posts");
+        assert_eq!(normalize_menu_path("/docs/guide/"), "/docs/guide");
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("opendash-menu-s02-unit-{nanos}"));
+        let db = init_db(&dir.join("cms.db")).await.unwrap();
+
+        let mut tx = db.begin().await.unwrap();
+        sqlx::query(
+            "INSERT INTO content_entries (content_type_key, locale, translation_group_id, slug, title, values_json, publication_status, version)
+             VALUES ('page', 'vi', 'tg_m1', 'parent-pg', 'Parent Page', '{}', 'draft', 1),
+                    ('page', 'vi', 'tg_m2', 'child-pg', 'Child Page', '{}', 'draft', 1)",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        sqlx::query(
+            "UPDATE content_entries SET publication_status = 'published', published_at = datetime('now')
+              WHERE content_type_key = 'page' AND slug IN ('parent-pg', 'child-pg') AND locale = 'vi'",
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        let p_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM content_entries WHERE slug = 'parent-pg' AND locale = 'vi'",
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        let c_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM content_entries WHERE slug = 'child-pg' AND locale = 'vi'",
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+        crate::storage::permalinks::sync_claims_in_tx(&mut tx)
+            .await
+            .unwrap();
+
+        let m = create_menu_in_tx(
+            &mut tx,
+            &CreateMenuInput {
+                menu_key: "main".into(),
+                title: "Main".into(),
+                origin_provenance: None,
+            },
+        )
+        .await
+        .unwrap();
+        replace_menu_items_in_tx(
+            &mut tx,
+            m.id,
+            1,
+            &[
+                MenuItemInput {
+                    id: None,
+                    client_key: Some("root_page".into()),
+                    parent_id: None,
+                    parent_client_key: None,
+                    position: 0,
+                    label: "Parent".into(),
+                    target_kind: MenuTargetKind::Entry,
+                    target_entry_id: Some(p_id),
+                    target_term_id: None,
+                    external_url: None,
+                },
+                MenuItemInput {
+                    id: None,
+                    client_key: Some("child_page".into()),
+                    parent_id: None,
+                    parent_client_key: Some("root_page".into()),
+                    position: 0,
+                    label: "Child".into(),
+                    target_kind: MenuTargetKind::Entry,
+                    target_entry_id: Some(c_id),
+                    target_term_id: None,
+                    external_url: None,
+                },
+                item_ext("Ext", 1, "https://example.com/out"),
+            ],
+        )
+        .await
+        .unwrap();
+
+        let vm = resolve_menu_view_for_path_in_tx(&mut tx, m.id, Some("/child-pg/?utm=1"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(vm.items.len(), 2);
+        let root_item = &vm.items[0];
+        assert_eq!(root_item.depth, 1);
+        assert!(!root_item.is_external);
+        assert!(!root_item.is_active);
+        assert!(root_item.is_ancestor);
+        assert_eq!(root_item.children.len(), 1);
+        assert_eq!(root_item.children[0].depth, 2);
+        assert!(root_item.children[0].is_active);
+        assert!(!root_item.children[0].is_ancestor);
+
+        let ext_item = &vm.items[1];
+        assert!(ext_item.is_external);
+        assert!(!ext_item.is_active);
+        assert!(!ext_item.is_ancestor);
+
+        let preview_vm = resolve_menu_view_for_path_in_tx(&mut tx, m.id, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!preview_vm.items[0].is_ancestor);
+        assert!(!preview_vm.items[0].children[0].is_active);
 
         tx.commit().await.unwrap();
         drop(db);

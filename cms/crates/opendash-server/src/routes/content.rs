@@ -113,26 +113,31 @@ pub async fn content_entry_preview(
     if !valid_content_type_key(&type_key) || type_key == "pattern" {
         return Err(ApiError::not_found("Không tìm thấy loại nội dung."));
     }
-    let schema = content_storage::load_content_type_definition(&db, &type_key)
+    let effective = content_storage::load_effective_content_schema(&db, &type_key)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
     let mut record = entry_storage::get_entry(&db, &type_key, id)
         .await?
         .ok_or_else(|| ApiError::not_found("Không tìm thấy nội dung."))?;
-    if let Some(effective) = content_storage::load_effective_content_schema(&db, &type_key).await? {
-        let role = match actor.user.role {
-            Role::Admin => FieldRole::Admin,
-            Role::Editor => FieldRole::Editor,
-        };
-        entry_storage::filter_entry_values_for_role(&mut record, &effective, role);
-    }
+    let role = match actor.user.role {
+        Role::Admin => FieldRole::Admin,
+        Role::Editor => FieldRole::Editor,
+    };
+    entry_storage::filter_entry_values_for_role(&mut record, &effective, role);
     let entry_locale = record.locale.clone();
-    let view = content_render::authenticated_preview_view(record, &schema);
+    let entry_title = record.title.clone();
     let (_, selected_template) = active_content_templates(&db).await?;
-    let raw = content_render::render_single(&schema, &view, selected_template.as_deref())?;
+    let raw = crate::routes::entries::render_admin_single_fallback_html(
+        &db,
+        &record,
+        &effective,
+        role,
+        selected_template.as_deref(),
+    )
+    .await?;
     let (_, bcp47_tag, dir) =
         crate::storage::settings::get_locale_bcp47_and_dir(&db, Some(&entry_locale)).await?;
-    let seo_view = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &view.title);
+    let seo_view = crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, &entry_title);
     let html = content_render::compose_document_with_seo(None, &raw, None, &seo_view)?;
     Ok((
         [

@@ -7,6 +7,59 @@ use super::entries::{self, ContentEntryRecord, EntryFilters, decode_row};
 use crate::error::ApiResult;
 use crate::public_context::{PublicFilters, TaxonomyKind};
 
+type HydratedEntrySqlRow = (
+    i64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    Option<String>,
+    Option<i64>,
+    String,
+);
+
+fn decode_hydrated_entry_rows(
+    rows: Vec<HydratedEntrySqlRow>,
+) -> ApiResult<Vec<ContentEntryRecord>> {
+    let mut records = Vec::with_capacity(rows.len());
+    for (
+        id,
+        content_type_key,
+        slug,
+        title,
+        values_json,
+        publication_status,
+        version,
+        created_at,
+        updated_at,
+        published_at,
+        primary_category_term_id,
+        locale,
+    ) in rows
+    {
+        let mut record = decode_row((
+            id,
+            content_type_key,
+            slug,
+            title,
+            values_json,
+            publication_status,
+            version,
+            created_at,
+            updated_at,
+            published_at,
+        ))?;
+        record.primary_category_term_id = primary_category_term_id;
+        record.locale = locale;
+        records.push(record);
+    }
+    Ok(records)
+}
+
 /// Slug is unique per `(content_type_key, locale)`; defaults to the active
 /// default locale when omitted. Never bypasses enabled locale visibility.
 pub async fn get_by_slug(
@@ -35,7 +88,7 @@ pub async fn get_by_slug_for_locale(
     };
     let row: Option<entries::EntryRow> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
-                e.publication_status, e.version, e.created_at, e.updated_at
+                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at
          FROM content_entries e
          JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
          JOIN content_types t ON t.key = e.content_type_key
@@ -73,7 +126,7 @@ async fn get_published_by_id_in_tx(
 ) -> ApiResult<Option<ContentEntryRecord>> {
     let row: Option<entries::EntryRow> = sqlx::query_as(
         "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
-                e.publication_status, e.version, e.created_at, e.updated_at
+                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at
          FROM content_entries e
          JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
          JOIN content_types t ON t.key = e.content_type_key
@@ -93,7 +146,9 @@ async fn get_published_by_id_in_tx(
 pub struct PublicEntryRenderSnapshot {
     pub entry: ContentEntryRecord,
     pub locale: String,
-    pub schema: opendash_core::content::ContentTypeDefinition,
+    pub effective_schema: opendash_core::content::EffectiveContentSchema,
+    pub eligible_public_taxonomies: Vec<String>,
+    pub terms: Vec<crate::content_render::PublicTermView>,
     pub active: Option<super::theme::ActiveThemeV3>,
     pub resolution: super::overrides::TemplateResolution,
     pub body: Option<crate::page::RenderedLayout>,
@@ -153,23 +208,20 @@ pub async fn load_entry_render_snapshot_with_options(
     let Some(entry) = get_published_by_id_in_tx(&mut tx, id).await? else {
         return Ok(None);
     };
-    let entry_locale: String =
-        sqlx::query_scalar("SELECT locale FROM content_entries WHERE id = ?")
-            .bind(entry.id)
-            .fetch_one(&mut *tx)
-            .await?;
-    let mut schema =
-        content::load_content_type_definition_in_conn(&mut tx, &entry.content_type_key)
+    let entry_locale = entry.locale.clone();
+    let effective_schema =
+        content::load_effective_content_schema_in_tx(&mut tx, &entry.content_type_key)
             .await?
             .ok_or_else(|| ApiError::not_found("Không tìm thấy loại nội dung."))?;
-    let effective =
-        content::load_effective_content_schema_in_tx(&mut tx, &entry.content_type_key).await?;
-    if let Some(eff) = &effective
-        && !schema.fields.iter().any(|f| f.key == "body")
-        && let Some(body_fe) = eff.effective_fields.get("body")
-    {
-        schema.fields.push(body_fe.definition.clone());
-    }
+    let eligible_public_taxonomies =
+        load_eligible_public_taxonomies_in_conn(&mut tx, &entry.content_type_key).await?;
+    let terms = batch_load_public_entry_terms_in_conn(
+        &mut tx,
+        &[(entry.id, entry.content_type_key.clone())],
+    )
+    .await?
+    .remove(&entry.id)
+    .unwrap_or_default();
     let active = match themes_root {
         Some(root) => theme::load_active_theme_v3_in_conn(&mut tx, root).await?,
         None => None,
@@ -222,19 +274,24 @@ pub async fn load_entry_render_snapshot_with_options(
         active.as_ref().map(|v| &v.page_layouts),
     )
     .await?;
-    let body_allows_public_builder = effective.as_ref().is_some_and(|eff| {
-        eff.base.status == ProviderStatus::Active
-            && eff.base.declaration_state == DeclarationState::Declared
-            && eff.effective_fields.get("body").is_some_and(|fe| {
+    let body_allows_public_builder = effective_schema.base.status == ProviderStatus::Active
+        && effective_schema.base.declaration_state == DeclarationState::Declared
+        && effective_schema
+            .effective_fields
+            .get("body")
+            .is_some_and(|fe| {
                 fe.definition.field_type == ContentFieldType::RichText
                     && fe.definition.public_exposure == PublicExposure::Public
                     && fe.definition.min_view_role == FieldRole::Editor
-            })
-    });
+            });
     let mut render_budget = crate::page::RenderBudget::new();
     let raw_body = entry.values.get("body").and_then(serde_json::Value::as_str);
     let body = if !matches!(entry.content_type_key.as_str(), "pattern" | "section")
-        && schema.settings.supports(ContentSupport::Builder)
+        && effective_schema
+            .base
+            .descriptor
+            .settings
+            .supports(ContentSupport::Builder)
         && body_allows_public_builder
         && raw_body.is_some_and(opendash_core::builder_blocks::contains_blocks)
     {
@@ -290,7 +347,9 @@ pub async fn load_entry_render_snapshot_with_options(
     Ok(Some(PublicEntryRenderSnapshot {
         entry,
         locale: entry_locale,
-        schema,
+        effective_schema,
+        eligible_public_taxonomies,
+        terms,
         active,
         resolution,
         body,
@@ -300,7 +359,10 @@ pub async fn load_entry_render_snapshot_with_options(
 
 /// Deny public archives independently from entry visibility. Legacy CPTs
 /// without settings retain their existing public archive behavior.
-pub async fn require_public_archive(db: &SqlitePool, type_key: &str) -> ApiResult<()> {
+pub async fn require_public_archive_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    type_key: &str,
+) -> ApiResult<()> {
     let visible: i64 = sqlx::query_scalar(
         "SELECT EXISTS(
             SELECT 1 FROM content_types
@@ -310,7 +372,7 @@ pub async fn require_public_archive(db: &SqlitePool, type_key: &str) -> ApiResul
         )",
     )
     .bind(type_key)
-    .fetch_one(db)
+    .fetch_one(&mut *conn)
     .await?;
     if visible == 0 {
         return Err(crate::error::ApiError::not_found(
@@ -318,6 +380,11 @@ pub async fn require_public_archive(db: &SqlitePool, type_key: &str) -> ApiResul
         ));
     }
     Ok(())
+}
+
+pub async fn require_public_archive(db: &SqlitePool, type_key: &str) -> ApiResult<()> {
+    let mut conn = db.acquire().await?;
+    require_public_archive_in_conn(&mut conn, type_key).await
 }
 
 /// Publication filtering happens in SQL before paging, so a draft never
@@ -334,6 +401,29 @@ pub async fn list_published(
     // restrictions all run in SQL before paging; EXISTS cannot duplicate rows.
     // Keep the saved Builder media ACL query below unchanged (Forge P02).
     entries::list_published_filtered(db, type_key, limit, offset, filters).await
+}
+
+/// Single-snapshot Archive page + exact filtered total count without torn reads.
+pub async fn list_published_with_total(
+    db: &SqlitePool,
+    type_key: &str,
+    limit: i64,
+    offset: i64,
+    filters: EntryFilters,
+) -> ApiResult<(Vec<ContentEntryRecord>, i64)> {
+    let mut tx = db.begin().await?;
+    require_public_archive_in_conn(&mut tx, type_key).await?;
+    let res = entries::list_published_filtered_with_total_in_tx(
+        &mut tx,
+        type_key,
+        limit,
+        offset,
+        filters,
+        entries::PublishedListSort::IdDesc,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(res)
 }
 
 /// Resolve stable site-owned IDs to their current public URL. Draft/deleted
@@ -590,7 +680,8 @@ async fn list_taxonomy_published_in_tx(
             WHERE generic_scope.depth < 8 AND ? = 1
         )
         SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
-               e.publication_status, e.version, e.created_at, e.updated_at
+               e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
+               e.primary_category_term_id, e.locale
           FROM content_entries e
           JOIN content_types t ON t.key = e.content_type_key
           LEFT JOIN content_type_taxonomy_overrides override
@@ -658,17 +749,7 @@ async fn list_taxonomy_published_in_tx(
         .fetch_one(&mut **tx)
         .await?;
     let page_sql = format!("{FILTERED} ORDER BY e.id DESC LIMIT ? OFFSET ?");
-    let rows: Vec<(
-        i64,
-        String,
-        String,
-        String,
-        String,
-        String,
-        i64,
-        String,
-        String,
-    )> = sqlx::query_as(sqlx::AssertSqlSafe(page_sql))
+    let rows: Vec<HydratedEntrySqlRow> = sqlx::query_as(sqlx::AssertSqlSafe(page_sql))
         .bind(root_category)
         .bind(i64::from(filters.descendants))
         .bind(generic_term_id)
@@ -691,11 +772,413 @@ async fn list_taxonomy_published_in_tx(
         .bind(offset)
         .fetch_all(&mut **tx)
         .await?;
-    let entries = rows
-        .into_iter()
-        .map(decode_row)
-        .collect::<ApiResult<Vec<_>>>()?;
+    let entries = decode_hydrated_entry_rows(rows)?;
     Ok(TaxonomyPublishedPage { entries, total })
+}
+
+/// Batch-loads active, declared, and public (`d.public = 1`) taxonomies for a
+/// set of CPT keys using <= 2 batch queries, respecting `content_type_taxonomy_overrides`.
+pub async fn batch_load_eligible_public_taxonomies_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    type_keys: &[String],
+) -> ApiResult<std::collections::BTreeMap<String, Vec<String>>> {
+    let mut distinct = std::collections::BTreeSet::new();
+    let mut out = std::collections::BTreeMap::<String, Vec<String>>::new();
+    for key in type_keys {
+        if distinct.insert(key.clone()) {
+            out.insert(key.clone(), Vec::new());
+        }
+    }
+    if distinct.is_empty() {
+        return Ok(out);
+    }
+    let all_keys: Vec<String> = distinct.into_iter().collect();
+    let mut overridden = std::collections::BTreeSet::new();
+    for chunk in all_keys.chunks(500) {
+        let keys_json = serde_json::to_string(chunk)?;
+        let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+            "SELECT o.content_type_key, d.key
+               FROM content_type_taxonomy_overrides o
+               LEFT JOIN json_each(o.taxonomies_json) sel ON 1 = 1
+               LEFT JOIN taxonomy_definitions d
+                 ON d.key = sel.value
+                AND d.public = 1
+                AND d.provider_status = 'active'
+                AND d.declaration_state = 'declared'
+              WHERE o.content_type_key IN (SELECT value FROM json_each(?))",
+        )
+        .bind(keys_json)
+        .fetch_all(&mut *conn)
+        .await?;
+        for (tk, tax_opt) in rows {
+            overridden.insert(tk.clone());
+            if let Some(tax) = tax_opt {
+                out.entry(tk).or_default().push(tax);
+            }
+        }
+    }
+    let remaining: Vec<String> = all_keys
+        .into_iter()
+        .filter(|k| !overridden.contains(k))
+        .collect();
+    for chunk in remaining.chunks(500) {
+        let keys_json = serde_json::to_string(chunk)?;
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT e.content_type_key, e.taxonomy_kind
+               FROM content_type_taxonomy_eligibility e
+               JOIN taxonomy_definitions d ON d.key = e.taxonomy_kind
+              WHERE e.content_type_key IN (SELECT value FROM json_each(?))
+                AND e.provider_status = 'active'
+                AND e.declaration_state = 'declared'
+                AND d.public = 1
+                AND d.provider_status = 'active'
+                AND d.declaration_state = 'declared'
+              ORDER BY e.content_type_key ASC, e.taxonomy_kind ASC",
+        )
+        .bind(keys_json)
+        .fetch_all(&mut *conn)
+        .await?;
+        for (tk, tax) in rows {
+            out.entry(tk).or_default().push(tax);
+        }
+    }
+    for list in out.values_mut() {
+        list.sort();
+        list.dedup();
+    }
+    Ok(out)
+}
+
+pub async fn load_eligible_public_taxonomies_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    type_key: &str,
+) -> ApiResult<Vec<String>> {
+    let mut map =
+        batch_load_eligible_public_taxonomies_in_conn(conn, &[type_key.to_owned()]).await?;
+    Ok(map.remove(type_key).unwrap_or_default())
+}
+
+pub async fn batch_load_eligible_public_taxonomies(
+    db: &SqlitePool,
+    type_keys: &[String],
+) -> ApiResult<std::collections::BTreeMap<String, Vec<String>>> {
+    let mut conn = db.acquire().await?;
+    batch_load_eligible_public_taxonomies_in_conn(&mut conn, type_keys).await
+}
+
+/// Batch-loads public, active, declared and CPT-eligible `PublicTermView`s for entries
+/// (supports both draft preview and published entries), with C3 canonical URLs (`None` if unclaimed).
+pub async fn batch_load_public_entry_terms_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    entries: &[(i64, String)],
+) -> ApiResult<std::collections::BTreeMap<i64, Vec<crate::content_render::PublicTermView>>> {
+    let mut out =
+        std::collections::BTreeMap::<i64, Vec<crate::content_render::PublicTermView>>::new();
+    if entries.is_empty() {
+        return Ok(out);
+    }
+    let mut ids_set = std::collections::BTreeSet::new();
+    for (eid, _) in entries {
+        ids_set.insert(*eid);
+        out.entry(*eid).or_default();
+    }
+    let entry_ids: Vec<i64> = ids_set.into_iter().collect();
+    let mut raw_rows: Vec<(i64, i64, String, String, String)> = Vec::new();
+    let mut term_ids_set = std::collections::BTreeSet::new();
+    for chunk in entry_ids.chunks(500) {
+        let ids_json = serde_json::to_string(chunk)?;
+        let rows: Vec<(i64, i64, String, String, String)> = sqlx::query_as(
+            "SELECT et.entry_id, t.id, t.kind, t.name, t.slug
+               FROM entry_terms et
+               JOIN content_entries e ON e.id = et.entry_id
+               JOIN taxonomy_terms t ON t.id = et.term_id
+               JOIN taxonomy_definitions d ON d.key = t.kind
+               LEFT JOIN content_type_taxonomy_overrides override
+                 ON override.content_type_key = e.content_type_key
+              WHERE et.entry_id IN (SELECT value FROM json_each(?))
+                AND t.locale = e.locale
+                AND d.public = 1
+                AND d.provider_status = 'active'
+                AND d.declaration_state = 'declared'
+                AND (
+                    (override.content_type_key IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM json_each(override.taxonomies_json) sel
+                         WHERE sel.value = t.kind
+                    ))
+                    OR
+                    (override.content_type_key IS NULL AND EXISTS (
+                        SELECT 1 FROM content_type_taxonomy_eligibility el
+                         WHERE el.content_type_key = e.content_type_key
+                           AND el.taxonomy_kind = t.kind
+                           AND el.provider_status = 'active'
+                           AND el.declaration_state = 'declared'
+                    ))
+                )
+              ORDER BY et.entry_id ASC, t.kind ASC, t.id ASC",
+        )
+        .bind(ids_json)
+        .fetch_all(&mut *conn)
+        .await?;
+        for r in rows {
+            term_ids_set.insert(r.1);
+            raw_rows.push(r);
+        }
+    }
+    let term_ids: Vec<i64> = term_ids_set.into_iter().collect();
+    let term_urls =
+        crate::storage::permalinks::batch_canonical_term_paths_in_tx(conn, &term_ids).await?;
+    for (eid, tid, kind, name, slug) in raw_rows {
+        out.entry(eid)
+            .or_default()
+            .push(crate::content_render::PublicTermView {
+                id: tid,
+                kind,
+                name,
+                slug,
+                url: term_urls.get(&tid).cloned(),
+            });
+    }
+    Ok(out)
+}
+
+pub async fn batch_load_public_entry_terms(
+    db: &SqlitePool,
+    entries: &[(i64, String)],
+) -> ApiResult<std::collections::BTreeMap<i64, Vec<crate::content_render::PublicTermView>>> {
+    let mut conn = db.acquire().await?;
+    batch_load_public_entry_terms_in_conn(&mut conn, entries).await
+}
+
+/// Loads ancestor chain for a taxonomy term (from root ancestor down to immediate parent)
+/// using 1 `WITH RECURSIVE` query (depth <= 8) + Rust cycle guard + batch C3 paths.
+pub async fn load_term_ancestor_chain_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    term_id: i64,
+    expected_kind: &str,
+) -> ApiResult<Vec<crate::content_render::BreadcrumbItem>> {
+    let rows: Vec<(i64, String, i64)> = sqlx::query_as(
+        "WITH RECURSIVE ancestors(id, name, parent_id, depth) AS (
+             SELECT p.id, p.name, p.parent_id, 1
+               FROM taxonomy_terms cur
+               JOIN taxonomy_terms p ON p.id = cur.parent_id AND p.kind = cur.kind
+               JOIN taxonomy_definitions d ON d.key = p.kind
+              WHERE cur.id = ? AND cur.kind = ?
+                AND d.public = 1 AND d.provider_status = 'active' AND d.declaration_state = 'declared'
+             UNION ALL
+             SELECT p.id, p.name, p.parent_id, ancestors.depth + 1
+               FROM ancestors
+               JOIN taxonomy_terms p ON p.id = ancestors.parent_id AND p.kind = ?
+               JOIN taxonomy_definitions d ON d.key = p.kind
+              WHERE ancestors.depth < 8
+                AND d.public = 1 AND d.provider_status = 'active' AND d.declaration_state = 'declared'
+         )
+         SELECT id, name, depth FROM ancestors ORDER BY depth DESC",
+    )
+    .bind(term_id)
+    .bind(expected_kind)
+    .bind(expected_kind)
+    .fetch_all(&mut *conn)
+    .await?;
+
+    let mut visited = std::collections::HashSet::from([term_id]);
+    let mut ordered = Vec::new();
+    for (aid, name, _) in rows {
+        if visited.insert(aid) {
+            ordered.push((aid, name));
+        }
+    }
+    let ancestor_ids: Vec<i64> = ordered.iter().map(|(aid, _)| *aid).collect();
+    let urls =
+        crate::storage::permalinks::batch_canonical_term_paths_in_tx(conn, &ancestor_ids).await?;
+    Ok(ordered
+        .into_iter()
+        .map(|(aid, name)| crate::content_render::BreadcrumbItem {
+            name,
+            url: urls.get(&aid).cloned(),
+            is_current: false,
+        })
+        .collect())
+}
+
+async fn hydrate_entry_views_in_conn(
+    conn: &mut sqlx::SqliteConnection,
+    records: Vec<ContentEntryRecord>,
+) -> ApiResult<Vec<crate::content_render::EntryView>> {
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+    let entry_ids: Vec<i64> = records.iter().map(|r| r.id).collect();
+    let pairs: Vec<(i64, String)> = records
+        .iter()
+        .map(|r| (r.id, r.content_type_key.clone()))
+        .collect();
+    let distinct_types: Vec<String> = records
+        .iter()
+        .map(|r| r.content_type_key.clone())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    let urls =
+        super::seo::resolve_public_entry_paths_by_entry_ids_in_conn(conn, &entry_ids).await?;
+    let mut terms_map = batch_load_public_entry_terms_in_conn(conn, &pairs).await?;
+    let tax_map = batch_load_eligible_public_taxonomies_in_conn(conn, &distinct_types).await?;
+    let mut schemas = std::collections::BTreeMap::new();
+    for tk in &distinct_types {
+        if let Some(eff) = super::content::load_effective_content_schema_in_tx(conn, tk).await? {
+            schemas.insert(tk.clone(), eff);
+        }
+    }
+
+    let mut views = Vec::with_capacity(records.len());
+    for record in records {
+        let Some(eff) = schemas.get(&record.content_type_key) else {
+            continue;
+        };
+        let url = urls.get(&record.id).cloned();
+        let terms = terms_map.remove(&record.id).unwrap_or_default();
+        let eligible_taxonomies = tax_map
+            .get(&record.content_type_key)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        views.push(crate::content_render::entry_view_with_context(
+            &record,
+            eff,
+            url,
+            &terms,
+            eligible_taxonomies,
+            opendash_core::content::FieldRole::Editor,
+        ));
+    }
+    Ok(views)
+}
+
+/// Fetches up to `limit` (clamped <= 20) published entries in the same CPT and locale
+/// sharing at least one public, active, declared, CPT-eligible taxonomy term.
+pub async fn query_related_entries(
+    db: &SqlitePool,
+    entry_id: i64,
+    type_key: &str,
+    limit: usize,
+) -> ApiResult<Vec<crate::content_render::EntryView>> {
+    let clamped = (limit.min(20)) as i64;
+    if clamped == 0 {
+        return Ok(Vec::new());
+    }
+    let mut tx = db.begin().await?;
+    let Some(source_locale): Option<String> =
+        sqlx::query_scalar("SELECT locale FROM content_entries WHERE id = ?")
+            .bind(entry_id)
+            .fetch_optional(&mut *tx)
+            .await?
+    else {
+        tx.commit().await?;
+        return Ok(Vec::new());
+    };
+    let rows: Vec<HydratedEntrySqlRow> = sqlx::query_as(
+        "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
+                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
+                e.primary_category_term_id, e.locale
+           FROM content_entries e
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN content_types t ON t.key = e.content_type_key
+           LEFT JOIN content_type_taxonomy_overrides override
+             ON override.content_type_key = e.content_type_key
+          WHERE e.content_type_key = ?
+            AND e.locale = ?
+            AND e.id != ?
+            AND e.publication_status = 'published'
+            AND e.content_type_key != 'pattern'
+            AND t.provider_status = 'active'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+            AND EXISTS (
+                SELECT 1
+                  FROM entry_terms et1
+                  JOIN entry_terms et2 ON et2.term_id = et1.term_id
+                  JOIN taxonomy_terms tt ON tt.id = et1.term_id
+                  JOIN taxonomy_definitions d ON d.key = tt.kind
+                 WHERE et1.entry_id = ?
+                   AND et2.entry_id = e.id
+                   AND tt.locale = e.locale
+                   AND d.public = 1
+                   AND d.provider_status = 'active'
+                   AND d.declaration_state = 'declared'
+                   AND (
+                       (override.content_type_key IS NOT NULL AND EXISTS (
+                           SELECT 1 FROM json_each(override.taxonomies_json) sel
+                            WHERE sel.value = tt.kind
+                       ))
+                       OR
+                       (override.content_type_key IS NULL AND EXISTS (
+                           SELECT 1 FROM content_type_taxonomy_eligibility el
+                            WHERE el.content_type_key = e.content_type_key
+                              AND el.taxonomy_kind = tt.kind
+                              AND el.provider_status = 'active'
+                              AND el.declaration_state = 'declared'
+                       ))
+                   )
+            )
+          ORDER BY COALESCE(e.published_at, e.updated_at) DESC, e.id DESC
+          LIMIT ?",
+    )
+    .bind(type_key)
+    .bind(&source_locale)
+    .bind(entry_id)
+    .bind(entry_id)
+    .bind(clamped)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let records = decode_hydrated_entry_rows(rows)?;
+    let out = hydrate_entry_views_in_conn(&mut tx, records).await?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+/// Fetches up to `limit` (clamped <= 20) recent published `post` entries in the given
+/// (or default) locale, optionally excluding `exclude_post_id`.
+pub async fn query_recent_posts(
+    db: &SqlitePool,
+    exclude_post_id: Option<i64>,
+    locale: Option<&str>,
+    limit: usize,
+) -> ApiResult<Vec<crate::content_render::EntryView>> {
+    let clamped = (limit.min(20)) as i64;
+    if clamped == 0 {
+        return Ok(Vec::new());
+    }
+    let mut tx = db.begin().await?;
+    let active_locale = match locale {
+        Some(loc) => loc.to_owned(),
+        None => super::settings::get_default_locale_code_in_conn(&mut tx).await?,
+    };
+    let rows: Vec<HydratedEntrySqlRow> = sqlx::query_as(
+        "SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
+                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
+                e.primary_category_term_id, e.locale
+           FROM content_entries e
+           JOIN site_locales sl ON sl.code = e.locale AND sl.enabled = 1
+           JOIN content_types t ON t.key = e.content_type_key
+          WHERE e.content_type_key = 'post'
+            AND e.locale = ?
+            AND e.publication_status = 'published'
+            AND (? IS NULL OR e.id != ?)
+            AND t.provider_status = 'active'
+            AND COALESCE(json_extract(t.definition_json, '$.settings.public'), 1) = 1
+          ORDER BY COALESCE(e.published_at, e.updated_at) DESC, e.id DESC
+          LIMIT ?",
+    )
+    .bind(&active_locale)
+    .bind(exclude_post_id)
+    .bind(exclude_post_id)
+    .bind(clamped)
+    .fetch_all(&mut *tx)
+    .await?;
+
+    let records = decode_hydrated_entry_rows(rows)?;
+    let out = hydrate_entry_views_in_conn(&mut tx, records).await?;
+    tx.commit().await?;
+    Ok(out)
 }
 
 /// Images become public only while referenced by an image/gallery custom field

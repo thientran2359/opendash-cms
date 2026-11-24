@@ -235,7 +235,7 @@ pub async fn query(
     };
     let rows_sql = format!(
         "{CATEGORY_SCOPE} SELECT e.id, e.content_type_key, e.slug, e.title, e.values_json,
-                e.publication_status, e.version, e.created_at, e.updated_at,
+                e.publication_status, e.version, e.created_at, e.updated_at, e.published_at,
                 e.locale, e.translation_group_id
          {SCOPE} AND (? = 'all' OR e.publication_status = ?)
          ORDER BY {column} {direction}{tie} LIMIT ? OFFSET ?"
@@ -250,6 +250,7 @@ pub async fn query(
         i64,
         String,
         String,
+        Option<String>,
         String,
         String,
     )> = bind_scope!(
@@ -267,13 +268,23 @@ pub async fn query(
 
     let mut group_ids: Vec<String> = selected
         .iter()
-        .map(|row| row.10.clone())
+        .map(|row| row.11.clone())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
         .collect();
     let translations_by_group =
         entries::batch_translations_by_group_in_tx(&mut tx, type_key, &group_ids).await?;
     group_ids.clear();
+
+    let entry_ids: Vec<i64> = selected.iter().map(|row| row.0).collect();
+    let mut terms_by_entry = entries::batch_load_term_ids_in_conn(&mut tx, &entry_ids).await?;
+    let published_ids: Vec<i64> = selected
+        .iter()
+        .filter(|row| row.5 == "published")
+        .map(|row| row.0)
+        .collect();
+    let public_urls =
+        seo::resolve_public_entry_paths_by_entry_ids_in_conn(&mut tx, &published_ids).await?;
 
     let mut items = Vec::with_capacity(selected.len());
     for (
@@ -286,6 +297,7 @@ pub async fn query(
         version,
         created_at,
         updated_at,
+        published_at,
         locale,
         translation_group_id,
     ) in selected
@@ -300,13 +312,9 @@ pub async fn query(
             version,
             created_at,
             updated_at,
+            published_at,
         ))?;
-        let term_ids: Vec<i64> = sqlx::query_scalar(
-            "SELECT term_id FROM entry_terms WHERE entry_id = ? ORDER BY term_id",
-        )
-        .bind(record.id)
-        .fetch_all(&mut *tx)
-        .await?;
+        let term_ids = terms_by_entry.remove(&record.id).unwrap_or_default();
         record.values.retain(|key, _| {
             effective.effective_fields.get(key).is_some_and(|field| {
                 field.effective_status == EffectiveFieldStatus::Active
@@ -314,11 +322,8 @@ pub async fn query(
                     && field.definition.public_exposure == PublicExposure::Public
             })
         });
-        // SEO's public resolver checks provider state and CPT visibility as
-        // well as publication, so a private CPT remains editable without
-        // giving its Admin row a misleading public View link.
         let public_url = if record.publication_status == "published" {
-            seo::resolve_public_entry_path_in_tx(&mut tx, record.id).await?
+            public_urls.get(&record.id).cloned()
         } else {
             None
         };
