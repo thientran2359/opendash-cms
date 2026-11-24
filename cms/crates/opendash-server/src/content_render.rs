@@ -14,23 +14,115 @@ use crate::{
     theme,
 };
 
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct CoreL10n {
+    pub lang: &'static str,
+    pub yes: &'static str,
+    pub no: &'static str,
+    pub empty_content: &'static str,
+    pub previous_page: &'static str,
+    pub next_page: &'static str,
+    pub invalid_template_content: &'static str,
+    pub image_alt_prefix: &'static str,
+    pub list_unavailable: &'static str,
+    pub page_empty: &'static str,
+    pub back_to_first_page: &'static str,
+    pub list_prev: &'static str,
+    pub list_next: &'static str,
+    pub contact_unavailable: &'static str,
+    pub pattern_missing: &'static str,
+    pub select_placeholder: &'static str,
+    pub select_empty: &'static str,
+    pub home_unconfigured: &'static str,
+    pub not_found_title: &'static str,
+    pub contact_error_title: &'static str,
+    pub contact_error_heading: &'static str,
+    pub contact_received_title: &'static str,
+    pub contact_received_heading: &'static str,
+    pub contact_received_body: &'static str,
+}
+
+const CORE_L10N_VI: CoreL10n = CoreL10n {
+    lang: "vi",
+    yes: "Có",
+    no: "Không",
+    empty_content: "Chưa có nội dung.",
+    previous_page: "← Trang trước",
+    next_page: "Trang sau →",
+    invalid_template_content: "Nội dung mẫu không hợp lệ.",
+    image_alt_prefix: "Ảnh minh họa ",
+    list_unavailable: "Danh sách chưa khả dụng.",
+    page_empty: "Trang này không có nội dung.",
+    back_to_first_page: "Về trang đầu",
+    list_prev: "Trang trước",
+    list_next: "Trang sau",
+    contact_unavailable: "Biểu mẫu liên hệ hiện không khả dụng.",
+    pattern_missing: "Pattern không còn tồn tại.",
+    select_placeholder: "-- Chọn --",
+    select_empty: "Để trống",
+    home_unconfigured: "Chưa cấu hình trang chủ.",
+    not_found_title: "404 — Không tìm thấy trang",
+    contact_error_title: "Lỗi gửi biểu mẫu",
+    contact_error_heading: "Không thể gửi biểu mẫu",
+    contact_received_title: "Đã nhận liên hệ",
+    contact_received_heading: "Cảm ơn bạn đã liên hệ",
+    contact_received_body: "Thông tin của bạn đã được tiếp nhận.",
+};
+
+const CORE_L10N_EN: CoreL10n = CoreL10n {
+    lang: "en",
+    yes: "Yes",
+    no: "No",
+    empty_content: "No content yet.",
+    previous_page: "← Previous",
+    next_page: "Next →",
+    invalid_template_content: "Invalid template content.",
+    image_alt_prefix: "Illustration ",
+    list_unavailable: "List is currently unavailable.",
+    page_empty: "This page has no content.",
+    back_to_first_page: "Back to first page",
+    list_prev: "Previous",
+    list_next: "Next",
+    contact_unavailable: "Contact form is currently unavailable.",
+    pattern_missing: "Pattern no longer exists.",
+    select_placeholder: "-- Select --",
+    select_empty: "Leave blank",
+    home_unconfigured: "Homepage is not configured.",
+    not_found_title: "404 — Page not found",
+    contact_error_title: "Form submission error",
+    contact_error_heading: "Unable to submit form",
+    contact_received_title: "Message received",
+    contact_received_heading: "Thank you for contacting us",
+    contact_received_body: "Your message has been received.",
+};
+
+/// Returns built-in Core fallback strings (`vi` for Vietnamese, `en` fallback for all other locales).
+pub fn core_l10n(locale_code: &str) -> &'static CoreL10n {
+    let lower = locale_code.trim().to_ascii_lowercase();
+    if lower == "vi" || lower.starts_with("vi-") {
+        &CORE_L10N_VI
+    } else {
+        &CORE_L10N_EN
+    }
+}
+
 pub const DEFAULT_ARCHIVE: &str = r##"<!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="{{ l10n.lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ content_type.label }} — {{ site.title }}</title>
 </head><body><main class="mx-auto max-w-4xl px-4 py-8 text-od-text">
 <header class="mb-8"><strong class="text-xl font-od-heading font-semibold">{{ site.title }}</strong>{% if site.tagline %}<p class="text-od-muted">{{ site.tagline }}</p>{% endif %}</header>
 <h1 class="mb-6 text-3xl font-od-heading font-bold">{{ content_type.label }}</h1>
 {% for entry in entries %}
 <article class="od-prose border-b border-od-border py-5"><h2>{% if entry.url %}<a href="{{ entry.url }}">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</h2>
-{% if entry.cover_url %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}<img class="max-h-64 max-w-full rounded-lg object-contain" src="{{ entry.cover_url }}" alt="Ảnh minh họa {{ entry.title }}" loading="lazy">{% if entry.url %}</a>{% endif %}{% endif %}
+{% if entry.cover_url %}{% if entry.url %}<a href="{{ entry.url }}">{% endif %}<img class="max-h-64 max-w-full rounded-lg object-contain" src="{{ entry.cover_url }}" alt="{{ l10n.image_alt_prefix }}{{ entry.title }}" loading="lazy">{% if entry.url %}</a>{% endif %}{% endif %}
 </article>
-{% else %}<p>Chưa có nội dung.</p>{% endfor %}
-<nav class="mt-8 flex gap-4">{% if previous_url %}<a href="{{ previous_url }}">← Trang trước</a>{% endif %}
-{% if next_url %}<a href="{{ next_url }}">Trang sau →</a>{% endif %}</nav>
+{% else %}<p>{{ l10n.empty_content }}</p>{% endfor %}
+<nav class="mt-8 flex gap-4">{% if previous_url %}<a href="{{ previous_url }}">{{ l10n.previous_page }}</a>{% endif %}
+{% if next_url %}<a href="{{ next_url }}">{{ l10n.next_page }}</a>{% endif %}</nav>
 </main></body></html>"##;
 
 pub const DEFAULT_SINGLE: &str = r##"<!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="{{ l10n.lang }}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ entry.title }} — {{ site.title }}</title>
 </head><body><main class="mx-auto max-w-4xl px-4 py-8 text-od-text">
 <header class="mb-8"><strong class="text-xl font-od-heading font-semibold">{{ site.title }}</strong>{% if site.tagline %}<p class="text-od-muted">{{ site.tagline }}</p>{% endif %}</header>
@@ -95,6 +187,7 @@ pub fn entry_view_with_url(
     schema: &ContentTypeDefinition,
     url: Option<String>,
 ) -> EntryView {
+    let l10n = core_l10n(&record.locale);
     let mut cover_url = None;
     let mut public_values = BTreeMap::new();
     let mut fields = Vec::with_capacity(schema.fields.len());
@@ -151,9 +244,9 @@ pub fn entry_view_with_url(
         let text = match definition.field_type {
             ContentFieldType::Image | ContentFieldType::Gallery => String::new(),
             ContentFieldType::Boolean if value.is_boolean() => if value == &Value::Bool(true) {
-                "Có"
+                l10n.yes
             } else {
-                "Không"
+                l10n.no
             }
             .to_string(),
             _ => match (extracted_rich, value) {
@@ -271,9 +364,11 @@ pub fn compose_document_with_seo(
             parts.body_fragment
         }
         Err(diag) => {
+            let l10n = core_l10n(&seo.lang);
             format!(
-                "<main data-doc-diagnostic=\"{}\"><p>Nội dung mẫu không hợp lệ.</p><pre>{}</pre></main>",
+                "<main data-doc-diagnostic=\"{}\"><p>{}</p><pre>{}</pre></main>",
                 escape_html_attr(diag.code),
+                escape_html_attr(l10n.invalid_template_content),
                 escape_html_attr(rendered_layout),
             )
         }
@@ -367,12 +462,33 @@ pub fn render_archive_with_site(
     selected_template: Option<&str>,
     site: &SiteContext<'_>,
 ) -> ApiResult<String> {
+    render_archive_with_site_for_locale(
+        schema,
+        entries,
+        previous_url,
+        next_url,
+        selected_template,
+        site,
+        "vi",
+    )
+}
+
+pub fn render_archive_with_site_for_locale(
+    schema: &ContentTypeDefinition,
+    entries: &[EntryView],
+    previous_url: Option<&str>,
+    next_url: Option<&str>,
+    selected_template: Option<&str>,
+    site: &SiteContext<'_>,
+    locale_code: &str,
+) -> ApiResult<String> {
     let data = serde_json::json!({
         "content_type": schema,
         "entries": entries,
         "previous_url": previous_url,
         "next_url": next_url,
         "site": site,
+        "l10n": core_l10n(locale_code),
     });
     if let Some(custom) = selected_template {
         if let Ok(html) = theme::render_content(custom, &data) {
@@ -411,11 +527,30 @@ pub fn render_single_with_site_and_archive(
     site: &SiteContext<'_>,
     archive_url: Option<&str>,
 ) -> ApiResult<String> {
+    render_single_with_site_and_archive_for_locale(
+        schema,
+        entry,
+        selected_template,
+        site,
+        archive_url,
+        "vi",
+    )
+}
+
+pub fn render_single_with_site_and_archive_for_locale(
+    schema: &ContentTypeDefinition,
+    entry: &EntryView,
+    selected_template: Option<&str>,
+    site: &SiteContext<'_>,
+    archive_url: Option<&str>,
+    locale_code: &str,
+) -> ApiResult<String> {
     let data = serde_json::json!({
         "content_type": schema,
         "entry": entry,
         "archive_url": archive_url,
         "site": site,
+        "l10n": core_l10n(locale_code),
     });
     if let Some(custom) = selected_template {
         if let Ok(html) = theme::render_content(custom, &data) {

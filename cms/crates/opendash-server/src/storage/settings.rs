@@ -147,6 +147,23 @@ pub(crate) async fn get_default_locale_code(db: &SqlitePool) -> ApiResult<String
     get_default_locale_code_in_conn(&mut conn).await
 }
 
+pub(crate) async fn enabled_secondary_locale_for_segment(
+    db: &SqlitePool,
+    segment: &str,
+) -> ApiResult<Option<String>> {
+    if segment.is_empty() {
+        return Ok(None);
+    }
+    let mut conn = db.acquire().await?;
+    let code: Option<String> = sqlx::query_scalar(
+        "SELECT code FROM site_locales WHERE code = ? AND enabled = 1 AND is_default = 0",
+    )
+    .bind(segment)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(code)
+}
+
 /// Resolve `(code, bcp47_tag, direction)` for `locale` (or the default locale when `None`).
 pub(crate) async fn get_locale_bcp47_and_dir_in_conn(
     conn: &mut SqliteConnection,

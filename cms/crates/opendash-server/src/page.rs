@@ -1234,13 +1234,17 @@ pub fn render_builder_with_budget_and_base_path(
                             ))
                         }
                         ElementContent::Known(KnownElement::List(props)) => {
+                            let l10n = crate::content_render::core_l10n(&budget.locale);
                             match lists.get(&element.id) {
                                 Some(ResolvedList::MissingConfig) => {
                                     diagnostics.push(BuilderDiagnostic {
                                         node_id: element.id.clone(),
                                         code: "list_config_unavailable",
                                     });
-                                    Some("<p class=\"builder-list-empty\">Danh sách chưa khả dụng.</p>".into())
+                                    Some(format!(
+                                        "<p class=\"builder-list-empty\">{}</p>",
+                                        l10n.list_unavailable
+                                    ))
                                 }
                                 Some(ResolvedList::Page {
                                     items,
@@ -1253,15 +1257,22 @@ pub fn render_builder_with_budget_and_base_path(
                                         escape_html(&props.type_key),
                                     );
                                     if *out_of_range {
-                                        list_html.push_str("<p>Trang này không có nội dung.</p>");
+                                        list_html.push_str(&format!("<p>{}</p>", l10n.page_empty));
                                         list_html.push_str(&format!(
-                                            "<a class=\"builder-list-first\" href=\"{}\">Về trang đầu</a>",
-                                            escape_html(&list_page_href(list_base_path, lists, &element.id, 1)),
+                                            "<a class=\"builder-list-first\" href=\"{}\">{}</a>",
+                                            escape_html(&list_page_href(
+                                                list_base_path,
+                                                lists,
+                                                &element.id,
+                                                1
+                                            )),
+                                            l10n.back_to_first_page,
                                         ));
                                     } else if items.is_empty() {
-                                        list_html.push_str(
-                                            "<p class=\"builder-list-empty\">Chưa có nội dung.</p>",
-                                        );
+                                        list_html.push_str(&format!(
+                                            "<p class=\"builder-list-empty\">{}</p>",
+                                            l10n.empty_content,
+                                        ));
                                     } else {
                                         list_html.push_str("<ul>");
                                         for item in items {
@@ -1283,14 +1294,26 @@ pub fn render_builder_with_budget_and_base_path(
                                         list_html.push_str("</ul>");
                                         if !is_preview && *page > 1 {
                                             list_html.push_str(&format!(
-                                                "<a class=\"builder-list-prev\" href=\"{}\">Trang trước</a>",
-                                                escape_html(&list_page_href(list_base_path, lists, &element.id, page - 1)),
+                                                "<a class=\"builder-list-prev\" href=\"{}\">{}</a>",
+                                                escape_html(&list_page_href(
+                                                    list_base_path,
+                                                    lists,
+                                                    &element.id,
+                                                    page - 1
+                                                )),
+                                                l10n.list_prev,
                                             ));
                                         }
                                         if !is_preview && *has_next && *page < 100 {
                                             list_html.push_str(&format!(
-                                                "<a class=\"builder-list-next\" href=\"{}\">Trang sau</a>",
-                                                escape_html(&list_page_href(list_base_path, lists, &element.id, page + 1)),
+                                                "<a class=\"builder-list-next\" href=\"{}\">{}</a>",
+                                                escape_html(&list_page_href(
+                                                    list_base_path,
+                                                    lists,
+                                                    &element.id,
+                                                    page + 1
+                                                )),
+                                                l10n.list_next,
                                             ));
                                         }
                                     }
@@ -1307,6 +1330,7 @@ pub fn render_builder_with_budget_and_base_path(
                             }
                         }
                         ElementContent::Known(KnownElement::ContactForm(props)) => {
+                            let l10n = crate::content_render::core_l10n(&budget.locale);
                             match forms.get(&element.id).and_then(|opt| opt.as_ref()) {
                                 Some(form) if form.status == "active" => {
                                     let rendered = render_contact_form_html(
@@ -1314,6 +1338,7 @@ pub fn render_builder_with_budget_and_base_path(
                                         form,
                                         &props.submit_label,
                                         is_preview,
+                                        l10n,
                                     );
                                     if !is_preview {
                                         has_active_contact_form = true;
@@ -1325,7 +1350,10 @@ pub fn render_builder_with_budget_and_base_path(
                                         node_id: element.id.clone(),
                                         code: "contact_form_unavailable",
                                     });
-                                    Some("<p class=\"builder-contact-unavailable\">Biểu mẫu liên hệ hiện không khả dụng.</p>".to_string())
+                                    Some(format!(
+                                        "<p class=\"builder-contact-unavailable\">{}</p>",
+                                        l10n.contact_unavailable
+                                    ))
                                 }
                             }
                         }
@@ -1475,7 +1503,11 @@ pub fn render_builder_with_budget_and_base_path(
                                         code: "pattern_missing",
                                     });
                                     if is_preview {
-                                        Some("<div class=\"od-pattern-missing\" role=\"status\">Pattern không còn tồn tại.</div>".into())
+                                        let l10n = crate::content_render::core_l10n(&budget.locale);
+                                        Some(format!(
+                                            "<div class=\"od-pattern-missing\" role=\"status\">{}</div>",
+                                            l10n.pattern_missing
+                                        ))
                                     } else {
                                         None
                                     }
@@ -1612,6 +1644,7 @@ fn render_contact_form_html(
     form: &crate::storage::contact::ContactFormRecord,
     submit_label: &str,
     is_preview: bool,
+    l10n: &crate::content_render::CoreL10n,
 ) -> String {
     use opendash_core::contact::FormKind;
     let mut out = String::new();
@@ -1632,7 +1665,10 @@ fn render_contact_form_html(
         out.push_str(&format!(
             "<input type=\"hidden\" name=\"nonce\" value=\"{nonce}\">"
         ));
-        out.push_str("<div class=\"opendash-hp\" hidden><label>Để trống<input type=\"text\" name=\"honeypot\" tabindex=\"-1\" autocomplete=\"off\"></label></div>");
+        out.push_str(&format!(
+            "<div class=\"opendash-hp\" hidden><label>{}<input type=\"text\" name=\"honeypot\" tabindex=\"-1\" autocomplete=\"off\"></label></div>",
+            l10n.select_empty
+        ));
     }
 
     for field in &form.schema.fields {
@@ -1657,7 +1693,10 @@ fn render_contact_form_html(
                     "<label for=\"{input_id}\">{label}</label><select id=\"{input_id}\" name=\"{field_name}\"{req_attr}>"
                 ));
                 if !field.required {
-                    out.push_str("<option value=\"\">-- Chọn --</option>");
+                    out.push_str(&format!(
+                        "<option value=\"\">{}</option>",
+                        l10n.select_placeholder
+                    ));
                 }
                 if let Some(options) = &field.options {
                     for opt in options {
@@ -2674,6 +2713,7 @@ mod m6_s05_tests {
         let mut zero_fuel_budget = RenderBudget {
             fuel_remaining: 0,
             html_bytes_used: 0,
+            ..RenderBudget::default()
         };
         let isolated = render_builder_with_budget(
             &state,

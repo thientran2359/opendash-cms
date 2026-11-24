@@ -235,12 +235,17 @@ pub(crate) async fn render_not_found_response_for_locale(
     };
     let site = settings::get_general_for_locale(db, locale).await?;
     let opts = settings::get_active_public_theme_options_for_locale(db, locale).await?;
-    let (_, bcp47_tag, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
+    let (resolved_locale, bcp47_tag, dir) = settings::get_locale_bcp47_and_dir(db, locale).await?;
     let site_ctx = SiteContext {
         title: &site.site_title,
         tagline: &site.tagline,
     };
     let mut budget = overrides::PublicCompositionBudget::default();
+    let locale_ctx =
+        seo::build_theme_locale_context(db, Some(&resolved_locale), seo::ThemeLocaleTarget::None)
+            .await?;
+    budget.set_locale_context(active.as_ref(), &resolved_locale, locale_ctx);
+    let l10n = content_render::core_l10n(&resolved_locale);
     let body = resolve_public_template_html(
         db,
         &overrides::build_candidates(&PublicTemplateContext::NotFound)?,
@@ -248,7 +253,7 @@ pub(crate) async fn render_not_found_response_for_locale(
         &site_ctx,
         &opts,
         locale,
-        "<main><h1>404 — Không tìm thấy trang</h1></main>",
+        &format!("<main><h1>{}</h1></main>", l10n.not_found_title),
         None,
         serde_json::json!({ "route": { "kind": "not_found" } }),
         &mut budget,
@@ -264,11 +269,8 @@ pub(crate) async fn render_not_found_response_for_locale(
             &mut budget,
         )
         .await?;
-    let view = crate::seo::SeoView::for_noindex_page_with_dir(
-        &bcp47_tag,
-        &dir,
-        "404 — Không tìm thấy trang",
-    );
+    let view =
+        crate::seo::SeoView::for_noindex_page_with_dir(&bcp47_tag, &dir, l10n.not_found_title);
     let html = content_render::compose_document_with_seo(
         header_html.as_deref(),
         &body.html,
@@ -379,18 +381,28 @@ pub(crate) async fn render_canonical_archive(
         title: &site.site_title,
         tagline: &site.tagline,
     };
-    let fallback_html = content_render::render_archive_with_site(
+    let fallback_html = content_render::render_archive_with_site_for_locale(
         &schema,
         &entries,
         previous.as_deref(),
         next.as_deref(),
         list_template.as_deref(),
         &site_ctx,
+        &locale,
     )?;
     let candidates = overrides::build_candidates(&PublicTemplateContext::Archive {
         content_type: type_key.clone(),
     })?;
     let mut budget = overrides::PublicCompositionBudget::default();
+    let locale_ctx = seo::build_theme_locale_context(
+        &db,
+        Some(&locale),
+        seo::ThemeLocaleTarget::Archive {
+            type_key: &type_key,
+        },
+    )
+    .await?;
+    budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
     let body = resolve_public_template_html(
         &db,
         &candidates,
@@ -525,7 +537,7 @@ async fn render_entry_response_with_cache(
         active: active_v3,
         mut resolution,
         body: entry_body,
-        budget: entry_render_budget,
+        budget: mut entry_render_budget,
     } = snapshot;
     if is_home {
         let page_layout_key = entry
@@ -589,15 +601,28 @@ async fn render_entry_response_with_cache(
         .is_some_and(|body| body.has_active_contact_form);
     let fallback_html = match entry_body {
         Some(body) => body.html,
-        None => content_render::render_single_with_site_and_archive(
+        None => content_render::render_single_with_site_and_archive_for_locale(
             &schema,
             &entry_view_with_url(entry.clone(), &schema, Some(canonical_path)),
             single_template.as_deref(),
             &site_ctx,
             archive_path.as_deref(),
+            &entry_locale,
         )?,
     };
+    entry_render_budget.locale = entry_locale.clone();
     let mut budget = overrides::PublicCompositionBudget::with_render_budget(entry_render_budget);
+    let locale_ctx = seo::build_theme_locale_context(
+        &db,
+        Some(&entry_locale),
+        if is_home {
+            seo::ThemeLocaleTarget::Home
+        } else {
+            seo::ThemeLocaleTarget::Entry { entry_id: entry.id }
+        },
+    )
+    .await?;
+    budget.set_locale_context(active_v3.as_ref(), &entry_locale, locale_ctx);
     let body = render_resolved_public_template_html(
         &db,
         resolution,
@@ -815,13 +840,14 @@ pub(crate) async fn render_canonical_taxonomy(
         title: &site.site_title,
         tagline: &site.tagline,
     };
-    let fallback_html = content_render::render_archive_with_site(
+    let fallback_html = content_render::render_archive_with_site_for_locale(
         &schema,
         &entries,
         previous.as_deref(),
         next.as_deref(),
         None,
         &site_ctx,
+        &locale,
     )?;
     let candidates = overrides::build_candidates(&PublicTemplateContext::Taxonomy {
         taxonomy: schema.key.clone(),
@@ -829,6 +855,13 @@ pub(crate) async fn render_canonical_taxonomy(
         slug: term.slug.clone(),
     })?;
     let mut budget = overrides::PublicCompositionBudget::default();
+    let locale_ctx = seo::build_theme_locale_context(
+        db,
+        Some(&locale),
+        seo::ThemeLocaleTarget::Term { term_id },
+    )
+    .await?;
+    budget.set_locale_context(active_v3.as_ref(), &locale, locale_ctx);
     let body = resolve_public_template_html(
         db,
         &candidates,

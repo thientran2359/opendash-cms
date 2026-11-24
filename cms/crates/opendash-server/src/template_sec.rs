@@ -163,6 +163,7 @@ pub const MAX_BLOCK_FUEL_PER_NODE: u64 = 2_000;
 pub struct RenderBudget {
     pub fuel_remaining: u64,
     pub html_bytes_used: usize,
+    pub locale: String,
 }
 
 impl Default for RenderBudget {
@@ -170,6 +171,7 @@ impl Default for RenderBudget {
         Self {
             fuel_remaining: TEMPLATE_FUEL_LIMIT,
             html_bytes_used: 0,
+            locale: "vi".to_owned(),
         }
     }
 }
@@ -228,6 +230,7 @@ impl PreviewCompositionBudget {
         RenderBudget {
             fuel_remaining: self.fuel_remaining,
             html_bytes_used: self.html_bytes_used,
+            locale: "vi".to_owned(),
         }
     }
 
@@ -524,7 +527,6 @@ const ALLOWED_DYNAMIC_URL_VARS: &[&str] = &[
     "entry.cover_url",
     "field.image_url",
     "url",
-    "item.url",
     "previous_url",
     "next_url",
     "archive_url",
@@ -606,9 +608,7 @@ pub fn validate_template_csec_with_theme_urls(
         .map_err(|_| "Cú pháp template MiniJinja không hợp lệ.")?;
 
     validate_stmt(&ast)?;
-    if !policy.permitted_href_expressions.is_empty() {
-        reject_options_rebinding(&ast)?;
-    }
+    reject_reserved_context_rebinding(&ast)?;
     validate_theme_html_context(source, false, policy)?;
 
     let mut env = restricted_environment();
@@ -844,9 +844,7 @@ fn composition_sites(
     validate_theme_html_context(source, false, policy)?;
     let ast = parse(source, name, SyntaxConfig::default())
         .map_err(|_| "Cú pháp theme MiniJinja không hợp lệ.")?;
-    if !policy.permitted_href_expressions.is_empty() {
-        reject_options_rebinding(&ast)?;
-    }
+    reject_reserved_context_rebinding(&ast)?;
     // Scan what each possible MiniJinja branch can actually emit. A linear
     // scan through the source can see a closing quote in the *other* branch
     // and mistake a real runtime attribute for an HTML body position.
@@ -1421,6 +1419,34 @@ pub fn json_to_safe_value(value: &serde_json::Value) -> Value {
     }
 }
 
+/// Converts a JSON context object into a MiniJinja `Value`, attaching pre-built
+/// `Arc`-backed `t` and `locale` values without re-serializing them on every fragment.
+pub fn json_context_with_shared_locale(
+    value: &serde_json::Value,
+    shared_t: Option<&Value>,
+    shared_locale: Option<&Value>,
+) -> Value {
+    if shared_t.is_none() && shared_locale.is_none() {
+        return json_to_safe_value(value);
+    }
+    let mut pairs: BTreeMap<String, Value> = match value {
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(k, val)| (k.clone(), json_to_safe_value(val)))
+            .collect(),
+        _ => BTreeMap::new(),
+    };
+    if let Some(t) = shared_t {
+        pairs.entry("t".to_owned()).or_insert_with(|| t.clone());
+    }
+    if let Some(locale) = shared_locale {
+        pairs
+            .entry("locale".to_owned())
+            .or_insert_with(|| locale.clone());
+    }
+    Value::from_pairs(pairs)
+}
+
 fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
     match stmt {
         Stmt::Template(t) => {
@@ -1492,56 +1518,79 @@ fn validate_stmt(stmt: &Stmt<'_>) -> Result<(), &'static str> {
     }
 }
 
-fn binds_options(expr: &Expr<'_>) -> bool {
+const RESERVED_CONTEXT_VARS: &[&str] = &[
+    "options",
+    "theme_options",
+    "locale",
+    "t",
+    "site",
+    "menus",
+    "entry",
+    "entries",
+];
+
+fn binds_reserved_context(expr: &Expr<'_>) -> bool {
     match expr {
-        Expr::Var(var) => var.id == "options",
-        Expr::Tuple(tuple) => tuple.items.iter().any(binds_options),
-        Expr::List(list) => list.items.iter().any(binds_options),
+        Expr::Var(var) => RESERVED_CONTEXT_VARS.contains(&var.id),
+        Expr::Tuple(tuple) => tuple.items.iter().any(binds_reserved_context),
+        Expr::List(list) => list.items.iter().any(binds_reserved_context),
         // Attribute and subscript assignments are forbidden rather than
-        // allowing a mutable binding to masquerade as the manifest root.
-        Expr::GetAttr(attr) => binds_options(&attr.expr),
-        Expr::GetItem(item) => binds_options(&item.expr),
+        // allowing a mutable binding to masquerade as a reserved context root.
+        Expr::GetAttr(attr) => binds_reserved_context(&attr.expr),
+        Expr::GetItem(item) => binds_reserved_context(&item.expr),
         _ => false,
     }
 }
 
-fn reject_options_rebinding(stmt: &Stmt<'_>) -> Result<(), &'static str> {
-    let forbidden = || Err("C-SEC cấm gán lại biến options trong theme.");
+fn reject_reserved_context_rebinding(stmt: &Stmt<'_>) -> Result<(), &'static str> {
+    let forbidden = || Err("C-SEC cấm gán lại biến ngữ cảnh hệ thống trong theme.");
     match stmt {
-        Stmt::Template(t) => t.children.iter().try_for_each(reject_options_rebinding),
+        Stmt::Template(t) => t
+            .children
+            .iter()
+            .try_for_each(reject_reserved_context_rebinding),
         Stmt::ForLoop(f) => {
-            if binds_options(&f.target) {
+            let is_canonical_entries_loop = matches!(&f.target, Expr::Var(t) if t.id == "entry")
+                && matches!(&f.iter, Expr::Var(it) if it.id == "entries");
+            if !is_canonical_entries_loop && binds_reserved_context(&f.target) {
                 return forbidden();
             }
             f.body
                 .iter()
                 .chain(&f.else_body)
-                .try_for_each(reject_options_rebinding)
+                .try_for_each(reject_reserved_context_rebinding)
         }
         Stmt::WithBlock(w) => {
-            if w.assignments.iter().any(|(key, _)| binds_options(key)) {
+            if w.assignments
+                .iter()
+                .any(|(key, _)| binds_reserved_context(key))
+            {
                 return forbidden();
             }
-            w.body.iter().try_for_each(reject_options_rebinding)
+            w.body
+                .iter()
+                .try_for_each(reject_reserved_context_rebinding)
         }
         Stmt::Set(s) => {
-            if binds_options(&s.target) {
+            if binds_reserved_context(&s.target) {
                 forbidden()
             } else {
                 Ok(())
             }
         }
         Stmt::SetBlock(sb) => {
-            if binds_options(&sb.target) {
+            if binds_reserved_context(&sb.target) {
                 return forbidden();
             }
-            sb.body.iter().try_for_each(reject_options_rebinding)
+            sb.body
+                .iter()
+                .try_for_each(reject_reserved_context_rebinding)
         }
         Stmt::IfCond(i) => i
             .true_body
             .iter()
             .chain(&i.false_body)
-            .try_for_each(reject_options_rebinding),
+            .try_for_each(reject_reserved_context_rebinding),
         _ => Ok(()),
     }
 }
@@ -1589,6 +1638,9 @@ fn validate_expr(expr: &Expr<'_>) -> Result<(), &'static str> {
             validate_expr(&g.expr)
         }
         Expr::GetItem(g) => {
+            if matches!(&g.expr, Expr::Var(v) if v.id == "t") {
+                return Err("C-SEC cấm truy cập t[...] động; hãy dùng t.<key>.");
+            }
             validate_expr(&g.expr)?;
             validate_expr(&g.subscript_expr)
         }
@@ -1640,6 +1692,148 @@ fn validate_call_arg(arg: &minijinja::machinery::ast::CallArg<'_>) -> Result<(),
         | minijinja::machinery::ast::CallArg::Kwarg(_, e)
         | minijinja::machinery::ast::CallArg::PosSplat(e)
         | minijinja::machinery::ast::CallArg::KwargSplat(e) => validate_expr(e),
+    }
+}
+
+/// Collects every `t.<key>` translation key referenced by a theme template AST.
+pub fn collect_theme_translation_keys(source: &str) -> Result<BTreeSet<String>, &'static str> {
+    let ast = parse(source, "theme-l10n", SyntaxConfig::default())
+        .map_err(|_| "Cú pháp theme MiniJinja không hợp lệ.")?;
+    let mut keys = BTreeSet::new();
+    collect_t_keys_stmt(&ast, &mut keys);
+    Ok(keys)
+}
+
+fn collect_t_keys_stmt(stmt: &Stmt<'_>, out: &mut BTreeSet<String>) {
+    match stmt {
+        Stmt::Template(t) => {
+            for child in &t.children {
+                collect_t_keys_stmt(child, out);
+            }
+        }
+        Stmt::EmitExpr(e) => collect_t_keys_expr(&e.expr, out),
+        Stmt::ForLoop(f) => {
+            collect_t_keys_expr(&f.iter, out);
+            if let Some(cond) = &f.filter_expr {
+                collect_t_keys_expr(cond, out);
+            }
+            for child in f.body.iter().chain(&f.else_body) {
+                collect_t_keys_stmt(child, out);
+            }
+        }
+        Stmt::IfCond(i) => {
+            collect_t_keys_expr(&i.expr, out);
+            for child in i.true_body.iter().chain(&i.false_body) {
+                collect_t_keys_stmt(child, out);
+            }
+        }
+        Stmt::WithBlock(w) => {
+            for (_, val) in &w.assignments {
+                collect_t_keys_expr(val, out);
+            }
+            for child in &w.body {
+                collect_t_keys_stmt(child, out);
+            }
+        }
+        Stmt::Set(s) => collect_t_keys_expr(&s.expr, out),
+        Stmt::SetBlock(sb) => {
+            if let Some(filter) = &sb.filter {
+                collect_t_keys_expr(filter, out);
+            }
+            for child in &sb.body {
+                collect_t_keys_stmt(child, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_t_keys_expr(expr: &Expr<'_>, out: &mut BTreeSet<String>) {
+    match expr {
+        Expr::GetAttr(g) => {
+            if matches!(&g.expr, Expr::Var(v) if v.id == "t") {
+                out.insert(g.name.to_owned());
+            } else {
+                collect_t_keys_expr(&g.expr, out);
+            }
+        }
+        Expr::GetItem(g) => {
+            collect_t_keys_expr(&g.expr, out);
+            collect_t_keys_expr(&g.subscript_expr, out);
+        }
+        Expr::Slice(s) => {
+            collect_t_keys_expr(&s.expr, out);
+            if let Some(start) = &s.start {
+                collect_t_keys_expr(start, out);
+            }
+            if let Some(stop) = &s.stop {
+                collect_t_keys_expr(stop, out);
+            }
+            if let Some(step) = &s.step {
+                collect_t_keys_expr(step, out);
+            }
+        }
+        Expr::UnaryOp(u) => collect_t_keys_expr(&u.expr, out),
+        Expr::BinOp(b) => {
+            collect_t_keys_expr(&b.left, out);
+            collect_t_keys_expr(&b.right, out);
+        }
+        Expr::Compare(c) => {
+            collect_t_keys_expr(&c.expr, out);
+            for op in &c.ops {
+                collect_t_keys_expr(&op.expr, out);
+            }
+        }
+        Expr::IfExpr(i) => {
+            collect_t_keys_expr(&i.test_expr, out);
+            collect_t_keys_expr(&i.true_expr, out);
+            if let Some(f) = &i.false_expr {
+                collect_t_keys_expr(f, out);
+            }
+        }
+        Expr::List(l) => {
+            for item in &l.items {
+                collect_t_keys_expr(item, out);
+            }
+        }
+        Expr::Tuple(t) => {
+            for item in &t.items {
+                collect_t_keys_expr(item, out);
+            }
+        }
+        Expr::Map(m) => {
+            for (k, v) in m.keys.iter().zip(m.values.iter()) {
+                collect_t_keys_expr(k, out);
+                collect_t_keys_expr(v, out);
+            }
+        }
+        Expr::Filter(f) => {
+            if let Some(e) = &f.expr {
+                collect_t_keys_expr(e, out);
+            }
+            for arg in &f.args {
+                collect_t_keys_call_arg(arg, out);
+            }
+        }
+        Expr::Test(t) => {
+            collect_t_keys_expr(&t.expr, out);
+            for arg in &t.args {
+                collect_t_keys_call_arg(arg, out);
+            }
+        }
+        Expr::Var(_) | Expr::Const(_) | Expr::Call(_) => {}
+    }
+}
+
+fn collect_t_keys_call_arg(
+    arg: &minijinja::machinery::ast::CallArg<'_>,
+    out: &mut BTreeSet<String>,
+) {
+    match arg {
+        minijinja::machinery::ast::CallArg::Pos(e)
+        | minijinja::machinery::ast::CallArg::Kwarg(_, e)
+        | minijinja::machinery::ast::CallArg::PosSplat(e)
+        | minijinja::machinery::ast::CallArg::KwargSplat(e) => collect_t_keys_expr(e, out),
     }
 }
 
@@ -1917,7 +2111,9 @@ fn validate_tag_attributes(
                 } else if !ALLOWED_DYNAMIC_URL_VARS.contains(&expr_inner)
                     && !(tag_name == "a"
                         && name == "href"
-                        && theme_policy.is_some_and(|policy| policy.allows_anchor_href(expr_inner)))
+                        && (matches!(expr_inner, "item.url" | "locale.home_url")
+                            || theme_policy
+                                .is_some_and(|policy| policy.allows_anchor_href(expr_inner))))
                 {
                     return Err("URL động trong thuộc tính không nằm trong whitelist typed URL.");
                 }

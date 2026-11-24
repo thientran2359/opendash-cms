@@ -6,6 +6,8 @@ pub const MAX_PUBLIC_DOCUMENT_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SafeDocumentParts {
+    pub html_lang: Option<String>,
+    pub html_dir: Option<String>,
     pub body_attributes: Vec<(String, String)>,
     pub body_fragment: String,
     pub authorized_styles: Vec<String>,
@@ -376,6 +378,8 @@ pub fn normalize_public_document(
             }
         }
         return Ok(SafeDocumentParts {
+            html_lang: None,
+            html_dir: None,
             body_attributes: Vec::new(),
             body_fragment,
             authorized_styles,
@@ -397,6 +401,8 @@ pub fn normalize_public_document(
     let mut seen_doctype = false;
     let mut seen_head = false;
     let mut seen_body = false;
+    let mut html_lang: Option<String> = None;
+    let mut html_dir: Option<String> = None;
     let mut body_attributes = Vec::new();
     let mut authorized_styles = Vec::new();
     let mut body_fragment = String::new();
@@ -454,6 +460,21 @@ pub fn normalize_public_document(
                             "invalid_html_envelope",
                             "Thẻ <html> trùng lặp hoặc lồng nhau.",
                         ));
+                    }
+                    let attrs = parse_attributes(attrs_raw)?;
+                    for (k, v) in attrs {
+                        if k == "lang" {
+                            let trimmed = v.trim();
+                            if crate::storage::settings::valid_content_language(trimmed) {
+                                html_lang = Some(trimmed.to_owned());
+                            }
+                        } else if k == "dir" {
+                            if v.eq_ignore_ascii_case("ltr") {
+                                html_dir = Some("ltr".to_owned());
+                            } else if v.eq_ignore_ascii_case("rtl") {
+                                html_dir = Some("rtl".to_owned());
+                            }
+                        }
                     }
                     phase = Phase::InHtmlBeforeHead;
                 }
@@ -570,6 +591,8 @@ pub fn normalize_public_document(
     }
 
     Ok(SafeDocumentParts {
+        html_lang,
+        html_dir,
         body_attributes,
         body_fragment,
         authorized_styles,

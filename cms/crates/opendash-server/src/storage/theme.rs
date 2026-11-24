@@ -696,40 +696,54 @@ pub async fn ensure_default_starter_theme(
 ) -> ApiResult<ThemeRevisionRecord> {
     use crate::builtin_themes::{
         STARTER_THEME_ID, STARTER_THEME_NAME, STARTER_THEME_VERSION, builtin_starter_theme_files,
-        builtin_starter_theme_v100_files,
+        builtin_starter_theme_v100_files, builtin_starter_theme_v101_files,
     };
-    // A pre-existing canonical v1.0.0 record is eligible for exact-byte
+    // Pre-existing canonical v1.0.0 / v1.0.1 records are eligible for exact-byte
     // repair. Fresh sites must never receive a fabricated legacy revision.
-    let v100_files = builtin_starter_theme_v100_files();
-    let (v100_digest, v100_file_digests) = compute_canonical_file_map_digest(&v100_files);
-    let installed_v100 = {
-        let mut conn = db.acquire().await?;
-        find_revision_by_digest(&mut conn, &v100_digest).await?
-    };
-    if let Some(old) = installed_v100 {
-        if old.theme_id == STARTER_THEME_ID
-            && old.version == "1.0.0"
-            && old.source_format == ThemeSourceFormat::V3
-        {
-            repair_builtin_starter_revision_dir_if_needed(
-                themes_root,
-                &v100_digest,
-                &v100_file_digests,
-            )?;
-            let old_pkg = crate::theme::validate_theme_v3_files(v100_files.clone())
-                .map_err(|_| ApiError::internal("Frozen Starter v1.0.0 không hợp lệ."))?;
-            stage_and_commit_v3_revision(
-                db,
-                themes_root,
-                "bootstrap-starter-v100-repair",
-                STARTER_THEME_ID,
-                STARTER_THEME_NAME,
-                "1.0.0",
-                &old_pkg.manifest_json,
-                r#"{"source":"builtin_starter"}"#,
-                &v100_files,
-            )
-            .await?;
+    for (legacy_version, repair_label, legacy_files) in [
+        (
+            "1.0.0",
+            "bootstrap-starter-v100-repair",
+            builtin_starter_theme_v100_files(),
+        ),
+        (
+            "1.0.1",
+            "bootstrap-starter-v101-repair",
+            builtin_starter_theme_v101_files(),
+        ),
+    ] {
+        let (legacy_digest, legacy_file_digests) = compute_canonical_file_map_digest(&legacy_files);
+        let installed_legacy = {
+            let mut conn = db.acquire().await?;
+            find_revision_by_digest(&mut conn, &legacy_digest).await?
+        };
+        if let Some(old) = installed_legacy {
+            if old.theme_id == STARTER_THEME_ID
+                && old.version == legacy_version
+                && old.source_format == ThemeSourceFormat::V3
+            {
+                repair_builtin_starter_revision_dir_if_needed(
+                    themes_root,
+                    &legacy_digest,
+                    &legacy_file_digests,
+                )?;
+                let old_pkg =
+                    crate::theme::validate_theme_v3_files(legacy_files.clone()).map_err(|_| {
+                        ApiError::internal("Frozen Starter legacy snapshot không hợp lệ.")
+                    })?;
+                stage_and_commit_v3_revision(
+                    db,
+                    themes_root,
+                    repair_label,
+                    STARTER_THEME_ID,
+                    STARTER_THEME_NAME,
+                    legacy_version,
+                    &old_pkg.manifest_json,
+                    r#"{"source":"builtin_starter"}"#,
+                    &legacy_files,
+                )
+                .await?;
+            }
         }
     }
     let files = builtin_starter_theme_files();
@@ -1033,6 +1047,37 @@ pub struct ActiveThemeV3 {
     pub templates: BTreeMap<String, String>,
     pub parts: BTreeMap<String, String>,
     pub page_layouts: BTreeMap<String, String>,
+    pub locales: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+impl ActiveThemeV3 {
+    /// Per-key merges theme dictionaries (`default_locale -> primary_subtag -> exact code`)
+    /// so missing keys in secondary dictionaries never trigger strict UndefinedError.
+    pub fn merged_translations(&self, locale_code: &str) -> BTreeMap<String, String> {
+        let mut merged = BTreeMap::new();
+        if let Some(default_locale) = self.manifest.default_locale.as_deref() {
+            let def_code = default_locale.to_ascii_lowercase();
+            if let Some(dict) = self.locales.get(&def_code) {
+                for (k, v) in dict {
+                    merged.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        let target_code = locale_code.to_ascii_lowercase();
+        if let Some((primary, _)) = target_code.split_once('-') {
+            if let Some(dict) = self.locales.get(primary) {
+                for (k, v) in dict {
+                    merged.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        if let Some(dict) = self.locales.get(&target_code) {
+            for (k, v) in dict {
+                merged.insert(k.clone(), v.clone());
+            }
+        }
+        merged
+    }
 }
 
 /// Provider-owned selection metadata is kept separate from site-owned typed
@@ -1348,6 +1393,20 @@ pub(super) async fn load_active_theme_v3_in_conn(
         };
         page_layouts.insert(layout.key.clone(), source);
     }
+    let mut locales = BTreeMap::new();
+    for rel_path in revision.file_digests.keys() {
+        if let Some(rest) = rel_path.strip_prefix("locales/") {
+            if let Some(code) = rest.strip_suffix(".json") {
+                let Ok(bytes) = std::fs::read(rev_dir.join(rel_path)) else {
+                    return Ok(None);
+                };
+                let Ok(dict) = crate::theme::parse_theme_locale_json(&bytes) else {
+                    return Ok(None);
+                };
+                locales.insert(code.to_owned(), dict);
+            }
+        }
+    }
     Ok(Some(ActiveThemeV3 {
         revision_id: revision.revision_id,
         revision_digest: revision.revision_digest,
@@ -1355,6 +1414,7 @@ pub(super) async fn load_active_theme_v3_in_conn(
         templates,
         parts,
         page_layouts,
+        locales,
     }))
 }
 

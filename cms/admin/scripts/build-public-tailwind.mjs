@@ -16,6 +16,8 @@ const target = join(repoRoot, 'cms/crates/opendash-server/src/builtin_themes/ope
 const scanRoots = [
   'cms/crates/opendash-server/src/builtin_blocks',
   'cms/crates/opendash-server/src/builtin_themes/opendash-starter',
+  'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.0.1',
+  'cms/crates/opendash-server/src/builtin_themes/opendash-starter-1.1.0',
   'cms/fixtures/demo-website',
 ];
 const rustSources = [

@@ -1,0 +1,19 @@
+{
+  "nav_primary_label": "Điều hướng chính",
+  "footer_links_heading": "Liên kết",
+  "footer_nav_label": "Liên kết chân trang",
+  "posts_kicker": "Tin tức và kiến thức",
+  "posts_heading": "Bài viết mới nhất",
+  "posts_empty": "Chưa có bài viết nào.",
+  "back_to_posts": "← Bài viết",
+  "empty_content": "Chưa có nội dung.",
+  "previous_page": "← Trang trước",
+  "next_page": "Trang sau →",
+  "pagination_label": "Phân trang",
+  "topic_label": "Chủ đề",
+  "image_alt_prefix": "Ảnh minh họa ",
+  "not_found_heading": "404 — Không tìm thấy trang",
+  "not_found_body": "Đường dẫn này chưa tồn tại hoặc đã được chuyển đi.",
+  "back_to_home": "Về Trang chủ",
+  "language_switcher_label": "Ngôn ngữ"
+}

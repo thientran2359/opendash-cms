@@ -138,7 +138,7 @@ async fn local_library_catalog_is_authenticated_and_pattern_scoped() {
     // Library descriptors are read-only; private Pattern CPT documents are
     // still scoped to the separate, authenticated Pattern API.
     let templates = data["theme_templates"].as_array().unwrap();
-    assert_eq!(templates.len(), 15, "9 templates, 3 parts, 3 page layouts");
+    assert_eq!(templates.len(), 16, "9 templates, 4 parts, 3 page layouts");
     assert!(templates.iter().all(|row| {
         row["theme_id"] == "opendash-starter"
             && row["can_apply"] == false
