@@ -2026,6 +2026,7 @@ export const en = {
   "studio.no_blocks_are_available_for_this_location": "No blocks are available for this location.",
   "studio.row_with_count_columns": "Row with {{count}} columns",
   "studio.loading_appearance_customization": "Loading appearance customization...",
+  "studio.reload_preview_locale_before_saving": "Reload the preview language successfully before saving. Your draft is retained until then.",
   "studio.ready_to_customize_the_website_and_build_templates": "Ready to customize the website and build templates.",
   "studio.cannot_load_appearance_customization_data": "Cannot load appearance customization data.",
   "studio.cannot_open_appearance_customization": "Cannot open appearance customization.",

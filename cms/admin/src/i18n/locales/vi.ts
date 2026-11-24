@@ -2028,6 +2028,7 @@ export const vi: Record<TranslationKey, string> = {
   "studio.no_blocks_are_available_for_this_location": "Không tìm thấy block phù hợp cho vị trí này.",
   "studio.row_with_count_columns": "Row {{count}} cột",
   "studio.loading_appearance_customization": "Đang tải không gian Tùy chỉnh giao diện...",
+  "studio.reload_preview_locale_before_saving": "Cần tải thành công ngôn ngữ xem trước trước khi lưu. Bản nháp vẫn được giữ đến lúc đó.",
   "studio.ready_to_customize_the_website_and_build_templates": "Sẵn sàng tùy biến Website & dựng Template.",
   "studio.cannot_load_appearance_customization_data": "Không thể tải dữ liệu Tùy chỉnh giao diện.",
   "studio.cannot_open_appearance_customization": "Không thể mở Tùy chỉnh giao diện.",

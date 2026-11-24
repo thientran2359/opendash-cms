@@ -369,7 +369,9 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 {t("studio.no_active_v3_theme_with_configurable_options")}
               </AdminAlert>
             ) : (
+              <fieldset disabled={disabled} className="min-w-0">
               <ThemeOptionsForm
+                key={JSON.stringify([activeThemeId, previewLocale, themeOptionsReloadToken])}
                 themeId={activeThemeId}
                 csrfToken={csrfToken}
                 viewport={viewport}
@@ -381,6 +383,7 @@ export const StudioCustomizerNav: React.FC<Props> = ({
                 reloadToken={themeOptionsReloadToken}
                 onValuesChange={onThemeOptionsChange}
               />
+              </fieldset>
             )}
           </section>
         </div>

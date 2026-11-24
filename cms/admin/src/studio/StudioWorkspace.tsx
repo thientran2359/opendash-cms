@@ -133,7 +133,9 @@ export const StudioWorkspace: React.FC<Props> = ({
     && (!localeState.multilingualEnabled || !localeState.enabledLocales.some(loc => loc.code === previewLocale)));
   const effectivePreviewLocale = (previewLocaleInvalid ? '' : previewLocale) || localeState.defaultLocale?.code || '';
   const [localeDraftConflict, setLocaleDraftConflict] = useState<string | null>(null);
-  const localeDraftBlocked = !isMode2 && Boolean(localeDraftConflict || previewLocaleInvalid);
+  const [localeReloadPending, setLocaleReloadPending] = useState(false);
+  // A failed locale load must never leave the old draft eligible for a new locale's CAS.
+  const localeDraftBlocked = !isMode2 && Boolean(localeDraftConflict || previewLocaleInvalid || localeReloadPending);
   const [activeThemeId, setActiveThemeId] = useState<string | null>(null);
   const [activeThemeName, setActiveThemeName] = useState<string | null>(null);
   const [targets, setTargets] = useState<StudioTargetItem[]>([]);
@@ -223,6 +225,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     setPreviewHtml('');
     setConflict(false);
     setLocaleDraftConflict(null);
+    setLocaleReloadPending(false);
     resetHistory();
     mode1LoadedRef.current = false;
     mode2LoadedKeyRef.current = null;
@@ -294,6 +297,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     previewAbortRef.current?.abort();
     setPreviewLocale('');
     setPreviewHtml('');
+    setLocaleReloadPending(true);
     setLoading(false);
     if (mode1Dirty) {
       setLocaleDraftConflict(previewLocale);
@@ -456,6 +460,7 @@ export const StudioWorkspace: React.FC<Props> = ({
           if (forceReload) {
             setThemeOptionsDraft(null);
             setThemeOptionsDirty(false);
+            setThemeOptionsVersion(null);
             setThemeOptionsReloadToken(v => v + 1);
           }
 
@@ -468,6 +473,7 @@ export const StudioWorkspace: React.FC<Props> = ({
             hydrateTemplateTarget(initialKey, targetsRes.items, byKey);
           }
           mode1LoadedRef.current = true;
+          setLocaleReloadPending(false);
           setConflict(false);
           setStatus(t("studio.ready_to_customize_the_website_and_build_templates"));
         })
@@ -626,7 +632,7 @@ export const StudioWorkspace: React.FC<Props> = ({
 
   useEffect(() => {
     if (!active || !user || !csrfToken) return;
-    if (!isMode2 && (!previewTargetCandidate || previewLocaleInvalid)) return;
+    if (!isMode2 && (!previewTargetCandidate || previewLocaleInvalid || (localeReloadPending && !localeDraftConflict))) return;
     if (isMode2 && (!entryTypeKey || entryId === null || entryVersion === null)) return;
 
     const seq = ++previewSeqRef.current;
@@ -710,6 +716,7 @@ export const StudioWorkspace: React.FC<Props> = ({
     effectivePreviewLocale,
     previewLocaleInvalid,
     localeDraftConflict,
+    localeReloadPending,
   ]);
 
   const handleSelectTarget = (nextKey: string | null) => {
@@ -839,7 +846,7 @@ export const StudioWorkspace: React.FC<Props> = ({
   };
 
   const handleResetTemplate = async () => {
-    if (!active || !csrfToken || savingRef.current || localeDraftConflict || previewLocaleInvalid || !selectedTarget?.override_id || !templateSavedVersion) return;
+    if (!active || !csrfToken || savingRef.current || localeDraftBlocked || !selectedTarget?.override_id || !templateSavedVersion) return;
     if (!window.confirm(t("studio.reset_template_label_to_the_theme_core_default", { label: selectedTarget.label }))) return;
     savingRef.current = true;
     setSaving(true);
@@ -1060,10 +1067,12 @@ export const StudioWorkspace: React.FC<Props> = ({
       handleReloadMode2();
       return;
     }
+    if (loading || savingRef.current) return;
     if (mode1Dirty && !window.confirm(t("studio.reloading_from_the_server_discards_unsaved_studio_changes_continue"))) {
       return;
     }
     setLocaleDraftConflict(null);
+    setLocaleReloadPending(true);
     setLoading(true);
     mode1ForceReloadRef.current = true;
     mode1LoadedRef.current = false;
@@ -1124,6 +1133,8 @@ export const StudioWorkspace: React.FC<Props> = ({
                     setThemeOptionsDirty(false);
                   }
                   setPreviewLocale(next);
+                  setLocaleReloadPending(true);
+                  setLoading(true);
                   mode1ForceReloadRef.current = true;
                   mode1LoadedRef.current = false;
                   setMode1ReloadSeq(v => v + 1);
@@ -1143,13 +1154,14 @@ export const StudioWorkspace: React.FC<Props> = ({
               data-testid="studio-sidebar-alert"
               className="flex items-center justify-between gap-2 border-b border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-800"
             >
-              <span className="min-w-0 flex-1 truncate" title={localeDraftBlocked ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : notice || t("studio.data_version_conflict")}>
-                {localeDraftBlocked ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : error && notice ? notice : t("studio.data_changed_on_the_server_412")}
+              <span className="min-w-0 flex-1 truncate" title={localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : notice || t("studio.data_version_conflict")}>
+                {localeDraftConflict || previewLocaleInvalid ? t("studio.the_preview_locale_is_no_longer_available_drafts_are_retained_reload_to_switch_to_the_default_locale") : localeReloadPending ? t("studio.reload_preview_locale_before_saving") : error && notice ? notice : t("studio.data_changed_on_the_server_412")}
               </span>
               {(conflict || localeDraftBlocked) && (
                 <button
                   type="button"
                   onClick={handleReloadConflict}
+                  disabled={loading || saving}
                   className="shrink-0 rounded border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100"
                 >
                   {t("studio.reload")}
@@ -1227,6 +1239,7 @@ export const StudioWorkspace: React.FC<Props> = ({
               themeOptionsDirty={themeOptionsDirty}
               themeOptionsReloadToken={themeOptionsReloadToken}
               onThemeOptionsChange={(vals, meta) => {
+                if (localeDraftBlocked) return;
                 setThemeOptionsDraft(vals);
                 setThemeOptionsVersion(meta.version);
                 setThemeOptionsDirty(meta.dirty);
