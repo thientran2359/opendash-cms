@@ -80,7 +80,6 @@ pub struct PluginManager {
     active_action_leases: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     allow_loopback: bool,
     plugins_root: PathBuf,
-    #[allow(dead_code)]
     secrets_root: PathBuf,
     manifest_cache: Arc<RwLock<Option<BTreeMap<String, CachedActivePlugin>>>>,
     recovery: crate::config::RecoveryState,
@@ -726,6 +725,15 @@ impl PluginManager {
 
     pub fn plugins_root(&self) -> &std::path::Path {
         &self.plugins_root
+    }
+
+    pub fn secrets_root(&self) -> &std::path::Path {
+        &self.secrets_root
+    }
+
+    #[allow(dead_code)]
+    pub fn plugin_secrets_dir(&self, plugin_id: &str) -> PathBuf {
+        self.secrets_root.join("plugins").join(plugin_id)
     }
 
     pub fn runtime(&self) -> &PluginRuntime {

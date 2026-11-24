@@ -720,7 +720,7 @@ pub async fn plan_sample_import(
             }
 
             let exists_opt: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM theme_option_values WHERE theme_id = ? AND option_key = ?)",
+                "SELECT EXISTS(SELECT 1 FROM theme_option_values WHERE owner_kind = 'theme' AND owner_id = ? AND option_key = ?)",
             )
             .bind(theme_id)
             .bind(&s.option_key)
@@ -773,7 +773,7 @@ pub async fn plan_sample_import(
     }
 
     let theme_options_version: i64 = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT version FROM theme_option_versions WHERE theme_id = ?), 0)",
+        "SELECT COALESCE((SELECT version FROM theme_option_versions WHERE owner_kind = 'theme' AND owner_id = ?), 0)",
     )
     .bind(theme_id)
     .fetch_one(db)
@@ -1179,7 +1179,7 @@ pub async fn execute_sample_import_with_cutpoint(
                 .fetch_one(&mut *conn)
                 .await?;
         let cur_opt_ver: i64 = sqlx::query_scalar(
-            "SELECT COALESCE((SELECT version FROM theme_option_versions WHERE theme_id = ?), 0)",
+            "SELECT COALESCE((SELECT version FROM theme_option_versions WHERE owner_kind = 'theme' AND owner_id = ?), 0)",
         )
         .bind(theme_id)
         .fetch_one(&mut *conn)
@@ -1427,10 +1427,18 @@ pub async fn execute_sample_import_with_cutpoint(
                         .ok_or_else(|| ApiError::unprocessable("Sample option key không tồn tại."))?;
                     settings::validate_option_value(def, &resolved).map_err(ApiError::unprocessable)?;
                     sqlx::query(
-                        "INSERT INTO theme_option_media_refs (theme_id, option_key, media_id)
-                         VALUES (?, ?, ?)
-                         ON CONFLICT(theme_id, option_key) DO UPDATE SET media_id = excluded.media_id",
+                        "DELETE FROM theme_option_media_refs
+                          WHERE owner_kind = 'theme' AND owner_id = ? AND option_key = ?",
                     )
+                    .bind(theme_id)
+                    .bind(&s.option_key)
+                    .execute(&mut *conn)
+                    .await?;
+                    sqlx::query(
+                        "INSERT INTO theme_option_media_refs (theme_id, owner_kind, owner_id, option_key, media_id)
+                         VALUES (?, 'theme', ?, ?, ?)",
+                    )
+                    .bind(theme_id)
                     .bind(theme_id)
                     .bind(&s.option_key)
                     .bind(mid)
@@ -1445,9 +1453,10 @@ pub async fn execute_sample_import_with_cutpoint(
                 settings::validate_option_value(def, &val).map_err(ApiError::unprocessable)?;
                 let val_json = serde_json::to_string(&val)?;
                 sqlx::query(
-                    "INSERT INTO theme_option_values (theme_id, option_key, value_json)
-                     VALUES (?, ?, ?)",
+                    "INSERT INTO theme_option_values (theme_id, owner_kind, owner_id, option_key, value_json)
+                     VALUES (?, 'theme', ?, ?, ?)",
                 )
+                .bind(theme_id)
                 .bind(theme_id)
                 .bind(&s.option_key)
                 .bind(&val_json)
@@ -1481,9 +1490,10 @@ pub async fn execute_sample_import_with_cutpoint(
         }
         if any_setting_created {
             sqlx::query(
-                "INSERT INTO theme_option_versions (theme_id, version) VALUES (?, 1)
-                 ON CONFLICT(theme_id) DO UPDATE SET version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                "INSERT INTO theme_option_versions (theme_id, owner_kind, owner_id, version) VALUES (?, 'theme', ?, 1)
+                 ON CONFLICT(owner_kind, owner_id) DO UPDATE SET version = version + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
             )
+            .bind(theme_id)
             .bind(theme_id)
             .execute(&mut *conn)
             .await?;

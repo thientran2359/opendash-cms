@@ -46,8 +46,9 @@ use crate::{
             menus_get, menus_list, menus_preview, menus_put,
         },
         plugin::{
-            MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES, plugin_action, plugin_disable,
-            plugin_enable, plugin_install, plugin_list, plugin_run, plugin_ui_schema,
+            MAX_PLUGIN_JSON_BYTES, MAX_PLUGIN_SETTINGS_JSON_BYTES, MAX_PLUGIN_ZIP_BYTES,
+            plugin_action, plugin_disable, plugin_enable, plugin_get_settings, plugin_install,
+            plugin_list, plugin_put_settings, plugin_run, plugin_ui_schema,
         },
         public::public_page,
         public_content::{media_file, media_thumb},
@@ -634,6 +635,12 @@ pub fn build_router_with_themes_root(
             post(plugin_action).layer(DefaultBodyLimit::max(MAX_PLUGIN_JSON_BYTES)),
         )
         .route("/api/admin/plugins/{id}/ui-schema", get(plugin_ui_schema))
+        .route(
+            "/api/admin/plugins/{id}/settings",
+            get(plugin_get_settings)
+                .put(plugin_put_settings)
+                .layer(DefaultBodyLimit::max(MAX_PLUGIN_SETTINGS_JSON_BYTES)),
+        )
         .route("/api/admin/plugins/{id}/disable", post(plugin_disable))
         .route("/api/admin/plugins/{id}/enable", post(plugin_enable))
         .route(

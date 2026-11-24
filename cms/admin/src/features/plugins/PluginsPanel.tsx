@@ -1,8 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { PluginSummary } from '../../types.ts';
-import { getPlugins } from '../../api/plugins.ts';
+import type { PluginSettingsSnapshot, PluginSummary } from '../../types.ts';
+import { ApiClientError } from '../../api/client.ts';
+import { getPluginSettings, getPlugins, savePluginSettings } from '../../api/plugins.ts';
 import { ZipUploadField } from '../../components/FormPrimitives.tsx';
 import { AdminAlert, AdminBadge, AdminButton } from '../../components/AdminPrimitives.tsx';
+import {
+  buildOwnerOptionsSubmitPayload,
+  OwnerOptionsForm,
+} from '../shared/OwnerOptionsForm.tsx';
 import { DeclarativePluginUi } from './DeclarativePluginUi.tsx';
 
 interface PluginsPanelProps {
@@ -35,8 +40,9 @@ function readableError(error: unknown): string {
 }
 
 /**
- * Scope M3-S28: keep the existing App-owned mutations. This panel owns only its
- * read/retry UX; it never changes Wasmi endpoints, role guards or App/AdminShell.
+ * Scope M3-S28 + Plugin S02: keep App-owned lifecycle/run mutations intact while
+ * hosting owner-isolated plugin settings (`GET/PUT /api/admin/plugins/{id}/settings`)
+ * through shared `<OwnerOptionsForm>`.
  */
 export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   mode = 'list',
@@ -59,6 +65,14 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   const [loadError, setLoadError] = useState('');
   const [pendingAction, setPendingAction] = useState('');
   const [notice, setNotice] = useState('');
+  const [settingsPluginId, setSettingsPluginId] = useState('');
+  const [settingsSnapshot, setSettingsSnapshot] = useState<PluginSettingsSnapshot | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<Record<string, unknown>>({});
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsNotice, setSettingsNotice] = useState('');
+  const [settingsError, setSettingsError] = useState('');
+  const [settingsReloadTick, setSettingsReloadTick] = useState(0);
   const latestRequest = useRef(0);
   const pendingRef = useRef(false);
   const mounted = useRef(true);
@@ -91,6 +105,50 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
   useEffect(() => {
     setVisiblePlugins(plugins);
   }, [plugins]);
+
+  const settingsTargetPlugin = visiblePlugins.find(
+    plugin => plugin.id === (settingsPluginId || selectedPluginId),
+  );
+  const effectiveSettingsPluginId = settingsTargetPlugin?.id ?? '';
+
+  useEffect(() => {
+    if (mode !== 'list' || !effectiveSettingsPluginId) {
+      setSettingsSnapshot(null);
+      setSettingsDraft({});
+      setSettingsError('');
+      setSettingsNotice('');
+      setSettingsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    let active = true;
+    setSettingsLoading(true);
+    setSettingsError('');
+    setSettingsNotice('');
+    void getPluginSettings(effectiveSettingsPluginId, controller.signal)
+      .then(snapshot => {
+        if (!active) return;
+        setSettingsSnapshot(snapshot);
+        setSettingsDraft(snapshot.values);
+      })
+      .catch(cause => {
+        if (!active || controller.signal.aborted) return;
+        if (cause instanceof ApiClientError && cause.status === 401) {
+          onUnauthorized?.();
+        }
+        setSettingsSnapshot(null);
+        setSettingsError(
+          cause instanceof Error ? cause.message : 'Không thể tải cài đặt plugin.',
+        );
+      })
+      .finally(() => {
+        if (active) setSettingsLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [mode, effectiveSettingsPluginId, settingsReloadTick, onUnauthorized]);
 
   const refresh = async () => {
     const current = ++latestRequest.current;
@@ -160,6 +218,49 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
     void invoke('Đang tắt ' + plugin.name + '...', () => onDisablePlugin(plugin.id));
   };
 
+  const handleSaveSettings = async () => {
+    if (!settingsSnapshot || !csrfToken || settingsSaving) return;
+    setSettingsSaving(true);
+    setSettingsError('');
+    setSettingsNotice('');
+    try {
+      const payload = buildOwnerOptionsSubmitPayload(settingsSnapshot.schema, settingsDraft);
+      const saved = await savePluginSettings(
+        settingsSnapshot.plugin_id,
+        payload,
+        settingsSnapshot.version,
+        csrfToken,
+      );
+      setSettingsSnapshot(saved);
+      setSettingsDraft(saved.values);
+      setSettingsNotice('Đã lưu cài đặt plugin.');
+    } catch (cause) {
+      if (cause instanceof ApiClientError && cause.status === 401) {
+        onUnauthorized?.();
+        setSettingsError(
+          'Phiên đăng nhập đã hết hạn (401). Thay đổi chưa lưu vẫn được giữ lại.',
+        );
+      } else if (cause instanceof ApiClientError && cause.status === 412) {
+        setSettingsError(
+          'Cài đặt plugin đã thay đổi ở phiên khác (412). Dữ liệu bạn vừa sửa vẫn được giữ lại.',
+        );
+      } else {
+        setSettingsError(
+          cause instanceof Error ? cause.message : 'Không thể lưu cài đặt plugin.',
+        );
+      }
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const handleSettingsApiError = (cause: unknown, fallback: string) => {
+    if (cause instanceof ApiClientError && cause.status === 401) {
+      onUnauthorized?.();
+    }
+    setSettingsError(cause instanceof Error ? cause.message : fallback);
+  };
+
   const busy = isProcessing || Boolean(pendingAction);
   const selected = visiblePlugins.find(plugin => plugin.id === selectedPluginId);
   const canRun = Boolean(selected?.enabled) && !busy;
@@ -172,7 +273,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           <p className="mt-0.5 text-sm text-zinc-600">
             {mode === 'install'
               ? 'Cài gói plugin ZIP. Gói đã cài sẽ được tự bật sau khi được xác thực.'
-              : 'Kiểm tra quyền và bật hoặc tắt plugin chạy trong Wasmi sandbox.'}
+              : 'Kiểm tra quyền, cấu hình cài đặt và bật hoặc tắt plugin chạy trong Wasmi sandbox.'}
           </p>
         </div>
         <AdminButton variant="secondary" size="sm" onClick={() => void refresh()} disabled={busy || loading}>
@@ -217,6 +318,7 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
         <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
           {visiblePlugins.map(plugin => {
             const grants = permissionDetails(plugin);
+            const isSettingsOpen = effectiveSettingsPluginId === plugin.id;
             return (
               <article key={plugin.id} className="min-w-0 rounded-xl border border-zinc-200 bg-white p-4" data-plugin-id={plugin.id}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -248,8 +350,21 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
                         aria-label={'Tắt plugin ' + plugin.name}>Tắt</AdminButton>
                     : <AdminButton variant="secondary" size="sm" disabled={busy} onClick={() => enable(plugin)}
                         aria-label={'Bật plugin ' + plugin.name}>Bật / Thử lại</AdminButton>}
+                  <AdminButton
+                    variant={isSettingsOpen ? 'primary' : 'secondary'}
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setSettingsPluginId(plugin.id)}
+                    aria-pressed={isSettingsOpen}
+                    aria-label={'Cài đặt plugin ' + plugin.name}
+                  >
+                    {isSettingsOpen ? 'Đang cấu hình' : 'Cài đặt'}
+                  </AdminButton>
                   <AdminButton variant={selectedPluginId === plugin.id ? 'primary' : 'secondary'} size="sm" disabled={busy || !plugin.enabled}
-                    onClick={() => onSelectPlugin(plugin.id)}
+                    onClick={() => {
+                      setSettingsPluginId(plugin.id);
+                      onSelectPlugin(plugin.id);
+                    }}
                     aria-pressed={selectedPluginId === plugin.id}>
                     {selectedPluginId === plugin.id ? 'Đã chọn để chạy' : 'Chọn chạy'}
                   </AdminButton>
@@ -259,6 +374,59 @@ export const PluginsPanel: React.FC<PluginsPanelProps> = ({
           })}
         </div>
       </section>
+
+      {settingsTargetPlugin && (
+        <section className="min-w-0 max-w-2xl space-y-3 border-t border-zinc-200 pt-5" aria-labelledby="plugin-settings-heading">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 id="plugin-settings-heading" className="text-sm font-semibold text-zinc-950">
+              Cài đặt plugin: {settingsTargetPlugin.name} ({settingsTargetPlugin.id})
+            </h3>
+            <AdminButton
+              variant="secondary"
+              size="sm"
+              disabled={settingsLoading || settingsSaving}
+              onClick={() => setSettingsReloadTick(n => n + 1)}
+            >
+              Tải lại từ máy chủ
+            </AdminButton>
+          </div>
+          {settingsLoading && (
+            <p role="status" className="text-sm text-zinc-600">Đang tải cài đặt plugin…</p>
+          )}
+          {!settingsLoading && !settingsSnapshot && settingsError && (
+            <AdminAlert tone="error">{settingsError}</AdminAlert>
+          )}
+          {!settingsLoading && settingsSnapshot && settingsSnapshot.schema.length === 0 && (
+            <p className="text-xs text-zinc-500">
+              Plugin này không khai báo schema cài đặt (settings_schema).
+            </p>
+          )}
+          {!settingsLoading && settingsSnapshot && settingsSnapshot.schema.length > 0 && (
+            <OwnerOptionsForm
+              ownerKind="plugin"
+              ownerId={settingsSnapshot.plugin_id}
+              title={`Cài đặt plugin (${settingsTargetPlugin.name})`}
+              schema={settingsSnapshot.schema}
+              values={settingsDraft}
+              savedValues={settingsSnapshot.values}
+              version={settingsSnapshot.version}
+              csrfToken={csrfToken ?? null}
+              saving={settingsSaving}
+              notice={settingsNotice}
+              error={settingsError}
+              submitLabel={settingsSaving ? 'Đang lưu…' : 'Lưu cài đặt'}
+              testId="plugin-settings-form"
+              onChange={(next) => {
+                setSettingsDraft(next);
+                setSettingsNotice('');
+                setSettingsError('');
+              }}
+              onSubmit={() => void handleSaveSettings()}
+              onApiError={handleSettingsApiError}
+            />
+          )}
+        </section>
+      )}
 
       <section className="min-w-0 max-w-2xl space-y-3 border-t border-zinc-200 pt-5" aria-labelledby="plugin-run-heading">
         <h3 id="plugin-run-heading" className="text-sm font-semibold text-zinc-950">Thử thực thi plugin</h3>

@@ -1,4 +1,4 @@
-import { PluginRunResult, PluginSummary } from '../types.ts';
+import { PluginRunResult, PluginSettingsSnapshot, PluginSummary } from '../types.ts';
 import { requestJson, requestText } from './client.ts';
 
 export async function getPlugins(signal?: AbortSignal): Promise<PluginSummary[]> {
@@ -100,6 +100,38 @@ export async function runPluginAction(
       contentType: 'application/json',
       body: JSON.stringify(payload ?? {}),
       defaultErrorMessage: 'Lỗi khi thực thi action của plugin.',
+    },
+  );
+}
+
+export function getPluginSettings(
+  id: string,
+  signal?: AbortSignal,
+): Promise<PluginSettingsSnapshot> {
+  return requestJson<PluginSettingsSnapshot>(
+    `/api/admin/plugins/${encodeURIComponent(id)}/settings`,
+    {
+      signal,
+      defaultErrorMessage: 'Không thể tải cài đặt plugin.',
+    },
+  );
+}
+
+export function savePluginSettings(
+  id: string,
+  values: Record<string, unknown>,
+  version: number,
+  csrfToken: string,
+): Promise<PluginSettingsSnapshot> {
+  return requestJson<PluginSettingsSnapshot>(
+    `/api/admin/plugins/${encodeURIComponent(id)}/settings`,
+    {
+      method: 'PUT',
+      csrfToken,
+      ifMatchVersion: version,
+      contentType: 'application/json',
+      body: JSON.stringify({ values }),
+      defaultErrorMessage: 'Không thể lưu cài đặt plugin.',
     },
   );
 }
